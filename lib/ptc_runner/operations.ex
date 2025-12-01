@@ -96,113 +96,20 @@ defmodule PtcRunner.Operations do
   end
 
   # Comparison
-  def eval("eq", node, context, eval_fn) do
-    field = Map.get(node, "field")
-    value = Map.get(node, "value")
+  def eval("eq", node, context, eval_fn), do: eval_comparison(node, context, eval_fn, "eq", &==/2)
 
-    case eval_fn.(context, nil) do
-      {:error, _} = err ->
-        err
+  def eval("neq", node, context, eval_fn),
+    do: eval_comparison(node, context, eval_fn, "neq", &!=/2)
 
-      {:ok, data} ->
-        if is_map(data) do
-          data_value = Map.get(data, field)
-          {:ok, data_value == value}
-        else
-          {:error, {:execution_error, "eq requires a map, got #{inspect(data)}"}}
-        end
-    end
-  end
+  def eval("gt", node, context, eval_fn), do: eval_comparison(node, context, eval_fn, "gt", &>/2)
 
-  def eval("neq", node, context, eval_fn) do
-    field = Map.get(node, "field")
-    value = Map.get(node, "value")
+  def eval("gte", node, context, eval_fn),
+    do: eval_comparison(node, context, eval_fn, "gte", &>=/2)
 
-    case eval_fn.(context, nil) do
-      {:error, _} = err ->
-        err
+  def eval("lt", node, context, eval_fn), do: eval_comparison(node, context, eval_fn, "lt", &</2)
 
-      {:ok, data} ->
-        if is_map(data) do
-          data_value = Map.get(data, field)
-          {:ok, data_value != value}
-        else
-          {:error, {:execution_error, "neq requires a map, got #{inspect(data)}"}}
-        end
-    end
-  end
-
-  def eval("gt", node, context, eval_fn) do
-    field = Map.get(node, "field")
-    value = Map.get(node, "value")
-
-    case eval_fn.(context, nil) do
-      {:error, _} = err ->
-        err
-
-      {:ok, data} ->
-        if is_map(data) do
-          data_value = Map.get(data, field)
-          {:ok, data_value > value}
-        else
-          {:error, {:execution_error, "gt requires a map, got #{inspect(data)}"}}
-        end
-    end
-  end
-
-  def eval("gte", node, context, eval_fn) do
-    field = Map.get(node, "field")
-    value = Map.get(node, "value")
-
-    case eval_fn.(context, nil) do
-      {:error, _} = err ->
-        err
-
-      {:ok, data} ->
-        if is_map(data) do
-          data_value = Map.get(data, field)
-          {:ok, data_value >= value}
-        else
-          {:error, {:execution_error, "gte requires a map, got #{inspect(data)}"}}
-        end
-    end
-  end
-
-  def eval("lt", node, context, eval_fn) do
-    field = Map.get(node, "field")
-    value = Map.get(node, "value")
-
-    case eval_fn.(context, nil) do
-      {:error, _} = err ->
-        err
-
-      {:ok, data} ->
-        if is_map(data) do
-          data_value = Map.get(data, field)
-          {:ok, data_value < value}
-        else
-          {:error, {:execution_error, "lt requires a map, got #{inspect(data)}"}}
-        end
-    end
-  end
-
-  def eval("lte", node, context, eval_fn) do
-    field = Map.get(node, "field")
-    value = Map.get(node, "value")
-
-    case eval_fn.(context, nil) do
-      {:error, _} = err ->
-        err
-
-      {:ok, data} ->
-        if is_map(data) do
-          data_value = Map.get(data, field)
-          {:ok, data_value <= value}
-        else
-          {:error, {:execution_error, "lte requires a map, got #{inspect(data)}"}}
-        end
-    end
-  end
+  def eval("lte", node, context, eval_fn),
+    do: eval_comparison(node, context, eval_fn, "lte", &<=/2)
 
   # Access operations
   def eval("get", node, context, eval_fn) do
@@ -260,6 +167,24 @@ defmodule PtcRunner.Operations do
   end
 
   # Helper functions
+
+  defp eval_comparison(node, context, eval_fn, op_name, compare_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, compare_fn.(data_value, value)}
+        else
+          {:error, {:execution_error, "#{op_name} requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
 
   defp eval_pipe([], acc, _context, _eval_fn) do
     {:ok, acc}
