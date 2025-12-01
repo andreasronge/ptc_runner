@@ -147,7 +147,8 @@ jobs:
             2. Create a new branch: `git checkout -b claude/issue-${{ steps.context.outputs.number }}-$(date +%Y%m%d-%H%M%S)`
             3. Make your changes
             4. Run `mix precommit` - only proceed if it passes
-            5. Commit and push: `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
+            5. Commit and push in ONE command: `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
+               - IMPORTANT: Always chain commit and push together so push happens immediately after commit
             6. Create a PR: `gh pr create --title "Fix #${{ steps.context.outputs.number }}: [brief description]" --body "Fixes #${{ steps.context.outputs.number }}"`
             7. Post summary on the ISSUE: `gh issue comment ${{ steps.context.outputs.number }} --body "YOUR_SUMMARY"`
 
@@ -155,7 +156,8 @@ jobs:
             1. Read the PR: `gh pr view ${{ steps.context.outputs.number }}`
             2. Make your changes on the current branch
             3. Run `mix precommit` - only proceed if it passes
-            4. Commit and push: `git add -A && git commit -m "fix: ..." && git push`
+            4. Commit and push in ONE command: `git add -A && git commit -m "fix: ..." && git push`
+               - IMPORTANT: Always chain commit and push together so push happens immediately after commit
             5. Post summary on the PR: `gh pr comment ${{ steps.context.outputs.number }} --body "YOUR_SUMMARY"`
 
             ## Your Task
