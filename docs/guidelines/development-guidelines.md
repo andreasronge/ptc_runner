@@ -2,6 +2,8 @@
 
 This is an Elixir library for Programmatic Tool Calling (PTC).
 
+See **[Architecture](../architecture.md)** for system design, DSL specification, and API reference.
+
 ## Project Guidelines
 
 - Run `mix format --check-formatted && mix compile --warnings-as-errors && mix test` before committing
@@ -113,20 +115,17 @@ Since this library may run LLM-generated code:
 
 ## Code Organization
 
+See [Architecture - Module Structure](../architecture.md#module-structure) for the current layout.
+
 ```
 lib/
-├── ptc_runner.ex           # Main public API
+├── ptc_runner.ex           # Main public API: run/2, run!/2
 ├── ptc_runner/
-│   ├── dsl/                # DSL definitions
-│   │   ├── ast.ex          # AST node definitions
-│   │   └── operations.ex   # Supported operations
-│   ├── parser/             # DSL parsing
-│   │   ├── json_parser.ex  # JSON DSL parser
-│   │   └── validator.ex    # AST validation
-│   ├── interpreter/        # Execution
-│   │   ├── evaluator.ex    # AST evaluation
-│   │   └── sandbox.ex      # Process isolation
-│   └── tools/              # Tool integration
-│       ├── registry.ex     # Tool registration
-│       └── mcp.ex          # MCP protocol support
+│   ├── parser.ex           # JSON parsing
+│   ├── validator.ex        # Schema validation
+│   ├── interpreter.ex      # AST evaluation
+│   ├── operations.ex       # Built-in operations
+│   ├── sandbox.ex          # Process isolation + resource limits
+│   ├── context.ex          # Variable bindings and tool results
+│   └── tools.ex            # Tool registry
 ```
