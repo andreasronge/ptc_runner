@@ -30,7 +30,7 @@ defmodule PtcRunner.Sandbox do
     - `{:error, reason}` on failure
   """
   @spec execute(map(), Context.t(), keyword()) ::
-          {:ok, any(), metrics()} | {:error, atom() | String.t()}
+          {:ok, any(), metrics()} | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
 
   def execute(ast, context, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 1000)
@@ -73,7 +73,7 @@ defmodule PtcRunner.Sandbox do
         {:error, {:memory_exceeded, max_heap * 8}}
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        {:error, "Process terminated: #{inspect(reason)}"}
+        {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
     after
       timeout ->
         # Kill the process if it times out

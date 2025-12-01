@@ -46,13 +46,13 @@ defmodule PtcRunner.Context do
     - `{:ok, value}` if variable exists
     - `{:ok, nil}` if variable doesn't exist
   """
-  @spec get_var(t(), String.t()) :: {:ok, any()} | {:error, String.t()}
+  @spec get_var(t(), String.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
   def get_var(context, name) when is_binary(name) do
     {:ok, Map.get(context.variables, name)}
   end
 
   def get_var(_context, name) do
-    {:error, "Variable name must be a string, got #{inspect(name)}"}
+    {:error, {:execution_error, "Variable name must be a string, got #{inspect(name)}"}}
   end
 
   @doc """

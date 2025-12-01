@@ -306,8 +306,8 @@ defmodule PtcRunnerTest do
       ]
     })
 
-    {:error, reason} = PtcRunner.run(program)
-    assert String.contains?(reason, "count requires a list")
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "count requires a list")
   end
 
   test "sum on non-list raises error" do
@@ -319,8 +319,8 @@ defmodule PtcRunnerTest do
       ]
     })
 
-    {:error, reason} = PtcRunner.run(program)
-    assert String.contains?(reason, "sum requires a list")
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "sum requires a list")
   end
 
   test "filter on non-list raises error" do
@@ -332,8 +332,8 @@ defmodule PtcRunnerTest do
       ]
     })
 
-    {:error, reason} = PtcRunner.run(program)
-    assert String.contains?(reason, "filter requires a list")
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "filter requires a list")
   end
 
   # Parse errors

@@ -23,7 +23,7 @@ defmodule PtcRunner.Operations do
     - `{:error, reason}` on failure
   """
   @spec eval(String.t(), map(), Context.t(), function()) ::
-          {:ok, any()} | {:error, String.t()}
+          {:ok, any()} | {:error, {atom(), String.t()}}
 
   # Data operations
   def eval("literal", node, _context, _eval_fn) do
@@ -58,7 +58,7 @@ defmodule PtcRunner.Operations do
         if is_list(data) do
           filter_list(data, where_clause, context, eval_fn)
         else
-          {:error, "filter requires a list, got #{inspect(data)}"}
+          {:error, {:execution_error, "filter requires a list, got #{inspect(data)}"}}
         end
     end
   end
@@ -74,7 +74,7 @@ defmodule PtcRunner.Operations do
         if is_list(data) do
           map_list(data, expr, context, eval_fn)
         else
-          {:error, "map requires a list, got #{inspect(data)}"}
+          {:error, {:execution_error, "map requires a list, got #{inspect(data)}"}}
         end
     end
   end
@@ -90,7 +90,7 @@ defmodule PtcRunner.Operations do
         if is_list(data) do
           select_list(data, fields)
         else
-          {:error, "select requires a list, got #{inspect(data)}"}
+          {:error, {:execution_error, "select requires a list, got #{inspect(data)}"}}
         end
     end
   end
@@ -109,7 +109,7 @@ defmodule PtcRunner.Operations do
           data_value = Map.get(data, field)
           {:ok, data_value == value}
         else
-          {:error, "eq requires a map, got #{inspect(data)}"}
+          {:error, {:execution_error, "eq requires a map, got #{inspect(data)}"}}
         end
     end
   end
@@ -126,7 +126,7 @@ defmodule PtcRunner.Operations do
         if is_list(data) do
           sum_list(data, field)
         else
-          {:error, "sum requires a list, got #{inspect(data)}"}
+          {:error, {:execution_error, "sum requires a list, got #{inspect(data)}"}}
         end
     end
   end
@@ -140,13 +140,13 @@ defmodule PtcRunner.Operations do
         if is_list(data) do
           {:ok, length(data)}
         else
-          {:error, "count requires a list, got #{inspect(data)}"}
+          {:error, {:execution_error, "count requires a list, got #{inspect(data)}"}}
         end
     end
   end
 
   def eval(op, _node, _context, _eval_fn) do
-    {:error, "Unknown operation '#{op}'"}
+    {:error, {:execution_error, "Unknown operation '#{op}'"}}
   end
 
   # Helper functions
@@ -178,7 +178,9 @@ defmodule PtcRunner.Operations do
           {:cont, {:ok, acc}}
 
         {:ok, result} ->
-          {:halt, {:error, "filter where clause must return boolean, got #{inspect(result)}"}}
+          {:halt,
+           {:error,
+            {:execution_error, "filter where clause must return boolean, got #{inspect(result)}"}}}
 
         {:error, _} = err ->
           {:halt, err}
@@ -220,12 +222,18 @@ defmodule PtcRunner.Operations do
   defp sum_item(item, field, acc) do
     if is_map(item) do
       case Map.get(item, field) do
-        val when is_number(val) -> {:cont, {:ok, acc + val}}
-        nil -> {:cont, {:ok, acc}}
-        val -> {:halt, {:error, "sum requires numeric values, got #{inspect(val)}"}}
+        val when is_number(val) ->
+          {:cont, {:ok, acc + val}}
+
+        nil ->
+          {:cont, {:ok, acc}}
+
+        val ->
+          {:halt,
+           {:error, {:execution_error, "sum requires numeric values, got #{inspect(val)}"}}}
       end
     else
-      {:halt, {:error, "sum requires list of maps, got #{inspect(item)}"}}
+      {:halt, {:error, {:execution_error, "sum requires list of maps, got #{inspect(item)}"}}}
     end
   end
 end
