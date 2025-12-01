@@ -327,6 +327,19 @@ defmodule PtcRunnerTest do
     assert result == nil
   end
 
+  test "get on list with numeric string path returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "get", "path": ["0"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
   test "get within pipe receives piped input" do
     program = ~s({
       "op": "pipe",
