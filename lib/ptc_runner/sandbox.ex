@@ -34,7 +34,7 @@ defmodule PtcRunner.Sandbox do
 
   def execute(ast, context, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 1000)
-    _max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
 
     # Spawn isolated process with resource limits
     start_time = System.monotonic_time(:millisecond)
@@ -42,13 +42,16 @@ defmodule PtcRunner.Sandbox do
     parent = self()
 
     {pid, ref} =
-      spawn_monitor(fn ->
-        # Set process priority to normal within the process
-        Process.flag(:priority, :normal)
-        result = Interpreter.eval(ast, context)
-        memory = get_process_memory()
-        send(parent, {:result, result, memory})
-      end)
+      Process.spawn(
+        fn ->
+          # Set process priority to normal within the process
+          Process.flag(:priority, :normal)
+          result = Interpreter.eval(ast, context)
+          memory = get_process_memory()
+          send(parent, {:result, result, memory})
+        end,
+        [:monitor, {:max_heap_size, max_heap}]
+      )
 
     # Wait for result with timeout
     receive do

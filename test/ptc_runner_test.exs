@@ -289,6 +289,13 @@ defmodule PtcRunnerTest do
     assert reason == {:validation_error, "Operation 'load' requires field 'name'"}
   end
 
+  test "nested unknown operation in pipe raises validation error" do
+    program = ~s({"op": "pipe", "steps": [{"op": "unknown_op"}]})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
+  end
+
   # Error handling - type errors
   test "count on non-list raises error" do
     program = ~s({

@@ -135,9 +135,11 @@ defmodule PtcRunner.Validator do
   end
 
   defp validate_list(list) do
-    case Enum.find(list, &validate_node/1) do
-      {:error, _} = err -> err
-      _ -> :ok
-    end
+    Enum.reduce_while(list, :ok, fn node, :ok ->
+      case validate_node(node) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
   end
 end
