@@ -199,7 +199,7 @@ jobs:
           # Falls back to github.token if PAT not available
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             # Auto-Triage PR Review
 
