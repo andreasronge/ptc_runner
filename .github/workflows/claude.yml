@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     # Prevent concurrent Claude operations on the same PR/issue
+    # All claude-* workflows use the same group naming: claude-pr-{number}
     concurrency:
       group: claude-pr-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false  # Don't cancel in-progress fixes
@@ -33,6 +34,13 @@ jobs:
       MIX_ENV: test
 
     steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - workflow triggers from comments will be disabled"
+            echo "::warning::PRs created by this workflow won't trigger CI automatically"
+          fi
+
       # For issue_comment on PRs, we need to checkout the PR branch, not main
       - name: Get PR branch (for issue comments on PRs)
         id: pr-branch
@@ -48,20 +56,48 @@ jobs:
           echo "head_repo=$HEAD_OWNER/$HEAD_REPO" >> $GITHUB_OUTPUT
           echo "Found PR branch: $HEAD_REF from $HEAD_OWNER/$HEAD_REPO"
 
+          # Check if this is a fork PR
+          REPO_OWNER="${{ github.repository_owner }}"
+          if [ "$HEAD_OWNER" != "$REPO_OWNER" ]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "::warning::PR is from a fork ($HEAD_OWNER/$HEAD_REPO) - cannot push fixes"
+          else
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip fork PRs with comment
+        if: steps.pr-branch.outputs.is_fork == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --body "⚠️ **Cannot auto-fix fork PRs**
+
+          This PR is from a fork, and the automation cannot push changes to fork branches.
+
+          Please apply the requested changes manually, or the repository maintainer can:
+          1. Check out the fork branch locally
+          2. Make the changes
+          3. Push to the fork (if they have access) or ask the contributor to update"
+
+          echo "::notice::Skipping fork PR - posted explanation comment"
+          exit 0
+
       - name: Checkout repository
+        if: steps.pr-branch.outputs.is_fork != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           # For PR comments, checkout the PR branch; otherwise default branch
           ref: ${{ steps.pr-branch.outputs.head_ref || github.ref }}
-          # For fork PRs, we'd need to checkout from the fork
           repository: ${{ steps.pr-branch.outputs.head_repo || github.repository }}
 
       - name: Setup Elixir environment
+        if: steps.pr-branch.outputs.is_fork != 'true'
         uses: ./.github/actions/setup-elixir
 
       # Determine if this is a PR or Issue context
       - name: Detect context type
+        if: steps.pr-branch.outputs.is_fork != 'true'
         id: context
         run: |
           if [ "${{ github.event_name }}" == "issues" ]; then
@@ -76,6 +112,7 @@ jobs:
           fi
 
       - name: Run Claude Code
+        if: steps.pr-branch.outputs.is_fork != 'true'
         id: claude
         uses: anthropics/claude-code-action@v1
         env:
@@ -146,6 +183,9 @@ jobs:
             - Whether changes were committed (and the commit message) or why not
             - Any errors encountered
             - If you created a PR, include the PR URL
+
+            **CRITICAL**: NEVER include the literal text "@claude" in any comments you post.
+            This would trigger another workflow run and create an infinite loop.
 
           # Allow Claude to search/read/edit code and run mix commands
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md

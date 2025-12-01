@@ -1,0 +1,338 @@
+name: Claude PM
+
+on:
+  # Run when PR is merged to main
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+  # Manual trigger for testing or recovery
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'next-issue'
+        type: choice
+        options:
+          - next-issue      # Normal: find/create next issue to work on
+          - status-only     # Just update STATUS.md, don't create issues
+          - reset-stuck     # Reset stuck state and resume
+
+jobs:
+  pm:
+    # Only run on merged PRs (not closed without merge), or on manual trigger
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
+
+    runs-on: ubuntu-latest
+
+    # Prevent concurrent PM operations
+    concurrency:
+      group: claude-pm
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - implementation triggers won't work"
+            echo "::warning::@claude comments posted by PM won't trigger the claude.yml workflow"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Check for open PRs
+        id: open-prs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check if there are any open PRs (excluding the just-merged one)
+          OPEN_PR_COUNT=$(gh pr list --repo "${{ github.repository }}" --state open --json number | jq length)
+          echo "open_pr_count=$OPEN_PR_COUNT" >> $GITHUB_OUTPUT
+
+          if [ "$OPEN_PR_COUNT" -gt 0 ]; then
+            echo "::notice::Found $OPEN_PR_COUNT open PR(s) - will skip creating new work"
+            OPEN_PRS=$(gh pr list --repo "${{ github.repository }}" --state open --json number,title --jq '.[] | "#\(.number): \(.title)"')
+            echo "Open PRs:"
+            echo "$OPEN_PRS"
+          fi
+
+      - name: Check current PM status
+        id: status
+        run: |
+          # Read STATUS.md to check if stuck
+          if [ -f "STATUS.md" ]; then
+            # Check for stuck state (badge shows stuck)
+            if grep -q "PM-stuck-red" STATUS.md; then
+              echo "is_stuck=true" >> $GITHUB_OUTPUT
+              echo "::warning::PM workflow is in STUCK state"
+            else
+              echo "is_stuck=false" >> $GITHUB_OUTPUT
+            fi
+
+            # Extract failure count
+            FAILURE_COUNT=$(grep -oP "Consecutive failures\*\*: \K\d+" STATUS.md || echo "0")
+            echo "failure_count=$FAILURE_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "is_stuck=false" >> $GITHUB_OUTPUT
+            echo "failure_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Handle stuck state
+        if: steps.status.outputs.is_stuck == 'true' && github.event.inputs.action != 'reset-stuck'
+        run: |
+          echo "::error::PM workflow is stuck. Use workflow_dispatch with 'reset-stuck' action to resume."
+          echo "Check STATUS.md for details on what went wrong."
+          exit 1
+
+      - name: Reset stuck state
+        if: github.event.inputs.action == 'reset-stuck'
+        run: |
+          echo "Resetting stuck state..."
+          # The Claude step will handle updating STATUS.md
+
+      - name: Run Claude PM
+        id: claude-pm
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            # Product Manager Workflow
+
+            You are the PM workflow for this repository. Your job is to manage the development pipeline.
+
+            **Repository**: ${{ github.repository }}
+            **Trigger**: ${{ github.event_name }}
+            **Action**: ${{ github.event.inputs.action || 'next-issue' }}
+            **Current failure count**: ${{ steps.status.outputs.failure_count }}
+            **Is stuck**: ${{ steps.status.outputs.is_stuck }}
+            **Open PRs**: ${{ steps.open-prs.outputs.open_pr_count }}
+
+            ## Read Guidelines First
+
+            Before doing anything, read these documents:
+            1. `docs/guidelines/issue-creation-guidelines.md` - How to create issues
+            2. `docs/guidelines/planning-guidelines.md` - The 9-point review checklist
+            3. `docs/architecture.md` - Implementation phases and what to build
+            4. `STATUS.md` - Current implementation progress
+
+            ## Your Task Based on Action
+
+            ### If action is "status-only":
+            1. Analyze codebase to determine what's implemented
+            2. Update STATUS.md with current progress
+            3. Do NOT create or trigger any issues
+            4. Exit
+
+            ### If action is "reset-stuck":
+            1. Reset the failure count to 0
+            2. Change status badge to active (green)
+            3. Clear the failure table
+            4. Then proceed with "next-issue" logic
+
+            ### If action is "next-issue" (default):
+
+            #### Step 1: Check for Blocking Issues
+
+            ```bash
+            # Check for bug issues (highest priority)
+            gh issue list --label "bug" --state open --json number,title
+
+            # Check for issues from PR reviews that need fixing
+            gh issue list --label "from-pr-review" --state open --json number,title
+
+            # Check for tech debt issues
+            gh issue list --label "tech-debt" --state open --json number,title
+            ```
+
+            **Priority order:**
+            1. `bug` - Bugs should be fixed before new features
+            2. `from-pr-review` - Issues found during PR review take priority
+            3. `tech-debt` - Technical debt that may block progress
+
+            If there are blocking issues:
+            - Evaluate each one: should it be done now, or is there a documented reason to defer?
+            - Valid reasons to defer: "will be addressed in issue #X", "low value vs complexity", "needs design decision"
+            - If should be done: check if it has `ready-for-implementation`, if not add `needs-review` first
+            - If should be deferred: add a comment explaining why, and continue to next step
+
+            #### Step 2: Check for Ready Issues
+
+            ```bash
+            # Check for issues already approved and ready
+            gh issue list --label "ready-for-implementation" --state open --json number,title
+            ```
+
+            If there's a `ready-for-implementation` issue:
+            - Pick the oldest one (or highest priority if labeled)
+            - Skip to Step 5 (trigger implementation)
+
+            #### Step 3: Analyze What to Build Next
+
+            If no ready issues exist:
+
+            1. **Check what's implemented**:
+               ```bash
+               # Recent commits
+               git log --oneline -30
+
+               # Check test coverage for features
+               grep -r "describe.*" test/ --include="*.exs"
+
+               # Check what operations are implemented
+               grep -r "defp.*eval.*op:" lib/
+               ```
+
+            2. **Compare to architecture.md phases**:
+               - What phase are we in?
+               - What's the next logical piece to implement?
+               - Are there dependencies?
+
+            3. **Verify tests pass**:
+               ```bash
+               mix test
+               ```
+               If tests fail, create a bug fix issue instead of a feature issue.
+
+            #### Step 4: Create a New Issue
+
+            Based on your analysis:
+
+            1. Draft an issue following the template in `issue-creation-guidelines.md`
+            2. Create it with appropriate labels:
+
+               **For new features (from architecture phases):**
+               ```bash
+               gh issue create \
+                 --title "[Phase N] Brief description" \
+                 --label "enhancement" \
+                 --label "needs-review" \
+                 --body-file /tmp/issue-body.md
+               ```
+
+               **For technical debt (refactoring, test improvements, code quality):**
+               ```bash
+               gh issue create \
+                 --title "Tech debt: Brief description" \
+                 --label "tech-debt" \
+                 --label "needs-review" \
+                 --body-file /tmp/issue-body.md
+               ```
+
+               **For bug fixes:**
+               ```bash
+               gh issue create \
+                 --title "Bug: Brief description" \
+                 --label "bug" \
+                 --label "needs-review" \
+                 --body-file /tmp/issue-body.md
+               ```
+
+            3. The `needs-review` label will trigger the issue review workflow
+            4. Update STATUS.md with the new issue in "Recent Activity"
+            5. **STOP HERE** - Wait for the issue to be reviewed before implementation
+
+            #### Step 5: Trigger Implementation
+
+            When you have a `ready-for-implementation` issue:
+
+            1. Post a comment to trigger the claude.yml workflow:
+               ```bash
+               gh issue comment ISSUE_NUMBER --body "@claude please implement this issue and then create a PR"
+               ```
+            2. Update STATUS.md:
+               - Set current work to this issue
+               - Add entry to Recent Activity table
+
+            ## Handling Failures
+
+            ### If Issue Review Rejects an Issue
+
+            When the review workflow adds `needs-clarification` or `needs-breakdown`:
+
+            1. Read the review feedback: `gh issue view NUMBER --comments`
+            2. Decide:
+               - **Fixable**: Update the issue body and re-add `needs-review` label
+               - **Fundamental problem**: Close the issue with explanation
+            3. Increment failure count if this is a rejection
+            4. If failure count >= 3: Enter STUCK state
+
+            ### STUCK State
+
+            When entering stuck state:
+
+            1. Update STATUS.md:
+               - Change badge to `![PM Status](https://img.shields.io/badge/PM-stuck-red)`
+               - Set status to "Stuck"
+               - Document what went wrong in the failure table
+            2. Do NOT create more issues
+            3. Exit with error
+
+            ## Updating STATUS.md
+
+            Always update STATUS.md after any action:
+
+            1. Read current STATUS.md
+            2. Update relevant sections:
+               - Badge (active/stuck)
+               - Current state
+               - Recent activity table (add new row)
+               - Implementation progress checkboxes (if phases completed)
+               - Failure tracking (if applicable)
+            3. Update "Last updated" timestamp
+            4. Write the file and commit:
+               ```bash
+               git add STATUS.md
+               git commit -m "chore: update PM status"
+               git push
+               ```
+
+            ## Safety Rules
+
+            1. **One issue at a time**: Never have multiple issues in flight
+            2. **Wait for merge**: Don't create new issues or trigger implementations while a PR is open
+               - If Open PRs > 0, only update STATUS.md and exit
+               - This prevents parallel work that could conflict
+            3. **Respect reviews**: If an issue is rejected, address feedback or close it
+            4. **Max 3 failures**: Enter stuck state after 3 consecutive rejections
+            5. **Don't skip steps**: Always check blocking issues first
+
+            ## Output
+
+            At the end, summarize what you did:
+            - What action was taken
+            - What issue was created/triggered (if any)
+            - Current STATUS.md state
+            - Any errors or warnings
+
+            Now begin the PM workflow.
+
+          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh issue:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(mix test:*)"'
+
+          show_full_output: true
+
+      - name: Check PM result
+        if: always()
+        run: |
+          echo "PM workflow completed"
+          echo "Check STATUS.md for current state"
