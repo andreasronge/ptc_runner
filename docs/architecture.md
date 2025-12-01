@@ -178,6 +178,151 @@ PtcRunner.run(program,
 | `concat` | Concatenate lists | `{"op": "concat", "lists": [...]}` |
 | `zip` | Zip lists together | `{"op": "zip", "lists": [...]}` |
 
+## Semantic Specifications
+
+This section clarifies edge cases and behavior for v1.0.
+
+### Variable and Context Access
+
+**`load` vs `var`:**
+- `load` reads from the **context** passed to `run/2` (external data)
+- `var` reads from **let bindings** within the program (internal variables)
+- Both return `nil` if the name doesn't exist (no error)
+
+**`let` scoping:**
+- Inner `let` bindings shadow outer bindings with the same name
+- Bindings are only visible within the `in` expression
+
+**Circular references:**
+- `let x = var("x")` is allowed but returns `nil` (var evaluated before binding exists)
+- No explicit cycle detection needed
+
+### Pipe and Collection Behavior
+
+**Empty `pipe`:**
+- `{"op": "pipe", "steps": []}` returns `nil`
+
+**`pipe` input:**
+- First step receives `nil` as input (unless it's `load`, `var`, `call`, or `literal`)
+- Each subsequent step receives the previous step's output
+
+**Current item in `map`:**
+- Inside a `map` expression, `{"op": "get", "path": []}` returns the current item
+- Empty path `[]` always means "current value in scope"
+
+### Type Handling
+
+**Collection operations on wrong types:**
+- `filter`, `map`, `reject` on non-list → `{:error, {:execution_error, "..."}}`
+- `select` on non-map → error
+- Operations fail fast with descriptive errors
+
+**`nth` with invalid index:**
+- Negative indices → error (not supported in v1)
+- Out of bounds → returns `nil`
+
+**`get` path semantics:**
+- Path elements are always **string keys** for maps
+- For lists, use `nth` operation (not `get` with numeric path)
+- `{"op": "get", "path": ["0"]}` looks for key `"0"`, not index 0
+
+### Comparison Operations
+
+**`contains` behavior by type:**
+- On **list**: checks if value is a member (`value in list`)
+- On **string**: checks substring (`String.contains?/2`)
+- On **map**: checks if key exists (`Map.has_key?/2`)
+- On other types: returns `false`
+
+**Field-based comparisons:**
+- All comparison ops (`eq`, `gt`, etc.) use `field` to access the current item
+- To compare the current value directly, use `field: nil` or omit `field`
+
+**Comparing expressions (out of scope for v1):**
+- No `{"op": "gt", "left": expr, "right": expr}` syntax
+- Use `let` bindings to achieve this if needed
+
+### Aggregation Edge Cases
+
+**Empty collections:**
+
+| Operation | Empty List Result |
+|-----------|------------------|
+| `sum` | `0` |
+| `count` | `0` |
+| `avg` | `nil` |
+| `min` | `nil` |
+| `max` | `nil` |
+
+**Non-numeric fields:**
+- `sum`, `avg` skip non-numeric values (treat as 0)
+- `min`, `max` use Elixir's term ordering
+
+### Logic Operations
+
+**`if` without `else`:**
+- `else` is **required** in v1
+- Validation error if omitted
+
+**Truthiness:**
+- Only `false` and `nil` are falsy
+- Empty list `[]`, empty string `""`, `0` are truthy (Elixir semantics)
+
+### Combine Operations
+
+**`merge` conflict resolution:**
+- Later objects override earlier objects (last wins)
+- `{"op": "merge", "objects": [{"a": 1}, {"a": 2}]}` → `{"a": 2}`
+
+**`zip` length mismatch:**
+- Stops at shortest list length
+- `zip([[1,2,3], [a,b]])` → `[[1,a], [2,b]]`
+
+**`concat` on non-lists:**
+- Error if any element is not a list
+
+### Tool Behavior
+
+**Tool errors:**
+- If tool returns `{:error, reason}` → program returns `{:error, {:execution_error, reason}}`
+- If tool raises an exception → caught and converted to execution error
+- Tool exceptions don't crash the sandbox
+
+**Tool argument validation:**
+- Tools receive raw args map—no schema validation in v1
+- Tools should validate their own arguments
+- Missing required args result in pattern match error (surfaced as execution error)
+
+**Tool result size:**
+- Tool results count toward memory limit
+- Large tool results can trigger `{:error, {:memory_exceeded, ...}}`
+
+**Async tools (out of scope for v1):**
+- Tools must return synchronously
+- Streaming, pagination handled by the tool internally
+
+### Resource Limits
+
+**Nesting depth:**
+- Max nesting depth: 50 levels (configurable via `:max_depth`)
+- Exceeding returns `{:error, {:validation_error, "Max nesting depth exceeded"}}`
+
+**Operation count (out of scope for v1):**
+- No limit on number of operations
+- Rely on timeout and memory limits
+
+### Out of Scope for v1
+
+These features are intentionally deferred:
+
+- **`sort` / `order_by`**: Use tools or pre-sort data
+- **`group_by`**: Use tools for grouping
+- **String operations** (`split`, `join`, `uppercase`, etc.): Use tools
+- **Regex matching**: Use tools
+- **Arithmetic operations** (`add`, `subtract`, etc.): Use tools or `let` with literals
+- **Parallel tool execution**: Tools execute sequentially
+- **Expression-based comparisons**: Use `let` bindings as workaround
+
 ## Example Programs
 
 ### Example 1: Filter and Sum Expenses

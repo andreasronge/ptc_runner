@@ -5,6 +5,8 @@
 - **[Architecture](../architecture.md)** - System design, DSL specification, implementation phases
 - **[Testing Guidelines](testing-guidelines.md)** - Test patterns and quality standards
 - **[Development Guidelines](development-guidelines.md)** - Elixir coding standards
+- **[Issue Creation Guidelines](issue-creation-guidelines.md)** - How PM workflow creates issues
+- **[PR Review Guidelines](pr-review-guidelines.md)** - PR review structure and severity
 
 ## When to Use This Document
 
