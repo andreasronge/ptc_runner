@@ -256,11 +256,28 @@ jobs:
 
             When you have a `ready-for-implementation` issue:
 
-            1. Post a comment to trigger the claude.yml workflow:
+            1. First, check if the issue has review comments:
                ```bash
-               gh issue comment ISSUE_NUMBER --body "@claude please implement this issue and then create a PR"
+               gh issue view ISSUE_NUMBER --comments
                ```
-            2. Update STATUS.md:
+
+            2. Post a comment to trigger the claude.yml workflow. The comment MUST instruct Claude to:
+               - Read and address any feedback from the issue review
+               - Update the issue description if the review identified problems
+               - Then implement the issue and create a PR
+
+               ```bash
+               gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
+
+               1. First, read the review comments on this issue
+               2. If the review identified issues (inconsistencies, missing details, etc.), update the issue description to address them
+               3. Then implement the issue following the (updated) specification
+               4. Create a PR with your implementation
+
+               Make sure your implementation addresses any concerns raised in the review."
+               ```
+
+            3. Update STATUS.md:
                - Set current work to this issue
                - Add entry to Recent Activity table
 
@@ -290,7 +307,7 @@ jobs:
 
             ## Updating STATUS.md
 
-            Always update STATUS.md after any action:
+            Always update STATUS.md after any action. Commit directly to main (no PR needed for status updates).
 
             1. Read current STATUS.md
             2. Update relevant sections:
@@ -300,12 +317,14 @@ jobs:
                - Implementation progress checkboxes (if phases completed)
                - Failure tracking (if applicable)
             3. Update "Last updated" timestamp
-            4. Write the file and commit:
+            4. Commit directly to main branch:
                ```bash
-               git add STATUS.md
+               git add STATUS.md README.md
                git commit -m "chore: update PM status"
-               git push
+               git push origin main
                ```
+
+            **IMPORTANT**: Do NOT create a PR for STATUS.md updates. Commit directly to main to avoid parallel PR conflicts.
 
             ## Safety Rules
 
