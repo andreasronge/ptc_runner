@@ -49,7 +49,10 @@ docs/
 - **[Development Guidelines](docs/guidelines/development-guidelines.md)** - Elixir standards
 - **[Testing Guidelines](docs/guidelines/testing-guidelines.md)** - Test quality and patterns
 - **[Planning Guidelines](docs/guidelines/planning-guidelines.md)** - Issue review and feature planning
+- **[Issue Creation Guidelines](docs/guidelines/issue-creation-guidelines.md)** - How to create well-specified issues
+- **[PR Review Guidelines](docs/guidelines/pr-review-guidelines.md)** - PR review structure and severity
 - **[Research Notes](docs/research.md)** - PTC specification research
+- **[STATUS.md](STATUS.md)** - PM workflow status and implementation progress
 
 ## Key Commands
 
