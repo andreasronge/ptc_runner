@@ -353,6 +353,26 @@ defmodule PtcRunnerTest do
     assert reason == {:timeout, 0}
   end
 
+  # Memory limit handling
+  test "memory limit is enforced" do
+    # Pass large data through context
+    large_list = List.duplicate(%{"data" => String.duplicate("x", 1000)}, 10_000)
+
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "load", "name": "large_data"},
+        {"op": "count"}
+      ]
+    })
+
+    # Use a very small max_heap to trigger the limit
+    {:error, reason} =
+      PtcRunner.run(program, context: %{"large_data" => large_list}, max_heap: 1000)
+
+    assert match?({:memory_exceeded, _bytes}, reason)
+  end
+
   # run! function
   test "run! returns result without metrics" do
     program = ~s({"op": "literal", "value": 42})
