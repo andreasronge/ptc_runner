@@ -264,22 +264,25 @@ jobs:
             2. Post a comment to trigger the claude.yml workflow. The comment MUST instruct Claude to:
                - Read and address any feedback from the issue review
                - Update the issue description if the review identified problems
-               - Then implement the issue and create a PR
+               - Implement the issue and create a PR
+               - **Update STATUS.md as part of the same PR** (to avoid parallel PRs)
 
                ```bash
                gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
 
                1. First, read the review comments on this issue
                2. If the review identified issues (inconsistencies, missing details, etc.), update the issue description to address them
-               3. Then implement the issue following the (updated) specification
-               4. Create a PR with your implementation
+               3. Implement the issue following the (updated) specification
+               4. Update STATUS.md to reflect this work:
+                  - Set 'Current work' to this issue number and title
+                  - Add a row to the 'Recent Activity' table with today's date, 'Implementation started', issue number, and 'In progress'
+                  - Update the 'Last updated' timestamp
+               5. Create a PR with your implementation (including the STATUS.md update)
 
                Make sure your implementation addresses any concerns raised in the review."
                ```
 
-            3. Update STATUS.md:
-               - Set current work to this issue
-               - Add entry to Recent Activity table
+            3. **Do NOT update STATUS.md here** - the implementation PR will include the STATUS.md update to avoid parallel PRs.
 
             ## Handling Failures
 
@@ -307,7 +310,9 @@ jobs:
 
             ## Updating STATUS.md
 
-            Always update STATUS.md after any action. Commit directly to main (no PR needed for status updates).
+            Update STATUS.md when creating new issues (Step 4), but NOT when triggering implementation (Step 5).
+
+            When updating STATUS.md (e.g., after creating a new issue):
 
             1. Read current STATUS.md
             2. Update relevant sections:
@@ -317,14 +322,16 @@ jobs:
                - Implementation progress checkboxes (if phases completed)
                - Failure tracking (if applicable)
             3. Update "Last updated" timestamp
-            4. Commit directly to main branch:
+            4. Create a PR with the changes:
                ```bash
+               git checkout -b pm/status-update-$(date +%Y%m%d-%H%M%S)
                git add STATUS.md README.md
                git commit -m "chore: update PM status"
-               git push origin main
+               git push -u origin HEAD
+               gh pr create --title "chore: update PM status" --body "Automated PM status update"
                ```
 
-            **IMPORTANT**: Do NOT create a PR for STATUS.md updates. Commit directly to main to avoid parallel PR conflicts.
+            **IMPORTANT**: When triggering implementation (Step 5), do NOT update STATUS.md - let the implementation PR include the status update to avoid parallel PRs.
 
             ## Safety Rules
 
