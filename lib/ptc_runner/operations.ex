@@ -448,34 +448,44 @@ defmodule PtcRunner.Operations do
   defp min_list([], _field), do: {:ok, nil}
 
   defp min_list(data, field) do
-    values =
-      Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
-        case get_item_value(item, field) do
-          {:ok, val} -> {:cont, {:ok, acc ++ [val]}}
-          :skip -> {:cont, {:ok, acc}}
-        end
-      end)
+    Enum.reduce(data, {:ok, nil}, fn item, acc ->
+      update_min(acc, item, field)
+    end)
+  end
 
-    case values do
-      {:ok, []} -> {:ok, nil}
-      {:ok, vals} -> {:ok, Enum.min(vals)}
+  defp update_min({:ok, nil}, item, field) do
+    case get_item_value(item, field) do
+      {:ok, val} -> {:ok, val}
+      :skip -> {:ok, nil}
+    end
+  end
+
+  defp update_min({:ok, min_val}, item, field) do
+    case get_item_value(item, field) do
+      {:ok, val} -> {:ok, min(min_val, val)}
+      :skip -> {:ok, min_val}
     end
   end
 
   defp max_list([], _field), do: {:ok, nil}
 
   defp max_list(data, field) do
-    values =
-      Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
-        case get_item_value(item, field) do
-          {:ok, val} -> {:cont, {:ok, acc ++ [val]}}
-          :skip -> {:cont, {:ok, acc}}
-        end
-      end)
+    Enum.reduce(data, {:ok, nil}, fn item, acc ->
+      update_max(acc, item, field)
+    end)
+  end
 
-    case values do
-      {:ok, []} -> {:ok, nil}
-      {:ok, vals} -> {:ok, Enum.max(vals)}
+  defp update_max({:ok, nil}, item, field) do
+    case get_item_value(item, field) do
+      {:ok, val} -> {:ok, val}
+      :skip -> {:ok, nil}
+    end
+  end
+
+  defp update_max({:ok, max_val}, item, field) do
+    case get_item_value(item, field) do
+      {:ok, val} -> {:ok, max(max_val, val)}
+      :skip -> {:ok, max_val}
     end
   end
 
