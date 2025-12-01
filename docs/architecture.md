@@ -255,7 +255,7 @@ This section clarifies edge cases and behavior for v1.0.
 | `max` | `nil` |
 
 **Non-numeric fields:**
-- `sum`, `avg` skip non-numeric values (treat as 0)
+- `sum`, `avg` skip non-numeric values entirely (not counted in denominator for `avg`)
 - `min`, `max` use Elixir's term ordering
 
 ### Logic Operations
