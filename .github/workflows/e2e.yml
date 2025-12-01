@@ -1,0 +1,33 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Which tests to run'
+        required: false
+        type: choice
+        options:
+          - 'integration'
+        default: 'integration'
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Compile
+        run: mix compile
+
+      - name: Run integration tests
+        run: mix test --include integration --trace
+        timeout-minutes: 15

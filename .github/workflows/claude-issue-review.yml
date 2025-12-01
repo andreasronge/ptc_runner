@@ -1,0 +1,57 @@
+name: Claude Issue Review
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  claude-issue-review:
+    # Only run when 'needs-review' label is added
+    if: github.event.label.name == 'needs-review'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Run Claude Issue Review
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+            ISSUE TITLE: ${{ github.event.issue.title }}
+
+            Review this GitHub issue using the project's planning guidelines:
+
+            1. Read `docs/guidelines/planning-guidelines.md` for the 9-point review checklist
+            2. Use `gh issue view ${{ github.event.issue.number }} --comments` to read the full issue and all comments
+            3. Explore the codebase to verify proposed solutions work with existing code
+            4. Follow the output format from the planning guidelines
+
+            After your review:
+            - Post your review as a comment using `gh issue comment`
+            - If the issue needs corrections, update the issue body:
+              1. Write the corrected issue body to /tmp/issue-body.md
+              2. Run: gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md
+            - Add appropriate labels using `gh issue edit --add-label`:
+              - `needs-clarification` if important details are missing
+              - `needs-breakdown` if issue should be split into smaller issues
+              - `ready-for-implementation` if issue is well-defined and ready
+              - `bug` / `enhancement` / `documentation` based on issue type
+
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Write,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label:*),Bash(mix:*),Bash(git:*)"'
