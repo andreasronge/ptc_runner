@@ -9,7 +9,7 @@ defmodule PtcRunner.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      description: "A BEAM-native Programmatic Tool Calling (PTC) runner"
+      description: "A BEAM-native Elixir library for Programmatic Tool Calling (PTC)"
     ]
   end
 
