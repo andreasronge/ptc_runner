@@ -17,6 +17,12 @@ jobs:
       MIX_ENV: test
 
     steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - ready-for-implementation label won't trigger PM workflow"
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -28,7 +34,9 @@ jobs:
       - name: Run Claude Issue Review
         uses: anthropics/claude-code-action@v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Use PAT so that adding ready-for-implementation label triggers PM workflow
+          # Falls back to github.token if PAT not available (but PM trigger won't work)
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
