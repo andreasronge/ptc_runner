@@ -649,5 +649,12 @@ defmodule PtcRunnerTest do
 
       assert reason == {:execution_error, "No input available"}
     end
+
+    test "eq without piped input returns error" do
+      program = ~s({"op": "eq", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
   end
 end
