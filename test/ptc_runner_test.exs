@@ -382,6 +382,19 @@ defmodule PtcRunnerTest do
     assert result == 99
   end
 
+  test "get with explicit nil default returns null" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"x": 1}},
+        {"op": "get", "path": ["missing"], "default": null}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
   # E2E test demonstrating get with map
   test "extract nested user emails from list of users" do
     program = ~s({

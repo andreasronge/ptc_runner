@@ -2,8 +2,8 @@ defmodule PtcRunner.Operations do
   @moduledoc """
   Built-in operations for the DSL.
 
-  Implements all Phase 1 operations: literal, load, var, pipe,
-  filter, map, select, eq, sum, and count.
+  Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
+  filter, map, select, eq, sum, count; Phase 2: get).
   """
 
   alias PtcRunner.Context
