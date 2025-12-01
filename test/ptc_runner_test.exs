@@ -605,4 +605,56 @@ defmodule PtcRunnerTest do
       PtcRunner.run!(program)
     end
   end
+
+  # Error tests for operations without piped input
+  describe "operations without piped input" do
+    test "get without piped input returns error" do
+      program = ~s({"op": "get", "path": ["x"]})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "filter without piped input returns error" do
+      program = ~s({"op": "filter", "where": {"op": "eq", "field": "x", "value": 1}})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "map without piped input returns error" do
+      program = ~s({"op": "map", "expr": {"op": "literal", "value": "x"}})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "count without piped input returns error" do
+      program = ~s({"op": "count"})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "sum without piped input returns error" do
+      program = ~s({"op": "sum", "field": "amount"})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "select without piped input returns error" do
+      program = ~s({"op": "select", "fields": ["name"]})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "eq without piped input returns error" do
+      program = ~s({"op": "eq", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+  end
 end
