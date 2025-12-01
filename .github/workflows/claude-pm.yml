@@ -6,6 +6,10 @@ on:
     types: [closed]
     branches: [main]
 
+  # Run when an issue becomes ready for implementation
+  issues:
+    types: [labeled]
+
   # Manual trigger for testing or recovery
   workflow_dispatch:
     inputs:
@@ -21,9 +25,13 @@ on:
 
 jobs:
   pm:
-    # Only run on merged PRs (not closed without merge), or on manual trigger
+    # Run on:
+    # - Merged PRs (not closed without merge)
+    # - Issues labeled 'ready-for-implementation'
+    # - Manual trigger
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'issues' && github.event.label.name == 'ready-for-implementation') ||
       github.event_name == 'workflow_dispatch'
 
     runs-on: ubuntu-latest
