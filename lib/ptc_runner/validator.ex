@@ -109,6 +109,24 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  # Access operations
+  defp validate_operation("get", node) do
+    case Map.get(node, "path") do
+      nil ->
+        {:error, {:validation_error, "Operation 'get' requires field 'path'"}}
+
+      path when not is_list(path) ->
+        {:error, {:validation_error, "Field 'path' must be a list"}}
+
+      path ->
+        Enum.all?(path, &is_binary/1)
+        |> case do
+          true -> :ok
+          false -> {:error, {:validation_error, "All path elements in 'path' must be strings"}}
+        end
+    end
+  end
+
   # Aggregations
   defp validate_operation("sum", node) do
     case Map.get(node, "field") do
