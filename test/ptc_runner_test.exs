@@ -355,7 +355,8 @@ defmodule PtcRunnerTest do
 
   # Memory limit handling
   test "memory limit is enforced" do
-    # Pass large data through context
+    # Pass large data through context - context data counts toward sandbox memory
+    # per docs/architecture.md:297-298, making this a valid test approach
     large_list = List.duplicate(%{"data" => String.duplicate("x", 1000)}, 10_000)
 
     program = ~s({
@@ -370,7 +371,8 @@ defmodule PtcRunnerTest do
     {:error, reason} =
       PtcRunner.run(program, context: %{"large_data" => large_list}, max_heap: 1000)
 
-    assert match?({:memory_exceeded, _bytes}, reason)
+    assert {:memory_exceeded, bytes} = reason
+    assert is_integer(bytes)
   end
 
   # run! function
