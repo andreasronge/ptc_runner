@@ -249,8 +249,8 @@ jobs:
                ```
 
             3. The `needs-review` label will trigger the issue review workflow
-            4. Update STATUS.md with the new issue in "Recent Activity"
-            5. **STOP HERE** - Wait for the issue to be reviewed before implementation
+            4. **STOP HERE** - Wait for the issue to be reviewed before implementation
+               (STATUS.md will be updated by the implementation PR, not here)
 
             #### Step 5: Trigger Implementation
 
@@ -308,36 +308,19 @@ jobs:
             2. Do NOT create more issues
             3. Exit with error
 
-            ## Updating STATUS.md
+            ## STATUS.md Updates
 
-            Update STATUS.md when creating new issues (Step 4), but NOT when triggering implementation (Step 5).
+            **Do NOT create separate PRs for STATUS.md updates.** This causes merge conflicts.
 
-            When updating STATUS.md (e.g., after creating a new issue):
-
-            1. Read current STATUS.md
-            2. Update relevant sections:
-               - Badge (active/stuck)
-               - Current state
-               - Recent activity table (add new row)
-               - Implementation progress checkboxes (if phases completed)
-               - Failure tracking (if applicable)
-            3. Update "Last updated" timestamp
-            4. Create a PR with the changes:
-               ```bash
-               git checkout -b pm/status-update-$(date +%Y%m%d-%H%M%S)
-               git add STATUS.md README.md
-               git commit -m "chore: update PM status"
-               git push -u origin HEAD
-               gh pr create --title "chore: update PM status" --body "Automated PM status update"
-               ```
-
-            **IMPORTANT**: When triggering implementation (Step 5), do NOT update STATUS.md - let the implementation PR include the status update to avoid parallel PRs.
+            STATUS.md is updated only:
+            - By implementation PRs (Step 5 instructs Claude to include STATUS.md updates)
+            - When entering STUCK state (update directly on main as part of error handling)
 
             ## Safety Rules
 
             1. **One issue at a time**: Never have multiple issues in flight
             2. **Wait for merge**: Don't create new issues or trigger implementations while a PR is open
-               - If Open PRs > 0, only update STATUS.md and exit
+               - If Open PRs > 0, exit without taking action
                - This prevents parallel work that could conflict
             3. **Respect reviews**: If an issue is rejected, address feedback or close it
             4. **Max 3 failures**: Enter stuck state after 3 consecutive rejections
