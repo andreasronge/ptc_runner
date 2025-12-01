@@ -4,7 +4,7 @@ defmodule PtcRunner.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject).
+  last, nth, reject, contains, avg, min, max).
   """
 
   alias PtcRunner.Context
@@ -112,6 +112,24 @@ defmodule PtcRunner.Operations do
   def eval("lte", node, context, eval_fn),
     do: eval_comparison(node, context, eval_fn, "lte", &<=/2)
 
+  def eval("contains", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          field_value = Map.get(data, field)
+          {:ok, contains_value?(field_value, value)}
+        else
+          {:error, {:execution_error, "contains requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
   # Access operations
   def eval("get", node, context, eval_fn) do
     path = Map.get(node, "path", [])
@@ -159,6 +177,54 @@ defmodule PtcRunner.Operations do
           {:ok, length(data)}
         else
           {:error, {:execution_error, "count requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("avg", node, context, eval_fn) do
+    field = Map.get(node, "field")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          avg_list(data, field)
+        else
+          {:error, {:execution_error, "avg requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("min", node, context, eval_fn) do
+    field = Map.get(node, "field")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          min_list(data, field)
+        else
+          {:error, {:execution_error, "min requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("max", node, context, eval_fn) do
+    field = Map.get(node, "field")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          max_list(data, field)
+        else
+          {:error, {:execution_error, "max requires a list, got #{inspect(data)}"}}
         end
     end
   end
@@ -364,6 +430,83 @@ defmodule PtcRunner.Operations do
       {:halt, {:error, {:execution_error, "sum requires list of maps, got #{inspect(item)}"}}}
     end
   end
+
+  defp avg_list([], _field), do: {:ok, nil}
+
+  defp avg_list(data, field) do
+    {sum, count} =
+      Enum.reduce(data, {0, 0}, fn item, {sum_acc, count_acc} ->
+        case get_numeric_value(item, field) do
+          {:ok, val} -> {sum_acc + val, count_acc + 1}
+          :skip -> {sum_acc, count_acc}
+        end
+      end)
+
+    if count == 0, do: {:ok, nil}, else: {:ok, sum / count}
+  end
+
+  defp min_list([], _field), do: {:ok, nil}
+
+  defp min_list(data, field) do
+    values =
+      Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+        case get_item_value(item, field) do
+          {:ok, val} -> {:cont, {:ok, acc ++ [val]}}
+          :skip -> {:cont, {:ok, acc}}
+        end
+      end)
+
+    case values do
+      {:ok, []} -> {:ok, nil}
+      {:ok, vals} -> {:ok, Enum.min(vals)}
+    end
+  end
+
+  defp max_list([], _field), do: {:ok, nil}
+
+  defp max_list(data, field) do
+    values =
+      Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+        case get_item_value(item, field) do
+          {:ok, val} -> {:cont, {:ok, acc ++ [val]}}
+          :skip -> {:cont, {:ok, acc}}
+        end
+      end)
+
+    case values do
+      {:ok, []} -> {:ok, nil}
+      {:ok, vals} -> {:ok, Enum.max(vals)}
+    end
+  end
+
+  defp get_numeric_value(item, field) when is_map(item) do
+    case Map.get(item, field) do
+      val when is_number(val) -> {:ok, val}
+      nil -> :skip
+      _val -> :skip
+    end
+  end
+
+  defp get_numeric_value(_item, _field), do: :skip
+
+  defp get_item_value(item, field) when is_map(item) do
+    case Map.get(item, field) do
+      nil -> :skip
+      val -> {:ok, val}
+    end
+  end
+
+  defp get_item_value(_item, _field), do: :skip
+
+  defp contains_value?(field_value, value) when is_list(field_value), do: value in field_value
+
+  defp contains_value?(field_value, value) when is_binary(field_value) and is_binary(value),
+    do: String.contains?(field_value, value)
+
+  defp contains_value?(field_value, value) when is_map(field_value),
+    do: Map.has_key?(field_value, value)
+
+  defp contains_value?(_field_value, _value), do: false
 
   defp get_nested(data, path) when is_map(data) do
     path_as_atoms = Enum.map(path, &Access.key/1)
