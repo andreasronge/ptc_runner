@@ -327,7 +327,7 @@ jobs:
 
             Now begin the PM workflow.
 
-          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh issue:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(mix test:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh issue:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(mix test:*)"'
 
           show_full_output: true
 
