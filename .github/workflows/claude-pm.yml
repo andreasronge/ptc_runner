@@ -280,27 +280,51 @@ jobs:
             3. The `needs-review` label will trigger the issue review workflow
             4. **STOP HERE** - Wait for the issue to be reviewed before implementation
 
-            #### Step 5: Trigger Implementation
+            #### Step 5: Pre-Implementation Check
 
-            When you have a `ready-for-implementation` issue:
+            Before triggering implementation, evaluate whether the issue can proceed:
 
-            1. First, check if the issue has review comments:
+            1. **Read the issue and comments**:
                ```bash
                gh issue view ISSUE_NUMBER --comments
                ```
 
-            2. Post a comment to trigger the claude.yml workflow:
+            2. **Check for blockers** - Look for:
+               - Comments mentioning "blocked by #N", "waiting for #N", "depends on #N"
+               - References to other issues that must be done first
+               - If a blocker issue is referenced, check if it's still open:
+                 ```bash
+                 gh issue view BLOCKER_NUMBER --json state
+                 ```
 
-               ```bash
-               gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
+            3. **If blocked by open issue**: Do NOT trigger implementation. Exit and report the blocker.
 
-               1. First, read the review comments on this issue
-               2. If the review identified issues (inconsistencies, missing details, etc.), update the issue description to address them
-               3. Implement the issue following the (updated) specification
-               4. Create a PR with your implementation
+            4. **Assess implementation readiness** - Briefly consider:
+               - Does the codebase need refactoring to implement this cleanly?
+               - Should this issue be split into smaller issues?
+               - Are there prerequisites not captured in existing issues?
 
-               Make sure your implementation addresses any concerns raised in the review."
-               ```
+               If you identify a blocker:
+               - Create a new issue (tech-debt, bug, or enhancement) with `needs-review` label
+               - Add a comment to the ready issue: "Blocked by #N - [brief reason]"
+               - **STOP** - Do not trigger implementation
+
+            #### Step 6: Trigger Implementation
+
+            When the issue is ready and unblocked:
+
+            Post a comment to trigger the claude.yml workflow:
+
+            ```bash
+            gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
+
+            1. First, read the review comments on this issue
+            2. If the review identified issues (inconsistencies, missing details, etc.), update the issue description to address them
+            3. Implement the issue following the (updated) specification
+            4. Create a PR with your implementation
+
+            Make sure your implementation addresses any concerns raised in the review."
+            ```
 
             ## Handling Failures
 
