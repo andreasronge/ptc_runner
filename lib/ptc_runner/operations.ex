@@ -2,8 +2,8 @@ defmodule PtcRunner.Operations do
   @moduledoc """
   Built-in operations for the DSL.
 
-  Implements all Phase 1 operations: literal, load, var, pipe,
-  filter, map, select, eq, sum, and count.
+  Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
+  filter, map, select, eq, sum, count; Phase 2: get).
   """
 
   alias PtcRunner.Context
@@ -111,6 +111,26 @@ defmodule PtcRunner.Operations do
         else
           {:error, {:execution_error, "eq requires a map, got #{inspect(data)}"}}
         end
+    end
+  end
+
+  # Access operations
+  def eval("get", node, context, eval_fn) do
+    path = Map.get(node, "path", [])
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        result =
+          if path == [] do
+            data
+          else
+            get_nested(data, path)
+          end
+
+        handle_get_result(result, node)
     end
   end
 
@@ -235,5 +255,29 @@ defmodule PtcRunner.Operations do
     else
       {:halt, {:error, {:execution_error, "sum requires list of maps, got #{inspect(item)}"}}}
     end
+  end
+
+  defp get_nested(data, path) when is_map(data) do
+    path_as_atoms = Enum.map(path, &Access.key/1)
+    get_in(data, path_as_atoms)
+  end
+
+  defp get_nested(_data, _path) do
+    # Non-map values always return nil when accessing a path
+    nil
+  end
+
+  defp handle_get_result(nil, node) do
+    default = Map.get(node, "default")
+
+    if Map.has_key?(node, "default") do
+      {:ok, default}
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp handle_get_result(value, _node) do
+    {:ok, value}
   end
 end
