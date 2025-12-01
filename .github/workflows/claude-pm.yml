@@ -77,23 +77,26 @@ jobs:
 
       - name: Check current PM status
         id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Read STATUS.md to check if stuck
-          if [ -f "STATUS.md" ]; then
-            # Check for stuck state (badge shows stuck)
-            if grep -q "PM-stuck-red" STATUS.md; then
-              echo "is_stuck=true" >> $GITHUB_OUTPUT
-              echo "::warning::PM workflow is in STUCK state"
-            else
-              echo "is_stuck=false" >> $GITHUB_OUTPUT
-            fi
+          # Query GitHub directly for PM state (source of truth)
 
-            # Extract failure count
-            FAILURE_COUNT=$(grep -oP "Consecutive failures\*\*: \K\d+" STATUS.md || echo "0")
-            echo "failure_count=$FAILURE_COUNT" >> $GITHUB_OUTPUT
+          # Check for stuck state via label
+          STUCK_ISSUES=$(gh issue list --repo "${{ github.repository }}" --label "pm-stuck" --state open --json number | jq length)
+          if [ "$STUCK_ISSUES" -gt 0 ]; then
+            echo "is_stuck=true" >> $GITHUB_OUTPUT
+            echo "::warning::PM workflow is in STUCK state (found issue with pm-stuck label)"
           else
             echo "is_stuck=false" >> $GITHUB_OUTPUT
-            echo "failure_count=0" >> $GITHUB_OUTPUT
+          fi
+
+          # Count recent failures via label (issues that failed PM attempts)
+          FAILURE_COUNT=$(gh issue list --repo "${{ github.repository }}" --label "pm-failed-attempt" --state open --json number | jq length)
+          echo "failure_count=$FAILURE_COUNT" >> $GITHUB_OUTPUT
+
+          if [ "$FAILURE_COUNT" -ge 3 ]; then
+            echo "::warning::$FAILURE_COUNT consecutive PM failures detected"
           fi
 
       - name: Handle stuck state
@@ -134,21 +137,29 @@ jobs:
             1. `docs/guidelines/issue-creation-guidelines.md` - How to create issues
             2. `docs/guidelines/planning-guidelines.md` - The 9-point review checklist
             3. `docs/architecture.md` - Implementation phases and what to build
-            4. `STATUS.md` - Current implementation progress
+
+            ## State Management
+
+            **GitHub is the source of truth** - do NOT rely on STATUS.md for state tracking.
+
+            Query state directly:
+            - **Work in progress**: `gh pr list --state open` (any open PR = work in progress)
+            - **Stuck state**: `gh issue list --label "pm-stuck" --state open`
+            - **Failure count**: `gh issue list --label "pm-failed-attempt" --state open`
+            - **Ready for work**: `gh issue list --label "ready-for-implementation" --state open`
 
             ## Your Task Based on Action
 
             ### If action is "status-only":
-            1. Analyze codebase to determine what's implemented
-            2. Update STATUS.md with current progress
+            1. Analyze codebase and GitHub state
+            2. Report current implementation progress
             3. Do NOT create or trigger any issues
             4. Exit
 
             ### If action is "reset-stuck":
-            1. Reset the failure count to 0
-            2. Change status badge to active (green)
-            3. Clear the failure table
-            4. Then proceed with "next-issue" logic
+            1. Remove `pm-stuck` label from any issues that have it
+            2. Remove `pm-failed-attempt` label from recent issues
+            3. Then proceed with "next-issue" logic
 
             ### If action is "next-issue" (default):
 
@@ -250,7 +261,6 @@ jobs:
 
             3. The `needs-review` label will trigger the issue review workflow
             4. **STOP HERE** - Wait for the issue to be reviewed before implementation
-               (STATUS.md will be updated by the implementation PR, not here)
 
             #### Step 5: Trigger Implementation
 
@@ -261,11 +271,7 @@ jobs:
                gh issue view ISSUE_NUMBER --comments
                ```
 
-            2. Post a comment to trigger the claude.yml workflow. The comment MUST instruct Claude to:
-               - Read and address any feedback from the issue review
-               - Update the issue description if the review identified problems
-               - Implement the issue and create a PR
-               - **Update STATUS.md as part of the same PR** (to avoid parallel PRs)
+            2. Post a comment to trigger the claude.yml workflow:
 
                ```bash
                gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
@@ -273,16 +279,10 @@ jobs:
                1. First, read the review comments on this issue
                2. If the review identified issues (inconsistencies, missing details, etc.), update the issue description to address them
                3. Implement the issue following the (updated) specification
-               4. Update STATUS.md to reflect this work:
-                  - Set 'Current work' to this issue number and title
-                  - Add a row to the 'Recent Activity' table with today's date, 'Implementation started', issue number, and 'In progress'
-                  - Update the 'Last updated' timestamp
-               5. Create a PR with your implementation (including the STATUS.md update)
+               4. Create a PR with your implementation
 
                Make sure your implementation addresses any concerns raised in the review."
                ```
-
-            3. **Do NOT update STATUS.md here** - the implementation PR will include the STATUS.md update to avoid parallel PRs.
 
             ## Handling Failures
 
@@ -294,27 +294,22 @@ jobs:
             2. Decide:
                - **Fixable**: Update the issue body and re-add `needs-review` label
                - **Fundamental problem**: Close the issue with explanation
-            3. Increment failure count if this is a rejection
-            4. If failure count >= 3: Enter STUCK state
+            3. Add `pm-failed-attempt` label to track the failure
+            4. If 3+ issues have `pm-failed-attempt` label: Enter STUCK state
 
             ### STUCK State
 
             When entering stuck state:
 
-            1. Update STATUS.md:
-               - Change badge to `![PM Status](https://img.shields.io/badge/PM-stuck-red)`
-               - Set status to "Stuck"
-               - Document what went wrong in the failure table
-            2. Do NOT create more issues
-            3. Exit with error
+            1. Add `pm-stuck` label to the problematic issue
+            2. Post a comment explaining what went wrong
+            3. Do NOT create more issues
+            4. Exit with error
 
-            ## STATUS.md Updates
-
-            **Do NOT create separate PRs for STATUS.md updates.** This causes merge conflicts.
-
-            STATUS.md is updated only:
-            - By implementation PRs (Step 5 instructs Claude to include STATUS.md updates)
-            - When entering STUCK state (update directly on main as part of error handling)
+            To recover from stuck state, someone must:
+            - Fix the underlying issue
+            - Remove the `pm-stuck` label
+            - Run the workflow with "reset-stuck" action
 
             ## Safety Rules
 
@@ -323,7 +318,7 @@ jobs:
                - If Open PRs > 0, exit without taking action
                - This prevents parallel work that could conflict
             3. **Respect reviews**: If an issue is rejected, address feedback or close it
-            4. **Max 3 failures**: Enter stuck state after 3 consecutive rejections
+            4. **Max 3 failures**: Enter stuck state after 3 consecutive rejections (tracked via `pm-failed-attempt` label)
             5. **Don't skip steps**: Always check blocking issues first
 
             ## Output
@@ -331,7 +326,7 @@ jobs:
             At the end, summarize what you did:
             - What action was taken
             - What issue was created/triggered (if any)
-            - Current STATUS.md state
+            - Current state (from GitHub labels/PRs)
             - Any errors or warnings
 
             Now begin the PM workflow.
@@ -342,6 +337,12 @@ jobs:
 
       - name: Check PM result
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "PM workflow completed"
-          echo "Check STATUS.md for current state"
+          echo ""
+          echo "Current state:"
+          echo "- Open PRs: $(gh pr list --state open --json number | jq length)"
+          echo "- Ready issues: $(gh issue list --label ready-for-implementation --state open --json number | jq length)"
+          echo "- Stuck: $(gh issue list --label pm-stuck --state open --json number | jq length)"
