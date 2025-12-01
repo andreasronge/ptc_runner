@@ -3,7 +3,8 @@ defmodule PtcRunner.Operations do
   Built-in operations for the DSL.
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
-  filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte).
+  filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
+  last, nth, reject).
   """
 
   alias PtcRunner.Context
@@ -162,11 +163,80 @@ defmodule PtcRunner.Operations do
     end
   end
 
+  def eval("first", _node, context, eval_fn) do
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          {:ok, List.first(data)}
+        else
+          {:error, {:execution_error, "first requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("last", _node, context, eval_fn) do
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          {:ok, List.last(data)}
+        else
+          {:error, {:execution_error, "last requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("nth", node, context, eval_fn) do
+    index = Map.get(node, "index")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        eval_nth(data, index)
+    end
+  end
+
+  def eval("reject", node, context, eval_fn) do
+    where_clause = Map.get(node, "where")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          reject_list(data, where_clause, context, eval_fn)
+        else
+          {:error, {:execution_error, "reject requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
   def eval(op, _node, _context, _eval_fn) do
     {:error, {:execution_error, "Unknown operation '#{op}'"}}
   end
 
   # Helper functions
+
+  defp eval_nth(data, index) when is_list(data) do
+    if is_integer(index) && index >= 0 do
+      {:ok, Enum.at(data, index)}
+    else
+      {:error,
+       {:execution_error, "nth index must be a non-negative integer, got #{inspect(index)}"}}
+    end
+  end
+
+  defp eval_nth(data, _index) do
+    {:error, {:execution_error, "nth requires a list, got #{inspect(data)}"}}
+  end
 
   defp eval_comparison(node, context, eval_fn, op_name, compare_fn) do
     field = Map.get(node, "field")
@@ -216,6 +286,29 @@ defmodule PtcRunner.Operations do
           {:halt,
            {:error,
             {:execution_error, "filter where clause must return boolean, got #{inspect(result)}"}}}
+
+        {:error, _} = err ->
+          {:halt, err}
+      end
+    end)
+  end
+
+  defp reject_list(data, where_clause, context, _eval_fn) do
+    Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+      # Inject item as __input for evaluation
+      where_clause_with_input = Map.put(where_clause, "__input", item)
+
+      case Interpreter.eval(where_clause_with_input, context) do
+        {:ok, true} ->
+          {:cont, {:ok, acc}}
+
+        {:ok, false} ->
+          {:cont, {:ok, acc ++ [item]}}
+
+        {:ok, result} ->
+          {:halt,
+           {:error,
+            {:execution_error, "reject where clause must return boolean, got #{inspect(result)}"}}}
 
         {:error, _} = err ->
           {:halt, err}

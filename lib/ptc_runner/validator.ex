@@ -175,6 +175,36 @@ defmodule PtcRunner.Validator do
     :ok
   end
 
+  defp validate_operation("first", _node) do
+    :ok
+  end
+
+  defp validate_operation("last", _node) do
+    :ok
+  end
+
+  defp validate_operation("nth", node) do
+    case Map.get(node, "index") do
+      nil ->
+        {:error, {:validation_error, "Operation 'nth' requires field 'index'"}}
+
+      index when is_integer(index) and index >= 0 ->
+        :ok
+
+      index when is_integer(index) ->
+        {:error, {:validation_error, "Operation 'nth' index must be non-negative, got #{index}"}}
+
+      _ ->
+        {:error, {:validation_error, "Operation 'nth' field 'index' must be an integer"}}
+    end
+  end
+
+  defp validate_operation("reject", node) do
+    with :ok <- require_field(node, "where", "Operation 'reject' requires field 'where'") do
+      validate_node(Map.get(node, "where"))
+    end
+  end
+
   # Unknown operation
   defp validate_operation(op, _node) do
     {:error, {:validation_error, "Unknown operation '#{op}'"}}

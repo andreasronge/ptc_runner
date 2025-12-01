@@ -406,6 +406,232 @@ defmodule PtcRunnerTest do
            ]
   end
 
+  # First operation
+  test "first returns the first item in a list" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3, 4, 5]},
+        {"op": "first"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 1
+  end
+
+  test "first on single-item list returns that item" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [42]},
+        {"op": "first"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 42
+  end
+
+  test "first on empty list returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "first"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  # Last operation
+  test "last returns the last item in a list" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3, 4, 5]},
+        {"op": "last"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 5
+  end
+
+  test "last on single-item list returns that item" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [42]},
+        {"op": "last"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 42
+  end
+
+  test "last on empty list returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "last"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  # Nth operation
+  test "nth returns item at specified index" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [10, 20, 30, 40, 50]},
+        {"op": "nth", "index": 2}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 30
+  end
+
+  test "nth at index 0 returns first item" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [10, 20, 30]},
+        {"op": "nth", "index": 0}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 10
+  end
+
+  test "nth out of bounds returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "nth", "index": 10}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "nth on empty list returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "nth", "index": 0}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  # Reject operation
+  test "reject removes matching items" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "food", "amount": 50},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == [
+             %{"category" => "food", "amount" => 50}
+           ]
+  end
+
+  test "reject with no matches returns full list" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "food"}}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == [
+             %{"category" => "travel", "amount" => 500},
+             %{"category" => "travel", "amount" => 200}
+           ]
+  end
+
+  test "reject with all matches returns empty list" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == []
+  end
+
+  test "reject on empty list returns empty list" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == []
+  end
+
+  # E2E test with first, last, and nth in a pipeline
+  test "first/last/nth work in realistic data processing pipeline" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"item": "book", "price": 50},
+          {"item": "pen", "price": 5},
+          {"item": "laptop", "price": 1000},
+          {"item": "notebook", "price": 10}
+        ]},
+        {"op": "reject", "where": {"op": "lt", "field": "price", "value": 10}},
+        {"op": "first"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == %{"item" => "book", "price" => 50}
+  end
+
   # Get operation
   test "get with single-element path extracts top-level field" do
     program = ~s({
@@ -722,6 +948,103 @@ defmodule PtcRunnerTest do
     assert String.contains?(msg, "filter requires a list")
   end
 
+  test "first on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "first"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "first requires a list")
+  end
+
+  test "last on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": "not a list"},
+        {"op": "last"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "last requires a list")
+  end
+
+  test "nth on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "nth", "index": 0}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "nth requires a list")
+  end
+
+  test "nth with invalid index in piped context gets caught at validation" do
+    # Note: Validation catches negative/non-integer indices at validation time
+    # This test verifies the validator works. Runtime index errors are tested
+    # in validation error tests below.
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "nth", "index": -1}
+      ]
+    })
+
+    {:error, {:validation_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "non-negative")
+  end
+
+  test "reject on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "reject", "where": {"op": "eq", "field": "x", "value": 1}}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "reject requires a list")
+  end
+
+  # Validation errors for new operations
+  test "nth missing index field raises validation error" do
+    program = ~s({"op": "nth"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Operation 'nth' requires field 'index'"}
+  end
+
+  test "nth with negative index in validation raises validation error" do
+    program = ~s({"op": "nth", "index": -1})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Operation 'nth' index must be non-negative, got -1"}
+  end
+
+  test "nth with non-integer index in validation raises validation error" do
+    program = ~s({"op": "nth", "index": "not_an_integer"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Operation 'nth' field 'index' must be an integer"}
+  end
+
+  test "reject missing where field raises validation error" do
+    program = ~s({"op": "reject"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Operation 'reject' requires field 'where'"}
+  end
+
   # Parse errors
   test "malformed JSON raises parse error" do
     program = "{invalid json"
@@ -858,6 +1181,34 @@ defmodule PtcRunnerTest do
 
     test "lte without piped input returns error" do
       program = ~s({"op": "lte", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "first without piped input returns error" do
+      program = ~s({"op": "first"})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "last without piped input returns error" do
+      program = ~s({"op": "last"})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "nth without piped input returns error" do
+      program = ~s({"op": "nth", "index": 0})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "reject without piped input returns error" do
+      program = ~s({"op": "reject", "where": {"op": "eq", "field": "x", "value": 1}})
       {:error, reason} = PtcRunner.run(program)
 
       assert reason == {:execution_error, "No input available"}
