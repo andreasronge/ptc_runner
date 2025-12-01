@@ -15,9 +15,14 @@ jobs:
     runs-on: ubuntu-latest
 
     # Prevent concurrent Claude operations on the same PR
-    # This shares the same group as claude-code-review.yml and claude.yml
+    # NOTE: Uses branch name because workflow_run doesn't provide PR number until steps run.
+    # This differs from claude.yml/code-review which use PR number, meaning triage won't
+    # block/be blocked by those workflows via concurrency. This is acceptable because:
+    # 1. Triage runs AFTER code-review completes (workflow_run trigger)
+    # 2. Triage's @claude comments trigger claude.yml, which should run after triage
+    # 3. The "Fail if fixes pending" step prevents premature completion
     concurrency:
-      group: claude-pr-${{ github.event.workflow_run.head_branch }}
+      group: claude-triage-${{ github.event.workflow_run.head_branch }}
       cancel-in-progress: true
 
     permissions:
@@ -29,6 +34,13 @@ jobs:
       id-token: write
 
     steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - @claude fix comments won't trigger the fix workflow"
+            echo "::warning::Auto-merge will also be disabled"
+          fi
+
       - name: Get PR number from workflow run
         id: pr
         env:
@@ -312,10 +324,27 @@ jobs:
 
             ### For DEFER_ISSUE items - Create a GitHub issue
 
+            Choose appropriate labels based on the issue type:
+
+            **For feature enhancements:**
             ```bash
             gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
               --label "enhancement" --label "from-pr-review" \
               --body "Context and suggested improvement..."
+            ```
+
+            **For technical debt (refactoring, code quality, test improvements):**
+            ```bash
+            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
+              --label "tech-debt" --label "from-pr-review" \
+              --body "Context and suggested improvement..."
+            ```
+
+            **For bugs found during review:**
+            ```bash
+            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
+              --label "bug" --label "from-pr-review" \
+              --body "Context and bug description..."
             ```
 
             ### After all actions - Post a summary comment (no @claude prefix!)
@@ -328,13 +357,13 @@ jobs:
             ### Decisions Made
             | # | Issue | Decision | Action |
             |---|-------|----------|--------|
-            | 1 | [desc] | FIX_NOW | Included in @claude fix request |
-            | 2 | [desc] | FIX_NOW | Included in @claude fix request |
+            | 1 | [desc] | FIX_NOW | Included in fix request above |
+            | 2 | [desc] | FIX_NOW | Included in fix request above |
             | 3 | [desc] | DEFER_ISSUE | Created issue #N |
             | 4 | [desc] | IGNORE | [reason] |
 
             ### Status
-            - FIX_NOW items: N (batched in single @claude comment above)
+            - FIX_NOW items: N (batched in single fix comment above)
             - Issues created: M
             - Items ignored: K"
             ```
