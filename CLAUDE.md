@@ -52,7 +52,7 @@ docs/
 - **[Issue Creation Guidelines](docs/guidelines/issue-creation-guidelines.md)** - How to create well-specified issues
 - **[PR Review Guidelines](docs/guidelines/pr-review-guidelines.md)** - PR review structure and severity
 - **[Research Notes](docs/research.md)** - PTC specification research
-- **[STATUS.md](STATUS.md)** - PM workflow status and implementation progress
+- **[STATUS.md](STATUS.md)** - Implementation progress (state managed via GitHub labels)
 
 ## Key Commands
 

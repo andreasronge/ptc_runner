@@ -225,8 +225,8 @@ When an issue is rejected by the review workflow:
 ### Consecutive Failures
 
 After 3 consecutive rejected issues:
-- PM workflow enters STUCK state
-- Update STATUS.md with failure details
+- PM workflow enters STUCK state (tracked via `pm-stuck` label)
+- Add `pm-failed-attempt` label to track failures
 - Stop creating new issues until reviewed
 
 ## Labels
@@ -238,6 +238,8 @@ After 3 consecutive rejected issues:
 | `ready-for-implementation` | Approved, ready to implement |
 | `from-pr-review` | Created by triage workflow during PR review |
 | `blocked` | Cannot proceed due to dependency |
+| `pm-stuck` | PM workflow has failed and needs manual intervention |
+| `pm-failed-attempt` | Tracks consecutive PM failures (3 = stuck) |
 
 ### Issue Type Labels
 | Label | Meaning | Priority |
