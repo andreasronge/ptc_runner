@@ -1,0 +1,231 @@
+defmodule PtcRunner.Operations do
+  @moduledoc """
+  Built-in operations for the DSL.
+
+  Implements all Phase 1 operations: literal, load, var, pipe,
+  filter, map, select, eq, sum, and count.
+  """
+
+  alias PtcRunner.Context
+  alias PtcRunner.Interpreter
+
+  @doc """
+  Evaluates a built-in operation.
+
+  ## Arguments
+    - op: Operation name
+    - node: Operation definition map
+    - context: Execution context
+    - eval_fn: Function to recursively evaluate expressions
+
+  ## Returns
+    - `{:ok, result}` on success
+    - `{:error, reason}` on failure
+  """
+  @spec eval(String.t(), map(), Context.t(), function()) ::
+          {:ok, any()} | {:error, String.t()}
+
+  # Data operations
+  def eval("literal", node, _context, _eval_fn) do
+    {:ok, Map.get(node, "value")}
+  end
+
+  def eval("load", node, context, _eval_fn) do
+    name = Map.get(node, "name")
+    Context.get_var(context, name)
+  end
+
+  def eval("var", node, context, _eval_fn) do
+    name = Map.get(node, "name")
+    Context.get_var(context, name)
+  end
+
+  # Control flow
+  def eval("pipe", node, context, eval_fn) do
+    steps = Map.get(node, "steps", [])
+    eval_pipe(steps, nil, context, eval_fn)
+  end
+
+  # Collection operations
+  def eval("filter", node, context, eval_fn) do
+    where_clause = Map.get(node, "where")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          filter_list(data, where_clause, context, eval_fn)
+        else
+          {:error, "filter requires a list, got #{inspect(data)}"}
+        end
+    end
+  end
+
+  def eval("map", node, context, eval_fn) do
+    expr = Map.get(node, "expr")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          map_list(data, expr, context, eval_fn)
+        else
+          {:error, "map requires a list, got #{inspect(data)}"}
+        end
+    end
+  end
+
+  def eval("select", node, context, eval_fn) do
+    fields = Map.get(node, "fields", [])
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          select_list(data, fields)
+        else
+          {:error, "select requires a list, got #{inspect(data)}"}
+        end
+    end
+  end
+
+  # Comparison
+  def eval("eq", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, data_value == value}
+        else
+          {:error, "eq requires a map, got #{inspect(data)}"}
+        end
+    end
+  end
+
+  # Aggregations
+  def eval("sum", node, context, eval_fn) do
+    field = Map.get(node, "field")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          sum_list(data, field)
+        else
+          {:error, "sum requires a list, got #{inspect(data)}"}
+        end
+    end
+  end
+
+  def eval("count", _node, context, eval_fn) do
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          {:ok, length(data)}
+        else
+          {:error, "count requires a list, got #{inspect(data)}"}
+        end
+    end
+  end
+
+  def eval(op, _node, _context, _eval_fn) do
+    {:error, "Unknown operation '#{op}'"}
+  end
+
+  # Helper functions
+
+  defp eval_pipe([], acc, _context, _eval_fn) do
+    {:ok, acc}
+  end
+
+  defp eval_pipe([step | rest], acc, context, eval_fn) do
+    # Create a wrapper that evaluates the current step with accumulated value
+    step_with_input = Map.put(step, "__input", acc)
+
+    case Interpreter.eval(step_with_input, context) do
+      {:ok, result} -> eval_pipe(rest, result, context, eval_fn)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp filter_list(data, where_clause, context, _eval_fn) do
+    Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+      # Inject item as __input for evaluation
+      where_clause_with_input = Map.put(where_clause, "__input", item)
+
+      case Interpreter.eval(where_clause_with_input, context) do
+        {:ok, true} ->
+          {:cont, {:ok, acc ++ [item]}}
+
+        {:ok, false} ->
+          {:cont, {:ok, acc}}
+
+        {:ok, result} ->
+          {:halt, {:error, "filter where clause must return boolean, got #{inspect(result)}"}}
+
+        {:error, _} = err ->
+          {:halt, err}
+      end
+    end)
+  end
+
+  defp map_list(data, expr, context, _eval_fn) do
+    Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+      # Inject item as __input for evaluation
+      expr_with_input = Map.put(expr, "__input", item)
+
+      case Interpreter.eval(expr_with_input, context) do
+        {:ok, result} -> {:cont, {:ok, acc ++ [result]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp select_list(data, fields) do
+    result =
+      Enum.map(data, fn item ->
+        if is_map(item) do
+          Map.take(item, fields)
+        else
+          item
+        end
+      end)
+
+    {:ok, result}
+  end
+
+  defp sum_list(data, field) do
+    Enum.reduce_while(data, {:ok, 0}, fn item, {:ok, acc} ->
+      sum_item(item, field, acc)
+    end)
+  end
+
+  defp sum_item(item, field, acc) do
+    if is_map(item) do
+      case Map.get(item, field) do
+        val when is_number(val) -> {:cont, {:ok, acc + val}}
+        nil -> {:cont, {:ok, acc}}
+        val -> {:halt, {:error, "sum requires numeric values, got #{inspect(val)}"}}
+      end
+    else
+      {:halt, {:error, "sum requires list of maps, got #{inspect(item)}"}}
+    end
+  end
+end
