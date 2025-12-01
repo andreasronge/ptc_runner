@@ -19,7 +19,7 @@ defmodule PtcRunner.Interpreter do
     - `{:ok, result}` on success
     - `{:error, reason}` on failure
   """
-  @spec eval(map(), Context.t()) :: {:ok, any()} | {:error, String.t()}
+  @spec eval(map(), Context.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
   def eval(node, context) when is_map(node) do
     # Handle input from pipe - if __input is set, use that value
     input = Map.get(node, "__input")
@@ -27,7 +27,7 @@ defmodule PtcRunner.Interpreter do
 
     case Map.get(node_without_input, "op") do
       nil ->
-        {:error, "Missing required field 'op'"}
+        {:error, {:execution_error, "Missing required field 'op'"}}
 
       op ->
         # For operations that need input (everything except literal, load, var)
@@ -42,7 +42,7 @@ defmodule PtcRunner.Interpreter do
   end
 
   def eval(node, _context) do
-    {:error, "Node must be a map, got #{inspect(node)}"}
+    {:error, {:execution_error, "Node must be a map, got #{inspect(node)}"}}
   end
 
   defp eval_operation(op, node, context) do
@@ -54,7 +54,7 @@ defmodule PtcRunner.Interpreter do
       if input_value != nil do
         {:ok, input_value}
       else
-        {:error, "No input available"}
+        {:error, {:execution_error, "No input available"}}
       end
     end
 

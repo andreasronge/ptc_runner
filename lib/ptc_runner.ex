@@ -50,7 +50,7 @@ defmodule PtcRunner do
       42
   """
   @spec run(String.t() | map(), keyword()) ::
-          {:ok, any(), metrics()} | {:error, String.t() | atom()}
+          {:ok, any(), metrics()} | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
 
   def run(program, opts \\ []) do
     with {:ok, ast} <- Parser.parse(program),
