@@ -1,5 +1,8 @@
 # PtcRunner
 
+<!-- PM Status Badge: Updated by PM workflow -->
+![PM Status](https://img.shields.io/badge/PM-active-green)
+
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
 
 ## What is PTC?
