@@ -235,6 +235,174 @@ defmodule PtcRunnerTest do
            ]
   end
 
+  # Get operation
+  test "get with single-element path extracts top-level field" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"name": "Alice", "age": 30}},
+        {"op": "get", "path": ["name"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == "Alice"
+  end
+
+  test "get with multi-element path extracts nested field" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"user": {"profile": {"email": "alice@example.com"}}}},
+        {"op": "get", "path": ["user", "profile", "email"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == "alice@example.com"
+  end
+
+  test "get with empty path returns current value" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"name": "Alice"}},
+        {"op": "get", "path": []}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == %{"name" => "Alice"}
+  end
+
+  test "get with missing path returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"name": "Alice"}},
+        {"op": "get", "path": ["missing", "field"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "get with default returns default when path missing" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"name": "Alice"}},
+        {"op": "get", "path": ["age"], "default": 25}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 25
+  end
+
+  test "get with default returns value when path exists" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"name": "Alice", "age": 30}},
+        {"op": "get", "path": ["age"], "default": 25}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 30
+  end
+
+  test "get on non-map returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 123},
+        {"op": "get", "path": ["field"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "get within pipe receives piped input" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"x": {"y": 42}}},
+        {"op": "get", "path": ["x", "y"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 42
+  end
+
+  test "get within map accesses current item fields" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"id": 1, "profile": {"email": "alice@example.com"}},
+          {"id": 2, "profile": {"email": "bob@example.com"}}
+        ]},
+        {"op": "map", "expr": {"op": "get", "path": ["profile", "email"]}}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == ["alice@example.com", "bob@example.com"]
+  end
+
+  test "get with missing path on map returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"x": 1}},
+        {"op": "get", "path": ["y", "z"]}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "get with missing path returns default value" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"x": 1}},
+        {"op": "get", "path": ["y"], "default": 99}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 99
+  end
+
+  # E2E test demonstrating get with map
+  test "extract nested user emails from list of users" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "load", "name": "users"},
+        {"op": "map", "expr": {"op": "get", "path": ["profile", "email"]}}
+      ]
+    })
+
+    context = %{
+      "users" => [
+        %{"id" => 1, "profile" => %{"email" => "alice@example.com"}},
+        %{"id" => 2, "profile" => %{"email" => "bob@example.com"}}
+      ]
+    }
+
+    {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+    assert result == ["alice@example.com", "bob@example.com"]
+  end
+
   # Complex pipeline
   test "filter and sum pipeline from issue example" do
     program = ~s({
@@ -294,6 +462,27 @@ defmodule PtcRunnerTest do
     {:error, reason} = PtcRunner.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
+  end
+
+  test "get operation missing path field raises validation error" do
+    program = ~s({"op": "get"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Operation 'get' requires field 'path'"}
+  end
+
+  test "get operation with non-array path raises validation error" do
+    program = ~s({"op": "get", "path": "not_an_array"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Field 'path' must be a list"}
+  end
+
+  test "get operation with non-string path elements raises validation error" do
+    program = ~s({"op": "get", "path": ["valid", 123]})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "All path elements in 'path' must be strings"}
   end
 
   # Error handling - type errors

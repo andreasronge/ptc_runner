@@ -114,6 +114,26 @@ defmodule PtcRunner.Operations do
     end
   end
 
+  # Access operations
+  def eval("get", node, context, eval_fn) do
+    path = Map.get(node, "path", [])
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        result =
+          if path == [] do
+            data
+          else
+            get_nested(data, path)
+          end
+
+        handle_get_result(result, node)
+    end
+  end
+
   # Aggregations
   def eval("sum", node, context, eval_fn) do
     field = Map.get(node, "field")
@@ -235,5 +255,29 @@ defmodule PtcRunner.Operations do
     else
       {:halt, {:error, {:execution_error, "sum requires list of maps, got #{inspect(item)}"}}}
     end
+  end
+
+  defp get_nested(data, path) when is_map(data) do
+    path_as_atoms = Enum.map(path, &Access.key/1)
+    get_in(data, path_as_atoms)
+  end
+
+  defp get_nested(_data, _path) do
+    # Non-map values always return nil when accessing a path
+    nil
+  end
+
+  defp handle_get_result(nil, node) do
+    default = Map.get(node, "default")
+
+    if Map.has_key?(node, "default") do
+      {:ok, default}
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp handle_get_result(value, _node) do
+    {:ok, value}
   end
 end
