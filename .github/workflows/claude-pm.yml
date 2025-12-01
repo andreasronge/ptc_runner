@@ -100,17 +100,29 @@ jobs:
           fi
 
       - name: Handle stuck state
-        if: steps.status.outputs.is_stuck == 'true' && github.event.inputs.action != 'reset-stuck'
+        if: steps.status.outputs.is_stuck == 'true' && github.event.inputs.action != 'reset-stuck' && github.event.inputs.action != 'status-only'
         run: |
           echo "::error::PM workflow is stuck. Use workflow_dispatch with 'reset-stuck' action to resume."
-          echo "Check STATUS.md for details on what went wrong."
+          echo "Check issues with 'pm-stuck' label for details on what went wrong."
           exit 1
 
       - name: Reset stuck state
         if: github.event.inputs.action == 'reset-stuck'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "Resetting stuck state..."
-          # The Claude step will handle updating STATUS.md
+          # Remove pm-stuck label from all issues
+          for issue in $(gh issue list --label "pm-stuck" --state open --json number --jq '.[].number'); do
+            echo "Removing pm-stuck label from issue #$issue"
+            gh issue edit "$issue" --remove-label "pm-stuck" || true
+          done
+          # Remove pm-failed-attempt label from all issues
+          for issue in $(gh issue list --label "pm-failed-attempt" --state open --json number --jq '.[].number'); do
+            echo "Removing pm-failed-attempt label from issue #$issue"
+            gh issue edit "$issue" --remove-label "pm-failed-attempt" || true
+          done
+          echo "Stuck state reset complete"
 
       - name: Run Claude PM
         id: claude-pm
@@ -157,9 +169,7 @@ jobs:
             4. Exit
 
             ### If action is "reset-stuck":
-            1. Remove `pm-stuck` label from any issues that have it
-            2. Remove `pm-failed-attempt` label from recent issues
-            3. Then proceed with "next-issue" logic
+            The labels have already been removed by the workflow. Just proceed with "next-issue" logic.
 
             ### If action is "next-issue" (default):
 
