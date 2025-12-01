@@ -1016,6 +1016,58 @@ defmodule PtcRunnerTest do
     assert String.contains?(msg, "reject requires a list")
   end
 
+  test "avg on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "avg requires a list")
+  end
+
+  test "min on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": "not a list"},
+        {"op": "min", "field": "price"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "min requires a list")
+  end
+
+  test "max on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "max", "field": "value"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "max requires a list")
+  end
+
+  test "contains on non-map raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "contains", "field": "x", "value": 1}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "contains requires a map")
+  end
+
   # Validation errors for new operations
   test "nth missing index field raises validation error" do
     program = ~s({"op": "nth"})
