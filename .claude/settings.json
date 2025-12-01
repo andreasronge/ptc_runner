@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r 'select(.tool_input.file_path | test(\"\\\\.exs?$\")) | .tool_input.file_path' | while read file_path; do [ -n \"$file_path\" ] && mix format \"$file_path\" 2>/dev/null; done",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

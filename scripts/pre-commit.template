@@ -1,0 +1,109 @@
+#!/bin/bash
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# Track time
+START_TIME=$(date +%s)
+
+# Get all staged files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# Detect what types of files changed
+HAS_ELIXIR_FILES=$(echo "$STAGED_FILES" | grep -E '\.(ex|exs)$' || true)
+HAS_CONFIG_FILES=$(echo "$STAGED_FILES" | grep -E '^config/.*\.exs$' || true)
+HAS_MIX_FILES=$(echo "$STAGED_FILES" | grep -E '^mix\.(exs|lock)$' || true)
+HAS_DELETED_MODULES=$(git diff --cached --diff-filter=D --name-only | grep -E '\.(ex|exs)$' || true)
+
+# Determine if tests should run
+SHOULD_RUN_TESTS=false
+SKIP_REASON=""
+
+if [ -n "$HAS_ELIXIR_FILES" ] || [ -n "$HAS_CONFIG_FILES" ] || [ -n "$HAS_MIX_FILES" ]; then
+  SHOULD_RUN_TESTS=true
+else
+  SKIP_REASON="No Elixir/config/mix files changed"
+fi
+
+# Handle deleted modules - need clean build
+if [ -n "$HAS_DELETED_MODULES" ]; then
+  echo "  ⚠️  Detected deleted Elixir modules - cleaning build..."
+  echo "$HAS_DELETED_MODULES" | sed 's/^/    - /'
+  mix clean --deps > /dev/null 2>&1
+  mix deps.compile > /dev/null 2>&1
+  echo "  ✅ Clean build completed"
+fi
+
+# 1. Format check (only if Elixir files changed)
+if [ -n "$HAS_ELIXIR_FILES" ]; then
+  echo "  ⏳ Checking code formatting..."
+  if ! mix format --check-formatted > /dev/null 2>&1; then
+    echo "  ❌ Code not formatted. Run: mix format"
+    exit 1
+  fi
+  echo "  ✅ Code formatted"
+else
+  echo "  ⏭️  Skipping format check (no Elixir files)"
+fi
+
+# 2. Compilation check (only if Elixir/config/mix files changed)
+if [ "$SHOULD_RUN_TESTS" = true ]; then
+  echo "  ⏳ Compiling with warnings as errors..."
+  if ! mix compile --warnings-as-errors > /dev/null 2>&1; then
+    echo "  ❌ Compilation failed or warnings present"
+    echo "  Run: mix compile"
+    exit 1
+  fi
+  echo "  ✅ Compilation successful"
+else
+  echo "  ⏭️  Skipping compilation ($SKIP_REASON)"
+fi
+
+# 3. Credo check (only if Elixir files changed)
+if [ -n "$HAS_ELIXIR_FILES" ]; then
+  echo "  ⏳ Running Credo..."
+  if ! mix credo --strict > /dev/null 2>&1; then
+    echo "  ❌ Credo issues found. Run: mix credo --strict"
+    exit 1
+  fi
+  echo "  ✅ Credo passed"
+else
+  echo "  ⏭️  Skipping Credo (no Elixir files)"
+fi
+
+# 4. Run tests (only if code could affect behavior)
+if [ "$SHOULD_RUN_TESTS" = true ]; then
+  # Check for changed test files to run them specifically
+  changed_test_files=$(echo "$STAGED_FILES" | grep "^test/.*_test\.exs$" || true)
+
+  if [ -n "$changed_test_files" ]; then
+    echo "  ⏳ Running tests for changed files..."
+    for file in $changed_test_files; do
+      echo "    Testing: $file"
+      if ! mix test "$file" > /dev/null 2>&1; then
+        echo "    ❌ Tests failed for $file"
+        echo "    Run: mix test $file"
+        exit 1
+      fi
+    done
+    echo "  ✅ Changed tests pass"
+  else
+    echo "  ℹ️  No test files changed (run 'mix test' before push)"
+  fi
+else
+  echo "  ⏭️  Skipping tests ($SKIP_REASON)"
+fi
+
+# Calculate elapsed time
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+
+echo ""
+echo "✅ All pre-commit checks passed in ${ELAPSED}s"
+echo ""
+
+# Ensure <10s
+if [ $ELAPSED -gt 10 ]; then
+  echo "⚠️  Warning: Pre-commit took ${ELAPSED}s (target: <10s)"
+fi
