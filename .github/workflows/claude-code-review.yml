@@ -1,0 +1,104 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  claude-review:
+    # Skip if PR has no changes (e.g., fast-forward merge from main)
+    if: github.event.pull_request.changed_files > 0
+
+    runs-on: ubuntu-latest
+
+    # Prevent concurrent Claude operations on the same PR
+    # Uses head_ref (branch name) to match triage and claude.yml workflows
+    concurrency:
+      group: claude-pr-${{ github.head_ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write  # Need write to add labels
+      issues: read
+      id-token: write
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for merge
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Attempt merge with main
+        id: merge-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Fetch the base branch
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+
+          # Attempt merge (don't commit, just check for conflicts)
+          if git merge origin/${{ github.event.pull_request.base.ref }} --no-commit --no-ff; then
+            echo "merge_ok=true" >> $GITHUB_OUTPUT
+            echo "✅ Merge with ${{ github.event.pull_request.base.ref }} successful"
+          else
+            echo "merge_ok=false" >> $GITHUB_OUTPUT
+            echo "❌ Merge conflict detected"
+
+            # Add merge-conflict label
+            gh pr edit ${{ github.event.pull_request.number }} --add-label "merge-conflict"
+
+            # Post a comment explaining the situation
+            gh pr comment ${{ github.event.pull_request.number }} --body "$(cat <<'EOF'
+          ⚠️ **Merge Conflict Detected**
+
+          This PR has conflicts with the base branch and cannot be reviewed until they are resolved.
+
+          Please merge or rebase with the base branch and push the changes. The review will run automatically once the conflicts are resolved.
+          EOF
+          )"
+          fi
+
+      - name: Skip review if merge conflict
+        if: steps.merge-check.outputs.merge_ok == 'false'
+        run: |
+          echo "::notice::Skipping review due to merge conflict"
+          exit 0
+
+      - name: Setup Elixir environment
+        if: steps.merge-check.outputs.merge_ok == 'true'
+        uses: ./.github/actions/setup-elixir
+
+      - name: Run Claude Code Review
+        if: steps.merge-check.outputs.merge_ok == 'true'
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            # PR Review Task
+
+            **Repository**: ${{ github.repository }}
+            **PR Number**: ${{ github.event.pull_request.number }}
+
+            ## Instructions
+
+            1. Read `docs/guidelines/pr-review-guidelines.md` for complete review guidelines
+            2. Use `gh pr view ${{ github.event.pull_request.number }}` to see the PR description
+            3. Use `gh pr diff ${{ github.event.pull_request.number }}` to see changes
+            4. If the PR references an issue (e.g., "Fixes #N"), read it with comments: `gh issue view N --comments`
+            5. Follow the review structure and severity language from the guidelines
+            6. Post your review using `gh pr comment ${{ github.event.pull_request.number }} --body "..."`
+
+            **CRITICAL**: Check for in-scope completeness - if the PR establishes a pattern,
+            verify it's applied consistently. Flag incomplete work as "MUST FIX", not "consider".
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(mix:*),Bash(git:*)"'
