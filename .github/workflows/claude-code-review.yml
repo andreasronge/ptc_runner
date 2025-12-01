@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     # Prevent concurrent Claude operations on the same PR
-    # Uses head_ref (branch name) to match triage and claude.yml workflows
+    # All claude-* workflows use the same group naming: claude-pr-{number}
     concurrency:
-      group: claude-pr-${{ github.head_ref }}
+      group: claude-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     permissions:
       contents: read
