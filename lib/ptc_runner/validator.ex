@@ -109,6 +109,41 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  defp validate_operation("neq", node) do
+    case require_field(node, "field", "Operation 'neq' requires field 'field'") do
+      :ok -> require_field(node, "value", "Operation 'neq' requires field 'value'")
+      err -> err
+    end
+  end
+
+  defp validate_operation("gt", node) do
+    case require_field(node, "field", "Operation 'gt' requires field 'field'") do
+      :ok -> require_field(node, "value", "Operation 'gt' requires field 'value'")
+      err -> err
+    end
+  end
+
+  defp validate_operation("gte", node) do
+    case require_field(node, "field", "Operation 'gte' requires field 'field'") do
+      :ok -> require_field(node, "value", "Operation 'gte' requires field 'value'")
+      err -> err
+    end
+  end
+
+  defp validate_operation("lt", node) do
+    case require_field(node, "field", "Operation 'lt' requires field 'field'") do
+      :ok -> require_field(node, "value", "Operation 'lt' requires field 'value'")
+      err -> err
+    end
+  end
+
+  defp validate_operation("lte", node) do
+    case require_field(node, "field", "Operation 'lte' requires field 'field'") do
+      :ok -> require_field(node, "value", "Operation 'lte' requires field 'value'")
+      err -> err
+    end
+  end
+
   # Access operations
   defp validate_operation("get", node) do
     case Map.get(node, "path") do

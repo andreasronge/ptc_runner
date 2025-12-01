@@ -3,7 +3,7 @@ defmodule PtcRunner.Operations do
   Built-in operations for the DSL.
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
-  filter, map, select, eq, sum, count; Phase 2: get).
+  filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte).
   """
 
   alias PtcRunner.Context
@@ -110,6 +110,96 @@ defmodule PtcRunner.Operations do
           {:ok, data_value == value}
         else
           {:error, {:execution_error, "eq requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("neq", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, data_value != value}
+        else
+          {:error, {:execution_error, "neq requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("gt", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, data_value > value}
+        else
+          {:error, {:execution_error, "gt requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("gte", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, data_value >= value}
+        else
+          {:error, {:execution_error, "gte requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("lt", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, data_value < value}
+        else
+          {:error, {:execution_error, "lt requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("lte", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          data_value = Map.get(data, field)
+          {:ok, data_value <= value}
+        else
+          {:error, {:execution_error, "lte requires a map, got #{inspect(data)}"}}
         end
     end
   end

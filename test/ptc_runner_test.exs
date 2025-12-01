@@ -152,6 +152,177 @@ defmodule PtcRunnerTest do
     assert result == false
   end
 
+  test "eq with nil field value" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"category": null}},
+        {"op": "eq", "field": "category", "value": null}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  # Neq comparison operation
+  test "neq compares field value with literal" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"category": "food"}},
+        {"op": "neq", "field": "category", "value": "travel"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "neq returns false for equal values" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"category": "travel"}},
+        {"op": "neq", "field": "category", "value": "travel"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  # Gt comparison operation
+  test "gt returns true when field value is greater" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 100}},
+        {"op": "gt", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "gt returns false when field value is not greater" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 30}},
+        {"op": "gt", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  # Gte comparison operation
+  test "gte returns true when field value is greater or equal" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 50}},
+        {"op": "gte", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "gte returns false when field value is less" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 30}},
+        {"op": "gte", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  # Lt comparison operation
+  test "lt returns true when field value is less" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 30}},
+        {"op": "lt", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "lt returns false when field value is not less" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 100}},
+        {"op": "lt", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  # Lte comparison operation
+  test "lte returns true when field value is less or equal" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 50}},
+        {"op": "lte", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "lte returns false when field value is greater" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"amount": 100}},
+        {"op": "lte", "field": "amount", "value": 50}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  # E2E test with filter using comparison operations
+  test "filter with numeric comparison returns matching items" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"item": "book", "price": 50},
+          {"item": "pen", "price": 5},
+          {"item": "laptop", "price": 1000},
+          {"item": "notebook", "price": 10}
+        ]},
+        {"op": "filter", "where": {"op": "gt", "field": "price", "value": 10}}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == [
+             %{"item" => "book", "price" => 50},
+             %{"item" => "laptop", "price" => 1000}
+           ]
+  end
+
   # Filter operation
   test "filter keeps matching items" do
     program = ~s({
@@ -652,6 +823,41 @@ defmodule PtcRunnerTest do
 
     test "eq without piped input returns error" do
       program = ~s({"op": "eq", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "neq without piped input returns error" do
+      program = ~s({"op": "neq", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "gt without piped input returns error" do
+      program = ~s({"op": "gt", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "gte without piped input returns error" do
+      program = ~s({"op": "gte", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "lt without piped input returns error" do
+      program = ~s({"op": "lt", "field": "x", "value": 1})
+      {:error, reason} = PtcRunner.run(program)
+
+      assert reason == {:execution_error, "No input available"}
+    end
+
+    test "lte without piped input returns error" do
+      program = ~s({"op": "lte", "field": "x", "value": 1})
       {:error, reason} = PtcRunner.run(program)
 
       assert reason == {:execution_error, "No input available"}
