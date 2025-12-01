@@ -26,6 +26,16 @@ defmodule PtcRunner do
           memory_bytes: integer()
         }
 
+  @typedoc """
+  Error types returned by PtcRunner operations.
+  """
+  @type error ::
+          {:parse_error, String.t()}
+          | {:validation_error, String.t()}
+          | {:execution_error, String.t()}
+          | {:timeout, non_neg_integer()}
+          | {:memory_exceeded, non_neg_integer()}
+
   @doc """
   Runs a PTC program and returns the result with metrics.
 
@@ -50,7 +60,7 @@ defmodule PtcRunner do
       42
   """
   @spec run(String.t() | map(), keyword()) ::
-          {:ok, any(), metrics()} | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
+          {:ok, any(), metrics()} | {:error, error()}
 
   def run(program, opts \\ []) do
     with {:ok, ast} <- Parser.parse(program),
