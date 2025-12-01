@@ -45,6 +45,7 @@ docs/
 
 ## Documentation
 
+- **[Architecture](docs/architecture.md)** - System design, DSL specification, and API reference
 - **[Development Guidelines](docs/guidelines/development-guidelines.md)** - Elixir standards
 - **[Testing Guidelines](docs/guidelines/testing-guidelines.md)** - Test quality and patterns
 - **[Planning Guidelines](docs/guidelines/planning-guidelines.md)** - Issue review and feature planning
@@ -59,12 +60,16 @@ docs/
 
 ## Architecture Overview
 
+See **[docs/architecture.md](docs/architecture.md)** for full details.
+
 The library has four main layers:
 
-1. **DSL Layer** - JSON-based language for tool calls, filters, aggregations
-2. **Parser Layer** - Converts DSL to internal AST with validation
-3. **Interpreter/Execution Engine** - Runs AST safely in the BEAM
-4. **Tool Layer** - Exposes BEAM functions as tools (MCP integration)
+1. **Parser** - JSON parsing and validation
+2. **Validator** - Schema validation for DSL programs
+3. **Interpreter** - AST evaluation with resource limits
+4. **Tool Registry** - User-defined tool functions
+
+Programs execute in isolated BEAM processes with configurable timeout (default 1s) and memory limits (default 10MB).
 
 ## Development Reminders
 

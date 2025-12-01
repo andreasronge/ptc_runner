@@ -1,5 +1,11 @@
 # Planning & Issue Review Guidelines
 
+## Key References
+
+- **[Architecture](../architecture.md)** - System design, DSL specification, implementation phases
+- **[Testing Guidelines](testing-guidelines.md)** - Test patterns and quality standards
+- **[Development Guidelines](development-guidelines.md)** - Elixir coding standards
+
 ## When to Use This Document
 
 Read this document when:
