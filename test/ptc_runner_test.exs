@@ -350,7 +350,7 @@ defmodule PtcRunnerTest do
 
     # Use a very short timeout to trigger it
     {:error, reason} = PtcRunner.run(program, timeout: 0)
-    assert reason == :timeout
+    assert reason == {:timeout, 0}
   end
 
   # run! function

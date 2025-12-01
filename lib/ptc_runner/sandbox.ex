@@ -69,17 +69,17 @@ defmodule PtcRunner.Sandbox do
             {:error, reason}
         end
 
+      {:DOWN, ^ref, :process, ^pid, :killed} ->
+        {:error, {:memory_exceeded, max_heap * 8}}
+
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        case reason do
-          :killed -> {:error, :timeout}
-          _ -> {:error, "Process terminated: #{inspect(reason)}"}
-        end
+        {:error, "Process terminated: #{inspect(reason)}"}
     after
       timeout ->
         # Kill the process if it times out
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :kill)
-        {:error, :timeout}
+        {:error, {:timeout, timeout}}
     end
   end
 
