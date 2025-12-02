@@ -124,7 +124,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Field <= value. Example: {op:'lte', field:'quantity', value:0}",
+          "description": "Field less than or equal to value. Example: {op:'lte', field:'quantity', value:0}",
           "properties": {
             "field": {
               "type": "string"
@@ -417,7 +417,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Field >= value. Example: {op:'gte', field:'age', value:18}",
+          "description": "Field greater than or equal to value. Example: {op:'gte', field:'age', value:18}",
           "properties": {
             "field": {
               "type": "string"

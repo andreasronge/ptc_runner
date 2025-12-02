@@ -158,7 +158,8 @@ defmodule PtcRunner.Schema do
       }
     },
     "gte" => %{
-      "description" => "Field >= value. Example: {op:'gte', field:'age', value:18}",
+      "description" =>
+        "Field greater than or equal to value. Example: {op:'gte', field:'age', value:18}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -172,7 +173,8 @@ defmodule PtcRunner.Schema do
       }
     },
     "lte" => %{
-      "description" => "Field <= value. Example: {op:'lte', field:'quantity', value:0}",
+      "description" =>
+        "Field less than or equal to value. Example: {op:'lte', field:'quantity', value:0}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
