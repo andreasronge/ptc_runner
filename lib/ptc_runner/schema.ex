@@ -292,7 +292,18 @@ defmodule PtcRunner.Schema do
     %{
       "$schema" => "http://json-schema.org/draft-07/schema#",
       "title" => "PTC DSL Program",
-      "oneOf" => operation_schemas
+      "type" => "object",
+      "$defs" => %{
+        "operation" => %{"oneOf" => operation_schemas}
+      },
+      "properties" => %{
+        "program" => %{
+          "description" => "The PTC program operation",
+          "$ref" => "#/$defs/operation"
+        }
+      },
+      "required" => ["program"],
+      "additionalProperties" => false
     }
   end
 
@@ -349,13 +360,13 @@ defmodule PtcRunner.Schema do
   end
 
   defp type_to_json_schema(:expr) do
-    %{"$ref" => "#"}
+    %{"$ref" => "#/$defs/operation"}
   end
 
   defp type_to_json_schema({:list, :expr}) do
     %{
       "type" => "array",
-      "items" => %{"$ref" => "#"}
+      "items" => %{"$ref" => "#/$defs/operation"}
     }
   end
 

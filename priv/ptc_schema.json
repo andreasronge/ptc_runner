@@ -1,612 +1,627 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "oneOf": [
-    {
-      "additionalProperties": false,
-      "description": "Load a resource by name",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "op": {
-          "const": "load"
-        }
-      },
-      "required": [
-        "op",
-        "name"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Get last element",
-      "properties": {
-        "op": {
-          "const": "last"
-        }
-      },
-      "required": [
-        "op"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Pipe value through multiple steps",
-      "properties": {
-        "op": {
-          "const": "pipe"
-        },
-        "steps": {
-          "items": {
-            "$ref": "#"
+  "$defs": {
+    "operation": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Load a resource by name",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "op": {
+              "const": "load"
+            }
           },
-          "type": "array"
-        }
-      },
-      "required": [
-        "op",
-        "steps"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Concatenate multiple lists",
-      "properties": {
-        "lists": {
-          "items": {
-            "$ref": "#"
-          },
-          "type": "array"
-        },
-        "op": {
-          "const": "concat"
-        }
-      },
-      "required": [
-        "op",
-        "lists"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Merge multiple objects",
-      "properties": {
-        "objects": {
-          "items": {
-            "$ref": "#"
-          },
-          "type": "array"
-        },
-        "op": {
-          "const": "merge"
-        }
-      },
-      "required": [
-        "op",
-        "objects"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Count elements",
-      "properties": {
-        "op": {
-          "const": "count"
-        }
-      },
-      "required": [
-        "op"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Maximum value in a field",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "max"
-        }
-      },
-      "required": [
-        "op",
-        "field"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check less than or equal",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "lte"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check equality",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "eq"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Reject collection elements based on condition",
-      "properties": {
-        "op": {
-          "const": "reject"
-        },
-        "where": {
-          "$ref": "#"
-        }
-      },
-      "required": [
-        "op",
-        "where"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Get value at path",
-      "properties": {
-        "default": {},
-        "op": {
-          "const": "get"
-        },
-        "path": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "op",
-        "path"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Sum values in a field",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "sum"
-        }
-      },
-      "required": [
-        "op",
-        "field"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Select specific fields from objects",
-      "properties": {
-        "fields": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "op": {
-          "const": "select"
-        }
-      },
-      "required": [
-        "op",
-        "fields"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Call a tool",
-      "properties": {
-        "args": {
+          "required": [
+            "op",
+            "name"
+          ],
           "type": "object"
         },
-        "op": {
-          "const": "call"
-        },
-        "tool": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "op",
-        "tool"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Minimum value in a field",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "min"
-        }
-      },
-      "required": [
-        "op",
-        "field"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Get first element",
-      "properties": {
-        "op": {
-          "const": "first"
-        }
-      },
-      "required": [
-        "op"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Conditional expression",
-      "properties": {
-        "condition": {
-          "$ref": "#"
-        },
-        "else": {
-          "$ref": "#"
-        },
-        "op": {
-          "const": "if"
-        },
-        "then": {
-          "$ref": "#"
-        }
-      },
-      "required": [
-        "op",
-        "condition",
-        "else",
-        "then"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check greater than",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "gt"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check if field contains value",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "contains"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Transform collection elements",
-      "properties": {
-        "expr": {
-          "$ref": "#"
-        },
-        "op": {
-          "const": "map"
-        }
-      },
-      "required": [
-        "op",
-        "expr"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "A literal JSON value",
-      "properties": {
-        "op": {
-          "const": "literal"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Logical NOT of a condition",
-      "properties": {
-        "condition": {
-          "$ref": "#"
-        },
-        "op": {
-          "const": "not"
-        }
-      },
-      "required": [
-        "op",
-        "condition"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Get element at index",
-      "properties": {
-        "index": {
-          "minimum": 0,
-          "type": "integer"
-        },
-        "op": {
-          "const": "nth"
-        }
-      },
-      "required": [
-        "op",
-        "index"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check greater than or equal",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "gte"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Reference a variable",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "op": {
-          "const": "var"
-        }
-      },
-      "required": [
-        "op",
-        "name"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check inequality",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "neq"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Check less than",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "lt"
-        },
-        "value": {}
-      },
-      "required": [
-        "op",
-        "field",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Logical AND of conditions",
-      "properties": {
-        "conditions": {
-          "items": {
-            "$ref": "#"
+        {
+          "additionalProperties": false,
+          "description": "Get last element",
+          "properties": {
+            "op": {
+              "const": "last"
+            }
           },
-          "type": "array"
+          "required": [
+            "op"
+          ],
+          "type": "object"
         },
-        "op": {
-          "const": "and"
-        }
-      },
-      "required": [
-        "op",
-        "conditions"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Bind a value to a variable",
-      "properties": {
-        "in": {
-          "$ref": "#"
-        },
-        "name": {
-          "type": "string"
-        },
-        "op": {
-          "const": "let"
-        },
-        "value": {
-          "$ref": "#"
-        }
-      },
-      "required": [
-        "op",
-        "in",
-        "name",
-        "value"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Filter collection based on condition",
-      "properties": {
-        "op": {
-          "const": "filter"
-        },
-        "where": {
-          "$ref": "#"
-        }
-      },
-      "required": [
-        "op",
-        "where"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Zip multiple lists together",
-      "properties": {
-        "lists": {
-          "items": {
-            "$ref": "#"
+        {
+          "additionalProperties": false,
+          "description": "Pipe value through multiple steps",
+          "properties": {
+            "op": {
+              "const": "pipe"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/operation"
+              },
+              "type": "array"
+            }
           },
-          "type": "array"
+          "required": [
+            "op",
+            "steps"
+          ],
+          "type": "object"
         },
-        "op": {
-          "const": "zip"
-        }
-      },
-      "required": [
-        "op",
-        "lists"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Average values in a field",
-      "properties": {
-        "field": {
-          "type": "string"
-        },
-        "op": {
-          "const": "avg"
-        }
-      },
-      "required": [
-        "op",
-        "field"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Logical OR of conditions",
-      "properties": {
-        "conditions": {
-          "items": {
-            "$ref": "#"
+        {
+          "additionalProperties": false,
+          "description": "Concatenate multiple lists",
+          "properties": {
+            "lists": {
+              "items": {
+                "$ref": "#/$defs/operation"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "concat"
+            }
           },
-          "type": "array"
+          "required": [
+            "op",
+            "lists"
+          ],
+          "type": "object"
         },
-        "op": {
-          "const": "or"
+        {
+          "additionalProperties": false,
+          "description": "Merge multiple objects",
+          "properties": {
+            "objects": {
+              "items": {
+                "$ref": "#/$defs/operation"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "merge"
+            }
+          },
+          "required": [
+            "op",
+            "objects"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Count elements",
+          "properties": {
+            "op": {
+              "const": "count"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Maximum value in a field",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "max"
+            }
+          },
+          "required": [
+            "op",
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check less than or equal",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "lte"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check equality",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "eq"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Reject collection elements based on condition",
+          "properties": {
+            "op": {
+              "const": "reject"
+            },
+            "where": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "where"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Get value at path",
+          "properties": {
+            "default": {},
+            "op": {
+              "const": "get"
+            },
+            "path": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "op",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Sum values in a field",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "sum"
+            }
+          },
+          "required": [
+            "op",
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Select specific fields from objects",
+          "properties": {
+            "fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "select"
+            }
+          },
+          "required": [
+            "op",
+            "fields"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Call a tool",
+          "properties": {
+            "args": {
+              "type": "object"
+            },
+            "op": {
+              "const": "call"
+            },
+            "tool": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "tool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Minimum value in a field",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "min"
+            }
+          },
+          "required": [
+            "op",
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Get first element",
+          "properties": {
+            "op": {
+              "const": "first"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Conditional expression",
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/operation"
+            },
+            "else": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "if"
+            },
+            "then": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "condition",
+            "else",
+            "then"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check greater than",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "gt"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check if field contains value",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "contains"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Transform collection elements",
+          "properties": {
+            "expr": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "map"
+            }
+          },
+          "required": [
+            "op",
+            "expr"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A literal JSON value",
+          "properties": {
+            "op": {
+              "const": "literal"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Logical NOT of a condition",
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "not"
+            }
+          },
+          "required": [
+            "op",
+            "condition"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Get element at index",
+          "properties": {
+            "index": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "nth"
+            }
+          },
+          "required": [
+            "op",
+            "index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check greater than or equal",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "gte"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Reference a variable",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "op": {
+              "const": "var"
+            }
+          },
+          "required": [
+            "op",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check inequality",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "neq"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check less than",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "lt"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Logical AND of conditions",
+          "properties": {
+            "conditions": {
+              "items": {
+                "$ref": "#/$defs/operation"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "and"
+            }
+          },
+          "required": [
+            "op",
+            "conditions"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Bind a value to a variable",
+          "properties": {
+            "in": {
+              "$ref": "#/$defs/operation"
+            },
+            "name": {
+              "type": "string"
+            },
+            "op": {
+              "const": "let"
+            },
+            "value": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "in",
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Filter collection based on condition",
+          "properties": {
+            "op": {
+              "const": "filter"
+            },
+            "where": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "where"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Zip multiple lists together",
+          "properties": {
+            "lists": {
+              "items": {
+                "$ref": "#/$defs/operation"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "zip"
+            }
+          },
+          "required": [
+            "op",
+            "lists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Average values in a field",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "avg"
+            }
+          },
+          "required": [
+            "op",
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Logical OR of conditions",
+          "properties": {
+            "conditions": {
+              "items": {
+                "$ref": "#/$defs/operation"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "or"
+            }
+          },
+          "required": [
+            "op",
+            "conditions"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "op",
-        "conditions"
-      ],
-      "type": "object"
+      ]
     }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "program": {
+      "$ref": "#/$defs/operation",
+      "description": "The PTC program operation"
+    }
+  },
+  "required": [
+    "program"
   ],
-  "title": "PTC DSL Program"
+  "title": "PTC DSL Program",
+  "type": "object"
 }
