@@ -70,17 +70,17 @@ program = ~s({
 | Category | Operations |
 |----------|------------|
 | **Data** | `literal`, `var`, `load`, `let` |
-| **Collections** | `pipe`, `filter`, `reject`, `map`, `select`, `first`, `last`, `count` |
+| **Collections** | `pipe`, `filter`, `reject`, `map`, `select`, `first`, `last`, `count`, `nth` |
 | **Aggregation** | `sum`, `avg`, `min`, `max` |
 | **Access** | `get` (nested paths) |
 | **Comparison** | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains` |
 | **Logic** | `and`, `or`, `not`, `if` |
 | **Tools** | `call` |
-| **Combine** | `merge`, `concat` |
+| **Combine** | `merge`, `concat`, `zip` |
 
 ## Status
 
-In development. See the [Architecture](docs/architecture.md) document for full DSL specification and implementation roadmap.
+See the [Architecture](docs/architecture.md) document for full DSL specification.
 
 ## Documentation
 
