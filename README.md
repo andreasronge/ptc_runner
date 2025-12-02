@@ -165,6 +165,28 @@ Store results from previous turns and reference them:
 )
 ```
 
+### Dynamic Context Refs
+
+When integrating PtcRunner as a tool in an LLM agent, consider automatically storing large tool results as **context refs** instead of returning them directly to the LLM. This keeps large datasets in BEAM memory while giving the LLM a handle to query them:
+
+```elixir
+def handle_tool_result(state, tool_name, result) do
+  if large_result?(result) do
+    # Store data, give LLM a reference
+    ref = "#{tool_name}_#{System.unique_integer([:positive])}"
+    state = %{state | context: Map.put(state.context, ref, result)}
+
+    # Return summary to LLM (not the full data)
+    summary = %{ref: ref, count: length(result), fields: Map.keys(hd(result))}
+    {state, {:context_ref, summary}}
+  else
+    {state, {:inline, result}}
+  end
+end
+```
+
+The LLM can then query the ref via PtcRunner: `{"op": "load", "name": "get_orders_42"}`. See the [demo app](demo/) for a working example with static datasets.
+
 ## Integration with LLMs
 
 PtcRunner is execution-only—compose it with your LLM client (e.g., [ReqLLM](https://hexdocs.pm/req_llm)):
