@@ -67,14 +67,17 @@ defmodule PtcRunner do
          :ok <- Validator.validate(ast) do
       context_map = Keyword.get(opts, :context, %{})
       tools = Keyword.get(opts, :tools, %{})
-      context = Context.new(context_map, tools)
 
-      sandbox_opts = [
-        timeout: Keyword.get(opts, :timeout, 1000),
-        max_heap: Keyword.get(opts, :max_heap, 1_250_000)
-      ]
+      with :ok <- validate_tools(tools) do
+        context = Context.new(context_map, tools)
 
-      Sandbox.execute(ast, context, sandbox_opts)
+        sandbox_opts = [
+          timeout: Keyword.get(opts, :timeout, 1000),
+          max_heap: Keyword.get(opts, :max_heap, 1_250_000)
+        ]
+
+        Sandbox.execute(ast, context, sandbox_opts)
+      end
     else
       {:error, reason} -> {:error, reason}
     end
@@ -105,6 +108,23 @@ defmodule PtcRunner do
     case run(program, opts) do
       {:ok, result, _metrics} -> result
       {:error, reason} -> raise "PtcRunner error: #{inspect(reason)}"
+    end
+  end
+
+  defp validate_tools(tools) do
+    invalid_tools =
+      tools
+      |> Enum.reject(fn {_name, fun} -> is_function(fun, 1) end)
+      |> Enum.map(fn {name, _fun} -> name end)
+
+    case invalid_tools do
+      [] ->
+        :ok
+
+      names ->
+        {:error,
+         {:validation_error,
+          "Tools must be functions with arity 1. Invalid: #{Enum.join(names, ", ")}"}}
     end
   end
 end
