@@ -866,6 +866,53 @@ defmodule PtcRunnerTest do
     assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
   end
 
+  test "typo in operation suggests closest match" do
+    program = ~s({"op": "filer"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Unknown operation 'filer'. Did you mean 'filter'?"}
+  end
+
+  test "missing letter typo suggests closest match" do
+    program = ~s({"op": "selct"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Unknown operation 'selct'. Did you mean 'select'?"}
+  end
+
+  test "extra letter typo suggests closest match" do
+    program = ~s({"op": "filtter"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Unknown operation 'filtter'. Did you mean 'filter'?"}
+  end
+
+  test "case insensitive typo suggestion" do
+    program = ~s({"op": "FILTER"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Unknown operation 'FILTER'. Did you mean 'filter'?"}
+  end
+
+  test "very different operation name has no suggestion" do
+    program = ~s({"op": "xyz"})
+    {:error, reason} = PtcRunner.run(program)
+
+    assert reason == {:validation_error, "Unknown operation 'xyz'"}
+  end
+
+  test "E2E: provides helpful typo suggestion for misspelled operation in filter" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [{"x": 1}, {"x": 2}, {"x": 3}]},
+        {"op": "filer", "where": {"op": "eq", "field": "x", "value": 1}}
+      ]
+    })
+    {:error, {:validation_error, msg}} = PtcRunner.run(program)
+    assert msg =~ "Did you mean 'filter'?"
+  end
+
   test "missing required field in operation raises validation error" do
     program = ~s({"op": "literal"})
     {:error, reason} = PtcRunner.run(program)
