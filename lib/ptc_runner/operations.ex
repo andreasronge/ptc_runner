@@ -4,7 +4,8 @@ defmodule PtcRunner.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not).
+  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, merge,
+  concat, zip).
   """
 
   alias PtcRunner.Context
@@ -98,6 +99,21 @@ defmodule PtcRunner.Operations do
           {:ok, false}
         end
     end
+  end
+
+  def eval("merge", node, context, _eval_fn) do
+    objects = Map.get(node, "objects", [])
+    eval_merge(objects, context)
+  end
+
+  def eval("concat", node, context, _eval_fn) do
+    lists = Map.get(node, "lists", [])
+    eval_concat(lists, context)
+  end
+
+  def eval("zip", node, context, _eval_fn) do
+    lists = Map.get(node, "lists", [])
+    eval_zip(lists, context)
   end
 
   # Control flow
@@ -629,5 +645,96 @@ defmodule PtcRunner.Operations do
 
   defp handle_get_result(value, _node) do
     {:ok, value}
+  end
+
+  defp eval_merge([], _context) do
+    {:ok, %{}}
+  end
+
+  defp eval_merge(objects, context) do
+    Enum.reduce_while(objects, {:ok, %{}}, fn obj_expr, {:ok, acc} ->
+      case Interpreter.eval(obj_expr, context) do
+        {:error, _} = err ->
+          {:halt, err}
+
+        {:ok, obj} when is_map(obj) ->
+          {:cont, {:ok, Map.merge(acc, obj)}}
+
+        {:ok, obj} ->
+          {:halt, {:error, {:execution_error, "merge requires map values, got #{inspect(obj)}"}}}
+      end
+    end)
+  end
+
+  defp eval_concat([], _context) do
+    {:ok, []}
+  end
+
+  defp eval_concat(lists, context) do
+    Enum.reduce_while(lists, {:ok, []}, fn list_expr, {:ok, acc} ->
+      case Interpreter.eval(list_expr, context) do
+        {:error, _} = err ->
+          {:halt, err}
+
+        {:ok, list} when is_list(list) ->
+          {:cont, {:ok, acc ++ list}}
+
+        {:ok, list} ->
+          {:halt,
+           {:error, {:execution_error, "concat requires list values, got #{inspect(list)}"}}}
+      end
+    end)
+  end
+
+  defp eval_zip([], _context) do
+    {:ok, []}
+  end
+
+  defp eval_zip(lists, context) do
+    case eval_all_lists(lists, context, []) do
+      {:error, _} = err ->
+        err
+
+      {:ok, evaluated_lists} ->
+        {:ok, do_zip(evaluated_lists)}
+    end
+  end
+
+  defp eval_all_lists([], _context, acc) do
+    {:ok, Enum.reverse(acc)}
+  end
+
+  defp eval_all_lists([list_expr | rest], context, acc) do
+    case Interpreter.eval(list_expr, context) do
+      {:error, _} = err ->
+        err
+
+      {:ok, list} when is_list(list) ->
+        eval_all_lists(rest, context, [list | acc])
+
+      {:ok, list} ->
+        {:error, {:execution_error, "zip requires list values, got #{inspect(list)}"}}
+    end
+  end
+
+  defp do_zip([]), do: []
+  defp do_zip([[] | _]), do: []
+
+  defp do_zip(lists) do
+    # Take first element from each list
+    heads =
+      Enum.map(lists, fn
+        [h | _] -> h
+        [] -> nil
+      end)
+
+    # Check if any list is empty
+    if Enum.any?(heads, &is_nil/1) do
+      []
+    else
+      # Recurse with tails
+      tails = Enum.map(lists, fn [_ | t] -> t end)
+      [heads | do_zip(tails)]
+    end
   end
 end
