@@ -4,7 +4,7 @@ defmodule PtcRunner.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject, contains, avg, min, max; Phase 3: let, if).
+  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not).
   """
 
   alias PtcRunner.Context
@@ -70,6 +70,32 @@ defmodule PtcRunner.Operations do
           Interpreter.eval(else_expr, context)
         else
           Interpreter.eval(then_expr, context)
+        end
+    end
+  end
+
+  def eval("and", node, context, _eval_fn) do
+    conditions = Map.get(node, "conditions", [])
+    eval_and(conditions, context)
+  end
+
+  def eval("or", node, context, _eval_fn) do
+    conditions = Map.get(node, "conditions", [])
+    eval_or(conditions, context)
+  end
+
+  def eval("not", node, context, _eval_fn) do
+    condition_expr = Map.get(node, "condition")
+
+    case Interpreter.eval(condition_expr, context) do
+      {:error, _} = err ->
+        err
+
+      {:ok, result} ->
+        if result in [false, nil] do
+          {:ok, true}
+        else
+          {:ok, false}
         end
     end
   end
@@ -366,6 +392,36 @@ defmodule PtcRunner.Operations do
     case Interpreter.eval(step_with_input, context) do
       {:ok, result} -> eval_pipe(rest, result, context, eval_fn)
       {:error, _} = err -> err
+    end
+  end
+
+  defp eval_and([], _context), do: {:ok, true}
+
+  defp eval_and([cond_expr | rest], context) do
+    case Interpreter.eval(cond_expr, context) do
+      {:error, _} = err ->
+        err
+
+      {:ok, result} when result in [false, nil] ->
+        {:ok, false}
+
+      {:ok, _} ->
+        eval_and(rest, context)
+    end
+  end
+
+  defp eval_or([], _context), do: {:ok, false}
+
+  defp eval_or([cond_expr | rest], context) do
+    case Interpreter.eval(cond_expr, context) do
+      {:error, _} = err ->
+        err
+
+      {:ok, result} when result in [false, nil] ->
+        eval_or(rest, context)
+
+      {:ok, _} ->
+        {:ok, true}
     end
   end
 

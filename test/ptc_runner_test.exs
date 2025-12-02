@@ -2239,5 +2239,460 @@ defmodule PtcRunnerTest do
       {:ok, result, _metrics} = PtcRunner.run(program)
       assert result == 1000
     end
+
+    # And operation - boolean logic tests
+    test "and with all truthy conditions returns true" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": true},
+          {"op": "literal", "value": true},
+          {"op": "literal", "value": true}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "and with one falsy condition returns false" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": true},
+          {"op": "literal", "value": false},
+          {"op": "literal", "value": true}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "and with empty conditions returns true" do
+      program = ~s({
+        "op": "and",
+        "conditions": []
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "and with nil condition returns false" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": true},
+          {"op": "literal", "value": null},
+          {"op": "literal", "value": true}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "and treats truthy values correctly (0, [], empty string, empty map)" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": 0},
+          {"op": "literal", "value": []},
+          {"op": "literal", "value": ""},
+          {"op": "literal", "value": {}}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "and short-circuits on first false" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": false},
+          {"op": "var", "name": "undefined_var"}
+        ]
+      })
+
+      # Should not raise error due to undefined_var because of short-circuit
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    # Or operation - boolean logic tests
+    test "or with one truthy condition returns true" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {"op": "literal", "value": false},
+          {"op": "literal", "value": true},
+          {"op": "literal", "value": false}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "or with all falsy conditions returns false" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {"op": "literal", "value": false},
+          {"op": "literal", "value": false},
+          {"op": "literal", "value": false}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "or with empty conditions returns false" do
+      program = ~s({
+        "op": "or",
+        "conditions": []
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "or with nil conditions returns false" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {"op": "literal", "value": false},
+          {"op": "literal", "value": null},
+          {"op": "literal", "value": false}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "or treats truthy values correctly" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {"op": "literal", "value": false},
+          {"op": "literal", "value": 0}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "or short-circuits on first true" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {"op": "literal", "value": true},
+          {"op": "var", "name": "undefined_var"}
+        ]
+      })
+
+      # Should not raise error due to undefined_var because of short-circuit
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    # Not operation - boolean logic tests
+    test "not with true returns false" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "literal", "value": true}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "not with false returns true" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "literal", "value": false}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "not with nil returns true" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "literal", "value": null}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "not with truthy value returns false" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "literal", "value": 42}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    test "not with truthy empty string returns false" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "literal", "value": ""}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == false
+    end
+
+    # Error propagation tests
+    test "and with undefined variable treated as nil (falsy)" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": true},
+          {"op": "var", "name": "undefined_var"},
+          {"op": "literal", "value": true}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      # undefined variable returns nil, which is falsy, so and returns false
+      assert result == false
+    end
+
+    test "or with undefined variable treated as nil (falsy) but continues" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {"op": "literal", "value": false},
+          {"op": "var", "name": "undefined_var"},
+          {"op": "literal", "value": true}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      # undefined variable returns nil (falsy), continues to next (true), so or returns true
+      assert result == true
+    end
+
+    test "not with undefined variable treated as nil returns true" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "var", "name": "undefined_var"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      # undefined variable returns nil, which is falsy, so not returns true
+      assert result == true
+    end
+
+    # Validation error tests
+    test "and validation fails when conditions field is missing" do
+      program = ~s({
+        "op": "and"
+      })
+
+      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      assert String.contains?(message, "requires field 'conditions'")
+    end
+
+    test "and validation fails when conditions is not a list" do
+      program = ~s({
+        "op": "and",
+        "conditions": "not a list"
+      })
+
+      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      assert String.contains?(message, "must be a list")
+    end
+
+    test "or validation fails when conditions field is missing" do
+      program = ~s({
+        "op": "or"
+      })
+
+      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      assert String.contains?(message, "requires field 'conditions'")
+    end
+
+    test "or validation fails when conditions is not a list" do
+      program = ~s({
+        "op": "or",
+        "conditions": 42
+      })
+
+      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      assert String.contains?(message, "must be a list")
+    end
+
+    test "not validation fails when condition field is missing" do
+      program = ~s({
+        "op": "not"
+      })
+
+      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      assert String.contains?(message, "requires field 'condition'")
+    end
+
+    test "not validates nested condition expression" do
+      program = ~s({
+        "op": "not",
+        "condition": {"op": "invalid_op"}
+      })
+
+      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      assert String.contains?(message, "Unknown operation")
+    end
+
+    # Complex nested logic tests
+    test "nested and inside or" do
+      program = ~s({
+        "op": "or",
+        "conditions": [
+          {
+            "op": "and",
+            "conditions": [
+              {"op": "literal", "value": true},
+              {"op": "literal", "value": false}
+            ]
+          },
+          {"op": "literal", "value": true}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    test "nested not inside and" do
+      program = ~s({
+        "op": "and",
+        "conditions": [
+          {"op": "literal", "value": true},
+          {
+            "op": "not",
+            "condition": {"op": "literal", "value": false}
+          }
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == true
+    end
+
+    # E2E test with if, comparisons, and logic operations
+    test "complex conditional with and, or, not, and if" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "load", "name": "order"},
+          {
+            "op": "if",
+            "condition": {
+              "op": "and",
+              "conditions": [
+                {"op": "gt", "field": "total", "value": 100},
+                {
+                  "op": "or",
+                  "conditions": [
+                    {"op": "eq", "field": "status", "value": "vip"},
+                    {"op": "eq", "field": "status", "value": "premium"}
+                  ]
+                },
+                {
+                  "op": "not",
+                  "condition": {"op": "eq", "field": "flagged", "value": true}
+                }
+              ]
+            },
+            "then": {"op": "literal", "value": "eligible"},
+            "else": {"op": "literal", "value": "not_eligible"}
+          }
+        ]
+      })
+
+      context = %{"order" => %{"total" => 150, "status" => "vip", "flagged" => false}}
+      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      assert result == "eligible"
+    end
+
+    test "complex conditional with and, or, not returns not_eligible when total too low" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "load", "name": "order"},
+          {
+            "op": "if",
+            "condition": {
+              "op": "and",
+              "conditions": [
+                {"op": "gt", "field": "total", "value": 100},
+                {
+                  "op": "or",
+                  "conditions": [
+                    {"op": "eq", "field": "status", "value": "vip"},
+                    {"op": "eq", "field": "status", "value": "premium"}
+                  ]
+                },
+                {
+                  "op": "not",
+                  "condition": {"op": "eq", "field": "flagged", "value": true}
+                }
+              ]
+            },
+            "then": {"op": "literal", "value": "eligible"},
+            "else": {"op": "literal", "value": "not_eligible"}
+          }
+        ]
+      })
+
+      context = %{"order" => %{"total" => 50, "status" => "vip", "flagged" => false}}
+      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      assert result == "not_eligible"
+    end
+
+    test "complex conditional with and, or, not returns not_eligible when flagged" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "load", "name": "order"},
+          {
+            "op": "if",
+            "condition": {
+              "op": "and",
+              "conditions": [
+                {"op": "gt", "field": "total", "value": 100},
+                {
+                  "op": "or",
+                  "conditions": [
+                    {"op": "eq", "field": "status", "value": "vip"},
+                    {"op": "eq", "field": "status", "value": "premium"}
+                  ]
+                },
+                {
+                  "op": "not",
+                  "condition": {"op": "eq", "field": "flagged", "value": true}
+                }
+              ]
+            },
+            "then": {"op": "literal", "value": "eligible"},
+            "else": {"op": "literal", "value": "not_eligible"}
+          }
+        ]
+      })
+
+      context = %{"order" => %{"total" => 150, "status" => "vip", "flagged" => true}}
+      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      assert result == "not_eligible"
+    end
   end
 end
