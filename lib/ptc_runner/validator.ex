@@ -35,271 +35,39 @@ defmodule PtcRunner.Validator do
     end
   end
 
-  # Data operations
-  defp validate_operation("literal", node) do
-    case Map.has_key?(node, "value") do
-      true -> :ok
-      false -> {:error, {:validation_error, "Operation 'literal' requires field 'value'"}}
+  defp validate_operation(op, node) do
+    case PtcRunner.Schema.get_operation(op) do
+      {:ok, definition} ->
+        validate_fields(op, node, definition)
+
+      :error ->
+        suggestion = suggest_operation(op)
+        {:error, {:validation_error, "Unknown operation '#{op}'#{suggestion}"}}
     end
   end
 
-  defp validate_operation("load", node) do
-    case Map.has_key?(node, "name") do
-      true -> :ok
-      false -> {:error, {:validation_error, "Operation 'load' requires field 'name'"}}
+  defp validate_fields(op, node, definition) do
+    fields = Map.get(definition, "fields", %{})
+
+    # Special case: handle operations that need custom validation
+    case op do
+      "let" -> validate_let(op, node, fields)
+      "nth" -> validate_nth(node, fields)
+      "select" -> validate_select(node, fields)
+      "get" -> validate_get(node, fields)
+      _ -> validate_fields_generic(op, node, fields)
     end
   end
 
-  defp validate_operation("var", node) do
-    case Map.has_key?(node, "name") do
-      true -> :ok
-      false -> {:error, {:validation_error, "Operation 'var' requires field 'name'"}}
-    end
-  end
-
-  defp validate_operation("let", node) do
-    with :ok <- require_field(node, "name", "Operation 'let' requires field 'name'"),
+  defp validate_let(op, node, fields) do
+    with :ok <- validate_required_fields(op, node, fields),
          :ok <- validate_let_name(node),
-         :ok <- require_field(node, "value", "Operation 'let' requires field 'value'"),
-         :ok <- require_field(node, "in", "Operation 'let' requires field 'in'") do
-      # Recursively validate nested expressions
-      with :ok <- validate_node(Map.get(node, "value")) do
-        validate_node(Map.get(node, "in"))
-      end
+         :ok <- validate_node(Map.get(node, "value")) do
+      validate_node(Map.get(node, "in"))
     end
   end
 
-  defp validate_operation("if", node) do
-    with :ok <- require_field(node, "condition", "Operation 'if' requires field 'condition'"),
-         :ok <- require_field(node, "then", "Operation 'if' requires field 'then'"),
-         :ok <- require_field(node, "else", "Operation 'if' requires field 'else'") do
-      # Recursively validate nested expressions
-      with :ok <- validate_node(Map.get(node, "condition")) do
-        with :ok <- validate_node(Map.get(node, "then")) do
-          validate_node(Map.get(node, "else"))
-        end
-      end
-    end
-  end
-
-  defp validate_operation("and", node) do
-    case Map.get(node, "conditions") do
-      nil ->
-        {:error, {:validation_error, "Operation 'and' requires field 'conditions'"}}
-
-      conditions when not is_list(conditions) ->
-        {:error, {:validation_error, "Field 'conditions' must be a list"}}
-
-      conditions ->
-        validate_list(conditions)
-    end
-  end
-
-  defp validate_operation("or", node) do
-    case Map.get(node, "conditions") do
-      nil ->
-        {:error, {:validation_error, "Operation 'or' requires field 'conditions'"}}
-
-      conditions when not is_list(conditions) ->
-        {:error, {:validation_error, "Field 'conditions' must be a list"}}
-
-      conditions ->
-        validate_list(conditions)
-    end
-  end
-
-  defp validate_operation("not", node) do
-    with :ok <- require_field(node, "condition", "Operation 'not' requires field 'condition'") do
-      validate_node(Map.get(node, "condition"))
-    end
-  end
-
-  defp validate_operation("merge", node) do
-    case Map.get(node, "objects") do
-      nil ->
-        {:error, {:validation_error, "Operation 'merge' requires field 'objects'"}}
-
-      objects when not is_list(objects) ->
-        {:error, {:validation_error, "Field 'objects' must be a list"}}
-
-      objects ->
-        validate_list(objects)
-    end
-  end
-
-  defp validate_operation("concat", node) do
-    case Map.get(node, "lists") do
-      nil ->
-        {:error, {:validation_error, "Operation 'concat' requires field 'lists'"}}
-
-      lists when not is_list(lists) ->
-        {:error, {:validation_error, "Field 'lists' must be a list"}}
-
-      lists ->
-        validate_list(lists)
-    end
-  end
-
-  defp validate_operation("zip", node) do
-    case Map.get(node, "lists") do
-      nil ->
-        {:error, {:validation_error, "Operation 'zip' requires field 'lists'"}}
-
-      lists when not is_list(lists) ->
-        {:error, {:validation_error, "Field 'lists' must be a list"}}
-
-      lists ->
-        validate_list(lists)
-    end
-  end
-
-  # Control flow
-  defp validate_operation("pipe", node) do
-    case Map.get(node, "steps") do
-      nil ->
-        {:error, {:validation_error, "Operation 'pipe' requires field 'steps'"}}
-
-      steps when not is_list(steps) ->
-        {:error, {:validation_error, "Field 'steps' must be a list"}}
-
-      steps ->
-        validate_list(steps)
-    end
-  end
-
-  # Collection operations
-  defp validate_operation("filter", node) do
-    with :ok <- require_field(node, "where", "Operation 'filter' requires field 'where'") do
-      validate_node(Map.get(node, "where"))
-    end
-  end
-
-  defp validate_operation("map", node) do
-    with :ok <- require_field(node, "expr", "Operation 'map' requires field 'expr'") do
-      validate_node(Map.get(node, "expr"))
-    end
-  end
-
-  defp validate_operation("select", node) do
-    case Map.get(node, "fields") do
-      nil ->
-        {:error, {:validation_error, "Operation 'select' requires field 'fields'"}}
-
-      fields when not is_list(fields) ->
-        {:error, {:validation_error, "Field 'fields' must be a list"}}
-
-      fields ->
-        Enum.all?(fields, &is_binary/1)
-        |> case do
-          true -> :ok
-          false -> {:error, {:validation_error, "All field names in 'fields' must be strings"}}
-        end
-    end
-  end
-
-  # Comparison
-  defp validate_operation("eq", node) do
-    case require_field(node, "field", "Operation 'eq' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'eq' requires field 'value'")
-      err -> err
-    end
-  end
-
-  defp validate_operation("neq", node) do
-    case require_field(node, "field", "Operation 'neq' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'neq' requires field 'value'")
-      err -> err
-    end
-  end
-
-  defp validate_operation("gt", node) do
-    case require_field(node, "field", "Operation 'gt' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'gt' requires field 'value'")
-      err -> err
-    end
-  end
-
-  defp validate_operation("gte", node) do
-    case require_field(node, "field", "Operation 'gte' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'gte' requires field 'value'")
-      err -> err
-    end
-  end
-
-  defp validate_operation("lt", node) do
-    case require_field(node, "field", "Operation 'lt' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'lt' requires field 'value'")
-      err -> err
-    end
-  end
-
-  defp validate_operation("lte", node) do
-    case require_field(node, "field", "Operation 'lte' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'lte' requires field 'value'")
-      err -> err
-    end
-  end
-
-  # Comparison: contains
-  defp validate_operation("contains", node) do
-    case require_field(node, "field", "Operation 'contains' requires field 'field'") do
-      :ok -> require_field(node, "value", "Operation 'contains' requires field 'value'")
-      err -> err
-    end
-  end
-
-  # Access operations
-  defp validate_operation("get", node) do
-    case Map.get(node, "path") do
-      nil ->
-        {:error, {:validation_error, "Operation 'get' requires field 'path'"}}
-
-      path when not is_list(path) ->
-        {:error, {:validation_error, "Field 'path' must be a list"}}
-
-      path ->
-        Enum.all?(path, &is_binary/1)
-        |> case do
-          true -> :ok
-          false -> {:error, {:validation_error, "All path elements in 'path' must be strings"}}
-        end
-    end
-  end
-
-  # Aggregations
-  defp validate_operation("sum", node) do
-    case Map.get(node, "field") do
-      nil -> {:error, {:validation_error, "Operation 'sum' requires field 'field'"}}
-      field when is_binary(field) -> :ok
-      _ -> {:error, {:validation_error, "Field 'field' must be a string"}}
-    end
-  end
-
-  defp validate_operation("count", _node) do
-    :ok
-  end
-
-  defp validate_operation("avg", node) do
-    validate_aggregation_field(node, "avg")
-  end
-
-  defp validate_operation("min", node) do
-    validate_aggregation_field(node, "min")
-  end
-
-  defp validate_operation("max", node) do
-    validate_aggregation_field(node, "max")
-  end
-
-  defp validate_operation("first", _node) do
-    :ok
-  end
-
-  defp validate_operation("last", _node) do
-    :ok
-  end
-
-  defp validate_operation("nth", node) do
+  defp validate_nth(node, _fields) do
     case Map.get(node, "index") do
       nil ->
         {:error, {:validation_error, "Operation 'nth' requires field 'index'"}}
@@ -315,53 +83,145 @@ defmodule PtcRunner.Validator do
     end
   end
 
-  defp validate_operation("reject", node) do
-    with :ok <- require_field(node, "where", "Operation 'reject' requires field 'where'") do
-      validate_node(Map.get(node, "where"))
+  defp validate_select(node, _fields) do
+    case Map.get(node, "fields") do
+      nil ->
+        {:error, {:validation_error, "Operation 'select' requires field 'fields'"}}
+
+      fields_val when not is_list(fields_val) ->
+        {:error, {:validation_error, "Field 'fields' must be a list"}}
+
+      fields_val ->
+        case Enum.all?(fields_val, &is_binary/1) do
+          true -> :ok
+          false -> {:error, {:validation_error, "All field names in 'fields' must be strings"}}
+        end
     end
   end
 
-  # Tool integration
-  defp validate_operation("call", node) do
-    with :ok <- require_field(node, "tool", "Operation 'call' requires field 'tool'") do
-      case Map.get(node, "args") do
-        nil -> :ok
-        args when is_map(args) -> :ok
-        _ -> {:error, {:validation_error, "Field 'args' must be a map"}}
+  defp validate_get(node, _fields) do
+    case Map.get(node, "path") do
+      nil ->
+        {:error, {:validation_error, "Operation 'get' requires field 'path'"}}
+
+      path when not is_list(path) ->
+        {:error, {:validation_error, "Field 'path' must be a list"}}
+
+      path ->
+        case Enum.all?(path, &is_binary/1) do
+          true -> :ok
+          false -> {:error, {:validation_error, "All path elements in 'path' must be strings"}}
+        end
+    end
+  end
+
+  defp validate_fields_generic(op, node, fields) do
+    Enum.reduce_while(fields, :ok, fn {field_name, field_spec}, :ok ->
+      required? = Map.get(field_spec, "required", false)
+      type = Map.get(field_spec, "type")
+
+      case validate_field(node, op, field_name, type, required?) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
       end
+    end)
+  end
+
+  defp validate_field(node, _op, field_name, _type, false)
+       when not is_map_key(node, field_name) do
+    :ok
+  end
+
+  defp validate_field(node, op, field_name, type, _required?) do
+    if Map.has_key?(node, field_name) do
+      value = Map.get(node, field_name)
+      validate_field_type(op, field_name, value, type)
+    else
+      {:error, {:validation_error, "Operation '#{op}' requires field '#{field_name}'"}}
     end
   end
 
-  # Unknown operation
-  defp validate_operation(op, _node) do
-    suggestion = suggest_operation(op)
-    {:error, {:validation_error, "Unknown operation '#{op}'#{suggestion}"}}
+  defp validate_field_type(_op, _field_name, _value, :any) do
+    :ok
   end
 
-  @valid_operations ~w(literal load var let if and or not merge concat zip pipe filter map select eq neq gt gte lt lte contains get sum count avg min max first last nth reject call)
+  defp validate_field_type(_op, field_name, value, :string) do
+    case is_binary(value) do
+      true -> :ok
+      false -> {:error, {:validation_error, "Field '#{field_name}' must be a string"}}
+    end
+  end
+
+  defp validate_field_type(_op, _field_name, value, :expr) do
+    validate_node(value)
+  end
+
+  defp validate_field_type(_op, field_name, value, :non_neg_integer) do
+    case is_integer(value) and value >= 0 do
+      true ->
+        :ok
+
+      false ->
+        {:error, {:validation_error, "Field '#{field_name}' must be a non-negative integer"}}
+    end
+  end
+
+  defp validate_field_type(_op, field_name, value, :map) do
+    case is_map(value) do
+      true -> :ok
+      false -> {:error, {:validation_error, "Field '#{field_name}' must be a map"}}
+    end
+  end
+
+  defp validate_field_type(_op, field_name, value, {:list, :expr}) do
+    case is_list(value) do
+      true -> validate_list(value)
+      false -> {:error, {:validation_error, "Field '#{field_name}' must be a list"}}
+    end
+  end
+
+  defp validate_field_type(_op, field_name, value, {:list, :string}) do
+    case is_list(value) do
+      true ->
+        case Enum.all?(value, &is_binary/1) do
+          true ->
+            :ok
+
+          false ->
+            {:error, {:validation_error, "All elements in '#{field_name}' must be strings"}}
+        end
+
+      false ->
+        {:error, {:validation_error, "Field '#{field_name}' must be a list"}}
+    end
+  end
+
+  defp validate_field_type(_op, _field_name, _value, type) do
+    {:error, {:validation_error, "Unknown field type: #{inspect(type)}"}}
+  end
+
+  defp validate_required_fields(op, node, fields) do
+    Enum.reduce_while(fields, :ok, fn {field_name, field_spec}, :ok ->
+      required? = Map.get(field_spec, "required", false)
+
+      case {required?, Map.has_key?(node, field_name)} do
+        {true, false} ->
+          {:halt,
+           {:error, {:validation_error, "Operation '#{op}' requires field '#{field_name}'"}}}
+
+        _ ->
+          {:cont, :ok}
+      end
+    end)
+  end
 
   defp suggest_operation(unknown_op) do
-    @valid_operations
+    PtcRunner.Schema.valid_operation_names()
     |> Enum.map(fn valid -> {valid, String.jaro_distance(String.downcase(unknown_op), valid)} end)
     |> Enum.max_by(fn {_op, score} -> score end)
     |> case do
       {suggested, score} when score > 0.8 -> ". Did you mean '#{suggested}'?"
       _ -> ""
-    end
-  end
-
-  defp require_field(node, field, message) do
-    case Map.has_key?(node, field) do
-      true -> :ok
-      false -> {:error, {:validation_error, message}}
-    end
-  end
-
-  defp validate_aggregation_field(node, op_name) do
-    case Map.get(node, "field") do
-      nil -> {:error, {:validation_error, "Operation '#{op_name}' requires field 'field'"}}
-      field when is_binary(field) -> :ok
-      _ -> {:error, {:validation_error, "Field 'field' must be a string"}}
     end
   end
 
