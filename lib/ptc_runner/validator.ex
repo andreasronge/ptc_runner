@@ -57,6 +57,18 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  defp validate_operation("let", node) do
+    with :ok <- require_field(node, "name", "Operation 'let' requires field 'name'"),
+         :ok <- validate_let_name(node),
+         :ok <- require_field(node, "value", "Operation 'let' requires field 'value'"),
+         :ok <- require_field(node, "in", "Operation 'let' requires field 'in'") do
+      # Recursively validate nested expressions
+      with :ok <- validate_node(Map.get(node, "value")) do
+        validate_node(Map.get(node, "in"))
+      end
+    end
+  end
+
   # Control flow
   defp validate_operation("pipe", node) do
     case Map.get(node, "steps") do
@@ -252,5 +264,12 @@ defmodule PtcRunner.Validator do
         {:error, _} = err -> {:halt, err}
       end
     end)
+  end
+
+  defp validate_let_name(node) do
+    case Map.get(node, "name") do
+      name when is_binary(name) -> :ok
+      _ -> {:error, {:validation_error, "Field 'name' must be a string"}}
+    end
   end
 end

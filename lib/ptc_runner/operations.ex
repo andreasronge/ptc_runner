@@ -41,6 +41,21 @@ defmodule PtcRunner.Operations do
     Context.get_var(context, name)
   end
 
+  def eval("let", node, context, _eval_fn) do
+    name = Map.get(node, "name")
+    value_expr = Map.get(node, "value")
+    in_expr = Map.get(node, "in")
+
+    case Interpreter.eval(value_expr, context) do
+      {:error, _} = err ->
+        err
+
+      {:ok, value} ->
+        new_context = Context.put_var(context, name, value)
+        Interpreter.eval(in_expr, new_context)
+    end
+  end
+
   # Control flow
   def eval("pipe", node, context, eval_fn) do
     steps = Map.get(node, "steps", [])
