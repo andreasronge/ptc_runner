@@ -4,7 +4,7 @@ defmodule PtcRunner.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject, contains, avg, min, max).
+  last, nth, reject, contains, avg, min, max; Phase 3: let).
   """
 
   alias PtcRunner.Context
