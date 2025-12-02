@@ -1,0 +1,15 @@
+# Dependencies
+/deps/
+
+# Build artifacts
+/_build/
+
+# Mix lock (optional - remove if you want to lock deps)
+# /mix.lock
+
+# IDE
+.idea/
+*.iml
+
+# Environment
+.env
