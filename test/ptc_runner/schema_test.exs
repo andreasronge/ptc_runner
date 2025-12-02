@@ -657,7 +657,7 @@ defmodule PtcRunner.SchemaTest do
     end
   end
 
-  describe "to_prompt/0" do
+  describe "to_prompt/1" do
     test "returns a string with operation descriptions" do
       prompt = PtcRunner.Schema.to_prompt()
 
@@ -678,6 +678,9 @@ defmodule PtcRunner.SchemaTest do
       assert String.contains?(prompt, "Filter/Transform:")
       assert String.contains?(prompt, "Compare:")
       assert String.contains?(prompt, "Aggregate:")
+      assert String.contains?(prompt, "Combine:")
+      assert String.contains?(prompt, "Access:")
+      assert String.contains?(prompt, "Tools:")
     end
 
     test "includes examples by default" do
