@@ -4,7 +4,7 @@ defmodule PtcRunner.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject, contains, avg, min, max).
+  last, nth, reject, contains, avg, min, max; Phase 3: let).
   """
 
   alias PtcRunner.Context
@@ -39,6 +39,21 @@ defmodule PtcRunner.Operations do
   def eval("var", node, context, _eval_fn) do
     name = Map.get(node, "name")
     Context.get_var(context, name)
+  end
+
+  def eval("let", node, context, _eval_fn) do
+    name = Map.get(node, "name")
+    value_expr = Map.get(node, "value")
+    in_expr = Map.get(node, "in")
+
+    case Interpreter.eval(value_expr, context) do
+      {:error, _} = err ->
+        err
+
+      {:ok, value} ->
+        new_context = Context.put_var(context, name, value)
+        Interpreter.eval(in_expr, new_context)
+    end
   end
 
   # Control flow

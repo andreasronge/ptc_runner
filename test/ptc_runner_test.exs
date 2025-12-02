@@ -1643,5 +1643,324 @@ defmodule PtcRunnerTest do
       {:error, reason} = PtcRunner.run(program)
       assert reason == {:validation_error, "Operation 'max' requires field 'field'"}
     end
+
+    test "let missing name field raises validation error" do
+      program = ~s({
+        "op": "let",
+        "value": {"op": "literal", "value": 5},
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'let' requires field 'name'"}
+    end
+
+    test "let with non-string name raises validation error" do
+      program = ~s({
+        "op": "let",
+        "name": 42,
+        "value": {"op": "literal", "value": 5},
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Field 'name' must be a string"}
+    end
+
+    test "let missing value field raises validation error" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'let' requires field 'value'"}
+    end
+
+    test "let missing in field raises validation error" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "literal", "value": 5}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'let' requires field 'in'"}
+    end
+
+    test "let with invalid nested value expression raises validation error" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "unknown_op"},
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
+    end
+
+    test "let with invalid nested in expression raises validation error" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "literal", "value": 5},
+        "in": {"op": "unknown_op"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
+    end
+  end
+
+  # Let operation - basic tests
+  describe "let operation" do
+    test "let binds value to name and returns it via var" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "literal", "value": 5},
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 5
+    end
+
+    test "let allows var to reference undefined name returns nil" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "literal", "value": 5},
+        "in": {"op": "var", "name": "y"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == nil
+    end
+
+    test "let with list value" do
+      program = ~s({
+        "op": "let",
+        "name": "items",
+        "value": {"op": "literal", "value": [1, 2, 3]},
+        "in": {
+          "op": "pipe",
+          "steps": [
+            {"op": "var", "name": "items"},
+            {"op": "count"}
+          ]
+        }
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 3
+    end
+
+    test "let with nested let bindings (shadowing)" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "literal", "value": 1},
+        "in": {
+          "op": "let",
+          "name": "x",
+          "value": {"op": "literal", "value": 2},
+          "in": {"op": "var", "name": "x"}
+        }
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 2
+    end
+
+    test "let scoping - inner binding doesn't leak out" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {
+          "op": "let",
+          "name": "y",
+          "value": {"op": "literal", "value": 10},
+          "in": {"op": "var", "name": "y"}
+        },
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 10
+    end
+
+    test "let with empty string name" do
+      program = ~s({
+        "op": "let",
+        "name": "",
+        "value": {"op": "literal", "value": 42},
+        "in": {"op": "var", "name": ""}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 42
+    end
+
+    test "let with pipe - receives piped input in value" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [1, 2, 3]},
+          {
+            "op": "let",
+            "name": "data",
+            "value": {"op": "var", "name": "__input"},
+            "in": {
+              "op": "pipe",
+              "steps": [
+                {"op": "var", "name": "data"},
+                {"op": "count"}
+              ]
+            }
+          }
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 3
+    end
+
+    test "let with computed value expression" do
+      program = ~s({
+        "op": "let",
+        "name": "sum_val",
+        "value": {
+          "op": "pipe",
+          "steps": [
+            {"op": "literal", "value": [
+              {"amount": 100},
+              {"amount": 200}
+            ]},
+            {"op": "sum", "field": "amount"}
+          ]
+        },
+        "in": {"op": "var", "name": "sum_val"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 300
+    end
+
+    test "let with error in value expression propagates error" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {
+          "op": "pipe",
+          "steps": [
+            {"op": "literal", "value": 42},
+            {"op": "count"}
+          ]
+        },
+        "in": {"op": "var", "name": "x"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert {:execution_error, msg} = reason
+      assert String.contains?(msg, "count requires a list")
+    end
+
+    test "let with filter using bound variable" do
+      program = ~s({
+        "op": "let",
+        "name": "threshold",
+        "value": {"op": "literal", "value": 100},
+        "in": {
+          "op": "pipe",
+          "steps": [
+            {"op": "literal", "value": [
+              {"id": 1, "amount": 50},
+              {"id": 2, "amount": 150},
+              {"id": 3, "amount": 200}
+            ]},
+            {"op": "filter", "where": {
+              "op": "gt",
+              "field": "amount",
+              "value": 100
+            }},
+            {"op": "count"}
+          ]
+        }
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 2
+    end
+
+    test "E2E: let with load and complex pipeline" do
+      program = ~s({
+        "op": "let",
+        "name": "expenses",
+        "value": {"op": "load", "name": "data"},
+        "in": {
+          "op": "pipe",
+          "steps": [
+            {"op": "var", "name": "expenses"},
+            {"op": "filter", "where": {"op": "gt", "field": "amount", "value": 100}},
+            {"op": "count"}
+          ]
+        }
+      })
+
+      context = %{
+        "data" => [
+          %{"category" => "travel", "amount" => 500},
+          %{"category" => "food", "amount" => 50},
+          %{"category" => "travel", "amount" => 200}
+        ]
+      }
+
+      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      assert result == 2
+    end
+
+    test "let with var for undefined name in outer scope" do
+      program = ~s({
+        "op": "let",
+        "name": "x",
+        "value": {"op": "literal", "value": 5},
+        "in": {
+          "op": "pipe",
+          "steps": [
+            {"op": "var", "name": "x"},
+            {"op": "literal", "value": 10}
+          ]
+        }
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 10
+    end
+
+    test "multiple let bindings at different levels" do
+      program = ~s({
+        "op": "let",
+        "name": "a",
+        "value": {"op": "literal", "value": 10},
+        "in": {
+          "op": "let",
+          "name": "b",
+          "value": {"op": "literal", "value": 20},
+          "in": {
+            "op": "pipe",
+            "steps": [
+              {"op": "var", "name": "a"},
+              {"op": "literal", "value": 30}
+            ]
+          }
+        }
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 30
+    end
   end
 end
