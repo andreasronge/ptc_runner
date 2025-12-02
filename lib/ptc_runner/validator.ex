@@ -321,6 +321,17 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  # Tool integration
+  defp validate_operation("call", node) do
+    with :ok <- require_field(node, "tool", "Operation 'call' requires field 'tool'") do
+      case Map.get(node, "args") do
+        nil -> :ok
+        args when is_map(args) -> :ok
+        _ -> {:error, {:validation_error, "Field 'args' must be a map"}}
+      end
+    end
+  end
+
   # Unknown operation
   defp validate_operation(op, _node) do
     {:error, {:validation_error, "Unknown operation '#{op}'"}}
