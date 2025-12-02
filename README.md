@@ -40,12 +40,14 @@ tools = %{
 
 # LLM generates this JSON program
 program = ~s({
-  "op": "pipe",
-  "steps": [
-    {"op": "call", "tool": "get_expenses"},
-    {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-    {"op": "sum", "field": "amount"}
-  ]
+  "program": {
+    "op": "pipe",
+    "steps": [
+      {"op": "call", "tool": "get_expenses"},
+      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+      {"op": "sum", "field": "amount"}
+    ]
+  }
 })
 
 # Execute safely with resource limits
@@ -101,15 +103,15 @@ end
 
 ```elixir
 # Simple program
-{:ok, result, _metrics} = PtcRunner.run(~s({"op": "literal", "value": 42}))
+{:ok, result, _metrics} = PtcRunner.run(~s({"program": {"op": "literal", "value": 42}}))
 # result = 42
 
 # With context data
 {:ok, result, _metrics} = PtcRunner.run(
-  ~s({"op": "pipe", "steps": [
+  ~s({"program": {"op": "pipe", "steps": [
     {"op": "load", "name": "numbers"},
     {"op": "sum", "field": "value"}
-  ]}),
+  ]}}),
   context: %{"numbers" => [%{"value" => 1}, %{"value" => 2}, %{"value" => 3}]}
 )
 # result = 6
@@ -150,14 +152,14 @@ Store results from previous turns and reference them:
 
 ```elixir
 # Turn 1: Fetch data
-{:ok, users, _} = PtcRunner.run(~s({"op": "call", "tool": "get_users"}), tools: tools)
+{:ok, users, _} = PtcRunner.run(~s({"program": {"op": "call", "tool": "get_users"}}), tools: tools)
 
 # Turn 2: Use previous result
 {:ok, count, _} = PtcRunner.run(
-  ~s({"op": "pipe", "steps": [
+  ~s({"program": {"op": "pipe", "steps": [
     {"op": "load", "name": "previous_users"},
     {"op": "count"}
-  ]}),
+  ]}}),
   context: %{"previous_users" => users}
 )
 ```

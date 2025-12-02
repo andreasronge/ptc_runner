@@ -68,16 +68,18 @@ Programs can store intermediate results and reference them later. This enables:
 
 ```json
 {
-  "op": "let",
-  "name": "expenses",
-  "value": {"op": "call", "tool": "get_expenses"},
-  "in": {
-    "op": "pipe",
-    "steps": [
-      {"op": "var", "name": "expenses"},
-      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-      {"op": "sum", "field": "amount"}
-    ]
+  "program": {
+    "op": "let",
+    "name": "expenses",
+    "value": {"op": "call", "tool": "get_expenses"},
+    "in": {
+      "op": "pipe",
+      "steps": [
+        {"op": "var", "name": "expenses"},
+        {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+        {"op": "sum", "field": "amount"}
+      ]
+    }
   }
 }
 ```
@@ -329,12 +331,14 @@ These features are intentionally deferred:
 
 ```json
 {
-  "op": "pipe",
-  "steps": [
-    {"op": "load", "name": "expenses"},
-    {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-    {"op": "sum", "field": "amount"}
-  ]
+  "program": {
+    "op": "pipe",
+    "steps": [
+      {"op": "load", "name": "expenses"},
+      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+      {"op": "sum", "field": "amount"}
+    ]
+  }
 }
 ```
 
@@ -342,13 +346,15 @@ These features are intentionally deferred:
 
 ```json
 {
-  "op": "pipe",
-  "steps": [
-    {"op": "call", "tool": "get_voice_calls"},
-    {"op": "filter", "where": {"op": "eq", "field": "status", "value": "completed"}},
-    {"op": "filter", "where": {"op": "gt", "field": "duration_ms", "value": 60000}},
-    {"op": "select", "fields": ["id", "transcript", "duration_ms"]}
-  ]
+  "program": {
+    "op": "pipe",
+    "steps": [
+      {"op": "call", "tool": "get_voice_calls"},
+      {"op": "filter", "where": {"op": "eq", "field": "status", "value": "completed"}},
+      {"op": "filter", "where": {"op": "gt", "field": "duration_ms", "value": 60000}},
+      {"op": "select", "fields": ["id", "transcript", "duration_ms"]}
+    ]
+  }
 }
 ```
 
@@ -356,31 +362,33 @@ These features are intentionally deferred:
 
 ```json
 {
-  "op": "let",
-  "name": "users",
-  "value": {"op": "call", "tool": "get_users"},
-  "in": {
+  "program": {
     "op": "let",
-    "name": "orders",
-    "value": {"op": "call", "tool": "get_orders"},
+    "name": "users",
+    "value": {"op": "call", "tool": "get_users"},
     "in": {
-      "op": "pipe",
-      "steps": [
-        {"op": "var", "name": "orders"},
-        {"op": "filter", "where": {"op": "gt", "field": "total", "value": 100}},
-        {"op": "map", "expr": {
-          "op": "merge",
-          "objects": [
-            {"op": "get", "path": []},
-            {"op": "pipe", "steps": [
-              {"op": "var", "name": "users"},
-              {"op": "filter", "where": {"op": "eq", "field": "id", "value": {"op": "get", "path": ["user_id"]}}},
-              {"op": "first"},
-              {"op": "select", "fields": ["name", "email"]}
-            ]}
-          ]
-        }}
-      ]
+      "op": "let",
+      "name": "orders",
+      "value": {"op": "call", "tool": "get_orders"},
+      "in": {
+        "op": "pipe",
+        "steps": [
+          {"op": "var", "name": "orders"},
+          {"op": "filter", "where": {"op": "gt", "field": "total", "value": 100}},
+          {"op": "map", "expr": {
+            "op": "merge",
+            "objects": [
+              {"op": "get", "path": []},
+              {"op": "pipe", "steps": [
+                {"op": "var", "name": "users"},
+                {"op": "filter", "where": {"op": "eq", "field": "id", "value": {"op": "get", "path": ["user_id"]}}},
+                {"op": "first"},
+                {"op": "select", "fields": ["name", "email"]}
+              ]}
+            ]
+          }}
+        ]
+      }
     }
   }
 }
@@ -390,21 +398,23 @@ These features are intentionally deferred:
 
 ```json
 {
-  "op": "pipe",
-  "steps": [
-    {"op": "load", "name": "invoice"},
-    {"op": "let", "name": "total", "value": {"op": "get", "path": ["total"]}, "in": {
-      "op": "if",
-      "condition": {"op": "gt", "field": "total", "value": 1000},
-      "then": {"op": "literal", "value": "high_value"},
-      "else": {
+  "program": {
+    "op": "pipe",
+    "steps": [
+      {"op": "load", "name": "invoice"},
+      {"op": "let", "name": "total", "value": {"op": "get", "path": ["total"]}, "in": {
         "op": "if",
-        "condition": {"op": "gt", "field": "total", "value": 100},
-        "then": {"op": "literal", "value": "medium_value"},
-        "else": {"op": "literal", "value": "low_value"}
-      }
-    }}
-  ]
+        "condition": {"op": "gt", "field": "total", "value": 1000},
+        "then": {"op": "literal", "value": "high_value"},
+        "else": {
+          "op": "if",
+          "condition": {"op": "gt", "field": "total", "value": 100},
+          "then": {"op": "literal", "value": "medium_value"},
+          "else": {"op": "literal", "value": "low_value"}
+        }
+      }}
+    ]
+  }
 }
 ```
 
@@ -415,19 +425,21 @@ When running in a multi-turn conversation, previous results can be passed via co
 ```elixir
 # Turn 1: Get expenses
 {:ok, expenses, _metrics} = PtcRunner.run(
-  ~s({"op": "call", "tool": "get_expenses"}),
+  ~s({"program": {"op": "call", "tool": "get_expenses"}}),
   tools: tools
 )
 
 # Turn 2: Use previous result
 {:ok, total, _metrics} = PtcRunner.run(
   ~s({
-    "op": "pipe",
-    "steps": [
-      {"op": "load", "name": "previous_expenses"},
-      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-      {"op": "sum", "field": "amount"}
-    ]
+    "program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "load", "name": "previous_expenses"},
+        {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+        {"op": "sum", "field": "amount"}
+      ]
+    }
   }),
   context: %{"previous_expenses" => expenses},
   tools: tools
@@ -663,11 +675,11 @@ defmodule MyApp.PTCAgent do
   Logic: and, or, not
 
   Example:
-  {"op": "pipe", "steps": [
+  {"program": {"op": "pipe", "steps": [
     {"op": "call", "tool": "get_data"},
     {"op": "filter", "where": {"op": "gt", "field": "value", "value": 100}},
     {"op": "sum", "field": "amount"}
-  ]}
+  ]}}
 
   Available tools: #{inspect(@tools)}
   """
