@@ -300,7 +300,7 @@ defmodule PtcRunner.Schema do
   defp operation_to_schema(op_name, op_def) do
     fields = op_def["fields"]
     properties = build_properties(op_name, fields)
-    required_fields = build_required(op_name, fields)
+    required_fields = build_required(fields)
 
     %{
       "type" => "object",
@@ -327,7 +327,7 @@ defmodule PtcRunner.Schema do
   end
 
   # Build the required fields array for an operation schema
-  defp build_required(_op_name, fields) do
+  defp build_required(fields) do
     base_required = ["op"]
 
     field_required =
