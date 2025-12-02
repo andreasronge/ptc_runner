@@ -3221,8 +3221,74 @@ defmodule PtcRunnerTest do
         "tool": "wrong_arity"
       }})
 
-      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: tools)
-      assert String.contains?(msg, "is not a function with arity 1")
+      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "Tools must be functions with arity 1")
+      assert String.contains?(msg, "wrong_arity")
+    end
+
+    test "tool validation catches arity-2 function" do
+      tools = %{
+        "bad_tool" => fn _a, _b -> "two args" end
+      }
+
+      program = ~s({"program": {"op": "literal", "value": 42}})
+
+      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "Tools must be functions with arity 1")
+      assert String.contains?(msg, "bad_tool")
+    end
+
+    test "tool validation catches non-function values" do
+      tools = %{
+        "not_a_function" => "string value"
+      }
+
+      program = ~s({"program": {"op": "literal", "value": 42}})
+
+      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "Tools must be functions with arity 1")
+      assert String.contains?(msg, "not_a_function")
+    end
+
+    test "tool validation reports multiple invalid tools" do
+      tools = %{
+        "tool1" => fn -> "zero args" end,
+        "tool2" => "not a function",
+        "tool3" => fn _a, _b -> "two args" end,
+        "valid_tool" => fn _args -> "valid" end
+      }
+
+      program = ~s({"program": {"op": "literal", "value": 42}})
+
+      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "Tools must be functions with arity 1")
+      # All three invalid tools should be mentioned
+      assert String.contains?(msg, "tool1")
+      assert String.contains?(msg, "tool2")
+      assert String.contains?(msg, "tool3")
+    end
+
+    test "tool validation passes with valid arity-1 functions" do
+      tools = %{
+        "add" => fn %{"a" => a, "b" => b} -> a + b end,
+        "multiply" => fn %{"x" => x, "y" => y} -> x * y end
+      }
+
+      program = ~s({"program": {
+        "op": "call",
+        "tool": "add",
+        "args": {"a": 2, "b": 3}
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      assert result == 5
+    end
+
+    test "tool validation passes with empty tools map" do
+      program = ~s({"program": {"op": "literal", "value": 42}})
+
+      {:ok, result, _metrics} = PtcRunner.run(program, tools: %{})
+      assert result == 42
     end
 
     test "missing tool field raises validation error" do
