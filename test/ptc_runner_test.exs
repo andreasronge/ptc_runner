@@ -2317,7 +2317,7 @@ defmodule PtcRunnerTest do
         ]
       })
 
-      # Should not raise error due to undefined_var because of short-circuit
+      # Second condition is not evaluated due to short-circuit
       {:ok, result, _metrics} = PtcRunner.run(program)
       assert result == false
     end
@@ -2397,7 +2397,7 @@ defmodule PtcRunnerTest do
         ]
       })
 
-      # Should not raise error due to undefined_var because of short-circuit
+      # Second condition is not evaluated due to short-circuit
       {:ok, result, _metrics} = PtcRunner.run(program)
       assert result == true
     end
