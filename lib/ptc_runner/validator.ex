@@ -144,6 +144,14 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  # Comparison: contains
+  defp validate_operation("contains", node) do
+    case require_field(node, "field", "Operation 'contains' requires field 'field'") do
+      :ok -> require_field(node, "value", "Operation 'contains' requires field 'value'")
+      err -> err
+    end
+  end
+
   # Access operations
   defp validate_operation("get", node) do
     case Map.get(node, "path") do
@@ -173,6 +181,18 @@ defmodule PtcRunner.Validator do
 
   defp validate_operation("count", _node) do
     :ok
+  end
+
+  defp validate_operation("avg", node) do
+    validate_aggregation_field(node, "avg")
+  end
+
+  defp validate_operation("min", node) do
+    validate_aggregation_field(node, "min")
+  end
+
+  defp validate_operation("max", node) do
+    validate_aggregation_field(node, "max")
   end
 
   defp validate_operation("first", _node) do
@@ -214,6 +234,14 @@ defmodule PtcRunner.Validator do
     case Map.has_key?(node, field) do
       true -> :ok
       false -> {:error, {:validation_error, message}}
+    end
+  end
+
+  defp validate_aggregation_field(node, op_name) do
+    case Map.get(node, "field") do
+      nil -> {:error, {:validation_error, "Operation '#{op_name}' requires field 'field'"}}
+      field when is_binary(field) -> :ok
+      _ -> {:error, {:validation_error, "Field 'field' must be a string"}}
     end
   end
 

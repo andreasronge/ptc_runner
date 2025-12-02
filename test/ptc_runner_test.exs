@@ -1016,6 +1016,58 @@ defmodule PtcRunnerTest do
     assert String.contains?(msg, "reject requires a list")
   end
 
+  test "avg on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "avg requires a list")
+  end
+
+  test "min on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": "not a list"},
+        {"op": "min", "field": "price"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "min requires a list")
+  end
+
+  test "max on non-list raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "max", "field": "value"}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "max requires a list")
+  end
+
+  test "contains on non-map raises error" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "contains", "field": "x", "value": 1}
+      ]
+    })
+
+    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    assert String.contains?(msg, "contains requires a map")
+  end
+
   # Validation errors for new operations
   test "nth missing index field raises validation error" do
     program = ~s({"op": "nth"})
@@ -1212,6 +1264,384 @@ defmodule PtcRunnerTest do
       {:error, reason} = PtcRunner.run(program)
 
       assert reason == {:execution_error, "No input available"}
+    end
+  end
+
+  # Contains operation
+  test "contains on list returns true when value is member" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"tags": [1, 2, 3]}},
+        {"op": "contains", "field": "tags", "value": 2}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "contains on list returns false when value is not member" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"tags": [1, 2, 3]}},
+        {"op": "contains", "field": "tags", "value": 5}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  test "contains on string returns true for substring" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"text": "hello world"}},
+        {"op": "contains", "field": "text", "value": "world"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "contains on string returns false for missing substring" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"text": "hello"}},
+        {"op": "contains", "field": "text", "value": "world"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  test "contains on map returns true for existing key" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"metadata": {"a": 1}}},
+        {"op": "contains", "field": "metadata", "value": "a"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == true
+  end
+
+  test "contains on nil field value returns false" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"data": null}},
+        {"op": "contains", "field": "data", "value": "foo"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  test "contains on other types returns false" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"count": 42}},
+        {"op": "contains", "field": "count", "value": "foo"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == false
+  end
+
+  # Avg operation
+  test "avg calculates average of numeric field values" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"amount": 10},
+          {"amount": 20}
+        ]},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 15.0
+  end
+
+  test "avg on empty list returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "avg skips non-numeric values" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"amount": 10},
+          {"amount": "foo"}
+        ]},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 10.0
+  end
+
+  test "avg with all non-numeric returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"amount": "foo"}
+        ]},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "avg skips nil values" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"amount": 10},
+          {"amount": null}
+        ]},
+        {"op": "avg", "field": "amount"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 10.0
+  end
+
+  # Min operation
+  test "min returns minimum value of field" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"val": 3},
+          {"val": 1},
+          {"val": 2}
+        ]},
+        {"op": "min", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 1
+  end
+
+  test "min on empty list returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "min", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "min with single element returns that element" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [{"val": 5}]},
+        {"op": "min", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 5
+  end
+
+  test "min skips nil values" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"val": null},
+          {"val": 3},
+          {"val": 1}
+        ]},
+        {"op": "min", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 1
+  end
+
+  # Max operation
+  test "max returns maximum value of field" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"val": 3},
+          {"val": 1},
+          {"val": 2}
+        ]},
+        {"op": "max", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 3
+  end
+
+  test "max on empty list returns nil" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "max", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == nil
+  end
+
+  test "max with single element returns that element" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [{"val": 5}]},
+        {"op": "max", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 5
+  end
+
+  test "max skips nil values" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"val": null},
+          {"val": 3},
+          {"val": 1}
+        ]},
+        {"op": "max", "field": "val"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == 3
+  end
+
+  # E2E test with multiple operations
+  test "E2E: expense filtering and aggregation" do
+    program = ~s({
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "tags": ["flights", "hotels"], "amount": 500},
+          {"category": "food", "tags": ["restaurant"], "amount": 50},
+          {"category": "travel", "tags": ["flights"], "amount": 200}
+        ]},
+        {"op": "filter", "where": {"op": "contains", "field": "tags", "value": "flights"}},
+        {"op": "select", "fields": ["amount"]},
+        {"op": "first"}
+      ]
+    })
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == %{"amount" => 500}
+  end
+
+  describe "Validation error tests for new operations" do
+    test "contains missing field parameter returns validation error" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [1, 2, 3]},
+          {"op": "contains", "value": 2}
+        ]
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'contains' requires field 'field'"}
+    end
+
+    test "contains missing value parameter returns validation error" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [1, 2, 3]},
+          {"op": "contains", "field": "tags"}
+        ]
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'contains' requires field 'value'"}
+    end
+
+    test "avg missing field parameter returns validation error" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"amount": 10}]},
+          {"op": "avg"}
+        ]
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'avg' requires field 'field'"}
+    end
+
+    test "min missing field parameter returns validation error" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"val": 5}]},
+          {"op": "min"}
+        ]
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'min' requires field 'field'"}
+    end
+
+    test "max missing field parameter returns validation error" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"val": 5}]},
+          {"op": "max"}
+        ]
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'max' requires field 'field'"}
     end
   end
 end
