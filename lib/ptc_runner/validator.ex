@@ -82,6 +82,38 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  defp validate_operation("and", node) do
+    case Map.get(node, "conditions") do
+      nil ->
+        {:error, {:validation_error, "Operation 'and' requires field 'conditions'"}}
+
+      conditions when not is_list(conditions) ->
+        {:error, {:validation_error, "Field 'conditions' must be a list"}}
+
+      conditions ->
+        validate_list(conditions)
+    end
+  end
+
+  defp validate_operation("or", node) do
+    case Map.get(node, "conditions") do
+      nil ->
+        {:error, {:validation_error, "Operation 'or' requires field 'conditions'"}}
+
+      conditions when not is_list(conditions) ->
+        {:error, {:validation_error, "Field 'conditions' must be a list"}}
+
+      conditions ->
+        validate_list(conditions)
+    end
+  end
+
+  defp validate_operation("not", node) do
+    with :ok <- require_field(node, "condition", "Operation 'not' requires field 'condition'") do
+      validate_node(Map.get(node, "condition"))
+    end
+  end
+
   # Control flow
   defp validate_operation("pipe", node) do
     case Map.get(node, "steps") do
