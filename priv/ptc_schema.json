@@ -107,7 +107,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Maximum value in a field",
+          "description": "Maximum value in field. Example: {op:'max', field:'price'}",
           "properties": {
             "field": {
               "type": "string"
@@ -124,7 +124,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check less than or equal",
+          "description": "Field <= value. Example: {op:'lte', field:'quantity', value:0}",
           "properties": {
             "field": {
               "type": "string"
@@ -257,7 +257,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Minimum value in a field",
+          "description": "Minimum value in field. Example: {op:'min', field:'price'}",
           "properties": {
             "field": {
               "type": "string"
@@ -331,7 +331,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check if field contains value",
+          "description": "Field contains value. Example: {op:'contains', field:'tags', value:'featured'}",
           "properties": {
             "field": {
               "type": "string"
@@ -417,7 +417,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check greater than or equal",
+          "description": "Field >= value. Example: {op:'gte', field:'age', value:18}",
           "properties": {
             "field": {
               "type": "string"
@@ -453,7 +453,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Field not equals value",
+          "description": "Field not equals value. Example: {op:'neq', field:'status', value:'deleted'}",
           "properties": {
             "field": {
               "type": "string"
@@ -472,7 +472,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check less than",
+          "description": "Field less than value. Example: {op:'lt', field:'price', value:100}",
           "properties": {
             "field": {
               "type": "string"
@@ -573,7 +573,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Average values in a field",
+          "description": "Average of numeric field. Example: {op:'avg', field:'rating'}",
           "properties": {
             "field": {
               "type": "string"

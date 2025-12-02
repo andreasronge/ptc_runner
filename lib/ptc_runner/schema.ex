@@ -130,7 +130,8 @@ defmodule PtcRunner.Schema do
       }
     },
     "neq" => %{
-      "description" => "Field not equals value",
+      "description" =>
+        "Field not equals value. Example: {op:'neq', field:'status', value:'deleted'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -144,28 +145,29 @@ defmodule PtcRunner.Schema do
       }
     },
     "gte" => %{
-      "description" => "Check greater than or equal",
+      "description" => "Field >= value. Example: {op:'gte', field:'age', value:18}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "lt" => %{
-      "description" => "Check less than",
+      "description" => "Field less than value. Example: {op:'lt', field:'price', value:100}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "lte" => %{
-      "description" => "Check less than or equal",
+      "description" => "Field <= value. Example: {op:'lte', field:'quantity', value:0}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "contains" => %{
-      "description" => "Check if field contains value",
+      "description" =>
+        "Field contains value. Example: {op:'contains', field:'tags', value:'featured'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -193,19 +195,19 @@ defmodule PtcRunner.Schema do
       "fields" => %{}
     },
     "avg" => %{
-      "description" => "Average values in a field",
+      "description" => "Average of numeric field. Example: {op:'avg', field:'rating'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
     },
     "min" => %{
-      "description" => "Minimum value in a field",
+      "description" => "Minimum value in field. Example: {op:'min', field:'price'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
     },
     "max" => %{
-      "description" => "Maximum value in a field",
+      "description" => "Maximum value in field. Example: {op:'max', field:'price'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
