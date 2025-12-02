@@ -313,4 +313,148 @@ defmodule PtcRunner.SchemaTest do
       end)
     end
   end
+
+  describe "to_json_schema/0" do
+    test "returns a valid JSON Schema structure" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      assert is_map(schema)
+      assert schema["$schema"] == "http://json-schema.org/draft-07/schema#"
+      assert schema["title"] == "PTC DSL Program"
+      assert is_list(schema["oneOf"])
+    end
+
+    test "generates 33 operation schemas" do
+      schema = PtcRunner.Schema.to_json_schema()
+      assert length(schema["oneOf"]) == 33
+    end
+
+    test "each operation schema has required structure" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      Enum.each(schema["oneOf"], fn op_schema ->
+        assert is_map(op_schema)
+        assert op_schema["type"] == "object"
+        assert is_map(op_schema["properties"])
+        assert is_list(op_schema["required"])
+        assert op_schema["additionalProperties"] == false
+      end)
+    end
+
+    test "literal operation schema is correct" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      literal_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "literal"
+        end)
+
+      assert literal_schema != nil
+      assert "op" in literal_schema["required"]
+      assert "value" in literal_schema["required"]
+      assert literal_schema["properties"]["value"] == %{}
+    end
+
+    test "operations with no fields have only 'op' as required" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      count_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "count"
+        end)
+
+      assert count_schema["required"] == ["op"]
+    end
+
+    test "operations with optional fields do not include them in required" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      get_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "get"
+        end)
+
+      assert "path" in get_schema["required"]
+      assert "default" not in get_schema["required"]
+      assert Map.has_key?(get_schema["properties"], "default")
+    end
+
+    test "expr types use $ref" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      let_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "let"
+        end)
+
+      assert let_schema["properties"]["value"] == %{"$ref" => "#"}
+      assert let_schema["properties"]["in"] == %{"$ref" => "#"}
+    end
+
+    test "list of expr types have correct schema" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      and_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "and"
+        end)
+
+      assert and_schema["properties"]["conditions"] == %{
+               "type" => "array",
+               "items" => %{"$ref" => "#"}
+             }
+    end
+
+    test "list of string types have correct schema" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      select_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "select"
+        end)
+
+      assert select_schema["properties"]["fields"] == %{
+               "type" => "array",
+               "items" => %{"type" => "string"}
+             }
+    end
+
+    test "non_neg_integer types have minimum constraint" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      nth_schema =
+        Enum.find(schema["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "nth"
+        end)
+
+      assert nth_schema["properties"]["index"] == %{
+               "type" => "integer",
+               "minimum" => 0
+             }
+    end
+
+    test "generated schema is valid JSON" do
+      schema = PtcRunner.Schema.to_json_schema()
+      json = Jason.encode!(schema)
+      decoded = Jason.decode!(json)
+
+      assert decoded == schema
+    end
+
+    test "schema file is synchronized with generated schema" do
+      generated = PtcRunner.Schema.to_json_schema()
+      file_path = Path.expand("priv/ptc_schema.json")
+
+      assert File.exists?(file_path),
+             "priv/ptc_schema.json file not found"
+
+      on_disk =
+        file_path
+        |> File.read!()
+        |> Jason.decode!()
+
+      assert generated == on_disk,
+             "Generated schema does not match priv/ptc_schema.json"
+    end
+  end
 end
