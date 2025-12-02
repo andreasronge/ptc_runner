@@ -3,6 +3,7 @@
   "oneOf": [
     {
       "additionalProperties": false,
+      "description": "Load a resource by name",
       "properties": {
         "name": {
           "type": "string"
@@ -19,6 +20,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Get last element",
       "properties": {
         "op": {
           "const": "last"
@@ -31,6 +33,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Pipe value through multiple steps",
       "properties": {
         "op": {
           "const": "pipe"
@@ -50,6 +53,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Concatenate multiple lists",
       "properties": {
         "lists": {
           "items": {
@@ -69,6 +73,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Merge multiple objects",
       "properties": {
         "objects": {
           "items": {
@@ -88,6 +93,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Count elements",
       "properties": {
         "op": {
           "const": "count"
@@ -100,6 +106,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Maximum value in a field",
       "properties": {
         "field": {
           "type": "string"
@@ -116,6 +123,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check less than or equal",
       "properties": {
         "field": {
           "type": "string"
@@ -134,6 +142,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check equality",
       "properties": {
         "field": {
           "type": "string"
@@ -152,6 +161,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Reject collection elements based on condition",
       "properties": {
         "op": {
           "const": "reject"
@@ -168,6 +178,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Get value at path",
       "properties": {
         "default": {},
         "op": {
@@ -188,6 +199,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Sum values in a field",
       "properties": {
         "field": {
           "type": "string"
@@ -204,6 +216,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Select specific fields from objects",
       "properties": {
         "fields": {
           "items": {
@@ -223,6 +236,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Call a tool",
       "properties": {
         "args": {
           "type": "object"
@@ -242,6 +256,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Minimum value in a field",
       "properties": {
         "field": {
           "type": "string"
@@ -258,6 +273,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Get first element",
       "properties": {
         "op": {
           "const": "first"
@@ -270,6 +286,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Conditional expression",
       "properties": {
         "condition": {
           "$ref": "#"
@@ -294,6 +311,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check greater than",
       "properties": {
         "field": {
           "type": "string"
@@ -312,6 +330,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check if field contains value",
       "properties": {
         "field": {
           "type": "string"
@@ -330,6 +349,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Transform collection elements",
       "properties": {
         "expr": {
           "$ref": "#"
@@ -346,6 +366,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "A literal JSON value",
       "properties": {
         "op": {
           "const": "literal"
@@ -360,6 +381,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Logical NOT of a condition",
       "properties": {
         "condition": {
           "$ref": "#"
@@ -376,6 +398,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Get element at index",
       "properties": {
         "index": {
           "minimum": 0,
@@ -393,6 +416,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check greater than or equal",
       "properties": {
         "field": {
           "type": "string"
@@ -411,6 +435,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Reference a variable",
       "properties": {
         "name": {
           "type": "string"
@@ -427,6 +452,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check inequality",
       "properties": {
         "field": {
           "type": "string"
@@ -445,6 +471,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Check less than",
       "properties": {
         "field": {
           "type": "string"
@@ -463,6 +490,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Logical AND of conditions",
       "properties": {
         "conditions": {
           "items": {
@@ -482,6 +510,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Bind a value to a variable",
       "properties": {
         "in": {
           "$ref": "#"
@@ -506,6 +535,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Filter collection based on condition",
       "properties": {
         "op": {
           "const": "filter"
@@ -522,6 +552,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Zip multiple lists together",
       "properties": {
         "lists": {
           "items": {
@@ -541,6 +572,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Average values in a field",
       "properties": {
         "field": {
           "type": "string"
@@ -557,6 +589,7 @@
     },
     {
       "additionalProperties": false,
+      "description": "Logical OR of conditions",
       "properties": {
         "conditions": {
           "items": {

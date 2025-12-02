@@ -304,6 +304,7 @@ defmodule PtcRunner.Schema do
 
     %{
       "type" => "object",
+      "description" => op_def["description"],
       "properties" => properties,
       "required" => required_fields,
       "additionalProperties" => false
