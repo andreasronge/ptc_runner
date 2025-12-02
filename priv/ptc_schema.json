@@ -4,7 +4,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Load a resource by name",
+          "description": "Load a resource by name. Use name='input' to load the input data",
           "properties": {
             "name": {
               "type": "string"
@@ -34,7 +34,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Pipe value through multiple steps",
+          "description": "Sequence of operations. Steps: [load input, then filter/map/sum/count]. Example: pipe with steps [load, filter, count]",
           "properties": {
             "op": {
               "const": "pipe"
@@ -94,7 +94,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Count elements",
+          "description": "Count items in collection. Example: {op:'count'}",
           "properties": {
             "op": {
               "const": "count"
@@ -143,7 +143,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check equality",
+          "description": "Field equals value. Example: {op:'eq', field:'status', value:'active'}",
           "properties": {
             "field": {
               "type": "string"
@@ -200,7 +200,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Sum values in a field",
+          "description": "Sum numeric field. Example: {op:'sum', field:'price'}",
           "properties": {
             "field": {
               "type": "string"
@@ -312,7 +312,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check greater than",
+          "description": "Field greater than value. Example: {op:'gt', field:'price', value:10}",
           "properties": {
             "field": {
               "type": "string"
@@ -453,7 +453,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Check inequality",
+          "description": "Field not equals value",
           "properties": {
             "field": {
               "type": "string"
@@ -536,7 +536,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Filter collection based on condition",
+          "description": "Keep items matching condition. Use with gt/lt/eq in 'where' field",
           "properties": {
             "op": {
               "const": "filter"

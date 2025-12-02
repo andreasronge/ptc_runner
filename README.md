@@ -168,8 +168,10 @@ Store results from previous turns and reference them:
 
 PtcRunner is execution-only—compose it with your LLM client (e.g., [ReqLLM](https://hexdocs.pm/req_llm)):
 
+### Text Mode
+
 ```elixir
-# 1. LLM generates program
+# 1. LLM generates program as text
 {:ok, response} = ReqLLM.generate_text("openrouter:anthropic/claude-3-sonnet", prompt)
 program = extract_json(response)
 
@@ -180,7 +182,33 @@ case PtcRunner.run(program, tools: tools) do
 end
 ```
 
-See `test/e2e/` for complete integration examples.
+### Structured Output Mode
+
+Use `PtcRunner.Schema.to_llm_schema/0` with structured output for guaranteed valid JSON:
+
+```elixir
+# Get the LLM-optimized schema (includes usage hints in descriptions)
+schema = PtcRunner.Schema.to_llm_schema()
+
+# LLM generates valid program directly - no JSON parsing needed
+program = ReqLLM.generate_object!(
+  "openrouter:google/gemini-2.5-flash",
+  "Filter products where price > 100, then count them",
+  schema
+)
+
+# Execute the program
+{:ok, result, _metrics} = PtcRunner.run(Jason.encode!(program),
+  context: %{"input" => products}
+)
+```
+
+The LLM schema includes operation descriptions that guide the model:
+- `pipe`: "Sequence of operations. Steps: [load input, then filter/map/sum/count]"
+- `load`: "Load a resource by name. Use name='input' to load the input data"
+- `filter`: "Keep items matching condition. Use with gt/lt/eq in 'where' field"
+
+See `test/ptc_runner/e2e_test.exs` for complete integration examples.
 
 ## License
 

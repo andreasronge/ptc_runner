@@ -563,7 +563,7 @@ defmodule PtcRunner.SchemaTest do
       assert Map.has_key?(get_schema["properties"], "default")
     end
 
-    test "expr types use inline object schema (not $ref)" do
+    test "expr types use anyOf with operation schemas" do
       schema = PtcRunner.Schema.to_llm_schema()
 
       let_schema =
@@ -571,14 +571,16 @@ defmodule PtcRunner.SchemaTest do
           op["properties"]["op"]["const"] == "let"
         end)
 
-      # Verify value and in fields use inline object schema, not $ref
-      assert let_schema["properties"]["value"]["type"] == "object"
-      assert let_schema["properties"]["value"]["properties"]["op"]["type"] == "string"
-      assert let_schema["properties"]["in"]["type"] == "object"
-      assert let_schema["properties"]["in"]["properties"]["op"]["type"] == "string"
+      # Verify value and in fields use anyOf with nested operation schemas
+      assert is_list(let_schema["properties"]["value"]["anyOf"])
+      assert is_list(let_schema["properties"]["in"]["anyOf"])
+
+      # Each anyOf entry should have op const
+      first_value_op = hd(let_schema["properties"]["value"]["anyOf"])
+      assert first_value_op["properties"]["op"]["const"] != nil
     end
 
-    test "list of expr types have correct inline schema" do
+    test "list of expr types use anyOf schema" do
       schema = PtcRunner.Schema.to_llm_schema()
 
       and_schema =
@@ -588,10 +590,11 @@ defmodule PtcRunner.SchemaTest do
 
       assert and_schema["properties"]["conditions"]["type"] == "array"
       assert is_map(and_schema["properties"]["conditions"]["items"])
-      assert and_schema["properties"]["conditions"]["items"]["type"] == "object"
+      assert is_list(and_schema["properties"]["conditions"]["items"]["anyOf"])
 
-      assert and_schema["properties"]["conditions"]["items"]["properties"]["op"]["type"] ==
-               "string"
+      # Each anyOf entry should define an operation
+      first_op = hd(and_schema["properties"]["conditions"]["items"]["anyOf"])
+      assert first_op["properties"]["op"]["const"] != nil
     end
 
     test "list of string types have correct schema" do
@@ -620,7 +623,7 @@ defmodule PtcRunner.SchemaTest do
       assert nth_schema["properties"]["index"]["minimum"] == 0
     end
 
-    test "recursive operations like pipe validate correctly" do
+    test "recursive operations like pipe use anyOf for steps" do
       schema = PtcRunner.Schema.to_llm_schema()
 
       pipe_schema =
@@ -630,8 +633,16 @@ defmodule PtcRunner.SchemaTest do
 
       assert pipe_schema != nil
       assert pipe_schema["properties"]["steps"]["type"] == "array"
-      assert pipe_schema["properties"]["steps"]["items"]["type"] == "object"
-      assert pipe_schema["properties"]["steps"]["items"]["properties"]["op"]["type"] == "string"
+      assert is_list(pipe_schema["properties"]["steps"]["items"]["anyOf"])
+
+      # Steps should include load operation with required name field
+      load_schema =
+        Enum.find(pipe_schema["properties"]["steps"]["items"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "load"
+        end)
+
+      assert load_schema != nil
+      assert "name" in load_schema["required"]
     end
 
     test "generated schema is valid JSON" do
