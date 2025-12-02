@@ -369,7 +369,7 @@ defmodule PtcRunner.Operations do
       nil ->
         {:error, {:execution_error, "Tool '#{tool_name}' not found"}}
 
-      tool_fn when is_function(tool_fn, 1) ->
+      tool_fn ->
         try do
           case tool_fn.(args) do
             {:error, reason} ->
@@ -381,9 +381,6 @@ defmodule PtcRunner.Operations do
         rescue
           e -> {:error, {:execution_error, "Tool '#{tool_name}' raised: #{Exception.message(e)}"}}
         end
-
-      _tool_fn ->
-        {:error, {:execution_error, "Tool '#{tool_name}' is not a function with arity 1"}}
     end
   end
 
