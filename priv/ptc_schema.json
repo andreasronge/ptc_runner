@@ -34,7 +34,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Sequence of operations. Steps: [load input, then filter/map/sum/count]. Example: pipe with steps [load, filter, count]",
+          "description": "Sequence of operations. Example: {op:'pipe', steps:[{op:'load', name:'input'}, {op:'filter', where:{op:'gt', field:'price', value:10}}]}",
           "properties": {
             "op": {
               "const": "pipe"
@@ -350,7 +350,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Transform collection elements",
+          "description": "Transform collection elements. Example: {op:'map', expr:{op:'get', path:['name']}}",
           "properties": {
             "expr": {
               "$ref": "#/$defs/operation"
@@ -536,7 +536,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Keep items matching condition. Use with gt/lt/eq in 'where' field",
+          "description": "Keep items matching condition. Example: {op:'filter', where:{op:'gt', field:'price', value:10}}",
           "properties": {
             "op": {
               "const": "filter"

@@ -98,7 +98,7 @@ defmodule PtcRunner.Schema do
     },
     "pipe" => %{
       "description" =>
-        "Sequence of operations. Steps: [load input, then filter/map/sum/count]. Example: pipe with steps [load, filter, count]",
+        "Sequence of operations. Example: {op:'pipe', steps:[{op:'load', name:'input'}, {op:'filter', where:{op:'gt', field:'price', value:10}}]}",
       "fields" => %{
         "steps" => %{"type" => {:list, :expr}, "required" => true}
       }
@@ -106,13 +106,15 @@ defmodule PtcRunner.Schema do
 
     # Collection operations
     "filter" => %{
-      "description" => "Keep items matching condition. Use with gt/lt/eq in 'where' field",
+      "description" =>
+        "Keep items matching condition. Example: {op:'filter', where:{op:'gt', field:'price', value:10}}",
       "fields" => %{
         "where" => %{"type" => :expr, "required" => true}
       }
     },
     "map" => %{
-      "description" => "Transform collection elements",
+      "description" =>
+        "Transform collection elements. Example: {op:'map', expr:{op:'get', path:['name']}}",
       "fields" => %{
         "expr" => %{"type" => :expr, "required" => true}
       }
