@@ -192,7 +192,7 @@ schema = PtcRunner.Schema.to_llm_schema()
 
 # LLM generates valid program directly - no JSON parsing needed
 program = ReqLLM.generate_object!(
-  "openrouter:google/gemini-2.5-flash",
+  "openrouter:anthropic/claude-haiku-4.5",
   "Filter products where price > 100, then count them",
   schema
 )
@@ -203,10 +203,14 @@ program = ReqLLM.generate_object!(
 )
 ```
 
-The LLM schema includes operation descriptions that guide the model:
-- `pipe`: "Sequence of operations. Steps: [load input, then filter/map/sum/count]"
-- `load`: "Load a resource by name. Use name='input' to load the input data"
-- `filter`: "Keep items matching condition. Use with gt/lt/eq in 'where' field"
+#### Model Compatibility
+
+The LLM schema uses nested `anyOf` structures to define valid operations. Not all models handle complex structured output schemas equally well:
+
+- **Recommended**: Claude Haiku 4.5, Claude Sonnet 4+ - reliably follow nested schema constraints
+- **May have issues**: Some models may not enforce required fields in deeply nested `anyOf` schemas
+
+The schema includes operation descriptions with examples (e.g., `{op:'gt', field:'price', value:10}`) to guide models. See `PtcRunner.Schema.operations/0` for all available operations.
 
 See `test/ptc_runner/e2e_test.exs` for complete integration examples.
 
