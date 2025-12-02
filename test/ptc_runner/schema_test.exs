@@ -25,7 +25,10 @@ defmodule PtcRunner.SchemaTest do
       {:ok, literal_def} = PtcRunner.Schema.get_operation("literal")
 
       assert is_map(literal_def)
-      assert literal_def["description"] == "A literal JSON value"
+
+      assert literal_def["description"] ==
+               "A literal JSON value. Example: {op:'literal', value:42}"
+
       assert is_map(literal_def["fields"])
     end
 

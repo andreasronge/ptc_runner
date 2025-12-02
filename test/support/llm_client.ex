@@ -8,7 +8,7 @@ defmodule PtcRunner.TestSupport.LLMClient do
   (with guaranteed valid JSON).
   """
 
-  @model "openrouter:anthropic/claude-sonnet-4"
+  @model "openrouter:anthropic/claude-haiku-4.5"
   @timeout 60_000
 
   @doc """

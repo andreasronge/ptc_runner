@@ -12,19 +12,20 @@ defmodule PtcRunner.Schema do
   @operations %{
     # Data operations
     "literal" => %{
-      "description" => "A literal JSON value",
+      "description" => "A literal JSON value. Example: {op:'literal', value:42}",
       "fields" => %{
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "load" => %{
-      "description" => "Load a resource by name. Use name='input' to load the input data",
+      "description" =>
+        "Load a resource by name. Use name='input' to load the input data. Example: {op:'load', name:'input'}",
       "fields" => %{
         "name" => %{"type" => :string, "required" => true}
       }
     },
     "var" => %{
-      "description" => "Reference a variable",
+      "description" => "Reference a variable. Example: {op:'var', name:'count'}",
       "fields" => %{
         "name" => %{"type" => :string, "required" => true}
       }
@@ -32,7 +33,8 @@ defmodule PtcRunner.Schema do
 
     # Binding
     "let" => %{
-      "description" => "Bind a value to a variable",
+      "description" =>
+        "Bind a value to a variable. Example: {op:'let', name:'x', value:{op:'literal', value:5}, in:{op:'var', name:'x'}}",
       "fields" => %{
         "name" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :expr, "required" => true},
@@ -42,7 +44,8 @@ defmodule PtcRunner.Schema do
 
     # Control flow
     "if" => %{
-      "description" => "Conditional expression",
+      "description" =>
+        "Conditional expression. Example: {op:'if', condition:{op:'gt', field:'age', value:18}, then:{op:'literal', value:'adult'}, else:{op:'literal', value:'minor'}}",
       "fields" => %{
         "condition" => %{"type" => :expr, "required" => true},
         "then" => %{"type" => :expr, "required" => true},
@@ -50,19 +53,22 @@ defmodule PtcRunner.Schema do
       }
     },
     "and" => %{
-      "description" => "Logical AND of conditions",
+      "description" =>
+        "Logical AND of conditions. Example: {op:'and', conditions:[{op:'gt', field:'age', value:18}, {op:'eq', field:'status', value:'active'}]}",
       "fields" => %{
         "conditions" => %{"type" => {:list, :expr}, "required" => true}
       }
     },
     "or" => %{
-      "description" => "Logical OR of conditions",
+      "description" =>
+        "Logical OR of conditions. Example: {op:'or', conditions:[{op:'eq', field:'status', value:'pending'}, {op:'eq', field:'status', value:'cancelled'}]}",
       "fields" => %{
         "conditions" => %{"type" => {:list, :expr}, "required" => true}
       }
     },
     "not" => %{
-      "description" => "Logical NOT of a condition",
+      "description" =>
+        "Logical NOT of a condition. Example: {op:'not', condition:{op:'eq', field:'status', value:'deleted'}}",
       "fields" => %{
         "condition" => %{"type" => :expr, "required" => true}
       }
@@ -70,26 +76,29 @@ defmodule PtcRunner.Schema do
 
     # Combining operations
     "merge" => %{
-      "description" => "Merge multiple objects",
+      "description" =>
+        "Merge multiple objects. Example: {op:'merge', objects:[{op:'literal', value:{a:1}}, {op:'literal', value:{b:2}}]}",
       "fields" => %{
         "objects" => %{"type" => {:list, :expr}, "required" => true}
       }
     },
     "concat" => %{
-      "description" => "Concatenate multiple lists",
+      "description" =>
+        "Concatenate multiple lists. Example: {op:'concat', lists:[{op:'literal', value:[1,2]}, {op:'literal', value:[3,4]}]}",
       "fields" => %{
         "lists" => %{"type" => {:list, :expr}, "required" => true}
       }
     },
     "zip" => %{
-      "description" => "Zip multiple lists together",
+      "description" =>
+        "Zip multiple lists together. Example: {op:'zip', lists:[{op:'literal', value:[1,2]}, {op:'literal', value:['a','b']}]}",
       "fields" => %{
         "lists" => %{"type" => {:list, :expr}, "required" => true}
       }
     },
     "pipe" => %{
       "description" =>
-        "Sequence of operations. Steps: [load input, then filter/map/sum/count]. Example: pipe with steps [load, filter, count]",
+        "Sequence of operations. Example: {op:'pipe', steps:[{op:'load', name:'input'}, {op:'filter', where:{op:'gt', field:'price', value:10}}]}",
       "fields" => %{
         "steps" => %{"type" => {:list, :expr}, "required" => true}
       }
@@ -97,25 +106,29 @@ defmodule PtcRunner.Schema do
 
     # Collection operations
     "filter" => %{
-      "description" => "Keep items matching condition. Use with gt/lt/eq in 'where' field",
+      "description" =>
+        "Keep items matching condition. Example: {op:'filter', where:{op:'gt', field:'price', value:10}}",
       "fields" => %{
         "where" => %{"type" => :expr, "required" => true}
       }
     },
     "map" => %{
-      "description" => "Transform collection elements",
+      "description" =>
+        "Transform collection elements. Example: {op:'map', expr:{op:'get', path:['name']}}",
       "fields" => %{
         "expr" => %{"type" => :expr, "required" => true}
       }
     },
     "select" => %{
-      "description" => "Select specific fields from objects",
+      "description" =>
+        "Select specific fields from objects. Example: {op:'select', fields:['name', 'email']}",
       "fields" => %{
         "fields" => %{"type" => {:list, :string}, "required" => true}
       }
     },
     "reject" => %{
-      "description" => "Reject collection elements based on condition",
+      "description" =>
+        "Reject collection elements based on condition. Example: {op:'reject', where:{op:'eq', field:'status', value:'inactive'}}",
       "fields" => %{
         "where" => %{"type" => :expr, "required" => true}
       }
@@ -130,7 +143,8 @@ defmodule PtcRunner.Schema do
       }
     },
     "neq" => %{
-      "description" => "Field not equals value",
+      "description" =>
+        "Field not equals value. Example: {op:'neq', field:'status', value:'deleted'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -144,28 +158,31 @@ defmodule PtcRunner.Schema do
       }
     },
     "gte" => %{
-      "description" => "Check greater than or equal",
+      "description" =>
+        "Field greater than or equal to value. Example: {op:'gte', field:'age', value:18}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "lt" => %{
-      "description" => "Check less than",
+      "description" => "Field less than value. Example: {op:'lt', field:'price', value:100}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "lte" => %{
-      "description" => "Check less than or equal",
+      "description" =>
+        "Field less than or equal to value. Example: {op:'lte', field:'quantity', value:0}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "contains" => %{
-      "description" => "Check if field contains value",
+      "description" =>
+        "Field contains value. Example: {op:'contains', field:'tags', value:'featured'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -174,7 +191,7 @@ defmodule PtcRunner.Schema do
 
     # Access operations
     "get" => %{
-      "description" => "Get value at path",
+      "description" => "Get value at path. Example: {op:'get', path:['user', 'address', 'city']}",
       "fields" => %{
         "path" => %{"type" => {:list, :string}, "required" => true},
         "default" => %{"type" => :any, "required" => false}
@@ -193,33 +210,33 @@ defmodule PtcRunner.Schema do
       "fields" => %{}
     },
     "avg" => %{
-      "description" => "Average values in a field",
+      "description" => "Average of numeric field. Example: {op:'avg', field:'rating'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
     },
     "min" => %{
-      "description" => "Minimum value in a field",
+      "description" => "Minimum value in field. Example: {op:'min', field:'price'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
     },
     "max" => %{
-      "description" => "Maximum value in a field",
+      "description" => "Maximum value in field. Example: {op:'max', field:'price'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
     },
     "first" => %{
-      "description" => "Get first element",
+      "description" => "Get first element. Example: {op:'first'}",
       "fields" => %{}
     },
     "last" => %{
-      "description" => "Get last element",
+      "description" => "Get last element. Example: {op:'last'}",
       "fields" => %{}
     },
     "nth" => %{
-      "description" => "Get element at index",
+      "description" => "Get element at index. Example: {op:'nth', index:2}",
       "fields" => %{
         "index" => %{"type" => :non_neg_integer, "required" => true}
       }
@@ -227,7 +244,7 @@ defmodule PtcRunner.Schema do
 
     # Tool integration
     "call" => %{
-      "description" => "Call a tool",
+      "description" => "Call a tool. Example: {op:'call', tool:'fetch_user', args:{id:123}}",
       "fields" => %{
         "tool" => %{"type" => :string, "required" => true},
         "args" => %{"type" => :map, "required" => false}
