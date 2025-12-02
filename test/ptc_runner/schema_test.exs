@@ -486,4 +486,160 @@ defmodule PtcRunner.SchemaTest do
              "Generated schema does not match priv/ptc_schema.json"
     end
   end
+
+  describe "to_llm_schema/0" do
+    test "returns a valid JSON Schema structure" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      assert is_map(schema)
+      assert schema["title"] == "PTC Program"
+      assert schema["type"] == "object"
+      assert is_map(schema["properties"])
+      assert is_list(schema["properties"]["program"]["anyOf"])
+    end
+
+    test "schema has program property with correct structure" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      assert is_map(schema["properties"])
+      assert is_map(schema["properties"]["program"])
+      assert is_list(schema["properties"]["program"]["anyOf"])
+      assert schema["required"] == ["program"]
+      assert schema["additionalProperties"] == false
+    end
+
+    test "generates 33 operation schemas" do
+      schema = PtcRunner.Schema.to_llm_schema()
+      assert length(schema["properties"]["program"]["anyOf"]) == 33
+    end
+
+    test "each operation schema has required structure" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      Enum.each(schema["properties"]["program"]["anyOf"], fn op_schema ->
+        assert is_map(op_schema)
+        assert op_schema["type"] == "object"
+        assert is_map(op_schema["properties"])
+        assert is_list(op_schema["required"])
+        assert op_schema["additionalProperties"] == false
+      end)
+    end
+
+    test "literal operation schema is correct" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      literal_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "literal"
+        end)
+
+      assert literal_schema != nil
+      assert "op" in literal_schema["required"]
+      assert "value" in literal_schema["required"]
+      assert literal_schema["properties"]["value"] == %{}
+    end
+
+    test "operations with no fields have only 'op' as required" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      count_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "count"
+        end)
+
+      assert count_schema["required"] == ["op"]
+    end
+
+    test "operations with optional fields do not include them in required" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      get_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "get"
+        end)
+
+      assert "path" in get_schema["required"]
+      assert "default" not in get_schema["required"]
+      assert Map.has_key?(get_schema["properties"], "default")
+    end
+
+    test "expr types use inline object schema (not $ref)" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      let_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "let"
+        end)
+
+      # Verify value and in fields use inline object schema, not $ref
+      assert let_schema["properties"]["value"]["type"] == "object"
+      assert let_schema["properties"]["value"]["properties"]["op"]["type"] == "string"
+      assert let_schema["properties"]["in"]["type"] == "object"
+      assert let_schema["properties"]["in"]["properties"]["op"]["type"] == "string"
+    end
+
+    test "list of expr types have correct inline schema" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      and_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "and"
+        end)
+
+      assert and_schema["properties"]["conditions"]["type"] == "array"
+      assert is_map(and_schema["properties"]["conditions"]["items"])
+      assert and_schema["properties"]["conditions"]["items"]["type"] == "object"
+
+      assert and_schema["properties"]["conditions"]["items"]["properties"]["op"]["type"] ==
+               "string"
+    end
+
+    test "list of string types have correct schema" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      select_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "select"
+        end)
+
+      assert select_schema["properties"]["fields"] == %{
+               "type" => "array",
+               "items" => %{"type" => "string"}
+             }
+    end
+
+    test "non_neg_integer types have minimum constraint" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      nth_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "nth"
+        end)
+
+      assert nth_schema["properties"]["index"]["type"] == "integer"
+      assert nth_schema["properties"]["index"]["minimum"] == 0
+    end
+
+    test "recursive operations like pipe validate correctly" do
+      schema = PtcRunner.Schema.to_llm_schema()
+
+      pipe_schema =
+        Enum.find(schema["properties"]["program"]["anyOf"], fn op ->
+          op["properties"]["op"]["const"] == "pipe"
+        end)
+
+      assert pipe_schema != nil
+      assert pipe_schema["properties"]["steps"]["type"] == "array"
+      assert pipe_schema["properties"]["steps"]["items"]["type"] == "object"
+      assert pipe_schema["properties"]["steps"]["items"]["properties"]["op"]["type"] == "string"
+    end
+
+    test "generated schema is valid JSON" do
+      schema = PtcRunner.Schema.to_llm_schema()
+      json = Jason.encode!(schema)
+      decoded = Jason.decode!(json)
+
+      assert decoded == schema
+    end
+  end
 end

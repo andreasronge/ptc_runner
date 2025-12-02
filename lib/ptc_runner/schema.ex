@@ -352,6 +352,121 @@ defmodule PtcRunner.Schema do
     base_required ++ field_required
   end
 
+  @doc """
+  Generate a flattened JSON Schema optimized for LLM structured output.
+
+  This schema uses `anyOf` to list all operations at the top level, avoiding
+  the recursive `$ref` patterns that LLMs struggle with. The schema is designed
+  to work with ReqLLM.generate_object! for structured output mode.
+
+  ## Returns
+    A map representing the flattened JSON Schema for the PTC DSL.
+  """
+  @spec to_llm_schema() :: map()
+  def to_llm_schema do
+    operation_schemas =
+      @operations
+      |> Enum.map(fn {op_name, op_def} ->
+        operation_to_llm_schema(op_name, op_def)
+      end)
+
+    %{
+      "title" => "PTC Program",
+      "type" => "object",
+      "properties" => %{
+        "program" => %{
+          "description" => "The PTC program operation",
+          "anyOf" => operation_schemas
+        }
+      },
+      "required" => ["program"],
+      "additionalProperties" => false
+    }
+  end
+
+  # Convert a single operation to its flattened schema representation for LLM use
+  defp operation_to_llm_schema(op_name, op_def) do
+    fields = op_def["fields"]
+    properties = build_llm_properties(op_name, fields)
+    required_fields = build_required(fields)
+
+    %{
+      "type" => "object",
+      "description" => op_def["description"],
+      "properties" => properties,
+      "required" => required_fields,
+      "additionalProperties" => false
+    }
+  end
+
+  # Build the properties map for an LLM schema operation (flattened, no $ref)
+  defp build_llm_properties(op_name, fields) do
+    base_properties = %{
+      "op" => %{"const" => op_name}
+    }
+
+    field_properties =
+      fields
+      |> Enum.map(fn {field_name, field_spec} ->
+        {field_name, type_to_llm_json_schema(field_spec["type"])}
+      end)
+      |> Enum.into(%{})
+
+    Map.merge(base_properties, field_properties)
+  end
+
+  # Convert Elixir type to flattened JSON Schema type for LLM use (no $ref)
+  defp type_to_llm_json_schema(:any), do: %{}
+
+  defp type_to_llm_json_schema(:string) do
+    %{"type" => "string"}
+  end
+
+  # For nested expressions, use a placeholder schema instead of $ref
+  # This allows the LLM to generate valid operations
+  defp type_to_llm_json_schema(:expr) do
+    %{
+      "description" => "A PTC operation (any valid operation type)",
+      "type" => "object",
+      "properties" => %{
+        "op" => %{"type" => "string"}
+      },
+      "required" => ["op"]
+    }
+  end
+
+  defp type_to_llm_json_schema({:list, :expr}) do
+    %{
+      "type" => "array",
+      "items" => %{
+        "description" => "A PTC operation (any valid operation type)",
+        "type" => "object",
+        "properties" => %{
+          "op" => %{"type" => "string"}
+        },
+        "required" => ["op"]
+      }
+    }
+  end
+
+  defp type_to_llm_json_schema({:list, :string}) do
+    %{
+      "type" => "array",
+      "items" => %{"type" => "string"}
+    }
+  end
+
+  defp type_to_llm_json_schema(:map) do
+    %{"type" => "object"}
+  end
+
+  defp type_to_llm_json_schema(:non_neg_integer) do
+    %{
+      "type" => "integer",
+      "minimum" => 0
+    }
+  end
+
   # Convert Elixir type to JSON Schema type specification
   defp type_to_json_schema(:any), do: %{}
 
