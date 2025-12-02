@@ -23,27 +23,27 @@ Based on `docs/architecture.md` phases:
 - [x] Sandbox with timeout and heap limits
 - [x] Execution metrics
 
-### Phase 2: Query Operations
-- [ ] Nested path access: `get`
-- [ ] Comparisons: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`
-- [ ] More aggregations: `avg`, `min`, `max`
-- [ ] Collection: `first`, `last`, `nth`, `reject`
+### Phase 2: Query Operations ✓
+- [x] Nested path access: `get`
+- [x] Comparisons: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`
+- [x] More aggregations: `avg`, `min`, `max`
+- [x] Collection: `first`, `last`, `nth`, `reject`
 
-### Phase 3: Logic & Variables
-- [ ] Logic: `and`, `or`, `not`, `if`
-- [ ] Variables: `let` bindings
-- [ ] Combine: `merge`, `concat`
+### Phase 3: Logic & Variables ✓
+- [x] Logic: `and`, `or`, `not`, `if`
+- [x] Variables: `let` bindings
+- [x] Combine: `merge`, `concat`, `zip`
 
-### Phase 4: Tool Integration
-- [ ] Tool registry and `call` operation
-- [ ] Integration tests with mock tools
-- [ ] E2E test with LLM
+### Phase 4: Tool Integration ✓
+- [x] Tool registry and `call` operation
+- [x] Integration tests with mock tools
+- [x] E2E test with LLM
 
-### Phase 5: Polish
-- [ ] Error messages optimized for LLM consumption
-- [ ] Validation with helpful suggestions
-- [ ] Documentation and examples
-- [ ] Hex package preparation
+### Phase 5: Polish ✓
+- [x] Error messages optimized for LLM consumption
+- [x] Validation with helpful suggestions
+- [x] Documentation and examples
+- [x] Hex package preparation
 
 ## If PM Workflow is STUCK
 
