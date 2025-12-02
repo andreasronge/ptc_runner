@@ -3,14 +3,19 @@ defmodule PtcRunner.TestSupport.LLMClient do
   LLM client for E2E testing using ReqLLM and OpenRouter.
 
   This module provides a simple interface for generating PTC programs
-  from natural language task descriptions using LLM models.
+  from natural language task descriptions using LLM models. It supports
+  both text mode (with manual cleanup) and structured output mode
+  (with guaranteed valid JSON).
   """
 
   @model "openrouter:google/gemini-2.5-flash"
   @timeout 60_000
 
   @doc """
-  Generates a PTC program from a natural language task description.
+  Generates a PTC program from a natural language task description using text mode.
+
+  This function uses the LLM's text generation API and requires manual cleanup
+  of markdown fences from the response.
 
   ## Arguments
     - task: Natural language description of what the program should do
@@ -45,6 +50,58 @@ defmodule PtcRunner.TestSupport.LLMClient do
 
     text = ReqLLM.generate_text!(@model, prompt, receive_timeout: @timeout)
     clean_response(text)
+  end
+
+  @doc """
+  Generates a PTC program from a natural language task description using structured output mode.
+
+  This function uses the LLM's structured output API, which guarantees valid JSON output.
+  No manual cleanup is required.
+
+  ## Arguments
+    - task: Natural language description of what the program should do
+
+  ## Returns
+    The generated program as a JSON string.
+
+  ## Raises
+    Raises if the API key is not set or if the LLM call fails.
+  """
+  @spec generate_program_structured!(String.t()) :: String.t()
+  def generate_program_structured!(task) do
+    ensure_api_key!()
+
+    # Build the prompt with helpful instructions for the LLM
+    prompt = """
+    You are generating a PTC (Programmatic Tool Calling) program. Generate a single operation
+    that accomplishes the task.
+
+    IMPORTANT: The input data is available via {"op": "load", "name": "input"}.
+    Operations like filter, map, select, sum, count, etc. require input data.
+    Use a pipe operation to chain: first load the input, then apply transformations.
+
+    Example for filtering: {"op": "pipe", "steps": [{"op": "load", "name": "input"}, {"op": "filter", "where": ...}]}
+
+    Task: #{task}
+    """
+
+    # Get the LLM schema (flattened for structured output)
+    llm_schema = PtcRunner.Schema.to_llm_schema()
+
+    # Use structured output API with the LLM schema
+    result =
+      ReqLLM.generate_object!(@model, prompt, llm_schema, receive_timeout: @timeout)
+
+    # Wrap the result in the program envelope and return as JSON string
+    case result do
+      %{"program" => _} = wrapped ->
+        Jason.encode!(wrapped)
+
+      %{} = unwrapped ->
+        # If for some reason the result doesn't have the program key,
+        # wrap it now
+        Jason.encode!(%{"program" => unwrapped})
+    end
   end
 
   defp clean_response(text) do
