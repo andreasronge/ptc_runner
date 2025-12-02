@@ -334,7 +334,20 @@ defmodule PtcRunner.Validator do
 
   # Unknown operation
   defp validate_operation(op, _node) do
-    {:error, {:validation_error, "Unknown operation '#{op}'"}}
+    suggestion = suggest_operation(op)
+    {:error, {:validation_error, "Unknown operation '#{op}'#{suggestion}"}}
+  end
+
+  @valid_operations ~w(literal load var let if and or not merge concat zip pipe filter map select eq neq gt gte lt lte contains get sum count avg min max first last nth reject call)
+
+  defp suggest_operation(unknown_op) do
+    @valid_operations
+    |> Enum.map(fn valid -> {valid, String.jaro_distance(String.downcase(unknown_op), valid)} end)
+    |> Enum.max_by(fn {_op, score} -> score end)
+    |> case do
+      {suggested, score} when score > 0.8 -> ". Did you mean '#{suggested}'?"
+      _ -> ""
+    end
   end
 
   defp require_field(node, field, message) do
