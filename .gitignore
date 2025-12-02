@@ -22,3 +22,5 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 ptc_runner-*.tar
 
+# Environment variables file (contains secrets like API keys).
+.env
