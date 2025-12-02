@@ -218,22 +218,12 @@ defmodule PtcDemo.TestRunner do
   end
 
   defp get_last_result do
-    case Agent.last_program() do
+    case Agent.last_result() do
       nil ->
-        {:error, "No program generated"}
+        {:error, "No result available"}
 
-      program_json ->
-        datasets = %{
-          "products" => PtcDemo.SampleData.products(),
-          "orders" => PtcDemo.SampleData.orders(),
-          "employees" => PtcDemo.SampleData.employees(),
-          "expenses" => PtcDemo.SampleData.expenses()
-        }
-
-        case PtcRunner.run(program_json, context: datasets, timeout: 5000) do
-          {:ok, result, _metrics} -> {:ok, result}
-          {:error, reason} -> {:error, inspect(reason)}
-        end
+      result ->
+        {:ok, result}
     end
   end
 

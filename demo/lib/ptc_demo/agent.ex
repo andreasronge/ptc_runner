@@ -18,7 +18,7 @@ defmodule PtcDemo.Agent do
   @timeout 60_000
 
   # --- State ---
-  defstruct [:model, :context, :datasets, :last_program, :mode]
+  defstruct [:model, :context, :datasets, :last_program, :last_result, :mode]
 
   # --- Public API ---
 
@@ -36,6 +36,10 @@ defmodule PtcDemo.Agent do
 
   def last_program do
     GenServer.call(__MODULE__, :last_program)
+  end
+
+  def last_result do
+    GenServer.call(__MODULE__, :last_result)
   end
 
   def list_datasets do
@@ -84,6 +88,7 @@ defmodule PtcDemo.Agent do
        context: context,
        datasets: datasets,
        last_program: nil,
+       last_result: nil,
        mode: mode
      }}
   end
@@ -143,7 +148,8 @@ defmodule PtcDemo.Agent do
               |> ReqLLM.Context.append(user(question))
               |> ReqLLM.Context.append(assistant(answer))
 
-            {:reply, {:ok, answer}, %{state | context: new_context, last_program: program_json}}
+            {:reply, {:ok, answer},
+             %{state | context: new_context, last_program: program_json, last_result: result}}
 
           {:error, reason} ->
             error_msg = "Program execution failed: #{inspect(reason)}"
@@ -158,12 +164,17 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call(:reset, _from, state) do
     new_context = ReqLLM.Context.new([system(system_prompt())])
-    {:reply, :ok, %{state | context: new_context, last_program: nil}}
+    {:reply, :ok, %{state | context: new_context, last_program: nil, last_result: nil}}
   end
 
   @impl true
   def handle_call(:last_program, _from, state) do
     {:reply, state.last_program, state}
+  end
+
+  @impl true
+  def handle_call(:last_result, _from, state) do
+    {:reply, state.last_result, state}
   end
 
   @impl true
