@@ -374,6 +374,94 @@ defmodule PtcRunner.Schema do
   end
 
   @doc """
+  Generate a concise prompt describing PTC operations for LLM text mode.
+
+  This produces a compact (~300 tokens) human-readable description of operations
+  suitable for system prompts. Much smaller than `to_llm_schema/0` (~10k tokens)
+  while still enabling LLMs to generate valid programs.
+
+  ## Options
+    - `:examples` - number of full JSON examples to include (default: 2)
+
+  ## Returns
+    A string containing operation descriptions and examples.
+  """
+  @spec to_prompt(keyword()) :: String.t()
+  def to_prompt(opts \\ []) do
+    num_examples = Keyword.get(opts, :examples, 2)
+
+    categories = [
+      {"Data", ~w(load literal var)},
+      {"Flow", ~w(pipe let if)},
+      {"Logic", ~w(and or not)},
+      {"Filter/Transform", ~w(filter map select reject)},
+      {"Compare", ~w(eq neq gt gte lt lte contains)},
+      {"Aggregate", ~w(count sum avg min max first last nth)},
+      {"Combine", ~w(merge concat zip)},
+      {"Access", ~w(get)},
+      {"Tools", ~w(call)}
+    ]
+
+    ops_text = Enum.map_join(categories, "\n", &format_category/1)
+
+    examples_text = build_examples(num_examples)
+
+    """
+    PTC Operations (JSON format, wrap in {"program": ...}):
+
+    #{ops_text}
+    #{examples_text}
+    """
+    |> String.trim()
+  end
+
+  defp format_category({name, ops}) do
+    ops_desc =
+      ops
+      |> Enum.filter(&Map.has_key?(@operations, &1))
+      |> Enum.map_join(", ", &format_op/1)
+
+    "#{name}: #{ops_desc}"
+  end
+
+  defp format_op(op_name) do
+    case Map.get(@operations, op_name) do
+      %{"fields" => fields} when map_size(fields) == 0 ->
+        op_name
+
+      %{"fields" => fields} ->
+        required =
+          fields
+          |> Enum.filter(fn {_, spec} -> spec["required"] end)
+          |> Enum.map_join(",", fn {name, _} -> name end)
+
+        "#{op_name}(#{required})"
+
+      _ ->
+        op_name
+    end
+  end
+
+  @prompt_examples [
+    {"Count filtered items",
+     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"orders"},{"op":"filter","where":{"op":"gt","field":"total","value":100}},{"op":"count"}]}}|},
+    {"Sum with multiple conditions",
+     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"expenses"},{"op":"filter","where":{"op":"and","conditions":[{"op":"eq","field":"status","value":"approved"},{"op":"eq","field":"category","value":"travel"}]}},{"op":"sum","field":"amount"}]}}|},
+    {"Average of filtered data",
+     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"products"},{"op":"filter","where":{"op":"eq","field":"category","value":"electronics"}},{"op":"avg","field":"price"}]}}|}
+  ]
+
+  defp build_examples(n) do
+    @prompt_examples
+    |> Enum.take(n)
+    |> Enum.map_join("\n\n", fn {desc, json} -> "#{desc}:\n#{json}" end)
+    |> case do
+      "" -> ""
+      text -> "\nExamples:\n#{text}"
+    end
+  end
+
+  @doc """
   Generate a flattened JSON Schema optimized for LLM structured output.
 
   This schema uses `anyOf` to list all operations at the top level, avoiding

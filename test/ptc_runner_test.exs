@@ -1200,6 +1200,7 @@ defmodule PtcRunnerTest do
   end
 
   # Memory limit handling
+  @tag :capture_log
   test "memory limit is enforced" do
     # Pass large data through context - context data counts toward sandbox memory
     # per docs/architecture.md:297-298, making this a valid test approach

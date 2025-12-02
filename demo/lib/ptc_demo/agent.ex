@@ -18,7 +18,7 @@ defmodule PtcDemo.Agent do
   @timeout 60_000
 
   # --- State ---
-  defstruct [:model, :context, :datasets, :last_program, :last_result, :mode]
+  defstruct [:model, :context, :datasets, :last_program, :last_result, :mode, :usage]
 
   # --- Public API ---
 
@@ -51,6 +51,13 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
+  Get cumulative usage statistics for this session.
+  """
+  def stats do
+    GenServer.call(__MODULE__, :stats)
+  end
+
+  @doc """
   Auto-detect which model to use based on available API keys.
   """
   def detect_model do
@@ -67,8 +74,8 @@ defmodule PtcDemo.Agent do
   @impl true
   def init(opts) do
     model = System.get_env(@model_env) || detect_model()
-    # Mode: :structured (default, reliable) or :text (for debugging)
-    mode = Keyword.get(opts, :mode, :structured)
+    # Mode: :text (default, token-efficient) or :structured (reliable but expensive)
+    mode = Keyword.get(opts, :mode, :text)
 
     # Pre-load datasets into memory (simulating a real system)
     datasets = %{
@@ -89,7 +96,8 @@ defmodule PtcDemo.Agent do
        datasets: datasets,
        last_program: nil,
        last_result: nil,
-       mode: mode
+       mode: mode,
+       usage: empty_usage()
      }}
   end
 
@@ -102,7 +110,7 @@ defmodule PtcDemo.Agent do
     IO.puts("\n   [Phase 1] Generating PTC program (#{state.mode} mode)...")
 
     case generate_program(state.model, context, state.mode) do
-      {:ok, program_json} ->
+      {:ok, program_json, phase1_usage} ->
         IO.puts("   [Program] #{truncate(program_json, 100)}")
 
         # Phase 2: Execute program with PtcRunner
@@ -141,6 +149,13 @@ defmodule PtcDemo.Agent do
               )
 
             answer = ReqLLM.Response.text(response)
+            phase3_usage = ReqLLM.Response.usage(response)
+
+            # Accumulate usage from both phases
+            new_usage =
+              state.usage
+              |> add_usage(phase1_usage)
+              |> add_usage(phase3_usage)
 
             # Update context with the exchange
             new_context =
@@ -149,7 +164,13 @@ defmodule PtcDemo.Agent do
               |> ReqLLM.Context.append(assistant(answer))
 
             {:reply, {:ok, answer},
-             %{state | context: new_context, last_program: program_json, last_result: result}}
+             %{
+               state
+               | context: new_context,
+                 last_program: program_json,
+                 last_result: result,
+                 usage: new_usage
+             }}
 
           {:error, reason} ->
             error_msg = "Program execution failed: #{inspect(reason)}"
@@ -164,7 +185,9 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call(:reset, _from, state) do
     new_context = ReqLLM.Context.new([system(system_prompt())])
-    {:reply, :ok, %{state | context: new_context, last_program: nil, last_result: nil}}
+
+    {:reply, :ok,
+     %{state | context: new_context, last_program: nil, last_result: nil, usage: empty_usage()}}
   end
 
   @impl true
@@ -182,24 +205,18 @@ defmodule PtcDemo.Agent do
     {:reply, state.model, state}
   end
 
+  @impl true
+  def handle_call(:stats, _from, state) do
+    {:reply, state.usage, state}
+  end
+
   # --- Private Functions ---
 
   defp system_prompt do
     # Get schema from data module (simulates MCP tool schema discovery)
     data_schema = SampleData.schema_prompt()
-
-    operations = """
-    PTC Operations:
-    - pipe: Chain operations. Example: {"op":"pipe","steps":[...]}
-    - load: Load dataset by name. Example: {"op":"load","name":"orders"}
-    - filter: Keep matching items. Example: {"op":"filter","where":{"op":"eq","field":"status","value":"active"}}
-    - count: Count items. Example: {"op":"count"}
-    - sum/avg/min/max: Aggregate a field. Example: {"op":"sum","field":"amount"}
-    - first/last: Get first/last item
-    - and/or: Combine conditions. Example: {"op":"and","conditions":[...]}
-
-    Comparisons for filter: eq, neq, gt, gte, lt, lte
-    """
+    # Get operations prompt from library (~300 tokens vs ~10k for full schema)
+    operations = PtcRunner.Schema.to_prompt()
 
     """
     You are a data analyst. Generate PTC programs to answer questions about data.
@@ -211,13 +228,10 @@ defmodule PtcDemo.Agent do
     #{data_schema}
 
     #{operations}
-
-    Example - count orders over $1000 paid by credit_card:
-    {"program":{"op":"pipe","steps":[{"op":"load","name":"orders"},{"op":"filter","where":{"op":"and","conditions":[{"op":"gt","field":"total","value":1000},{"op":"eq","field":"payment_method","value":"credit_card"}]}},{"op":"count"}]}}
     """
   end
 
-  # Structured mode - uses generate_object! for guaranteed valid JSON
+  # Structured mode - uses generate_object for guaranteed valid JSON with usage tracking
   defp generate_program(model, context, :structured) do
     llm_schema = PtcRunner.Schema.to_llm_schema()
 
@@ -238,41 +252,46 @@ defmodule PtcDemo.Agent do
     User question: #{user_question}
     """
 
-    try do
-      result = ReqLLM.generate_object!(model, prompt, llm_schema, receive_timeout: @timeout)
+    case ReqLLM.generate_object(model, prompt, llm_schema, receive_timeout: @timeout) do
+      {:ok, response} ->
+        result = ReqLLM.Response.object(response)
+        usage = ReqLLM.Response.usage(response)
 
-      # Wrap in program envelope if needed
-      json =
-        case result do
-          %{"program" => _} -> Jason.encode!(result)
-          %{} -> Jason.encode!(%{"program" => result})
-        end
+        # Wrap in program envelope if needed
+        json =
+          case result do
+            %{"program" => _} -> Jason.encode!(result)
+            %{} -> Jason.encode!(%{"program" => result})
+          end
 
-      {:ok, json}
-    rescue
-      e -> {:error, Exception.message(e)}
+        {:ok, json, usage}
+
+      {:error, error} ->
+        {:error, Exception.message(error)}
     end
   end
 
-  # Text mode - uses generate_text! with retry logic
+  # Text mode - uses generate_text with retry logic and usage tracking
   defp generate_program(model, context, :text) do
-    generate_program_text(model, context, 2)
+    generate_program_text(model, context, 2, nil)
   end
 
-  defp generate_program_text(_model, _context, 0) do
+  defp generate_program_text(_model, _context, 0, _accumulated_usage) do
     {:error, "Failed to generate valid program after retries"}
   end
 
-  defp generate_program_text(model, context, retries) do
+  defp generate_program_text(model, context, retries, accumulated_usage) do
     case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
       {:ok, response} ->
         text = ReqLLM.Response.text(response)
+        usage = ReqLLM.Response.usage(response)
+        total_usage = add_usage(accumulated_usage, usage)
         json = clean_json(text)
 
         # Validate it's actually a valid program before returning
         case validate_program(json) do
           :ok ->
-            {:ok, json}
+            {:ok, json, total_usage}
 
           {:error, reason} ->
             IO.puts("   [Retry] Invalid response: #{reason}, retrying...")
@@ -288,7 +307,7 @@ defmodule PtcDemo.Agent do
                 )
               )
 
-            generate_program_text(model, error_context, retries - 1)
+            generate_program_text(model, error_context, retries - 1, total_usage)
         end
 
       {:error, reason} ->
@@ -361,5 +380,42 @@ defmodule PtcDemo.Agent do
     else
       str
     end
+  end
+
+  # --- Usage Tracking Helpers ---
+
+  defp empty_usage do
+    %{
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0.0,
+      requests: 0
+    }
+  end
+
+  defp add_usage(acc, nil), do: acc
+  defp add_usage(nil, usage), do: normalize_usage(usage)
+
+  defp add_usage(acc, usage) when is_map(usage) do
+    normalized = normalize_usage(usage)
+
+    %{
+      input_tokens: acc.input_tokens + normalized.input_tokens,
+      output_tokens: acc.output_tokens + normalized.output_tokens,
+      total_tokens: acc.total_tokens + normalized.total_tokens,
+      total_cost: acc.total_cost + normalized.total_cost,
+      requests: acc.requests + 1
+    }
+  end
+
+  defp normalize_usage(usage) when is_map(usage) do
+    %{
+      input_tokens: usage[:input_tokens] || usage["input_tokens"] || 0,
+      output_tokens: usage[:output_tokens] || usage["output_tokens"] || 0,
+      total_tokens: usage[:total_tokens] || usage["total_tokens"] || 0,
+      total_cost: usage[:total_cost] || usage["total_cost"] || 0.0,
+      requests: 1
+    }
   end
 end

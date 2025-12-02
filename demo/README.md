@@ -58,23 +58,23 @@ export REQ_LLM_MODEL=anthropic:claude-sonnet-4-20250514
 # Install dependencies
 mix deps.get
 
-# Run the chat (structured mode - default, most reliable)
+# Run the chat (text mode - default, token-efficient)
 mix run -e "PtcDemo.CLI.main([])"
 
-# Run in text mode (with retry logic)
-mix run -e "PtcDemo.CLI.main([\"--text\"])"
+# Run in structured mode (reliable but expensive)
+mix run -e "PtcDemo.CLI.main([\"--structured\"])"
 ```
 
 ## Generation Modes
 
 The demo supports two modes for generating PTC programs:
 
-| Mode | Command | Description |
-|------|---------|-------------|
-| **Structured** (default) | `main([])` | Uses `generate_object!` with JSON schema - guaranteed valid JSON structure |
-| **Text** | `main(["--text"])` | Uses `generate_text!` with retry logic - useful for debugging |
+| Mode | Command | Tokens/call | Description |
+|------|---------|-------------|-------------|
+| **Text** (default) | `main([])` | ~600 | Uses `PtcRunner.Schema.to_prompt/0` with examples and retry logic |
+| **Structured** | `main(["--structured"])` | ~11,000 | Uses JSON schema for guaranteed valid output |
 
-Structured mode is recommended for reliability. Text mode shows raw LLM output and retry behavior.
+Text mode is recommended for cost-efficiency. It uses `PtcRunner.Schema.to_prompt/0` which generates a compact description of operations (~300 tokens) instead of the full JSON schema (~10k tokens).
 
 ## Available Datasets (loaded once, kept in memory)
 
@@ -125,20 +125,36 @@ Total approved expenses over $500?
 | `/datasets` | List available datasets with sizes |
 | `/program` | Show the last generated PTC program |
 | `/examples` | Show example queries |
-| `/reset` | Clear conversation context |
+| `/stats` | Show token usage and cost statistics |
+| `/reset` | Clear conversation context and stats |
 | `/help` | Show help |
 | `/quit` | Exit |
+
+## Usage Statistics
+
+The demo tracks token usage and costs across your session. Use `/stats` to see:
+
+```
+Session Statistics:
+  Requests:      4
+  Input tokens:  2,456
+  Output tokens: 312
+  Total tokens:  2,768
+  Total cost:    $0.003421
+```
+
+This demonstrates how text mode keeps token usage low compared to structured mode.
 
 ## Automated Testing
 
 Run the test suite to verify the LLM generates correct programs:
 
 ```bash
-# Run all tests with structured mode (default, most reliable)
+# Run all tests with text mode (default)
 mix run -e "PtcDemo.TestRunner.run_all(verbose: true)"
 
-# Run all tests with text mode
-mix run -e "PtcDemo.TestRunner.run_all(mode: :text, verbose: true)"
+# Run all tests with structured mode
+mix run -e "PtcDemo.TestRunner.run_all(mode: :structured, verbose: true)"
 
 # Quick run (dots for progress)
 mix run -e "PtcDemo.TestRunner.run_all()"

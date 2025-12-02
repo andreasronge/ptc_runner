@@ -86,6 +86,7 @@ See the [Architecture](docs/architecture.md) document for full DSL specification
 
 - **[Architecture](docs/architecture.md)** - System design, DSL specification, API reference
 - **[Research Notes](docs/research.md)** - Background research on PTC approaches
+- **[Demo App](demo/)** - Interactive CLI chat showing PTC with ReqLLM integration
 
 ## Installation
 
@@ -168,14 +169,25 @@ Store results from previous turns and reference them:
 
 PtcRunner is execution-only—compose it with your LLM client (e.g., [ReqLLM](https://hexdocs.pm/req_llm)):
 
-### Text Mode
+### Text Mode (Recommended)
+
+Use `PtcRunner.Schema.to_prompt/0` for a compact operation description (~300 tokens):
 
 ```elixir
-# 1. LLM generates program as text
-{:ok, response} = ReqLLM.generate_text("openrouter:anthropic/claude-3-sonnet", prompt)
+# Build system prompt with operation descriptions
+system_prompt = """
+Generate PTC programs to answer questions about data.
+Respond with ONLY valid JSON.
+
+#{PtcRunner.Schema.to_prompt()}
+"""
+
+# LLM generates program as text
+{:ok, response} = ReqLLM.generate_text("anthropic:claude-haiku-4.5",
+  [%{role: :system, content: system_prompt}, %{role: :user, content: question}])
 program = extract_json(response)
 
-# 2. PtcRunner executes it
+# Execute with retry on validation errors
 case PtcRunner.run(program, tools: tools) do
   {:ok, result, _} -> {:ok, result}
   {:error, error} -> retry_with_feedback(prompt, error)
@@ -184,7 +196,7 @@ end
 
 ### Structured Output Mode
 
-Use `PtcRunner.Schema.to_llm_schema/0` with structured output for guaranteed valid JSON:
+Use `PtcRunner.Schema.to_llm_schema/0` for guaranteed valid JSON (~10k tokens):
 
 ```elixir
 # Get the LLM-optimized schema (includes usage hints in descriptions)
@@ -213,6 +225,10 @@ The LLM schema uses nested `anyOf` structures to define valid operations. Not al
 The schema includes operation descriptions with examples (e.g., `{op:'gt', field:'price', value:10}`) to guide models. See `PtcRunner.Schema.operations/0` for all available operations.
 
 See `test/ptc_runner/e2e_test.exs` for complete integration examples.
+
+## Development
+
+This library was primarily developed by Claude (Anthropic) via GitHub Actions workflows, with human oversight and direction. See the commit history for details.
 
 ## License
 
