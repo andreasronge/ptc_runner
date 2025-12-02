@@ -8,7 +8,7 @@ defmodule PtcRunner.TestSupport.LLMClient do
   (with guaranteed valid JSON).
   """
 
-  @model "openrouter:google/gemini-2.5-flash"
+  @model "openrouter:anthropic/claude-sonnet-4"
   @timeout 60_000
 
   @doc """
@@ -71,26 +71,20 @@ defmodule PtcRunner.TestSupport.LLMClient do
   def generate_program_structured!(task) do
     ensure_api_key!()
 
-    # Build the prompt with helpful instructions for the LLM
     prompt = """
-    You are generating a PTC (Programmatic Tool Calling) program. Generate a single operation
-    that accomplishes the task.
+    Generate a PTC program for: #{task}
 
-    IMPORTANT: The input data is available via {"op": "load", "name": "input"}.
-    Operations like filter, map, select, sum, count, etc. require input data.
-    Use a pipe operation to chain: first load the input, then apply transformations.
+    Example - filter items where price > 10:
+    {"program":{"op":"pipe","steps":[{"op":"load","name":"input"},{"op":"filter","where":{"op":"gt","field":"price","value":10}}]}}
 
-    Example for filtering: {"op": "pipe", "steps": [{"op": "load", "name": "input"}, {"op": "filter", "where": ...}]}
-
-    Task: #{task}
+    Example - sum all prices:
+    {"program":{"op":"pipe","steps":[{"op":"load","name":"input"},{"op":"sum","field":"price"}]}}
     """
 
-    # Get the LLM schema (flattened for structured output)
     llm_schema = PtcRunner.Schema.to_llm_schema()
 
-    # Use structured output API with the LLM schema
-    result =
-      ReqLLM.generate_object!(@model, prompt, llm_schema, receive_timeout: @timeout)
+    # Use structured output API - schema descriptions guide the LLM
+    result = ReqLLM.generate_object!(@model, prompt, llm_schema, receive_timeout: @timeout)
 
     # Wrap the result in the program envelope and return as JSON string
     case result do
