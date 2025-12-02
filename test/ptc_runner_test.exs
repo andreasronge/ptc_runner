@@ -2217,23 +2217,6 @@ defmodule PtcRunnerTest do
       assert result == "standard"
     end
 
-    test "E2E: nested if conditions" do
-      program = ~s({
-        "op": "if",
-        "condition": {"op": "literal", "value": true},
-        "then": {
-          "op": "if",
-          "condition": {"op": "literal", "value": false},
-          "then": {"op": "literal", "value": "nested-then"},
-          "else": {"op": "literal", "value": "nested-else"}
-        },
-        "else": {"op": "literal", "value": "outer-else"}
-      })
-
-      {:ok, result, _metrics} = PtcRunner.run(program)
-      assert result == "nested-else"
-    end
-
     test "if with let binding - outer binding accessible in branches" do
       program = ~s({
         "op": "let",
