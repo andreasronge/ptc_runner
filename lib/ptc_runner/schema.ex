@@ -274,4 +274,105 @@ defmodule PtcRunner.Schema do
   end
 
   def get_operation(_), do: :error
+
+  @doc """
+  Generate a JSON Schema (draft-07) for the PTC DSL.
+
+  ## Returns
+    A map representing the JSON Schema that can be encoded to JSON.
+  """
+  @spec to_json_schema() :: map()
+  def to_json_schema do
+    operation_schemas =
+      @operations
+      |> Enum.map(fn {op_name, op_def} ->
+        operation_to_schema(op_name, op_def)
+      end)
+
+    %{
+      "$schema" => "http://json-schema.org/draft-07/schema#",
+      "title" => "PTC DSL Program",
+      "oneOf" => operation_schemas
+    }
+  end
+
+  # Convert a single operation to its JSON Schema representation
+  defp operation_to_schema(op_name, op_def) do
+    fields = op_def["fields"]
+    properties = build_properties(op_name, fields)
+    required_fields = build_required(op_name, fields)
+
+    %{
+      "type" => "object",
+      "properties" => properties,
+      "required" => required_fields,
+      "additionalProperties" => false
+    }
+  end
+
+  # Build the properties map for an operation schema
+  defp build_properties(op_name, fields) do
+    base_properties = %{
+      "op" => %{"const" => op_name}
+    }
+
+    field_properties =
+      fields
+      |> Enum.map(fn {field_name, field_spec} ->
+        {field_name, type_to_json_schema(field_spec["type"])}
+      end)
+      |> Enum.into(%{})
+
+    Map.merge(base_properties, field_properties)
+  end
+
+  # Build the required fields array for an operation schema
+  defp build_required(_op_name, fields) do
+    base_required = ["op"]
+
+    field_required =
+      fields
+      |> Enum.filter(fn {_field_name, field_spec} ->
+        field_spec["required"] == true
+      end)
+      |> Enum.map(fn {field_name, _field_spec} -> field_name end)
+
+    base_required ++ field_required
+  end
+
+  # Convert Elixir type to JSON Schema type specification
+  defp type_to_json_schema(:any), do: %{}
+
+  defp type_to_json_schema(:string) do
+    %{"type" => "string"}
+  end
+
+  defp type_to_json_schema(:expr) do
+    %{"$ref" => "#"}
+  end
+
+  defp type_to_json_schema({:list, :expr}) do
+    %{
+      "type" => "array",
+      "items" => %{"$ref" => "#"}
+    }
+  end
+
+  defp type_to_json_schema({:list, :string}) do
+    %{
+      "type" => "array",
+      "items" => %{"type" => "string"}
+    }
+  end
+
+  defp type_to_json_schema(:map) do
+    %{"type" => "object"}
+  end
+
+  defp type_to_json_schema(:non_neg_integer) do
+    %{
+      "type" => "integer",
+      "minimum" => 0
+    }
+  end
 end
