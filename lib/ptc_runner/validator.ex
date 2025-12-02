@@ -114,6 +114,45 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  defp validate_operation("merge", node) do
+    case Map.get(node, "objects") do
+      nil ->
+        {:error, {:validation_error, "Operation 'merge' requires field 'objects'"}}
+
+      objects when not is_list(objects) ->
+        {:error, {:validation_error, "Field 'objects' must be a list"}}
+
+      objects ->
+        validate_list(objects)
+    end
+  end
+
+  defp validate_operation("concat", node) do
+    case Map.get(node, "lists") do
+      nil ->
+        {:error, {:validation_error, "Operation 'concat' requires field 'lists'"}}
+
+      lists when not is_list(lists) ->
+        {:error, {:validation_error, "Field 'lists' must be a list"}}
+
+      lists ->
+        validate_list(lists)
+    end
+  end
+
+  defp validate_operation("zip", node) do
+    case Map.get(node, "lists") do
+      nil ->
+        {:error, {:validation_error, "Operation 'zip' requires field 'lists'"}}
+
+      lists when not is_list(lists) ->
+        {:error, {:validation_error, "Field 'lists' must be a list"}}
+
+      lists ->
+        validate_list(lists)
+    end
+  end
+
   # Control flow
   defp validate_operation("pipe", node) do
     case Map.get(node, "steps") do
