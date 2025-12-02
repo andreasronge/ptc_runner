@@ -9,7 +9,11 @@ defmodule PtcRunner.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      description: "A BEAM-native Elixir library for Programmatic Tool Calling (PTC)"
+      name: "PtcRunner",
+      description: "A BEAM-native Elixir library for Programmatic Tool Calling (PTC)",
+      source_url: "https://github.com/devoteam-se/ptc_runner",
+      docs: docs(),
+      package: package()
     ]
   end
 
@@ -30,7 +34,8 @@ defmodule PtcRunner.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
 
@@ -42,6 +47,21 @@ defmodule PtcRunner.MixProject do
         "credo --strict",
         "test --warnings-as-errors"
       ]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "PtcRunner",
+      extras: ["README.md", "docs/architecture.md"]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{"GitHub" => "https://github.com/devoteam-se/ptc_runner"},
+      homepage_url: "https://github.com/devoteam-se/ptc_runner"
     ]
   end
 end
