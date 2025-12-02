@@ -215,8 +215,10 @@ defmodule PtcDemo.Agent do
       context.messages
       |> Enum.filter(fn msg -> msg.role == :user end)
       |> List.last()
-      |> Map.get(:content, "")
-      |> extract_text_content()
+      |> case do
+        nil -> ""
+        msg -> msg |> Map.get(:content, "") |> extract_text_content()
+      end
 
     # Build prompt with system context included (like E2E test pattern)
     prompt = """
