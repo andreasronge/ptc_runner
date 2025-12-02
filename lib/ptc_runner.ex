@@ -7,7 +7,7 @@ defmodule PtcRunner do
 
   ## Examples
 
-      iex> program = ~s({"op": "literal", "value": 42})
+      iex> program = ~s({"program": {"op": "literal", "value": 42}})
       iex> {:ok, result, _metrics} = PtcRunner.run(program)
       iex> result
       42
@@ -55,7 +55,7 @@ defmodule PtcRunner do
 
   ## Examples
 
-      iex> {:ok, result, _metrics} = PtcRunner.run(~s({"op": "literal", "value": 42}))
+      iex> {:ok, result, _metrics} = PtcRunner.run(~s({"program": {"op": "literal", "value": 42}}))
       iex> result
       42
   """
@@ -95,7 +95,7 @@ defmodule PtcRunner do
 
   ## Examples
 
-      iex> result = PtcRunner.run!(~s({"op": "literal", "value": 42}))
+      iex> result = PtcRunner.run!(~s({"program": {"op": "literal", "value": 42}}))
       iex> result
       42
   """
