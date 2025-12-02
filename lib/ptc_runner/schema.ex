@@ -6,6 +6,9 @@ defmodule PtcRunner.Schema do
   supporting validation, JSON Schema generation, and documentation.
   """
 
+  # Essential operations for nested expressions (minimized for schema size)
+  @nested_ops ~w(load literal filter map sum count gt gte lt lte eq)
+
   @operations %{
     # Data operations
     "literal" => %{
@@ -15,7 +18,7 @@ defmodule PtcRunner.Schema do
       }
     },
     "load" => %{
-      "description" => "Load a resource by name",
+      "description" => "Load a resource by name. Use name='input' to load the input data",
       "fields" => %{
         "name" => %{"type" => :string, "required" => true}
       }
@@ -85,7 +88,8 @@ defmodule PtcRunner.Schema do
       }
     },
     "pipe" => %{
-      "description" => "Pipe value through multiple steps",
+      "description" =>
+        "Sequence of operations. Steps: [load input, then filter/map/sum/count]. Example: pipe with steps [load, filter, count]",
       "fields" => %{
         "steps" => %{"type" => {:list, :expr}, "required" => true}
       }
@@ -93,7 +97,7 @@ defmodule PtcRunner.Schema do
 
     # Collection operations
     "filter" => %{
-      "description" => "Filter collection based on condition",
+      "description" => "Keep items matching condition. Use with gt/lt/eq in 'where' field",
       "fields" => %{
         "where" => %{"type" => :expr, "required" => true}
       }
@@ -119,21 +123,21 @@ defmodule PtcRunner.Schema do
 
     # Comparison operations
     "eq" => %{
-      "description" => "Check equality",
+      "description" => "Field equals value. Example: {op:'eq', field:'status', value:'active'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "neq" => %{
-      "description" => "Check inequality",
+      "description" => "Field not equals value",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
       }
     },
     "gt" => %{
-      "description" => "Check greater than",
+      "description" => "Field greater than value. Example: {op:'gt', field:'price', value:10}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -179,13 +183,13 @@ defmodule PtcRunner.Schema do
 
     # Aggregations
     "sum" => %{
-      "description" => "Sum values in a field",
+      "description" => "Sum numeric field. Example: {op:'sum', field:'price'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
     },
     "count" => %{
-      "description" => "Count elements",
+      "description" => "Count items in collection. Example: {op:'count'}",
       "fields" => %{}
     },
     "avg" => %{
@@ -375,7 +379,8 @@ defmodule PtcRunner.Schema do
       "type" => "object",
       "properties" => %{
         "program" => %{
-          "description" => "The PTC program operation",
+          "description" =>
+            "Use pipe to chain operations. Start with load (name='input'), then apply transforms like filter, map, sum",
           "anyOf" => operation_schemas
         }
       },
@@ -417,53 +422,69 @@ defmodule PtcRunner.Schema do
 
   # Convert Elixir type to flattened JSON Schema type for LLM use (no $ref)
   defp type_to_llm_json_schema(:any), do: %{}
+  defp type_to_llm_json_schema(:string), do: %{"type" => "string"}
+  defp type_to_llm_json_schema(:map), do: %{"type" => "object"}
+  defp type_to_llm_json_schema(:non_neg_integer), do: %{"type" => "integer", "minimum" => 0}
 
-  defp type_to_llm_json_schema(:string) do
-    %{"type" => "string"}
-  end
+  defp type_to_llm_json_schema({:list, :string}),
+    do: %{"type" => "array", "items" => %{"type" => "string"}}
 
-  # For nested expressions, use a placeholder schema instead of $ref
-  # This allows the LLM to generate valid operations
-  defp type_to_llm_json_schema(:expr) do
-    %{
-      "description" => "A PTC operation (any valid operation type)",
-      "type" => "object",
-      "properties" => %{
-        "op" => %{"type" => "string"}
-      },
-      "required" => ["op"]
-    }
-  end
+  # For nested expressions, use anyOf with all operation schemas (one level deep)
+  defp type_to_llm_json_schema(:expr), do: %{"anyOf" => nested_operation_schemas()}
 
   defp type_to_llm_json_schema({:list, :expr}) do
+    %{"type" => "array", "items" => %{"anyOf" => nested_operation_schemas()}}
+  end
+
+  # Generate operation schemas for nested expressions (limited set, leaf level)
+  defp nested_operation_schemas do
+    @operations
+    |> Enum.filter(fn {op_name, _} -> op_name in @nested_ops end)
+    |> Enum.map(fn {op_name, op_def} ->
+      fields = op_def["fields"]
+      properties = build_nested_properties(op_name, fields)
+      required_fields = build_required(fields)
+
+      %{
+        "type" => "object",
+        "description" => op_def["description"],
+        "properties" => properties,
+        "required" => required_fields,
+        "additionalProperties" => false
+      }
+    end)
+  end
+
+  defp build_nested_properties(op_name, fields) do
+    field_properties =
+      Enum.into(fields, %{}, fn {field_name, field_spec} ->
+        {field_name, type_to_nested_schema(field_spec["type"])}
+      end)
+
+    Map.put(field_properties, "op", %{"const" => op_name})
+  end
+
+  # Leaf-level type schemas (nested expressions use simple {op: string} to avoid infinite recursion)
+  defp type_to_nested_schema(:any), do: %{}
+  defp type_to_nested_schema(:string), do: %{"type" => "string"}
+  defp type_to_nested_schema(:map), do: %{"type" => "object"}
+  defp type_to_nested_schema(:non_neg_integer), do: %{"type" => "integer", "minimum" => 0}
+
+  defp type_to_nested_schema({:list, :string}),
+    do: %{"type" => "array", "items" => %{"type" => "string"}}
+
+  defp type_to_nested_schema(:expr) do
+    %{"type" => "object", "properties" => %{"op" => %{"type" => "string"}}, "required" => ["op"]}
+  end
+
+  defp type_to_nested_schema({:list, :expr}) do
     %{
       "type" => "array",
       "items" => %{
-        "description" => "A PTC operation (any valid operation type)",
         "type" => "object",
-        "properties" => %{
-          "op" => %{"type" => "string"}
-        },
+        "properties" => %{"op" => %{"type" => "string"}},
         "required" => ["op"]
       }
-    }
-  end
-
-  defp type_to_llm_json_schema({:list, :string}) do
-    %{
-      "type" => "array",
-      "items" => %{"type" => "string"}
-    }
-  end
-
-  defp type_to_llm_json_schema(:map) do
-    %{"type" => "object"}
-  end
-
-  defp type_to_llm_json_schema(:non_neg_integer) do
-    %{
-      "type" => "integer",
-      "minimum" => 0
     }
   end
 
