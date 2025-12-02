@@ -321,18 +321,31 @@ defmodule PtcRunner.SchemaTest do
       assert is_map(schema)
       assert schema["$schema"] == "http://json-schema.org/draft-07/schema#"
       assert schema["title"] == "PTC DSL Program"
-      assert is_list(schema["oneOf"])
+      assert schema["type"] == "object"
+      assert is_map(schema["$defs"])
+      assert is_map(schema["$defs"]["operation"])
+      assert is_list(schema["$defs"]["operation"]["oneOf"])
+    end
+
+    test "schema has program property with correct structure" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      assert is_map(schema["properties"])
+      assert is_map(schema["properties"]["program"])
+      assert schema["properties"]["program"]["$ref"] == "#/$defs/operation"
+      assert schema["required"] == ["program"]
+      assert schema["additionalProperties"] == false
     end
 
     test "generates 33 operation schemas" do
       schema = PtcRunner.Schema.to_json_schema()
-      assert length(schema["oneOf"]) == 33
+      assert length(schema["$defs"]["operation"]["oneOf"]) == 33
     end
 
     test "each operation schema has required structure" do
       schema = PtcRunner.Schema.to_json_schema()
 
-      Enum.each(schema["oneOf"], fn op_schema ->
+      Enum.each(schema["$defs"]["operation"]["oneOf"], fn op_schema ->
         assert is_map(op_schema)
         assert op_schema["type"] == "object"
         assert is_map(op_schema["properties"])
@@ -345,7 +358,7 @@ defmodule PtcRunner.SchemaTest do
       schema = PtcRunner.Schema.to_json_schema()
 
       literal_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "literal"
         end)
 
@@ -359,7 +372,7 @@ defmodule PtcRunner.SchemaTest do
       schema = PtcRunner.Schema.to_json_schema()
 
       count_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "count"
         end)
 
@@ -370,7 +383,7 @@ defmodule PtcRunner.SchemaTest do
       schema = PtcRunner.Schema.to_json_schema()
 
       get_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "get"
         end)
 
@@ -379,29 +392,29 @@ defmodule PtcRunner.SchemaTest do
       assert Map.has_key?(get_schema["properties"], "default")
     end
 
-    test "expr types use $ref" do
+    test "expr types use $ref pointing to $defs/operation" do
       schema = PtcRunner.Schema.to_json_schema()
 
       let_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "let"
         end)
 
-      assert let_schema["properties"]["value"] == %{"$ref" => "#"}
-      assert let_schema["properties"]["in"] == %{"$ref" => "#"}
+      assert let_schema["properties"]["value"] == %{"$ref" => "#/$defs/operation"}
+      assert let_schema["properties"]["in"] == %{"$ref" => "#/$defs/operation"}
     end
 
-    test "list of expr types have correct schema" do
+    test "list of expr types have correct schema with $defs/operation reference" do
       schema = PtcRunner.Schema.to_json_schema()
 
       and_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "and"
         end)
 
       assert and_schema["properties"]["conditions"] == %{
                "type" => "array",
-               "items" => %{"$ref" => "#"}
+               "items" => %{"$ref" => "#/$defs/operation"}
              }
     end
 
@@ -409,7 +422,7 @@ defmodule PtcRunner.SchemaTest do
       schema = PtcRunner.Schema.to_json_schema()
 
       select_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "select"
         end)
 
@@ -423,13 +436,29 @@ defmodule PtcRunner.SchemaTest do
       schema = PtcRunner.Schema.to_json_schema()
 
       nth_schema =
-        Enum.find(schema["oneOf"], fn op ->
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
           op["properties"]["op"]["const"] == "nth"
         end)
 
       assert nth_schema["properties"]["index"] == %{
                "type" => "integer",
                "minimum" => 0
+             }
+    end
+
+    test "recursive operations like pipe validate correctly" do
+      schema = PtcRunner.Schema.to_json_schema()
+
+      pipe_schema =
+        Enum.find(schema["$defs"]["operation"]["oneOf"], fn op ->
+          op["properties"]["op"]["const"] == "pipe"
+        end)
+
+      assert pipe_schema != nil
+
+      assert pipe_schema["properties"]["steps"] == %{
+               "type" => "array",
+               "items" => %{"$ref" => "#/$defs/operation"}
              }
     end
 

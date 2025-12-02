@@ -24,3 +24,6 @@ ptc_runner-*.tar
 
 # Environment variables file (contains secrets like API keys).
 .env
+
+# Temporary commit message files from tooling.
+.commit_msg.txt
