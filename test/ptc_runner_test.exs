@@ -1962,5 +1962,299 @@ defmodule PtcRunnerTest do
       {:ok, result, _metrics} = PtcRunner.run(program)
       assert result == 30
     end
+
+    # If operation - truthiness tests
+    test "if returns then result when condition is true" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": true},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "yes"
+    end
+
+    test "if returns else result when condition is false" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": false},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "no"
+    end
+
+    test "if returns else result when condition is nil" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": null},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "no"
+    end
+
+    test "if returns then result when condition is truthy integer" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": 1},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "yes"
+    end
+
+    test "if returns then result when condition is truthy zero" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": 0},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "yes"
+    end
+
+    test "if returns then result when condition is truthy empty list" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": []},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "yes"
+    end
+
+    test "if returns then result when condition is truthy empty string" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": ""},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "yes"
+    end
+
+    test "if returns then result when condition is truthy empty map" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": {}},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "yes"
+    end
+
+    test "if with nested if conditions" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": true},
+        "then": {
+          "op": "if",
+          "condition": {"op": "literal", "value": false},
+          "then": {"op": "literal", "value": "nested-then"},
+          "else": {"op": "literal", "value": "nested-else"}
+        },
+        "else": {"op": "literal", "value": "outer-else"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "nested-else"
+    end
+
+    test "if with comparison condition" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"amount": 100}},
+          {
+            "op": "if",
+            "condition": {"op": "gt", "field": "amount", "value": 50},
+            "then": {"op": "literal", "value": "high"},
+            "else": {"op": "literal", "value": "low"}
+          }
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "high"
+    end
+
+    test "if with comparison condition returning false" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"amount": 30}},
+          {
+            "op": "if",
+            "condition": {"op": "gt", "field": "amount", "value": 50},
+            "then": {"op": "literal", "value": "high"},
+            "else": {"op": "literal", "value": "low"}
+          }
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "low"
+    end
+
+    test "if with error in condition expression propagates error" do
+      program = ~s({
+        "op": "if",
+        "condition": {
+          "op": "pipe",
+          "steps": [
+            {"op": "literal", "value": 42},
+            {"op": "count"}
+          ]
+        },
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert {:execution_error, msg} = reason
+      assert String.contains?(msg, "count requires a list")
+    end
+
+    test "if missing condition field raises validation error" do
+      program = ~s({
+        "op": "if",
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert {:validation_error, msg} = reason
+      assert String.contains?(msg, "condition")
+    end
+
+    test "if missing then field raises validation error" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": true},
+        "else": {"op": "literal", "value": "no"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert {:validation_error, msg} = reason
+      assert String.contains?(msg, "then")
+    end
+
+    test "if missing else field raises validation error" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": true},
+        "then": {"op": "literal", "value": "yes"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert {:validation_error, msg} = reason
+      assert String.contains?(msg, "else")
+    end
+
+    test "if with invalid nested condition expression raises validation error" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": true},
+        "then": {"op": "literal", "value": "yes"},
+        "else": {"op": "unknown"}
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert {:validation_error, msg} = reason
+      assert String.contains?(msg, "Unknown operation")
+    end
+
+    test "E2E: if with pipe and comparison" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"total": 1500}},
+          {
+            "op": "if",
+            "condition": {"op": "gt", "field": "total", "value": 1000},
+            "then": {"op": "literal", "value": "high_value"},
+            "else": {"op": "literal", "value": "standard"}
+          }
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "high_value"
+    end
+
+    test "E2E: if with pipe and failed comparison" do
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"total": 500}},
+          {
+            "op": "if",
+            "condition": {"op": "gt", "field": "total", "value": 1000},
+            "then": {"op": "literal", "value": "high_value"},
+            "else": {"op": "literal", "value": "standard"}
+          }
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "standard"
+    end
+
+    test "E2E: nested if conditions" do
+      program = ~s({
+        "op": "if",
+        "condition": {"op": "literal", "value": true},
+        "then": {
+          "op": "if",
+          "condition": {"op": "literal", "value": false},
+          "then": {"op": "literal", "value": "nested-then"},
+          "else": {"op": "literal", "value": "nested-else"}
+        },
+        "else": {"op": "literal", "value": "outer-else"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "nested-else"
+    end
+
+    test "if with let binding - outer binding accessible in branches" do
+      program = ~s({
+        "op": "let",
+        "name": "threshold",
+        "value": {"op": "literal", "value": 1000},
+        "in": {
+          "op": "pipe",
+          "steps": [
+            {"op": "literal", "value": {"amount": 1500}},
+            {
+              "op": "if",
+              "condition": {"op": "gt", "field": "amount", "value": 1000},
+              "then": {"op": "var", "name": "threshold"},
+              "else": {"op": "literal", "value": 0}
+            }
+          ]
+        }
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 1000
+    end
   end
 end
