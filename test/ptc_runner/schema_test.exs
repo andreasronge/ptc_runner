@@ -656,4 +656,59 @@ defmodule PtcRunner.SchemaTest do
       assert decoded == schema
     end
   end
+
+  describe "to_prompt/0" do
+    test "returns a string with operation descriptions" do
+      prompt = PtcRunner.Schema.to_prompt()
+
+      assert is_binary(prompt)
+      assert String.contains?(prompt, "PTC Operations")
+      assert String.contains?(prompt, "pipe(steps)")
+      assert String.contains?(prompt, "load(name)")
+      assert String.contains?(prompt, "filter(where)")
+      assert String.contains?(prompt, "count")
+    end
+
+    test "includes all operation categories" do
+      prompt = PtcRunner.Schema.to_prompt()
+
+      assert String.contains?(prompt, "Data:")
+      assert String.contains?(prompt, "Flow:")
+      assert String.contains?(prompt, "Logic:")
+      assert String.contains?(prompt, "Filter/Transform:")
+      assert String.contains?(prompt, "Compare:")
+      assert String.contains?(prompt, "Aggregate:")
+    end
+
+    test "includes examples by default" do
+      prompt = PtcRunner.Schema.to_prompt()
+
+      assert String.contains?(prompt, "Examples:")
+      assert String.contains?(prompt, ~s|{"program":|)
+      assert String.contains?(prompt, ~s|"op":"pipe"|)
+    end
+
+    test "examples option controls number of examples" do
+      prompt_none = PtcRunner.Schema.to_prompt(examples: 0)
+      prompt_one = PtcRunner.Schema.to_prompt(examples: 1)
+      prompt_three = PtcRunner.Schema.to_prompt(examples: 3)
+
+      refute String.contains?(prompt_none, "Examples:")
+
+      assert String.contains?(prompt_one, "Count filtered items")
+      refute String.contains?(prompt_one, "Sum with multiple conditions")
+
+      assert String.contains?(prompt_three, "Count filtered items")
+      assert String.contains?(prompt_three, "Sum with multiple conditions")
+      assert String.contains?(prompt_three, "Average of filtered data")
+    end
+
+    test "is much smaller than to_llm_schema" do
+      prompt = PtcRunner.Schema.to_prompt()
+      llm_schema = PtcRunner.Schema.to_llm_schema() |> Jason.encode!()
+
+      # Prompt should be at least 10x smaller
+      assert String.length(prompt) < String.length(llm_schema) / 10
+    end
+  end
 end

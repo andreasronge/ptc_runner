@@ -17,8 +17,8 @@ defmodule PtcDemo.CLI do
 
     ensure_api_key!()
 
-    # Parse mode from args: --text or --structured (default)
-    mode = if "--text" in args, do: :text, else: :structured
+    # Parse mode from args: --structured or text (default, token-efficient)
+    mode = if "--structured" in args, do: :structured, else: :text
 
     # Start the agent
     {:ok, _pid} = PtcDemo.Agent.start_link(mode: mode)
@@ -86,6 +86,12 @@ defmodule PtcDemo.CLI do
     loop()
   end
 
+  defp handle_input("/stats") do
+    stats = PtcDemo.Agent.stats()
+    IO.puts(format_stats(stats))
+    loop()
+  end
+
   defp handle_input(question) do
     case PtcDemo.Agent.ask(question) do
       {:ok, answer} ->
@@ -101,8 +107,8 @@ defmodule PtcDemo.CLI do
   defp banner(model, mode) do
     mode_desc =
       case mode do
-        :structured -> "structured (reliable JSON)"
-        :text -> "text (with retry)"
+        :text -> "text (token-efficient, ~600 tokens/call)"
+        :structured -> "structured (reliable, ~11k tokens/call)"
       end
 
     """
@@ -130,7 +136,8 @@ defmodule PtcDemo.CLI do
       /datasets  - List available datasets
       /program   - Show last generated PTC program
       /examples  - Show example queries
-      /reset     - Clear conversation context
+      /stats     - Show token usage and cost statistics
+      /reset     - Clear conversation context and stats
       /quit      - Exit
 
     Just type your question to query the data!
@@ -172,6 +179,36 @@ defmodule PtcDemo.CLI do
       _ -> json_str
     end
   end
+
+  defp format_stats(stats) do
+    cost_str = format_cost(stats.total_cost)
+
+    """
+
+    Session Statistics:
+      Requests:      #{stats.requests}
+      Input tokens:  #{format_number(stats.input_tokens)}
+      Output tokens: #{format_number(stats.output_tokens)}
+      Total tokens:  #{format_number(stats.total_tokens)}
+      Total cost:    #{cost_str}
+    """
+  end
+
+  defp format_number(n) when is_integer(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
+    |> String.reverse()
+  end
+
+  defp format_number(n), do: inspect(n)
+
+  defp format_cost(cost) when is_float(cost) and cost > 0 do
+    "$#{:erlang.float_to_binary(cost, decimals: 6)}"
+  end
+
+  defp format_cost(_), do: "$0.00 (not available for this provider)"
 
   defp ensure_api_key! do
     has_key =
