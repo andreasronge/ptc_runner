@@ -716,7 +716,7 @@ See `test/e2e/llm_integration_test.exs` for complete examples.
 ### Phase 3: Logic & Variables
 - Logic: `and`, `or`, `not`, `if`
 - Variables: `let` bindings
-- Combine: `merge`, `concat`
+- Combine: `merge`, `concat`, `zip`
 
 ### Phase 4: Tool Integration
 - Tool registry and `call` operation
