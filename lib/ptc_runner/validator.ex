@@ -69,6 +69,19 @@ defmodule PtcRunner.Validator do
     end
   end
 
+  defp validate_operation("if", node) do
+    with :ok <- require_field(node, "condition", "Operation 'if' requires field 'condition'"),
+         :ok <- require_field(node, "then", "Operation 'if' requires field 'then'"),
+         :ok <- require_field(node, "else", "Operation 'if' requires field 'else'") do
+      # Recursively validate nested expressions
+      with :ok <- validate_node(Map.get(node, "condition")) do
+        with :ok <- validate_node(Map.get(node, "then")) do
+          validate_node(Map.get(node, "else"))
+        end
+      end
+    end
+  end
+
   # Control flow
   defp validate_operation("pipe", node) do
     case Map.get(node, "steps") do
