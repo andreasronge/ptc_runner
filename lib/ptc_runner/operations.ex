@@ -720,7 +720,7 @@ defmodule PtcRunner.Operations do
         err
 
       {:ok, evaluated_lists} ->
-        {:ok, do_zip(evaluated_lists)}
+        {:ok, Enum.zip_with(evaluated_lists, & &1)}
     end
   end
 
@@ -738,27 +738,6 @@ defmodule PtcRunner.Operations do
 
       {:ok, list} ->
         {:error, {:execution_error, "zip requires list values, got #{inspect(list)}"}}
-    end
-  end
-
-  defp do_zip([]), do: []
-  defp do_zip([[] | _]), do: []
-
-  defp do_zip(lists) do
-    # Take first element from each list
-    heads =
-      Enum.map(lists, fn
-        [h | _] -> h
-        [] -> nil
-      end)
-
-    # Check if any list is empty
-    if Enum.any?(heads, &is_nil/1) do
-      []
-    else
-      # Recurse with tails
-      tails = Enum.map(lists, fn [_ | t] -> t end)
-      [heads | do_zip(tails)]
     end
   end
 end
