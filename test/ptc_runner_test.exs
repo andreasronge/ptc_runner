@@ -3055,4 +3055,148 @@ defmodule PtcRunnerTest do
       assert result == "not_eligible"
     end
   end
+
+  describe "call operation (tool invocation)" do
+    test "call tool with args" do
+      tools = %{
+        "add" => fn %{"a" => a, "b" => b} -> a + b end
+      }
+
+      program = ~s({
+        "op": "call",
+        "tool": "add",
+        "args": {"a": 5, "b": 3}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      assert result == 8
+    end
+
+    test "call tool without args passes empty map" do
+      tools = %{
+        "get_default" => fn _args -> "default_value" end
+      }
+
+      program = ~s({
+        "op": "call",
+        "tool": "get_default"
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      assert result == "default_value"
+    end
+
+    test "call non-existent tool raises execution error" do
+      program = ~s({
+        "op": "call",
+        "tool": "missing_tool"
+      })
+
+      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: %{})
+      assert String.contains?(msg, "Tool 'missing_tool' not found")
+    end
+
+    test "call tool that returns error tuple propagates error" do
+      tools = %{
+        "failing_tool" => fn _args -> {:error, "Something went wrong"} end
+      }
+
+      program = ~s({
+        "op": "call",
+        "tool": "failing_tool"
+      })
+
+      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "Tool 'failing_tool' error")
+      assert String.contains?(msg, "Something went wrong")
+    end
+
+    test "call tool that raises exception catches and converts" do
+      tools = %{
+        "raising_tool" => fn _args -> raise "Tool crashed" end
+      }
+
+      program = ~s({
+        "op": "call",
+        "tool": "raising_tool"
+      })
+
+      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "Tool 'raising_tool' raised")
+      assert String.contains?(msg, "Tool crashed")
+    end
+
+    test "call tool with wrong arity raises error" do
+      tools = %{
+        "wrong_arity" => fn -> "no args" end
+      }
+
+      program = ~s({
+        "op": "call",
+        "tool": "wrong_arity"
+      })
+
+      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: tools)
+      assert String.contains?(msg, "is not a function with arity 1")
+    end
+
+    test "missing tool field raises validation error" do
+      program = ~s({
+        "op": "call"
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Operation 'call' requires field 'tool'"}
+    end
+
+    test "args field must be a map raises validation error" do
+      program = ~s({
+        "op": "call",
+        "tool": "test",
+        "args": "not a map"
+      })
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Field 'args' must be a map"}
+    end
+
+    test "call tool as first step in pipe" do
+      tools = %{
+        "get_users" => fn _args ->
+          [
+            %{"id" => 1, "name" => "Alice", "active" => true},
+            %{"id" => 2, "name" => "Bob", "active" => false}
+          ]
+        end
+      }
+
+      program = ~s({
+        "op": "pipe",
+        "steps": [
+          {"op": "call", "tool": "get_users"},
+          {"op": "filter", "where": {"op": "eq", "field": "active", "value": true}},
+          {"op": "count"}
+        ]
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      assert result == 1
+    end
+
+    test "call tool and store result with let binding" do
+      tools = %{
+        "get_balance" => fn %{"account" => acc} -> acc * 100 end
+      }
+
+      program = ~s({
+        "op": "let",
+        "name": "balance",
+        "value": {"op": "call", "tool": "get_balance", "args": {"account": 5}},
+        "in": {"op": "var", "name": "balance"}
+      })
+
+      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      assert result == 500
+    end
+  end
 end

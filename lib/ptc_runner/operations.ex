@@ -360,6 +360,33 @@ defmodule PtcRunner.Operations do
     end
   end
 
+  # Tool integration
+  def eval("call", node, context, _eval_fn) do
+    tool_name = Map.get(node, "tool")
+    args = Map.get(node, "args", %{})
+
+    case Map.get(context.tools, tool_name) do
+      nil ->
+        {:error, {:execution_error, "Tool '#{tool_name}' not found"}}
+
+      tool_fn when is_function(tool_fn, 1) ->
+        try do
+          case tool_fn.(args) do
+            {:error, reason} ->
+              {:error, {:execution_error, "Tool '#{tool_name}' error: #{inspect(reason)}"}}
+
+            result ->
+              {:ok, result}
+          end
+        rescue
+          e -> {:error, {:execution_error, "Tool '#{tool_name}' raised: #{Exception.message(e)}"}}
+        end
+
+      _tool_fn ->
+        {:error, {:execution_error, "Tool '#{tool_name}' is not a function with arity 1"}}
+    end
+  end
+
   def eval(op, _node, _context, _eval_fn) do
     {:error, {:execution_error, "Unknown operation '#{op}'"}}
   end
