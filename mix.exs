@@ -57,7 +57,7 @@ defmodule PtcRunner.MixProject do
 
   defp docs do
     [
-      main: "PtcRunner",
+      main: "readme",
       extras: ["README.md", "docs/architecture.md", "CHANGELOG.md"]
     ]
   end

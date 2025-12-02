@@ -85,8 +85,7 @@ See the [Architecture](docs/architecture.md) document for full DSL specification
 ## Documentation
 
 - **[Architecture](docs/architecture.md)** - System design, DSL specification, API reference
-- **[Research Notes](docs/research.md)** - Background research on PTC approaches
-- **[Demo App](demo/)** - Interactive CLI chat showing PTC with ReqLLM integration
+- **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
 
 ## Installation
 
@@ -185,7 +184,7 @@ def handle_tool_result(state, tool_name, result) do
 end
 ```
 
-The LLM can then query the ref via PtcRunner: `{"op": "load", "name": "get_orders_42"}`. See the [demo app](demo/) for a working example with static datasets.
+The LLM can then query the ref via PtcRunner: `{"op": "load", "name": "get_orders_42"}`. See the demo app in the `demo/` directory for a working example with static datasets.
 
 ## Integration with LLMs
 
