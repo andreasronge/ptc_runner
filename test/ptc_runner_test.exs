@@ -1152,6 +1152,44 @@ defmodule PtcRunnerTest do
     assert String.contains?(message, "JSON decode error")
   end
 
+  test "valid wrapped JSON string extracts program and runs successfully" do
+    program = ~s({"program": {"op": "literal", "value": 42}})
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == 42
+  end
+
+  test "valid wrapped map extracts program and runs successfully" do
+    program = %{"program" => %{"op" => "literal", "value" => 99}}
+    {:ok, result, _metrics} = PtcRunner.run(program)
+
+    assert result == 99
+  end
+
+  test "missing program field returns parse error" do
+    program = ~s({"data": {"op": "literal", "value": 42}})
+    {:error, {:parse_error, message}} = PtcRunner.run(program)
+
+    assert message == "Missing required field 'program'"
+  end
+
+  test "program is not a map returns parse error" do
+    # Test with null
+    program = ~s({"program": null})
+    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    assert message == "program must be a map"
+
+    # Test with string
+    program = ~s({"program": "not a map"})
+    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    assert message == "program must be a map"
+
+    # Test with array
+    program = ~s({"program": [1, 2, 3]})
+    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    assert message == "program must be a map"
+  end
+
   # Timeout handling
   test "timeout is enforced" do
     program = ~s({"program": {"op": "literal", "value": 42}})
