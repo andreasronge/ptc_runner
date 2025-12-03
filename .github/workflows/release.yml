@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    name: Publish to Hex.pm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          MIX_VERSION=$(grep 'version:' mix.exs | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "Tag version: $TAG_VERSION"
+          echo "Mix version: $MIX_VERSION"
+          if [ "$TAG_VERSION" != "$MIX_VERSION" ]; then
+            echo "::error::Tag v$TAG_VERSION doesn't match mix.exs version $MIX_VERSION"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: mix test
+        env:
+          MIX_ENV: test
+
+      - name: Build package
+        run: mix hex.build
+
+      - name: Publish to Hex.pm
+        run: mix hex.publish --yes
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+
+      - name: Publish docs to HexDocs
+        run: mix hex.publish docs --yes
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
