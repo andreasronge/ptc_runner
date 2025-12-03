@@ -243,6 +243,13 @@ The schema includes operation descriptions with examples (e.g., `{op:'gt', field
 
 See `test/ptc_runner/e2e_test.exs` for complete integration examples.
 
+## Future Plans
+
+- **Schema optimization**: The full JSON schema (~10k tokens) is large for LLM context. Exploring alternatives like incremental schema loading or compressed representations.
+- **Data introspection**: Add operations like `keys` and `typeof` so LLMs can discover the structure of unknown data at runtime, enabling better querying of nested objects without upfront schema knowledge. See [#90](https://github.com/andreasronge/ptc_runner/issues/90).
+- **Benchmarks and evals**: Compare model performance across different configurations—with and without JSON schema, text vs structured output mode, and automatic discovery of nested data structures.
+- **Real-world integration**: Integrate PtcRunner into a Phoenix-based voice assistant application to validate the library in production use cases.
+
 ## Development
 
 This library was primarily developed by Claude (Anthropic) via GitHub Actions workflows, with human oversight and direction. See the commit history for details.
