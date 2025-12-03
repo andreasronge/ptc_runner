@@ -4,7 +4,9 @@ Guidelines for the Claude Code Review workflow to produce actionable, clear revi
 
 ## Overview
 
-The PR review workflow runs on every pull request and produces a review comment. This review is then processed by the [Auto-Triage workflow](auto-triage-spec.md), which decides whether to fix issues immediately, defer them to GitHub issues, or ignore them.
+The PR review workflow runs when a maintainer adds the `claude-review` label to a pull request. Once triggered, it produces a review comment that is then processed by the [Auto-Triage workflow](auto-triage-spec.md), which decides whether to fix issues immediately, defer them to GitHub issues, or ignore them.
+
+**Note**: For public repositories, the `claude-review` label prevents untrusted PRs from automatically triggering expensive Claude API calls.
 
 **Key insight**: The review's language directly affects triage decisions. Clear, explicit severity signals help the auto-triage make correct choices.
 

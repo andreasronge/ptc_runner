@@ -2,12 +2,17 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [labeled, synchronize]
 
 jobs:
   claude-review:
-    # Skip if PR has no changes (e.g., fast-forward merge from main)
-    if: github.event.pull_request.changed_files > 0
+    # Only run when claude-review label is added, or on sync if label already present
+    if: |
+      github.event.pull_request.changed_files > 0 &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'claude-review') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claude-review'))
+      )
 
     runs-on: ubuntu-latest
 
@@ -69,6 +74,15 @@ jobs:
         run: |
           echo "::notice::Skipping review due to merge conflict"
           exit 0
+
+      - name: Remove merge-conflict label if present
+        if: steps.merge-check.outputs.merge_ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Remove stale merge-conflict label from previous failed merges
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --remove-label "merge-conflict" 2>/dev/null || true
 
       - name: Setup Elixir environment
         if: steps.merge-check.outputs.merge_ok == 'true'

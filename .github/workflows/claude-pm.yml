@@ -205,82 +205,22 @@ jobs:
             - If should be done: check if it has `ready-for-implementation`, if not add `needs-review` first
             - If should be deferred: add a comment explaining why, and continue to next step
 
-            #### Step 2: Check for Ready Issues
+            #### Step 2: Check for Ready AND Approved Issues
 
             ```bash
-            # Check for issues already approved and ready
-            gh issue list --label "ready-for-implementation" --state open --json number,title
+            # Check for issues that are BOTH ready AND approved by maintainer
+            gh issue list --label "ready-for-implementation" --label "claude-approved" --state open --json number,title
             ```
 
-            If there's a `ready-for-implementation` issue:
+            If there's an issue with BOTH labels:
             - Pick the oldest one (or highest priority if labeled)
-            - Skip to Step 5 (trigger implementation)
+            - Skip to Step 4 (trigger implementation)
 
-            #### Step 3: Analyze What to Build Next
+            If NO issue has both labels:
+            - Exit with message: "No approved issues ready for implementation. Maintainer must add 'claude-approved' label to issues before PM can work on them."
+            - Do NOT create new issues - this workflow does not create issues autonomously
 
-            If no ready issues exist:
-
-            1. **Check what's implemented**:
-               ```bash
-               # Recent commits
-               git log --oneline -30
-
-               # Check test coverage for features
-               grep -r "describe.*" test/ --include="*.exs"
-
-               # Check what operations are implemented
-               grep -r "defp.*eval.*op:" lib/
-               ```
-
-            2. **Compare to architecture.md phases**:
-               - What phase are we in?
-               - What's the next logical piece to implement?
-               - Are there dependencies?
-
-            3. **Verify tests pass**:
-               ```bash
-               mix test
-               ```
-               If tests fail, create a bug fix issue instead of a feature issue.
-
-            #### Step 4: Create a New Issue
-
-            Based on your analysis:
-
-            1. Draft an issue following the template in `issue-creation-guidelines.md`
-            2. Create it with appropriate labels:
-
-               **For new features (from architecture phases):**
-               ```bash
-               gh issue create \
-                 --title "[Phase N] Brief description" \
-                 --label "enhancement" \
-                 --label "needs-review" \
-                 --body-file /tmp/issue-body.md
-               ```
-
-               **For technical debt (refactoring, test improvements, code quality):**
-               ```bash
-               gh issue create \
-                 --title "Tech debt: Brief description" \
-                 --label "tech-debt" \
-                 --label "needs-review" \
-                 --body-file /tmp/issue-body.md
-               ```
-
-               **For bug fixes:**
-               ```bash
-               gh issue create \
-                 --title "Bug: Brief description" \
-                 --label "bug" \
-                 --label "needs-review" \
-                 --body-file /tmp/issue-body.md
-               ```
-
-            3. The `needs-review` label will trigger the issue review workflow
-            4. **STOP HERE** - Wait for the issue to be reviewed before implementation
-
-            #### Step 5: Pre-Implementation Check
+            #### Step 3: Pre-Implementation Check
 
             Before triggering implementation, evaluate whether the issue can proceed:
 
@@ -305,11 +245,10 @@ jobs:
                - Are there prerequisites not captured in existing issues?
 
                If you identify a blocker:
-               - Create a new issue (tech-debt, bug, or enhancement) with `needs-review` label
                - Add a comment to the ready issue: "Blocked by #N - [brief reason]"
-               - **STOP** - Do not trigger implementation
+               - **STOP** - Do not trigger implementation (maintainer must resolve the blocker)
 
-            #### Step 6: Trigger Implementation
+            #### Step 4: Trigger Implementation
 
             When the issue is ready and unblocked:
 
@@ -328,25 +267,21 @@ jobs:
 
             ## Handling Failures
 
-            ### If Issue Review Rejects an Issue
+            ### If Implementation Fails
 
-            When the review workflow adds `needs-clarification` or `needs-breakdown`:
+            If the implementation attempt fails or the issue cannot proceed:
 
-            1. Read the review feedback: `gh issue view NUMBER --comments`
-            2. Decide:
-               - **Fixable**: Update the issue body and re-add `needs-review` label
-               - **Fundamental problem**: Close the issue with explanation
-            3. Add `pm-failed-attempt` label to track the failure
-            4. If 3+ issues have `pm-failed-attempt` label: Enter STUCK state
+            1. Add a comment to the issue explaining what went wrong
+            2. Add `pm-failed-attempt` label to track the failure
+            3. Exit - the maintainer will need to intervene
 
             ### STUCK State
 
-            When entering stuck state:
+            If 3+ issues have `pm-failed-attempt` label, enter STUCK state:
 
             1. Add `pm-stuck` label to the problematic issue
             2. Post a comment explaining what went wrong
-            3. Do NOT create more issues
-            4. Exit with error
+            3. Exit with error
 
             To recover from stuck state, someone must:
             - Fix the underlying issue
@@ -355,12 +290,12 @@ jobs:
 
             ## Safety Rules
 
-            1. **One issue at a time**: Never have multiple issues in flight
-            2. **Wait for merge**: Don't create new issues or trigger implementations while a PR is open
+            1. **No issue creation**: This workflow does NOT create issues. Only the maintainer creates issues.
+            2. **Require claude-approved**: Only work on issues with BOTH `ready-for-implementation` AND `claude-approved` labels
+            3. **One issue at a time**: Never have multiple issues in flight
+            4. **Wait for merge**: Don't trigger implementations while a PR is open
                - If Open PRs > 0, exit without taking action
                - This prevents parallel work that could conflict
-            3. **Respect reviews**: If an issue is rejected, address feedback or close it
-            4. **Max 3 failures**: Enter stuck state after 3 consecutive rejections (tracked via `pm-failed-attempt` label)
             5. **Don't skip steps**: Always check blocking issues first
 
             ## Output

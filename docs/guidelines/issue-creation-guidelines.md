@@ -1,10 +1,10 @@
 # Issue Creation Guidelines
 
-Guidelines for the PM workflow to create well-specified GitHub issues.
+Guidelines for creating well-specified GitHub issues.
 
 ## Overview
 
-The PM workflow creates issues that are ready for implementation. Each issue should be:
+Issues must be created by maintainers (not automatically by workflows). Each issue should be:
 - **Self-contained**: All information needed to implement is in the issue
 - **Right-sized**: Large enough to be testable via E2E test, small enough for one PR
 - **Verified**: Based on actual codebase analysis, not assumptions
@@ -222,18 +222,21 @@ When an issue is rejected by the review workflow:
 2. Create a new issue if the work is still needed
 3. Reference the closed issue for context
 
-### Consecutive Failures
+## Enabling Automation
 
-After 3 consecutive rejected issues:
-- PM workflow enters STUCK state (tracked via `pm-stuck` label)
-- Add `pm-failed-attempt` label to track failures
-- Stop creating new issues until reviewed
+For Claude workflows to work on an issue:
+
+1. **Add `claude-approved` label** - Required for PM workflow to trigger implementation
+2. **Add `ready-for-implementation` label** - Issue must be reviewed and approved
+3. PM workflow will only act on issues with BOTH labels
 
 ## Labels
 
 ### Workflow Labels
 | Label | Meaning |
 |-------|---------|
+| `claude-approved` | Maintainer-approved for Claude automation (required for PM workflow) |
+| `claude-review` | Triggers Claude automated PR review |
 | `needs-review` | Issue ready for review workflow |
 | `ready-for-implementation` | Approved, ready to implement |
 | `from-pr-review` | Created by triage workflow during PR review |
