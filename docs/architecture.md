@@ -4,31 +4,32 @@
 
 PtcRunner is a BEAM-native library for executing Programmatic Tool Calling (PTC) programs. It provides a safe, controlled environment for running LLM-generated data transformation and tool orchestration code.
 
+```mermaid
+flowchart TD
+      User([User / LLM Client]) -->|"run/2 (JSON program)"| Runner[PtcRunner]
+
+      subgraph "PtcRunner Process"
+          Runner -->|parse/1| Parser[Parser]
+          Parser -->|AST| Validator[Validator]
+          Validator -->|":ok"| Runner
+          Runner -->|Creates| Context[Execution Context]
+          Context -- Contains --> Tools[Tool Registry]
+      end
+
+      subgraph "Sandbox Process"
+          direction TB
+          Sandbox[Sandbox<br/>max_heap: 10MB<br/>timeout: 1s]
+          Sandbox -->|eval/2| Interpreter[Interpreter]
+          Interpreter -->|Dispatch| Ops[Operations]
+          Ops -->|Access vars| ContextRef[Context]
+          Ops -->|Call| ToolsRef[Tools]
+      end
+
+      Runner -->|"execute/3 (AST, Context)"| Sandbox
+      Sandbox -->|Result| Runner
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         PtcRunner                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐    ┌──────────┐    ┌─────────────┐               │
-│  │  Parser  │───▶│Validator │───▶│ Interpreter │               │
-│  │  (JSON)  │    │ (Schema) │    │  (Evaluator)│               │
-│  └──────────┘    └──────────┘    └──────┬──────┘               │
-│                                         │                        │
-│                                         ▼                        │
-│                              ┌──────────────────┐               │
-│                              │  Tool Registry   │               │
-│                              │  (User-defined)  │               │
-│                              └──────────────────┘               │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Sandbox Process                        │   │
-│  │  • max_heap_size: 10MB (configurable)                    │   │
-│  │  • timeout: 1s (configurable)                            │   │
-│  │  • isolated evaluation                                   │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+The diagram shows the two-phase execution model: first the JSON program is parsed and validated in the main process, then execution happens in an isolated sandbox process with memory and timeout limits. The Context (containing variables and registered tools) is passed into the sandbox where the Interpreter dispatches operations.
 
 ## Design Principles
 
@@ -49,8 +50,8 @@ lib/
 │   ├── interpreter.ex            # AST evaluation
 │   ├── operations.ex             # Built-in operations
 │   ├── sandbox.ex                # Process isolation + resource limits
-│   ├── context.ex                # Variable bindings and tool results
-│   └── tools.ex                  # Tool registry
+│   ├── context.ex                # Variable bindings and tool registry
+│   └── schema.ex                 # Operation definitions for validation
 ```
 
 ## DSL Specification
@@ -610,13 +611,13 @@ defmodule PtcRunner.Sandbox do
     parent = self()
 
     {pid, ref} = Process.spawn(fn ->
+      Process.flag(:priority, :normal)
       result = Interpreter.eval(ast, context)
       memory = Process.info(self(), :memory) |> elem(1)
       send(parent, {:result, result, memory})
     end, [
       :monitor,
-      {:max_heap_size, max_heap},
-      {:priority, :low}
+      {:max_heap_size, max_heap}
     ])
 
     start_time = System.monotonic_time(:millisecond)
