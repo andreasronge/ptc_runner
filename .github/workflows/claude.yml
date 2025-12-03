@@ -12,11 +12,19 @@ on:
 
 jobs:
   claude:
+    # Only allow trusted actors or issues/PRs with claude-approved label
+    # Also block bot-authored comments/reviews to prevent self-triggering loops
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (
+        github.actor == 'andreasronge' ||
+        contains(github.event.issue.labels.*.name, 'claude-approved') ||
+        contains(github.event.pull_request.labels.*.name, 'claude-approved')
+      ) && (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && github.event.comment.user.type != 'Bot') ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && github.event.comment.user.type != 'Bot') ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && github.event.review.user.type != 'Bot') ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && github.event.issue.user.type != 'Bot')
+      )
     runs-on: ubuntu-latest
 
     # Prevent concurrent Claude operations on the same PR/issue

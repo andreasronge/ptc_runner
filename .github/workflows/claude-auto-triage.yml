@@ -71,15 +71,25 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
           echo "head_sha=$HEAD_SHA" >> $GITHUB_OUTPUT
 
-          # Get PR details
-          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName,baseRefName,title)
+          # Get PR details including fork info
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName,baseRefName,title,headRepositoryOwner)
           HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
           BASE_REF=$(echo "$PR_DATA" | jq -r '.baseRefName')
           PR_TITLE=$(echo "$PR_DATA" | jq -r '.title')
+          HEAD_OWNER=$(echo "$PR_DATA" | jq -r '.headRepositoryOwner.login')
 
           echo "head_ref=$HEAD_REF" >> $GITHUB_OUTPUT
           echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
           echo "title=$PR_TITLE" >> $GITHUB_OUTPUT
+
+          # Check if PR is from a fork
+          REPO_OWNER="${{ github.repository_owner }}"
+          if [ "$HEAD_OWNER" != "$REPO_OWNER" ]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "::notice::PR is from fork ($HEAD_OWNER) - FIX_NOW items will be converted to issues"
+          else
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Skip if no PR found
         if: steps.pr.outputs.skip == 'true'
@@ -220,6 +230,15 @@ jobs:
             **PR Title**: ${{ steps.pr.outputs.title }}
             **Repository**: ${{ github.repository }}
             **Triage Cycle**: ${{ steps.check-labels.outputs.triage_cycle }} of 3 max
+            **Is Fork PR**: ${{ steps.pr.outputs.is_fork }}
+
+            ## Fork PR Handling
+
+            **IMPORTANT**: If this is a fork PR (`Is Fork PR: true`), you CANNOT use FIX_NOW.
+            Automated fixes cannot push to fork branches. Instead:
+            - Convert ALL FIX_NOW items to DEFER_ISSUE
+            - Create issues with clear fix instructions so the contributor can apply them
+            - In the summary, note that fixes were deferred because this is a fork PR
 
             ## Your Task
 

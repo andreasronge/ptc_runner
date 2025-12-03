@@ -9,6 +9,12 @@ jobs:
     # Only run when 'needs-review' label is added
     if: github.event.label.name == 'needs-review'
     runs-on: ubuntu-latest
+
+    # Prevent concurrent reviews of the same issue
+    concurrency:
+      group: claude-issue-review-${{ github.event.issue.number }}
+      cancel-in-progress: true
+
     permissions:
       contents: read
       issues: write
