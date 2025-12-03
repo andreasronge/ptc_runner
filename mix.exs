@@ -14,7 +14,10 @@ defmodule PtcRunner.MixProject do
       description: "A BEAM-native Elixir library for Programmatic Tool Calling (PTC)",
       source_url: "https://github.com/devoteam-se/ptc_runner",
       docs: docs(),
-      package: package()
+      package: package(),
+      test_coverage: [
+        ignore_modules: [PtcRunner.TestSupport.LLMClient]
+      ]
     ]
   end
 
