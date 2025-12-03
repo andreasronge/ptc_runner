@@ -112,7 +112,7 @@ defmodule PtcRunner.ValidatorTest do
     end
   end
 
-  describe "Validator.validate/1 - Parser.nth validation" do
+  describe "Validator.validate/1 - nth validation" do
     test "validates nth with non-negative index" do
       ast = %{"op" => "nth", "index" => 0}
       assert :ok = PtcRunner.Validator.validate(ast)
@@ -356,7 +356,7 @@ defmodule PtcRunner.ValidatorTest do
 
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
 
-      assert message =~ "AST must be a map" or message =~ "Node must be a map"
+      assert message =~ "Node must be a map"
     end
   end
 
@@ -383,7 +383,7 @@ defmodule PtcRunner.ValidatorTest do
       }
 
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
-      assert message =~ "AST must be a map" or message =~ "Node must be a map"
+      assert message =~ "Node must be a map"
     end
 
     test "validates {:list, :string} field type via concat" do
@@ -478,7 +478,7 @@ defmodule PtcRunner.ValidatorTest do
       }
 
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
-      assert message =~ "AST must be a map" or message =~ "Node must be a map"
+      assert message =~ "Node must be a map"
     end
 
     test "catches error in let in with invalid expression" do
@@ -490,7 +490,7 @@ defmodule PtcRunner.ValidatorTest do
       }
 
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
-      assert message =~ "Node must be a map" or message =~ "AST must be a map"
+      assert message =~ "Node must be a map"
     end
   end
 
@@ -540,7 +540,7 @@ defmodule PtcRunner.ValidatorTest do
       }
 
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
-      assert message =~ "AST must be a map" or message =~ "Node must be a map"
+      assert message =~ "Node must be a map"
     end
 
     test "returns error when expr field has missing required field" do
@@ -693,7 +693,7 @@ defmodule PtcRunner.ValidatorTest do
       }
 
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
-      assert message =~ "Node must be a map" or message =~ "AST must be a map"
+      assert message =~ "Node must be a map"
     end
 
     test "validates select with single field" do
