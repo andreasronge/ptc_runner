@@ -81,4 +81,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context data support for multi-turn conversations
 - Metrics collection for performance monitoring
 
-[0.1.0]: https://github.com/devoteam-se/ptc_runner/releases/tag/v0.1.0
+[0.1.0]: https://github.com/andreasronge/ptc_runner/releases/tag/v0.1.0

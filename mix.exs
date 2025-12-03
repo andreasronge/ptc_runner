@@ -12,7 +12,7 @@ defmodule PtcRunner.MixProject do
       aliases: aliases(),
       name: "PtcRunner",
       description: "A BEAM-native Elixir library for Programmatic Tool Calling (PTC)",
-      source_url: "https://github.com/devoteam-se/ptc_runner",
+      source_url: "https://github.com/andreasronge/ptc_runner",
       docs: docs(),
       package: package(),
       test_coverage: [
@@ -67,9 +67,12 @@ defmodule PtcRunner.MixProject do
 
   defp package do
     [
+      files: ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/devoteam-se/ptc_runner"},
-      homepage_url: "https://github.com/devoteam-se/ptc_runner"
+      links: %{
+        "GitHub" => "https://github.com/andreasronge/ptc_runner",
+        "Changelog" => "https://github.com/andreasronge/ptc_runner/blob/main/CHANGELOG.md"
+      }
     ]
   end
 end
