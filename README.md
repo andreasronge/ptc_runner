@@ -1,5 +1,9 @@
 # PtcRunner
 
+[![Hex.pm](https://img.shields.io/hexpm/v/ptc_runner.svg)](https://hex.pm/packages/ptc_runner)
+[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/ptc_runner)
+[![License](https://img.shields.io/hexpm/l/ptc_runner.svg)](LICENSE)
+
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
 
 ## What is PTC?
