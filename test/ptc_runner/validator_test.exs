@@ -630,7 +630,7 @@ defmodule PtcRunner.ValidatorTest do
       assert :ok = PtcRunner.Validator.validate(ast)
     end
 
-    test "map field validation error when not a map" do
+    test "literal operation accepts list value" do
       ast = %{"op" => "literal", "value" => [1, 2, 3]}
       assert :ok = PtcRunner.Validator.validate(ast)
     end
