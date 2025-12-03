@@ -1,8 +1,5 @@
 # PtcRunner
 
-<!-- PM Status Badge: Updated by PM workflow -->
-![PM Status](https://img.shields.io/badge/PM-active-green)
-
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
 
 ## What is PTC?
@@ -13,7 +10,9 @@ Programmatic Tool Calling is an execution model where an LLM writes small progra
 2. Filters, transforms, and aggregates the results
 3. Returns only the final answer
 
-This results in **85-98% token savings** for data-heavy workflows.
+This can dramatically reduce token usage for data-heavy workflows.
+
+The PTC pattern was introduced by Anthropic in their engineering blog posts on [advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use) and [code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp). See also [open-ptc-agent](https://github.com/Chen-zexi/open-ptc-agent) for a Python-based implementation.
 
 ## Why PtcRunner?
 
@@ -78,9 +77,6 @@ program = ~s({
 | **Tools** | `call` |
 | **Combine** | `merge`, `concat`, `zip` |
 
-## Status
-
-See the [Architecture](docs/architecture.md) document for full DSL specification.
 
 ## Documentation
 
