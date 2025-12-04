@@ -934,11 +934,11 @@ defmodule PtcRunnerTest do
     assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
   end
 
-  test "get operation missing path field raises validation error" do
+  test "get operation missing field and path raises validation error" do
     program = ~s({"program": {"op": "get"}})
     {:error, reason} = PtcRunner.run(program)
 
-    assert reason == {:validation_error, "Operation 'get' requires field 'path'"}
+    assert reason == {:validation_error, "Operation 'get' requires either 'field' or 'path'"}
   end
 
   test "get operation with non-array path raises validation error" do
@@ -3349,6 +3349,212 @@ defmodule PtcRunnerTest do
 
       {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
       assert result == 500
+    end
+  end
+
+  describe "sort_by operation" do
+    test "sorts list ascending by default" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"price": 999}, {"price": 15}, {"price": 599}]},
+          {"op": "sort_by", "field": "price"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert Enum.map(result, & &1["price"]) == [15, 599, 999]
+    end
+
+    test "sorts list descending when order is desc" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"price": 15}, {"price": 999}, {"price": 599}]},
+          {"op": "sort_by", "field": "price", "order": "desc"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert Enum.map(result, & &1["price"]) == [999, 599, 15]
+    end
+
+    test "returns empty list when input is empty" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": []},
+          {"op": "sort_by", "field": "price"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == []
+    end
+
+    test "returns validation error for invalid order value" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"price": 10}]},
+          {"op": "sort_by", "field": "price", "order": "invalid"}
+        ]
+      }})
+
+      {:error, reason} = PtcRunner.run(program)
+      assert reason == {:validation_error, "Field 'order' must be 'asc' or 'desc', got 'invalid'"}
+    end
+  end
+
+  describe "max_by operation" do
+    test "returns row with maximum field value" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [
+            {"name": "Alice", "years": 3},
+            {"name": "Bob", "years": 7},
+            {"name": "Carol", "years": 5}
+          ]},
+          {"op": "max_by", "field": "years"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == %{"name" => "Bob", "years" => 7}
+    end
+
+    test "returns null for empty list" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": []},
+          {"op": "max_by", "field": "years"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == nil
+    end
+
+    test "skips items with nil field values" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [
+            {"name": "Alice", "years": null},
+            {"name": "Bob", "years": 7},
+            {"name": "Carol", "years": 5}
+          ]},
+          {"op": "max_by", "field": "years"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == %{"name" => "Bob", "years" => 7}
+    end
+  end
+
+  describe "min_by operation" do
+    test "returns row with minimum field value" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [
+            {"name": "Laptop", "price": 999},
+            {"name": "Book", "price": 15},
+            {"name": "Phone", "price": 599}
+          ]},
+          {"op": "min_by", "field": "price"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == %{"name" => "Book", "price" => 15}
+    end
+
+    test "returns null for empty list" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": []},
+          {"op": "min_by", "field": "price"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == nil
+    end
+
+    test "skips items with nil field values" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [
+            {"name": "Laptop", "price": null},
+            {"name": "Book", "price": 15},
+            {"name": "Phone", "price": 599}
+          ]},
+          {"op": "min_by", "field": "price"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == %{"name" => "Book", "price" => 15}
+    end
+  end
+
+  describe "get operation with field parameter" do
+    test "extracts single field using field parameter" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"name": "Alice", "age": 30}},
+          {"op": "get", "field": "name"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == "Alice"
+    end
+
+    test "returns null when field does not exist" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"name": "Alice"}},
+          {"op": "get", "field": "age"}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == nil
+    end
+
+    test "returns default when field does not exist and default provided" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": {"name": "Alice"}},
+          {"op": "get", "field": "age", "default": 0}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == 0
+    end
+
+    test "get with field works in map operation" do
+      program = ~s({"program": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [{"name": "Apple"}, {"name": "Banana"}]},
+          {"op": "map", "expr": {"op": "get", "field": "name"}}
+        ]
+      }})
+
+      {:ok, result, _metrics} = PtcRunner.run(program)
+      assert result == ["Apple", "Banana"]
     end
   end
 end

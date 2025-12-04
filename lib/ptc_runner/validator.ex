@@ -55,6 +55,7 @@ defmodule PtcRunner.Validator do
       "nth" -> validate_nth(node, fields)
       "select" -> validate_select(node, fields)
       "get" -> validate_get(node, fields)
+      "sort_by" -> validate_sort_by(node, fields)
       _ -> validate_fields_generic(op, node, fields)
     end
   end
@@ -100,17 +101,57 @@ defmodule PtcRunner.Validator do
   end
 
   defp validate_get(node, _fields) do
-    case Map.get(node, "path") do
+    has_field = Map.has_key?(node, "field")
+    has_path = Map.has_key?(node, "path")
+
+    cond do
+      has_field and has_path ->
+        {:error, {:validation_error, "Operation 'get' accepts 'field' or 'path', not both"}}
+
+      has_field ->
+        validate_get_field(Map.get(node, "field"))
+
+      has_path ->
+        validate_get_path(Map.get(node, "path"))
+
+      true ->
+        {:error, {:validation_error, "Operation 'get' requires either 'field' or 'path'"}}
+    end
+  end
+
+  defp validate_get_field(field) when is_binary(field), do: :ok
+  defp validate_get_field(_), do: {:error, {:validation_error, "Field 'field' must be a string"}}
+
+  defp validate_get_path(path) when not is_list(path) do
+    {:error, {:validation_error, "Field 'path' must be a list"}}
+  end
+
+  defp validate_get_path(path) do
+    if Enum.all?(path, &is_binary/1) do
+      :ok
+    else
+      {:error, {:validation_error, "All path elements in 'path' must be strings"}}
+    end
+  end
+
+  defp validate_sort_by(node, _fields) do
+    case Map.get(node, "field") do
       nil ->
-        {:error, {:validation_error, "Operation 'get' requires field 'path'"}}
+        {:error, {:validation_error, "Operation 'sort_by' requires field 'field'"}}
 
-      path when not is_list(path) ->
-        {:error, {:validation_error, "Field 'path' must be a list"}}
+      field when not is_binary(field) ->
+        {:error, {:validation_error, "Field 'field' must be a string"}}
 
-      path ->
-        case Enum.all?(path, &is_binary/1) do
-          true -> :ok
-          false -> {:error, {:validation_error, "All path elements in 'path' must be strings"}}
+      _field ->
+        case Map.get(node, "order") do
+          nil ->
+            :ok
+
+          order when order in ["asc", "desc"] ->
+            :ok
+
+          order ->
+            {:error, {:validation_error, "Field 'order' must be 'asc' or 'desc', got '#{order}'"}}
         end
     end
   end

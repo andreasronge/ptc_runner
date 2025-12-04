@@ -73,11 +73,12 @@ program = ~s({
 | Category | Operations |
 |----------|------------|
 | **Data** | `literal`, `var`, `load`, `let` |
-| **Collections** | `pipe`, `filter`, `reject`, `map`, `select`, `first`, `last`, `count`, `nth` |
-| **Aggregation** | `sum`, `avg`, `min`, `max` |
-| **Access** | `get` (nested paths) |
+| **Collections** | `pipe`, `filter`, `reject`, `map`, `select`, `sort_by`, `first`, `last`, `count`, `nth` |
+| **Aggregation** | `sum`, `avg`, `min`, `max`, `min_by`, `max_by` |
+| **Access** | `get` (single field or nested path) |
 | **Comparison** | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains` |
 | **Logic** | `and`, `or`, `not`, `if` |
+| **Introspection** | `keys`, `typeof` |
 | **Tools** | `call` |
 | **Combine** | `merge`, `concat`, `zip` |
 
@@ -85,6 +86,7 @@ program = ~s({
 ## Documentation
 
 - **[Architecture](docs/architecture.md)** - System design, DSL specification, API reference
+- **[LLM Testing](docs/llm-testing.md)** - Benchmark results, testing modes, model comparison
 - **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
 
 ## Installation

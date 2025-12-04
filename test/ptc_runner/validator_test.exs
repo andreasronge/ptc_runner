@@ -203,16 +203,28 @@ defmodule PtcRunner.ValidatorTest do
       assert :ok = PtcRunner.Validator.validate(ast)
     end
 
+    test "validates get with field parameter" do
+      ast = %{"op" => "get", "field" => "name"}
+      assert :ok = PtcRunner.Validator.validate(ast)
+    end
+
     test "validates get with empty path" do
       ast = %{"op" => "get", "path" => []}
       assert :ok = PtcRunner.Validator.validate(ast)
     end
 
-    test "returns error for missing path" do
+    test "returns error for missing field and path" do
       ast = %{"op" => "get"}
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
 
-      assert message == "Operation 'get' requires field 'path'"
+      assert message == "Operation 'get' requires either 'field' or 'path'"
+    end
+
+    test "returns error when both field and path are provided" do
+      ast = %{"op" => "get", "field" => "name", "path" => ["user", "name"]}
+      {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
+
+      assert message == "Operation 'get' accepts 'field' or 'path', not both"
     end
 
     test "returns error when path is not a list" do
@@ -234,6 +246,13 @@ defmodule PtcRunner.ValidatorTest do
       {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
 
       assert message == "Field 'path' must be a list"
+    end
+
+    test "returns error when field is not a string" do
+      ast = %{"op" => "get", "field" => 123}
+      {:error, {:validation_error, message}} = PtcRunner.Validator.validate(ast)
+
+      assert message == "Field 'field' must be a string"
     end
   end
 

@@ -8,42 +8,36 @@ defmodule PtcRunner.TestSupport.LLMClient do
   (with guaranteed valid JSON).
   """
 
-  @model "openrouter:anthropic/claude-haiku-4.5"
+  # @model "openrouter:anthropic/claude-haiku-4.5"
+  # @model "openrouter:deepseek/deepseek-v3.2"
+  # @model "openrouter:moonshotai/kimi-linear-48b-a3b-instruct"
+  @model "openrouter:google/gemini-2.5-flash"
   @timeout 60_000
 
   @doc """
-  Generates a PTC program from a natural language task description using text mode.
+  Generates a PTC program using text mode with the compact `to_prompt()` description.
 
-  This function uses the LLM's text generation API and requires manual cleanup
-  of markdown fences from the response.
+  This tests whether LLMs can generate valid programs from a minimal,
+  human-readable description (~300 tokens) without a full JSON schema.
 
   ## Arguments
     - task: Natural language description of what the program should do
-    - json_schema: The JSON Schema for the PTC DSL
 
   ## Returns
     The generated program as a JSON string.
-
-  ## Raises
-    Raises if the API key is not set or if the LLM call fails.
   """
-  @spec generate_program!(String.t(), map()) :: String.t()
-  def generate_program!(task, json_schema) do
+  @spec generate_program_text!(String.t()) :: String.t()
+  def generate_program_text!(task) do
     ensure_api_key!()
 
     prompt = """
     You are generating a PTC (Programmatic Tool Calling) program.
 
-    JSON Schema:
-    #{Jason.encode!(json_schema, pretty: true)}
+    #{PtcRunner.Schema.to_prompt()}
 
     Task: #{task}
 
     IMPORTANT: The input data is available via {"op": "load", "name": "input"}.
-    Operations like filter, map, select, sum, count, etc. require input data.
-    Use a pipe operation to chain: first load the input, then apply transformations.
-
-    Example for filtering: {"op": "pipe", "steps": [{"op": "load", "name": "input"}, {"op": "filter", "where": ...}]}
 
     Respond with ONLY valid JSON, no explanation or markdown formatting.
     """
