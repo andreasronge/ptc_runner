@@ -125,6 +125,7 @@ PtcRunner.run(program,
 | `reject` | Remove matching items | `{"op": "reject", "where": {...}}` |
 | `map` | Transform each item | `{"op": "map", "expr": {...}}` |
 | `select` | Pick specific fields | `{"op": "select", "fields": ["id", "name"]}` |
+| `sort_by` | Sort by field | `{"op": "sort_by", "field": "price", "order": "asc"}` |
 | `first` | Get first item | `{"op": "first"}` |
 | `last` | Get last item | `{"op": "last"}` |
 | `nth` | Get nth item (0-indexed) | `{"op": "nth", "index": 2}` |
@@ -138,13 +139,16 @@ PtcRunner.run(program,
 | `avg` | Average a field | `{"op": "avg", "field": "amount"}` |
 | `min` | Minimum value | `{"op": "min", "field": "amount"}` |
 | `max` | Maximum value | `{"op": "max", "field": "amount"}` |
+| `min_by` | Row with min value | `{"op": "min_by", "field": "price"}` |
+| `max_by` | Row with max value | `{"op": "max_by", "field": "years"}` |
 
 #### Access Operations
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
+| `get` | Get single field | `{"op": "get", "field": "name"}` |
 | `get` | Get nested field | `{"op": "get", "path": ["user", "profile", "email"]}` |
-| `get` | Get with default | `{"op": "get", "path": ["x"], "default": 0}` |
+| `get` | Get with default | `{"op": "get", "field": "x", "default": 0}` |
 
 #### Introspection Operations
 
@@ -284,10 +288,14 @@ This section clarifies edge cases and behavior for v1.0.
 | `avg` | `nil` |
 | `min` | `nil` |
 | `max` | `nil` |
+| `min_by` | `nil` |
+| `max_by` | `nil` |
+| `sort_by` | `[]` |
 
 **Non-numeric fields:**
 - `avg` skips non-numeric values entirely (not counted in denominator); `sum` errors on non-numeric values
 - `min`, `max` use Elixir's term ordering
+- `min_by`, `max_by` skip items with `nil` field values and return the entire row (not just the value)
 
 ### Logic Operations
 
@@ -346,7 +354,6 @@ This section clarifies edge cases and behavior for v1.0.
 
 These features are intentionally deferred:
 
-- **`sort` / `order_by`**: Use tools or pre-sort data
 - **`group_by`**: Use tools for grouping
 - **String operations** (`split`, `join`, `uppercase`, etc.): Use tools
 - **Regex matching**: Use tools

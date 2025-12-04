@@ -207,7 +207,12 @@ defmodule PtcRunner.Operations do
 
   # Access operations
   def eval("get", node, context, eval_fn) do
-    path = Map.get(node, "path", [])
+    # Support both field (single key) and path (nested access)
+    path =
+      case Map.get(node, "field") do
+        nil -> Map.get(node, "path", [])
+        field -> [field]
+      end
 
     case eval_fn.(context, nil) do
       {:error, _} = err ->
@@ -356,6 +361,55 @@ defmodule PtcRunner.Operations do
           reject_list(data, where_clause, context, eval_fn)
         else
           {:error, {:execution_error, "reject requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("sort_by", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    order = Map.get(node, "order", "asc")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          sort_by_list(data, field, order)
+        else
+          {:error, {:execution_error, "sort_by requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("max_by", node, context, eval_fn) do
+    field = Map.get(node, "field")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          max_by_list(data, field)
+        else
+          {:error, {:execution_error, "max_by requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("min_by", node, context, eval_fn) do
+    field = Map.get(node, "field")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_list(data) do
+          min_by_list(data, field)
+        else
+          {:error, {:execution_error, "min_by requires a list, got #{inspect(data)}"}}
         end
     end
   end
@@ -764,6 +818,55 @@ defmodule PtcRunner.Operations do
       {:ok, list} ->
         {:error, {:execution_error, "zip requires list values, got #{inspect(list)}"}}
     end
+  end
+
+  defp sort_by_list([], _field, _order), do: {:ok, []}
+
+  defp sort_by_list(data, field, order) do
+    sorter =
+      case order do
+        "desc" -> &>=/2
+        _ -> &<=/2
+      end
+
+    sorted =
+      Enum.sort_by(
+        data,
+        fn item ->
+          if is_map(item), do: Map.get(item, field), else: nil
+        end,
+        sorter
+      )
+
+    {:ok, sorted}
+  end
+
+  defp max_by_list([], _field), do: {:ok, nil}
+
+  defp max_by_list(data, field) do
+    result =
+      data
+      |> Enum.filter(fn item -> is_map(item) and Map.get(item, field) != nil end)
+      |> case do
+        [] -> nil
+        items -> Enum.max_by(items, fn item -> Map.get(item, field) end)
+      end
+
+    {:ok, result}
+  end
+
+  defp min_by_list([], _field), do: {:ok, nil}
+
+  defp min_by_list(data, field) do
+    result =
+      data
+      |> Enum.filter(fn item -> is_map(item) and Map.get(item, field) != nil end)
+      |> case do
+        [] -> nil
+        items -> Enum.min_by(items, fn item -> Map.get(item, field) end)
+      end
+
+    {:ok, result}
   end
 
   defp get_type_name(nil), do: "null"

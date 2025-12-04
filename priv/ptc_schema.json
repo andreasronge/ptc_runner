@@ -179,9 +179,12 @@
         },
         {
           "additionalProperties": false,
-          "description": "Get value at path. Example: {op:'get', path:['user', 'address', 'city']}",
+          "description": "Get value at field or path. Use field for single key: {op:'get', field:'name'}. Use path for nested: {op:'get', path:['user', 'name']}",
           "properties": {
             "default": {},
+            "field": {
+              "type": "string"
+            },
             "op": {
               "const": "get"
             },
@@ -193,8 +196,7 @@
             }
           },
           "required": [
-            "op",
-            "path"
+            "op"
           ],
           "type": "object"
         },
@@ -295,6 +297,26 @@
           },
           "required": [
             "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Sort list by field. Example: {op:'sort_by', field:'price'} or {op:'sort_by', field:'price', order:'desc'}",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "sort_by"
+            },
+            "order": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "field"
           ],
           "type": "object"
         },
@@ -443,6 +465,23 @@
         },
         {
           "additionalProperties": false,
+          "description": "Get the row with minimum field value. Example: {op:'min_by', field:'price'} returns the item with lowest price",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "min_by"
+            }
+          },
+          "required": [
+            "op",
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Field greater than or equal to value. Example: {op:'gte', field:'age', value:18}",
           "properties": {
             "field": {
@@ -574,6 +613,23 @@
           "required": [
             "op",
             "where"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Get the row with maximum field value. Example: {op:'max_by', field:'years'} returns the item with highest years",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "max_by"
+            }
+          },
+          "required": [
+            "op",
+            "field"
           ],
           "type": "object"
         },
