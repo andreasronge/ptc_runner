@@ -217,6 +217,19 @@
         },
         {
           "additionalProperties": false,
+          "description": "Get type of current value as string. Returns 'object', 'list', 'string', 'number', 'boolean', or 'null'. Example: {op:'typeof'}",
+          "properties": {
+            "op": {
+              "const": "typeof"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Select specific fields from objects. Example: {op:'select', fields:['name', 'email']}",
           "properties": {
             "fields": {
@@ -412,6 +425,19 @@
           "required": [
             "op",
             "index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Get sorted list of keys in a map. Example: {op:'keys'}",
+          "properties": {
+            "op": {
+              "const": "keys"
+            }
+          },
+          "required": [
+            "op"
           ],
           "type": "object"
         },
