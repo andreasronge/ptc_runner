@@ -146,6 +146,13 @@ PtcRunner.run(program,
 | `get` | Get nested field | `{"op": "get", "path": ["user", "profile", "email"]}` |
 | `get` | Get with default | `{"op": "get", "path": ["x"], "default": 0}` |
 
+#### Introspection Operations
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| `keys` | Get sorted keys of a map | `{"op": "keys"}` |
+| `typeof` | Get type of current value | `{"op": "typeof"}` |
+
 #### Comparison Operations
 
 | Operation | Description | Example |
@@ -228,6 +235,27 @@ This section clarifies edge cases and behavior for v1.0.
 - Path elements are always **string keys** for maps
 - For lists, use `nth` operation (not `get` with numeric path)
 - `{"op": "get", "path": ["0"]}` looks for key `"0"`, not index 0
+
+### Introspection Operations
+
+**`keys` behavior:**
+- Returns a sorted list of all keys in a map
+- Empty map returns empty list `[]`
+- Non-map inputs return error with clear message
+- Use in combination with `get` for nested exploration
+
+**`typeof` return values:**
+- `"object"` for maps (`is_map/1`)
+- `"list"` for lists (`is_list/1`)
+- `"string"` for binary strings (`is_binary/1`)
+- `"number"` for integers and floats (`is_number/1`)
+- `"boolean"` for true/false (`is_boolean/1`)
+- `"null"` for nil
+
+**Multi-turn exploration patterns:**
+- LLMs can call `typeof` to discover data structure type
+- Combine with `keys` to explore object fields: `pipe` → `get` → `typeof` then `get` → `keys`
+- Use `first` with introspection to explore list items: `first` → `typeof` then `first` → `keys`
 
 ### Comparison Operations
 
