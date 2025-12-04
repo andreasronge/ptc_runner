@@ -63,6 +63,9 @@ mix run -e "PtcDemo.CLI.main([])"
 
 # Run in structured mode (reliable but expensive)
 mix run -e "PtcDemo.CLI.main([\"--structured\"])"
+
+# Run in explore mode (LLM discovers schema via introspection)
+mix run -e "PtcDemo.CLI.main([\"--explore\"])"
 ```
 
 ## Generation Modes
@@ -75,6 +78,27 @@ The demo supports two modes for generating PTC programs:
 | **Structured** | `main(["--structured"])` | ~11,000 | Uses JSON schema for guaranteed valid output |
 
 Text mode is recommended for cost-efficiency. It uses `PtcRunner.Schema.to_prompt/0` which generates a compact description of operations (~300 tokens) instead of the full JSON schema (~10k tokens).
+
+## Data Modes
+
+The demo supports two data modes that control how much schema information the LLM receives:
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| **Schema** (default) | none | LLM receives full schema with field names and types |
+| **Explore** | `--explore` | LLM must discover schema using `typeof` and `keys` operations |
+
+Explore mode demonstrates the introspection workflow where an LLM discovers unknown data structures through multi-turn conversation:
+
+```
+you> How many products are there?
+   [Phase 1] LLM explores: load products | first | keys
+   [Result] ["id", "name", "category", ...]
+   [Phase 1] LLM writes query: load products | count
+   [Result] 500
+```
+
+Switch modes at runtime with `/mode schema` or `/mode explore`.
 
 ## Available Datasets (loaded once, kept in memory)
 
@@ -124,9 +148,14 @@ Total approved expenses over $500?
 |---------|-------------|
 | `/datasets` | List available datasets with sizes |
 | `/program` | Show the last generated PTC program |
+| `/result` | Show the last execution result (raw value) |
+| `/context` | Show conversation history |
 | `/examples` | Show example queries |
 | `/stats` | Show token usage and cost statistics |
-| `/reset` | Clear conversation context and stats |
+| `/mode` | Show current data mode |
+| `/mode schema` | Switch to schema mode (LLM gets full schema) |
+| `/mode explore` | Switch to explore mode (LLM discovers schema) |
+| `/reset` | Clear conversation context, stats, and reset to schema mode |
 | `/help` | Show help |
 | `/quit` | Exit |
 
