@@ -68,6 +68,19 @@ defmodule PtcRunner.Operations.IntrospectionTest do
     assert String.contains?(message, "keys requires a map")
   end
 
+  test "keys returns execution error for null input" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": null},
+        {"op": "keys"}
+      ]
+    }})
+
+    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    assert String.contains?(message, "keys requires a map")
+  end
+
   # Typeof operation tests
 
   test "typeof returns 'object' for maps" do
@@ -159,6 +172,19 @@ defmodule PtcRunner.Operations.IntrospectionTest do
 
     {:ok, result, _metrics} = PtcRunner.run(program)
     assert result == "boolean"
+  end
+
+  test "typeof returns 'null' for null value" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": null},
+        {"op": "typeof"}
+      ]
+    }})
+
+    {:ok, result, _metrics} = PtcRunner.run(program)
+    assert result == "null"
   end
 
   # E2E tests demonstrating nested exploration patterns

@@ -31,7 +31,7 @@ defmodule PtcRunner.Interpreter do
 
       op ->
         # For operations that need input (everything except literal, load, var)
-        if input != nil and op not in ["literal", "load", "var"] do
+        if Map.has_key?(node, "__input") and op not in ["literal", "load", "var"] do
           # Create a context with the input value available
           input_context = Context.put_var(context, "__input", input)
           eval_operation(op, node_without_input, input_context)
@@ -49,10 +49,8 @@ defmodule PtcRunner.Interpreter do
     # Create a wrapper function for recursive evaluation
     eval_fn = fn ctx, _acc ->
       # Get the input value if it exists
-      input_value = Map.get(ctx.variables, "__input")
-
-      if input_value != nil do
-        {:ok, input_value}
+      if Map.has_key?(ctx.variables, "__input") do
+        {:ok, Map.get(ctx.variables, "__input")}
       else
         {:error, {:execution_error, "No input available"}}
       end
