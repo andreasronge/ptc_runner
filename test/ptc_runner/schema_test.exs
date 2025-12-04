@@ -5,18 +5,18 @@ defmodule PtcRunner.SchemaTest do
     test "operations/0 returns a map" do
       operations = PtcRunner.Schema.operations()
       assert is_map(operations)
-      assert map_size(operations) == 33
+      assert map_size(operations) == 35
     end
 
-    test "valid_operation_names/0 returns 33 operation names in sorted order" do
+    test "valid_operation_names/0 returns 35 operation names in sorted order" do
       names = PtcRunner.Schema.valid_operation_names()
 
       assert is_list(names)
-      assert length(names) == 33
+      assert length(names) == 35
       assert names == Enum.sort(names)
 
       expected_ops =
-        ~w(and avg call concat contains count eq filter first get gt gte if last let literal load lt lte map max merge min neq not nth or pipe reject select sum var zip)
+        ~w(and avg call concat contains count eq filter first get gt gte if keys last let literal load lt lte map max merge min neq not nth or pipe reject select sum typeof var zip)
 
       assert Enum.sort(names) == expected_ops
     end
@@ -340,9 +340,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 33 operation schemas" do
+    test "generates 35 operation schemas" do
       schema = PtcRunner.Schema.to_json_schema()
-      assert length(schema["$defs"]["operation"]["oneOf"]) == 33
+      assert length(schema["$defs"]["operation"]["oneOf"]) == 35
     end
 
     test "each operation schema has required structure" do
@@ -511,9 +511,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 33 operation schemas" do
+    test "generates 35 operation schemas" do
       schema = PtcRunner.Schema.to_llm_schema()
-      assert length(schema["properties"]["program"]["anyOf"]) == 33
+      assert length(schema["properties"]["program"]["anyOf"]) == 35
     end
 
     test "each operation schema has required structure" do

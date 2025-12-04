@@ -7,7 +7,7 @@ defmodule PtcRunner.Schema do
   """
 
   # Essential operations for nested expressions (minimized for schema size)
-  @nested_ops ~w(load literal filter map sum count gt gte lt lte eq)
+  @nested_ops ~w(load literal filter map sum count gt gte lt lte eq keys typeof)
 
   @operations %{
     # Data operations
@@ -242,6 +242,17 @@ defmodule PtcRunner.Schema do
       }
     },
 
+    # Introspection operations
+    "keys" => %{
+      "description" => "Get sorted list of keys in a map. Example: {op:'keys'}",
+      "fields" => %{}
+    },
+    "typeof" => %{
+      "description" =>
+        "Get type of current value as string. Returns 'object', 'list', 'string', 'number', 'boolean', or 'null'. Example: {op:'typeof'}",
+      "fields" => %{}
+    },
+
     # Tool integration
     "call" => %{
       "description" => "Call a tool. Example: {op:'call', tool:'fetch_user', args:{id:123}}",
@@ -399,6 +410,7 @@ defmodule PtcRunner.Schema do
       {"Aggregate", ~w(count sum avg min max first last nth)},
       {"Combine", ~w(merge concat zip)},
       {"Access", ~w(get)},
+      {"Introspect", ~w(keys typeof)},
       {"Tools", ~w(call)}
     ]
 

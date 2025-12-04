@@ -5,7 +5,7 @@ defmodule PtcRunner.Operations do
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
   last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, merge,
-  concat, zip).
+  concat, zip; Phase 4: keys, typeof - introspection operations).
   """
 
   alias PtcRunner.Context
@@ -357,6 +357,31 @@ defmodule PtcRunner.Operations do
         else
           {:error, {:execution_error, "reject requires a list, got #{inspect(data)}"}}
         end
+    end
+  end
+
+  # Introspection operations
+  def eval("keys", _node, context, eval_fn) do
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        if is_map(data) do
+          {:ok, data |> Map.keys() |> Enum.sort()}
+        else
+          {:error, {:execution_error, "keys requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("typeof", _node, context, eval_fn) do
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data} ->
+        {:ok, get_type_name(data)}
     end
   end
 
@@ -740,4 +765,11 @@ defmodule PtcRunner.Operations do
         {:error, {:execution_error, "zip requires list values, got #{inspect(list)}"}}
     end
   end
+
+  defp get_type_name(nil), do: "null"
+  defp get_type_name(v) when is_map(v), do: "object"
+  defp get_type_name(v) when is_list(v), do: "list"
+  defp get_type_name(v) when is_binary(v), do: "string"
+  defp get_type_name(v) when is_number(v), do: "number"
+  defp get_type_name(v) when is_boolean(v), do: "boolean"
 end
