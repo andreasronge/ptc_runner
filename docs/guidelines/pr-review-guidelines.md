@@ -32,6 +32,9 @@ Use this consistent structure for all reviews:
 ### Security
 [Security assessment - even if just "No concerns"]
 
+### Documentation
+[Assessment of whether relevant docs are updated - or "No updates needed"]
+
 ### Verdict
 [Approve/Request Changes/Comment - with brief rationale]
 ```
@@ -49,6 +52,7 @@ Use for problems that **should block merge** or need FIX_NOW:
 | **Incomplete work** | PR establishes pattern but doesn't apply it consistently |
 | **Breaking changes** | API changes without migration, removed functionality |
 | **Test failures** | Tests that would fail or test pollution |
+| **Missing docs** | Public API changes without doc updates, outdated architecture docs |
 
 **Language to use:**
 - "MUST FIX: ..."
@@ -134,6 +138,23 @@ Ask:
 gh issue list --search "keyword" --state all
 ```
 
+### 5. Check Documentation Impact
+```bash
+# Check if PR changes public API
+grep -l "def " --include="*.ex" <changed_files>
+
+# Search for docs that reference changed functionality
+grep -r "function_name\|module_name" docs/
+
+# Verify architecture.md is current with changes
+grep -r "relevant_feature" docs/architecture.md
+```
+
+Ask:
+- Does this PR change public API? If yes, are `@doc` and `@moduledoc` updated?
+- Does this add/change DSL operations? If yes, is `docs/architecture.md` updated?
+- Does this change project structure or conventions? If yes, is `CLAUDE.md` updated?
+
 ## Output Format for Triage
 
 Structure findings so the auto-triage can easily parse them:
@@ -186,4 +207,5 @@ Before submitting a review:
 - [ ] Complexity assessment provided for each item
 - [ ] In-scope incomplete work is flagged (not just mentioned as "consider")
 - [ ] Existing GitHub issues checked before suggesting deferrals
+- [ ] Documentation impact assessed (public API → docs updated?)
 - [ ] Verdict is clear: Approve, Request Changes, or Comment
