@@ -141,8 +141,15 @@ defmodule PtcDemo.Agent do
     # Add user question to context
     context = ReqLLM.Context.append(state.context, user(question))
 
-    # Run the agentic loop
-    case agent_loop(state.model, context, state.datasets, state.usage, @max_iterations) do
+    # Run the agentic loop with initial last_exec = {nil, nil}
+    case agent_loop(
+           state.model,
+           context,
+           state.datasets,
+           state.usage,
+           @max_iterations,
+           {nil, nil}
+         ) do
       {:ok, answer, final_context, new_usage, last_program, last_result} ->
         {:reply, {:ok, answer},
          %{
@@ -220,11 +227,11 @@ defmodule PtcDemo.Agent do
 
   # --- Agentic Loop ---
 
-  defp agent_loop(_model, context, _datasets, usage, 0) do
+  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec) do
     {:error, "Max iterations reached", context, usage}
   end
 
-  defp agent_loop(model, context, datasets, usage, remaining) do
+  defp agent_loop(model, context, datasets, usage, remaining, last_exec) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
 
     case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
@@ -249,7 +256,9 @@ defmodule PtcDemo.Agent do
                   |> ReqLLM.Context.append(assistant(text))
                   |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
 
-                agent_loop(model, new_context, datasets, new_usage, remaining - 1)
+                # Track raw result for test runner
+                new_last_exec = {program_json, result}
+                agent_loop(model, new_context, datasets, new_usage, remaining - 1, new_last_exec)
 
               {:error, reason} ->
                 error_msg = PtcRunner.format_error(reason)
@@ -261,7 +270,7 @@ defmodule PtcDemo.Agent do
                   |> ReqLLM.Context.append(assistant(text))
                   |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
 
-                agent_loop(model, new_context, datasets, new_usage, remaining - 1)
+                agent_loop(model, new_context, datasets, new_usage, remaining - 1, last_exec)
             end
 
           :none ->
@@ -269,8 +278,8 @@ defmodule PtcDemo.Agent do
             IO.puts("   [Answer] Final response (no program)")
             final_context = ReqLLM.Context.append(context, assistant(text))
 
-            # Extract last program/result from context for state tracking
-            {last_program, last_result} = extract_last_execution(context)
+            # Use tracked last execution (raw values, not formatted strings)
+            {last_program, last_result} = last_exec
 
             {:ok, text, final_context, new_usage, last_program, last_result}
         end
@@ -292,6 +301,7 @@ defmodule PtcDemo.Agent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
+    Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets (with field types):
 
@@ -313,6 +323,7 @@ defmodule PtcDemo.Agent do
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
+    Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets: #{dataset_names}
 
@@ -429,44 +440,6 @@ defmodule PtcDemo.Agent do
     end)
   end
 
-  # Extract last program and result from conversation context
-  defp extract_last_execution(context) do
-    messages = context.messages
-
-    # Find last assistant message with a program
-    last_program =
-      messages
-      |> Enum.filter(fn msg -> msg.role == :assistant end)
-      |> Enum.reverse()
-      |> Enum.find_value(fn msg ->
-        content = extract_text_content(msg.content)
-
-        case extract_ptc_program(content) do
-          {:ok, json} -> json
-          :none -> nil
-        end
-      end)
-
-    # Find last tool result
-    last_result =
-      messages
-      |> Enum.filter(fn msg -> msg.role == :user end)
-      |> Enum.reverse()
-      |> Enum.find_value(fn msg ->
-        content = extract_text_content(msg.content)
-
-        if String.starts_with?(content, "[Tool Result]") do
-          content
-          |> String.replace_prefix("[Tool Result]\n", "")
-          |> String.trim()
-        else
-          nil
-        end
-      end)
-
-    {last_program, last_result}
-  end
-
   # Extract text from various content formats (string, ContentPart list, etc.)
   defp extract_text_content(content) when is_binary(content), do: content
 
@@ -481,16 +454,8 @@ defmodule PtcDemo.Agent do
   defp extract_text_content(_), do: ""
 
   # Truncated format for console output
-  defp format_result(result) when is_list(result) do
-    count = length(result)
-
-    if count > 3 do
-      sample = result |> Enum.take(2) |> inspect()
-      "#{sample} ... (#{count} items total)"
-    else
-      inspect(result)
-    end
-  end
+  # Uses string length (not item count) to preserve short lists like keys output
+  @max_result_chars 200
 
   defp format_result(result) when is_number(result) do
     if is_float(result) do
@@ -500,7 +465,26 @@ defmodule PtcDemo.Agent do
     end
   end
 
-  defp format_result(result), do: inspect(result)
+  defp format_result(result) do
+    full = inspect(result, limit: 50)
+
+    if String.length(full) > @max_result_chars do
+      truncate_with_context(result, full)
+    else
+      full
+    end
+  end
+
+  defp truncate_with_context(result, full) when is_list(result) do
+    count = length(result)
+    truncated = String.slice(full, 0, @max_result_chars)
+    "#{truncated}... (#{count} items total)"
+  end
+
+  defp truncate_with_context(_result, full) do
+    truncated = String.slice(full, 0, @max_result_chars)
+    "#{truncated}..."
+  end
 
   defp truncate(str, max_len) do
     if String.length(str) > max_len do
