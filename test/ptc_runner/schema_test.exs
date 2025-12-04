@@ -5,18 +5,18 @@ defmodule PtcRunner.SchemaTest do
     test "operations/0 returns a map" do
       operations = PtcRunner.Schema.operations()
       assert is_map(operations)
-      assert map_size(operations) == 35
+      assert map_size(operations) == 38
     end
 
-    test "valid_operation_names/0 returns 35 operation names in sorted order" do
+    test "valid_operation_names/0 returns 38 operation names in sorted order" do
       names = PtcRunner.Schema.valid_operation_names()
 
       assert is_list(names)
-      assert length(names) == 35
+      assert length(names) == 38
       assert names == Enum.sort(names)
 
       expected_ops =
-        ~w(and avg call concat contains count eq filter first get gt gte if keys last let literal load lt lte map max merge min neq not nth or pipe reject select sum typeof var zip)
+        ~w(and avg call concat contains count eq filter first get gt gte if keys last let literal load lt lte map max max_by merge min min_by neq not nth or pipe reject select sort_by sum typeof var zip)
 
       assert Enum.sort(names) == expected_ops
     end
@@ -216,9 +216,11 @@ defmodule PtcRunner.SchemaTest do
   end
 
   describe "Access operations" do
-    test "get has required 'path' and optional 'default'" do
+    test "get has optional 'field', 'path', and 'default'" do
       {:ok, def} = PtcRunner.Schema.get_operation("get")
-      assert def["fields"]["path"]["required"] == true
+      assert def["fields"]["field"]["required"] == false
+      assert def["fields"]["field"]["type"] == :string
+      assert def["fields"]["path"]["required"] == false
       assert def["fields"]["path"]["type"] == {:list, :string}
       assert def["fields"]["default"]["required"] == false
       assert def["fields"]["default"]["type"] == :any
@@ -340,9 +342,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 35 operation schemas" do
+    test "generates 38 operation schemas" do
       schema = PtcRunner.Schema.to_json_schema()
-      assert length(schema["$defs"]["operation"]["oneOf"]) == 35
+      assert length(schema["$defs"]["operation"]["oneOf"]) == 38
     end
 
     test "each operation schema has required structure" do
@@ -382,7 +384,7 @@ defmodule PtcRunner.SchemaTest do
       assert count_schema["required"] == ["op"]
     end
 
-    test "operations with optional fields do not include them in required" do
+    test "get operation has optional field, path, and default" do
       schema = PtcRunner.Schema.to_json_schema()
 
       get_schema =
@@ -390,8 +392,10 @@ defmodule PtcRunner.SchemaTest do
           op["properties"]["op"]["const"] == "get"
         end)
 
-      assert "path" in get_schema["required"]
-      assert "default" not in get_schema["required"]
+      # field, path, and default are all optional in schema (validator enforces field OR path)
+      assert get_schema["required"] == ["op"]
+      assert Map.has_key?(get_schema["properties"], "field")
+      assert Map.has_key?(get_schema["properties"], "path")
       assert Map.has_key?(get_schema["properties"], "default")
     end
 
@@ -511,9 +515,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 35 operation schemas" do
+    test "generates 38 operation schemas" do
       schema = PtcRunner.Schema.to_llm_schema()
-      assert length(schema["properties"]["program"]["anyOf"]) == 35
+      assert length(schema["properties"]["program"]["anyOf"]) == 38
     end
 
     test "each operation schema has required structure" do
@@ -553,7 +557,7 @@ defmodule PtcRunner.SchemaTest do
       assert count_schema["required"] == ["op"]
     end
 
-    test "operations with optional fields do not include them in required" do
+    test "get operation has optional field, path, and default" do
       schema = PtcRunner.Schema.to_llm_schema()
 
       get_schema =
@@ -561,8 +565,10 @@ defmodule PtcRunner.SchemaTest do
           op["properties"]["op"]["const"] == "get"
         end)
 
-      assert "path" in get_schema["required"]
-      assert "default" not in get_schema["required"]
+      # field, path, and default are all optional in schema (validator enforces field OR path)
+      assert get_schema["required"] == ["op"]
+      assert Map.has_key?(get_schema["properties"], "field")
+      assert Map.has_key?(get_schema["properties"], "path")
       assert Map.has_key?(get_schema["properties"], "default")
     end
 

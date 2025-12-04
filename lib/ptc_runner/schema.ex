@@ -126,6 +126,14 @@ defmodule PtcRunner.Schema do
         "fields" => %{"type" => {:list, :string}, "required" => true}
       }
     },
+    "sort_by" => %{
+      "description" =>
+        "Sort list by field. Example: {op:'sort_by', field:'price'} or {op:'sort_by', field:'price', order:'desc'}",
+      "fields" => %{
+        "field" => %{"type" => :string, "required" => true},
+        "order" => %{"type" => :string, "required" => false}
+      }
+    },
     "reject" => %{
       "description" =>
         "Reject collection elements based on condition. Example: {op:'reject', where:{op:'eq', field:'status', value:'inactive'}}",
@@ -191,9 +199,11 @@ defmodule PtcRunner.Schema do
 
     # Access operations
     "get" => %{
-      "description" => "Get value at path. Example: {op:'get', path:['user', 'address', 'city']}",
+      "description" =>
+        "Get value at field or path. Use field for single key: {op:'get', field:'name'}. Use path for nested: {op:'get', path:['user', 'name']}",
       "fields" => %{
-        "path" => %{"type" => {:list, :string}, "required" => true},
+        "field" => %{"type" => :string, "required" => false},
+        "path" => %{"type" => {:list, :string}, "required" => false},
         "default" => %{"type" => :any, "required" => false}
       }
     },
@@ -223,6 +233,20 @@ defmodule PtcRunner.Schema do
     },
     "max" => %{
       "description" => "Maximum value in field. Example: {op:'max', field:'price'}",
+      "fields" => %{
+        "field" => %{"type" => :string, "required" => true}
+      }
+    },
+    "min_by" => %{
+      "description" =>
+        "Get the row with minimum field value. Example: {op:'min_by', field:'price'} returns the item with lowest price",
+      "fields" => %{
+        "field" => %{"type" => :string, "required" => true}
+      }
+    },
+    "max_by" => %{
+      "description" =>
+        "Get the row with maximum field value. Example: {op:'max_by', field:'years'} returns the item with highest years",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true}
       }
@@ -405,9 +429,9 @@ defmodule PtcRunner.Schema do
       {"Data", ~w(load literal var)},
       {"Flow", ~w(pipe let if)},
       {"Logic", ~w(and or not)},
-      {"Filter/Transform", ~w(filter map select reject)},
+      {"Filter/Transform", ~w(filter map select reject sort_by)},
       {"Compare", ~w(eq neq gt gte lt lte contains)},
-      {"Aggregate", ~w(count sum avg min max first last nth)},
+      {"Aggregate", ~w(count sum avg min max min_by max_by first last nth)},
       {"Combine", ~w(merge concat zip)},
       {"Access", ~w(get)},
       {"Introspect", ~w(keys typeof)},
