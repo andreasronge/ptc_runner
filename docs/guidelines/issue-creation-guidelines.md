@@ -59,6 +59,28 @@ Reference `docs/architecture.md` to understand:
 - What dependencies exist?
 - Is this the logical next step?
 
+### 4. Identify Documentation Impact
+
+Before finalizing the issue, analyze which documentation might need updates:
+
+```bash
+# Check what docs reference related functionality
+grep -r "keyword" docs/
+
+# Review architecture.md for relevant sections
+grep -r "feature_name" docs/architecture.md
+
+# Check if there's API documentation that might be affected
+grep -r "function_name" docs/
+```
+
+**Documentation to consider:**
+- `docs/architecture.md` - If adding/changing DSL operations, phases, or system design
+- `CLAUDE.md` - If adding new commands, conventions, or project structure (file must be brief !)
+- `README.md` - If changing public API or installation steps
+- Module `@moduledoc` and `@doc` - If changing function signatures or behavior
+- Type specs (`@spec`, `@type`) - If changing data structures
+
 ## Issue Template
 
 ```markdown
@@ -107,6 +129,12 @@ Reference `docs/architecture.md` to understand:
 ## Out of Scope
 
 [Explicitly list what this issue does NOT include]
+
+## Documentation Updates
+
+[List docs that need updating, or "None" if purely internal change]
+- `docs/architecture.md` - [what section needs update]
+- [Other affected docs]
 ```
 
 ## Sizing Guidelines
@@ -163,6 +191,7 @@ Before submitting an issue for review:
 - [ ] Patterns to follow reference actual existing code
 - [ ] Edge cases are specific to this feature
 - [ ] Out of scope is explicit
+- [ ] Documentation impact analyzed (which docs need updates)
 - [ ] Issue is right-sized (one PR, user-visible value)
 
 ## Common Mistakes
