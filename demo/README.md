@@ -58,26 +58,12 @@ export REQ_LLM_MODEL=anthropic:claude-sonnet-4-20250514
 # Install dependencies
 mix deps.get
 
-# Run the chat (text mode - default, token-efficient)
+# Run the chat (default schema mode - LLM receives full schema)
 mix run -e "PtcDemo.CLI.main([])"
-
-# Run in structured mode (reliable but expensive)
-mix run -e "PtcDemo.CLI.main([\"--structured\"])"
 
 # Run in explore mode (LLM discovers schema via introspection)
 mix run -e "PtcDemo.CLI.main([\"--explore\"])"
 ```
-
-## Generation Modes
-
-The demo supports two modes for generating PTC programs:
-
-| Mode | Command | Tokens/call | Description |
-|------|---------|-------------|-------------|
-| **Text** (default) | `main([])` | ~600 | Uses `PtcRunner.Schema.to_prompt/0` with examples and retry logic |
-| **Structured** | `main(["--structured"])` | ~11,000 | Uses JSON schema for guaranteed valid output |
-
-Text mode is recommended for cost-efficiency. It uses `PtcRunner.Schema.to_prompt/0` which generates a compact description of operations (~300 tokens) instead of the full JSON schema (~10k tokens).
 
 ## Data Modes
 
@@ -179,11 +165,8 @@ This demonstrates how text mode keeps token usage low compared to structured mod
 Run the test suite to verify the LLM generates correct programs:
 
 ```bash
-# Run all tests with text mode (default)
+# Run all tests
 mix run -e "PtcDemo.TestRunner.run_all(verbose: true)"
-
-# Run all tests with structured mode
-mix run -e "PtcDemo.TestRunner.run_all(mode: :structured, verbose: true)"
 
 # Quick run (dots for progress)
 mix run -e "PtcDemo.TestRunner.run_all()"
@@ -197,10 +180,10 @@ mix run -e "PtcDemo.TestRunner.run_one(5)"
 
 Example output:
 ```
-=== PTC Demo Test Runner (structured mode) ===
+=== PTC Demo Test Runner ===
 
 1. How many products are there?
-   [Phase 1] Generating PTC program (structured mode)...
+   [Phase 1] Generating PTC program...
    [Program] {"program":{"op":"pipe","steps":[{"op":"load","name":"products"},...
    [Phase 2] Executing in sandbox...
    [Result] 500 (1ms)

@@ -20,6 +20,15 @@ defmodule PtcDemo.CLI do
     # Parse data mode from args: --explore or schema (default)
     data_mode = if "--explore" in args, do: :explore, else: :schema
 
+    # Validate args - only --explore is supported
+    unknown_flags =
+      Enum.filter(args, fn arg -> String.starts_with?(arg, "--") and arg != "--explore" end)
+
+    if unknown_flags != [] do
+      IO.puts("Unknown flags: #{Enum.join(unknown_flags, ", ")}. Only --explore is supported.")
+      System.halt(1)
+    end
+
     # Start the agent
     {:ok, _pid} = PtcDemo.Agent.start_link(data_mode: data_mode)
 
