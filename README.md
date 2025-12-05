@@ -67,6 +67,7 @@ program = ~s({
 - **Resource limits**: configurable timeout (default 1s) and memory (default 10MB)
 - **Execution metrics**: duration and memory usage for every call
 - **Structured errors** optimized for LLM retry loops
+- **Explore mode**: Introspection ops (`keys`, `typeof`) for LLMs to discover data structure
 
 ## DSL Operations
 
