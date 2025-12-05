@@ -1,5 +1,5 @@
 defmodule PtcRunner.ContextTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   describe "Context.new/0" do
     test "creates context with default empty variables and tools" do

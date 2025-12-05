@@ -1,5 +1,5 @@
 defmodule PtcRunner.SandboxTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   describe "Sandbox.execute/2 - with default options" do
     test "executes program with default options" do
