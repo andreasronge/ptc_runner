@@ -1,5 +1,5 @@
 defmodule PtcRunner.InterpreterTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   describe "Interpreter.eval/2 - error cases" do
     test "returns error when node is missing 'op' field" do

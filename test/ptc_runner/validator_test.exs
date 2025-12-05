@@ -1,5 +1,5 @@
 defmodule PtcRunner.ValidatorTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   describe "Validator.validate/1 - valid operations" do
     test "validates valid literal operation" do
