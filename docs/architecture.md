@@ -532,6 +532,19 @@ Same as `run/2` but raises on error.
 result = PtcRunner.run!(program_json, opts)
 ```
 
+### `PtcRunner.format_error/1`
+
+Convert error tuples to LLM-friendly messages for retry loops.
+
+```elixir
+case PtcRunner.run(program) do
+  {:ok, result, _} -> result
+  {:error, err} ->
+    # Returns string like "Type error: expected list, got string"
+    PtcRunner.format_error(err)
+end
+```
+
 ## Tool Registration
 
 Tools are simple functions that receive arguments and return results.
