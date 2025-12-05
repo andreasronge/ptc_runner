@@ -1,5 +1,5 @@
 defmodule PtcRunner.ParserTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   describe "Parser.parse/1 - valid inputs" do
     test "parses valid JSON string with program map" do
