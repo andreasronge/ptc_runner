@@ -11,7 +11,7 @@ Issues must be created by maintainers (not automatically by workflows). Each iss
 
 ## Key References
 
-- **[Architecture](../architecture.md)** - Implementation phases and DSL specification
+- **[Architecture](../architecture.md)** - DSL specification and system design
 - **[Planning Guidelines](planning-guidelines.md)** - Issue review checklist
 - **[Testing Guidelines](testing-guidelines.md)** - Test quality standards
 - **[PR Review Guidelines](pr-review-guidelines.md)** - What reviewers expect
@@ -55,7 +55,6 @@ grep -r "describe.*feature" test/
 ### 3. Verify Against Architecture
 
 Reference `docs/architecture.md` to understand:
-- Which phase does this belong to?
 - What dependencies exist?
 - Is this the logical next step?
 
@@ -75,7 +74,7 @@ grep -r "function_name" docs/
 ```
 
 **Documentation to consider:**
-- `docs/architecture.md` - If adding/changing DSL operations, phases, or system design
+- `docs/architecture.md` - If adding/changing DSL operations or system design
 - `CLAUDE.md` - If adding new commands, conventions, or project structure (file must be brief !)
 - `README.md` - If changing public API or installation steps
 - Module `@moduledoc` and `@doc` - If changing function signatures or behavior
@@ -150,7 +149,6 @@ An issue is correctly sized when:
 ### Too Large
 
 Signs an issue is too large:
-- Covers an entire architecture phase
 - Has more than 5 acceptance criteria
 - Touches more than 5 files significantly
 - Description says "and also..."
@@ -168,7 +166,7 @@ Signs an issue is too small:
 
 ### Splitting Example
 
-**Too large**: "Implement Phase 3: Logic & Variables"
+**Too large**: "Add logic and variable operations"
 
 **Split into:**
 1. "Add `let` variable bindings" - Core variable binding with scoping
@@ -278,7 +276,7 @@ For Claude workflows to work on an issue:
 |-------|---------|----------|
 | `bug` | Bug fix needed | Highest |
 | `tech-debt` | Refactoring, test improvements, code quality | High |
-| `enhancement` | New feature from architecture phases | Normal |
+| `enhancement` | New feature | Normal |
 | `documentation` | Documentation updates | Low |
 
 ## References
@@ -286,4 +284,4 @@ For Claude workflows to work on an issue:
 - [Planning Guidelines](planning-guidelines.md) - The 9-point review checklist
 - [Testing Guidelines](testing-guidelines.md) - How to write good tests
 - [PR Review Guidelines](pr-review-guidelines.md) - What PR reviewers look for
-- [Architecture](../architecture.md) - System design and phases
+- [Architecture](../architecture.md) - System design and DSL specification

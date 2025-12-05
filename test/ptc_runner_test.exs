@@ -166,4 +166,74 @@ defmodule PtcRunnerTest do
       assert result == 700
     end
   end
+
+  describe "format_error/1" do
+    test "formats parse errors" do
+      assert PtcRunner.format_error({:parse_error, "unexpected token"}) ==
+               "ParseError: unexpected token"
+    end
+
+    test "formats validation errors" do
+      assert PtcRunner.format_error({:validation_error, "unknown operation 'foo'"}) ==
+               "ValidationError: unknown operation 'foo'"
+    end
+
+    test "formats timeout errors" do
+      assert PtcRunner.format_error({:timeout, 5000}) ==
+               "TimeoutError: execution exceeded 5000ms limit"
+    end
+
+    test "formats memory exceeded errors" do
+      assert PtcRunner.format_error({:memory_exceeded, 10_000_000}) ==
+               "MemoryError: exceeded 10000000 byte limit"
+    end
+
+    test "formats badmap execution errors" do
+      error_msg = """
+      Process terminated: {{:badmap, "Employee 1"}, [{Map, :get, ["Employee 1", "years_employed", nil], []}]}
+      """
+
+      result = PtcRunner.format_error({:execution_error, error_msg})
+      assert result =~ "TypeError:"
+      assert result =~ "expected an object"
+    end
+
+    test "extracts value from badmap error" do
+      error_msg = ~s(expected a map, got:\n\n    "some string value")
+      result = PtcRunner.format_error({:execution_error, error_msg})
+      assert result == ~s(TypeError: expected an object but got: "some string value")
+    end
+
+    test "formats badkey execution errors" do
+      error_msg = "key :missing not found in: %{name: \"test\"}"
+      result = PtcRunner.format_error({:execution_error, error_msg})
+      assert result =~ "KeyError:"
+      assert result =~ "not found"
+    end
+
+    test "formats undefined variable errors" do
+      error_msg = ~s({:undefined_variable, "myvar"})
+      result = PtcRunner.format_error({:execution_error, error_msg})
+      assert result =~ "UndefinedVariable:"
+      assert result =~ "myvar"
+    end
+
+    test "formats arithmetic errors" do
+      error_msg = "Process terminated: {:badarith, ...}"
+      result = PtcRunner.format_error({:execution_error, error_msg})
+      assert result =~ "ArithmeticError:"
+    end
+
+    test "formats unknown errors with inspect" do
+      result = PtcRunner.format_error(:some_unknown_error)
+      assert result =~ "Error:"
+      assert result =~ "some_unknown_error"
+    end
+
+    test "truncates long generic error messages" do
+      long_msg = String.duplicate("x", 500)
+      result = PtcRunner.format_error({:execution_error, long_msg})
+      assert String.length(result) < 250
+    end
+  end
 end

@@ -94,16 +94,14 @@ defmodule PtcDemo.TestRunner do
 
   Options:
     - verbose: true/false (default false) - show detailed output
-    - mode: :structured/:text (default :structured) - LLM generation mode
   """
   def run_all(opts \\ []) do
     verbose = Keyword.get(opts, :verbose, false)
-    mode = Keyword.get(opts, :mode, :structured)
 
-    IO.puts("\n=== PTC Demo Test Runner (#{mode} mode) ===\n")
+    IO.puts("\n=== PTC Demo Test Runner ===\n")
 
-    # Ensure agent is started with the right mode
-    ensure_agent_started(mode: mode)
+    # Ensure agent is started
+    ensure_agent_started()
 
     results =
       test_cases()
@@ -168,12 +166,10 @@ defmodule PtcDemo.TestRunner do
 
   # Private functions
 
-  defp ensure_agent_started(opts \\ []) do
-    mode = Keyword.get(opts, :mode, :structured)
-
+  defp ensure_agent_started do
     case Process.whereis(Agent) do
       nil ->
-        {:ok, _pid} = Agent.start_link(mode: mode)
+        {:ok, _pid} = Agent.start_link()
         :ok
 
       _pid ->
