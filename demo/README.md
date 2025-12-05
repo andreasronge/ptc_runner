@@ -158,8 +158,6 @@ Session Statistics:
   Total cost:    $0.003421
 ```
 
-This demonstrates how text mode keeps token usage low compared to structured mode.
-
 ## Automated Testing
 
 Run the test suite to verify the LLM generates correct programs:
@@ -205,8 +203,6 @@ Tests use **constraint-based assertions** since data is randomly generated:
 1. **Startup**: Datasets loaded into BEAM memory (GenServer state)
 2. **Query**: You ask a natural language question
 3. **Generate**: LLM creates a compact PTC program (~200 bytes)
-   - Structured mode: Uses JSON schema for guaranteed valid output
-   - Text mode: Uses retry logic if JSON is malformed
 4. **Execute**: PtcRunner runs program in sandbox against in-memory data
 5. **Respond**: Only small result returns to LLM for natural language answer
 
