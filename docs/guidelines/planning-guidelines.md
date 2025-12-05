@@ -2,7 +2,7 @@
 
 ## Key References
 
-- **[Architecture](../architecture.md)** - System design, DSL specification, implementation phases
+- **[Architecture](../architecture.md)** - System design and DSL specification
 - **[Testing Guidelines](testing-guidelines.md)** - Test patterns and quality standards
 - **[Development Guidelines](development-guidelines.md)** - Elixir coding standards
 - **[Issue Creation Guidelines](issue-creation-guidelines.md)** - How to create well-specified issues

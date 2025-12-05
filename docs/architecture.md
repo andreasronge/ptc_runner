@@ -745,38 +745,6 @@ end
 
 See `test/e2e/llm_integration_test.exs` for complete examples.
 
-## Implementation Phases
-
-### Phase 1: Core Interpreter
-- JSON parsing with Jason
-- Basic operations: `literal`, `load`, `var`, `pipe`
-- Collection operations: `filter`, `map`, `select`
-- Aggregations: `sum`, `count`
-- Sandbox with timeout and heap limits
-- Execution metrics
-
-### Phase 2: Query Operations
-- Nested path access: `get`
-- Comparisons: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`
-- More aggregations: `avg`, `min`, `max`
-- Collection: `first`, `last`, `nth`, `reject`
-
-### Phase 3: Logic & Variables
-- Logic: `and`, `or`, `not`, `if`
-- Variables: `let` bindings
-- Combine: `merge`, `concat`, `zip`
-
-### Phase 4: Tool Integration
-- Tool registry and `call` operation
-- Integration tests with mock tools
-- E2E test with LLM (ReqLLM + OpenRouter)
-
-### Phase 5: Polish
-- Error messages optimized for LLM consumption
-- Validation with helpful suggestions
-- Documentation and examples
-- Hex package preparation
-
 ## Dependencies
 
 Required:

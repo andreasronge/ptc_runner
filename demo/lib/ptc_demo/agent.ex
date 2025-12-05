@@ -2,6 +2,11 @@ defmodule PtcDemo.Agent do
   @moduledoc """
   PTC Agent that uses LLM to generate programs and PtcRunner to execute them.
 
+  Uses an agentic loop where:
+  - LLM decides when to query data by outputting a PTC program
+  - Program results are returned as tool results
+  - LLM continues until it provides a final answer (no program)
+
   This demonstrates the key advantage of Programmatic Tool Calling:
   - Large datasets stay in BEAM memory, never enter LLM context
   - LLM generates compact programs (~200 bytes) instead of processing raw data
@@ -16,9 +21,10 @@ defmodule PtcDemo.Agent do
 
   @model_env "REQ_LLM_MODEL"
   @timeout 60_000
+  @max_iterations 5
 
   # --- State ---
-  defstruct [:model, :context, :datasets, :last_program, :last_result, :mode, :usage]
+  defstruct [:model, :context, :datasets, :last_program, :last_result, :data_mode, :usage]
 
   # --- Public API ---
 
@@ -42,6 +48,14 @@ defmodule PtcDemo.Agent do
     GenServer.call(__MODULE__, :last_result)
   end
 
+  @doc """
+  Get all programs generated in this session (extracted from conversation context).
+  Returns a list of {program_json, result} tuples.
+  """
+  def programs do
+    GenServer.call(__MODULE__, :programs)
+  end
+
   def list_datasets do
     SampleData.available_datasets()
   end
@@ -55,6 +69,27 @@ defmodule PtcDemo.Agent do
   """
   def stats do
     GenServer.call(__MODULE__, :stats)
+  end
+
+  @doc """
+  Get the current data mode (:schema or :explore).
+  """
+  def data_mode do
+    GenServer.call(__MODULE__, :data_mode)
+  end
+
+  @doc """
+  Get the current conversation context (list of messages).
+  """
+  def context do
+    GenServer.call(__MODULE__, :context)
+  end
+
+  @doc """
+  Set the data mode and reset context with new system prompt.
+  """
+  def set_data_mode(mode) when mode in [:schema, :explore] do
+    GenServer.call(__MODULE__, {:set_data_mode, mode})
   end
 
   @doc """
@@ -74,8 +109,8 @@ defmodule PtcDemo.Agent do
   @impl true
   def init(opts) do
     model = System.get_env(@model_env) || detect_model()
-    # Mode: :text (default, token-efficient) or :structured (reliable but expensive)
-    mode = Keyword.get(opts, :mode, :text)
+    # Data mode: :schema (default, full schema) or :explore (discover via introspection)
+    data_mode = Keyword.get(opts, :data_mode, :schema)
 
     # Pre-load datasets into memory (simulating a real system)
     datasets = %{
@@ -85,9 +120,9 @@ defmodule PtcDemo.Agent do
       "expenses" => SampleData.expenses()
     }
 
-    context = ReqLLM.Context.new([system(system_prompt())])
+    context = ReqLLM.Context.new([system(system_prompt(data_mode))])
 
-    IO.puts("   [Mode] #{mode}")
+    IO.puts("   [Data] #{data_mode}")
 
     {:ok,
      %__MODULE__{
@@ -96,7 +131,7 @@ defmodule PtcDemo.Agent do
        datasets: datasets,
        last_program: nil,
        last_result: nil,
-       mode: mode,
+       data_mode: data_mode,
        usage: empty_usage()
      }}
   end
@@ -106,88 +141,44 @@ defmodule PtcDemo.Agent do
     # Add user question to context
     context = ReqLLM.Context.append(state.context, user(question))
 
-    # Phase 1: Generate PTC program
-    IO.puts("\n   [Phase 1] Generating PTC program (#{state.mode} mode)...")
+    # Run the agentic loop with initial last_exec = {nil, nil}
+    case agent_loop(
+           state.model,
+           context,
+           state.datasets,
+           state.usage,
+           @max_iterations,
+           {nil, nil}
+         ) do
+      {:ok, answer, final_context, new_usage, last_program, last_result} ->
+        {:reply, {:ok, answer},
+         %{
+           state
+           | context: final_context,
+             last_program: last_program,
+             last_result: last_result,
+             usage: new_usage
+         }}
 
-    case generate_program(state.model, context, state.mode) do
-      {:ok, program_json, phase1_usage} ->
-        IO.puts("   [Program] #{truncate(program_json, 100)}")
-
-        # Phase 2: Execute program with PtcRunner
-        IO.puts("   [Phase 2] Executing in sandbox...")
-
-        # Pass datasets as context - this is where the magic happens!
-        # The LLM generates a program that references data via "load",
-        # but the actual data (potentially huge) stays in BEAM memory,
-        # never entering the LLM context.
-        case PtcRunner.run(program_json, context: state.datasets, timeout: 5000) do
-          {:ok, result, metrics} ->
-            result_str = format_result(result)
-            IO.puts("   [Result] #{truncate(result_str, 80)} (#{metrics.duration_ms}ms)")
-
-            # Phase 3: Generate natural language response
-            IO.puts("   [Phase 3] Generating response...")
-
-            result_context =
-              ReqLLM.Context.append(
-                context,
-                assistant("I executed a program and got: #{result_str}")
-              )
-
-            final_prompt = """
-            The PTC program returned: #{result_str}
-
-            Provide a helpful, concise answer to the user's question based on this result.
-            If the result is a number, format it nicely. If it's a list, summarize key points.
-            """
-
-            result_context = ReqLLM.Context.append(result_context, user(final_prompt))
-
-            {:ok, response} =
-              ReqLLM.generate_text(state.model, result_context.messages,
-                receive_timeout: @timeout
-              )
-
-            answer = ReqLLM.Response.text(response)
-            phase3_usage = ReqLLM.Response.usage(response)
-
-            # Accumulate usage from both phases
-            new_usage =
-              state.usage
-              |> add_usage(phase1_usage)
-              |> add_usage(phase3_usage)
-
-            # Update context with the exchange
-            new_context =
-              state.context
-              |> ReqLLM.Context.append(user(question))
-              |> ReqLLM.Context.append(assistant(answer))
-
-            {:reply, {:ok, answer},
-             %{
-               state
-               | context: new_context,
-                 last_program: program_json,
-                 last_result: result,
-                 usage: new_usage
-             }}
-
-          {:error, reason} ->
-            error_msg = "Program execution failed: #{inspect(reason)}"
-            {:reply, {:error, error_msg}, state}
-        end
-
-      {:error, reason} ->
-        {:reply, {:error, "Failed to generate program: #{reason}"}, state}
+      {:error, reason, final_context, new_usage} ->
+        {:reply, {:error, reason}, %{state | context: final_context, usage: new_usage}}
     end
   end
 
   @impl true
   def handle_call(:reset, _from, state) do
-    new_context = ReqLLM.Context.new([system(system_prompt())])
+    # Reset to :schema mode (default)
+    new_context = ReqLLM.Context.new([system(system_prompt(:schema))])
 
     {:reply, :ok,
-     %{state | context: new_context, last_program: nil, last_result: nil, usage: empty_usage()}}
+     %{
+       state
+       | context: new_context,
+         last_program: nil,
+         last_result: nil,
+         data_mode: :schema,
+         usage: empty_usage()
+     }}
   end
 
   @impl true
@@ -201,6 +192,12 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
+  def handle_call(:programs, _from, state) do
+    programs = extract_all_programs(state.context)
+    {:reply, programs, state}
+  end
+
+  @impl true
   def handle_call(:model, _from, state) do
     {:reply, state.model, state}
   end
@@ -210,20 +207,103 @@ defmodule PtcDemo.Agent do
     {:reply, state.usage, state}
   end
 
+  @impl true
+  def handle_call(:data_mode, _from, state) do
+    {:reply, state.data_mode, state}
+  end
+
+  @impl true
+  def handle_call(:context, _from, state) do
+    {:reply, state.context.messages, state}
+  end
+
+  @impl true
+  def handle_call({:set_data_mode, mode}, _from, state) do
+    new_context = ReqLLM.Context.new([system(system_prompt(mode))])
+
+    {:reply, :ok,
+     %{state | data_mode: mode, context: new_context, last_program: nil, last_result: nil}}
+  end
+
+  # --- Agentic Loop ---
+
+  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec) do
+    {:error, "Max iterations reached", context, usage}
+  end
+
+  defp agent_loop(model, context, datasets, usage, remaining, last_exec) do
+    IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
+
+    case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
+      {:ok, response} ->
+        text = ReqLLM.Response.text(response)
+        new_usage = add_usage(usage, ReqLLM.Response.usage(response))
+
+        # Check if response contains a PTC program
+        case extract_ptc_program(text) do
+          {:ok, program_json} ->
+            IO.puts("   [Program] #{truncate(program_json, 80)}")
+
+            # Execute the program
+            case PtcRunner.run(program_json, context: datasets, timeout: 5000) do
+              {:ok, result, metrics} ->
+                result_str = format_result(result)
+                IO.puts("   [Result] #{truncate(result_str, 80)} (#{metrics.duration_ms}ms)")
+
+                # Add assistant message and tool result, then continue loop
+                new_context =
+                  context
+                  |> ReqLLM.Context.append(assistant(text))
+                  |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
+
+                # Track raw result for test runner
+                new_last_exec = {program_json, result}
+                agent_loop(model, new_context, datasets, new_usage, remaining - 1, new_last_exec)
+
+              {:error, reason} ->
+                error_msg = PtcRunner.format_error(reason)
+                IO.puts("   [Error] #{error_msg}")
+
+                # Add error as tool result and continue
+                new_context =
+                  context
+                  |> ReqLLM.Context.append(assistant(text))
+                  |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
+
+                agent_loop(model, new_context, datasets, new_usage, remaining - 1, last_exec)
+            end
+
+          :none ->
+            # No program found - this is the final answer
+            IO.puts("   [Answer] Final response (no program)")
+            final_context = ReqLLM.Context.append(context, assistant(text))
+
+            # Use tracked last execution (raw values, not formatted strings)
+            {last_program, last_result} = last_exec
+
+            {:ok, text, final_context, new_usage, last_program, last_result}
+        end
+
+      {:error, reason} ->
+        {:error, "LLM error: #{inspect(reason)}", context, usage}
+    end
+  end
+
   # --- Private Functions ---
 
-  defp system_prompt do
+  defp system_prompt(:schema) do
     # Get schema from data module (simulates MCP tool schema discovery)
     data_schema = SampleData.schema_prompt()
-    # Get operations prompt from library (~300 tokens vs ~10k for full schema)
+    # Get operations prompt from library
     operations = PtcRunner.Schema.to_prompt()
 
     """
-    You are a data analyst. Generate PTC programs to answer questions about data.
+    You are a data analyst. Answer questions about data by querying datasets.
 
-    IMPORTANT: Respond with ONLY valid JSON. No explanation, no markdown.
+    To query data, output a PTC program in a ```json code block. The result will be returned to you.
+    Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
-    Available datasets (with field types and enum values):
+    Available datasets (with field types):
 
     #{data_schema}
 
@@ -231,104 +311,133 @@ defmodule PtcDemo.Agent do
     """
   end
 
-  # Structured mode - uses generate_object for guaranteed valid JSON with usage tracking
-  defp generate_program(model, context, :structured) do
-    llm_schema = PtcRunner.Schema.to_llm_schema()
+  defp system_prompt(:explore) do
+    # Get operations prompt from library
+    operations = PtcRunner.Schema.to_prompt()
+    # Get dataset names dynamically
+    dataset_names =
+      SampleData.available_datasets() |> Enum.map_join(", ", fn {name, _} -> name end)
 
-    # Get the user's question from context
-    user_question =
-      context.messages
-      |> Enum.filter(fn msg -> msg.role == :user end)
-      |> List.last()
-      |> case do
-        nil -> ""
-        msg -> msg |> Map.get(:content, "") |> extract_text_content()
-      end
-
-    # Build prompt with system context included (like E2E test pattern)
-    prompt = """
-    #{system_prompt()}
-
-    User question: #{user_question}
     """
+    You are a data analyst. Answer questions about data by querying datasets.
 
-    case ReqLLM.generate_object(model, prompt, llm_schema, receive_timeout: @timeout) do
-      {:ok, response} ->
-        result = ReqLLM.Response.object(response)
-        usage = ReqLLM.Response.usage(response)
+    To query data, output a PTC program in a ```json code block. The result will be returned to you.
+    IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
+    Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
-        # Wrap in program envelope if needed
-        json =
-          case result do
-            %{"program" => _} -> Jason.encode!(result)
-            %{} -> Jason.encode!(%{"program" => result})
+    Available datasets: #{dataset_names}
+
+    Discover structure with: load <name> | first | keys
+
+    #{operations}
+    """
+  end
+
+  # Extract PTC program from LLM response (looks for ```json blocks)
+  defp extract_ptc_program(text) do
+    # Try extracting from markdown code block
+    case Regex.run(~r/```(?:json)?\s*([\s\S]+?)\s*```/, text) do
+      [_, content] ->
+        content = String.trim(content)
+
+        if String.starts_with?(content, "{") do
+          json = extract_balanced_json(content)
+
+          case validate_program(json) do
+            :ok -> {:ok, json}
+            {:error, _} -> :none
           end
-
-        {:ok, json, usage}
-
-      {:error, error} ->
-        {:error, Exception.message(error)}
-    end
-  end
-
-  # Text mode - uses generate_text with retry logic and usage tracking
-  defp generate_program(model, context, :text) do
-    generate_program_text(model, context, 2, nil)
-  end
-
-  defp generate_program_text(_model, _context, 0, _accumulated_usage) do
-    {:error, "Failed to generate valid program after retries"}
-  end
-
-  defp generate_program_text(model, context, retries, accumulated_usage) do
-    case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
-      {:ok, response} ->
-        text = ReqLLM.Response.text(response)
-        usage = ReqLLM.Response.usage(response)
-        total_usage = add_usage(accumulated_usage, usage)
-        json = clean_json(text)
-
-        # Validate it's actually a valid program before returning
-        case validate_program(json) do
-          :ok ->
-            {:ok, json, total_usage}
-
-          {:error, reason} ->
-            IO.puts("   [Retry] Invalid response: #{reason}, retrying...")
-            # Add error context to help LLM correct itself
-            error_context =
-              ReqLLM.Context.append(context, assistant(text))
-
-            error_context =
-              ReqLLM.Context.append(
-                error_context,
-                user(
-                  "That was invalid: #{reason}. Return ONLY valid JSON: {\"program\": {\"op\": ...}}"
-                )
-              )
-
-            generate_program_text(model, error_context, retries - 1, total_usage)
+        else
+          :none
         end
 
-      {:error, reason} ->
-        {:error, inspect(reason)}
+      nil ->
+        # Try finding a JSON object with "program" key anywhere in text
+        case :binary.match(text, "{\"program\"") do
+          {start, _} ->
+            substring = binary_part(text, start, byte_size(text) - start)
+            json = extract_balanced_json(substring)
+
+            case validate_program(json) do
+              :ok -> {:ok, json}
+              {:error, _} -> :none
+            end
+
+          :nomatch ->
+            :none
+        end
     end
   end
 
   defp validate_program(json) do
     case Jason.decode(json) do
-      {:ok, %{"program" => %{"op" => _}}} ->
-        :ok
-
-      {:ok, %{"program" => _}} ->
-        {:error, "program must have 'op' field"}
-
-      {:ok, _} ->
-        {:error, "missing 'program' key"}
-
-      {:error, _} ->
-        {:error, "invalid JSON"}
+      {:ok, %{"program" => %{"op" => _}}} -> :ok
+      {:ok, %{"program" => _}} -> {:error, "program must have 'op' field"}
+      {:ok, _} -> {:error, "missing 'program' key"}
+      {:error, _} -> {:error, "invalid JSON"}
     end
+  end
+
+  # Extract a complete JSON object by counting balanced braces
+  defp extract_balanced_json(text) do
+    text
+    |> String.graphemes()
+    |> Enum.reduce_while({0, []}, fn
+      "{", {depth, acc} -> {:cont, {depth + 1, ["{" | acc]}}
+      "}", {1, acc} -> {:halt, {0, ["}" | acc]}}
+      "}", {depth, acc} -> {:cont, {depth - 1, ["}" | acc]}}
+      char, {depth, acc} when depth > 0 -> {:cont, {depth, [char | acc]}}
+      _, {0, _} = state -> {:cont, state}
+    end)
+    |> case do
+      {0, chars} -> chars |> Enum.reverse() |> Enum.join()
+      _ -> text
+    end
+  end
+
+  # Extract all programs and their results from conversation context
+  defp extract_all_programs(context) do
+    messages = context.messages
+
+    messages
+    |> Enum.with_index()
+    |> Enum.filter(fn {msg, _idx} -> msg.role == :assistant end)
+    |> Enum.flat_map(fn {msg, idx} ->
+      content = extract_text_content(msg.content)
+
+      case extract_ptc_program(content) do
+        {:ok, program_json} ->
+          # Look for the next user message which should be the tool result
+          result =
+            messages
+            |> Enum.drop(idx + 1)
+            |> Enum.find(fn m -> m.role == :user end)
+            |> case do
+              nil ->
+                nil
+
+              user_msg ->
+                user_content = extract_text_content(user_msg.content)
+
+                cond do
+                  String.starts_with?(user_content, "[Tool Result]") ->
+                    user_content |> String.replace_prefix("[Tool Result]\n", "") |> String.trim()
+
+                  String.starts_with?(user_content, "[Tool Error]") ->
+                    {:error,
+                     user_content |> String.replace_prefix("[Tool Error]\n", "") |> String.trim()}
+
+                  true ->
+                    nil
+                end
+            end
+
+          [{program_json, result}]
+
+        :none ->
+          []
+      end
+    end)
   end
 
   # Extract text from various content formats (string, ContentPart list, etc.)
@@ -344,25 +453,9 @@ defmodule PtcDemo.Agent do
   defp extract_text_content(%{content: content}), do: extract_text_content(content)
   defp extract_text_content(_), do: ""
 
-  defp clean_json(text) do
-    text
-    |> String.trim()
-    |> String.replace(~r/^```json\s*/i, "")
-    |> String.replace(~r/^```\s*/i, "")
-    |> String.replace(~r/\s*```$/i, "")
-    |> String.trim()
-  end
-
-  defp format_result(result) when is_list(result) do
-    count = length(result)
-
-    if count > 3 do
-      sample = result |> Enum.take(2) |> inspect()
-      "#{sample} ... (#{count} items total)"
-    else
-      inspect(result)
-    end
-  end
+  # Truncated format for console output
+  # Uses string length (not item count) to preserve short lists like keys output
+  @max_result_chars 200
 
   defp format_result(result) when is_number(result) do
     if is_float(result) do
@@ -372,7 +465,26 @@ defmodule PtcDemo.Agent do
     end
   end
 
-  defp format_result(result), do: inspect(result)
+  defp format_result(result) do
+    full = inspect(result, limit: 50)
+
+    if String.length(full) > @max_result_chars do
+      truncate_with_context(result, full)
+    else
+      full
+    end
+  end
+
+  defp truncate_with_context(result, full) when is_list(result) do
+    count = length(result)
+    truncated = String.slice(full, 0, @max_result_chars)
+    "#{truncated}... (#{count} items total)"
+  end
+
+  defp truncate_with_context(_result, full) do
+    truncated = String.slice(full, 0, @max_result_chars)
+    "#{truncated}..."
+  end
 
   defp truncate(str, max_len) do
     if String.length(str) > max_len do
