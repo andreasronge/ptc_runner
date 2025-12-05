@@ -95,7 +95,7 @@ program = ~s({
 ```elixir
 def deps do
   [
-    {:ptc_runner, "~> 0.1.0"}
+    {:ptc_runner, "~> 0.2.0"}
   ]
 end
 ```
