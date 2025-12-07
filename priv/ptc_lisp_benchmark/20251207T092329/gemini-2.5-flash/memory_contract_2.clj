@@ -1,0 +1,11 @@
+;; Scenario: memory_contract
+;; Level: 4
+;; Iteration: 2
+;; Valid: true
+;; Errors: []
+;; Duration: 1921ms
+
+(let [orders (call "get-orders" {})
+      high-value-orders (filter (where :amount > 1000) orders)]
+  {:high_value_orders high-value-orders
+   :result (count high-value-orders)})

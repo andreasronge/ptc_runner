@@ -1,0 +1,418 @@
+[
+  {
+    "scenarios": [
+      {
+        "name": "simple_filter",
+        "level": 1,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (where :price > 100) ctx/input)",
+            "duration_ms": 3007
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (where :price > 100) ctx/products)",
+            "duration_ms": 2141
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (where :price > 100) ctx/input)",
+            "duration_ms": 1571
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "simple_count",
+        "level": 1,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(count (filter (where :active) ctx/input))",
+            "duration_ms": 3645
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :active))\n     count)",
+            "duration_ms": 1931
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :active))\n     (count))",
+            "duration_ms": 1841
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "pipeline_filter_sort",
+        "level": 2,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :salary > 50000))\n     (sort-by :salary >)\n     (take 5))",
+            "duration_ms": 1706
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :salary > 50000))\n     (sort-by :salary >)\n     (take 5))",
+            "duration_ms": 2023
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :salary > 50000))\n     (sort-by :salary >)\n     (take 5))",
+            "duration_ms": 2020
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "aggregate_sum",
+        "level": 2,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :status = \"completed\"))\n     (sum-by :amount))",
+            "duration_ms": 1756
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :status = \"completed\"))\n     (sum-by :amount))",
+            "duration_ms": 1537
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/input\n     (filter (where :status = \"completed\"))\n     (sum-by :amount))",
+            "duration_ms": 3484
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "predicate_combinator",
+        "level": 3,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/products\n     (filter (none-of (where :in_stock = false)))\n     (filter (any-of (where :category = \"electronics\")\n                     (where :price > 500))))",
+            "duration_ms": 3662
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter\n  (all-of\n    (any-of\n      (where :category = \"electronics\")\n      (where :price > 500))\n    (where :in_stock))\n  ctx/products)",
+            "duration_ms": 2211
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter\n  (all-of\n    (any-of\n      (where :category = \"electronics\")\n      (where :price > 500))\n    (where :in_stock))\n  ctx/products)",
+            "duration_ms": 3305
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "conditional_logic",
+        "level": 3,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(mapv\n  (fn [order]\n    (assoc (select-keys order [:id])\n           :size\n           (cond\n             (< (:amount order) 100) :small\n             (<= 100 (:amount order) 500) :medium\n             :else :large)))\n  ctx/orders)",
+            "duration_ms": 3578
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(mapv\n  (fn [order]\n    (let [amount (:amount order)]\n      {:id (:id order)\n       :size (cond\n               (< amount 100) :small\n               (<= 100 amount 500) :medium\n               (> amount 500) :large\n               :else nil)}))\n  ctx/input)",
+            "duration_ms": 4261
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(mapv\n  (fn [order]\n    (assoc order\n      :size\n      (cond\n        (< (:amount order) 100) :small\n        (<= (:amount order) 500) :medium\n        :else :large)))\n  ctx/orders)",
+            "duration_ms": 1601
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "tool_call_transform",
+        "level": 4,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> (call \"get-users\" {})\n     (filter (where :tier = \"premium\"))\n     (pluck :email))",
+            "duration_ms": 3299
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> (call \"get-users\" {})\n     (filter (where :tier = \"premium\"))\n     (pluck :email))",
+            "duration_ms": 3659
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> (call \"get-users\" {})\n     (filter (where :tier = \"premium\"))\n     (pluck :email))",
+            "duration_ms": 2228
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "memory_contract",
+        "level": 4,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [all-orders (call \"get-orders\" {})\n      high-value-orders (filter (where :amount > 1000) all-orders)]\n  {:high_value_orders high-value-orders\n   :result (count high-value-orders)})",
+            "duration_ms": 2000
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders (call \"get-orders\" {})\n      high-value-orders (filter (where :amount > 1000) orders)]\n  {:high_value_orders high-value-orders\n   :result (count high-value-orders)})",
+            "duration_ms": 1921
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders (call \"get-orders\" {})\n      high-value-orders (filter (where :amount > 1000) orders)]\n  {:high_value_orders high-value-orders\n   :result (count high-value-orders)})",
+            "duration_ms": 1686
+          }
+        ],
+        "valid_count": 3
+      }
+    ],
+    "model": "openrouter:google/gemini-2.5-flash",
+    "total_cost": 0.0225312,
+    "total_valid": 24,
+    "total_tests": 24
+  },
+  {
+    "scenarios": [
+      {
+        "name": "simple_filter",
+        "level": 1,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (where :price > 100) ctx/products)",
+            "duration_ms": 2505
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (where :price > 100) ctx/products)",
+            "duration_ms": 2163
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (where :price > 100) ctx/products)",
+            "duration_ms": 2827
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "simple_count",
+        "level": 1,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(count (filter (where :active true) ctx/users))",
+            "duration_ms": 6766
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(count (filter (where :active true) ctx/users))",
+            "duration_ms": 3447
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(count (filter (where :active = true) ctx/input))",
+            "duration_ms": 2853
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "pipeline_filter_sort",
+        "level": 2,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [all-employees ctx/employees\n      filtered (filter (where :salary > 50000) all-employees)\n      sorted (sort-by :salary > filtered)]\n  (take 5 sorted))",
+            "duration_ms": 4567
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/employees\n     (filter (where :salary > 50000))\n     (sort-by :salary >)\n     (take 5))",
+            "duration_ms": 3559
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [employees ctx/employees]\n  (->> employees\n       (filter (where :salary > 50000))\n       (sort-by :salary >)\n       (take 5)))",
+            "duration_ms": 4536
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "aggregate_sum",
+        "level": 2,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [completed (filter (where :status = \"completed\") ctx/orders)\n      total (sum-by :amount completed)]\n  total)",
+            "duration_ms": 3255
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [completed-orders (filter (where :status = \"completed\") ctx/orders)\n      total-amount (sum-by :amount completed-orders)]\n  total-amount)",
+            "duration_ms": 4875
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(->> ctx/orders\n     (filter (where :status = \"completed\"))\n     (sum-by :amount))",
+            "duration_ms": 2253
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "predicate_combinator",
+        "level": 3,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [products ctx/products]\n  (->> products\n       (filter (all-of\n                 (any-of\n                   (where :category = \"electronics\")\n                   (where :price > 500))\n                 (where :in_stock true)))))",
+            "duration_ms": 5207
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(filter (all-of\n         (any-of (where :category = \"electronics\")\n                 (where :price > 500))\n         (none-of (where :in_stock = false)))\n        ctx/products)",
+            "duration_ms": 3090
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [products ctx/products]\n  (filter (all-of \n            (any-of (where :category = \"electronics\") \n                    (where :price > 500))\n            (where :in_stock = true))\n          products))",
+            "duration_ms": 3023
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "conditional_logic",
+        "level": 3,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders ctx/orders]\n  (mapv\n    (fn [order]\n      (let [amount (:amount order)\n            size (cond\n                   (< amount 100) \"small\"\n                   (<= amount 500) \"medium\"\n                   :else \"large\")]\n        {:id (:id order) :size size}))\n    orders))",
+            "duration_ms": 6279
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders ctx/orders]\n  (mapv (fn [order]\n          (let [amount (:amount order)\n                size (cond\n                      (< amount 100) \"small\"\n                      (<= amount 500) \"medium\"\n                      :else \"large\")]\n            {:id (:id order)\n             :size size}))\n        orders))",
+            "duration_ms": 15725
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(map\n (fn [{:keys [id amount]}]\n   (let [size (cond\n                (< amount 100) \"small\"\n                (>= amount 500) \"large\"\n                :else \"medium\")]\n     {:id id :size size}))\n ctx/orders)",
+            "duration_ms": 5523
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "tool_call_transform",
+        "level": 4,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [users (call \"get-users\" {})\n      premium-users (filter (where :tier = \"premium\") users)]\n  (pluck :email premium-users))",
+            "duration_ms": 5243
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [users (call \"get-users\" {})\n      premium-users (filter (where :tier = \"premium\") users)]\n  (pluck :email premium-users))",
+            "duration_ms": 3582
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [users (call \"get-users\" {})\n      premium-users (filter (where :tier = \"premium\") users)\n      emails (pluck :email premium-users)]\n  emails)",
+            "duration_ms": 5767
+          }
+        ],
+        "valid_count": 3
+      },
+      {
+        "name": "memory_contract",
+        "level": 4,
+        "results": [
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders (call \"get-orders\" {})\n      high-value-orders (filter (where :amount > 1000) orders)]\n  {:high_value_orders high-value-orders\n   :result (count high-value-orders)})",
+            "duration_ms": 5247
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders (call \"get-orders\" {})\n      high-value-orders (filter (where :amount > 1000) orders)]\n  {:high_value_orders high-value-orders\n   :result (count high-value-orders)})",
+            "duration_ms": 7825
+          },
+          {
+            "errors": [],
+            "valid": true,
+            "generated_code": "(let [orders (call \"get-orders\" {})\n      high-value-orders (filter (where :amount > 1000) orders)]\n  {:high_value_orders high-value-orders\n   :result (count high-value-orders)})",
+            "duration_ms": 2962
+          }
+        ],
+        "valid_count": 3
+      }
+    ],
+    "model": "openrouter:deepseek/deepseek-v3.2",
+    "total_cost": 0.0200409,
+    "total_valid": 24,
+    "total_tests": 24
+  }
+]
