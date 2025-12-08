@@ -10,7 +10,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 | `claude-auto-triage.yml` | After code-review completes | Inherits from code-review | Triage review findings |
 | `claude.yml` | `@claude` mention | Actor or `claude-approved` label | Execute requested work |
 | `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue specifications |
-| `claude-pm.yml` | PR merged, issue labeled, manual | Both labels required | Orchestrate implementation |
+| `claude-pm.yml` | PR merged, issue labeled, manual | Both labels required | Create issues from specs, orchestrate implementation |
 
 ## Workflow Interactions
 
@@ -63,6 +63,88 @@ This document describes the Claude-powered GitHub workflows and their security g
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## PM Workflow: Specification Document Registry
+
+The PM workflow creates issues by reading from specification documents. It follows a phased approach:
+
+### Phase Order (Strict Dependencies)
+
+```
+Phase 0: API Refactor (docs/api-refactor-plan.md)
+    ↓ (must complete before any Lisp work)
+Phase 1: Parser (docs/ptc-lisp-parser-plan.md)
+    ↓
+Phase 2: Analyzer (docs/ptc-lisp-analyze-plan.md)
+    ↓
+Phase 3: Eval (docs/ptc-lisp-eval-plan.md)
+    ↓
+Phase 4: Integration (docs/ptc-lisp-integration-spec.md)
+```
+
+### Specification Documents
+
+| Phase | Document | Issue Prefix |
+|-------|----------|--------------|
+| 0 | `docs/api-refactor-plan.md` | `[API Refactor]` |
+| 1 | `docs/ptc-lisp-parser-plan.md` | `[Lisp Parser]` |
+| 2 | `docs/ptc-lisp-analyze-plan.md` | `[Lisp Analyzer]` |
+| 3 | `docs/ptc-lisp-eval-plan.md` | `[Lisp Eval]` |
+| 4 | `docs/ptc-lisp-integration-spec.md` | `[Lisp Integration]` |
+
+### Reference Documents (Not for Issue Creation)
+
+- `docs/ptc-lisp-specification.md` - Full language specification
+- `docs/ptc-lisp-overview.md` - High-level rationale
+- `docs/ptc-lisp-llm-guide.md` - LLM quick reference
+- `docs/ptc-lisp-benchmark-report.md` - Phase 1 evaluation results
+
+### How PM Creates Issues
+
+1. **Determines current phase** by checking:
+   - Code: Does `lib/ptc_runner/json/` exist? Does `lib/ptc_runner/lisp/parser.ex` exist?
+   - Issues: What phase issues are open/closed?
+
+2. **Reads the spec document** for the current phase
+
+3. **Creates ONE issue** with:
+   - Title: `[Phase Prefix] Description`
+   - Labels: `enhancement`, `needs-review`, `phase:PHASE`, optionally `ptc-lisp`
+   - Body following `issue-creation-guidelines.md` template
+
+4. **Adds issue to GitHub Project** (#1) and sets Phase field
+
+5. **Waits for review** via `claude-issue-review.yml`
+
+6. **Triggers implementation** when issue has BOTH `ready-for-implementation` AND `claude-approved`
+   - Updates project Status to "In Progress"
+
+### GitHub Project Integration
+
+**Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1) (Number: 1)
+
+| Field | Field ID | Purpose |
+|-------|----------|---------|
+| Status | `PVTSSF_lAHNGWjOASh0kM4OhOjl` | Track issue progress |
+| Phase | `PVTSSF_lAHNGWjOASh0kM4OhOk_` | Track implementation phase |
+
+**Phase Option IDs**:
+| Phase | Option ID |
+|-------|-----------|
+| API Refactor | `a8c7193b` |
+| Parser | `1c180ef6` |
+| Analyzer | `9d857bc6` |
+| Eval | `bbd1d60a` |
+| Integration | `c5f6c3a5` |
+
+**Status Option IDs**:
+| Status | Option ID |
+|--------|-----------|
+| Todo | `f75ad846` |
+| In Progress | `47fc9ee4` |
+| Done | `98236657` |
+
+**Required PAT Scopes**: The `PAT_WORKFLOW_TRIGGER` secret must have `project` and `read:project` scopes.
+
 ## Security Gates
 
 ### For Public Repository Safety
@@ -96,6 +178,14 @@ All workflows require explicit maintainer approval before Claude can act:
 - `needs-review` - Triggers issue review
 - `ready-for-implementation` - Marks issue as ready for PM
 - `claude-approved` - Maintainer approval for Claude automation
+
+### Phase Labels (PTC-Lisp Implementation)
+- `phase:api-refactor` - API namespace refactoring (Phase 0)
+- `phase:parser` - PTC-Lisp parser implementation (Phase 1)
+- `phase:analyzer` - PTC-Lisp analyzer implementation (Phase 2)
+- `phase:eval` - PTC-Lisp interpreter implementation (Phase 3)
+- `phase:integration` - End-to-end integration (Phase 4)
+- `ptc-lisp` - General PTC-Lisp language work
 
 ### Status Labels
 - `merge-conflict` - PR has merge conflicts (auto-removed when resolved)
