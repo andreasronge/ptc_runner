@@ -1,6 +1,6 @@
-defmodule PtcRunnerTest do
+defmodule PtcRunner.Json.JsonTest do
   use ExUnit.Case
-  doctest PtcRunner
+  doctest PtcRunner.Json
 
   # Public API tests
   describe "run/2" do
