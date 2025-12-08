@@ -1,4 +1,4 @@
-defmodule PtcRunner.Interpreter do
+defmodule PtcRunner.Json.Interpreter do
   @moduledoc """
   Interprets and evaluates AST nodes.
 
@@ -6,7 +6,7 @@ defmodule PtcRunner.Interpreter do
   """
 
   alias PtcRunner.Context
-  alias PtcRunner.Operations
+  alias PtcRunner.Json.Operations
 
   @doc """
   Evaluates an AST node in a given context.

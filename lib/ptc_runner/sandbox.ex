@@ -7,7 +7,7 @@ defmodule PtcRunner.Sandbox do
   """
 
   alias PtcRunner.Context
-  alias PtcRunner.Interpreter
+  alias PtcRunner.Json.Interpreter
 
   @typedoc """
   Execution metrics for a program run.

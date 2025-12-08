@@ -31,17 +31,24 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 lib/
 ├── ptc_runner.ex           # Main public API
 ├── ptc_runner/
-│   ├── dsl/                # DSL layer (JSON-based language)
-│   ├── parser/             # Parser layer (DSL → AST)
-│   ├── interpreter/        # Execution engine
-│   └── tools/              # Tool layer (MCP integration)
+│   ├── sandbox.ex          # Process isolation + resource limits
+│   ├── context.ex          # Variable bindings and tool registry
+│   ├── schema.ex           # Operation definitions for validation
+│   └── json/               # JSON DSL implementation
+│       ├── parser.ex       # JSON parsing → AST
+│       ├── validator.ex    # AST schema validation
+│       ├── interpreter.ex  # AST evaluation
+│       └── operations.ex   # Built-in operations
 test/
-├── ptc_runner_test.exs     # Main tests
+├── ptc_runner/             # Unit tests by module
 └── ...
 docs/
-├── research.md             # Research and specification notes
+├── architecture.md         # System design and DSL specification
+├── api-refactor-plan.md    # Multi-language support roadmap
 └── guidelines/             # Development guidelines
 ```
+
+> **Note**: A PTC-Lisp DSL is planned. See `docs/api-refactor-plan.md`.
 
 ## Documentation
 
