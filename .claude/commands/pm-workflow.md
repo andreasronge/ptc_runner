@@ -37,20 +37,9 @@ You are an autonomous PM agent responsible for keeping this project moving forwa
 
 ### GitHub Project
 
-- **Project**: https://github.com/users/andreasronge/projects/1 (Number: 1, Owner: andreasronge)
-- Issues are auto-added to the project when labeled `enhancement`, `bug`, or `tech-debt`
-- You need to set the **Phase** field manually after creating issues
-
-**Field IDs** (needed for `gh project item-edit`):
-- Phase field: `PVTSSF_lAHNGWjOASh0kM4OhOk_`
-- Status field: `PVTSSF_lAHNGWjOASh0kM4OhOjl`
-- Project ID: `PVT_kwHNGWjOASh0kA`
-
-**Phase options**: API Refactor (`a8c7193b`), Parser (`1c180ef6`), Analyzer (`9d857bc6`), Eval (`bbd1d60a`), Integration (`c5f6c3a5`)
-
-**Status options**: Todo (`f75ad846`), In Progress (`47fc9ee4`), Done (`98236657`)
-
-> **Note**: The hex codes in parentheses are GitHub Project field option IDs (not git SHAs). They're required when using `gh project item-edit --field-id <field> --single-select-option-id <option-id>` to set Phase or Status values.
+- **Project**: https://github.com/users/andreasronge/projects/1
+- Issues are **auto-added** to the project when labeled `enhancement`, `bug`, or `tech-debt`
+- Phase tracking uses labels (`phase:*`), not project fields
 
 ### Implementation Phases (Strict Order)
 
@@ -87,8 +76,7 @@ Report current state: which phase we're in, what issues exist, blockers. Don't c
 ### Triggering Implementation
 
 When an issue is ready and unblocked:
-1. Update project Status to "In Progress"
-2. Post a comment: `@claude Please implement this issue` with guidance to read the spec and create a PR
+- Post a comment: `@claude Please implement this issue` with guidance to read the spec and create a PR
 
 ### Creating Issues
 
@@ -96,8 +84,7 @@ When an issue is ready and unblocked:
 
 - Only create ONE issue at a time
 - Check for existing open issues in the current phase first (don't duplicate)
-- Add labels: `enhancement`, `needs-review`, and the phase label
-- Set the Phase field in the GitHub Project
+- Add labels: `enhancement`, `needs-review`, and the phase label (e.g., `phase:parser`)
 
 ### Declining Issues
 

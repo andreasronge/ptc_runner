@@ -69,18 +69,15 @@ The PM workflow (`claude-pm.yml`) orchestrates issue creation and implementation
 
 **Full details**: See `.claude/commands/pm-workflow.md` for:
 - Phase structure and specification documents
-- GitHub Project field IDs
 - Decision framework and safety rules
 
 **Key behaviors**:
 - Creates ONE issue at a time from specification documents
-- Issues are auto-added to GitHub Project via built-in workflow
-- PM sets the Phase field after issue creation
+- Issues are auto-added to GitHub Project when labeled (`enhancement`, `bug`, `tech-debt`)
+- Phase tracking uses labels (`phase:*`), not project fields
 - Triggers implementation only when issue has BOTH `ready-for-implementation` AND `claude-approved`
 
 **GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
-
-**Required PAT Scopes**: `PAT_WORKFLOW_TRIGGER` must have `project` and `read:project` scopes.
 
 ## Closing Issues
 
@@ -102,13 +99,6 @@ gh issue edit ISSUE_NUMBER --add-label "wontfix"  # or duplicate, out-of-scope, 
 
 # Add explanatory comment
 gh issue comment ISSUE_NUMBER --body "Closing: [explanation of why this won't be done]"
-```
-
-### Updating Project Status
-When closing as "not planned", remove from project or leave as-is (closed issues are filtered by default):
-```bash
-# Optional: Remove from project entirely
-gh project item-delete 1 --owner andreasronge --id ITEM_ID
 ```
 
 ## Security Gates
