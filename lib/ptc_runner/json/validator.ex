@@ -1,4 +1,4 @@
-defmodule PtcRunner.Validator do
+defmodule PtcRunner.Json.Validator do
   @moduledoc """
   Validates DSL programs against the schema.
 

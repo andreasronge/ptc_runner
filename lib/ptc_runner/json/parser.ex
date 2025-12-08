@@ -1,4 +1,4 @@
-defmodule PtcRunner.Parser do
+defmodule PtcRunner.Json.Parser do
   @moduledoc """
   Parses JSON strings or maps into AST representation.
 
