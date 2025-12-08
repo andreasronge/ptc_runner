@@ -6,7 +6,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 
 | Workflow | Trigger | Gate | Purpose |
 |----------|---------|------|---------|
-| `claude-code-review.yml` | PR labeled/synchronized | `claude-review` label | Automated PR review |
+| `claude-code-review.yml` | PR opened/labeled/synchronized | `claude/*` branch or `claude-review` label | Automated PR review |
 | `claude-auto-triage.yml` | After code-review completes | Inherits from code-review | Triage review findings |
 | `claude.yml` | `@claude` mention | Actor or `claude-approved` label | Execute requested work |
 | `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue specifications |
