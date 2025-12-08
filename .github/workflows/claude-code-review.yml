@@ -113,11 +113,16 @@ jobs:
             2. Use `gh pr view ${{ github.event.pull_request.number }}` to see the PR description
             3. Use `gh pr diff ${{ github.event.pull_request.number }}` to see changes
             4. If the PR references an issue (e.g., "Fixes #N"), read it with comments: `gh issue view N --comments`
-            5. Follow the review structure and severity language from the guidelines
-            6. Post your review using `gh pr comment ${{ github.event.pull_request.number }} --body "..."`
+            5. **Check spec documents**: If the issue references a spec/plan document (e.g., `docs/*-plan.md`),
+               read it and verify the implementation matches the spec
+            6. Follow the review structure and severity language from the guidelines
+            7. Post your review using `gh pr comment ${{ github.event.pull_request.number }} --body "..."`
 
             **CRITICAL**: Check for in-scope completeness - if the PR establishes a pattern,
             verify it's applied consistently. Flag incomplete work as "MUST FIX", not "consider".
+
+            **CRITICAL**: If the issue references a specification document, verify the implementation
+            matches the documented structure (file paths, module names, etc.).
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(mix:*),Bash(git:*)"'
