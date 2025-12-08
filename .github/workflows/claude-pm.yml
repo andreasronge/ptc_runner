@@ -10,6 +10,10 @@ on:
   issues:
     types: [labeled]
 
+  # Periodic check to pick up next work (catches gaps when all work is cleared)
+  schedule:
+    - cron: '0 * * * *'  # Every hour
+
   # Manual trigger for testing or recovery
   workflow_dispatch:
     inputs:
@@ -28,10 +32,12 @@ jobs:
     # Run on:
     # - Merged PRs (not closed without merge)
     # - Issues labeled 'ready-for-implementation'
+    # - Scheduled (hourly)
     # - Manual trigger
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'issues' && github.event.label.name == 'ready-for-implementation') ||
+      github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch'
 
     runs-on: ubuntu-latest
