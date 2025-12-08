@@ -11,7 +11,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -24,7 +24,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -37,7 +37,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -51,7 +51,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -64,7 +64,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -78,7 +78,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -91,7 +91,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -105,7 +105,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -118,7 +118,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -132,7 +132,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -145,7 +145,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -159,7 +159,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -172,7 +172,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -186,7 +186,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -199,7 +199,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -212,7 +212,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -225,7 +225,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -238,7 +238,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == true
   end
 
@@ -251,7 +251,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 
@@ -264,7 +264,7 @@ defmodule PtcRunner.Operations.ComparisonTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == false
   end
 end

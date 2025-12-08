@@ -11,13 +11,13 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 3
   end
 
   test "empty pipe returns nil" do
     program = ~s({"program": {"op": "pipe", "steps": []}})
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == nil
   end
@@ -32,7 +32,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"a" => 1, "b" => 2, "c" => 3}
   end
 
@@ -45,7 +45,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"a" => 10, "b" => 2}
   end
 
@@ -55,7 +55,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "objects": []
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{}
   end
 
@@ -67,7 +67,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"a" => 1}
   end
 
@@ -81,7 +81,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"a" => 1, "b" => 2, "c" => 3}
   end
 
@@ -104,7 +104,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       }
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"a" => 1, "b" => 2}
   end
 
@@ -116,7 +116,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "merge requires map values")
   end
 
@@ -125,7 +125,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "op": "merge"
     }})
 
-    {:error, {:validation_error, message}} = PtcRunner.run(program)
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "requires field 'objects'")
   end
 
@@ -135,7 +135,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "objects": 42
     }})
 
-    {:error, {:validation_error, message}} = PtcRunner.run(program)
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "must be a list")
   end
 
@@ -149,7 +149,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [1, 2, 3, 4]
   end
 
@@ -163,7 +163,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [1, 2, 3, 4]
   end
 
@@ -173,7 +173,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "lists": []
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == []
   end
 
@@ -185,7 +185,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [1, 2, 3]
   end
 
@@ -208,7 +208,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       }
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [1, 2, 3, 4]
   end
 
@@ -220,7 +220,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "concat requires list values")
   end
 
@@ -229,7 +229,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "op": "concat"
     }})
 
-    {:error, {:validation_error, message}} = PtcRunner.run(program)
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "requires field 'lists'")
   end
 
@@ -239,7 +239,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "lists": "not a list"
     }})
 
-    {:error, {:validation_error, message}} = PtcRunner.run(program)
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "must be a list")
   end
 
@@ -253,7 +253,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [[1, "a"], [2, "b"], [3, "c"]]
   end
 
@@ -266,7 +266,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [[1, "a"], [2, "b"]]
   end
 
@@ -276,7 +276,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "lists": []
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == []
   end
 
@@ -288,7 +288,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [[1], [2], [3]]
   end
 
@@ -302,7 +302,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == [[1, "a", true], [2, "b", false]]
   end
 
@@ -315,7 +315,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == []
   end
 
@@ -327,7 +327,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "zip requires list values")
   end
 
@@ -336,7 +336,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "op": "zip"
     }})
 
-    {:error, {:validation_error, message}} = PtcRunner.run(program)
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "requires field 'lists'")
   end
 
@@ -346,7 +346,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       "lists": {"a": 1}
     }})
 
-    {:error, {:validation_error, message}} = PtcRunner.run(program)
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "must be a list")
   end
 
@@ -378,7 +378,7 @@ defmodule PtcRunner.Operations.CollectionTest do
       }
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"id" => 1, "name" => "Alice", "total" => 100, "status" => "shipped"}
   end
 end

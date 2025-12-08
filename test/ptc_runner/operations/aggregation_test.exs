@@ -11,7 +11,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 5
   end
 
@@ -24,7 +24,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 0
   end
 
@@ -42,7 +42,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 750
   end
 
@@ -55,7 +55,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 0
   end
 
@@ -72,7 +72,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 150
   end
 
@@ -89,7 +89,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 15.0
   end
 
@@ -102,7 +102,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -118,7 +118,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 10.0
   end
 
@@ -133,7 +133,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -149,7 +149,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 10.0
   end
 
@@ -167,7 +167,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 1
   end
 
@@ -180,7 +180,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -193,7 +193,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 5
   end
 
@@ -210,7 +210,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 1
   end
 
@@ -228,7 +228,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 3
   end
 
@@ -241,7 +241,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -254,7 +254,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 5
   end
 
@@ -271,7 +271,7 @@ defmodule PtcRunner.Operations.AggregationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 3
   end
 
@@ -289,7 +289,7 @@ defmodule PtcRunner.Operations.AggregationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == %{"name" => "Bob", "years" => 7}
     end
 
@@ -302,7 +302,7 @@ defmodule PtcRunner.Operations.AggregationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == nil
     end
 
@@ -319,7 +319,7 @@ defmodule PtcRunner.Operations.AggregationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == %{"name" => "Bob", "years" => 7}
     end
   end
@@ -338,7 +338,7 @@ defmodule PtcRunner.Operations.AggregationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == %{"name" => "Book", "price" => 15}
     end
 
@@ -351,7 +351,7 @@ defmodule PtcRunner.Operations.AggregationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == nil
     end
 
@@ -368,7 +368,7 @@ defmodule PtcRunner.Operations.AggregationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == %{"name" => "Book", "price" => 15}
     end
   end

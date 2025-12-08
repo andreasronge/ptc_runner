@@ -13,7 +13,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "args": {"a": 5, "b": 3}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
       assert result == 8
     end
 
@@ -27,7 +27,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "tool": "get_default"
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
       assert result == "default_value"
     end
 
@@ -37,7 +37,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "tool": "missing_tool"
       }})
 
-      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: %{})
+      {:error, {:execution_error, msg}} = PtcRunner.Json.run(program, tools: %{})
       assert String.contains?(msg, "Tool 'missing_tool' not found")
     end
 
@@ -51,7 +51,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "tool": "failing_tool"
       }})
 
-      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: tools)
+      {:error, {:execution_error, msg}} = PtcRunner.Json.run(program, tools: tools)
       assert String.contains?(msg, "Tool 'failing_tool' error")
       assert String.contains?(msg, "Something went wrong")
     end
@@ -66,7 +66,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "tool": "raising_tool"
       }})
 
-      {:error, {:execution_error, msg}} = PtcRunner.run(program, tools: tools)
+      {:error, {:execution_error, msg}} = PtcRunner.Json.run(program, tools: tools)
       assert String.contains?(msg, "Tool 'raising_tool' raised")
       assert String.contains?(msg, "Tool crashed")
     end
@@ -81,7 +81,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "tool": "wrong_arity"
       }})
 
-      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      {:error, {:validation_error, msg}} = PtcRunner.Json.run(program, tools: tools)
       assert String.contains?(msg, "Tools must be functions with arity 1")
       assert String.contains?(msg, "wrong_arity")
     end
@@ -93,7 +93,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
 
       program = ~s({"program": {"op": "literal", "value": 42}})
 
-      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      {:error, {:validation_error, msg}} = PtcRunner.Json.run(program, tools: tools)
       assert String.contains?(msg, "Tools must be functions with arity 1")
       assert String.contains?(msg, "bad_tool")
     end
@@ -105,7 +105,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
 
       program = ~s({"program": {"op": "literal", "value": 42}})
 
-      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      {:error, {:validation_error, msg}} = PtcRunner.Json.run(program, tools: tools)
       assert String.contains?(msg, "Tools must be functions with arity 1")
       assert String.contains?(msg, "not_a_function")
     end
@@ -120,7 +120,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
 
       program = ~s({"program": {"op": "literal", "value": 42}})
 
-      {:error, {:validation_error, msg}} = PtcRunner.run(program, tools: tools)
+      {:error, {:validation_error, msg}} = PtcRunner.Json.run(program, tools: tools)
       assert String.contains?(msg, "Tools must be functions with arity 1")
       # All three invalid tools should be mentioned
       assert String.contains?(msg, "tool1")
@@ -140,14 +140,14 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "args": {"a": 2, "b": 3}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
       assert result == 5
     end
 
     test "tool validation passes with empty tools map" do
       program = ~s({"program": {"op": "literal", "value": 42}})
 
-      {:ok, result, _metrics} = PtcRunner.run(program, tools: %{})
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: %{})
       assert result == 42
     end
 
@@ -156,7 +156,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "op": "call"
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'call' requires field 'tool'"}
     end
 
@@ -167,7 +167,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "args": "not a map"
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Field 'args' must be a map"}
     end
 
@@ -190,7 +190,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
       assert result == 1
     end
 
@@ -206,7 +206,7 @@ defmodule PtcRunner.Operations.ToolCallTest do
         "in": {"op": "var", "name": "balance"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
       assert result == 500
     end
   end
