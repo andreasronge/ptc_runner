@@ -168,12 +168,13 @@ jobs:
             7. Post summary on the ISSUE: `gh issue comment ${{ steps.context.outputs.number }} --body "YOUR_SUMMARY"`
 
             ### If this is a PR (context type = "pr"):
-            1. Read the PR: `gh pr view ${{ steps.context.outputs.number }}`
-            2. Make your changes on the current branch
-            3. Run `mix precommit` - only proceed if it passes
-            4. Commit and push in ONE command: `git add -A && git commit -m "fix: ..." && git push`
+            1. Read the PR with comments: `gh pr view ${{ steps.context.outputs.number }} --comments`
+            2. Read review comments: `gh api repos/${{ github.repository }}/pulls/${{ steps.context.outputs.number }}/comments --jq '.[] | {path: .path, line: .line, body: .body}'`
+            3. Make your changes on the current branch
+            4. Run `mix precommit` - only proceed if it passes
+            5. Commit and push in ONE command: `git add -A && git commit -m "fix: ..." && git push`
                - IMPORTANT: Always chain commit and push together so push happens immediately after commit
-            5. Post summary on the PR: `gh pr comment ${{ steps.context.outputs.number }} --body "YOUR_SUMMARY"`
+            6. Post summary on the PR: `gh pr comment ${{ steps.context.outputs.number }} --body "YOUR_SUMMARY"`
 
             ## Your Task
 
