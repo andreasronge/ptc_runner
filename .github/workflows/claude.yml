@@ -99,6 +99,13 @@ jobs:
           ref: ${{ steps.pr-branch.outputs.head_ref || github.ref }}
           repository: ${{ steps.pr-branch.outputs.head_repo || github.repository }}
 
+      - name: Install git pre-commit hook
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        run: |
+          cp scripts/pre-commit .git/hooks/pre-commit
+          chmod +x .git/hooks/pre-commit
+          echo "Installed pre-commit hook"
+
       - name: Setup Elixir environment
         if: steps.pr-branch.outputs.is_fork != 'true'
         uses: ./.github/actions/setup-elixir
