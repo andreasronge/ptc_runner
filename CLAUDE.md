@@ -61,7 +61,6 @@ docs/
 - **[GitHub Workflows](docs/guidelines/github-workflows.md)** - Claude automation workflows and security gates
 - **[Release Process](docs/guidelines/release-process.md)** - How to publish releases to Hex.pm
 - **[Research Notes](docs/research.md)** - PTC specification research
-- **[STATUS.md](STATUS.md)** - Implementation progress (state managed via GitHub labels)
 
 ## Key Commands
 
