@@ -118,6 +118,35 @@ Most workflows require explicit maintainer approval before Claude can act:
 - **Cycle limit**: auto-triage.yml tracks cycles with labels, stops after 3 cycles
 - **Human intervention**: Adds `needs-human-review` label when max cycles reached
 
+### Stuck State & Recovery
+
+**When a PR gets stuck (max triage cycles):**
+1. Triage adds `needs-human-review` label and posts explanation comment
+2. Subsequent triage runs skip immediately (label check)
+3. PM workflow detects open PR and skips creating new work
+4. System is effectively **paused** until human intervenes
+
+**When PM workflow gets stuck:**
+1. PM adds `pm-stuck` label to the issue
+2. Subsequent PM runs detect stuck state and fail fast
+3. Use `reset-stuck` action to clear and resume
+
+**Recovery options:**
+
+| Situation | Resolution |
+|-----------|------------|
+| PR stuck at cycle 3 | Remove `needs-human-review` label (re-enables automation), OR manually fix and merge, OR close PR |
+| PM stuck | Run PM workflow manually with `reset-stuck` action, OR remove `pm-stuck`/`pm-failed-attempt` labels manually |
+
+**Manual workflow dispatch:**
+```bash
+# Check PM status without taking action
+gh workflow run claude-pm.yml -f action=status-only
+
+# Reset stuck state and resume
+gh workflow run claude-pm.yml -f action=reset-stuck
+```
+
 ### Concurrency Control
 
 | Workflow | Concurrency Group | Cancel In-Progress |
