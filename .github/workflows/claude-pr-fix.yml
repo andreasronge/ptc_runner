@@ -138,3 +138,21 @@ jobs:
 
           claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Edit,Write,Grep,Glob,Bash"'
           show_full_output: true
+
+      # Safety net: ensure any commits Claude made are pushed
+      - name: Push unpushed commits
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        run: |
+          # Check if there are unpushed commits
+          UNPUSHED=$(git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --oneline 2>/dev/null || echo "")
+          if [ -n "$UNPUSHED" ]; then
+            echo "Found unpushed commits:"
+            echo "$UNPUSHED"
+            echo "Pushing to origin..."
+            git push origin HEAD:${{ steps.pr-branch.outputs.head_ref }}
+            echo "::notice::Pushed commits that Claude forgot to push"
+          else
+            echo "No unpushed commits found"
+          fi
