@@ -110,6 +110,12 @@ jobs:
         if: steps.pr-branch.outputs.is_fork != 'true'
         uses: ./.github/actions/setup-elixir
 
+      - name: Install Claude Code CLI
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
       # Determine if this is a PR or Issue context
       - name: Detect context type
         if: steps.pr-branch.outputs.is_fork != 'true'
