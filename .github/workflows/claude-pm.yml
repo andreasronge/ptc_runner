@@ -27,12 +27,11 @@ jobs:
   pm:
     # Run on:
     # - Merged PRs (not closed without merge)
-    # - Issues labeled 'ready-for-implementation' or 'claude-approved'
+    # - Issues labeled 'ready-for-implementation'
     # - Manual trigger
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'issues' && github.event.label.name == 'ready-for-implementation') ||
-      (github.event_name == 'issues' && github.event.label.name == 'claude-approved') ||
       github.event_name == 'workflow_dispatch'
 
     runs-on: ubuntu-latest
