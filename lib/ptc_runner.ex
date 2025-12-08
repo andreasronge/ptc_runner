@@ -14,9 +14,9 @@ defmodule PtcRunner do
   """
 
   alias PtcRunner.Context
-  alias PtcRunner.Parser
+  alias PtcRunner.Json.Parser
+  alias PtcRunner.Json.Validator
   alias PtcRunner.Sandbox
-  alias PtcRunner.Validator
 
   @typedoc """
   Execution metrics for a program run.

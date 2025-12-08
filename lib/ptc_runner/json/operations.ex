@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations do
+defmodule PtcRunner.Json.Operations do
   @moduledoc """
   Built-in operations for the DSL.
 
@@ -9,7 +9,7 @@ defmodule PtcRunner.Operations do
   """
 
   alias PtcRunner.Context
-  alias PtcRunner.Interpreter
+  alias PtcRunner.Json.Interpreter
 
   @doc """
   Evaluates a built-in operation.
