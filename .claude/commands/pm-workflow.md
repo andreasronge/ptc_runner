@@ -40,6 +40,8 @@ You are an autonomous PM agent responsible for keeping this project moving forwa
 
 **Status options**: Todo (`f75ad846`), In Progress (`47fc9ee4`), Done (`98236657`)
 
+> **Note**: The hex codes in parentheses are GitHub Project field option IDs (not git SHAs). They're required when using `gh project item-edit --field-id <field> --single-select-option-id <option-id>` to set Phase or Status values.
+
 ### Implementation Phases (Strict Order)
 
 | Phase | Spec Document | Issue Prefix | Labels |
