@@ -58,33 +58,26 @@ export REQ_LLM_MODEL=anthropic:claude-sonnet-4-20250514
 # Install dependencies
 mix deps.get
 
-# Run the chat (default schema mode - LLM receives full schema)
+# Run the chat (text mode - default, token-efficient)
 mix run -e "PtcDemo.CLI.main([])"
+
+# Run in structured mode (reliable but expensive)
+mix run -e "PtcDemo.CLI.main([\"--structured\"])"
 
 # Run in explore mode (LLM discovers schema via introspection)
 mix run -e "PtcDemo.CLI.main([\"--explore\"])"
 ```
 
-## Data Modes
+## Generation Modes
 
-The demo supports two data modes that control how much schema information the LLM receives:
+The demo supports two modes for generating PTC programs:
 
-| Mode | Flag | Description |
-|------|------|-------------|
-| **Schema** (default) | none | LLM receives full schema with field names and types |
-| **Explore** | `--explore` | LLM must discover schema using `typeof` and `keys` operations |
+| Mode | Command | Tokens/call | Description |
+|------|---------|-------------|-------------|
+| **Text** (default) | `main([])` | ~600 | Uses `PtcRunner.Schema.to_prompt/0` with examples and retry logic |
+| **Structured** | `main(["--structured"])` | ~11,000 | Uses JSON schema for guaranteed valid output |
 
-Explore mode demonstrates the introspection workflow where an LLM discovers unknown data structures through multi-turn conversation:
-
-```
-you> How many products are there?
-   [Phase 1] LLM explores: load products | first | keys
-   [Result] ["id", "name", "category", ...]
-   [Phase 1] LLM writes query: load products | count
-   [Result] 500
-```
-
-Switch modes at runtime with `/mode schema` or `/mode explore`.
+Text mode is recommended for cost-efficiency. It uses `PtcRunner.Schema.to_prompt/0` which generates a compact description of operations (~300 tokens) instead of the full JSON schema (~10k tokens).
 
 ## Available Datasets (loaded once, kept in memory)
 
@@ -134,14 +127,9 @@ Total approved expenses over $500?
 |---------|-------------|
 | `/datasets` | List available datasets with sizes |
 | `/program` | Show the last generated PTC program |
-| `/result` | Show the last execution result (raw value) |
-| `/context` | Show conversation history |
 | `/examples` | Show example queries |
 | `/stats` | Show token usage and cost statistics |
-| `/mode` | Show current data mode |
-| `/mode schema` | Switch to schema mode (LLM gets full schema) |
-| `/mode explore` | Switch to explore mode (LLM discovers schema) |
-| `/reset` | Clear conversation context, stats, and reset to schema mode |
+| `/reset` | Clear conversation context and stats |
 | `/help` | Show help |
 | `/quit` | Exit |
 
@@ -158,13 +146,18 @@ Session Statistics:
   Total cost:    $0.003421
 ```
 
+This demonstrates how text mode keeps token usage low compared to structured mode.
+
 ## Automated Testing
 
 Run the test suite to verify the LLM generates correct programs:
 
 ```bash
-# Run all tests
+# Run all tests with text mode (default)
 mix run -e "PtcDemo.TestRunner.run_all(verbose: true)"
+
+# Run all tests with structured mode
+mix run -e "PtcDemo.TestRunner.run_all(mode: :structured, verbose: true)"
 
 # Quick run (dots for progress)
 mix run -e "PtcDemo.TestRunner.run_all()"
@@ -178,10 +171,10 @@ mix run -e "PtcDemo.TestRunner.run_one(5)"
 
 Example output:
 ```
-=== PTC Demo Test Runner ===
+=== PTC Demo Test Runner (structured mode) ===
 
 1. How many products are there?
-   [Phase 1] Generating PTC program...
+   [Phase 1] Generating PTC program (structured mode)...
    [Program] {"program":{"op":"pipe","steps":[{"op":"load","name":"products"},...
    [Phase 2] Executing in sandbox...
    [Result] 500 (1ms)
@@ -203,6 +196,8 @@ Tests use **constraint-based assertions** since data is randomly generated:
 1. **Startup**: Datasets loaded into BEAM memory (GenServer state)
 2. **Query**: You ask a natural language question
 3. **Generate**: LLM creates a compact PTC program (~200 bytes)
+   - Structured mode: Uses JSON schema for guaranteed valid output
+   - Text mode: Uses retry logic if JSON is malformed
 4. **Execute**: PtcRunner runs program in sandbox against in-memory data
 5. **Respond**: Only small result returns to LLM for natural language answer
 

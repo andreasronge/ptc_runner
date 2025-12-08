@@ -53,7 +53,7 @@ PTC-Lisp is a domain-specific language for data transformation in agentic LLM wo
 
 - **Data types**: nil, booleans, numbers, strings, keywords, vectors, maps
 - **Collections**: filter, map, reduce, sort, group, aggregate
-- **Predicates**: `where` builder with operators (=, >, <, includes, in)
+- **Predicates**: `where` builder with operators (=, not=, >, <, >=, <=, includes, in)
 - **Control flow**: let, if, when, cond, fn (anonymous functions)
 - **Threading**: `->>` (thread-last), `->` (thread-first) for pipelines
 - **Tool calls**: Invoke host-registered functions
@@ -148,9 +148,8 @@ Test whether LLMs can reliably generate valid PTC-Lisp programs.
 4. Track error patterns (unbalanced parens, wrong operators, etc.)
 
 **Models to test:**
-- Claude 3.5 Sonnet / Claude 3 Opus
-- GPT-4o
-- Gemini 1.5 Pro
+- Deepseek v3.2
+- Gemini 2.5 Flash
 
 **Test cases:**
 - Simple filter + aggregate
@@ -240,13 +239,11 @@ Programs are pure functions of `(memory, context) → result`:
 
 ### Resource Limits
 
-| Resource | Default | Purpose |
-|----------|---------|---------|
-| Timeout | 1,000 ms | Interpreter sandbox limit (prevents infinite execution) |
+| Timeout | 5,000 ms | Interpreter sandbox limit (prevents infinite execution) |
 | Max Heap | ~10 MB | Prevent memory exhaustion |
 | Max Depth | 50 | Prevent stack overflow |
 
-> **Note:** When using PTC-Lisp in agentic loops with tool calls that make network requests, consider using a longer timeout (e.g., 5,000 ms) via the `:timeout` option to accommodate external API latency.
+> **Note:** The default timeout of 5,000 ms is designed to accommodate external API latency in agentic loops.
 
 ---
 
@@ -280,11 +277,11 @@ Programs are pure functions of `(memory, context) → result`:
           ┌────────────────────────┼────────────────────────┐
           │                        │                        │
           ▼                        ▼                        ▼
-┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-│ ptc-lisp-parser-    │  │ ptc-lisp-analyze-   │  │ ptc-lisp-eval-      │
-│ plan.md             │  │ plan.md             │  │ plan.md             │
-│ (RawAST)            │──▶│ (CoreAST)          │──▶│ (Execution)        │
-└─────────────────────┘  └─────────────────────┘  └─────────────────────┘
+┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+│ ptc-lisp-parser-    │   │ ptc-lisp-analyze-   │   │ ptc-lisp-eval-      │
+│ plan.md             │   │ plan.md             │   │ plan.md             │
+│ (RawAST)            │──▶│ (CoreAST)           │──▶│ (Execution)         │
+└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
                                    │
                                    ▼
                     ┌─────────────────────────────┐
@@ -305,7 +302,7 @@ Programs are pure functions of `(memory, context) → result`:
 
 ```elixir
 {:ok, result, metrics} = PtcRunner.Lisp.run(
-  ~s/(->> ctx/users (filter (where :active true)) (count))/,
+  ~s/(->> ctx/users (filter (where :active = true)) (count))/,
   context: %{users: users},
   tools: %{"get-orders" => &MyApp.get_orders/1}
 )
@@ -359,7 +356,7 @@ This program:
 
 ## Version
 
-All documents are at **v0.3.0-draft** (prototype/evaluation phase).
+All documents are at **v0.3.2-draft** (prototype/evaluation phase).
 
 ## Next Steps
 
