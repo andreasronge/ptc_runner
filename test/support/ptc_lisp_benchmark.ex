@@ -62,11 +62,11 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
   ### Special Forms
   ```clojure
   (let [x 1, y 2] body)              ; local bindings
-  (let [{:keys [a b]} m] body)       ; map destructuring
+  (let [{:keys [a b]} m] body)       ; map destructuring (ONLY in let, NOT in fn)
   (if cond then else)                ; conditional (else is REQUIRED)
   (when cond body)                   ; single-branch returns nil if false
   (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
-  (fn [x] body)                      ; anonymous function
+  (fn [x] body)                      ; anonymous function (simple params only!)
   ```
 
   ### Threading (for pipelines)
@@ -131,16 +131,22 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
   | Wrong | Right |
   |-------|-------|
   | `(where :status "active")` | `(where :status = "active")` |
+  | `(where :active true)` | `(where :active = true)` or `(where :active)` |
   | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
+  | `(<= 1 x 10)` | `(and (>= x 1) (<= x 10))` |
+  | `(fn [{:keys [a b]}] ...)` | `(fn [m] (let [{:keys [a b]} m] ...))` |
   | `(ctx :input)` | `ctx/input` |
   | `(call :get-users {})` | `(call "get-users" {})` |
   | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
 
-  IMPORTANT: Respond with ONLY the PTC-Lisp code, no explanation or markdown formatting.
+  IMPORTANT:
+  - Comparisons are 2-arity ONLY: (< a b), NOT (<= a b c)
+  - Destructuring is ONLY in let, NOT in fn params
+  - Respond with ONLY the PTC-Lisp code, no explanation or markdown formatting.
   """
 
   @judge_system_prompt """
-  You are a syntax validator for PTC-Lisp, a minimal Clojure subset.
+  You are a strict syntax validator for PTC-Lisp, a minimal Clojure subset.
 
   Your task: Determine if the given code is syntactically valid PTC-Lisp.
 
@@ -153,16 +159,34 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
   - Predicates: (where :field op value) with operators =, not=, >, <, >=, <=, in, includes
   - Predicate combinators: all-of, any-of, none-of (NOT and/or for combining where clauses)
   - Tool calls: (call "string-name" {args}) - tool name MUST be string
+  - Comparisons are ONLY 2-arity: (< a b), (>= x y) — NOT 3-arity like (<= a b c)
+  - Destructuring ONLY in let bindings: (let [{:keys [a b]} m] ...) — NOT in fn params
+  - fn syntax: (fn [x y] body) — simple param vectors only, no destructuring
   - No namespaced keywords like :foo/bar
   - No quoted lists like '(1 2 3)
   - No Clojure features not listed above (no defn, loop, recur, atoms, etc.)
+
+  ## INVALID Syntax Examples (mark these as errors!):
+  - (where :status "active") — MISSING operator, should be (where :status = "active")
+  - (where :active true) — MISSING operator, should be (where :active = true) or (where :active)
+  - (<= 1 x 10) — 3-arity comparison not supported, use (and (>= x 1) (<= x 10))
+  - (fn [{:keys [a b]}] ...) — destructuring in fn params not supported
+  - (and (where :a = 1) (where :b = 2)) — use (all-of ...) not (and ...) for predicates
+
+  ## VALID Syntax Examples:
+  - (where :status = "active") — with operator
+  - (where :active) — truthy check (no value needed)
+  - (< x 10) — 2-arity comparison
+  - (fn [x] (:name x)) — simple fn param
+  - (let [{:keys [a b]} m] ...) — destructuring in let is OK
+  - (all-of (where :a = 1) (where :b = 2)) — predicate combinator
 
   ## Response Format:
   Respond with ONLY a JSON object (no markdown):
   {"valid": true/false, "errors": ["error1", "error2"] or []}
 
   If valid, errors should be empty array.
-  If invalid, list specific syntax errors found.
+  If invalid, list specific syntax errors found. Be strict!
   """
 
   # Test scenarios with varying difficulty
