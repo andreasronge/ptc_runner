@@ -82,10 +82,11 @@ When an issue is ready and unblocked:
 
 ### Creating Issues
 
+**IMPORTANT**: Read and follow `docs/guidelines/issue-creation-guidelines.md` before creating any issue. It contains the required template, quality checklist, and sizing guidelines.
+
 - Only create ONE issue at a time
 - Check for existing open issues in the current phase first (don't duplicate)
 - Add labels: `enhancement`, `needs-review`, and the phase label
-- Follow the template in `docs/guidelines/issue-creation-guidelines.md`
 - Set the Phase field in the GitHub Project
 
 ### Declining Issues
