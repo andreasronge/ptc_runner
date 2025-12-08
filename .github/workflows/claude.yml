@@ -205,9 +205,10 @@ jobs:
             **CRITICAL**: NEVER include the literal text "@claude" in any comments you post.
             This would trigger another workflow run and create an infinite loop.
 
-          # Allow Claude to search/read/edit code and run mix commands
+          # Allow Claude to search/read/edit code and run shell commands
+          # Full Bash access is safe in ephemeral GitHub runners
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Edit,Write,Grep,Glob,Bash(mix:*),Bash(git:*),Bash(gh issue:*),Bash(gh pr:*),Bash(mkdir:*)"'
+          claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Edit,Write,Grep,Glob,Bash"'
 
           # Enable full output for debugging
           show_full_output: true
