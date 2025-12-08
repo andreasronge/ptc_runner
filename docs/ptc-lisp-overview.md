@@ -242,9 +242,11 @@ Programs are pure functions of `(memory, context) → result`:
 
 | Resource | Default | Purpose |
 |----------|---------|---------|
-| Timeout | 1,000 ms | Prevent infinite execution |
+| Timeout | 1,000 ms | Interpreter sandbox limit (prevents infinite execution) |
 | Max Heap | ~10 MB | Prevent memory exhaustion |
 | Max Depth | 50 | Prevent stack overflow |
+
+> **Note:** When using PTC-Lisp in agentic loops with tool calls that make network requests, consider using a longer timeout (e.g., 5,000 ms) via the `:timeout` option to accommodate external API latency.
 
 ---
 
@@ -281,7 +283,7 @@ Programs are pure functions of `(memory, context) → result`:
 ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
 │ ptc-lisp-parser-    │  │ ptc-lisp-analyze-   │  │ ptc-lisp-eval-      │
 │ plan.md             │  │ plan.md             │  │ plan.md             │
-│ (RawAST)            │──▶│ (CoreAST)           │──▶│ (Execution)         │
+│ (RawAST)            │──▶│ (CoreAST)          │──▶│ (Execution)        │
 └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
                                    │
                                    ▼

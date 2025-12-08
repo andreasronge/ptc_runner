@@ -153,6 +153,8 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Not supported:** Multi-line strings, regex literals
 
+**String operations:** Strings support `count` and `empty?` but are otherwise opaque. Character access (`nth`, `first`), substring extraction, and string manipulation are not supported—use tools for complex string processing. See Section 8.6 for details.
+
 ### 3.5 Keywords
 
 Self-evaluating symbolic identifiers:
@@ -196,7 +198,14 @@ Key-value associations:
 {"string-key" 42}  ; string keys allowed
 ```
 
-Map keys can be keywords or strings. Keywords are preferred.
+**Map keys:** Only keywords and strings are valid map keys. Keywords are preferred for their readability and self-documenting nature. Using other types (numbers, vectors, maps) as keys raises a `validation-error`.
+
+```clojure
+{:name "Alice"}           ; OK - keyword key
+{"name" "Alice"}          ; OK - string key
+{1 "one"}                 ; VALIDATION ERROR - number key
+{[:a :b] "nested"}        ; VALIDATION ERROR - vector key
+```
 
 **Not supported:** Sets (`#{}`), Lists (`'()`)
 
@@ -515,6 +524,18 @@ Test if field value is in a set of values:
 
 Equivalent to: `(or (where :status = "active") (where :status = "pending"))`
 
+**Variables in `in` clause:** The value can be a bound variable, not just a literal:
+
+```clojure
+;; Using a variable for the membership set
+(let [premium-ids (->> users
+                       (filter (where :tier = "premium"))
+                       (pluck :id))]
+  (filter (where :user-id in premium-ids) orders))
+```
+
+At eval time, `premium-ids` is resolved to its value before the predicate closure is created.
+
 ### 7.4 `where` Semantics
 
 | Expression | True when |
@@ -594,6 +615,8 @@ This distinction exists because `where` is designed for safe filtering over pote
 (pluck :name users)                  ; shorthand for (map :name coll)
 ```
 
+**Note:** Since PTC-Lisp has no lazy sequences (see Section 13.1), `map` and `mapv` are functionally identical—both return vectors. `mapv` is provided for Clojure compatibility and to make intent explicit.
+
 #### Ordering
 
 | Function | Signature | Description |
@@ -603,12 +626,18 @@ This distinction exists because `where` is designed for safe filtering over pote
 | `sort-by` | `(sort-by keyfn comp coll)` | Sort with comparator |
 | `reverse` | `(reverse coll)` | Reverse order |
 
+**Sortable types:** Numbers and strings can be sorted. Numbers use numeric order; strings use lexicographic (alphabetical) order. Sorting mixed types or unsortable types (maps, nil) raises a type error.
+
 ```clojure
 (sort [3 1 2])                ; => [1 2 3]
+(sort ["b" "a" "c"])          ; => ["a" "b" "c"]
 (sort-by :price products)     ; ascending by price
 (sort-by :price > products)   ; descending by price
+(sort-by :name products)      ; alphabetical by name
 (reverse [1 2 3])             ; => [3 2 1]
 ```
+
+**Note:** While `sort` and `sort-by` support string comparison internally, the explicit comparison operators (`>`, `<`, `>=`, `<=`) only work on numbers. This prevents ambiguous comparisons in user code while allowing natural sorting.
 
 #### Subsetting
 
@@ -738,11 +767,14 @@ This distinction exists because `where` is designed for safe filtering over pote
 | `max` | `(max x y ...)` | Maximum value |
 | `min` | `(min x y ...)` | Minimum value |
 
+**Division behavior:** The `/` operator always returns a float, even for exact divisions. Integer division (`quot`) is not supported. Division by zero raises an execution error.
+
 ```clojure
 (+ 1 2 3)       ; => 6
 (- 10 3)        ; => 7
 (* 2 3 4)       ; => 24
-(/ 10 2)        ; => 5
+(/ 10 2)        ; => 5.0
+(/ 10 3)        ; => 3.333...
 (mod 10 3)      ; => 1
 (inc 5)         ; => 6
 (dec 5)         ; => 4
@@ -755,21 +787,23 @@ This distinction exists because `where` is designed for safe filtering over pote
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `=` | `(= x y ...)` | Equality |
+| `=` | `(= x y)` | Equality |
 | `not=` | `(not= x y)` | Inequality |
-| `<` | `(< x y ...)` | Less than |
-| `>` | `(> x y ...)` | Greater than |
-| `<=` | `(<= x y ...)` | Less or equal |
-| `>=` | `(>= x y ...)` | Greater or equal |
+| `<` | `(< x y)` | Less than |
+| `>` | `(> x y)` | Greater than |
+| `<=` | `(<= x y)` | Less or equal |
+| `>=` | `(>= x y)` | Greater or equal |
+
+**Note:** Comparison operators in PTC-Lisp are strictly 2-arity. Chained comparisons like `(< 1 2 3)` are **not supported**. Use `and` to combine comparisons: `(and (< 1 2) (< 2 3))`.
 
 ```clojure
 (= 1 1)         ; => true
 (= 1 2)         ; => false
 (not= 1 2)      ; => true
-(< 1 2 3)       ; => true (chained)
-(> 3 2 1)       ; => true
-(<= 1 1 2)      ; => true
-(>= 3 2 2)      ; => true
+(< 1 2)         ; => true
+(> 3 2)         ; => true
+(<= 1 1)        ; => true
+(>= 3 2)        ; => true
 ```
 
 ### 8.5 Logic
@@ -806,6 +840,26 @@ This distinction exists because `where` is designed for safe filtering over pote
 
 **Note:** In PTC-Lisp, `coll?` returns `true` only for vectors (and any future sequence types). Maps and strings are not considered collections by `coll?`. This affects functions like `flatten` which only flatten values where `coll?` is true.
 
+**Collection Functions on Maps and Strings:**
+
+Although maps and strings are not "collections" per `coll?`, some collection functions still work on them:
+
+| Function | Maps | Strings | Notes |
+|----------|------|---------|-------|
+| `count` | ✓ | ✓ | Returns key count / character count |
+| `empty?` | ✓ | ✓ | True if no keys / no characters |
+| `first` | ✗ | ✗ | Use `(first (keys m))` or `(first (vals m))` |
+| `last` | ✗ | ✗ | Use `(last (keys m))` or `(last (vals m))` |
+| `map` | ✗ | ✗ | Use `(map f (vals m))` or `(map f (keys m))` |
+| `filter` | ✗ | ✗ | Not applicable to maps/strings |
+| `nth` | ✗ | ✗ | String indexing not supported |
+
+To iterate over maps, extract keys or values first:
+```clojure
+(->> (keys my-map)
+     (map (fn [k] {:key k :val (get my-map k)})))
+```
+
 ### 8.7 Numeric Predicates
 
 | Function | Description |
@@ -815,6 +869,22 @@ This distinction exists because `where` is designed for safe filtering over pote
 | `neg?` | Is negative? |
 | `even?` | Is even? |
 | `odd?` | Is odd? |
+
+**Integer predicates on floats:** The predicates `even?` and `odd?` require integers. Passing a float raises a `type-error`, even if the float represents a whole number:
+
+```clojure
+(even? 4)      ; => true
+(even? 4.0)    ; => TYPE ERROR (float, not integer)
+(odd? 3)       ; => true
+(odd? 3.0)     ; => TYPE ERROR (float, not integer)
+```
+
+Since division always returns floats (see Section 8.3), avoid using `even?`/`odd?` on division results. Use `mod` instead:
+
+```clojure
+;; Check if x is divisible by 2
+(zero? (mod x 2))    ; works for integers
+```
 
 ---
 
@@ -1086,9 +1156,20 @@ Ordering comparisons (`>`, `<`, `>=`, `<=`) are only defined for numbers:
 (< 1.5 2.0)                  ; => true
 
 ;; Type errors
-(> "a" "b")                  ; => TYPE ERROR (strings not orderable)
+(> "a" "b")                  ; => TYPE ERROR (strings not orderable via >)
 (< {:a 1} {:b 2})            ; => TYPE ERROR (maps not orderable)
 (>= 5 nil)                   ; => TYPE ERROR (nil not orderable)
+```
+
+**Note on sorting:** While explicit comparison operators reject strings, the `sort` and `sort-by` functions use internal comparison that supports both numbers and strings. This design prevents ambiguous user-written comparisons while enabling natural sorting:
+
+```clojure
+;; These work (internal comparison)
+(sort ["b" "a" "c"])         ; => ["a" "b" "c"]
+(sort-by :name users)        ; sorts alphabetically
+
+;; This fails (explicit comparison)
+(> "bob" "alice")            ; => TYPE ERROR
 ```
 
 ### 11.4 Aggregation with Missing/Nil Fields
@@ -1310,7 +1391,7 @@ special-initial = "+" | "-" | "*" | "/" | "<" | ">" | "=" | "?" | "!" ;
 special-rest    = special-initial | "-" | "_" | "/" ;
 
 keyword     = ":" keyword-char+ ;
-keyword-char = letter | digit | "-" | "_" ;  (* no "/" in keywords *)
+keyword-char = letter | digit | "-" | "_" | "?" | "!" ;  (* no "/" in keywords *)
 
 vector      = "[" expression* "]" ;
 
@@ -1332,6 +1413,14 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
   - `((fn [x] x) 42)` — anonymous function application
   - `(call "tool" args)` — normal function calls
 
+**Tokenization precedence:** When a token could match multiple grammar rules, literals take precedence over symbols:
+1. `nil`, `true`, `false` → reserved literals (not symbols)
+2. `-123`, `3.14` → numbers (not symbols starting with `-` or digits)
+3. `:foo` → keyword
+4. Everything else → symbol
+
+This means `-1` is always the integer negative one, never a symbol named "-1".
+
 ---
 
 ## 15. Implementation Notes
@@ -1347,9 +1436,11 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 
 | Resource | Default | Notes |
 |----------|---------|-------|
-| Timeout | 1,000 ms | Execution time limit |
+| Timeout | 5,000 ms | Execution time limit |
 | Max Heap | ~10 MB | Memory limit |
 | Max Depth | 50 | Nesting depth limit |
+
+*Note: The 5,000 ms default accommodates tool calls in agentic loops. Hosts may configure lower limits for pure computation.*
 
 ### 15.3 Compatibility Testing
 
@@ -1413,6 +1504,8 @@ The program's return value determines memory behavior:
 | Non-map value | No memory change | Pure queries |
 | Map without `:result` | Entire map merged into memory | Update memory only |
 | Map with `:result` | Map (minus `:result`) merged into memory; `:result` returned to caller | Update memory AND return value |
+
+**Reserved key:** `:result` is reserved at the top level of return maps. It controls the return value and is never persisted to memory. Do not use `:result` as a memory key name—use alternatives like `:query-result`, `:computation-result`, or `:output`.
 
 #### Case 1: Pure Query (No Memory Update)
 
@@ -1724,9 +1817,11 @@ For initial experiments, implement this minimal subset:
 - `ctx/` — request context access
 - `call` — tool invocation
 
-### Arithmetic (Optional for v1)
+### Arithmetic (Can defer for minimal prototype)
 - `+`, `-`, `*`, `/`
 - `inc`, `dec`
+
+*Note: These are part of the full spec (Section 8.3) but can be deferred if building a minimal prototype focused on collection operations.*
 
 ### Memory Result Contract
 - Non-map return → no memory update
@@ -1785,3 +1880,5 @@ This restriction prevents accidental data leakage and simplifies reasoning about
 | 0.1.0-draft | 2024-XX-XX | Initial draft |
 | 0.2.0-draft | 2024-XX-XX | Added memory model, agentic loops, namespace syntax |
 | 0.3.0-draft | 2024-XX-XX | Fixed predicate combinators (`all-of`/`any-of`/`none-of`), added `fn` support, grammar fixes (`/` in symbols, expression in operator position), clarified nil/type error semantics, renamed `contains` to `includes` |
+| 0.3.1-draft | 2024-XX-XX | Added `?` and `!` to keyword grammar, clarified collection function behavior on maps/strings, documented division returns float, documented `:result` as reserved key, resolved sort vs comparison operator semantics for strings, noted map/mapv equivalence |
+| 0.3.2-draft | 2024-XX-XX | Standardized timeout to 5000ms, added tokenization precedence rules, clarified map keys restricted to keywords/strings, documented `even?`/`odd?` require integers |
