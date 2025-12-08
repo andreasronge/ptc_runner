@@ -109,6 +109,15 @@ This sounds optional, so triage will IGNORE.
 
 This is clearly actionable, so triage will FIX_NOW.
 
+## Requirement Verification
+
+Before reviewing code, verify PR fulfills its requirements:
+
+1. **Read linked issue** (if any): `gh issue view N --comments`
+2. **Read PR comments**: `gh pr view N --comments`
+3. **Verify requirements are met** - does PR solve what the issue requested?
+4. **Flag deviations** - if PR doesn't match requirements, either fix it or update the issue/docs to reflect the change
+
 ## Investigation Requirements
 
 Before flagging an issue, the reviewer MUST:
@@ -120,12 +129,15 @@ grep -r "pattern" lib/
 # Check if similar code elsewhere handles it differently
 ```
 
-### 2. Check Existing Patterns
+### 2. Check for Existing Code
 ```bash
-# See how similar cases are handled in the codebase
+# Check if similar functionality already exists
 grep -r "similar_pattern" lib/
+# See how similar cases are handled in the codebase
 # Read CLAUDE.md for project conventions
 ```
+
+Flag if PR introduces code that duplicates or reimplements existing functionality.
 
 ### 3. Assess Complexity
 Ask:
@@ -200,12 +212,16 @@ Don't waste time on:
 
 Before submitting a review:
 
+- [ ] Linked issue read (description AND all comments)
+- [ ] PR review comments read for context
+- [ ] PR implementation matches issue requirements (or deviations documented)
 - [ ] Summary accurately describes the PR's purpose
 - [ ] Issues are clearly marked as "Must Fix" with specific locations
 - [ ] Suggestions are clearly marked as "Optional"
 - [ ] Each issue includes: location, problem, impact, suggested fix
 - [ ] Complexity assessment provided for each item
 - [ ] In-scope incomplete work is flagged (not just mentioned as "consider")
+- [ ] Code duplication checked (production code DRY, test code uses setup/helpers)
 - [ ] Existing GitHub issues checked before suggesting deferrals
 - [ ] Documentation impact assessed (public API → docs updated?)
 - [ ] Verdict is clear: Approve, Request Changes, or Comment

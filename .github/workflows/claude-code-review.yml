@@ -130,6 +130,11 @@ jobs:
             **CRITICAL**: If the issue references a specification document, verify the implementation
             matches the documented structure (file paths, module names, etc.).
 
+            **CRITICAL**: Check for code duplication:
+            - Flag duplicated production code that should be extracted into helpers
+            - Flag duplicated test code that should use setup blocks or helper functions
+            - See `docs/guidelines/development-guidelines.md` (DRY section) and `docs/guidelines/testing-guidelines.md` (Avoid Duplication section)
+
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(mix:*),Bash(git:*)"'
 

@@ -1,0 +1,88 @@
+name: Claude Issue Implementation
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+
+jobs:
+  claude:
+    # Only trigger for issue contexts (not PR comments), trusted actors, and @claude mentions
+    if: |
+      (
+        github.actor == 'andreasronge' ||
+        contains(github.event.issue.labels.*.name, 'claude-approved')
+      ) && (
+        (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.comment.body, '@claude') && github.event.comment.user.type != 'Bot') ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && github.event.issue.user.type != 'Bot')
+      )
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - PRs won't trigger CI automatically"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git pre-commit hook
+        run: |
+          cp scripts/pre-commit .git/hooks/pre-commit
+          chmod +x .git/hooks/pre-commit
+          echo "Installed pre-commit hook"
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          prompt: |
+            Implement issue #${{ github.event.issue.number }}.
+
+            Request: ${{ github.event.comment.body || github.event.issue.body }}
+
+            **Keep it simple**: Only implement what was requested. No extras, no refactoring beyond scope.
+
+            Workflow:
+            1. Read issue AND comments: `gh issue view ${{ github.event.issue.number }} --comments`
+            2. Branch: `git checkout -b claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)`
+            3. Make minimal changes
+            4. Run `mix precommit` - only proceed if it passes
+            5. `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
+            6. `gh pr create --title "Fix #${{ github.event.issue.number }}: [desc]" --body "Fixes #${{ github.event.issue.number }}"`
+            7. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
+
+            NEVER include "@claude" in comments.
+
+          claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Edit,Write,Grep,Glob,Bash"'
+          show_full_output: true
