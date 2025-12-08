@@ -79,6 +79,8 @@ Phase 2: Analyzer (docs/ptc-lisp-analyze-plan.md)
 Phase 3: Eval (docs/ptc-lisp-eval-plan.md)
     ↓
 Phase 4: Integration (docs/ptc-lisp-integration-spec.md)
+    ↓
+Phase 5: Polish & Cleanup (review deferred issues, final cleanup)
 ```
 
 ### Specification Documents
@@ -90,6 +92,7 @@ Phase 4: Integration (docs/ptc-lisp-integration-spec.md)
 | 2 | `docs/ptc-lisp-analyze-plan.md` | `[Lisp Analyzer]` |
 | 3 | `docs/ptc-lisp-eval-plan.md` | `[Lisp Eval]` |
 | 4 | `docs/ptc-lisp-integration-spec.md` | `[Lisp Integration]` |
+| 5 | (review deferred issues) | `[Polish]` |
 
 ### Reference Documents (Not for Issue Creation)
 
@@ -142,8 +145,38 @@ Phase 4: Integration (docs/ptc-lisp-integration-spec.md)
 | Todo | `f75ad846` |
 | In Progress | `47fc9ee4` |
 | Done | `98236657` |
+| Not Planned | - | (use `gh issue close --reason "not planned"`)
 
 **Required PAT Scopes**: The `PAT_WORKFLOW_TRIGGER` secret must have `project` and `read:project` scopes.
+
+## Closing Issues
+
+### Completed (Done)
+When an issue is implemented via PR merge, it's automatically closed as "completed":
+```bash
+# Usually automatic, but manual if needed:
+gh issue close ISSUE_NUMBER
+```
+
+### Not Planned (Declined)
+When deciding not to implement an issue:
+```bash
+# Close with "not planned" reason (shows gray icon in GitHub)
+gh issue close ISSUE_NUMBER --reason "not planned"
+
+# Add a label documenting why
+gh issue edit ISSUE_NUMBER --add-label "wontfix"  # or duplicate, out-of-scope, deferred, superseded
+
+# Add explanatory comment
+gh issue comment ISSUE_NUMBER --body "Closing: [explanation of why this won't be done]"
+```
+
+### Updating Project Status
+When closing as "not planned", remove from project or leave as-is (closed issues are filtered by default):
+```bash
+# Optional: Remove from project entirely
+gh project item-delete 1 --owner andreasronge --id ITEM_ID
+```
 
 ## Security Gates
 
@@ -185,6 +218,7 @@ All workflows require explicit maintainer approval before Claude can act:
 - `phase:analyzer` - PTC-Lisp analyzer implementation (Phase 2)
 - `phase:eval` - PTC-Lisp interpreter implementation (Phase 3)
 - `phase:integration` - End-to-end integration (Phase 4)
+- `phase:polish` - Polish & cleanup, deferred issue review (Phase 5)
 - `ptc-lisp` - General PTC-Lisp language work
 
 ### Status Labels
@@ -200,6 +234,14 @@ All workflows require explicit maintainer approval before Claude can act:
 - `from-pr-review` - Issue created from PR review findings
 - `pm-stuck` - PM workflow encountered unrecoverable error
 - `pm-failed-attempt` - PM attempt failed
+
+### Declined Issue Labels
+When closing an issue as "not planned", add one of these labels to document why:
+- `wontfix` - Decision not to address (low value, against project direction)
+- `duplicate` - Duplicate of another issue (reference the original in comment)
+- `out-of-scope` - Outside current project goals
+- `deferred` - Postponed indefinitely (may revisit later)
+- `superseded` - Replaced by a different approach (reference new issue/PR)
 
 ## Fork PR Handling
 
