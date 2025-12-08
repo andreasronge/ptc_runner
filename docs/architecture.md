@@ -45,14 +45,24 @@ The diagram shows the two-phase execution model: first the JSON program is parse
 lib/
 ├── ptc_runner.ex                 # Public API: run/2, run!/2
 ├── ptc_runner/
-│   ├── parser.ex                 # JSON parsing
-│   ├── validator.ex              # Schema validation
-│   ├── interpreter.ex            # AST evaluation
-│   ├── operations.ex             # Built-in operations
-│   ├── sandbox.ex                # Process isolation + resource limits
-│   ├── context.ex                # Variable bindings and tool registry
-│   └── schema.ex                 # Operation definitions for validation
+│   ├── sandbox.ex                # Shared: Process isolation + resource limits
+│   ├── context.ex                # Shared: Variable bindings and tool registry
+│   ├── schema.ex                 # Shared: Operation definitions for validation
+│   │
+│   ├── json/                     # JSON DSL implementation
+│   │   ├── parser.ex             # JSON parsing → AST
+│   │   ├── validator.ex          # AST schema validation
+│   │   ├── interpreter.ex        # AST evaluation
+│   │   └── operations.ex         # Built-in operations
+│   │
+│   └── lisp/                     # PTC-Lisp DSL (planned)
+│       ├── parser.ex             # S-expression parsing
+│       ├── analyzer.ex           # AST analysis
+│       └── interpreter.ex        # Evaluation
 ```
+
+> **Note**: PTC-Lisp is a planned Clojure-like DSL that will provide an alternative syntax
+> to the JSON DSL. See `docs/api-refactor-plan.md` for the implementation roadmap.
 
 ## DSL Specification
 
