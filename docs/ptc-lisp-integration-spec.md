@@ -414,59 +414,59 @@ parse-error at line 3, column 15:
 ## 7. Implementation Checklist
 
 ### Parser
-- [ ] All literal types (nil, bool, number, string, keyword)
-- [ ] Symbols with special chars (`->>`, `>=`, `empty?`)
-- [ ] Namespaced symbols (`ctx/x`, `memory/y`)
-- [ ] Collections (vector, map, list)
-- [ ] Whitespace and comments
-- [ ] Error recovery with line/column
+- [x] All literal types (nil, bool, number, string, keyword)
+- [x] Symbols with special chars (`->>`, `>=`, `empty?`)
+- [x] Namespaced symbols (`ctx/x`, `memory/y`)
+- [x] Collections (vector, map, list)
+- [x] Whitespace and comments
+- [x] Error recovery with line/column
 
 ### Analyze
-- [ ] Symbol → var resolution
-- [ ] Namespace symbol dispatch
-- [ ] `let` with destructuring
-- [ ] `if` (3 args required)
-- [ ] `when` → `if` desugaring
-- [ ] `cond` → nested `if`
-- [ ] `->` and `->>` threading
-- [ ] `where` validation
-- [ ] `all-of`, `any-of`, `none-of`
-- [ ] `call` tool name validation
-- [ ] `fn` parameter extraction
-- [ ] Comparison operators (strict 2-arity: `=`, `not=`, `>`, `<`, `>=`, `<=`)
+- [x] Symbol → var resolution
+- [x] Namespace symbol dispatch
+- [x] `let` with destructuring
+- [x] `if` (3 args required)
+- [x] `when` → `if` desugaring
+- [x] `cond` → nested `if`
+- [x] `->` and `->>` threading
+- [x] `where` validation
+- [x] `all-of`, `any-of`, `none-of`
+- [x] `call` tool name validation
+- [x] `fn` parameter extraction
+- [x] Comparison operators (strict 2-arity: `=`, `not=`, `>`, `<`, `>=`, `<=`)
 
 ### Eval
-- [ ] Literal passthrough
-- [ ] Collection evaluation
-- [ ] Variable lookup
-- [ ] `ctx/` and `memory/` access
-- [ ] `let` binding with pattern match
-- [ ] `if` conditional (truthy semantics)
-- [ ] `and`/`or` short-circuit
-- [ ] `fn` closure creation
-- [ ] Function application (normal, variadic, keyword)
-- [ ] `where` predicate builder
-- [ ] Predicate combinators
-- [ ] Tool invocation
-- [ ] Nil-safe comparisons in `where`
+- [x] Literal passthrough
+- [x] Collection evaluation
+- [x] Variable lookup
+- [x] `ctx/` and `memory/` access
+- [x] `let` binding with pattern match
+- [x] `if` conditional (truthy semantics)
+- [x] `and`/`or` short-circuit
+- [x] `fn` closure creation
+- [x] Function application (normal, variadic, keyword)
+- [x] `where` predicate builder
+- [x] Predicate combinators
+- [x] Tool invocation
+- [x] Nil-safe comparisons in `where`
 
 ### Memory Contract
-- [ ] Non-map → no update
-- [ ] Map without `:result` → merge all
-- [ ] Map with `:result` → merge rest, return result
-- [ ] Delta tracking
+- [x] Non-map → no update
+- [x] Map without `:result` → merge all
+- [x] Map with `:result` → merge rest, return result
+- [x] Delta tracking
 
 ### Runtime Builtins
-- [ ] Collection ops (filter, map, pluck, etc.)
-- [ ] Ordering (sort, sort-by, reverse)
-- [ ] Subsetting (first, last, take, drop, take-while, drop-while)
-- [ ] Aggregation (count, sum-by, avg-by, min-by, max-by, group-by)
-- [ ] Map ops (get, get-in, assoc, merge, etc.)
-- [ ] Arithmetic (+, -, *, /, inc, dec, abs, max, min)
-- [ ] Comparison (=, not=, <, >, <=, >=)
-- [ ] Logic (not) — `and`/`or` are special forms
-- [ ] Type predicates (nil?, string?, map?, etc.)
-- [ ] Numeric predicates (zero?, pos?, neg?, even?, odd?)
+- [x] Collection ops (filter, map, pluck, etc.)
+- [x] Ordering (sort, sort-by, reverse)
+- [x] Subsetting (first, last, take, drop, take-while, drop-while)
+- [x] Aggregation (count, sum-by, avg-by, min-by, max-by, group-by)
+- [x] Map ops (get, get-in, assoc, merge, etc.)
+- [x] Arithmetic (+, -, *, /, inc, dec, abs, max, min)
+- [x] Comparison (=, not=, <, >, <=, >=)
+- [x] Logic (not) — `and`/`or` are special forms
+- [x] Type predicates (nil?, string?, map?, etc.)
+- [x] Numeric predicates (zero?, pos?, neg?, even?, odd?)
 
 ---
 
