@@ -51,7 +51,7 @@ defmodule PtcRunner.MixProject do
     [
       precommit: [
         "format --check-formatted",
-        "compile --warnings-as-errors",
+        "compile --force --warnings-as-errors",
         "credo --strict",
         "test --warnings-as-errors"
       ]
