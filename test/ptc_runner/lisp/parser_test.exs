@@ -34,6 +34,8 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "keywords" do
       assert {:ok, {:keyword, :name}} = Parser.parse(":name")
       assert {:ok, {:keyword, :user_id}} = Parser.parse(":user_id")
+      assert {:ok, {:keyword, :empty?}} = Parser.parse(":empty?")
+      assert {:ok, {:keyword, :valid!}} = Parser.parse(":valid!")
     end
   end
 

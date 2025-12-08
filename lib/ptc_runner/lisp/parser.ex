@@ -95,7 +95,7 @@ defmodule PtcRunner.Lisp.Parser do
   # Keywords (no / allowed)
   keyword =
     ignore(string(":"))
-    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_], min: 1)
+    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ??, ?!], min: 1)
     |> reduce({ParserHelpers, :build_keyword, []})
 
   # Symbols (/ allowed for namespacing)
