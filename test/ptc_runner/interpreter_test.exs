@@ -6,7 +6,7 @@ defmodule PtcRunner.InterpreterTest do
       node = %{"value" => 42}
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message == "Missing required field 'op'"
     end
@@ -15,7 +15,7 @@ defmodule PtcRunner.InterpreterTest do
       node = %{}
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message == "Missing required field 'op'"
     end
@@ -24,7 +24,7 @@ defmodule PtcRunner.InterpreterTest do
       node = "not a map"
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
       assert message =~ "not a map"
@@ -34,7 +34,7 @@ defmodule PtcRunner.InterpreterTest do
       node = [1, 2, 3]
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
     end
@@ -43,7 +43,7 @@ defmodule PtcRunner.InterpreterTest do
       node = 42
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
     end
@@ -52,7 +52,7 @@ defmodule PtcRunner.InterpreterTest do
       node = nil
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
     end
@@ -61,7 +61,7 @@ defmodule PtcRunner.InterpreterTest do
       node = true
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
     end
@@ -70,7 +70,7 @@ defmodule PtcRunner.InterpreterTest do
       node = :symbol
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
     end
@@ -79,7 +79,7 @@ defmodule PtcRunner.InterpreterTest do
       node = {:op, "literal"}
       context = PtcRunner.Context.new()
 
-      {:error, {:execution_error, message}} = PtcRunner.Interpreter.eval(node, context)
+      {:error, {:execution_error, message}} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert message =~ "Node must be a map"
     end
@@ -90,7 +90,7 @@ defmodule PtcRunner.InterpreterTest do
       node = %{"op" => "literal", "value" => 42}
       context = PtcRunner.Context.new()
 
-      {:ok, result} = PtcRunner.Interpreter.eval(node, context)
+      {:ok, result} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert result == 42
     end
@@ -99,7 +99,7 @@ defmodule PtcRunner.InterpreterTest do
       node = %{"op" => "load", "name" => "x"}
       context = PtcRunner.Context.new(%{"x" => 100})
 
-      {:ok, result} = PtcRunner.Interpreter.eval(node, context)
+      {:ok, result} = PtcRunner.Json.Interpreter.eval(node, context)
 
       assert result == 100
     end
