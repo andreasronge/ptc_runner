@@ -61,17 +61,16 @@ defmodule PtcRunner.Lisp do
 
   # Map result: check for :result key
   defp apply_memory_contract(value, memory) when is_map(value) do
-    {result_value, rest} = Map.pop(value, :result)
-    new_memory = Map.merge(memory, rest)
-
-    case result_value do
-      nil ->
-        # Map without :result → merge into memory, map is returned
-        {:ok, value, rest, new_memory}
-
-      _ ->
-        # Map with :result → merge rest into memory, :result value returned
-        {:ok, result_value, rest, new_memory}
+    if Map.has_key?(value, :result) do
+      # Map with :result → merge rest into memory, :result value returned
+      result_value = Map.fetch!(value, :result)
+      rest = Map.delete(value, :result)
+      new_memory = Map.merge(memory, rest)
+      {:ok, result_value, rest, new_memory}
+    else
+      # Map without :result → merge into memory, map is returned
+      new_memory = Map.merge(memory, value)
+      {:ok, value, value, new_memory}
     end
   end
 end

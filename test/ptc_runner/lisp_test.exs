@@ -1,4 +1,4 @@
-defmodule PtcRunner.Lisp.Test do
+defmodule PtcRunner.LispTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
