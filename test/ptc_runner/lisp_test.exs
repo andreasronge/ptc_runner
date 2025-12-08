@@ -563,20 +563,29 @@ defmodule PtcRunner.LispTest do
       assert result == %{name: "Alice", age: 30}
     end
 
-    test "let bindings with multiple interdependent variables" do
+    test "closure captures let-bound variable in filter" do
       source = ~S"""
-      (let [x 10
-            y 20
-            z (+ x y)]
-        {:result z
-         :cached-x x
-         :cached-y y})
+      (let [threshold 100]
+        {:result (filter (fn [x] (> (:price x) threshold)) ctx/products)
+         :threshold threshold})
       """
 
-      {:ok, result, delta, _} = Lisp.run(source)
+      ctx = %{
+        products: [
+          %{name: "laptop", price: 1200},
+          %{name: "mouse", price: 25},
+          %{name: "keyboard", price: 150}
+        ]
+      }
 
-      assert result == 30
-      assert delta == %{:"cached-x" => 10, :"cached-y" => 20}
+      {:ok, result, delta, _} = Lisp.run(source, context: ctx)
+
+      assert result == [
+               %{name: "laptop", price: 1200},
+               %{name: "keyboard", price: 150}
+             ]
+
+      assert delta == %{threshold: 100}
     end
   end
 end
