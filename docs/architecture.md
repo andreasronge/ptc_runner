@@ -62,7 +62,7 @@ lib/
 │       ├── analyze.ex            # RawAST → CoreAST validation/desugaring
 │       ├── core_ast.ex           # CoreAST type definitions
 │       ├── eval.ex               # CoreAST evaluation
-│       ├── runtime.ex            # Builtin functions (95+ operations)
+│       ├── runtime.ex            # Builtin functions (~90 operations)
 │       └── env.ex                # Environment/bindings management
 ```
 
