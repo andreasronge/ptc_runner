@@ -4,7 +4,7 @@ defmodule PtcRunner.Operations.DataSourceTest do
   # Basic literal operation
   test "literal returns the specified value" do
     program = ~s({"program": {"op": "literal", "value": 42}})
-    {:ok, result, metrics} = PtcRunner.run(program)
+    {:ok, result, metrics} = PtcRunner.Json.run(program)
 
     assert result == 42
     assert metrics.duration_ms >= 0
@@ -16,14 +16,14 @@ defmodule PtcRunner.Operations.DataSourceTest do
     program = ~s({"program": {"op": "load", "name": "data"}})
 
     {:ok, result, _metrics} =
-      PtcRunner.run(program, context: %{"data" => [1, 2, 3]})
+      PtcRunner.Json.run(program, context: %{"data" => [1, 2, 3]})
 
     assert result == [1, 2, 3]
   end
 
   test "load returns nil for missing variable" do
     program = ~s({"program": {"op": "load", "name": "missing"}})
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == nil
   end

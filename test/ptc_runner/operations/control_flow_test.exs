@@ -10,7 +10,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 5
     end
 
@@ -22,7 +22,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "in": {"op": "var", "name": "y"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == nil
     end
 
@@ -40,7 +40,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         }
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 3
     end
 
@@ -57,7 +57,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         }
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 2
     end
 
@@ -74,7 +74,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 10
     end
 
@@ -86,7 +86,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "in": {"op": "var", "name": ""}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 42
     end
 
@@ -110,7 +110,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 3
     end
 
@@ -131,7 +131,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "in": {"op": "var", "name": "sum_val"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 300
     end
 
@@ -149,7 +149,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert {:execution_error, msg} = reason
       assert String.contains?(msg, "count requires a list")
     end
@@ -177,7 +177,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         }
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 2
     end
 
@@ -204,7 +204,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }
 
-      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
       assert result == 2
     end
 
@@ -222,7 +222,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         }
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 10
     end
 
@@ -245,7 +245,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         }
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 30
     end
 
@@ -258,7 +258,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "yes"
     end
 
@@ -270,7 +270,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "no"
     end
 
@@ -282,7 +282,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "no"
     end
 
@@ -294,7 +294,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "yes"
     end
 
@@ -306,7 +306,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "yes"
     end
 
@@ -318,7 +318,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "yes"
     end
 
@@ -330,7 +330,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "yes"
     end
 
@@ -342,7 +342,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "yes"
     end
 
@@ -359,7 +359,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "outer-else"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "nested-else"
     end
 
@@ -377,7 +377,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "high"
     end
 
@@ -395,7 +395,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "low"
     end
 
@@ -413,7 +413,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert {:execution_error, msg} = reason
       assert String.contains?(msg, "count requires a list")
     end
@@ -425,7 +425,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert {:validation_error, msg} = reason
       assert String.contains?(msg, "condition")
     end
@@ -437,7 +437,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "literal", "value": "no"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert {:validation_error, msg} = reason
       assert String.contains?(msg, "then")
     end
@@ -449,7 +449,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "then": {"op": "literal", "value": "yes"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert {:validation_error, msg} = reason
       assert String.contains?(msg, "else")
     end
@@ -462,7 +462,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "else": {"op": "unknown"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert {:validation_error, msg} = reason
       assert String.contains?(msg, "Unknown operation")
     end
@@ -481,7 +481,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "high_value"
     end
 
@@ -499,7 +499,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "standard"
     end
 
@@ -522,7 +522,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         }
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == 1000
     end
 
@@ -537,7 +537,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -551,7 +551,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -561,7 +561,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "conditions": []
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -575,7 +575,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -590,7 +590,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -604,7 +604,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
       }})
 
       # Second condition is not evaluated due to short-circuit
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -619,7 +619,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -633,7 +633,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -643,7 +643,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "conditions": []
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -657,7 +657,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -670,7 +670,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -684,7 +684,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
       }})
 
       # Second condition is not evaluated due to short-circuit
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -695,7 +695,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "literal", "value": true}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -705,7 +705,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "literal", "value": false}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -715,7 +715,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "literal", "value": null}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -725,7 +725,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "literal", "value": 42}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -735,7 +735,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "literal", "value": ""}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == false
     end
 
@@ -750,7 +750,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       # undefined variable returns nil, which is falsy, so and returns false
       assert result == false
     end
@@ -765,7 +765,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       # undefined variable returns nil (falsy), continues to next (true), so or returns true
       assert result == true
     end
@@ -776,7 +776,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "var", "name": "undefined_var"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       # undefined variable returns nil, which is falsy, so not returns true
       assert result == true
     end
@@ -787,7 +787,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "op": "and"
       }})
 
-      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
       assert String.contains?(message, "requires field 'conditions'")
     end
 
@@ -797,7 +797,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "conditions": "not a list"
       }})
 
-      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
       assert String.contains?(message, "must be a list")
     end
 
@@ -806,7 +806,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "op": "or"
       }})
 
-      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
       assert String.contains?(message, "requires field 'conditions'")
     end
 
@@ -816,7 +816,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "conditions": 42
       }})
 
-      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
       assert String.contains?(message, "must be a list")
     end
 
@@ -825,7 +825,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "op": "not"
       }})
 
-      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
       assert String.contains?(message, "requires field 'condition'")
     end
 
@@ -835,7 +835,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         "condition": {"op": "invalid_op"}
       }})
 
-      {:error, {:validation_error, message}} = PtcRunner.run(program)
+      {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
       assert String.contains?(message, "Unknown operation")
     end
 
@@ -855,7 +855,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -871,7 +871,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == true
     end
 
@@ -907,7 +907,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
       }})
 
       context = %{"order" => %{"total" => 150, "status" => "vip", "flagged" => false}}
-      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
       assert result == "eligible"
     end
 
@@ -942,7 +942,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
       }})
 
       context = %{"order" => %{"total" => 50, "status" => "vip", "flagged" => false}}
-      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
       assert result == "not_eligible"
     end
 
@@ -977,7 +977,7 @@ defmodule PtcRunner.Operations.ControlFlowTest do
       }})
 
       context = %{"order" => %{"total" => 150, "status" => "vip", "flagged" => true}}
-      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
       assert result == "not_eligible"
     end
   end

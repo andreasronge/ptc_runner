@@ -16,7 +16,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == [
              %{"item" => "book", "price" => 50},
@@ -37,7 +37,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == [
              %{"category" => "travel", "amount" => 500},
@@ -54,7 +54,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == []
   end
 
@@ -68,7 +68,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == ["x", "x", "x"]
   end
 
@@ -81,7 +81,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == []
   end
 
@@ -98,7 +98,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == [
              %{"name" => "Alice", "age" => 30},
@@ -116,7 +116,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 1
   end
 
@@ -129,7 +129,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 42
   end
 
@@ -142,7 +142,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -156,7 +156,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 5
   end
 
@@ -169,7 +169,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 42
   end
 
@@ -182,7 +182,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -196,7 +196,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 30
   end
 
@@ -209,7 +209,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 10
   end
 
@@ -222,7 +222,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -235,7 +235,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -253,7 +253,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == [
              %{"category" => "food", "amount" => 50}
@@ -272,7 +272,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == [
              %{"category" => "travel", "amount" => 500},
@@ -292,7 +292,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == []
   end
@@ -306,7 +306,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == []
   end
@@ -327,7 +327,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == %{"item" => "book", "price" => 50}
   end
@@ -342,7 +342,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "Alice"
   end
 
@@ -355,7 +355,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "alice@example.com"
   end
 
@@ -368,7 +368,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == %{"name" => "Alice"}
   end
 
@@ -381,7 +381,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -394,7 +394,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 25
   end
 
@@ -407,7 +407,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 30
   end
 
@@ -420,7 +420,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -433,7 +433,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -446,7 +446,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 42
   end
 
@@ -462,7 +462,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == ["alice@example.com", "bob@example.com"]
   end
 
@@ -475,7 +475,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -488,7 +488,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == 99
   end
 
@@ -501,7 +501,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == nil
   end
 
@@ -522,7 +522,7 @@ defmodule PtcRunner.Operations.TransformationTest do
       ]
     }
 
-    {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
     assert result == ["alice@example.com", "bob@example.com"]
   end
 
@@ -536,7 +536,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert Enum.map(result, & &1["price"]) == [15, 599, 999]
     end
 
@@ -549,7 +549,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert Enum.map(result, & &1["price"]) == [999, 599, 15]
     end
 
@@ -562,7 +562,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == []
     end
 
@@ -575,7 +575,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Field 'order' must be 'asc' or 'desc', got 'invalid'"}
     end
   end
@@ -590,7 +590,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "Alice"
     end
 
@@ -603,7 +603,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == "N/A"
     end
 
@@ -619,7 +619,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
       assert result == [1, 2]
     end
 
@@ -630,7 +630,7 @@ defmodule PtcRunner.Operations.TransformationTest do
         "path": ["user", "name"]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'get' accepts 'field' or 'path', not both"}
     end
   end
