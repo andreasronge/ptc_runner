@@ -86,6 +86,14 @@ NaiveDateTime.utc_now()  # Loses timezone context
 
 ## Library Design Principles
 
+### DRY (Don't Repeat Yourself)
+
+- Extract repeated logic into helper functions
+- If you copy-paste code, refactor into a reusable function
+- Exception: Duplication is better than the wrong abstraction
+
+For test code, see [Testing Guidelines - Avoid Duplication](testing-guidelines.md#avoid-duplication).
+
 ### Public API
 
 - Keep the public API minimal and well-documented

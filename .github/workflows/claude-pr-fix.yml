@@ -1,0 +1,140 @@
+name: Claude PR Fix
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    # Only trigger for PR contexts, trusted actors, and @claude mentions
+    if: |
+      (
+        github.actor == 'andreasronge' ||
+        contains(github.event.issue.labels.*.name, 'claude-approved') ||
+        contains(github.event.pull_request.labels.*.name, 'claude-approved')
+      ) && (
+        (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude') && github.event.comment.user.type != 'Bot') ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && github.event.comment.user.type != 'Bot') ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && github.event.review.user.type != 'Bot')
+      )
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: claude-pr-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - workflow triggers from comments will be disabled"
+          fi
+
+      - name: Get PR branch
+        id: pr-branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          PR_DATA=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json headRefName,headRepository,headRepositoryOwner)
+          HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
+          HEAD_REPO=$(echo "$PR_DATA" | jq -r '.headRepository.name')
+          HEAD_OWNER=$(echo "$PR_DATA" | jq -r '.headRepositoryOwner.login')
+          echo "head_ref=$HEAD_REF" >> $GITHUB_OUTPUT
+          echo "head_repo=$HEAD_OWNER/$HEAD_REPO" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Found PR branch: $HEAD_REF from $HEAD_OWNER/$HEAD_REPO"
+
+          # Check if this is a fork PR
+          REPO_OWNER="${{ github.repository_owner }}"
+          if [ "$HEAD_OWNER" != "$REPO_OWNER" ]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "::warning::PR is from a fork ($HEAD_OWNER/$HEAD_REPO) - cannot push fixes"
+          else
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip fork PRs with comment
+        if: steps.pr-branch.outputs.is_fork == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ steps.pr-branch.outputs.pr_number }} --repo ${{ github.repository }} --body "Cannot auto-fix fork PRs
+
+          This PR is from a fork, and the automation cannot push changes to fork branches.
+
+          Please apply the requested changes manually."
+
+          echo "::notice::Skipping fork PR - posted explanation comment"
+          exit 0
+
+      - name: Checkout PR branch
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.pr-branch.outputs.head_ref }}
+          repository: ${{ steps.pr-branch.outputs.head_repo }}
+
+      - name: Install git pre-commit hook
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        run: |
+          cp scripts/pre-commit .git/hooks/pre-commit
+          chmod +x .git/hooks/pre-commit
+          echo "Installed pre-commit hook"
+
+      - name: Setup Elixir environment
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        uses: ./.github/actions/setup-elixir
+
+      - name: Install Claude Code CLI
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Run Claude Code
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          additional_permissions: |
+            actions: read
+
+          prompt: |
+            Fix PR #${{ steps.pr-branch.outputs.pr_number }}.
+
+            Request: ${{ github.event.comment.body || github.event.review.body }}
+
+            **Fix only what was asked**: No refactoring, no unrelated fixes, minimal changes only.
+
+            Workflow:
+            1. Read PR: `gh pr view ${{ steps.pr-branch.outputs.pr_number }} --comments`
+            2. Read review comments: `gh api repos/${{ github.repository }}/pulls/${{ steps.pr-branch.outputs.pr_number }}/comments --jq '.[] | {path: .path, line: .line, body: .body}'`
+            3. Make minimal changes
+            4. Run `mix precommit` - only proceed if it passes
+            5. `git add -A && git commit -m "fix: ..." && git push`
+            6. Post summary: `gh pr comment ${{ steps.pr-branch.outputs.pr_number }} --body "..."`
+
+            NEVER include "@claude" in comments.
+
+          claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Edit,Write,Grep,Glob,Bash"'
+          show_full_output: true
