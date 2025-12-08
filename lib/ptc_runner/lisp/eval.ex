@@ -480,7 +480,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp safe_includes(_, _), do: false
 
   # Convert Lisp closures to Erlang functions for use with higher-order functions
-  # Creates a 1-arity function that evaluates the closure body
+  # The closure must have 1 parameter (enforced at evaluation time)
   defp closure_to_fun({:closure, param_names, body, closure_env}, ctx, memory, tool_exec) do
     fn arg -> eval_closure_arg(arg, param_names, body, closure_env, ctx, memory, tool_exec) end
   end
@@ -493,7 +493,7 @@ defmodule PtcRunner.Lisp.Eval do
   # Helper to evaluate closure with a single argument
   defp eval_closure_arg(arg, param_names, body, closure_env, ctx, memory, tool_exec) do
     if length(param_names) != 1 do
-      raise "arity mismatch"
+      raise ArgumentError, "arity mismatch: expected 1, got #{length(param_names)}"
     end
 
     bindings = Enum.zip(param_names, [arg]) |> Map.new()
