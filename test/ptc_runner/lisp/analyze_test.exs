@@ -542,6 +542,175 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
     end
   end
 
+  describe "let bindings" do
+    test "simple bindings" do
+      raw = {:list, [{:symbol, :let}, {:vector, [{:symbol, :x}, 1]}, {:symbol, :x}]}
+      assert {:ok, {:let, [{:binding, {:var, :x}, 1}], {:var, :x}}} = Analyze.analyze(raw)
+    end
+
+    test "multiple bindings" do
+      raw =
+        {:list, [{:symbol, :let}, {:vector, [{:symbol, :x}, 1, {:symbol, :y}, 2]}, {:symbol, :y}]}
+
+      assert {:ok, {:let, [{:binding, {:var, :x}, 1}, {:binding, {:var, :y}, 2}], {:var, :y}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "destructuring with :keys" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map, [{{:keyword, :keys}, {:vector, [{:symbol, :a}, {:symbol, :b}]}}]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :a}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding, {:destructure, {:keys, [:a, :b], []}}, {:var, :m}}
+               ], {:var, :a}}} = Analyze.analyze(raw)
+    end
+
+    test "destructuring with :or defaults" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :a}]}},
+                 {{:keyword, :or}, {:map, [{{:keyword, :a}, 10}]}}
+               ]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :a}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding, {:destructure, {:keys, [:a], [a: 10]}}, {:var, :m}}
+               ], {:var, :a}}} = Analyze.analyze(raw)
+    end
+
+    test "destructuring with :as alias" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :x}]}},
+                 {{:keyword, :as}, {:symbol, :all}}
+               ]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :all}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding, {:destructure, {:as, :all, {:destructure, {:keys, [:x], []}}}},
+                  {:var, :m}}
+               ], {:var, :all}}} = Analyze.analyze(raw)
+    end
+
+    test "error case: odd binding count" do
+      raw = {:list, [{:symbol, :let}, {:vector, [{:symbol, :x}, 1, {:symbol, :y}]}, 100]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "even number"
+    end
+
+    test "error case: non-vector bindings" do
+      raw = {:list, [{:symbol, :let}, 42, 100]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "vector"
+    end
+  end
+
+  describe "if special form" do
+    test "basic if-then-else" do
+      raw = {:list, [{:symbol, :if}, true, 1, 2]}
+      assert {:ok, {:if, true, 1, 2}} = Analyze.analyze(raw)
+    end
+
+    test "if with expression condition" do
+      raw =
+        {:list,
+         [
+           {:symbol, :if},
+           {:list, [{:symbol, :<}, {:symbol, :x}, 10]},
+           {:string, "small"},
+           {:string, "large"}
+         ]}
+
+      assert {:ok,
+              {:if, {:call, {:var, :<}, [{:var, :x}, 10]}, {:string, "small"}, {:string, "large"}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "error case: wrong arity - too few arguments" do
+      raw = {:list, [{:symbol, :if}, true]}
+      assert {:error, {:invalid_arity, :if, msg}} = Analyze.analyze(raw)
+      assert msg =~ "expected"
+    end
+
+    test "error case: wrong arity - too many arguments" do
+      raw = {:list, [{:symbol, :if}, true, 1, 2, 3]}
+      assert {:error, {:invalid_arity, :if, msg}} = Analyze.analyze(raw)
+      assert msg =~ "expected"
+    end
+  end
+
+  describe "fn anonymous functions" do
+    test "single parameter" do
+      raw = {:list, [{:symbol, :fn}, {:vector, [{:symbol, :x}]}, {:symbol, :x}]}
+      assert {:ok, {:fn, [{:var, :x}], {:var, :x}}} = Analyze.analyze(raw)
+    end
+
+    test "multiple parameters" do
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:symbol, :x}, {:symbol, :y}]},
+           {:list, [{:symbol, :+}, {:symbol, :x}, {:symbol, :y}]}
+         ]}
+
+      assert {:ok, {:fn, [{:var, :x}, {:var, :y}], {:call, {:var, :+}, [{:var, :x}, {:var, :y}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "error case: non-vector params" do
+      raw = {:list, [{:symbol, :fn}, 42, 100]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "vector"
+    end
+
+    test "error case: destructuring pattern in params rejected" do
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:map, [{{:keyword, :keys}, {:vector, [{:symbol, :a}]}}]}]},
+           100
+         ]}
+
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "destructuring patterns"
+    end
+  end
+
   describe "empty list fails" do
     test "empty list is invalid" do
       raw = {:list, []}
