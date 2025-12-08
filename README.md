@@ -248,7 +248,7 @@ Respond with ONLY valid JSON.
 program = extract_json(response)
 
 # Execute with retry on validation errors
-case PtcRunner.run(program, tools: tools) do
+case PtcRunner.Json.run(program, tools: tools) do
   {:ok, result, _} -> {:ok, result}
   {:error, error} -> retry_with_feedback(prompt, error)
 end
@@ -270,7 +270,7 @@ program = ReqLLM.generate_object!(
 )
 
 # Execute the program
-{:ok, result, _metrics} = PtcRunner.run(Jason.encode!(program),
+{:ok, result, _metrics} = PtcRunner.Json.run(Jason.encode!(program),
   context: %{"input" => products}
 )
 ```
