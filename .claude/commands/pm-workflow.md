@@ -365,18 +365,25 @@ gh issue create \
 - Eval: `phase:eval`, `ptc-lisp`
 - Integration: `phase:integration`, `ptc-lisp`
 
-**Add to GitHub Project** (REQUIRED for all issues):
+**Set Phase in GitHub Project**:
+
+The issue is automatically added to the project by GitHub's auto-add workflow (triggered by the `enhancement`/`bug`/`tech-debt` label). You only need to set the Phase field:
+
 ```bash
-# After creating the issue, capture the URL
+# Wait briefly for auto-add to process, then get the item ID
 ISSUE_URL="https://github.com/REPO/issues/ISSUE_NUMBER"
+sleep 2
 
-# Add to project
-gh project item-add 1 --owner andreasronge --url "$ISSUE_URL"
-
-# Get the item ID to set the Phase field
+# Get the item ID (issue should already be in project via auto-add)
 ITEM_ID=$(gh project item-list 1 --owner andreasronge --format json | jq -r ".items[] | select(.content.url == \"$ISSUE_URL\") | .id")
 
-# Set the Phase field based on the issue's phase
+# If not found (auto-add hasn't run yet), add manually
+if [ -z "$ITEM_ID" ]; then
+  gh project item-add 1 --owner andreasronge --url "$ISSUE_URL"
+  ITEM_ID=$(gh project item-list 1 --owner andreasronge --format json | jq -r ".items[] | select(.content.url == \"$ISSUE_URL\") | .id")
+fi
+
+# Set the Phase field
 # Phase field ID: PVTSSF_lAHNGWjOASh0kM4OhOk_
 # Option IDs:
 #   - API Refactor: a8c7193b
