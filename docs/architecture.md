@@ -55,14 +55,19 @@ lib/
 │   │   ├── interpreter.ex        # AST evaluation
 │   │   └── operations.ex         # Built-in operations
 │   │
-│   └── lisp/                     # PTC-Lisp DSL (planned)
+│   └── lisp/                     # PTC-Lisp DSL implementation
 │       ├── parser.ex             # S-expression parsing
-│       ├── analyze.ex            # AST analysis
-│       └── interpreter.ex        # Evaluation
+│       ├── parser_helpers.ex     # Parsing utilities
+│       ├── ast.ex                # RawAST type definitions
+│       ├── analyze.ex            # RawAST → CoreAST validation/desugaring
+│       ├── core_ast.ex           # CoreAST type definitions
+│       ├── eval.ex               # CoreAST evaluation
+│       ├── runtime.ex            # Builtin functions (95+ operations)
+│       └── env.ex                # Environment/bindings management
 ```
 
-> **Note**: PTC-Lisp is a planned Clojure-like DSL that will provide an alternative syntax
-> to the JSON DSL. See `docs/api-refactor-plan.md` for the implementation roadmap.
+> **Note**: PTC-Lisp is a Clojure-like DSL that provides an alternative syntax
+> to the JSON DSL. See `docs/api-refactor-plan.md` for implementation details.
 
 ## DSL Specification
 
