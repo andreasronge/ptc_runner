@@ -43,7 +43,7 @@ end
 | `:context` | map | `%{}` | Request context, accessible via `ctx/` |
 | `:memory` | map | `%{}` | Persistent memory, accessible via `memory/` |
 | `:tools` | map | `%{}` | Tool functions (arity 1, receives args map) |
-| `:timeout` | integer | 1000 | Execution timeout in milliseconds |
+| `:timeout` | integer | 5000 | Execution timeout in milliseconds |
 | `:max_heap` | integer | 1_250_000 | Max heap size in words (~10MB) |
 
 ### Return Values
@@ -164,7 +164,7 @@ end
 
 The following section can be included in LLM system prompts to enable code generation.
 
----
+<!-- PTC_PROMPT_START -->
 
 ### Language Overview
 
@@ -195,10 +195,10 @@ memory/results        ; read from persistent memory
 (when cond body)                   ; single-branch returns nil if false
 (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
 (fn [x] body)                      ; anonymous function (simple params only, no destructuring)
-(< a b) (>= x y)                   ; comparisons are 2-arity ONLY, NOT (<= a b c)
+(< a b)                            ; comparisons are 2-arity ONLY, NOT (<= a b c)
 ```
 
-### Threading (for pipelines)
+### Threading (chained transformations)
 ```clojure
 (->> coll (filter pred) (map f) (take 5))   ; thread-last
 (-> m (assoc :a 1) (dissoc :b))             ; thread-first
@@ -213,6 +213,16 @@ memory/results        ; read from persistent memory
 (where :status in ["a" "b"])       ; membership test
 ```
 
+**Prefer truthy checks for boolean flags:**
+```clojure
+; GOOD - concise, handles messy data (1, "yes", etc.)
+(filter (where :active) users)
+(filter (where :verified) accounts)
+
+; AVOID - only needed when distinguishing true from other truthy values
+(filter (where :active = true) users)
+```
+
 **Combining predicates — use `all-of`/`any-of`/`none-of`, NOT `and`/`or`:**
 ```clojure
 ; WRONG - and/or return values, not combined predicates
@@ -221,7 +231,7 @@ memory/results        ; read from persistent memory
 ; CORRECT - predicate combinators
 (filter (all-of (where :a = 1) (where :b = 2)) coll)
 (filter (any-of (where :x = 1) (where :y = 1)) coll)
-(filter (none-of (where :deleted true)) coll)
+(filter (none-of (where :deleted)) coll)
 ```
 
 ### Core Functions
@@ -250,7 +260,9 @@ memory/results        ; read from persistent memory
 
 ### Tool Calls
 ```clojure
-(call "tool-name" {:arg1 value})   ; tool name MUST be a string literal
+(call "tool-name")                 ; no arguments
+(call "tool-name" {:arg1 value})   ; with arguments map
+; tool name MUST be a string literal
 ; WRONG: (call tool-name {...})    ; symbol not allowed
 ; WRONG: (call :tool-name {...})   ; keyword not allowed
 ```
@@ -282,10 +294,10 @@ The return value determines memory behavior:
 | Wrong | Right |
 |-------|-------|
 | `(where :status "active")` | `(where :status = "active")` |
-| `(where :active true)` | `(where :active = true)` or `(where :active)` |
+| `(where :active true)` | `(where :active)` (preferred) or `(where :active = true)` |
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
-| `(<= 1 x 10)` | `(and (>= x 1) (<= x 10))` |
 | `(fn [{:keys [a b]}] ...)` | `(fn [m] (let [{:keys [a b]} m] ...))` |
+| `(<= 100 x 500)` | `(and (>= x 100) (<= x 500))` |
 | `(ctx :input)` | `ctx/input` |
 | `(call :get-users {})` | `(call "get-users" {})` |
 | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
@@ -294,8 +306,10 @@ The return value determines memory behavior:
 
 **Key constraints:**
 - `where` predicates MUST have an operator (except for truthy check)
-- Comparisons are 2-arity ONLY: `(< a b)`, not `(<= a b c)`
 - Destructuring is ONLY allowed in `let`, NOT in `fn` params
+- Comparisons are strictly 2-arity: use `(and (>= x 100) (<= x 500))` NOT `(<= 100 x 500)`
+
+<!-- PTC_PROMPT_END -->
 
 ---
 
@@ -304,18 +318,21 @@ The return value determines memory behavior:
 To extract just the quick reference section for your LLM prompts:
 
 ```elixir
-# The quick reference starts after "## PTC-Lisp Quick Reference"
-# and is approximately 2.5KB of text
+# Extract content between the HTML comment markers (see source)
+# Markers: "<" + "!-- PTC_PROMPT_START --" + ">" and "<" + "!-- PTC_PROMPT_END --" + ">"
+
+@start_marker "<!" <> "-- PTC_PROMPT_START -->"
+@end_marker "<!" <> "-- PTC_PROMPT_END -->"
 
 prompt = """
 You are an assistant that writes PTC-Lisp programs.
 
 #{File.read!("docs/ptc-lisp-llm-guide.md")
-  |> String.split("## PTC-Lisp Quick Reference")
+  |> String.split(@start_marker)
   |> List.last()
-  |> String.split("## Extracting the LLM Prompt")
+  |> String.split(@end_marker)
   |> List.first()}
 """
 ```
 
-Or copy the section between the `---` markers above directly into your prompt template.
+The markers are HTML comments `PTC_PROMPT_START` and `PTC_PROMPT_END` that are invisible when rendered.

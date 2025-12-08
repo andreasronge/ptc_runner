@@ -28,7 +28,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     "openrouter:deepseek/deepseek-v3.2"
   ]
 
-  @judge_model "openrouter:anthropic/claude-3.5-haiku"
+  @judge_model "openrouter:openai/gpt-5.1-codex-mini"
 
   @default_iterations 3
   @timeout 60_000
@@ -37,149 +37,44 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
   @pricing %{
     "gemini-2.5-flash" => {0.30, 2.50},
     "deepseek-v3.2" => {0.27, 0.40},
-    "claude-haiku-4.5" => {0.80, 4.00}
+    "claude-haiku-4.5" => {0.80, 4.00},
+    "gpt-5.1-codex-mini" => {0.25, 2.0}
   }
 
+  # Extract the LLM prompt section between markers in docs/ptc-lisp-llm-guide.md
   @ptc_lisp_prompt """
   You are generating PTC-Lisp programs. PTC-Lisp is a minimal Clojure subset for data transformation.
 
-  ### Data Types
-  ```clojure
-  nil true false        ; nil and booleans
-  42 3.14               ; numbers
-  "hello"               ; strings
-  :keyword              ; keywords (NO namespaced keywords like :foo/bar)
-  [1 2 3]               ; vectors (NO lists '(1 2 3))
-  {:a 1 :b 2}           ; maps
-  ```
-
-  ### Accessing Data
-  ```clojure
-  ctx/input             ; read from request context
-  memory/results        ; read from persistent memory
-  ```
-
-  ### Special Forms
-  ```clojure
-  (let [x 1, y 2] body)              ; local bindings
-  (let [{:keys [a b]} m] body)       ; map destructuring (ONLY in let, NOT in fn)
-  (if cond then else)                ; conditional (else is REQUIRED)
-  (when cond body)                   ; single-branch returns nil if false
-  (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
-  (fn [x] body)                      ; anonymous function (simple params only!)
-  ```
-
-  ### Threading (for pipelines)
-  ```clojure
-  (->> coll (filter pred) (map f) (take 5))   ; thread-last
-  (-> m (assoc :a 1) (dissoc :b))             ; thread-first
-  ```
-
-  ### Predicate Builders
-  ```clojure
-  (where :field = value)             ; MUST include operator
-  (where :field > 10)                ; operators: = not= > < >= <= includes in
-  (where [:nested :path] = value)    ; nested field access
-  (where :field)                     ; truthy check (not nil, not false)
-  (where :status in ["a" "b"])       ; membership test
-  ```
-
-  **Combining predicates — use `all-of`/`any-of`/`none-of`, NOT `and`/`or`:**
-  ```clojure
-  (filter (all-of (where :a = 1) (where :b = 2)) coll)
-  (filter (any-of (where :x = 1) (where :y = 1)) coll)
-  (filter (none-of (where :deleted true)) coll)
-  ```
-
-  ### Core Functions
-  ```clojure
-  ; Filtering
-  (filter pred coll)  (remove pred coll)  (find pred coll)
-
-  ; Transforming
-  (map f coll)  (mapv f coll)  (pluck :key coll)
-
-  ; Ordering
-  (sort-by :key coll)  (sort-by :key > coll)  ; > for descending
-
-  ; Subsetting
-  (first coll)  (last coll)  (take n coll)  (drop n coll)  (nth coll i)
-
-  ; Aggregation
-  (count coll)  (sum-by :key coll)  (avg-by :key coll)
-  (min-by :key coll)  (max-by :key coll)  (group-by :key coll)
-
-  ; Maps
-  (get m :key)  (get-in m [:a :b])  (assoc m :k v)  (merge m1 m2)
-  (select-keys m [:a :b])  (keys m)  (vals m)
-  (:key m)  (:key m default)  ; keyword as function
-  ```
-
-  ### Tool Calls
-  ```clojure
-  (call "tool-name" {:arg1 value})   ; tool name MUST be a string literal
-  ```
-
-  ### Memory Result Contract
-  | Return | Effect |
-  |--------|--------|
-  | Non-map (number, vector, etc.) | No memory update, value returned |
-  | Map without `:result` | Merge into memory, map returned |
-  | Map with `:result` | Merge rest into memory, `:result` value returned |
-
-  ### Common Mistakes to AVOID
-  | Wrong | Right |
-  |-------|-------|
-  | `(where :status "active")` | `(where :status = "active")` |
-  | `(where :active true)` | `(where :active = true)` or `(where :active)` |
-  | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
-  | `(<= 1 x 10)` | `(and (>= x 1) (<= x 10))` |
-  | `(fn [{:keys [a b]}] ...)` | `(fn [m] (let [{:keys [a b]} m] ...))` |
-  | `(ctx :input)` | `ctx/input` |
-  | `(call :get-users {})` | `(call "get-users" {})` |
-  | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
+  #{File.read!("docs/ptc-lisp-llm-guide.md") |> String.split("<!-- PTC_PROMPT_START -->") |> List.last() |> String.split("<!-- PTC_PROMPT_END -->") |> List.first()}
 
   IMPORTANT:
-  - Comparisons are 2-arity ONLY: (< a b), NOT (<= a b c)
-  - Destructuring is ONLY in let, NOT in fn params
   - Respond with ONLY the PTC-Lisp code, no explanation or markdown formatting.
   """
 
   @judge_system_prompt """
   You are a strict syntax validator for PTC-Lisp, a minimal Clojure subset.
 
-  Your task: Determine if the given code is syntactically valid PTC-Lisp.
+  Your task: Determine if the given code is syntactically valid PTC-Lisp according to the specification below.
 
-  ## Valid PTC-Lisp Characteristics:
-  - S-expression syntax with balanced parentheses
-  - Data types: nil, true, false, numbers, "strings", :keywords, [vectors], {maps}
-  - Namespace access: ctx/key, memory/key (NOT ctx.key or ctx[:key])
-  - Special forms: let, if (with else!), when, cond, fn, and, or
-  - Threading: ->> and ->
-  - Predicates: (where :field op value) with operators =, not=, >, <, >=, <=, in, includes
-  - Predicate combinators: all-of, any-of, none-of (NOT and/or for combining where clauses)
-  - Tool calls: (call "string-name" {args}) - tool name MUST be string
-  - Comparisons are ONLY 2-arity: (< a b), (>= x y) — NOT 3-arity like (<= a b c)
-  - Destructuring ONLY in let bindings: (let [{:keys [a b]} m] ...) — NOT in fn params
-  - fn syntax: (fn [x y] body) — simple param vectors only, no destructuring
-  - No namespaced keywords like :foo/bar
-  - No quoted lists like '(1 2 3)
-  - No Clojure features not listed above (no defn, loop, recur, atoms, etc.)
+  #{File.read!("docs/ptc-lisp-specification.md")}
 
-  ## INVALID Syntax Examples (mark these as errors!):
-  - (where :status "active") — MISSING operator, should be (where :status = "active")
-  - (where :active true) — MISSING operator, should be (where :active = true) or (where :active)
-  - (<= 1 x 10) — 3-arity comparison not supported, use (and (>= x 1) (<= x 10))
-  - (fn [{:keys [a b]}] ...) — destructuring in fn params not supported
-  - (and (where :a = 1) (where :b = 2)) — use (all-of ...) not (and ...) for predicates
+  ## COMMON INVALID PATTERNS (reject these):
 
-  ## VALID Syntax Examples:
-  - (where :status = "active") — with operator
-  - (where :active) — truthy check (no value needed)
-  - (< x 10) — 2-arity comparison
-  - (fn [x] (:name x)) — simple fn param
-  - (let [{:keys [a b]} m] ...) — destructuring in let is OK
-  - (all-of (where :a = 1) (where :b = 2)) — predicate combinator
+  1. `where` predicate without operator:
+     - INVALID: `(where :active true)` or `(where :field value)`
+     - VALID: `(where :active = true)` or `(where :active)` for truthy check
+
+  2. 3-arity comparisons (Clojure range syntax not supported):
+     - INVALID: `(<= 100 x 500)` or `(< 0 n 10)`
+     - VALID: `(and (>= x 100) (<= x 500))`
+
+  3. Destructuring in `fn` parameters (only supported in `let`):
+     - INVALID: `(fn [{:keys [a b]}] ...)`
+     - VALID: `(fn [item] (let [{:keys [a b]} item] ...))`
+
+  4. Using `and`/`or` for filtering predicates (use combinators):
+     - INVALID: `(filter #(and (> (:price %) 100) (< (:price %) 500)) items)`
+     - VALID: `(filter (all-of (where :price > 100) (where :price < 500)) items)`
 
   ## Response Format:
   Respond with ONLY a JSON object (no markdown):
@@ -257,6 +152,29 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
           "Fetch orders from 'get-orders' tool, store the high-value orders (amount > 1000) in memory as :high_value_orders, and return just the count as the result",
         context_description:
           "The 'get-orders' tool returns orders with :id, :amount, and :customer fields"
+      },
+
+      # Level 5: Edge cases (tests for common LLM mistakes)
+      %{
+        name: "edge_truthy_check",
+        level: 5,
+        task: "Filter to only active users (where :active is true)",
+        context_description:
+          "ctx/users contains a list of users with :name, :email, and :active (boolean) fields. Note: Use explicit equality check with operator."
+      },
+      %{
+        name: "edge_range_check",
+        level: 5,
+        task: "Find all products with price between 100 and 500 (inclusive on both ends)",
+        context_description:
+          "ctx/products contains a list with :name and :price fields. Note: PTC-Lisp only supports 2-arity comparisons, not 3-arity range syntax."
+      },
+      %{
+        name: "edge_multi_field_extract",
+        level: 5,
+        task: "Extract :id and :name from each order into a new list of maps",
+        context_description:
+          "ctx/orders contains a list with :id, :name, :amount, and :status fields. Note: If using fn, destructuring must be in let bindings, not fn parameters."
       }
     ]
   end
@@ -301,7 +219,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     IO.puts(String.duplicate("=", 70) <> "\n")
 
     if dry_run do
-      print_dry_run(models, scenarios, iterations)
+      print_dry_run(models, judge, scenarios, iterations)
       :dry_run
     else
       results =
@@ -344,32 +262,105 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     end
   end
 
-  defp print_dry_run(models, scenarios, iterations) do
-    IO.puts("## Scenarios to test:\n")
+  @level_descriptions %{
+    1 => "Simple",
+    2 => "Pipeline",
+    3 => "Predicates",
+    4 => "Tool + Memory",
+    5 => "Edge Cases"
+  }
 
-    for s <- scenarios do
-      IO.puts("  [L#{s.level}] #{s.name}")
-      IO.puts("       Task: #{s.task}")
-      IO.puts("       Context: #{s.context_description}\n")
+  defp print_dry_run(models, judge, scenarios, iterations) do
+    # Group scenarios by level
+    by_level = Enum.group_by(scenarios, & &1.level) |> Enum.sort_by(fn {level, _} -> level end)
+
+    IO.puts("## Scenarios by Level\n")
+
+    for {level, level_scenarios} <- by_level do
+      level_desc = Map.get(@level_descriptions, level, "Unknown")
+      IO.puts("  Level #{level} (#{level_desc}) - #{length(level_scenarios)} scenarios:")
+
+      for s <- level_scenarios do
+        # Clean up task description for display (truncate if too long)
+        task_short = String.slice(s.task, 0, 60)
+        task_short = if String.length(s.task) > 60, do: task_short <> "...", else: task_short
+        IO.puts("    • #{s.name}: #{task_short}")
+      end
+
+      IO.puts("")
     end
 
-    IO.puts("## Execution plan:\n")
+    # Execution plan
+    IO.puts("## Execution Plan\n")
 
     for model <- models do
       model_short = model |> String.split("/") |> List.last()
-
-      IO.puts(
-        "  #{model_short}: #{length(scenarios)} scenarios × #{iterations} iterations = #{length(scenarios) * iterations} calls"
-      )
+      calls = length(scenarios) * iterations
+      IO.puts("  #{String.pad_trailing(model_short, 20)} #{calls} generation calls")
     end
 
-    total_calls = length(models) * length(scenarios) * iterations
+    judge_short = judge |> String.split("/") |> List.last()
+    total_gen_calls = length(models) * length(scenarios) * iterations
+    IO.puts("  #{String.pad_trailing(judge_short, 20)} #{total_gen_calls} judge calls")
 
-    IO.puts(
-      "\n  Total API calls: #{total_calls} generations + #{total_calls} judge calls = #{total_calls * 2}"
-    )
+    IO.puts("\n  Total API calls: #{total_gen_calls * 2}")
+
+    # Cost estimate
+    IO.puts("\n## Cost Estimate\n")
+    {gen_cost, judge_cost} = estimate_costs(models, judge, scenarios, iterations)
+    total_cost = gen_cost + judge_cost
+
+    IO.puts("  Generators: $#{format_cost(gen_cost)}")
+    IO.puts("  Judge:      $#{format_cost(judge_cost)}")
+    IO.puts("  ─────────────────")
+    IO.puts("  Total:      $#{format_cost(total_cost)}")
 
     IO.puts("\n✓ Dry run complete. Remove dry_run: true to execute.")
+  end
+
+  defp estimate_costs(models, judge, scenarios, iterations) do
+    # Estimate tokens (rough approximations)
+    # ~4.6KB prompt
+    gen_input_tokens = 1200
+    # typical generated code
+    gen_output_tokens = 150
+    # ~55KB spec
+    judge_input_tokens = 14_000
+    # JSON response
+    judge_output_tokens = 50
+
+    gen_calls_per_model = length(scenarios) * iterations
+    total_judge_calls = length(models) * gen_calls_per_model
+
+    gen_cost =
+      Enum.reduce(models, 0.0, fn model, acc ->
+        model_suffix = model |> String.split("/") |> List.last()
+
+        case Map.get(@pricing, model_suffix) do
+          {input_price, output_price} ->
+            input_cost = gen_calls_per_model * gen_input_tokens / 1_000_000 * input_price
+            output_cost = gen_calls_per_model * gen_output_tokens / 1_000_000 * output_price
+            acc + input_cost + output_cost
+
+          nil ->
+            acc
+        end
+      end)
+
+    judge_suffix = judge |> String.split("/") |> List.last()
+
+    judge_cost =
+      case Map.get(@pricing, judge_suffix) do
+        {input_price, output_price} ->
+          input_cost = total_judge_calls * judge_input_tokens / 1_000_000 * input_price
+          output_cost = total_judge_calls * judge_output_tokens / 1_000_000 * output_price
+          input_cost + output_cost
+
+        nil ->
+          0.0
+      end
+
+    {gen_cost, judge_cost}
   end
 
   defp run_single_test(generator_model, judge_model, scenario, iteration) do
@@ -587,13 +578,12 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     # By difficulty level
     IO.puts("\n## Valid Rate by Difficulty Level\n")
 
-    IO.puts(
-      "| Level | #{results |> Enum.map(&(&1.model |> String.split("/") |> List.last())) |> Enum.join(" | ")} |"
-    )
+    model_headers = Enum.map_join(results, " | ", &(&1.model |> String.split("/") |> List.last()))
+    IO.puts("| Level | #{model_headers} |")
 
     IO.puts("|-------|#{String.duplicate("------|", length(results))}")
 
-    for level <- 1..4 do
+    for level <- 1..5 do
       row =
         for r <- results do
           level_scenarios = Enum.filter(r.scenarios, &(&1.level == level))
@@ -628,25 +618,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     end
 
     # Error patterns
-    IO.puts("\n## Common Error Patterns\n")
-
-    all_errors =
-      results
-      |> Enum.flat_map(& &1.scenarios)
-      |> Enum.flat_map(& &1.results)
-      |> Enum.flat_map(& &1.errors)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.frequencies()
-      |> Enum.sort_by(fn {_, count} -> -count end)
-      |> Enum.take(10)
-
-    if Enum.empty?(all_errors) do
-      IO.puts("No errors recorded.")
-    else
-      for {error, count} <- all_errors do
-        IO.puts("- (#{count}x) #{String.slice(error, 0, 80)}")
-      end
-    end
+    print_error_patterns(results)
 
     # Total cost
     total_cost = Enum.sum(Enum.map(results, & &1.total_cost))
@@ -667,5 +639,27 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
 
     IO.puts("\nFull results saved to: #{output_dir}")
     IO.puts("")
+  end
+
+  defp print_error_patterns(results) do
+    IO.puts("\n## Common Error Patterns\n")
+
+    all_errors =
+      results
+      |> Enum.flat_map(& &1.scenarios)
+      |> Enum.flat_map(& &1.results)
+      |> Enum.flat_map(& &1.errors)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.frequencies()
+      |> Enum.sort_by(fn {_, count} -> -count end)
+      |> Enum.take(10)
+
+    if Enum.empty?(all_errors) do
+      IO.puts("No errors recorded.")
+    else
+      for {error, count} <- all_errors do
+        IO.puts("- (#{count}x) #{String.slice(error, 0, 80)}")
+      end
+    end
   end
 end
