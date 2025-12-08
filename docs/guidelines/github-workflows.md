@@ -63,91 +63,24 @@ This document describes the Claude-powered GitHub workflows and their security g
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## PM Workflow: Specification Document Registry
+## PM Workflow
 
-The PM workflow creates issues by reading from specification documents. It follows a phased approach:
+The PM workflow (`claude-pm.yml`) orchestrates issue creation and implementation. It runs the `/pm-workflow` Claude command.
 
-### Phase Order (Strict Dependencies)
+**Full details**: See `.claude/commands/pm-workflow.md` for:
+- Phase structure and specification documents
+- GitHub Project field IDs
+- Decision framework and safety rules
 
-```
-Phase 0: API Refactor (docs/api-refactor-plan.md)
-    ↓ (must complete before any Lisp work)
-Phase 1: Parser (docs/ptc-lisp-parser-plan.md)
-    ↓
-Phase 2: Analyzer (docs/ptc-lisp-analyze-plan.md)
-    ↓
-Phase 3: Eval (docs/ptc-lisp-eval-plan.md)
-    ↓
-Phase 4: Integration (docs/ptc-lisp-integration-spec.md)
-    ↓
-Phase 5: Polish & Cleanup (review deferred issues, final cleanup)
-```
+**Key behaviors**:
+- Creates ONE issue at a time from specification documents
+- Issues are auto-added to GitHub Project via built-in workflow
+- PM sets the Phase field after issue creation
+- Triggers implementation only when issue has BOTH `ready-for-implementation` AND `claude-approved`
 
-### Specification Documents
+**GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
 
-| Phase | Document | Issue Prefix |
-|-------|----------|--------------|
-| 0 | `docs/api-refactor-plan.md` | `[API Refactor]` |
-| 1 | `docs/ptc-lisp-parser-plan.md` | `[Lisp Parser]` |
-| 2 | `docs/ptc-lisp-analyze-plan.md` | `[Lisp Analyzer]` |
-| 3 | `docs/ptc-lisp-eval-plan.md` | `[Lisp Eval]` |
-| 4 | `docs/ptc-lisp-integration-spec.md` | `[Lisp Integration]` |
-| 5 | (review deferred issues) | `[Polish]` |
-
-### Reference Documents (Not for Issue Creation)
-
-- `docs/ptc-lisp-specification.md` - Full language specification
-- `docs/ptc-lisp-overview.md` - High-level rationale
-- `docs/ptc-lisp-llm-guide.md` - LLM quick reference
-- `docs/ptc-lisp-benchmark-report.md` - Phase 1 evaluation results
-
-### How PM Creates Issues
-
-1. **Determines current phase** by checking:
-   - Code: Does `lib/ptc_runner/json/` exist? Does `lib/ptc_runner/lisp/parser.ex` exist?
-   - Issues: What phase issues are open/closed?
-
-2. **Reads the spec document** for the current phase
-
-3. **Creates ONE issue** with:
-   - Title: `[Phase Prefix] Description`
-   - Labels: `enhancement`, `needs-review`, `phase:PHASE`, optionally `ptc-lisp`
-   - Body following `issue-creation-guidelines.md` template
-
-4. **Adds issue to GitHub Project** (#1) and sets Phase field
-
-5. **Waits for review** via `claude-issue-review.yml`
-
-6. **Triggers implementation** when issue has BOTH `ready-for-implementation` AND `claude-approved`
-   - Updates project Status to "In Progress"
-
-### GitHub Project Integration
-
-**Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1) (Number: 1)
-
-| Field | Field ID | Purpose |
-|-------|----------|---------|
-| Status | `PVTSSF_lAHNGWjOASh0kM4OhOjl` | Track issue progress |
-| Phase | `PVTSSF_lAHNGWjOASh0kM4OhOk_` | Track implementation phase |
-
-**Phase Option IDs**:
-| Phase | Option ID |
-|-------|-----------|
-| API Refactor | `a8c7193b` |
-| Parser | `1c180ef6` |
-| Analyzer | `9d857bc6` |
-| Eval | `bbd1d60a` |
-| Integration | `c5f6c3a5` |
-
-**Status Option IDs**:
-| Status | Option ID |
-|--------|-----------|
-| Todo | `f75ad846` |
-| In Progress | `47fc9ee4` |
-| Done | `98236657` |
-| Not Planned | - | (use `gh issue close --reason "not planned"`)
-
-**Required PAT Scopes**: The `PAT_WORKFLOW_TRIGGER` secret must have `project` and `read:project` scopes.
+**Required PAT Scopes**: `PAT_WORKFLOW_TRIGGER` must have `project` and `read:project` scopes.
 
 ## Closing Issues
 

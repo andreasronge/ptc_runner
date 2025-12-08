@@ -58,6 +58,7 @@ You are an autonomous PM agent responsible for keeping this project moving forwa
 - `docs/ptc-lisp-specification.md` - Full language specification
 - `docs/guidelines/issue-creation-guidelines.md` - Issue template
 - `docs/guidelines/planning-guidelines.md` - Review checklist
+- `docs/guidelines/github-workflows.md` - Full labels reference, workflow overview
 
 ## Actions
 
