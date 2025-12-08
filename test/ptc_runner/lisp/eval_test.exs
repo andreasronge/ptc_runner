@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.EvalTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Lisp.{Analyze, Env, Eval}
+  alias PtcRunner.Lisp.{Env, Eval}
 
   describe "literal evaluation" do
     test "nil" do
