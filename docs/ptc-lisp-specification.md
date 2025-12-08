@@ -448,7 +448,7 @@ Use a vector for nested access:
 Check if field is truthy (not `nil` or `false`):
 
 ```clojure
-(where :active)           ; shorthand for (where :active not= nil)
+(where :active)           ; field is truthy (not nil, not false)
 (where :verified = true)    ; explicit boolean check
 (where [:user :premium])  ; nested truthy check
 ```
@@ -1235,7 +1235,18 @@ This matters because tools may have side effects. The interpreter guarantees:
 
 ## 12. Error Handling
 
-Errors are internally represented as structured maps (e.g., `{:error, %{type: :parse_error, message: "...", ...}}`) for programmatic handling by the host. The formatted strings shown below are human-readable renderings for display to users or LLMs.
+Errors are represented as tagged tuples: `{:error, {error_type, details}}`. The error type is an atom, and details vary by error type (usually a message string, but may include additional context like expected/got values for type errors). Examples:
+
+```elixir
+{:error, {:parse_error, "unexpected token at line 3"}}
+{:error, {:validation_error, "unknown function: foo"}}
+{:error, {:type_error, "expected number", "got string"}}
+{:error, {:execution_error, "tool 'get-users' failed"}}
+{:error, {:timeout, 5000}}
+{:error, {:memory_exceeded, 10_000_000}}
+```
+
+The formatted strings shown below are human-readable renderings for display to users or LLMs.
 
 ### 12.1 Error Types
 
