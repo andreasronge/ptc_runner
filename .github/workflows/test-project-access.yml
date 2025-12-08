@@ -1,0 +1,160 @@
+name: Test GitHub Project Access
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-project-access:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PAT availability
+        run: |
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::error::PAT_WORKFLOW_TRIGGER secret is not set"
+            exit 1
+          fi
+          echo "PAT_WORKFLOW_TRIGGER is available"
+
+      - name: Test project read access
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER }}
+        run: |
+          echo "=== Testing Project Read Access ==="
+          echo ""
+
+          # Test 1: List project fields
+          echo "1. Listing project fields..."
+          if gh project field-list 1 --owner andreasronge --format json > /tmp/fields.json 2>&1; then
+            echo "   OK - Can read project fields"
+            cat /tmp/fields.json | jq -r '.fields[] | "   - \(.name) (\(.id))"'
+          else
+            echo "   FAIL - Cannot read project fields"
+            cat /tmp/fields.json
+            exit 1
+          fi
+          echo ""
+
+          # Test 2: List project items
+          echo "2. Listing project items (first 3)..."
+          if gh project item-list 1 --owner andreasronge --format json --limit 3 > /tmp/items.json 2>&1; then
+            echo "   OK - Can read project items"
+            ITEM_COUNT=$(cat /tmp/items.json | jq '.items | length')
+            echo "   Found $ITEM_COUNT items"
+          else
+            echo "   FAIL - Cannot read project items"
+            cat /tmp/items.json
+            exit 1
+          fi
+          echo ""
+
+          # Test 3: Verify expected field IDs exist
+          echo "3. Verifying expected field IDs..."
+          PHASE_FIELD="PVTSSF_lAHNGWjOASh0kM4OhOk_"
+          STATUS_FIELD="PVTSSF_lAHNGWjOASh0kM4OhOjl"
+
+          if cat /tmp/fields.json | jq -e ".fields[] | select(.id == \"$PHASE_FIELD\")" > /dev/null 2>&1; then
+            echo "   OK - Phase field ID exists ($PHASE_FIELD)"
+          else
+            echo "   WARN - Phase field ID not found in field list (may still work)"
+          fi
+
+          if cat /tmp/fields.json | jq -e ".fields[] | select(.id == \"$STATUS_FIELD\")" > /dev/null 2>&1; then
+            echo "   OK - Status field ID exists ($STATUS_FIELD)"
+          else
+            echo "   WARN - Status field ID not found in field list (may still work)"
+          fi
+          echo ""
+
+          echo "=== Project Read Access: PASSED ==="
+
+      - name: Test project write access
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER }}
+        run: |
+          echo "=== Testing Project Write Access ==="
+          echo ""
+
+          # Get first item from project to test with
+          ITEM_ID=$(gh project item-list 1 --owner andreasronge --format json --limit 1 | jq -r '.items[0].id // empty')
+
+          if [ -z "$ITEM_ID" ]; then
+            echo "SKIP - No items in project to test write access"
+            echo "Create an issue and add it to the project to test write access"
+            exit 0
+          fi
+
+          echo "Testing with item ID: $ITEM_ID"
+          echo ""
+
+          # Test: Get current Phase value, then set it to the same value (no-op update)
+          PHASE_FIELD="PVTSSF_lAHNGWjOASh0kM4OhOk_"
+
+          # Get current field value via GraphQL
+          echo "1. Reading current Phase value..."
+          CURRENT_PHASE=$(gh api graphql -f query='
+            query($itemId: ID!) {
+              node(id: $itemId) {
+                ... on ProjectV2Item {
+                  fieldValueByName(name: "Phase") {
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      optionId
+                      name
+                    }
+                  }
+                }
+              }
+            }
+          ' -f itemId="$ITEM_ID" --jq '.data.node.fieldValueByName.optionId // empty' 2>&1) || true
+
+          if [ -n "$CURRENT_PHASE" ]; then
+            echo "   Current Phase option ID: $CURRENT_PHASE"
+
+            # Test write by setting to same value (safe no-op)
+            echo ""
+            echo "2. Testing write by re-setting current Phase value..."
+            if gh project item-edit \
+                --project-id PVT_kwHNGWjOASh0kA \
+                --id "$ITEM_ID" \
+                --field-id "$PHASE_FIELD" \
+                --single-select-option-id "$CURRENT_PHASE" 2>&1; then
+              echo "   OK - Can update project items"
+            else
+              echo "   FAIL - Cannot update project items"
+              exit 1
+            fi
+          else
+            echo "   Item has no Phase set - testing with API Refactor phase..."
+
+            # Try setting to API Refactor (a8c7193b) as a test
+            echo ""
+            echo "2. Testing write by setting Phase to 'API Refactor'..."
+            if gh project item-edit \
+                --project-id PVT_kwHNGWjOASh0kA \
+                --id "$ITEM_ID" \
+                --field-id "$PHASE_FIELD" \
+                --single-select-option-id "a8c7193b" 2>&1; then
+              echo "   OK - Can update project items"
+              echo "   NOTE: Set Phase to 'API Refactor' - change manually if needed"
+            else
+              echo "   FAIL - Cannot update project items"
+              exit 1
+            fi
+          fi
+          echo ""
+
+          echo "=== Project Write Access: PASSED ==="
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "============================================"
+          echo "  PAT_WORKFLOW_TRIGGER PROJECT ACCESS: OK"
+          echo "============================================"
+          echo ""
+          echo "The PAT has sufficient permissions to:"
+          echo "  - Read project fields"
+          echo "  - List project items"
+          echo "  - Update project item fields"
+          echo ""
+          echo "PM workflow should work correctly."
