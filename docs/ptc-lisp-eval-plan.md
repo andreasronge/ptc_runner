@@ -2,7 +2,7 @@
 
 This document specifies the interpreter that evaluates CoreAST nodes.
 
-**Status:** Draft v2 (incorporates variadic design)
+**Status:** Draft v3 (aligned with Spec v0.3.2, strict binary ops, vector-only collections)
 
 ## Overview
 
@@ -489,55 +489,55 @@ defmodule PtcRunner.Lisp.Runtime do
   # Collection Operations
   # ============================================================
 
-  def filter(pred, coll), do: Enum.filter(coll, pred)
-  def remove(pred, coll), do: Enum.reject(coll, pred)
-  def find(pred, coll), do: Enum.find(coll, pred)
+  def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
+  def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
+  def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
-  def map(f, coll), do: Enum.map(coll, f)
-  def mapv(f, coll), do: Enum.map(coll, f)
-  def pluck(key, coll), do: Enum.map(coll, &Map.get(&1, key))
+  def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
+  def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
+  def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &Map.get(&1, key))
 
-  def sort(coll), do: Enum.sort(coll)
+  def sort(coll) when is_list(coll), do: Enum.sort(coll)
 
-  def sort_by(key, coll) when is_atom(key) do
+  def sort_by(key, coll) when is_list(coll) and is_atom(key) do
     Enum.sort_by(coll, &Map.get(&1, key))
   end
 
-  def sort_by(key, comp, coll) when is_atom(key) and is_function(comp) do
+  def sort_by(key, comp, coll) when is_list(coll) and is_atom(key) and is_function(comp) do
     Enum.sort_by(coll, &Map.get(&1, key), comp)
   end
 
-  def reverse(coll), do: Enum.reverse(coll)
+  def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
 
-  def first(coll), do: List.first(coll)
-  def last(coll), do: List.last(coll)
-  def nth(coll, idx), do: Enum.at(coll, idx)
-  def take(n, coll), do: Enum.take(coll, n)
-  def drop(n, coll), do: Enum.drop(coll, n)
-  def take_while(pred, coll), do: Enum.take_while(coll, pred)
-  def drop_while(pred, coll), do: Enum.drop_while(coll, pred)
-  def distinct(coll), do: Enum.uniq(coll)
+  def first(coll) when is_list(coll), do: List.first(coll)
+  def last(coll) when is_list(coll), do: List.last(coll)
+  def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
+  def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
+  def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
+  def take_while(pred, coll) when is_list(coll), do: Enum.take_while(coll, pred)
+  def drop_while(pred, coll) when is_list(coll), do: Enum.drop_while(coll, pred)
+  def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
 
   # concat2 is used for variadic concat: (concat c1 c2 ...)
   def concat2(a, b), do: Enum.concat(a || [], b || [])
-  def into(to, from), do: Enum.into(from, to)
-  def flatten(coll), do: List.flatten(coll)
-  def zip(c1, c2), do: Enum.zip(c1, c2)
-  def interleave(c1, c2), do: Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
+  def into(to, from) when is_list(to), do: Enum.into(from, to)
+  def flatten(coll) when is_list(coll), do: List.flatten(coll)
+  def zip(c1, c2) when is_list(c1) and is_list(c2), do: Enum.zip(c1, c2)
+  def interleave(c1, c2) when is_list(c1) and is_list(c2), do: Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
 
-  def count(coll), do: Enum.count(coll)
-  def empty?(coll), do: Enum.empty?(coll)
+  def count(coll) when is_list(coll) or is_map(coll) or is_binary(coll), do: Enum.count(coll)
+  def empty?(coll) when is_list(coll) or is_map(coll) or is_binary(coll), do: Enum.empty?(coll)
 
-  def reduce(f, init, coll), do: Enum.reduce(coll, init, f)
+  def reduce(f, init, coll) when is_list(coll), do: Enum.reduce(coll, init, f)
 
-  def sum_by(key, coll) do
+  def sum_by(key, coll) when is_list(coll) do
     coll
     |> Enum.map(&Map.get(&1, key))
     |> Enum.reject(&is_nil/1)
     |> Enum.sum()
   end
 
-  def avg_by(key, coll) do
+  def avg_by(key, coll) when is_list(coll) do
     values = coll |> Enum.map(&Map.get(&1, key)) |> Enum.reject(&is_nil/1)
     case values do
       [] -> nil
@@ -545,25 +545,25 @@ defmodule PtcRunner.Lisp.Runtime do
     end
   end
 
-  def min_by(key, coll) do
+  def min_by(key, coll) when is_list(coll) do
     case Enum.reject(coll, &is_nil(Map.get(&1, key))) do
       [] -> nil
       filtered -> Enum.min_by(filtered, &Map.get(&1, key))
     end
   end
 
-  def max_by(key, coll) do
+  def max_by(key, coll) when is_list(coll) do
     case Enum.reject(coll, &is_nil(Map.get(&1, key))) do
       [] -> nil
       filtered -> Enum.max_by(filtered, &Map.get(&1, key))
     end
   end
 
-  def group_by(key, coll), do: Enum.group_by(coll, &Map.get(&1, key))
+  def group_by(key, coll) when is_list(coll), do: Enum.group_by(coll, &Map.get(&1, key))
 
-  def some(pred, coll), do: Enum.any?(coll, pred)
-  def every?(pred, coll), do: Enum.all?(coll, pred)
-  def not_any?(pred, coll), do: not Enum.any?(coll, pred)
+  def some(pred, coll) when is_list(coll), do: Enum.any?(coll, pred)
+  def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
+  def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)
   def contains?(coll, key) when is_map(coll), do: Map.has_key?(coll, key)
   def contains?(coll, val) when is_list(coll), do: val in coll
 
@@ -614,12 +614,9 @@ defmodule PtcRunner.Lisp.Runtime do
   # Comparison (for direct use, not inside where)
   # ============================================================
 
-  def eq(args), do: Enum.reduce(args, true, fn x, acc -> acc and x == hd(args) end)
+  # Comparison functions are provided by Kernel (binary only).
+  # No variadic comparison in Runtime.
   def not_eq(x, y), do: x != y
-  def lt(args), do: args == Enum.sort(args) and args == Enum.uniq(args)
-  def gt(args), do: args == Enum.sort(args, :desc) and args == Enum.uniq(args)
-  def lte(args), do: args == Enum.sort(args)
-  def gte(args), do: args == Enum.sort(args, :desc)
 
   # ============================================================
   # Logic (non-short-circuit versions for completeness)
@@ -724,7 +721,7 @@ defmodule PtcRunner.Lisp.Env do
       {:assoc, {:normal, &Runtime.assoc/3}},
       {:"assoc-in", {:normal, &Runtime.assoc_in/3}},
       {:dissoc, {:normal, &Runtime.dissoc/2}},
-      {:merge, {:normal, &Runtime.merge/2}},
+      {:merge, {:variadic, &Runtime.merge/2, %{}}},
       {:"select-keys", {:normal, &Runtime.select_keys/2}},
       {:keys, {:normal, &Runtime.keys/1}},
       {:vals, {:normal, &Runtime.vals/1}},

@@ -658,7 +658,7 @@ This distinction exists because `where` is designed for safe filtering over pote
 | `into` | `(into to from)` | Pour from into to |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
 | `interleave` | `(interleave c1 c2)` | Interleave collections |
-| `zip` | `(zip c1 c2 ...)` | Combine into tuples |
+| `zip` | `(zip c1 c2)` | Combine into tuples |
 
 ```clojure
 (concat [1 2] [3 4])       ; => [1 2 3 4]

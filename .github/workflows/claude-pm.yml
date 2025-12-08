@@ -20,7 +20,7 @@ on:
         type: choice
         options:
           - next-issue      # Normal: find/create next issue to work on
-          - status-only     # Just update STATUS.md, don't create issues
+          - status-only     # Just report status, don't create/trigger issues
           - reset-stuck     # Reset stuck state and resume
 
 jobs:
@@ -142,7 +142,10 @@ jobs:
           prompt: |
             # Product Manager Workflow
 
-            You are the PM workflow for this repository. Your job is to manage the development pipeline.
+            You are the PM workflow for this repository. Your job is to manage the development pipeline by:
+            1. Creating issues from specification documents
+            2. Tracking progress through GitHub labels and Projects
+            3. Triggering implementation when issues are ready
 
             **Repository**: ${{ github.repository }}
             **Trigger**: ${{ github.event_name }}
@@ -151,164 +154,440 @@ jobs:
             **Is stuck**: ${{ steps.status.outputs.is_stuck }}
             **Open PRs**: ${{ steps.open-prs.outputs.open_pr_count }}
 
+            ## GitHub Project Integration
+
+            **Project Number**: 1
+            **Project Owner**: andreasronge
+            **Project URL**: https://github.com/users/andreasronge/projects/1
+
+            All created issues MUST be added to this project with the correct Phase field set.
+
+            ## Specification Document Registry
+
+            This project uses multiple specification documents. Read them in this order to understand the implementation plan:
+
+            ### Phase 0: API Refactoring (MUST complete first)
+            - **Document**: `docs/api-refactor-plan.md`
+            - **Purpose**: Refactor `PtcRunner` → `PtcRunner.Json` namespace
+            - **Issue prefix**: `[API Refactor]`
+            - **Labels**: `enhancement`, `phase:api-refactor`
+            - **Blocks**: All PTC-Lisp phases
+
+            ### Phase 1: PTC-Lisp Parser
+            - **Document**: `docs/ptc-lisp-parser-plan.md`
+            - **Spec**: `docs/ptc-lisp-specification.md` (data types, syntax)
+            - **Purpose**: NimbleParsec parser producing RawAST
+            - **Issue prefix**: `[Lisp Parser]`
+            - **Labels**: `enhancement`, `phase:parser`, `ptc-lisp`
+            - **Depends on**: Phase 0 complete
+
+            ### Phase 2: PTC-Lisp Analyzer
+            - **Document**: `docs/ptc-lisp-analyze-plan.md`
+            - **Spec**: `docs/ptc-lisp-specification.md` (special forms, validation)
+            - **Purpose**: Validation and desugaring (RawAST → CoreAST)
+            - **Issue prefix**: `[Lisp Analyzer]`
+            - **Labels**: `enhancement`, `phase:analyzer`, `ptc-lisp`
+            - **Depends on**: Phase 1 complete
+
+            ### Phase 3: PTC-Lisp Interpreter
+            - **Document**: `docs/ptc-lisp-eval-plan.md`
+            - **Spec**: `docs/ptc-lisp-specification.md` (operations, memory contract)
+            - **Purpose**: CoreAST evaluation + builtins
+            - **Issue prefix**: `[Lisp Eval]`
+            - **Labels**: `enhancement`, `phase:eval`, `ptc-lisp`
+            - **Depends on**: Phase 2 complete
+
+            ### Phase 4: Integration & Documentation
+            - **Document**: `docs/ptc-lisp-integration-spec.md`
+            - **Purpose**: End-to-end integration, docs updates
+            - **Issue prefix**: `[Lisp Integration]`
+            - **Labels**: `enhancement`, `phase:integration`, `ptc-lisp`
+            - **Depends on**: Phases 1-3 complete
+
+            ### Additional References (read but don't create issues from)
+            - `docs/ptc-lisp-overview.md` - High-level rationale
+            - `docs/ptc-lisp-llm-guide.md` - LLM quick reference
+            - `docs/ptc-lisp-benchmark-report.md` - Phase 1 evaluation results
+
             ## Read Guidelines First
 
             Before doing anything, read these documents:
-            1. `docs/guidelines/issue-creation-guidelines.md` - How to create issues
+            1. `docs/guidelines/issue-creation-guidelines.md` - Issue template and quality checklist
             2. `docs/guidelines/planning-guidelines.md` - The 9-point review checklist
-            3. `docs/architecture.md` - Implementation phases and what to build
 
             ## State Management
 
-            **GitHub is the source of truth** - do NOT rely on STATUS.md for state tracking.
+            **GitHub is the source of truth**
 
             Query state directly:
-            - **Work in progress**: `gh pr list --state open` (any open PR = work in progress)
-            - **Stuck state**: `gh issue list --label "pm-stuck" --state open`
-            - **Failure count**: `gh issue list --label "pm-failed-attempt" --state open`
-            - **Ready for work**: `gh issue list --label "ready-for-implementation" --state open`
+            ```bash
+            # Work in progress (any open PR = don't create new work)
+            gh pr list --state open
+
+            # Stuck state
+            gh issue list --label "pm-stuck" --state open
+
+            # Failure count
+            gh issue list --label "pm-failed-attempt" --state open
+
+            # Ready for work (has BOTH labels)
+            gh issue list --label "ready-for-implementation" --label "claude-approved" --state open
+
+            # All open issues by phase
+            gh issue list --label "phase:api-refactor" --state open
+            gh issue list --label "phase:parser" --state open
+            gh issue list --label "phase:analyzer" --state open
+            gh issue list --label "phase:eval" --state open
+            gh issue list --label "phase:integration" --state open
+
+            # Check phase completion (closed issues)
+            gh issue list --label "phase:api-refactor" --state closed
+            ```
 
             ## Your Task Based on Action
 
             ### If action is "status-only":
             1. Analyze codebase and GitHub state
-            2. Report current implementation progress
-            3. Do NOT create or trigger any issues
-            4. Exit
+            2. Determine which phase we're in
+            3. Report current implementation progress
+            4. List what issues exist and their states
+            5. Do NOT create or trigger any issues
+            6. Exit
 
             ### If action is "reset-stuck":
             The labels have already been removed by the workflow. Just proceed with "next-issue" logic.
 
             ### If action is "next-issue" (default):
 
-            #### Step 1: Check for Blocking Issues
+            #### Step 1: Check for Blocking Issues (Highest Priority)
 
             ```bash
-            # Check for bug issues (highest priority)
+            # Check for bug issues (highest priority - must fix first)
             gh issue list --label "bug" --state open --json number,title
 
             # Check for issues from PR reviews that need fixing
             gh issue list --label "from-pr-review" --state open --json number,title
 
-            # Check for tech debt issues
+            # Check for tech debt issues that block progress
             gh issue list --label "tech-debt" --state open --json number,title
             ```
 
             **Priority order:**
-            1. `bug` - Bugs should be fixed before new features
+            1. `bug` - Bugs must be fixed before new features
             2. `from-pr-review` - Issues found during PR review take priority
             3. `tech-debt` - Technical debt that may block progress
 
             If there are blocking issues:
-            - Evaluate each one: should it be done now, or is there a documented reason to defer?
-            - Valid reasons to defer: "will be addressed in issue #X", "low value vs complexity", "needs design decision"
-            - If should be done: check if it has `ready-for-implementation`, if not add `needs-review` first
-            - If should be deferred: add a comment explaining why, and continue to next step
+            - Check if they have `ready-for-implementation` AND `claude-approved` labels
+            - If yes: skip to Step 6 (trigger implementation)
+            - If no `ready-for-implementation`: add `needs-review` label first
+            - If no `claude-approved`: exit with message asking maintainer to approve
 
             #### Step 2: Check for Ready AND Approved Issues
 
             ```bash
-            # Check for issues that are BOTH ready AND approved by maintainer
-            gh issue list --label "ready-for-implementation" --label "claude-approved" --state open --json number,title
+            # Issues ready to implement
+            gh issue list --label "ready-for-implementation" --label "claude-approved" --state open --json number,title,labels
             ```
 
             If there's an issue with BOTH labels:
-            - Pick the oldest one (or highest priority if labeled)
-            - Skip to Step 4 (trigger implementation)
+            - Check issue body for "Blocked by: #N" or "Depends on: #N"
+            - If blocked by open issue: skip it, find next unblocked issue
+            - If unblocked: skip to Step 6 (trigger implementation)
 
-            If NO issue has both labels:
-            - Exit with message: "No approved issues ready for implementation. Maintainer must add 'claude-approved' label to issues before PM can work on them."
-            - Do NOT create new issues - this workflow does not create issues autonomously
+            #### Step 3: Determine Current Phase
 
-            #### Step 3: Pre-Implementation Check
+            Analyze the current state to determine which phase to work on:
 
-            Before triggering implementation, evaluate whether the issue can proceed:
+            1. **Check if API refactor is complete**:
+               ```bash
+               # Look for PtcRunner.Json module
+               grep -r "defmodule PtcRunner.Json" lib/
+
+               # Check for json/ subdirectory
+               ls -la lib/ptc_runner/json/ 2>/dev/null || echo "json/ not found"
+
+               # Check closed issues
+               gh issue list --label "phase:api-refactor" --state closed --json number,title
+               ```
+
+            2. **Check PTC-Lisp progress**:
+               ```bash
+               # Parser
+               ls -la lib/ptc_runner/lisp/parser.ex 2>/dev/null || echo "parser not found"
+               gh issue list --label "phase:parser" --state closed --json number,title
+
+               # Analyzer
+               ls -la lib/ptc_runner/lisp/analyze.ex 2>/dev/null || echo "analyzer not found"
+               gh issue list --label "phase:analyzer" --state closed --json number,title
+
+               # Eval
+               ls -la lib/ptc_runner/lisp/eval.ex 2>/dev/null || echo "eval not found"
+               gh issue list --label "phase:eval" --state closed --json number,title
+               ```
+
+            3. **Run tests to verify state**:
+               ```bash
+               mix test
+               ```
+               If tests fail, create a bug fix issue instead.
+
+            #### Step 4: Read Specification Document
+
+            Based on the current phase, read the appropriate specification document:
+
+            - **Phase 0 (API Refactor)**: Read `docs/api-refactor-plan.md`
+            - **Phase 1 (Parser)**: Read `docs/ptc-lisp-parser-plan.md` and relevant sections of `docs/ptc-lisp-specification.md`
+            - **Phase 2 (Analyzer)**: Read `docs/ptc-lisp-analyze-plan.md` and relevant sections of `docs/ptc-lisp-specification.md`
+            - **Phase 3 (Eval)**: Read `docs/ptc-lisp-eval-plan.md` and relevant sections of `docs/ptc-lisp-specification.md`
+            - **Phase 4 (Integration)**: Read `docs/ptc-lisp-integration-spec.md`
+
+            Identify the next logical piece to implement based on:
+            - What's already implemented (code exists)
+            - What issues exist (open and closed)
+            - Dependencies between components
+
+            #### Step 5: Create a New Issue
+
+            **IMPORTANT**:
+            - Only create ONE issue at a time
+            - **Do NOT create a duplicate**: If an open issue already exists for the current phase (even if not yet approved), do NOT create another one. Check first:
+              ```bash
+              gh issue list --label "phase:CURRENT_PHASE" --state open --json number,title
+              ```
+              If this returns any issues, STOP and report: "Issue #N already exists for this phase. Waiting for review/approval."
+
+            Based on your analysis, create a well-specified issue following the template in `docs/guidelines/issue-creation-guidelines.md`.
+
+            **Issue structure**:
+            ```markdown
+            ## Summary
+
+            [1-2 sentences: What is being implemented and why]
+
+            ## Context
+
+            **Specification**: [Link to the spec document section]
+            **Phase**: [Phase name from registry]
+            **Dependencies**: [Blocked by: #N or "None"]
+            **Related issues**: [Links or "None"]
+
+            ## Current State
+
+            [What exists now - based on actual codebase analysis]
+
+            ## Acceptance Criteria
+
+            - [ ] [Specific, testable criterion from spec]
+            - [ ] [Another criterion]
+            - [ ] Tests pass: `mix test`
+            - [ ] Code compiles without warnings: `mix compile --warnings-as-errors`
+
+            ## Implementation Hints
+
+            **Files to create/modify:**
+            - `lib/ptc_runner/...` - [what to do]
+            - `test/ptc_runner/...` - [what tests]
+
+            **Patterns to follow:**
+            - [Reference existing similar code]
+
+            **From specification:**
+            - [Key details from the spec document]
+
+            ## Test Plan
+
+            **Unit tests:**
+            - [Specific test cases from spec]
+
+            ## Out of Scope
+
+            [What this issue does NOT include - important for right-sizing]
+            ```
+
+            **Create the issue**:
+            ```bash
+            # Write body to temp file
+            cat > /tmp/issue-body.md << 'EOF'
+            [Issue body here]
+            EOF
+
+            # Create with appropriate labels based on phase
+            gh issue create \
+              --title "[Phase Prefix] Brief description" \
+              --label "enhancement" \
+              --label "needs-review" \
+              --label "phase:PHASE_LABEL" \
+              --label "ptc-lisp" \
+              --body-file /tmp/issue-body.md
+            ```
+
+            **Phase-specific labels**:
+            - API Refactor: `phase:api-refactor` (no `ptc-lisp` label)
+            - Parser: `phase:parser`, `ptc-lisp`
+            - Analyzer: `phase:analyzer`, `ptc-lisp`
+            - Eval: `phase:eval`, `ptc-lisp`
+            - Integration: `phase:integration`, `ptc-lisp`
+
+            **Add to GitHub Project** (REQUIRED for all issues):
+            ```bash
+            # After creating the issue, capture the URL
+            ISSUE_URL="https://github.com/${{ github.repository }}/issues/ISSUE_NUMBER"
+
+            # Add to project
+            gh project item-add 1 --owner andreasronge --url "$ISSUE_URL"
+
+            # Get the item ID to set the Phase field
+            ITEM_ID=$(gh project item-list 1 --owner andreasronge --format json | jq -r ".items[] | select(.content.url == \"$ISSUE_URL\") | .id")
+
+            # Set the Phase field based on the issue's phase
+            # Phase field ID: PVTSSF_lAHNGWjOASh0kM4OhOk_
+            # Option IDs:
+            #   - API Refactor: a8c7193b
+            #   - Parser: 1c180ef6
+            #   - Analyzer: 9d857bc6
+            #   - Eval: bbd1d60a
+            #   - Integration: c5f6c3a5
+            gh project item-edit --project-id PVT_kwHNGWjOASh0kA --id "$ITEM_ID" --field-id PVTSSF_lAHNGWjOASh0kM4OhOk_ --single-select-option-id PHASE_OPTION_ID
+            ```
+
+            **Phase to Option ID mapping**:
+            | Phase | Option ID |
+            |-------|-----------|
+            | API Refactor | a8c7193b |
+            | Parser | 1c180ef6 |
+            | Analyzer | 9d857bc6 |
+            | Eval | bbd1d60a |
+            | Integration | c5f6c3a5 |
+
+            **STOP HERE** - The `needs-review` label will trigger the issue review workflow.
+            Wait for review before implementation.
+
+            #### Step 6: Pre-Implementation Check
+
+            Before triggering implementation on an existing ready issue:
 
             1. **Read the issue and comments**:
                ```bash
                gh issue view ISSUE_NUMBER --comments
                ```
 
-            2. **Check for blockers** - Look for:
-               - Comments mentioning "blocked by #N", "waiting for #N", "depends on #N"
-               - References to other issues that must be done first
-               - If a blocker issue is referenced, check if it's still open:
+            2. **Check for blockers in issue body**:
+               - Look for "Blocked by: #N", "Depends on: #N"
+               - If found, check if blocker is still open:
                  ```bash
                  gh issue view BLOCKER_NUMBER --json state
                  ```
 
-            3. **If blocked by open issue**: Do NOT trigger implementation. Exit and report the blocker.
+            3. **If blocked by open issue**: Do NOT trigger. Exit and report the blocker.
 
-            4. **Assess implementation readiness** - Briefly consider:
-               - Does the codebase need refactoring to implement this cleanly?
-               - Should this issue be split into smaller issues?
-               - Are there prerequisites not captured in existing issues?
+            4. **Verify tests still pass**:
+               ```bash
+               mix test
+               ```
+               If tests fail, this is a bug - do NOT proceed with feature work.
 
-               If you identify a blocker:
-               - Add a comment to the ready issue: "Blocked by #N - [brief reason]"
-               - **STOP** - Do not trigger implementation (maintainer must resolve the blocker)
+            #### Step 7: Trigger Implementation
 
-            #### Step 4: Trigger Implementation
+            When an issue is ready (has BOTH labels) and unblocked:
 
-            When the issue is ready and unblocked:
+            1. **Update project status to "In Progress"**:
+               ```bash
+               ISSUE_URL="https://github.com/${{ github.repository }}/issues/ISSUE_NUMBER"
+               ITEM_ID=$(gh project item-list 1 --owner andreasronge --format json | jq -r ".items[] | select(.content.url == \"$ISSUE_URL\") | .id")
 
-            Post a comment to trigger the claude.yml workflow:
+               # Status field ID: PVTSSF_lAHNGWjOASh0kM4OhOjl
+               # Status option IDs:
+               #   - Todo: f75ad846
+               #   - In Progress: 47fc9ee4
+               #   - Done: 98236657
+               gh project item-edit --project-id PVT_kwHNGWjOASh0kA --id "$ITEM_ID" --field-id PVTSSF_lAHNGWjOASh0kM4OhOjl --single-select-option-id 47fc9ee4
+               ```
 
-            ```bash
-            gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
+            2. **Post implementation trigger comment**:
+               ```bash
+               gh issue comment ISSUE_NUMBER --body "@claude Please implement this issue:
 
-            1. First, read the review comments on this issue
-            2. If the review identified issues (inconsistencies, missing details, etc.), update the issue description to address them
-            3. Implement the issue following the (updated) specification
-            4. Create a PR with your implementation
+               1. First, read the review comments on this issue
+               2. If the review identified issues, update the issue description to address them
+               3. Read the specification document referenced in the issue
+               4. Implement following the specification and acceptance criteria
+               5. Create a PR with your implementation
 
-            Make sure your implementation addresses any concerns raised in the review."
+               Make sure your implementation:
+               - Follows existing patterns in the codebase
+               - Includes tests as specified in Test Plan
+               - Passes: mix test && mix compile --warnings-as-errors"
+               ```
+
+            ## Dependency Management
+
+            **Phase dependencies (strict order)**:
+            ```
+            Phase 0: API Refactor
+                ↓ (must complete before any Lisp work)
+            Phase 1: Parser (can start after API refactor)
+                ↓
+            Phase 2: Analyzer (depends on Parser)
+                ↓
+            Phase 3: Eval (depends on Analyzer)
+                ↓
+            Phase 4: Integration (depends on all above)
+            ```
+
+            **Within-phase dependencies**: Check the spec document for component dependencies.
+
+            **Recording dependencies**: Always include in issue body:
+            ```markdown
+            **Dependencies**: Blocked by: #123, #124 (or "None")
             ```
 
             ## Handling Failures
 
+            ### If Issue Review Rejects an Issue
+
+            1. Read the review feedback: `gh issue view NUMBER --comments`
+            2. Decide:
+               - **Fixable**: Update the issue body and re-add `needs-review` label
+               - **Fundamental problem**: Close the issue with explanation
+            3. Add `pm-failed-attempt` label to track the failure
+
             ### If Implementation Fails
 
-            If the implementation attempt fails or the issue cannot proceed:
-
-            1. Add a comment to the issue explaining what went wrong
-            2. Add `pm-failed-attempt` label to track the failure
-            3. Exit - the maintainer will need to intervene
+            1. Check the PR/issue comments for error details
+            2. Add `pm-failed-attempt` label to the issue
+            3. If 3+ issues have `pm-failed-attempt` label: Enter STUCK state
 
             ### STUCK State
 
-            If 3+ issues have `pm-failed-attempt` label, enter STUCK state:
-
             1. Add `pm-stuck` label to the problematic issue
             2. Post a comment explaining what went wrong
-            3. Exit with error
-
-            To recover from stuck state, someone must:
-            - Fix the underlying issue
-            - Remove the `pm-stuck` label
-            - Run the workflow with "reset-stuck" action
+            3. Do NOT create more issues
+            4. Exit with error
 
             ## Safety Rules
 
-            1. **No issue creation**: This workflow does NOT create issues. Only the maintainer creates issues.
-            2. **Require claude-approved**: Only work on issues with BOTH `ready-for-implementation` AND `claude-approved` labels
-            3. **One issue at a time**: Never have multiple issues in flight
-            4. **Wait for merge**: Don't trigger implementations while a PR is open
+            1. **One issue at a time**: Never create multiple issues in one run
+            2. **Wait for merge**: Don't create/trigger when PRs are open
                - If Open PRs > 0, exit without taking action
-               - This prevents parallel work that could conflict
-            5. **Don't skip steps**: Always check blocking issues first
+            3. **Respect phase order**: Don't start Phase N+1 until Phase N has at least one closed issue
+            4. **Require approval**: Only trigger implementation on issues with BOTH labels:
+               - `ready-for-implementation`
+               - `claude-approved`
+            5. **Max 3 failures**: Enter stuck state after 3 consecutive failures
 
             ## Output
 
-            At the end, summarize what you did:
-            - What action was taken
-            - What issue was created/triggered (if any)
-            - Current state (from GitHub labels/PRs)
-            - Any errors or warnings
+            At the end, summarize:
+            - **Current phase**: Which phase we're in
+            - **Action taken**: What you did (created issue, triggered implementation, etc.)
+            - **Issue**: Number and title of issue created/triggered
+            - **Blockers**: Any blocking issues or dependencies
+            - **Next steps**: What needs to happen next
 
             Now begin the PM workflow.
 
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh issue:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(mix test:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh issue:*),Bash(gh pr:*),Bash(gh label:*),Bash(gh project:*),Bash(git:*),Bash(mix test:*),Bash(mix compile:*),Bash(ls:*),Bash(cat:*)"'
 
           show_full_output: true
 
@@ -323,3 +602,15 @@ jobs:
           echo "- Open PRs: $(gh pr list --state open --json number | jq length)"
           echo "- Ready issues: $(gh issue list --label ready-for-implementation --state open --json number | jq length)"
           echo "- Stuck: $(gh issue list --label pm-stuck --state open --json number | jq length)"
+          echo ""
+          echo "Phase status:"
+          echo "- API Refactor open: $(gh issue list --label phase:api-refactor --state open --json number | jq length)"
+          echo "- API Refactor closed: $(gh issue list --label phase:api-refactor --state closed --json number | jq length)"
+          echo "- Parser open: $(gh issue list --label phase:parser --state open --json number | jq length)"
+          echo "- Parser closed: $(gh issue list --label phase:parser --state closed --json number | jq length)"
+          echo "- Analyzer open: $(gh issue list --label phase:analyzer --state open --json number | jq length)"
+          echo "- Analyzer closed: $(gh issue list --label phase:analyzer --state closed --json number | jq length)"
+          echo "- Eval open: $(gh issue list --label phase:eval --state open --json number | jq length)"
+          echo "- Eval closed: $(gh issue list --label phase:eval --state closed --json number | jq length)"
+          echo "- Integration open: $(gh issue list --label phase:integration --state open --json number | jq length)"
+          echo "- Integration closed: $(gh issue list --label phase:integration --state closed --json number | jq length)"

@@ -4,7 +4,12 @@ Guidelines for creating well-specified GitHub issues.
 
 ## Overview
 
-Issues must be created by maintainers (not automatically by workflows). Each issue should be:
+Issues can be created by:
+- **Maintainers**: Direct creation for any work item
+- **PM Workflow**: Automated creation from specification documents (see `github-workflows.md`)
+- **Auto-Triage**: Created during PR review for deferred items (labeled `from-pr-review`)
+
+Each issue should be:
 - **Self-contained**: All information needed to implement is in the issue
 - **Right-sized**: Large enough to be testable via E2E test, small enough for one PR
 - **Verified**: Based on actual codebase analysis, not assumptions
