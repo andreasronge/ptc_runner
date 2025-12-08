@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.ControlFlowTest do
+defmodule PtcRunner.Json.Operations.ControlFlowTest do
   use ExUnit.Case
 
   describe "let operation" do

@@ -1,4 +1,4 @@
-defmodule PtcRunner.ValidatorTest do
+defmodule PtcRunner.Json.ValidatorTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Json.Validator
