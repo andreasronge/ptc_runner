@@ -190,11 +190,12 @@ memory/results        ; read from persistent memory
 ### Special Forms
 ```clojure
 (let [x 1, y 2] body)              ; local bindings
-(let [{:keys [a b]} m] body)       ; map destructuring
+(let [{:keys [a b]} m] body)       ; map destructuring (ONLY in let, NOT in fn params)
 (if cond then else)                ; conditional (else is REQUIRED)
 (when cond body)                   ; single-branch returns nil if false
 (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
-(fn [x] body)                      ; anonymous function (no recursion, no #())
+(fn [x] body)                      ; anonymous function (simple params only, no destructuring)
+(< a b) (>= x y)                   ; comparisons are 2-arity ONLY, NOT (<= a b c)
 ```
 
 ### Threading (for pipelines)
@@ -266,7 +267,7 @@ The return value determines memory behavior:
 
 ```clojure
 ; Pure query - no memory change
-(->> ctx/items (filter (where :active true)) (count))
+(->> ctx/items (filter (where :active)) (count))
 
 ; Update memory only
 {:cached-users (call "get-users" {})}
@@ -281,12 +282,20 @@ The return value determines memory behavior:
 | Wrong | Right |
 |-------|-------|
 | `(where :status "active")` | `(where :status = "active")` |
+| `(where :active true)` | `(where :active = true)` or `(where :active)` |
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
+| `(<= 1 x 10)` | `(and (>= x 1) (<= x 10))` |
+| `(fn [{:keys [a b]}] ...)` | `(fn [m] (let [{:keys [a b]} m] ...))` |
 | `(ctx :input)` | `ctx/input` |
 | `(call :get-users {})` | `(call "get-users" {})` |
 | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
 | `'(1 2 3)` | `[1 2 3]` |
 | `:foo/bar` | `:foo-bar` (no namespaced keywords) |
+
+**Key constraints:**
+- `where` predicates MUST have an operator (except for truthy check)
+- Comparisons are 2-arity ONLY: `(< a b)`, not `(<= a b c)`
+- Destructuring is ONLY allowed in `let`, NOT in `fn` params
 
 ---
 
