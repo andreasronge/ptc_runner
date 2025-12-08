@@ -55,25 +55,31 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Vectors: evaluate all elements
   defp do_eval({:vector, elems}, ctx, memory, env, tool_exec) do
-    {values, memory2} =
-      Enum.map_reduce(elems, memory, fn elem, mem ->
-        {:ok, v, mem2} = do_eval(elem, ctx, mem, env, tool_exec)
-        {v, mem2}
+    result =
+      Enum.reduce_while(elems, {:ok, [], memory}, fn elem, {:ok, acc, mem} ->
+        case do_eval(elem, ctx, mem, env, tool_exec) do
+          {:ok, v, mem2} -> {:cont, {:ok, [v | acc], mem2}}
+          {:error, _} = err -> {:halt, err}
+        end
       end)
 
-    {:ok, values, memory2}
+    case result do
+      {:ok, values, memory2} -> {:ok, Enum.reverse(values), memory2}
+      {:error, _} = err -> err
+    end
   end
 
   # Maps: evaluate all keys and values
   defp do_eval({:map, pairs}, ctx, memory, env, tool_exec) do
-    {evaluated_pairs, memory2} =
-      Enum.map_reduce(pairs, memory, fn {k_ast, v_ast}, mem ->
-        {:ok, k, mem2} = do_eval(k_ast, ctx, mem, env, tool_exec)
-        {:ok, v, mem3} = do_eval(v_ast, ctx, mem2, env, tool_exec)
-        {{k, v}, mem3}
+    result =
+      Enum.reduce_while(pairs, {:ok, [], memory}, fn {k_ast, v_ast}, {:ok, acc, mem} ->
+        eval_map_pair(k_ast, v_ast, ctx, mem, env, tool_exec, acc)
       end)
 
-    {:ok, Map.new(evaluated_pairs), memory2}
+    case result do
+      {:ok, evaluated_pairs, memory2} -> {:ok, Map.new(evaluated_pairs), memory2}
+      {:error, _} = err -> err
+    end
   end
 
   # ============================================================
@@ -110,26 +116,34 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Conditional: if
   defp do_eval({:if, cond_ast, then_ast, else_ast}, ctx, memory, env, tool_exec) do
-    {:ok, cond_val, memory2} = do_eval(cond_ast, ctx, memory, env, tool_exec)
-
-    if truthy?(cond_val) do
-      do_eval(then_ast, ctx, memory2, env, tool_exec)
-    else
-      do_eval(else_ast, ctx, memory2, env, tool_exec)
+    with {:ok, cond_val, memory2} <- do_eval(cond_ast, ctx, memory, env, tool_exec) do
+      if truthy?(cond_val) do
+        do_eval(then_ast, ctx, memory2, env, tool_exec)
+      else
+        do_eval(else_ast, ctx, memory2, env, tool_exec)
+      end
     end
   end
 
   # Let bindings
   defp do_eval({:let, bindings, body}, ctx, memory, env, tool_exec) do
-    {new_env, memory2} =
-      Enum.reduce(bindings, {env, memory}, fn {:binding, pattern, value_ast},
-                                              {acc_env, acc_mem} ->
-        {:ok, value, mem2} = do_eval(value_ast, ctx, acc_mem, acc_env, tool_exec)
-        new_bindings = match_pattern(pattern, value)
-        {Map.merge(acc_env, new_bindings), mem2}
+    result =
+      Enum.reduce_while(bindings, {:ok, env, memory}, fn {:binding, pattern, value_ast},
+                                                         {:ok, acc_env, acc_mem} ->
+        case do_eval(value_ast, ctx, acc_mem, acc_env, tool_exec) do
+          {:ok, value, mem2} ->
+            new_bindings = match_pattern(pattern, value)
+            {:cont, {:ok, Map.merge(acc_env, new_bindings), mem2}}
+
+          {:error, _} = err ->
+            {:halt, err}
+        end
       end)
 
-    do_eval(body, ctx, memory2, new_env, tool_exec)
+    case result do
+      {:ok, new_env, memory2} -> do_eval(body, ctx, memory2, new_env, tool_exec)
+      {:error, _} = err -> err
+    end
   end
 
   # ============================================================
@@ -151,15 +165,23 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:call, fun_ast, arg_asts}, ctx, memory, env, tool_exec) do
-    {:ok, fun_val, memory1} = do_eval(fun_ast, ctx, memory, env, tool_exec)
+    with {:ok, fun_val, memory1} <- do_eval(fun_ast, ctx, memory, env, tool_exec) do
+      result =
+        Enum.reduce_while(arg_asts, {:ok, [], memory1}, fn arg_ast, {:ok, acc, mem} ->
+          case do_eval(arg_ast, ctx, mem, env, tool_exec) do
+            {:ok, v, mem2} -> {:cont, {:ok, [v | acc], mem2}}
+            {:error, _} = err -> {:halt, err}
+          end
+        end)
 
-    {arg_vals, memory2} =
-      Enum.map_reduce(arg_asts, memory1, fn arg_ast, mem ->
-        {:ok, v, mem2} = do_eval(arg_ast, ctx, mem, env, tool_exec)
-        {v, mem2}
-      end)
+      case result do
+        {:ok, arg_vals, memory2} ->
+          apply_fun(fun_val, Enum.reverse(arg_vals), ctx, memory2, tool_exec)
 
-    apply_fun(fun_val, arg_vals, ctx, memory2, tool_exec)
+        {:error, _} = err ->
+          err
+      end
+    end
   end
 
   # ============================================================
@@ -168,16 +190,19 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:where, field_path, op, value_ast}, ctx, memory, env, tool_exec) do
     # Evaluate the comparison value (if not truthy check)
-    {:ok, value, memory2} =
-      case value_ast do
-        nil -> {:ok, nil, memory}
-        _ -> do_eval(value_ast, ctx, memory, env, tool_exec)
-      end
+    case value_ast do
+      nil ->
+        accessor = build_field_accessor(field_path)
+        fun = build_where_predicate(op, accessor, nil)
+        {:ok, fun, memory}
 
-    accessor = build_field_accessor(field_path)
-    fun = build_where_predicate(op, accessor, value)
-
-    {:ok, fun, memory2}
+      _ ->
+        with {:ok, value, memory2} <- do_eval(value_ast, ctx, memory, env, tool_exec) do
+          accessor = build_field_accessor(field_path)
+          fun = build_where_predicate(op, accessor, value)
+          {:ok, fun, memory2}
+        end
+    end
   end
 
   # ============================================================
@@ -185,24 +210,45 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pred_combinator, kind, pred_asts}, ctx, memory, env, tool_exec) do
-    {pred_fns, memory2} =
-      Enum.map_reduce(pred_asts, memory, fn p_ast, mem ->
-        {:ok, f, mem2} = do_eval(p_ast, ctx, mem, env, tool_exec)
-        {f, mem2}
+    result =
+      Enum.reduce_while(pred_asts, {:ok, [], memory}, fn p_ast, {:ok, acc, mem} ->
+        case do_eval(p_ast, ctx, mem, env, tool_exec) do
+          {:ok, f, mem2} -> {:cont, {:ok, [f | acc], mem2}}
+          {:error, _} = err -> {:halt, err}
+        end
       end)
 
-    fun = build_pred_combinator(kind, pred_fns)
-    {:ok, fun, memory2}
+    case result do
+      {:ok, pred_fns, memory2} ->
+        fun = build_pred_combinator(kind, Enum.reverse(pred_fns))
+        {:ok, fun, memory2}
+
+      {:error, _} = err ->
+        err
+    end
   end
 
   # Tool calls
   defp do_eval({:call_tool, tool_name, args_ast}, ctx, memory, env, tool_exec) do
-    {:ok, args_map, memory2} = do_eval(args_ast, ctx, memory, env, tool_exec)
+    with {:ok, args_map, memory2} <- do_eval(args_ast, ctx, memory, env, tool_exec) do
+      # Call the tool executor provided by the host
+      result = tool_exec.(tool_name, args_map)
+      {:ok, result, memory2}
+    end
+  end
 
-    # Call the tool executor provided by the host
-    result = tool_exec.(tool_name, args_map)
+  # ============================================================
+  # Evaluation helpers
+  # ============================================================
 
-    {:ok, result, memory2}
+  # Helper for map pair evaluation to reduce nesting
+  defp eval_map_pair(k_ast, v_ast, ctx, mem, env, tool_exec, acc) do
+    with {:ok, k, mem2} <- do_eval(k_ast, ctx, mem, env, tool_exec),
+         {:ok, v, mem3} <- do_eval(v_ast, ctx, mem2, env, tool_exec) do
+      {:cont, {:ok, [{k, v} | acc], mem3}}
+    else
+      {:error, _} = err -> {:halt, err}
+    end
   end
 
   # ============================================================
@@ -212,26 +258,26 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval_and([], _ctx, memory, _env, _tool_exec), do: {:ok, true, memory}
 
   defp do_eval_and([e | rest], ctx, memory, env, tool_exec) do
-    {:ok, value, memory2} = do_eval(e, ctx, memory, env, tool_exec)
-
-    if truthy?(value) do
-      do_eval_and(rest, ctx, memory2, env, tool_exec)
-    else
-      # Short-circuit: return falsy value
-      {:ok, value, memory2}
+    with {:ok, value, memory2} <- do_eval(e, ctx, memory, env, tool_exec) do
+      if truthy?(value) do
+        do_eval_and(rest, ctx, memory2, env, tool_exec)
+      else
+        # Short-circuit: return falsy value
+        {:ok, value, memory2}
+      end
     end
   end
 
   defp do_eval_or([], _ctx, memory, _env, _tool_exec), do: {:ok, nil, memory}
 
   defp do_eval_or([e | rest], ctx, memory, env, tool_exec) do
-    {:ok, value, memory2} = do_eval(e, ctx, memory, env, tool_exec)
-
-    if truthy?(value) do
-      # Short-circuit: return truthy value
-      {:ok, value, memory2}
-    else
-      do_eval_or(rest, ctx, memory2, env, tool_exec)
+    with {:ok, value, memory2} <- do_eval(e, ctx, memory, env, tool_exec) do
+      if truthy?(value) do
+        # Short-circuit: return truthy value
+        {:ok, value, memory2}
+      else
+        do_eval_or(rest, ctx, memory2, env, tool_exec)
+      end
     end
   end
 
