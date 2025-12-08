@@ -218,6 +218,7 @@ The returned map has `:result` key, so:
 - `(where :field badop val)` → invalid where operator
 - `(call :name {})` → tool name must be string
 - `(let [x])` → odd binding count
+- `(< 1 2 3)` → invalid arity (comparisons are strict 2-arity)
 
 ### 4.3 Eval Tests
 
@@ -432,6 +433,7 @@ parse-error at line 3, column 15:
 - [ ] `all-of`, `any-of`, `none-of`
 - [ ] `call` tool name validation
 - [ ] `fn` parameter extraction
+- [ ] Comparison operators (strict 2-arity: `=`, `not=`, `>`, `<`, `>=`, `<=`)
 
 ### Eval
 - [ ] Literal passthrough

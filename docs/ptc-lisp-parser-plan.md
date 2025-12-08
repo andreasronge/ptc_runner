@@ -233,11 +233,11 @@ end
 escape_sequence =
   string("\\")
   |> choice([
-    string("\\") |> replace("\\"),
-    string("\"") |> replace("\""),
-    string("n") |> replace("\n"),
-    string("t") |> replace("\t"),
-    string("r") |> replace("\r")
+    string("\\") |> replace(?\\),
+    string("\"") |> replace(?"),
+    string("n") |> replace(?\n),
+    string("t") |> replace(?\t),
+    string("r") |> replace(?\r)
   ])
 
 # Regular character: anything except \ and " and newlines (single-line strings only)
@@ -482,8 +482,7 @@ defmodule PtcRunner.Lisp.Parser do
   keyword =
     ignore(string(":"))
     |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_], min: 1)
-    |> unwrap_and_tag(:keyword)
-    |> map({ParserHelpers, :to_keyword, []})
+    |> reduce({ParserHelpers, :build_keyword, []})
 
   # Symbols (/ allowed for namespacing)
   symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!]
@@ -621,7 +620,7 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   # Keyword/Symbol building
   # ============================================================
 
-  def to_keyword({:keyword, name}), do: {:keyword, String.to_atom(name)}
+  def build_keyword([name]), do: {:keyword, String.to_atom(name)}
 
   def build_symbol(parts) do
     name = Enum.join(parts)
@@ -777,7 +776,7 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "threading macro" do
       source = """
       (->> ctx/products
-           (filter (where :in-stock true))
+           (filter (where :in-stock))
            (sort-by :price)
            (take 10))
       """

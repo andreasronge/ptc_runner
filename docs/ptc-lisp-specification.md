@@ -1,6 +1,6 @@
 # PTC-Lisp Language Specification
 
-**Version:** 0.3.0-draft
+**Version:** 0.3.2-draft
 **Status:** Experimental
 **Purpose:** A minimal Clojure subset for LLM-generated data transformation programs
 
@@ -151,6 +151,8 @@ Double-quoted, with escape sequences:
 
 Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
+**Single-line only:** Strings must not contain literal newline characters (`\n`, `\r`). Use escape sequences (`\n`, `\r`) for newlines within string content.
+
 **Not supported:** Multi-line strings, regex literals
 
 **String operations:** Strings support `count` and `empty?` but are otherwise opaque. Character access (`nth`, `first`), substring extraction, and string manipulation are not supported—use tools for complex string processing. See Section 8.6 for details.
@@ -261,7 +263,7 @@ Binds names to values for use in the body expression:
     x))             ; => 2
 ```
 
-#### 5.1.1 Map Destructuring
+#### Map Destructuring
 
 Extract values from maps:
 
@@ -289,21 +291,6 @@ Extract values from maps:
 - `{:keys [a] :or {a default}}` — with defaults
 - `{new-name :old-key}` — rename binding
 - `{:keys [a] :as m}` — bind whole map to `m`
-
-#### 5.1.2 Vector Destructuring
-
-Extract values from vectors by position:
-
-```clojure
-(let [[a b c] [1 2 3]]
-  b)  ; => 2
-
-(let [[first second & rest] [1 2 3 4 5]]
-  rest)  ; => [3 4 5]
-
-(let [[a _ c] [1 2 3]]  ; _ ignores position
-  [a c])  ; => [1 3]
-```
 
 ### 5.2 `if` — Conditional
 
@@ -391,7 +378,7 @@ Equivalent to:
 
 ```clojure
 (->> ctx/products
-     (filter (where :in-stock true))
+     (filter (where :in-stock))
      (sort-by :price)
      (take 10))
 ```
@@ -462,7 +449,7 @@ Check if field is truthy (not `nil` or `false`):
 
 ```clojure
 (where :active)           ; shorthand for (where :active not= nil)
-(where :verified true)    ; explicit boolean check
+(where :verified = true)    ; explicit boolean check
 (where [:user :premium])  ; nested truthy check
 ```
 
@@ -482,14 +469,14 @@ Use `all-of`, `any-of`, `none-of` to combine predicate functions:
         users)
 
 ;; NONE-OF - no predicate must match (inverts)
-(filter (none-of (where :deleted true))
+(filter (none-of (where :deleted))
         items)
 
 ;; Complex combinations
 (filter (all-of (where :status = "active")
                 (any-of (where :role = "admin")
-                        (where :premium true))
-                (none-of (where :banned true)))
+                        (where :premium))
+                (none-of (where :banned)))
         users)
 ```
 
@@ -594,8 +581,8 @@ This distinction exists because `where` is designed for safe filtering over pote
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
-(filter (where :active true) users)
-(remove (where :deleted true) items)
+(filter (where :active) users)
+(remove (where :deleted) items)
 (find (where :id = 42) users)
 ```
 
@@ -714,8 +701,8 @@ This distinction exists because `where` is designed for safe filtering over pote
 
 ```clojure
 (empty? [])                        ; => true
-(some (where :admin true) users)   ; any admins?
-(every? (where :active true) users); all active?
+(some (where :admin) users)   ; any admins?
+(every? (where :active) users); all active?
 (contains? {:a 1} :a)              ; => true
 (contains? {:a 1} :b)              ; => false
 ```
@@ -969,7 +956,7 @@ Call registered tools using the `call` function:
 ;; Store tool result for later use
 (let [users (call "get-users")]
   (->> users
-       (filter (where :active true))
+       (filter (where :active))
        (count)))
 ```
 
@@ -1050,7 +1037,7 @@ Find eligible orders (high value, premium status, not flagged):
      (filter (all-of (where :total > 100)
                      (any-of (where :status = "vip")
                              (where :status = "premium"))
-                     (none-of (where :flagged true)))))
+                     (none-of (where :flagged)))))
 ```
 
 ### 10.7 Transform and Select Fields
@@ -1059,7 +1046,7 @@ Get names and emails of active users:
 
 ```clojure
 (->> ctx/users
-     (filter (where :active true))
+     (filter (where :active))
      (mapv (fn [u] (select-keys u [:name :email]))))
 ```
 
@@ -1248,6 +1235,8 @@ This matters because tools may have side effects. The interpreter guarantees:
 
 ## 12. Error Handling
 
+Errors are internally represented as structured maps (e.g., `{:error, %{type: :parse_error, message: "...", ...}}`) for programmatic handling by the host. The formatted strings shown below are human-readable renderings for display to users or LLMs.
+
 ### 12.1 Error Types
 
 | Error Type | Cause |
@@ -1263,7 +1252,7 @@ This matters because tools may have side effects. The interpreter guarantees:
 
 ### 12.2 Error Message Format
 
-Errors include location and context:
+Errors should include location and context when available. Source location tracking (line/column) is recommended but optional for v1 implementations—at minimum, errors must include the error type and a descriptive message.
 
 ```
 parse-error at line 3, column 15:
@@ -1327,6 +1316,7 @@ Anonymous functions are supported via `fn` with restrictions:
 **Restrictions:**
 - No recursion within `fn` (no self-reference)
 - No `#()` short syntax (simplifies parsing)
+- No destructuring in parameters (use `let` inside the body instead)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
 
@@ -1341,6 +1331,10 @@ Anonymous functions are supported via `fn` with restrictions:
 
 ;; Multiple arguments with reduce
 (reduce (fn [acc x] (+ acc (:amount x))) 0 items)
+
+;; Destructuring inside fn (NOT in params)
+(mapv (fn [m] (let [{:keys [name age]} m] {:name name :years age})) users)
+;; NOT: (mapv (fn [{:keys [name age]}] ...) users)  ; INVALID
 ```
 
 **When to use `fn` vs `where`:**
@@ -1379,7 +1373,7 @@ integer     = ["-"] digit+ ;
 float       = ["-"] digit+ "." digit+ [exponent] ;
 exponent    = ("e" | "E") ["+" | "-"] digit+ ;
 string      = '"' string-char* '"' ;
-string-char = escape-seq | (any char except '"' and '\') ;
+string-char = escape-seq | (any char except '"', '\', and newline) ;
 escape-seq  = '\\' ('"' | '\\' | 'n' | 't' | 'r') ;
 
 symbol      = symbol-first symbol-rest* ;

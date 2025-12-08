@@ -27,3 +27,6 @@ ptc_runner-*.tar
 
 # Temporary commit message files from tooling.
 .commit_msg.txt
+
+# Benchmark output (generated results).
+/priv/ptc_lisp_benchmark/

@@ -40,8 +40,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:let, [binding()], t()}
           # Conditionals
           | {:if, t(), t(), t()}                     # (if cond then else)
-          # Anonymous function
-          | {:fn, [pattern()], t()}                  # (fn [x y] body)
+          # Anonymous function (simple params only, no destructuring)
+          | {:fn, [simple_param()], t()}             # (fn [x y] body)
           # Short-circuit logic (special forms, not calls)
           | {:and, [t()]}
           | {:or, [t()]}
@@ -57,6 +57,9 @@ defmodule PtcRunner.Lisp.CoreAST do
           {:var, atom()}
           | {:destructure, {:keys, [atom()], keyword()}}  # {:keys [a b] :or {a default}}
           | {:destructure, {:as, atom(), pattern()}}      # {:keys [...] :as m}
+
+  # fn params are restricted to simple symbols (no destructuring)
+  @type simple_param :: {:var, atom()}
 
   @type field_path :: {:field, [field_segment()]}
   @type field_segment :: {:keyword, atom()} | {:string, String.t()}
@@ -192,6 +195,10 @@ defp do_analyze({:list, [head | rest]} = list) do
 
     # Tool call
     {:symbol, :call}    -> analyze_call_tool(rest)
+
+    # Comparison operators (strict 2-arity per spec section 8.4)
+    {:symbol, op} when op in [:=, :'not=', :>, :<, :>=, :<=] ->
+      analyze_comparison(op, rest)
 
     # Generic function call
     _ -> analyze_call(list)
@@ -383,10 +390,12 @@ defp analyze_fn(_),
   do: {:error, {:invalid_arity, :fn, "expected (fn [params] body)"}}
 
 # Support multiple params: (fn [x y] body)
+# NOTE: Destructuring is NOT allowed in fn params (only simple symbols)
+# Use: (fn [m] (let [{:keys [a b]} m] ...)) instead
 defp analyze_fn_params({:vector, param_asts}) do
   params =
     Enum.reduce_while(param_asts, {:ok, []}, fn ast, {:ok, acc} ->
-      case analyze_pattern(ast) do
+      case analyze_simple_param(ast) do
         {:ok, pattern} -> {:cont, {:ok, [pattern | acc]}}
         {:error, _} = err -> {:halt, err}
       end
@@ -400,6 +409,14 @@ end
 
 defp analyze_fn_params(_),
   do: {:error, {:invalid_form, "fn parameters must be a vector"}}
+
+# Only simple symbols allowed as fn params (no destructuring)
+defp analyze_simple_param({:symbol, name}), do: {:ok, {:var, name}}
+
+defp analyze_simple_param(other),
+  do: {:error, {:invalid_form,
+    "fn parameters must be simple symbols, not destructuring patterns. " <>
+    "Use (fn [m] (let [{:keys [a b]} m] ...)) instead. Got: #{inspect(other)}"}}
 ```
 
 ### 3.8 `and` / `or` — Short-Circuit Logic
@@ -557,7 +574,28 @@ defp analyze_call_tool(_) do
 end
 ```
 
-### 3.13 Generic Function Call
+### 3.13 Comparison Operators (Strict 2-Arity)
+
+Per the specification (section 8.4), comparison operators are strictly 2-arity.
+Chained comparisons like `(< 1 2 3)` are not supported.
+
+```elixir
+# Comparison operators require exactly 2 arguments
+defp analyze_comparison(op, [left_ast, right_ast]) do
+  with {:ok, left} <- do_analyze(left_ast),
+       {:ok, right} <- do_analyze(right_ast) do
+    {:ok, {:call, {:var, op}, [left, right]}}
+  end
+end
+
+defp analyze_comparison(op, args) do
+  {:error, {:invalid_arity, op,
+            "comparison operators require exactly 2 arguments, got #{length(args)}. " <>
+            "Use (and (#{op} a b) (#{op} b c)) for chained comparisons."}}
+end
+```
+
+### 3.14 Generic Function Call
 
 ```elixir
 # Everything else: (f arg1 arg2 ...)
@@ -569,7 +607,7 @@ defp analyze_call({:list, [f_ast | arg_asts]}) do
 end
 ```
 
-### 3.14 Helper Functions
+### 3.15 Helper Functions
 
 ```elixir
 defp analyze_list(xs) do
@@ -620,6 +658,7 @@ end
 | `cond` | `:invalid_cond_form` | Empty or odd pair count |
 | `call` | `:invalid_call_tool_name` | Non-string tool name |
 | `->`, `->>` | `:invalid_thread_form` | No expressions |
+| `=`, `>`, `<`, etc. | `:invalid_arity` | Not exactly 2 args (comparisons are strict 2-arity) |
 | General | `:invalid_form` | Empty list, etc. |
 
 ---
@@ -730,6 +769,41 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
     test "non-string name rejected" do
       raw = {:list, [{:symbol, :call}, {:symbol, :'get-users'}]}
       assert {:error, {:invalid_call_tool_name, _}} = Analyze.analyze(raw)
+    end
+  end
+
+  describe "comparison operators (strict 2-arity)" do
+    test "valid 2-arity comparison" do
+      raw = {:list, [{:symbol, :<}, 1, 2]}
+      assert {:ok, {:call, {:var, :<}, [1, 2]}} = Analyze.analyze(raw)
+    end
+
+    test "all comparison operators accept exactly 2 args" do
+      for op <- [:=, :'not=', :>, :<, :>=, :<=] do
+        raw = {:list, [{:symbol, op}, {:symbol, :a}, {:symbol, :b}]}
+        assert {:ok, {:call, {:var, ^op}, [{:var, :a}, {:var, :b}]}} = Analyze.analyze(raw)
+      end
+    end
+
+    test "chained comparison (3 args) is rejected" do
+      raw = {:list, [{:symbol, :<}, 1, 2, 3]}
+      assert {:error, {:invalid_arity, :<, msg}} = Analyze.analyze(raw)
+      assert msg =~ "exactly 2 arguments"
+      assert msg =~ "got 3"
+    end
+
+    test "single arg comparison is rejected" do
+      raw = {:list, [{:symbol, :>}, 1]}
+      assert {:error, {:invalid_arity, :>, msg}} = Analyze.analyze(raw)
+      assert msg =~ "exactly 2 arguments"
+      assert msg =~ "got 1"
+    end
+
+    test "zero arg comparison is rejected" do
+      raw = {:list, [{:symbol, :=}]}
+      assert {:error, {:invalid_arity, :=, msg}} = Analyze.analyze(raw)
+      assert msg =~ "exactly 2 arguments"
+      assert msg =~ "got 0"
     end
   end
 end
