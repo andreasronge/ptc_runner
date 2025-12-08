@@ -337,8 +337,10 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Normal builtins: {:normal, fun}
-  defp apply_fun({:normal, fun}, args, _ctx, memory, _tool_exec) when is_function(fun) do
-    {:ok, apply(fun, args), memory}
+  # Special handling for closures - convert them to Erlang functions
+  defp apply_fun({:normal, fun}, args, ctx, memory, tool_exec) when is_function(fun) do
+    converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, ctx, memory, tool_exec) end)
+    {:ok, apply(fun, converted_args), memory}
   end
 
   # Variadic builtins: {:variadic, fun2, identity}
@@ -476,4 +478,30 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp safe_includes(_, _), do: false
+
+  # Convert Lisp closures to Erlang functions for use with higher-order functions
+  # The closure must have 1 parameter (enforced at evaluation time)
+  defp closure_to_fun({:closure, param_names, body, closure_env}, ctx, memory, tool_exec) do
+    fn arg -> eval_closure_arg(arg, param_names, body, closure_env, ctx, memory, tool_exec) end
+  end
+
+  # Non-closures pass through unchanged
+  defp closure_to_fun(value, _ctx, _memory, _tool_exec) do
+    value
+  end
+
+  # Helper to evaluate closure with a single argument
+  defp eval_closure_arg(arg, param_names, body, closure_env, ctx, memory, tool_exec) do
+    if length(param_names) != 1 do
+      raise ArgumentError, "arity mismatch: expected 1, got #{length(param_names)}"
+    end
+
+    bindings = Enum.zip(param_names, [arg]) |> Map.new()
+    new_env = Map.merge(closure_env, bindings)
+
+    case do_eval(body, ctx, memory, new_env, tool_exec) do
+      {:ok, result, _} -> result
+      {:error, _} = err -> raise inspect(err)
+    end
+  end
 end
