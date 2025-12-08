@@ -54,13 +54,16 @@ program = ~s({
 })
 
 # Execute safely with resource limits
-{:ok, result, metrics} = PtcRunner.run(program, tools: tools)
+{:ok, result, metrics} = PtcRunner.Json.run(program, tools: tools)
 # result = 700
 # metrics = %{duration_ms: 2, memory_bytes: 1024}
 ```
 
+> **Note:** The deprecated `PtcRunner.run/2` function delegates to `PtcRunner.Json.run/2`. See [Usage](#usage) for examples of both JSON and PTC-Lisp DSLs.
+
 ## Features
 
+- **Multiple DSLs**: JSON (stable) and PTC-Lisp (efficient Clojure-like syntax)
 - **JSON DSL** with operations for filtering, mapping, aggregation, and control flow
 - **Variable bindings** to store and reference results across operations
 - **Tool registry** for user-defined functions
@@ -86,7 +89,9 @@ program = ~s({
 
 ## Documentation
 
-- **[Architecture](docs/architecture.md)** - System design, DSL specification, API reference
+- **[Architecture](docs/architecture.md)** - System design, API reference, resource limits
+- **[JSON DSL Operations](docs/ptc-json-specification.md)** - Complete JSON operation reference and examples (if available)
+- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Rationale, language design, and evaluation plan
 - **[LLM Testing](docs/llm-testing.md)** - Benchmark results, testing modes, model comparison
 - **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
 
@@ -102,15 +107,17 @@ end
 
 ## Usage
 
-### Basic Execution
+### JSON DSL
+
+#### Basic Execution
 
 ```elixir
 # Simple program
-{:ok, result, _metrics} = PtcRunner.run(~s({"program": {"op": "literal", "value": 42}}))
+{:ok, result, _metrics} = PtcRunner.Json.run(~s({"program": {"op": "literal", "value": 42}}))
 # result = 42
 
 # With context data
-{:ok, result, _metrics} = PtcRunner.run(
+{:ok, result, _metrics} = PtcRunner.Json.run(
   ~s({"program": {"op": "pipe", "steps": [
     {"op": "load", "name": "numbers"},
     {"op": "sum", "field": "value"}
@@ -120,7 +127,7 @@ end
 # result = 6
 ```
 
-### With Tools
+#### With Tools
 
 ```elixir
 tools = %{
@@ -128,20 +135,49 @@ tools = %{
   "search" => fn %{"query" => q} -> MyApp.search(q) end
 }
 
-{:ok, result, _metrics} = PtcRunner.run(program, tools: tools)
+{:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
 ```
+
+### PTC-Lisp
+
+PTC-Lisp is an efficient Clojure-like DSL that offers 3-5x better token density compared to JSON.
+
+```elixir
+# Define tools
+tools = %{
+  "get_expenses" => fn _args ->
+    [
+      %{"category" => "travel", "amount" => 500},
+      %{"category" => "food", "amount" => 50},
+      %{"category" => "travel", "amount" => 200}
+    ]
+  end
+}
+
+# Same example using PTC-Lisp instead of JSON
+program = ~s(
+  (->> (call "get_expenses" {})
+       (filter (where :category = "travel"))
+       (sum-by :amount))
+)
+
+{:ok, result, _metrics} = PtcRunner.Lisp.run(program, tools: tools)
+# result = 700
+```
+
+See [ptc-lisp-overview.md](docs/ptc-lisp-overview.md) for complete documentation.
 
 ### Resource Limits
 
 ```elixir
 # Custom limits
-{:ok, result, metrics} = PtcRunner.run(program,
+{:ok, result, metrics} = PtcRunner.Json.run(program,
   timeout: 5000,       # 5 seconds
   max_heap: 5_000_000  # ~40MB
 )
 
 # Handle resource errors
-case PtcRunner.run(program) do
+case PtcRunner.Json.run(program) do
   {:ok, result, metrics} -> handle_success(result)
   {:error, {:timeout, ms}} -> handle_timeout(ms)
   {:error, {:memory_exceeded, bytes}} -> handle_oom(bytes)
@@ -155,10 +191,10 @@ Store results from previous turns and reference them:
 
 ```elixir
 # Turn 1: Fetch data
-{:ok, users, _} = PtcRunner.run(~s({"program": {"op": "call", "tool": "get_users"}}), tools: tools)
+{:ok, users, _} = PtcRunner.Json.run(~s({"program": {"op": "call", "tool": "get_users"}}), tools: tools)
 
 # Turn 2: Use previous result
-{:ok, count, _} = PtcRunner.run(
+{:ok, count, _} = PtcRunner.Json.run(
   ~s({"program": {"op": "pipe", "steps": [
     {"op": "load", "name": "previous_users"},
     {"op": "count"}
