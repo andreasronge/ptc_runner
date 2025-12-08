@@ -196,6 +196,12 @@ jobs:
 
       # No Elixir setup needed - triage only reads code and PR comments
 
+      - name: Install Claude Code CLI
+        if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
       - name: Record triage start time and add labels
         if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
         id: triage-start

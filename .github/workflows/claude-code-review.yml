@@ -93,6 +93,12 @@ jobs:
         if: steps.merge-check.outputs.merge_ok == 'true'
         uses: ./.github/actions/setup-elixir
 
+      - name: Install Claude Code CLI
+        if: steps.merge-check.outputs.merge_ok == 'true'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
       - name: Run Claude Code Review
         if: steps.merge-check.outputs.merge_ok == 'true'
         id: claude-review

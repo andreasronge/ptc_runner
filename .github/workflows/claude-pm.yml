@@ -67,6 +67,11 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
       - name: Check for open PRs
         id: open-prs
         env:
