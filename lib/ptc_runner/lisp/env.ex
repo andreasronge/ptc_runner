@@ -1,0 +1,124 @@
+defmodule PtcRunner.Lisp.Env do
+  @moduledoc """
+  Builds the initial environment with builtins for PTC-Lisp.
+
+  Provides the foundation environment with all builtin functions
+  and their descriptors (normal, variadic, etc.).
+  """
+
+  alias PtcRunner.Lisp.Runtime
+
+  @type binding :: {:normal, function()} | {:variadic, function(), term()}
+  @type env :: %{atom() => binding()}
+
+  @spec initial() :: env()
+  def initial do
+    builtin_bindings() |> Map.new()
+  end
+
+  defp builtin_bindings do
+    [
+      # ============================================================
+      # Collection operations (normal arity)
+      # ============================================================
+      {:filter, {:normal, &Runtime.filter/2}},
+      {:remove, {:normal, &Runtime.remove/2}},
+      {:find, {:normal, &Runtime.find/2}},
+      {:map, {:normal, &Runtime.map/2}},
+      {:mapv, {:normal, &Runtime.mapv/2}},
+      {:pluck, {:normal, &Runtime.pluck/2}},
+      {:sort, {:normal, &Runtime.sort/1}},
+      {:"sort-by", {:normal, &Runtime.sort_by/2}},
+      {:reverse, {:normal, &Runtime.reverse/1}},
+      {:first, {:normal, &Runtime.first/1}},
+      {:last, {:normal, &Runtime.last/1}},
+      {:nth, {:normal, &Runtime.nth/2}},
+      {:take, {:normal, &Runtime.take/2}},
+      {:drop, {:normal, &Runtime.drop/2}},
+      {:"take-while", {:normal, &Runtime.take_while/2}},
+      {:"drop-while", {:normal, &Runtime.drop_while/2}},
+      {:distinct, {:normal, &Runtime.distinct/1}},
+      {:concat, {:variadic, &Runtime.concat2/2, []}},
+      {:into, {:normal, &Runtime.into/2}},
+      {:flatten, {:normal, &Runtime.flatten/1}},
+      {:zip, {:normal, &Runtime.zip/2}},
+      {:interleave, {:normal, &Runtime.interleave/2}},
+      {:count, {:normal, &Runtime.count/1}},
+      {:empty?, {:normal, &Runtime.empty?/1}},
+      {:reduce, {:normal, &Runtime.reduce/3}},
+      {:"sum-by", {:normal, &Runtime.sum_by/2}},
+      {:"avg-by", {:normal, &Runtime.avg_by/2}},
+      {:"min-by", {:normal, &Runtime.min_by/2}},
+      {:"max-by", {:normal, &Runtime.max_by/2}},
+      {:"group-by", {:normal, &Runtime.group_by/2}},
+      {:some, {:normal, &Runtime.some/2}},
+      {:every?, {:normal, &Runtime.every?/2}},
+      {:"not-any?", {:normal, &Runtime.not_any?/2}},
+      {:contains?, {:normal, &Runtime.contains?/2}},
+
+      # ============================================================
+      # Map operations
+      # ============================================================
+      {:get, {:normal, &Runtime.get/2}},
+      {:"get-in", {:normal, &Runtime.get_in/2}},
+      {:assoc, {:normal, &Runtime.assoc/3}},
+      {:"assoc-in", {:normal, &Runtime.assoc_in/3}},
+      {:dissoc, {:normal, &Runtime.dissoc/2}},
+      {:merge, {:variadic, &Runtime.merge/2, %{}}},
+      {:"select-keys", {:normal, &Runtime.select_keys/2}},
+      {:keys, {:normal, &Runtime.keys/1}},
+      {:vals, {:normal, &Runtime.vals/1}},
+
+      # ============================================================
+      # Arithmetic — variadic with identity
+      # ============================================================
+      {:+, {:variadic, &Kernel.+/2, 0}},
+      {:-, {:variadic, &Kernel.-/2, 0}},
+      {:*, {:variadic, &Kernel.*/2, 1}},
+      {:/, {:normal, &Kernel.//2}},
+      {:mod, {:normal, &Runtime.mod/2}},
+      {:inc, {:normal, &Runtime.inc/1}},
+      {:dec, {:normal, &Runtime.dec/1}},
+      {:abs, {:normal, &Runtime.abs/1}},
+      {:max, {:variadic_nonempty, &Kernel.max/2}},
+      {:min, {:variadic_nonempty, &Kernel.min/2}},
+
+      # ============================================================
+      # Comparison — normal (binary)
+      # ============================================================
+      {:=, {:normal, &Kernel.==/2}},
+      {:"not=", {:normal, &Kernel.!=/2}},
+      {:>, {:normal, &Kernel.>/2}},
+      {:<, {:normal, &Kernel.</2}},
+      {:>=, {:normal, &Kernel.>=/2}},
+      {:<=, {:normal, &Kernel.<=/2}},
+
+      # ============================================================
+      # Logic
+      # ============================================================
+      {:not, {:normal, &Runtime.not_/1}},
+
+      # ============================================================
+      # Type predicates
+      # ============================================================
+      {:nil?, {:normal, &is_nil/1}},
+      {:some?, {:normal, fn x -> not is_nil(x) end}},
+      {:boolean?, {:normal, &is_boolean/1}},
+      {:number?, {:normal, &is_number/1}},
+      {:string?, {:normal, &is_binary/1}},
+      {:keyword?, {:normal, fn x -> is_atom(x) and x not in [nil, true, false] end}},
+      {:vector?, {:normal, &is_list/1}},
+      {:map?, {:normal, &is_map/1}},
+      {:coll?, {:normal, &is_list/1}},
+
+      # ============================================================
+      # Numeric predicates
+      # ============================================================
+      {:zero?, {:normal, fn x -> x == 0 end}},
+      {:pos?, {:normal, fn x -> x > 0 end}},
+      {:neg?, {:normal, fn x -> x < 0 end}},
+      {:even?, {:normal, fn x -> rem(x, 2) == 0 end}},
+      {:odd?, {:normal, fn x -> rem(x, 2) != 0 end}}
+    ]
+  end
+end
