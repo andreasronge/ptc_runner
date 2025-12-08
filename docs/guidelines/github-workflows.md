@@ -75,7 +75,8 @@ The PM workflow (`claude-pm.yml`) orchestrates issue creation and implementation
 - Creates ONE issue at a time from specification documents
 - Issues are auto-added to GitHub Project when labeled (`enhancement`, `bug`, `tech-debt`)
 - Phase tracking uses labels (`phase:*`), not project fields
-- Triggers implementation only when issue has BOTH `ready-for-implementation` AND `claude-approved`
+- Triggers implementation automatically when issue has `ready-for-implementation` label
+- Skips if there's an open PR (prevents concurrent work)
 
 **GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
 
@@ -105,11 +106,11 @@ gh issue comment ISSUE_NUMBER --body "Closing: [explanation of why this won't be
 
 ### For Public Repository Safety
 
-All workflows require explicit maintainer approval before Claude can act:
+Most workflows require explicit maintainer approval before Claude can act:
 
 1. **PRs**: Maintainer must add `claude-review` label
 2. **Issues/PRs with @claude**: Requires `claude-approved` label (or be the maintainer)
-3. **Implementation**: Requires BOTH `ready-for-implementation` AND `claude-approved`
+3. **Implementation**: Triggers on `ready-for-implementation` label (review gate is sufficient)
 
 ### Loop Prevention
 
