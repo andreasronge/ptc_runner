@@ -264,25 +264,12 @@ For Claude workflows to work on an issue:
 
 ## Labels
 
-### Workflow Labels
-| Label | Meaning |
-|-------|---------|
-| `claude-approved` | Maintainer-approved for Claude automation (required for PM workflow) |
-| `claude-review` | Triggers Claude automated PR review |
-| `needs-review` | Issue ready for review workflow |
-| `ready-for-implementation` | Approved, ready to implement |
-| `from-pr-review` | Created by triage workflow during PR review |
-| `blocked` | Cannot proceed due to dependency |
-| `pm-stuck` | PM workflow has failed and needs manual intervention |
-| `pm-failed-attempt` | Tracks consecutive PM failures (3 = stuck) |
+See [GitHub Workflows](github-workflows.md#labels-reference) for the complete labels reference.
 
-### Issue Type Labels
-| Label | Meaning | Priority |
-|-------|---------|----------|
-| `bug` | Bug fix needed | Highest |
-| `tech-debt` | Refactoring, test improvements, code quality | High |
-| `enhancement` | New feature | Normal |
-| `documentation` | Documentation updates | Low |
+**Key labels for issues**:
+- `needs-review` - Triggers issue review workflow
+- `ready-for-implementation` - Issue approved and ready
+- `claude-approved` - Required for PM to trigger implementation (maintainer adds this)
 
 ## References
 
