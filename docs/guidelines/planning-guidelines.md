@@ -1,12 +1,16 @@
 # Planning & Issue Review Guidelines
 
-## Key References
+## Purpose
 
-- **[Architecture](../architecture.md)** - System design and DSL specification
-- **[Testing Guidelines](testing-guidelines.md)** - Test patterns and quality standards
-- **[Development Guidelines](development-guidelines.md)** - Elixir coding standards
-- **[Issue Creation Guidelines](issue-creation-guidelines.md)** - How to create well-specified issues
-- **[PR Review Guidelines](pr-review-guidelines.md)** - PR review structure and severity
+This document defines **how to review and evaluate GitHub issues** before they're approved for implementation - the 9-point checklist and review output format.
+
+**Audience**: Anyone reviewing issues (claude-issue-review workflow, maintainers).
+
+**Relationship to other docs**:
+- Reviews issues created following `issue-creation-guidelines.md` (template & quality)
+- The PM workflow (`pm-workflow.md`) triggers reviews by adding `needs-review` label
+
+**Used by**: `claude-issue-review.yml` workflow when reviewing issues.
 
 ## When to Use This Document
 
@@ -14,6 +18,32 @@ Read this document when:
 - Entering plan mode for a feature
 - Reviewing a GitHub issue
 - Evaluating an implementation proposal
+
+## Pre-Review Checks
+
+Before diving into the 9-point checklist, verify these basics:
+
+### Codebase Health
+- Are tests passing? (`mix test`)
+- Are there blocking bugs or tech-debt issues?
+- Is there a higher-priority issue that should be done first?
+
+**Priority order** (highest first):
+1. Bug fixes
+2. Issues from PR reviews (`from-pr-review` label)
+3. Tech debt blocking progress
+4. New features
+
+### Codebase Research
+- Does the issue accurately describe the current state?
+- Have the proposed files been verified to exist?
+- Do the referenced patterns actually exist in the codebase?
+
+### Documentation Impact
+If the issue changes public API or behavior, verify it identifies which docs need updating:
+- `docs/architecture.md` - DSL operations, system design
+- `README.md` - Public API, installation
+- Module `@moduledoc`/`@doc` - Function signatures
 
 ## Issue Review Checklist (9 Areas)
 
@@ -85,6 +115,11 @@ When reviewing an issue, structure your response as:
 ## Issue Review: [Title]
 
 **Summary**: [1-2 sentences]
+
+**Pre-Review Checks**:
+- Codebase health: [pass/issues found]
+- Higher-priority blockers: [none/list them]
+- Issue claims verified: [yes/issues found]
 
 **Analysis**:
 1. **Should This Be Done?**: [findings]
