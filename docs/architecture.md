@@ -57,7 +57,7 @@ lib/
 │   │
 │   └── lisp/                     # PTC-Lisp DSL (planned)
 │       ├── parser.ex             # S-expression parsing
-│       ├── analyzer.ex           # AST analysis
+│       ├── analyze.ex            # AST analysis
 │       └── interpreter.ex        # Evaluation
 ```
 
