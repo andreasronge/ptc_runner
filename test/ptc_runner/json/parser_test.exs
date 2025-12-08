@@ -1,4 +1,4 @@
-defmodule PtcRunner.ParserTest do
+defmodule PtcRunner.Json.ParserTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Json.Parser

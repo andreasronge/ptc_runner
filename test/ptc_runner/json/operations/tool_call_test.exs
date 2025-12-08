@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.ToolCallTest do
+defmodule PtcRunner.Json.Operations.ToolCallTest do
   use ExUnit.Case
 
   describe "call operation (tool invocation)" do

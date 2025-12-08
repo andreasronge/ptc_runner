@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.ComparisonTest do
+defmodule PtcRunner.Json.Operations.ComparisonTest do
   use ExUnit.Case
 
   # Eq comparison operation

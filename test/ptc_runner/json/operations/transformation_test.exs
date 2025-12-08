@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.TransformationTest do
+defmodule PtcRunner.Json.Operations.TransformationTest do
   use ExUnit.Case
 
   # Filter operation

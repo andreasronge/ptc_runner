@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.DataSourceTest do
+defmodule PtcRunner.Json.Operations.DataSourceTest do
   use ExUnit.Case
 
   # Basic literal operation

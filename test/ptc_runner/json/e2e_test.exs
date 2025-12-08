@@ -1,4 +1,4 @@
-defmodule PtcRunner.E2ETest do
+defmodule PtcRunner.Json.E2ETest do
   use ExUnit.Case, async: false
 
   @moduletag :e2e

@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.CollectionTest do
+defmodule PtcRunner.Json.Operations.CollectionTest do
   use ExUnit.Case
 
   # Pipe operation

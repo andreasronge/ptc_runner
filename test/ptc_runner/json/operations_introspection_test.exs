@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.IntrospectionTest do
+defmodule PtcRunner.Json.Operations.IntrospectionTest do
   use ExUnit.Case
 
   # Keys operation tests

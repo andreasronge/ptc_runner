@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.ErrorHandlingTest do
+defmodule PtcRunner.Json.Operations.ErrorHandlingTest do
   use ExUnit.Case
 
   # Validation errors

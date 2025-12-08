@@ -1,4 +1,4 @@
-defmodule PtcRunner.InterpreterTest do
+defmodule PtcRunner.Json.InterpreterTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Json.Interpreter

@@ -1,4 +1,4 @@
-defmodule PtcRunner.Operations.AggregationTest do
+defmodule PtcRunner.Json.Operations.AggregationTest do
   use ExUnit.Case
 
   # Count operation
