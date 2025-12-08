@@ -2,14 +2,18 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [labeled, synchronize]
+    types: [opened, labeled, synchronize]
 
 jobs:
   claude-review:
-    # Only run when claude-review label is added, or on sync if label already present
+    # Run when:
+    # - PR opened from claude/* branch (auto-review Claude's PRs)
+    # - claude-review label is added
+    # - PR synced and has claude-review label
     if: |
       github.event.pull_request.changed_files > 0 &&
       (
+        (github.event.action == 'opened' && startsWith(github.event.pull_request.head.ref, 'claude/')) ||
         (github.event.action == 'labeled' && github.event.label.name == 'claude-review') ||
         (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claude-review'))
       )
