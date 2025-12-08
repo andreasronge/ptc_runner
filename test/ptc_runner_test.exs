@@ -6,21 +6,21 @@ defmodule PtcRunnerTest do
   describe "run/2" do
     test "valid wrapped JSON string extracts program and runs successfully" do
       program = ~s({"program": {"op": "literal", "value": 42}})
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
       assert result == 42
     end
 
     test "valid wrapped map extracts program and runs successfully" do
       program = %{"program" => %{"op" => "literal", "value" => 99}}
-      {:ok, result, _metrics} = PtcRunner.run(program)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
       assert result == 99
     end
 
     test "missing program field returns parse error" do
       program = ~s({"data": {"op": "literal", "value": 42}})
-      {:error, {:parse_error, message}} = PtcRunner.run(program)
+      {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
 
       assert message == "Missing required field 'program'"
     end
@@ -28,17 +28,17 @@ defmodule PtcRunnerTest do
     test "program is not a map returns parse error" do
       # Test with null
       program = ~s({"program": null})
-      {:error, {:parse_error, message}} = PtcRunner.run(program)
+      {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
       assert message == "program must be a map"
 
       # Test with string
       program = ~s({"program": "not a map"})
-      {:error, {:parse_error, message}} = PtcRunner.run(program)
+      {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
       assert message == "program must be a map"
 
       # Test with array
       program = ~s({"program": [1, 2, 3]})
-      {:error, {:parse_error, message}} = PtcRunner.run(program)
+      {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
       assert message == "program must be a map"
     end
   end
@@ -46,7 +46,7 @@ defmodule PtcRunnerTest do
   describe "run!/2" do
     test "run! returns result without metrics" do
       program = ~s({"program": {"op": "literal", "value": 42}})
-      result = PtcRunner.run!(program)
+      result = PtcRunner.Json.run!(program)
 
       assert result == 42
     end
@@ -55,7 +55,7 @@ defmodule PtcRunnerTest do
       program = ~s({"program": {"op": "unknown_op"}})
 
       assert_raise RuntimeError, fn ->
-        PtcRunner.run!(program)
+        PtcRunner.Json.run!(program)
       end
     end
   end
@@ -77,7 +77,7 @@ defmodule PtcRunnerTest do
         "tool": "slow_tool"
       }})
 
-      result = PtcRunner.run(program, tools: tools, timeout_ms: 100)
+      result = PtcRunner.Json.run(program, tools: tools, timeout_ms: 100)
 
       assert match?({:error, {:timeout, _}}, result) or
                match?({:error, {:execution_error, _}}, result)
@@ -92,7 +92,7 @@ defmodule PtcRunnerTest do
       }})
 
       # With a reasonable memory limit, this should succeed
-      {:ok, result, _metrics} = PtcRunner.run(program, memory_limit_bytes: 1_000_000)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, memory_limit_bytes: 1_000_000)
       assert result == [1, 2, 3]
     end
   end
@@ -116,7 +116,7 @@ defmodule PtcRunnerTest do
         ]
       }
 
-      {:ok, result, metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, metrics} = PtcRunner.Json.run(program, context: context)
 
       assert result == 500
       assert metrics.duration_ms >= 0
@@ -139,7 +139,7 @@ defmodule PtcRunnerTest do
         ]
       }
 
-      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
       assert result == ["alice@example.com", "bob@example.com"]
     end
 
@@ -162,29 +162,29 @@ defmodule PtcRunnerTest do
         ]
       }
 
-      {:ok, result, _metrics} = PtcRunner.run(program, context: context)
+      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
       assert result == 700
     end
   end
 
   describe "format_error/1" do
     test "formats parse errors" do
-      assert PtcRunner.format_error({:parse_error, "unexpected token"}) ==
+      assert PtcRunner.Json.format_error({:parse_error, "unexpected token"}) ==
                "ParseError: unexpected token"
     end
 
     test "formats validation errors" do
-      assert PtcRunner.format_error({:validation_error, "unknown operation 'foo'"}) ==
+      assert PtcRunner.Json.format_error({:validation_error, "unknown operation 'foo'"}) ==
                "ValidationError: unknown operation 'foo'"
     end
 
     test "formats timeout errors" do
-      assert PtcRunner.format_error({:timeout, 5000}) ==
+      assert PtcRunner.Json.format_error({:timeout, 5000}) ==
                "TimeoutError: execution exceeded 5000ms limit"
     end
 
     test "formats memory exceeded errors" do
-      assert PtcRunner.format_error({:memory_exceeded, 10_000_000}) ==
+      assert PtcRunner.Json.format_error({:memory_exceeded, 10_000_000}) ==
                "MemoryError: exceeded 10000000 byte limit"
     end
 
@@ -193,46 +193,46 @@ defmodule PtcRunnerTest do
       Process terminated: {{:badmap, "Employee 1"}, [{Map, :get, ["Employee 1", "years_employed", nil], []}]}
       """
 
-      result = PtcRunner.format_error({:execution_error, error_msg})
+      result = PtcRunner.Json.format_error({:execution_error, error_msg})
       assert result =~ "TypeError:"
       assert result =~ "expected an object"
     end
 
     test "extracts value from badmap error" do
       error_msg = ~s(expected a map, got:\n\n    "some string value")
-      result = PtcRunner.format_error({:execution_error, error_msg})
+      result = PtcRunner.Json.format_error({:execution_error, error_msg})
       assert result == ~s(TypeError: expected an object but got: "some string value")
     end
 
     test "formats badkey execution errors" do
       error_msg = "key :missing not found in: %{name: \"test\"}"
-      result = PtcRunner.format_error({:execution_error, error_msg})
+      result = PtcRunner.Json.format_error({:execution_error, error_msg})
       assert result =~ "KeyError:"
       assert result =~ "not found"
     end
 
     test "formats undefined variable errors" do
       error_msg = ~s({:undefined_variable, "myvar"})
-      result = PtcRunner.format_error({:execution_error, error_msg})
+      result = PtcRunner.Json.format_error({:execution_error, error_msg})
       assert result =~ "UndefinedVariable:"
       assert result =~ "myvar"
     end
 
     test "formats arithmetic errors" do
       error_msg = "Process terminated: {:badarith, ...}"
-      result = PtcRunner.format_error({:execution_error, error_msg})
+      result = PtcRunner.Json.format_error({:execution_error, error_msg})
       assert result =~ "ArithmeticError:"
     end
 
     test "formats unknown errors with inspect" do
-      result = PtcRunner.format_error(:some_unknown_error)
+      result = PtcRunner.Json.format_error(:some_unknown_error)
       assert result =~ "Error:"
       assert result =~ "some_unknown_error"
     end
 
     test "truncates long generic error messages" do
       long_msg = String.duplicate("x", 500)
-      result = PtcRunner.format_error({:execution_error, long_msg})
+      result = PtcRunner.Json.format_error({:execution_error, long_msg})
       assert String.length(result) < 250
     end
   end

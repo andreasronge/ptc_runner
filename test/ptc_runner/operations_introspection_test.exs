@@ -12,7 +12,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == ["age", "city", "name"]
   end
 
@@ -25,7 +25,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == []
   end
 
@@ -38,7 +38,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "keys requires a map")
   end
 
@@ -51,7 +51,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "keys requires a map")
   end
 
@@ -64,7 +64,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "keys requires a map")
   end
 
@@ -77,7 +77,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:error, {:execution_error, message}} = PtcRunner.run(program)
+    {:error, {:execution_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "keys requires a map")
   end
 
@@ -92,7 +92,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "object"
   end
 
@@ -105,7 +105,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "list"
   end
 
@@ -118,7 +118,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "string"
   end
 
@@ -131,7 +131,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "number"
   end
 
@@ -144,7 +144,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "number"
   end
 
@@ -157,7 +157,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "boolean"
   end
 
@@ -170,7 +170,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "boolean"
   end
 
@@ -183,7 +183,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "null"
   end
 
@@ -202,7 +202,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == ["id", "name", "price"]
   end
 
@@ -215,7 +215,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program, context: %{"products" => [1, 2, 3]})
+    {:ok, result, _metrics} = PtcRunner.Json.run(program, context: %{"products" => [1, 2, 3]})
     assert result == "list"
   end
 
@@ -232,7 +232,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == ["city", "street", "zip"]
   end
 
@@ -249,7 +249,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
     assert result == "object"
   end
 
@@ -263,7 +263,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, type_result, _metrics} = PtcRunner.run(program1)
+    {:ok, type_result, _metrics} = PtcRunner.Json.run(program1)
     assert type_result == "list"
 
     # Second turn explores structure
@@ -276,7 +276,7 @@ defmodule PtcRunner.Operations.IntrospectionTest do
       ]
     }})
 
-    {:ok, keys_result, _metrics} = PtcRunner.run(program2)
+    {:ok, keys_result, _metrics} = PtcRunner.Json.run(program2)
     assert keys_result == ["id", "name"]
   end
 end

@@ -4,49 +4,49 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
   # Validation errors
   test "missing 'op' field raises validation error" do
     program = ~s({"program": {"value": 42}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Missing required field 'op'"}
   end
 
   test "unknown operation raises validation error" do
     program = ~s({"program": {"op": "unknown_op"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
   end
 
   test "typo in operation suggests closest match" do
     program = ~s({"program": {"op": "filer"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'filer'. Did you mean 'filter'?"}
   end
 
   test "missing letter typo suggests closest match" do
     program = ~s({"program": {"op": "selct"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'selct'. Did you mean 'select'?"}
   end
 
   test "extra letter typo suggests closest match" do
     program = ~s({"program": {"op": "filtter"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'filtter'. Did you mean 'filter'?"}
   end
 
   test "case insensitive typo suggestion" do
     program = ~s({"program": {"op": "FILTER"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'FILTER'. Did you mean 'filter'?"}
   end
 
   test "very different operation name has no suggestion" do
     program = ~s({"program": {"op": "xyz"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'xyz'"}
   end
@@ -59,48 +59,48 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         {"op": "filer", "where": {"op": "eq", "field": "x", "value": 1}}
       ]
     }})
-    {:error, {:validation_error, msg}} = PtcRunner.run(program)
+    {:error, {:validation_error, msg}} = PtcRunner.Json.run(program)
     assert msg =~ "Did you mean 'filter'?"
   end
 
   test "missing required field in operation raises validation error" do
     program = ~s({"program": {"op": "literal"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'literal' requires field 'value'"}
   end
 
   test "literal with no value field raises validation error" do
     program = ~s({"program": {"op": "load"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'load' requires field 'name'"}
   end
 
   test "nested unknown operation in pipe raises validation error" do
     program = ~s({"program": {"op": "pipe", "steps": [{"op": "unknown_op"}]}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
   end
 
   test "get operation missing field and path raises validation error" do
     program = ~s({"program": {"op": "get"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'get' requires either 'field' or 'path'"}
   end
 
   test "get operation with non-array path raises validation error" do
     program = ~s({"program": {"op": "get", "path": "not_an_array"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Field 'path' must be a list"}
   end
 
   test "get operation with non-string path elements raises validation error" do
     program = ~s({"program": {"op": "get", "path": ["valid", 123]}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "All path elements in 'path' must be strings"}
   end
@@ -115,7 +115,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "count requires a list")
   end
 
@@ -128,7 +128,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "sum requires a list")
   end
 
@@ -141,7 +141,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "filter requires a list")
   end
 
@@ -154,7 +154,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "first requires a list")
   end
 
@@ -167,7 +167,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "last requires a list")
   end
 
@@ -180,7 +180,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "nth requires a list")
   end
 
@@ -196,7 +196,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:validation_error, msg}} = PtcRunner.run(program)
+    {:error, {:validation_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "non-negative")
   end
 
@@ -209,7 +209,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "reject requires a list")
   end
 
@@ -222,7 +222,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "avg requires a list")
   end
 
@@ -235,7 +235,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "min requires a list")
   end
 
@@ -248,7 +248,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "max requires a list")
   end
 
@@ -261,35 +261,35 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
     }})
 
-    {:error, {:execution_error, msg}} = PtcRunner.run(program)
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
     assert String.contains?(msg, "contains requires a map")
   end
 
   # Validation errors for new operations
   test "nth missing index field raises validation error" do
     program = ~s({"program": {"op": "nth"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'nth' requires field 'index'"}
   end
 
   test "nth with negative index in validation raises validation error" do
     program = ~s({"program": {"op": "nth", "index": -1}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'nth' index must be non-negative, got -1"}
   end
 
   test "nth with non-integer index in validation raises validation error" do
     program = ~s({"program": {"op": "nth", "index": "not_an_integer"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'nth' field 'index' must be an integer"}
   end
 
   test "reject missing where field raises validation error" do
     program = ~s({"program": {"op": "reject"}})
-    {:error, reason} = PtcRunner.run(program)
+    {:error, reason} = PtcRunner.Json.run(program)
 
     assert reason == {:validation_error, "Operation 'reject' requires field 'where'"}
   end
@@ -297,28 +297,28 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
   # Parse errors
   test "malformed JSON raises parse error" do
     program = "{invalid json"
-    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
 
     assert String.contains?(message, "JSON decode error")
   end
 
   test "valid wrapped JSON string extracts program and runs successfully" do
     program = ~s({"program": {"op": "literal", "value": 42}})
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == 42
   end
 
   test "valid wrapped map extracts program and runs successfully" do
     program = %{"program" => %{"op" => "literal", "value" => 99}}
-    {:ok, result, _metrics} = PtcRunner.run(program)
+    {:ok, result, _metrics} = PtcRunner.Json.run(program)
 
     assert result == 99
   end
 
   test "missing program field returns parse error" do
     program = ~s({"data": {"op": "literal", "value": 42}})
-    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
 
     assert message == "Missing required field 'program'"
   end
@@ -326,17 +326,17 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
   test "program is not a map returns parse error" do
     # Test with null
     program = ~s({"program": null})
-    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
     assert message == "program must be a map"
 
     # Test with string
     program = ~s({"program": "not a map"})
-    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
     assert message == "program must be a map"
 
     # Test with array
     program = ~s({"program": [1, 2, 3]})
-    {:error, {:parse_error, message}} = PtcRunner.run(program)
+    {:error, {:parse_error, message}} = PtcRunner.Json.run(program)
     assert message == "program must be a map"
   end
 
@@ -364,7 +364,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
       ]
 
       for {program, _op_name} <- operations_without_input do
-        {:error, reason} = PtcRunner.run(program)
+        {:error, reason} = PtcRunner.Json.run(program)
         assert reason == {:execution_error, "No input available"}
       end
     end
@@ -380,7 +380,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         ]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'contains' requires field 'field'"}
     end
 
@@ -393,7 +393,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         ]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'contains' requires field 'value'"}
     end
 
@@ -406,7 +406,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         ]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'avg' requires field 'field'"}
     end
 
@@ -419,7 +419,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         ]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'min' requires field 'field'"}
     end
 
@@ -432,7 +432,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         ]
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'max' requires field 'field'"}
     end
 
@@ -443,7 +443,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'let' requires field 'name'"}
     end
 
@@ -455,7 +455,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Field 'name' must be a string"}
     end
 
@@ -466,7 +466,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'let' requires field 'value'"}
     end
 
@@ -477,7 +477,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         "value": {"op": "literal", "value": 5}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Operation 'let' requires field 'in'"}
     end
 
@@ -489,7 +489,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         "in": {"op": "var", "name": "x"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
     end
 
@@ -501,7 +501,7 @@ defmodule PtcRunner.Operations.ErrorHandlingTest do
         "in": {"op": "unknown_op"}
       }})
 
-      {:error, reason} = PtcRunner.run(program)
+      {:error, reason} = PtcRunner.Json.run(program)
       assert reason == {:validation_error, "Unknown operation 'unknown_op'"}
     end
   end
