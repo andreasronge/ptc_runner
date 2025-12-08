@@ -501,5 +501,82 @@ defmodule PtcRunner.LispTest do
 
       assert new_memory == delta
     end
+
+    test "thread-first with assoc chains" do
+      # Thread-first: value goes as first argument
+      source = "(-> {:a 1} (assoc :b 2) (assoc :c 3))"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == %{a: 1, b: 2, c: 3}
+    end
+
+    test "thread-last with multiple transformations" do
+      # Thread-last: value goes as last argument
+      source = ~S"""
+      (->> (call "get-numbers" {})
+           (filter (where :value > 1))
+           first
+           (:name))
+      """
+
+      tools = %{
+        "get-numbers" => fn _args ->
+          [
+            %{name: "one", value: 1},
+            %{name: "two", value: 2},
+            %{name: "three", value: 3}
+          ]
+        end
+      }
+
+      {:ok, result, _, _} = Lisp.run(source, tools: tools)
+      assert result == "two"
+    end
+
+    test "cond desugars to nested if correctly" do
+      source = ~S"""
+      (let [x ctx/x]
+        (cond
+          (> x 10) "big"
+          (> x 5) "medium"
+          :else "small"))
+      """
+
+      {:ok, result1, _, _} = Lisp.run(source, context: %{x: 15})
+      assert result1 == "big"
+
+      {:ok, result2, _, _} = Lisp.run(source, context: %{x: 7})
+      assert result2 == "medium"
+
+      {:ok, result3, _, _} = Lisp.run(source, context: %{x: 3})
+      assert result3 == "small"
+    end
+
+    test "map destructuring in let bindings" do
+      source = ~S"""
+      (let [{:keys [name age]} ctx/user]
+        {:name name
+         :age age})
+      """
+
+      ctx = %{user: %{name: "Alice", age: 30}}
+      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      assert result == %{name: "Alice", age: 30}
+    end
+
+    test "let bindings with multiple interdependent variables" do
+      source = ~S"""
+      (let [x 10
+            y 20
+            z (+ x y)]
+        {:result z
+         :cached-x x
+         :cached-y y})
+      """
+
+      {:ok, result, delta, _} = Lisp.run(source)
+
+      assert result == 30
+      assert delta == %{:"cached-x" => 10, :"cached-y" => 20}
+    end
   end
 end
