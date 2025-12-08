@@ -2,6 +2,16 @@
 
 $ARGUMENTS
 
+## Purpose
+
+This document provides runtime instructions for the PM GitHub Action (`claude-pm.yml`).
+
+**Audience**: Claude Code running as the autonomous PM agent.
+
+**Relationship to other docs**:
+- Creates issues following `docs/guidelines/issue-creation-guidelines.md` (template & quality)
+- Issues are reviewed by `claude-issue-review.yml` using `docs/guidelines/planning-guidelines.md` (9-point checklist)
+
 ## Your Role
 
 You are an autonomous PM agent responsible for keeping this project moving forward with a healthy, maintainable codebase.

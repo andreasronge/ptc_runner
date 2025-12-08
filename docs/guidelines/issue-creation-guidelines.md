@@ -1,6 +1,16 @@
 # Issue Creation Guidelines
 
-Guidelines for creating well-specified GitHub issues.
+## Purpose
+
+This document defines **how to write well-specified GitHub issues** - the template, sizing guidelines, and quality checklist.
+
+**Audience**: Anyone creating issues (maintainers, PM workflow, auto-triage).
+
+**Relationship to other docs**:
+- After creation, issues are reviewed using `planning-guidelines.md` (9-point checklist)
+- The PM workflow (`pm-workflow.md`) orchestrates when to create issues
+
+**Used by**: `claude-pm.yml` workflow when creating new issues.
 
 ## Overview
 
@@ -13,77 +23,6 @@ Each issue should be:
 - **Self-contained**: All information needed to implement is in the issue
 - **Right-sized**: Large enough to be testable via E2E test, small enough for one PR
 - **Verified**: Based on actual codebase analysis, not assumptions
-
-## Key References
-
-- **[Architecture](../architecture.md)** - DSL specification and system design
-- **[Planning Guidelines](planning-guidelines.md)** - Issue review checklist
-- **[Testing Guidelines](testing-guidelines.md)** - Test quality standards
-- **[PR Review Guidelines](pr-review-guidelines.md)** - What reviewers expect
-
-## Before Creating an Issue
-
-### 1. Check Codebase Health First
-
-Before creating a new feature issue, verify:
-
-```bash
-# Are there failing tests?
-mix test
-
-# Are there pending issues from PR reviews?
-gh issue list --label "from-pr-review"
-
-# Is there technical debt blocking progress?
-gh issue list --label "tech-debt"
-```
-
-**Priority order:**
-1. Fix failing tests
-2. Address review-found issues (unless documented reason to defer)
-3. Technical debt that blocks the feature
-4. New features
-
-### 2. Analyze What's Implemented
-
-```bash
-# Check recent commits
-git log --oneline -20
-
-# Search for existing implementations
-grep -r "pattern" lib/
-
-# Verify tests exist for the feature
-grep -r "describe.*feature" test/
-```
-
-### 3. Verify Against Architecture
-
-Reference `docs/architecture.md` to understand:
-- What dependencies exist?
-- Is this the logical next step?
-
-### 4. Identify Documentation Impact
-
-Before finalizing the issue, analyze which documentation might need updates:
-
-```bash
-# Check what docs reference related functionality
-grep -r "keyword" docs/
-
-# Review architecture.md for relevant sections
-grep -r "feature_name" docs/architecture.md
-
-# Check if there's API documentation that might be affected
-grep -r "function_name" docs/
-```
-
-**Documentation to consider:**
-- `docs/architecture.md` - If adding/changing DSL operations or system design
-- `CLAUDE.md` - If adding new commands, conventions, or project structure (file must be brief !)
-- `README.md` - If changing public API or installation steps
-- Module `@moduledoc` and `@doc` - If changing function signatures or behavior
-- Type specs (`@spec`, `@type`) - If changing data structures
 
 ## Issue Template
 

@@ -52,10 +52,10 @@ jobs:
 
             Review this GitHub issue using the project's planning guidelines:
 
-            1. Read `docs/guidelines/planning-guidelines.md` for the 9-point review checklist
+            1. Read `docs/guidelines/planning-guidelines.md` for the pre-review checks and 9-point review checklist
             2. Use `gh issue view ${{ github.event.issue.number }} --comments` to read the full issue and all comments
             3. Explore the codebase to verify proposed solutions work with existing code
-            4. Follow the output format from the planning guidelines
+            4. Follow the output format from the planning guidelines (including Pre-Review Checks section)
 
             After your review:
             - Post your review as a comment using `gh issue comment`
