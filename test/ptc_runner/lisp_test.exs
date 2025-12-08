@@ -106,6 +106,15 @@ defmodule PtcRunner.LispTest do
       assert delta == %{y: 20}
       assert new_memory == %{x: 10, y: 20}
     end
+
+    test "map with :result key set to nil returns nil" do
+      source = "{:result nil, :stored 100}"
+      {:ok, result, delta, new_memory} = Lisp.run(source)
+
+      assert result == nil
+      assert delta == %{stored: 100}
+      assert new_memory == %{stored: 100}
+    end
   end
 
   describe "context and memory access" do
