@@ -273,7 +273,7 @@ memory/results        ; read from persistent memory
 (min-by :key coll)  (max-by :key coll)  (group-by :key coll)
 
 ; Maps
-(get m :key)  (get-in m [:a :b])  (assoc m :k v)  (merge m1 m2)
+(get m :key)  (get m :key default)  (get-in m [:a :b])  (get-in m [:a :b] default)  (assoc m :k v)  (merge m1 m2)
 (select-keys m [:a :b])  (keys m)  (vals m)
 (:key m)  (:key m default)  ; keyword as function
 ```
