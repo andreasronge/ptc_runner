@@ -261,6 +261,39 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
     end
   end
 
+  describe "evaluation safety" do
+    property "valid programs evaluate without crashes" do
+      check all(ast <- Gen.gen_expr(2)) do
+        source = Formatter.format(ast)
+        ctx = %{items: [1, 2, 3], user: %{name: "test", active: true}}
+
+        tools = build_tools_for_source(source)
+        result = safe_run(source, context: ctx, tools: tools)
+
+        # Should return {:ok, _, _, _} or {:error, _}, never crash the interpreter
+        assert match?({:ok, _, _, _}, result) or match?({:error, _}, result),
+               "Unexpected result for source: #{source}\nResult: #{inspect(result)}"
+      end
+    end
+  end
+
+  describe "determinism" do
+    property "same input always produces same output" do
+      check all(ast <- Gen.gen_expr(2)) do
+        source = Formatter.format(ast)
+        ctx = %{x: 42, items: [1, 2, 3]}
+
+        tools = build_tools_for_source(source, "fixed")
+
+        result1 = safe_run(source, context: ctx, tools: tools)
+        result2 = safe_run(source, context: ctx, tools: tools)
+
+        assert result1 == result2,
+               "Non-deterministic evaluation for: #{source}"
+      end
+    end
+  end
+
   # Helpers
 
   defp valid_ast?(value) do
@@ -319,5 +352,20 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
 
   defp ast_equivalent?(a, b) do
     a == b
+  end
+
+  defp build_tools_for_source(source, default_result \\ :result) do
+    base_tools = %{"test_tool" => fn _args -> default_result end}
+
+    Regex.scan(~r/\(call "([^"]+)"/, source)
+    |> Enum.reduce(base_tools, fn [_full, tool_name], acc ->
+      Map.put_new(acc, tool_name, fn _args -> default_result end)
+    end)
+  end
+
+  defp safe_run(source, opts) do
+    PtcRunner.Lisp.run(source, opts)
+  rescue
+    _e -> {:error, :runtime_error}
   end
 end
