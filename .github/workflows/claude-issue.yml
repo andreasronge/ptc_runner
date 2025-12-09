@@ -73,6 +73,8 @@ jobs:
 
             **Keep it simple**: Only implement what was requested. No extras, no refactoring beyond scope.
 
+            **NEVER modify .credo.exs** - if credo complains, fix the code or use inline `# credo:disable-for-next-line` comments.
+
             Workflow:
             1. Read issue AND comments: `gh issue view ${{ github.event.issue.number }} --comments`
             2. Branch: `git checkout -b claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)`
