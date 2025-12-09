@@ -126,6 +126,8 @@ jobs:
 
             **Fix only what was asked**: No refactoring, no unrelated fixes, minimal changes only.
 
+            **NEVER modify .credo.exs** - if credo complains, fix the code or use inline `# credo:disable-for-next-line` comments.
+
             Workflow:
             1. Read PR: `gh pr view ${{ steps.pr-branch.outputs.pr_number }} --comments`
             2. Read review comments: `gh api repos/${{ github.repository }}/pulls/${{ steps.pr-branch.outputs.pr_number }}/comments --jq '.[] | {path: .path, line: .line, body: .body}'`
