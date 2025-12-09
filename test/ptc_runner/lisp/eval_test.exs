@@ -149,9 +149,10 @@ defmodule PtcRunner.Lisp.EvalTest do
                Eval.eval({:set, [inner, {:set, [3, 4]}]}, %{}, %{}, %{}, &dummy_tool/2)
 
       # Extract the inner MapSets to compare
-      [set1, set2] = MapSet.to_list(result)
-      assert MapSet.equal?(set1, MapSet.new([1, 2]))
-      assert MapSet.equal?(set2, MapSet.new([3, 4]))
+      inner_sets = MapSet.to_list(result)
+      assert length(inner_sets) == 2
+      assert Enum.any?(inner_sets, &MapSet.equal?(&1, MapSet.new([1, 2])))
+      assert Enum.any?(inner_sets, &MapSet.equal?(&1, MapSet.new([3, 4])))
     end
 
     test "set with error in element propagates error" do
