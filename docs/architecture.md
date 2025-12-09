@@ -63,6 +63,7 @@ lib/
 │       ├── core_ast.ex           # CoreAST type definitions
 │       ├── eval.ex               # CoreAST evaluation
 │       ├── runtime.ex            # Builtin functions (~90 operations)
+│       ├── schema.ex             # LLM prompt generation
 │       └── env.ex                # Environment/bindings management
 ```
 
