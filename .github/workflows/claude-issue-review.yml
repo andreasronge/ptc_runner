@@ -63,14 +63,24 @@ jobs:
             4. Follow the output format from the planning guidelines (including Pre-Review Checks section)
 
             After your review:
-            - Post your review as a comment using `gh issue comment`
-            - If the issue needs corrections, update the issue body:
-              1. Write the corrected issue body to /tmp/issue-body.md
-              2. Run: gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md
-            - Add appropriate labels using `gh issue edit --add-label`:
-              - `needs-clarification` if important details are missing
-              - `needs-breakdown` if issue should be split into smaller issues
-              - `ready-for-implementation` AND `claude-approved` if issue is well-defined and ready (add both labels together)
-              - `bug` / `enhancement` / `documentation` based on issue type
+
+            1. **Always update the issue body** with improvements you identify:
+               - Fix unclear descriptions, add missing context
+               - Add edge cases, test scenarios, or acceptance criteria
+               - Correct technical inaccuracies based on codebase exploration
+               - Structure the issue better (add sections if missing)
+               - To update: write to /tmp/issue-body.md, then run:
+                 `gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md`
+
+            2. **Post a review comment** summarizing:
+               - What you found and changed in the issue body
+               - Any remaining concerns or questions
+               - Your recommendation (ready, needs-clarification, or needs-breakdown)
+
+            3. **Add appropriate labels** using `gh issue edit --add-label`:
+               - `ready-for-implementation` AND `claude-approved` if issue is well-defined and ready
+               - `needs-clarification` if important details are missing (and you couldn't fill them in)
+               - `needs-breakdown` if issue should be split into smaller issues
+               - `bug` / `enhancement` / `documentation` based on issue type
 
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Write,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label:*),Bash(mix:*),Bash(git:*)"'
