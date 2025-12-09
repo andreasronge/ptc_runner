@@ -1037,6 +1037,34 @@ defmodule PtcRunner.Lisp.EvalTest do
       {:ok, result, _} = run(~S"(contains? #{1 2 3} 2)")
       assert result == true
     end
+
+    test "remove on set filters elements" do
+      {:ok, result, _} = run(~S"(remove odd? #{1 2 3 4})")
+      assert is_list(result)
+      assert Enum.sort(result) == [2, 4]
+    end
+
+    test "mapv on set returns vector" do
+      {:ok, result, _} = run(~S"(mapv inc #{1 2 3})")
+      assert is_list(result)
+      assert Enum.sort(result) == [2, 3, 4]
+    end
+
+    test "empty? on set returns true or false" do
+      {:ok, result_true, _} = run(~S"(empty? #{})")
+      assert result_true == true
+
+      {:ok, result_false, _} = run(~S"(empty? #{1 2 3})")
+      assert result_false == false
+    end
+
+    test "count on set returns size" do
+      {:ok, result_zero, _} = run(~S"(count #{})")
+      assert result_zero == 0
+
+      {:ok, result_three, _} = run(~S"(count #{1 2 3})")
+      assert result_three == 3
+    end
   end
 
   defp dummy_tool(_name, _args), do: :ok
