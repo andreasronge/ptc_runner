@@ -2,7 +2,32 @@
 
 This document specifies property-based testing infrastructure for the PTC-Lisp interpreter.
 
-**Status:** Draft v2 (aligned with Spec v0.3.2)
+**Status:** Ready for Implementation (aligned with Spec v0.3.2)
+
+---
+
+## PM Instructions
+
+This plan is ready for implementation. Create issues in the following order:
+
+### First Issue: Infrastructure Setup
+**Title:** `[Property Testing] Add StreamData dependency and create Formatter module`
+**Scope:**
+1. Add `stream_data` dependency to `mix.exs` (Section 1)
+2. Create `lib/ptc_runner/lisp/formatter.ex` (Section 2)
+3. Verify formatter produces valid syntax for all AST types
+
+**Acceptance criteria:** `mix compile` passes, formatter can serialize all AST node types from the Raw AST Reference table.
+
+### Subsequent Issues (in order)
+1. **Generators module** - Create `test/support/lisp_generators.ex` with all generators from Section 3
+2. **Basic property tests** - Roundtrip parsing, evaluation safety, determinism (Section 4.2-4.4)
+3. **Domain property tests** - Arithmetic, collections, type predicates, short-circuit (Section 4.5-4.8)
+4. **CI integration** - Add property tests to CI pipeline (Section 5, Phase 4)
+
+See Section 5 (Implementation Checklist) for the full breakdown.
+
+---
 
 ## Raw AST Reference
 
