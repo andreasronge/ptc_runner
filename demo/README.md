@@ -2,6 +2,15 @@
 
 Interactive chat demo showing how PtcRunner enables efficient LLM queries over large datasets.
 
+## Two DSL Options
+
+This demo includes two language implementations:
+
+| DSL | Module | Description |
+|-----|--------|-------------|
+| **PTC-JSON** | `PtcDemo.CLI` | JSON-based DSL (stable) |
+| **PTC-Lisp** | `PtcDemo.LispCLI` | Clojure-like DSL (experimental, ~3-5x more token efficient) |
+
 ## The Problem with Traditional Function Calling
 
 ```
@@ -20,20 +29,28 @@ Answer: "$42,500"
 
 ## The PtcRunner Solution
 
+**JSON DSL:**
 ```
 User: "Total travel expenses?"
   ↓
-LLM generates program: {"op":"pipe","steps":[
+LLM generates: {"op":"pipe","steps":[
   {"op":"load","name":"expenses"},
   {"op":"filter","where":{"op":"eq","field":"category","value":"travel"}},
   {"op":"sum","field":"amount"}
 ]}
   ↓
-PtcRunner executes in sandbox (data stays in BEAM memory)
+PtcRunner executes in sandbox → Only "42500" back to LLM
+```
+
+**Lisp DSL (more compact):**
+```
+User: "Total travel expenses?"
   ↓
-Only result "42500" → back to LLM  ← Cheap!
+LLM generates: (->> ctx/expenses
+                   (filter (where :category = "travel"))
+                   (sum-by :amount))
   ↓
-Answer: "$42,500"
+PtcRunner.Lisp executes in sandbox → Only "42500" back to LLM
 ```
 
 **Benefits:**
@@ -58,6 +75,7 @@ export REQ_LLM_MODEL=anthropic:claude-sonnet-4-20250514
 # Install dependencies
 mix deps.get
 
+# === JSON DSL ===
 # Run the chat (text mode - default, token-efficient)
 mix run -e "PtcDemo.CLI.main([])"
 
@@ -66,6 +84,13 @@ mix run -e "PtcDemo.CLI.main([\"--structured\"])"
 
 # Run in explore mode (LLM discovers schema via introspection)
 mix run -e "PtcDemo.CLI.main([\"--explore\"])"
+
+# === Lisp DSL ===
+# Run the Lisp chat (recommended - most token efficient)
+mix run -e "PtcDemo.LispCLI.main([])"
+
+# Lisp with explore mode
+mix run -e "PtcDemo.LispCLI.main([\"--explore\"])"
 ```
 
 ## Generation Modes
@@ -119,6 +144,29 @@ Average bonus for senior level employees?
 Sum all travel expenses
 How many expenses are pending approval?
 Total approved expenses over $500?
+```
+
+## Example Lisp Programs
+
+The Lisp DSL generates more compact, readable programs:
+
+```clojure
+;; Count products in a category
+(count (filter (where :category = "electronics") ctx/products))
+
+;; Total revenue from delivered orders
+(->> ctx/orders
+     (filter (where :status = "delivered"))
+     (sum-by :total))
+
+;; Average salary in engineering
+(avg-by :salary (filter (where :department = "engineering") ctx/employees))
+
+;; Find most expensive product
+(->> ctx/products (sort-by :price >) (first))
+
+;; Remote employees count
+(count (filter (where :remote) ctx/employees))
 ```
 
 ## Commands
@@ -195,9 +243,9 @@ Tests use **constraint-based assertions** since data is randomly generated:
 
 1. **Startup**: Datasets loaded into BEAM memory (GenServer state)
 2. **Query**: You ask a natural language question
-3. **Generate**: LLM creates a compact PTC program (~200 bytes)
-   - Structured mode: Uses JSON schema for guaranteed valid output
-   - Text mode: Uses retry logic if JSON is malformed
+3. **Generate**: LLM creates a compact PTC program
+   - JSON DSL: ~200 bytes, structured or text mode
+   - Lisp DSL: ~50-100 bytes, more compact syntax
 4. **Execute**: PtcRunner runs program in sandbox against in-memory data
 5. **Respond**: Only small result returns to LLM for natural language answer
 
@@ -213,11 +261,11 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 ┌─────────────────────────────────────────────────────────────┐
 │                    LLM (via ReqLLM)                          │
 │  • Receives question + schema (not data!)                   │
-│  • Generates PTC program (~200 bytes)                       │
+│  • Generates PTC program (JSON or Lisp)                     │
 └─────────────────────────┬───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      PtcRunner                               │
+│              PtcRunner.Json or PtcRunner.Lisp                │
 │  • Executes program in sandboxed BEAM process               │
 │  • Processes 2500 records in memory                         │
 │  • Returns small result (number, filtered list, etc.)       │
@@ -229,3 +277,13 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 │  • Generates natural language answer                        │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## Lisp vs JSON Comparison
+
+| Aspect | JSON DSL | Lisp DSL |
+|--------|----------|----------|
+| Program size | ~200 bytes | ~50-100 bytes |
+| Readability | Verbose | Concise |
+| Token usage | Higher | ~3-5x lower |
+| Maturity | Stable | Experimental |
+| Memory contract | N/A | Supports persistent memory |
