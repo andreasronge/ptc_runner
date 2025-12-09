@@ -55,6 +55,12 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
+  defp do_analyze({:set, elems}) do
+    with {:ok, elems2} <- analyze_list(elems) do
+      {:ok, {:set, elems2}}
+    end
+  end
+
   # ============================================================
   # Symbols and variables
   # ============================================================
