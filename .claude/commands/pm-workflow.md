@@ -186,6 +186,27 @@ When an issue is ready and unblocked:
 - Add labels: `enhancement`, `needs-review`, and any relevant phase labels
 - After creating, update the epic body to link the new issue
 
+### Updating Existing Issues
+
+You are trusted to refine and improve issues as you work. When reading specs or analyzing the codebase, you may discover that an existing issue needs updates.
+
+**When to update an issue:**
+- Acceptance criteria need clarification or are incomplete
+- Implementation hints are outdated or missing key files
+- Edge cases were overlooked
+- The scope is unclear and needs tightening
+- Dependencies have changed
+
+**How to update:**
+1. Edit the issue body with improvements: `gh issue edit ISSUE_NUMBER --body-file /tmp/updated-issue.md`
+2. Add a brief comment explaining what changed and why
+3. If the issue had `ready-for-implementation`, it keeps that label (no re-review needed for minor refinements)
+
+**Boundaries:**
+- **Do update**: Clarifications, better examples, missing details, tighter scope
+- **Don't change**: Fundamental purpose or major scope expansion (flag to human instead)
+- **When in doubt**: Make the update and document your reasoning in a comment
+
 ### Declining Issues
 
 When an issue shouldn't be implemented:
