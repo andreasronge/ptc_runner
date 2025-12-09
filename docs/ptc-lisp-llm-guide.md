@@ -206,7 +206,7 @@ memory/results        ; read from persistent memory
 ### Special Forms
 ```clojure
 (let [x 1, y 2] body)              ; local bindings
-(let [{:keys [a b]} m] body)       ; map destructuring (ONLY in let, NOT in fn params)
+(let [{:keys [a b]} m] body)       ; map destructuring
 (if cond then else)                ; conditional (else is REQUIRED)
 (when cond body)                   ; single-branch returns nil if false
 (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
@@ -325,7 +325,6 @@ The return value determines memory behavior:
 
 **Key constraints:**
 - `where` predicates MUST have an operator (except for truthy check)
-- Destructuring is ONLY allowed in `let`, NOT in `fn` params
 - Comparisons are strictly 2-arity: use `(and (>= x 100) (<= x 500))` NOT `(<= 100 x 500)`
 
 <!-- PTC_PROMPT_END -->
