@@ -324,6 +324,12 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
       assert {:error, {:invalid_where_form, msg}} = Analyze.analyze(raw)
       assert msg =~ "expected"
     end
+
+    test "error case: invalid field path element type" do
+      raw = {:list, [{:symbol, :where}, {:vector, [123]}, {:symbol, :=}, 1]}
+      assert {:error, {:invalid_where_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "keywords or strings"
+    end
   end
 
   describe "predicate combinators" do
@@ -635,6 +641,44 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
       raw = {:list, [{:symbol, :let}, 42, 100]}
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
       assert msg =~ "vector"
+    end
+
+    test "error case: invalid key type in destructuring" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map, [{{:keyword, :keys}, {:vector, [123]}}]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :a}
+         ]}
+
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "keyword or symbol"
+    end
+
+    test "error case: invalid default key type" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :x}]}},
+                 {{:keyword, :or}, {:map, [{{:string, "x"}, 10}]}}
+               ]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :x}
+         ]}
+
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "default keys must be keywords"
     end
   end
 
