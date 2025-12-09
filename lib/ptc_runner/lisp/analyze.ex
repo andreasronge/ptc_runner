@@ -148,12 +148,32 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_pattern({:symbol, name}), do: {:ok, {:var, name}}
 
+  defp analyze_pattern({:vector, elements}) do
+    with {:ok, patterns} <- analyze_pattern_list(elements) do
+      {:ok, {:destructure, {:seq, patterns}}}
+    end
+  end
+
   defp analyze_pattern({:map, pairs}) do
     analyze_destructure_map(pairs)
   end
 
   defp analyze_pattern(other) do
     {:error, {:unsupported_pattern, other}}
+  end
+
+  defp analyze_pattern_list(elements) do
+    elements
+    |> Enum.reduce_while({:ok, []}, fn elem, {:ok, acc} ->
+      case analyze_pattern(elem) do
+        {:ok, p} -> {:cont, {:ok, [p | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, rev} -> {:ok, Enum.reverse(rev)}
+      other -> other
+    end
   end
 
   defp analyze_destructure_map(pairs) do
@@ -321,7 +341,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_fn_params({:vector, param_asts}) do
     params =
       Enum.reduce_while(param_asts, {:ok, []}, fn ast, {:ok, acc} ->
-        case analyze_simple_param(ast) do
+        case analyze_pattern(ast) do
           {:ok, pattern} -> {:cont, {:ok, [pattern | acc]}}
           {:error, _} = err -> {:halt, err}
         end
@@ -335,15 +355,6 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_fn_params(_) do
     {:error, {:invalid_form, "fn parameters must be a vector"}}
-  end
-
-  defp analyze_simple_param({:symbol, name}), do: {:ok, {:var, name}}
-
-  defp analyze_simple_param(other) do
-    {:error,
-     {:invalid_form,
-      "fn parameters must be simple symbols, not destructuring patterns. " <>
-        "Use (fn [m] (let [{:keys [a b]} m] ...)) instead. Got: #{inspect(other)}"}}
   end
 
   # ============================================================

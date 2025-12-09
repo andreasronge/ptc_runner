@@ -207,7 +207,7 @@ defmodule PtcRunner.Lisp.EvalTest do
 
       {:ok, closure, %{}} = Eval.eval({:fn, params, body}, %{}, %{}, %{}, &dummy_tool/2)
 
-      assert match?({:closure, [:x], _body, _env}, closure)
+      assert match?({:closure, ^params, ^body, _env}, closure)
     end
 
     test "closure captures environment" do
