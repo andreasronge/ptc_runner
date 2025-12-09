@@ -197,9 +197,11 @@ When an issue is rejected by the review workflow:
 
 For Claude workflows to work on an issue:
 
-1. **Add `claude-approved` label** - Required for PM workflow to trigger implementation
-2. **Add `ready-for-implementation` label** - Issue must be reviewed and approved
-3. PM workflow will only act on issues with BOTH labels
+1. **Add `needs-review` label** - Triggers issue review workflow
+2. **Issue review adds both labels** - When approved, review adds `ready-for-implementation` AND `claude-approved`
+3. **PM triggers implementation** - Posts `@claude` comment, which requires `claude-approved` to execute
+
+The review gate is the single approval point. Once an issue passes review, automation handles the rest.
 
 ## Labels
 
@@ -207,8 +209,8 @@ See [GitHub Workflows](github-workflows.md#labels-reference) for the complete la
 
 **Key labels for issues**:
 - `needs-review` - Triggers issue review workflow
-- `ready-for-implementation` - Issue approved and ready
-- `claude-approved` - Required for PM to trigger implementation (maintainer adds this)
+- `ready-for-implementation` - Issue approved and ready for PM
+- `claude-approved` - Allows `@claude` comments to trigger implementation (added by review workflow)
 
 ## References
 

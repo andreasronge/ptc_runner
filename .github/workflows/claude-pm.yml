@@ -143,57 +143,43 @@ jobs:
           done
           echo "Stuck state reset complete"
 
-      - name: Gather phase status
-        id: phase-status
+      - name: Find active epic
+        id: epic
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Determine current phase by finding first phase with open issues
-          # or the next phase to start if all previous are complete
-          PHASES=("api-refactor" "parser" "analyzer" "eval" "integration" "property-testing" "polish")
-          PHASE_NAMES=("API Refactor" "Parser" "Analyzer" "Eval" "Integration" "Property Testing" "Polish")
+          # Find active epic (source of truth for PM workflow)
+          EPIC_DATA=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "type:epic" \
+            --label "status:active" \
+            --state open \
+            --json number,title,body \
+            --limit 1)
 
-          current_phase=""
-          current_phase_name=""
-          open_in_phase=0
+          EPIC_COUNT=$(echo "$EPIC_DATA" | jq length)
 
-          for i in "${!PHASES[@]}"; do
-            phase="${PHASES[$i]}"
-            open=$(gh issue list --label "phase:$phase" --state open --json number | jq length)
-            if [ "$open" -gt 0 ]; then
-              current_phase="$phase"
-              current_phase_name="${PHASE_NAMES[$i]}"
-              open_in_phase=$open
-              break
-            fi
-          done
+          if [ "$EPIC_COUNT" -eq 0 ]; then
+            echo "has_epic=false" >> $GITHUB_OUTPUT
+            echo "::notice::No active epic found - PM will handle other work"
+          else
+            echo "has_epic=true" >> $GITHUB_OUTPUT
+            EPIC_NUMBER=$(echo "$EPIC_DATA" | jq -r '.[0].number')
+            EPIC_TITLE=$(echo "$EPIC_DATA" | jq -r '.[0].title')
 
-          # If no open phase issues, find next phase to start
-          if [ -z "$current_phase" ]; then
-            for i in "${!PHASES[@]}"; do
-              phase="${PHASES[$i]}"
-              closed=$(gh issue list --label "phase:$phase" --state closed --json number | jq length)
-              if [ "$closed" -eq 0 ]; then
-                current_phase="$phase"
-                current_phase_name="${PHASE_NAMES[$i]}"
-                open_in_phase=0
-                break
-              fi
-            done
+            echo "number=$EPIC_NUMBER" >> $GITHUB_OUTPUT
+            # Use EOF delimiter to handle titles with special characters
+            echo "title<<EPIC_TITLE_EOF" >> $GITHUB_OUTPUT
+            echo "$EPIC_TITLE" >> $GITHUB_OUTPUT
+            echo "EPIC_TITLE_EOF" >> $GITHUB_OUTPUT
+
+            # Write body to file for multi-line handling
+            echo "$EPIC_DATA" | jq -r '.[0].body' > /tmp/epic-body.md
+
+            echo "Found active epic #$EPIC_NUMBER: $EPIC_TITLE"
           fi
 
-          # Default to property-testing if somehow not determined
-          if [ -z "$current_phase" ]; then
-            current_phase="property-testing"
-            current_phase_name="Property Testing"
-            open_in_phase=0
-          fi
-
-          echo "current_phase=$current_phase" >> $GITHUB_OUTPUT
-          echo "current_phase_name=$current_phase_name" >> $GITHUB_OUTPUT
-          echo "open_in_phase=$open_in_phase" >> $GITHUB_OUTPUT
-
-          # Tech debt / from-pr-review count
+          # Tech debt / from-pr-review count (PM monitors these regardless of epic)
           tech_debt=$(gh issue list --label "from-pr-review" --state open --json number | jq length)
           echo "tech_debt=$tech_debt" >> $GITHUB_OUTPUT
 
@@ -205,12 +191,20 @@ jobs:
           needs_review=$(gh issue list --label "needs-review" --state open --json number | jq length)
           echo "needs_review=$needs_review" >> $GITHUB_OUTPUT
 
-          echo "Phase status determined:"
-          echo "  Current phase: $current_phase_name ($current_phase)"
-          echo "  Open in phase: $open_in_phase"
+          echo "Status:"
           echo "  Tech debt: $tech_debt"
           echo "  Ready issues: $ready_issues"
           echo "  Needs review: $needs_review"
+
+      - name: Read epic body
+        id: epic-body
+        if: steps.epic.outputs.has_epic == 'true'
+        run: |
+          # Use delimiter to handle multi-line content
+          echo "body<<EPIC_BODY_EOF" >> $GITHUB_OUTPUT
+          cat /tmp/epic-body.md >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EPIC_BODY_EOF" >> $GITHUB_OUTPUT
 
       - name: Run Claude PM
         id: claude-pm
@@ -226,12 +220,18 @@ jobs:
             **Trigger**: ${{ github.event_name }}
             **Action**: ${{ github.event.inputs.action || 'next-issue' }}
 
-            ## Pre-computed State (no need to query GitHub for this)
-            - **Current phase**: ${{ steps.phase-status.outputs.current_phase_name }} (`${{ steps.phase-status.outputs.current_phase }}`)
-            - **Open issues in current phase**: ${{ steps.phase-status.outputs.open_in_phase }}
-            - **Ready for implementation**: ${{ steps.phase-status.outputs.ready_issues }}
-            - **Pending review**: ${{ steps.phase-status.outputs.needs_review }}
-            - **Tech debt (from-pr-review)**: ${{ steps.phase-status.outputs.tech_debt }}
+            ## Epic Status
+            - **Has active epic**: ${{ steps.epic.outputs.has_epic }}
+            - **Epic number**: #${{ steps.epic.outputs.number || 'N/A' }}
+            - **Epic title**: ${{ steps.epic.outputs.title || 'N/A' }}
+
+            ## Epic Body
+            ${{ steps.epic-body.outputs.body || '*No active epic - handle tech debt and ready issues*' }}
+
+            ## Other Work
+            - **Ready for implementation**: ${{ steps.epic.outputs.ready_issues }}
+            - **Pending review**: ${{ steps.epic.outputs.needs_review }}
+            - **Tech debt (from-pr-review)**: ${{ steps.epic.outputs.tech_debt }}
             - **Failure count**: ${{ steps.status.outputs.failure_count }}
 
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh:*),Bash(git:*),Bash(mix test:*),Bash(mix compile:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(wc:*)"'
@@ -250,20 +250,15 @@ jobs:
           echo "- Ready issues: $(gh issue list --label ready-for-implementation --state open --json number | jq length)"
           echo "- Stuck: $(gh issue list --label pm-stuck --state open --json number | jq length)"
           echo ""
-          echo "Phase status:"
-          echo "- API Refactor open: $(gh issue list --label phase:api-refactor --state open --json number | jq length)"
-          echo "- API Refactor closed: $(gh issue list --label phase:api-refactor --state closed --json number | jq length)"
-          echo "- Parser open: $(gh issue list --label phase:parser --state open --json number | jq length)"
-          echo "- Parser closed: $(gh issue list --label phase:parser --state closed --json number | jq length)"
-          echo "- Analyzer open: $(gh issue list --label phase:analyzer --state open --json number | jq length)"
-          echo "- Analyzer closed: $(gh issue list --label phase:analyzer --state closed --json number | jq length)"
-          echo "- Eval open: $(gh issue list --label phase:eval --state open --json number | jq length)"
-          echo "- Eval closed: $(gh issue list --label phase:eval --state closed --json number | jq length)"
-          echo "- Integration open: $(gh issue list --label phase:integration --state open --json number | jq length)"
-          echo "- Integration closed: $(gh issue list --label phase:integration --state closed --json number | jq length)"
-          echo "- Property Testing open: $(gh issue list --label phase:property-testing --state open --json number | jq length)"
-          echo "- Property Testing closed: $(gh issue list --label phase:property-testing --state closed --json number | jq length)"
-          echo "- Polish open: $(gh issue list --label phase:polish --state open --json number | jq length)"
-          echo "- Polish closed: $(gh issue list --label phase:polish --state closed --json number | jq length)"
+          echo "Epic status:"
+          EPIC=$(gh issue list --label "type:epic" --label "status:active" --state open --json number,title --limit 1)
+          if [ "$(echo "$EPIC" | jq length)" -gt 0 ]; then
+            echo "- Active epic: #$(echo "$EPIC" | jq -r '.[0].number') - $(echo "$EPIC" | jq -r '.[0].title')"
+          else
+            echo "- Active epic: None"
+          fi
           echo ""
-          echo "Deferred issues: $(gh issue list --label deferred --state open --json number | jq length)"
+          echo "Work queues:"
+          echo "- Tech debt (from-pr-review): $(gh issue list --label from-pr-review --state open --json number | jq length)"
+          echo "- Needs review: $(gh issue list --label needs-review --state open --json number | jq length)"
+          echo "- Deferred: $(gh issue list --label deferred --state open --json number | jq length)"
