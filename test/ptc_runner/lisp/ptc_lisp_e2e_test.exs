@@ -496,4 +496,30 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert message =~ "expected at least 3 elements, got 2"
     end
   end
+
+  describe "group-by with destructuring" do
+    test "average by category using destructuring" do
+      expenses = [
+        %{category: "food", amount: 100},
+        %{category: "food", amount: 50},
+        %{category: "transport", amount: 30}
+      ]
+
+      program = """
+      (->> ctx/expenses
+           (group-by :category)
+           (map (fn [[category items]]
+                  {:category category
+                   :average (avg-by :amount items)}))
+           (sort-by :category))
+      """
+
+      {:ok, result, _, _} = Lisp.run(program, context: %{expenses: expenses})
+
+      assert [
+               %{category: "food", average: 75.0},
+               %{category: "transport", average: 30.0}
+             ] = result
+    end
+  end
 end
