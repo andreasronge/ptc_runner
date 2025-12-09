@@ -130,6 +130,18 @@ defmodule PtcRunner.Lisp.ParserTest do
       set_ws = "#" <> "{ 1 , 2 , 3 }"
       assert {:ok, {:set, [1, 2, 3]}} = Parser.parse(set_ws)
     end
+
+    test "set containing map" do
+      set_map = "#" <> "{:a {:b 1}}"
+
+      assert {:ok, {:set, [{:keyword, :a}, {:map, [{{:keyword, :b}, 1}]}]}} =
+               Parser.parse(set_map)
+    end
+
+    test "set with mixed types" do
+      set_mixed = "#" <> "{:a \"b\" 3}"
+      assert {:ok, {:set, [{:keyword, :a}, {:string, "b"}, 3]}} = Parser.parse(set_mixed)
+    end
   end
 
   describe "whitespace and comments" do
