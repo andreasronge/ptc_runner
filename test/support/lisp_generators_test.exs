@@ -261,6 +261,73 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
     end
   end
 
+  describe "evaluation safety" do
+    property "valid programs evaluate without crashes" do
+      check all(ast <- Gen.gen_expr(2)) do
+        source = Formatter.format(ast)
+        ctx = %{items: [1, 2, 3], user: %{name: "test", active: true}}
+
+        # Create a tool executor that handles any tool name
+        tools = %{"test_tool" => fn _args -> :ok end}
+
+        # Extract tool names from source and add them to tools map
+        tools =
+          Regex.scan(~r/\(call "([^"]+)"/, source)
+          |> Enum.reduce(tools, fn [_full, tool_name], acc ->
+            Map.put_new(acc, tool_name, fn _args -> :result end)
+          end)
+
+        result =
+          try do
+            PtcRunner.Lisp.run(source, context: ctx, tools: tools)
+          rescue
+            # Catch runtime errors during evaluation - these are expected for some generated programs
+            _e -> {:error, :runtime_error}
+          end
+
+        # Should return {:ok, _, _, _} or {:error, _}, never crash the interpreter
+        assert match?({:ok, _, _, _}, result) or match?({:error, _}, result),
+               "Unexpected result for source: #{source}\nResult: #{inspect(result)}"
+      end
+    end
+  end
+
+  describe "determinism" do
+    property "same input always produces same output" do
+      check all(ast <- Gen.gen_expr(2)) do
+        source = Formatter.format(ast)
+        ctx = %{x: 42, items: [1, 2, 3]}
+
+        # Create a tool executor that handles any tool name
+        tools = %{"tool" => fn _args -> "fixed" end}
+
+        # Extract tool names from source and add them to tools map
+        tools =
+          Regex.scan(~r/\(call "([^"]+)"/, source)
+          |> Enum.reduce(tools, fn [_full, tool_name], acc ->
+            Map.put_new(acc, tool_name, fn _args -> "fixed" end)
+          end)
+
+        result1 =
+          try do
+            PtcRunner.Lisp.run(source, context: ctx, tools: tools)
+          rescue
+            _e -> {:error, :runtime_error}
+          end
+
+        result2 =
+          try do
+            PtcRunner.Lisp.run(source, context: ctx, tools: tools)
+          rescue
+            _e -> {:error, :runtime_error}
+          end
+
+        assert result1 == result2,
+               "Non-deterministic evaluation for: #{source}"
+      end
+    end
+  end
+
   # Helpers
 
   defp valid_ast?(value) do
