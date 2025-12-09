@@ -1,9 +1,9 @@
-defmodule PtcDemo.CLI do
+defmodule PtcDemo.LispCLI do
   @moduledoc """
-  Interactive CLI for the PTC Demo.
+  Interactive CLI for the PTC-Lisp Demo.
 
-  Demonstrates how PtcRunner enables LLMs to query large datasets efficiently
-  by generating programs that execute in BEAM memory, keeping data out of
+  Demonstrates how PtcRunner.Lisp enables LLMs to query large datasets efficiently
+  by generating Lisp programs that execute in BEAM memory, keeping data out of
   LLM context.
   """
 
@@ -26,9 +26,9 @@ defmodule PtcDemo.CLI do
     end
 
     # Start the agent
-    {:ok, _pid} = PtcDemo.Agent.start_link(data_mode: data_mode)
+    {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode)
 
-    IO.puts(banner(PtcDemo.Agent.model(), PtcDemo.Agent.data_mode()))
+    IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
 
     # Enter REPL loop
     loop()
@@ -56,25 +56,25 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/reset") do
-    PtcDemo.Agent.reset()
+    PtcDemo.LispAgent.reset()
     IO.puts("   [Context cleared, data mode reset to schema]\n")
     loop()
   end
 
   defp handle_input("/mode") do
-    mode = PtcDemo.Agent.data_mode()
+    mode = PtcDemo.LispAgent.data_mode()
     IO.puts("   [Data mode: #{mode}]\n")
     loop()
   end
 
   defp handle_input("/mode schema") do
-    PtcDemo.Agent.set_data_mode(:schema)
+    PtcDemo.LispAgent.set_data_mode(:schema)
     IO.puts("   [Switched to schema mode - LLM receives full schema]\n")
     loop()
   end
 
   defp handle_input("/mode explore") do
-    PtcDemo.Agent.set_data_mode(:explore)
+    PtcDemo.LispAgent.set_data_mode(:explore)
     IO.puts("   [Switched to explore mode - LLM must discover schema]\n")
     loop()
   end
@@ -85,8 +85,8 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/model") do
-    model = PtcDemo.Agent.model()
-    presets = PtcDemo.Agent.preset_models()
+    model = PtcDemo.LispAgent.model()
+    presets = PtcDemo.LispAgent.preset_models()
 
     IO.puts("\nCurrent model: #{model}")
     IO.puts("\nAvailable presets:")
@@ -101,7 +101,7 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/model " <> name) do
-    presets = PtcDemo.Agent.preset_models()
+    presets = PtcDemo.LispAgent.preset_models()
     name = String.trim(name)
 
     model =
@@ -110,7 +110,7 @@ defmodule PtcDemo.CLI do
         preset -> preset
       end
 
-    PtcDemo.Agent.set_model(model)
+    PtcDemo.LispAgent.set_model(model)
     IO.puts("   [Switched to model: #{model}]\n")
     loop()
   end
@@ -118,7 +118,7 @@ defmodule PtcDemo.CLI do
   defp handle_input("/datasets") do
     IO.puts("\nAvailable datasets:")
 
-    for {name, desc} <- PtcDemo.Agent.list_datasets() do
+    for {name, desc} <- PtcDemo.LispAgent.list_datasets() do
       IO.puts("  - #{name}: #{desc}")
     end
 
@@ -127,13 +127,13 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/program") do
-    case PtcDemo.Agent.last_program() do
+    case PtcDemo.LispAgent.last_program() do
       nil ->
         IO.puts("   No program generated yet.\n")
 
       program ->
         IO.puts("\nLast generated program:")
-        IO.puts(pretty_json(program))
+        IO.puts(program)
         IO.puts("")
     end
 
@@ -141,7 +141,7 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/programs") do
-    case PtcDemo.Agent.programs() do
+    case PtcDemo.LispAgent.programs() do
       [] ->
         IO.puts("   No programs generated yet.\n")
 
@@ -151,8 +151,8 @@ defmodule PtcDemo.CLI do
         programs
         |> Enum.with_index(1)
         |> Enum.each(fn {{program, result}, idx} ->
-          IO.puts("─── Program #{idx} ───")
-          IO.puts(pretty_json(program))
+          IO.puts("--- Program #{idx} ---")
+          IO.puts(program)
           IO.puts("\nResult: #{format_program_result(result)}\n")
         end)
     end
@@ -161,7 +161,7 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/result") do
-    case PtcDemo.Agent.last_result() do
+    case PtcDemo.LispAgent.last_result() do
       nil ->
         IO.puts("   No result yet.\n")
 
@@ -175,7 +175,7 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/context") do
-    messages = PtcDemo.Agent.context()
+    messages = PtcDemo.LispAgent.context()
 
     if messages == [] do
       IO.puts("\n   No conversation yet (system prompt excluded, use /system to view).\n")
@@ -196,7 +196,7 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/system") do
-    prompt = PtcDemo.Agent.system_prompt()
+    prompt = PtcDemo.LispAgent.system_prompt()
     IO.puts("\n[SYSTEM PROMPT]\n")
     IO.puts(prompt)
     IO.puts("")
@@ -209,13 +209,13 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/stats") do
-    stats = PtcDemo.Agent.stats()
+    stats = PtcDemo.LispAgent.stats()
     IO.puts(format_stats(stats))
     loop()
   end
 
   defp handle_input(question) do
-    case PtcDemo.Agent.ask(question) do
+    case PtcDemo.LispAgent.ask(question) do
       {:ok, answer} ->
         IO.puts("\nassistant> #{answer}\n")
 
@@ -235,13 +235,13 @@ defmodule PtcDemo.CLI do
 
     """
 
-    ╔══════════════════════════════════════════════════════════════════╗
-    ║           PTC Runner Demo - Programmatic Tool Calling            ║
-    ╠══════════════════════════════════════════════════════════════════╣
-    ║  Ask questions about data. The LLM generates programs that       ║
-    ║  execute in a sandbox - large data stays in BEAM memory,         ║
-    ║  never entering LLM context. Only small results return.          ║
-    ╚══════════════════════════════════════════════════════════════════╝
+    +-----------------------------------------------------------------+
+    |        PTC-Lisp Demo - Programmatic Tool Calling                |
+    +-----------------------------------------------------------------+
+    |  Ask questions about data. The LLM generates Lisp programs      |
+    |  that execute in a sandbox - large data stays in BEAM memory,   |
+    |  never entering LLM context. Only small results return.         |
+    +-----------------------------------------------------------------+
 
     Model: #{model}
     Data:  #{data_mode_desc}
@@ -256,7 +256,7 @@ defmodule PtcDemo.CLI do
     Commands:
       /help         - Show this help
       /datasets     - List available datasets
-      /program      - Show last generated PTC program
+      /program      - Show last generated PTC-Lisp program
       /programs     - Show all programs generated this session
       /result       - Show last execution result (raw value)
       /system       - Show current system prompt
@@ -301,14 +301,12 @@ defmodule PtcDemo.CLI do
       "How many expenses are pending approval?"
       "What's the average expense amount by category?"
 
-    """
-  end
+    Expected Lisp programs:
+      (count (filter (where :category = "electronics") ctx/products))
+      (->> ctx/orders (filter (where :status = "delivered")) (sum-by :total))
+      (avg-by :salary (filter (where :department = "engineering") ctx/employees))
 
-  defp pretty_json(json_str) do
-    case Jason.decode(json_str) do
-      {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
-      _ -> json_str
-    end
+    """
   end
 
   defp format_program_result(nil), do: "(no result captured)"

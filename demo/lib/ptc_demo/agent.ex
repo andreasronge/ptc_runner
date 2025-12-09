@@ -79,10 +79,17 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Get the current conversation context (list of messages).
+  Get the current conversation context (list of messages, excluding system prompt).
   """
   def context do
     GenServer.call(__MODULE__, :context)
+  end
+
+  @doc """
+  Get the current system prompt.
+  """
+  def system_prompt do
+    GenServer.call(__MODULE__, :system_prompt)
   end
 
   @doc """
@@ -90,6 +97,26 @@ defmodule PtcDemo.Agent do
   """
   def set_data_mode(mode) when mode in [:schema, :explore] do
     GenServer.call(__MODULE__, {:set_data_mode, mode})
+  end
+
+  @doc """
+  Set the model to use for LLM calls.
+  """
+  def set_model(model) do
+    GenServer.call(__MODULE__, {:set_model, model})
+  end
+
+  @doc """
+  Available preset models for easy switching.
+  """
+  def preset_models do
+    %{
+      "haiku" => "openrouter:anthropic/claude-haiku-4.5",
+      "gemini" => "openrouter:google/gemini-2.5-flash",
+      "deepseek" => "openrouter:deepseek/deepseek-v3.2",
+      "kimi" => "openrouter:moonshotai/kimi-k2",
+      "gpt" => "openrouter:openai/gpt-4.1-mini"
+    }
   end
 
   @doc """
@@ -214,7 +241,16 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call(:context, _from, state) do
-    {:reply, state.context.messages, state}
+    # Exclude system messages
+    messages = Enum.reject(state.context.messages, &(&1.role == :system))
+    {:reply, messages, state}
+  end
+
+  @impl true
+  def handle_call(:system_prompt, _from, state) do
+    system_msg = Enum.find(state.context.messages, &(&1.role == :system))
+    content = if system_msg, do: extract_text_content(system_msg.content), else: ""
+    {:reply, content, state}
   end
 
   @impl true
@@ -223,6 +259,11 @@ defmodule PtcDemo.Agent do
 
     {:reply, :ok,
      %{state | data_mode: mode, context: new_context, last_program: nil, last_result: nil}}
+  end
+
+  @impl true
+  def handle_call({:set_model, model}, _from, state) do
+    {:reply, :ok, %{state | model: model}}
   end
 
   # --- Agentic Loop ---
@@ -245,7 +286,7 @@ defmodule PtcDemo.Agent do
             IO.puts("   [Program] #{truncate(program_json, 80)}")
 
             # Execute the program
-            case PtcRunner.run(program_json, context: datasets, timeout: 5000) do
+            case PtcRunner.Json.run(program_json, context: datasets, timeout: 5000) do
               {:ok, result, metrics} ->
                 result_str = format_result(result)
                 IO.puts("   [Result] #{truncate(result_str, 80)} (#{metrics.duration_ms}ms)")
@@ -261,7 +302,7 @@ defmodule PtcDemo.Agent do
                 agent_loop(model, new_context, datasets, new_usage, remaining - 1, new_last_exec)
 
               {:error, reason} ->
-                error_msg = PtcRunner.format_error(reason)
+                error_msg = PtcRunner.Json.format_error(reason)
                 IO.puts("   [Error] #{error_msg}")
 
                 # Add error as tool result and continue

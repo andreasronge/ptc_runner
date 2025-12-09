@@ -3,23 +3,27 @@
 ## Quick Reference
 
 ```bash
-mix test                    # Run all tests
-mix test --failed           # Re-run failed tests
-mix test test/path_test.exs # Run specific test file
-mix test --trace            # Verbose output
+mix test                       # Run all tests
+mix test --failed              # Re-run failed tests
+mix test test/path_test.exs    # Run specific test file
+mix test test/path_test.exs:42 # Run test at specific line
+mix test --trace               # Verbose output
 ```
 
 ## Test Organization
 
 ```
 test/
-├── ptc_runner_test.exs     # Main module tests
 ├── ptc_runner/
-│   ├── parser_test.exs     # Parser tests
-│   ├── interpreter_test.exs # Interpreter tests
-│   └── tools_test.exs      # Tool integration tests
-├── support/                # Test helpers
-│   └── fixtures/           # Test data
+│   ├── json/               # JSON DSL tests
+│   │   ├── parser_test.exs
+│   │   ├── interpreter_test.exs
+│   │   └── operations/     # Operation-specific tests
+│   └── lisp/               # Lisp DSL tests
+│       ├── parser_test.exs
+│       ├── eval_test.exs
+│       └── formatter_test.exs
+├── support/                # Test helpers and generators
 └── test_helper.exs         # Test configuration
 ```
 
@@ -127,26 +131,7 @@ end
 
 ## Testing Parsers
 
-### Property-Based Testing
-
-Consider using StreamData for parser testing:
-
-```elixir
-# In mix.exs deps
-{:stream_data, "~> 1.0", only: [:test]}
-
-# In test
-use ExUnitProperties
-
-property "round-trips valid AST" do
-  check all ast <- valid_ast_generator() do
-    json = AST.to_json(ast)
-    assert {:ok, ^ast} = Parser.parse(json)
-  end
-end
-```
-
-### Edge Cases for Parsers
+### Edge Cases
 
 Always test:
 - Empty input
@@ -229,6 +214,27 @@ test "full pipeline" do
   # ...
 end
 ```
+
+## Property-Based Testing
+
+Use StreamData for testing invariants across many random inputs. Good candidates:
+- **Roundtrip properties**: parse → format → parse = original
+- **Algebraic laws**: `x + 0 = x`, `reverse(reverse(xs)) = xs`
+- **Safety invariants**: "no valid input causes a crash"
+
+```elixir
+use ExUnitProperties
+
+property "reverse is involutive" do
+  check all items <- list_of(integer()) do
+    assert Enum.reverse(Enum.reverse(items)) == items
+  end
+end
+```
+
+Run property tests: `mix test test/support/lisp_generators_test.exs`
+
+See `test/support/lisp_generators.ex` for existing generators.
 
 ## Checklist
 
