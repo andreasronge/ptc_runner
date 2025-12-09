@@ -848,6 +848,22 @@ defmodule PtcRunner.Lisp.EvalTest do
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
+    test "get with nil map returns nil or default" do
+      env = Env.initial()
+
+      # (get nil :key)
+      call_ast = {:call, {:var, :get}, [nil, {:keyword, :key}]}
+
+      assert {:ok, nil, %{}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+
+      # (get nil :key "default")
+      call_ast = {:call, {:var, :get}, [nil, {:keyword, :key}, {:string, "default"}]}
+
+      assert {:ok, "default", %{}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
     test "get-in with 2 arguments (map, path) returns nested value" do
       env = Env.initial()
       data = %{user: %{name: "Alice", address: %{city: "NYC"}}}
