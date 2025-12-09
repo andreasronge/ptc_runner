@@ -21,7 +21,7 @@ defmodule PtcRunner.Lisp.Eval do
           | list()
           | map()
           | function()
-          | {:closure, [atom()], CoreAST.t(), env()}
+          | {:closure, [CoreAST.pattern()], CoreAST.t(), env()}
 
   @type runtime_error ::
           {:unbound_var, atom()}
@@ -31,6 +31,7 @@ defmodule PtcRunner.Lisp.Eval do
           | {:tool_error, tool_name :: String.t(), reason :: term()}
           | {:invalid_keyword_call, atom(), [term()]}
           | {:arity_error, String.t()}
+          | {:destructure_error, String.t()}
 
   @spec eval(CoreAST.t(), map(), map(), env(), tool_executor()) ::
           {:ok, value(), map()} | {:error, runtime_error()}
