@@ -33,6 +33,7 @@ jobs:
       id-token: write
     env:
       MIX_ENV: test
+      FILE_SIZE_THRESHOLD: 800
 
     steps:
       - name: Checkout repository
@@ -99,6 +100,53 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           claude --version
 
+      - name: Check file sizes
+        if: steps.merge-check.outputs.merge_ok == 'true'
+        id: file-sizes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          threshold=$FILE_SIZE_THRESHOLD
+
+          # Get files with additions and their added line counts
+          # Output format: "added_lines<TAB>filename" for each file with additions
+          # Using TAB delimiter and substr($0, 7) to handle filenames with spaces
+          gh pr diff ${{ github.event.pull_request.number }} | \
+            awk '
+              /^\+\+\+ b\// {
+                if (file && added > 0) print added "\t" file
+                file = substr($0, 7)  # Everything after "+++ b/"
+                added = 0
+              }
+              /^\+[^+]/ && file { added++ }
+              END { if (file && added > 0) print added "\t" file }
+            ' > /tmp/files_with_additions.txt
+
+          report="## File Size Analysis\n\n"
+          found_large=false
+
+          while IFS=$'\t' read -r added_lines file; do
+            # Only check .ex and .exs files that exist
+            if [[ -f "$file" && "$file" =~ \.(ex|exs)$ ]]; then
+              total_lines=$(wc -l < "$file" | tr -d ' ')
+              if [[ $total_lines -gt $threshold ]]; then
+                report+="- ⚠️ **$file**: $total_lines lines total (+$added_lines in this PR, exceeds $threshold threshold)\n"
+                found_large=true
+              fi
+            fi
+          done < /tmp/files_with_additions.txt
+
+          if [[ "$found_large" == "false" ]]; then
+            report+="No files with additions exceed $threshold lines.\n"
+          fi
+
+          # Make available to next step via GITHUB_OUTPUT
+          {
+            echo 'FILE_SIZE_REPORT<<EOF'
+            echo -e "$report"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
       - name: Run Claude Code Review
         if: steps.merge-check.outputs.merge_ok == 'true'
         id: claude-review
@@ -112,6 +160,8 @@ jobs:
 
             **Repository**: ${{ github.repository }}
             **PR Number**: ${{ github.event.pull_request.number }}
+
+            ${{ steps.file-sizes.outputs.FILE_SIZE_REPORT }}
 
             ## Instructions
 
@@ -134,6 +184,10 @@ jobs:
             - Flag duplicated production code that should be extracted into helpers
             - Flag duplicated test code that should use setup blocks or helper functions
             - See `docs/guidelines/development-guidelines.md` (DRY section) and `docs/guidelines/testing-guidelines.md` (Avoid Duplication section)
+
+            **CRITICAL**: If the File Size Analysis above shows files exceeding the threshold:
+            - Flag as "Suggestion (Optional)" with recommendation to split into smaller modules
+            - Only flag if the PR added significant lines to the file (not just minor edits to already-large files)
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash"'
