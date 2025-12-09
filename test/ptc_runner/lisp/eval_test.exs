@@ -586,5 +586,142 @@ defmodule PtcRunner.Lisp.EvalTest do
     end
   end
 
+  describe "closure with destructuring patterns" do
+    test "vector destructuring: extracts first element" do
+      # (fn [[a b]] a) called with [1 2]
+      params = [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}]
+      body = {:var, :a}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :extract_first}, closure_def}]
+      call_ast = {:call, {:var, :extract_first}, [{:vector, [1, 2]}]}
+
+      assert {:ok, 1, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "vector destructuring: extracts second element" do
+      # (fn [[a b]] b) called with [1 2]
+      params = [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}]
+      body = {:var, :b}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :extract_second}, closure_def}]
+      call_ast = {:call, {:var, :extract_second}, [{:vector, [1, 2]}]}
+
+      assert {:ok, 2, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "vector destructuring: ignores extra elements" do
+      # (fn [[a]] a) called with [1 2 3]
+      params = [{:destructure, {:seq, [{:var, :a}]}}]
+      body = {:var, :a}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :take_first}, closure_def}]
+      call_ast = {:call, {:var, :take_first}, [{:vector, [1, 2, 3]}]}
+
+      assert {:ok, 1, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "vector destructuring: error on insufficient elements" do
+      # (fn [[a b c]] a) called with [1 2]
+      params = [{:destructure, {:seq, [{:var, :a}, {:var, :b}, {:var, :c}]}}]
+      body = {:var, :a}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :bad_extract}, closure_def}]
+      call_ast = {:call, {:var, :bad_extract}, [{:vector, [1, 2]}]}
+
+      assert {:error, _} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "vector destructuring: error on non-list argument" do
+      # (fn [[a b]] a) called with 42 (not a list)
+      params = [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}]
+      body = {:var, :a}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :expect_list}, closure_def}]
+      call_ast = {:call, {:var, :expect_list}, [42]}
+
+      assert {:error, _} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "map destructuring: extracts specified keys" do
+      # (fn [{:keys [x]}] x) called with {:x 10}
+      params = [{:destructure, {:keys, [:x], []}}]
+      body = {:var, :x}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :extract_x}, closure_def}]
+      call_ast = {:call, {:var, :extract_x}, [{:map, [{{:keyword, :x}, 10}]}]}
+
+      assert {:ok, 10, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "map destructuring: multiple keys" do
+      # (fn [{:keys [x y]}] [x y]) called with {:x 10 :y 20}
+      params = [{:destructure, {:keys, [:x, :y], []}}]
+      body = {:vector, [{:var, :x}, {:var, :y}]}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :extract_xy}, closure_def}]
+
+      call_ast =
+        {:call, {:var, :extract_xy}, [{:map, [{{:keyword, :x}, 10}, {{:keyword, :y}, 20}]}]}
+
+      assert {:ok, [10, 20], %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "map destructuring: with default value" do
+      # (fn [{:keys [x] :or {x 0}}] x) called with {:y 20}
+      params = [{:destructure, {:keys, [:x], [x: 0]}}]
+      body = {:var, :x}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :with_default}, closure_def}]
+      call_ast = {:call, {:var, :with_default}, [{:map, [{{:keyword, :y}, 20}]}]}
+
+      assert {:ok, 0, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "map destructuring: error on non-map argument" do
+      # (fn [{:keys [x]}] x) called with [1 2 3] (not a map)
+      params = [{:destructure, {:keys, [:x], []}}]
+      body = {:var, :x}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :expect_map}, closure_def}]
+      call_ast = {:call, {:var, :expect_map}, [{:vector, [1, 2, 3]}]}
+
+      assert {:error, _} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "vector destructuring with nested patterns: vector in vector" do
+      # (fn [[[a b] c]] a) called with [[1 2] 3]
+      params = [
+        {:destructure, {:seq, [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}, {:var, :c}]}}
+      ]
+
+      body = {:var, :a}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :nested_vec}, closure_def}]
+      call_ast = {:call, {:var, :nested_vec}, [{:vector, [{:vector, [1, 2]}, 3]}]}
+
+      assert {:ok, 1, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+  end
+
   defp dummy_tool(_name, _args), do: :ok
 end
