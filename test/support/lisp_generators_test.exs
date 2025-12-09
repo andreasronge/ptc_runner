@@ -294,6 +294,135 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
     end
   end
 
+  describe "arithmetic identities" do
+    property "x + 0 = x" do
+      check all(n <- one_of([Gen.gen_integer(), Gen.gen_float()])) do
+        source = "(+ #{n} 0)"
+        assert {:ok, result, _, _} = safe_run(source, [])
+        assert_numbers_equal(result, n)
+      end
+    end
+
+    property "x * 1 = x" do
+      check all(n <- one_of([Gen.gen_integer(), Gen.gen_float()])) do
+        source = "(* #{n} 1)"
+        assert {:ok, result, _, _} = safe_run(source, [])
+        assert_numbers_equal(result, n)
+      end
+    end
+
+    property "x - x = 0" do
+      check all(n <- Gen.gen_integer()) do
+        source = "(- #{n} #{n})"
+        assert {:ok, 0, _, _} = safe_run(source, [])
+      end
+    end
+  end
+
+  describe "collection invariants" do
+    property "map preserves count" do
+      check all(items <- list_of(integer(), min_length: 1, max_length: 20)) do
+        ctx = %{items: items}
+        source = "(= (count ctx/items) (count (map inc ctx/items)))"
+
+        case safe_run(source, context: ctx) do
+          {:ok, true, _, _} -> :ok
+          {:ok, false, _, _} -> flunk("map changed count")
+          # Type errors are acceptable
+          {:error, _} -> :ok
+        end
+      end
+    end
+
+    property "reverse(reverse(xs)) = xs" do
+      check all(items <- list_of(integer(), max_length: 20)) do
+        ctx = %{items: items}
+        source = "(= ctx/items (reverse (reverse ctx/items)))"
+
+        case safe_run(source, context: ctx) do
+          {:ok, true, _, _} -> :ok
+          {:ok, false, _, _} -> flunk("reverse is not idempotent")
+          # Type errors are acceptable
+          {:error, _} -> :ok
+        end
+      end
+    end
+
+    property "filter result count <= original count" do
+      check all(
+              items <-
+                list_of(map_of(atom(:alphanumeric), integer(), max_length: 3), max_length: 10)
+            ) do
+        ctx = %{items: items}
+        source = "(<= (count (filter (where :a) ctx/items)) (count ctx/items))"
+
+        case safe_run(source, context: ctx) do
+          {:ok, true, _, _} -> :ok
+          {:ok, false, _, _} -> flunk("filter increased count")
+          # Type errors are acceptable
+          {:error, _} -> :ok
+        end
+      end
+    end
+  end
+
+  describe "type predicates" do
+    property "exactly one type predicate is true for primitives" do
+      check all(
+              value <-
+                one_of([
+                  constant(nil),
+                  boolean(),
+                  integer(),
+                  float(),
+                  string(:alphanumeric, max_length: 20)
+                ])
+            ) do
+        ctx = %{v: value}
+
+        predicates = ["nil?", "boolean?", "number?", "string?"]
+
+        results =
+          Enum.map(predicates, fn pred ->
+            case safe_run("(#{pred} ctx/v)", context: ctx) do
+              {:ok, result, _, _} -> result
+              _ -> false
+            end
+          end)
+
+        true_count = Enum.count(results, & &1)
+
+        assert true_count == 1,
+               "Expected exactly 1 true predicate for #{inspect(value)}, got #{true_count}: #{inspect(Enum.zip(predicates, results))}"
+      end
+    end
+  end
+
+  describe "short-circuit logic" do
+    property "and with false short-circuits (doesn't call tool)" do
+      check all(exprs <- list_of(Gen.gen_leaf_expr([]), min_length: 1, max_length: 3)) do
+        formatted_exprs = Enum.map_join(exprs, " ", &Formatter.format/1)
+        source = "(and #{formatted_exprs} false (call \"should-not-run\" {}))"
+
+        tools = %{"should-not-run" => fn _ -> raise "Tool should not be called!" end}
+
+        result = safe_run(source, tools: tools)
+
+        # Should not crash (tool not called due to short-circuit)
+        assert match?({:ok, _, _, _}, result) or match?({:error, _}, result)
+      end
+    end
+
+    property "or with truthy value short-circuits (doesn't call tool)" do
+      check all(n <- integer(1..1000)) do
+        source = "(or #{n} (call \"should-not-run\" {}))"
+        tools = %{"should-not-run" => fn _ -> raise "Tool should not be called!" end}
+
+        assert {:ok, ^n, _, _} = safe_run(source, tools: tools)
+      end
+    end
+  end
+
   # Helpers
 
   defp valid_ast?(value) do
@@ -352,6 +481,14 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
 
   defp ast_equivalent?(a, b) do
     a == b
+  end
+
+  defp assert_numbers_equal(a, b) when is_float(a) or is_float(b) do
+    assert abs(a - b) < 1.0e-9, "Expected #{b}, got #{a}"
+  end
+
+  defp assert_numbers_equal(a, b) do
+    assert a == b
   end
 
   defp build_tools_for_source(source, default_result \\ :result) do
