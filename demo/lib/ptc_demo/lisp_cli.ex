@@ -13,25 +13,120 @@ defmodule PtcDemo.LispCLI do
 
     ensure_api_key!()
 
-    # Parse data mode from args: --explore or schema (default)
-    data_mode = if "--explore" in args, do: :explore, else: :schema
+    # Parse command line arguments
+    {opts, _rest} = parse_args(args)
 
-    # Validate args - only --explore is supported
-    unknown_flags =
-      Enum.filter(args, fn arg -> String.starts_with?(arg, "--") and arg != "--explore" end)
-
-    if unknown_flags != [] do
-      IO.puts("Unknown flags: #{Enum.join(unknown_flags, ", ")}. Only --explore is supported.")
-      System.halt(1)
-    end
+    data_mode = if opts[:explore], do: :explore, else: :schema
+    model = opts[:model]
+    run_tests = opts[:test]
+    verbose = opts[:verbose]
+    report_path = opts[:report]
 
     # Start the agent
     {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode)
 
-    IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
+    # Set model if specified
+    if model do
+      resolved_model = resolve_model(model)
+      PtcDemo.LispAgent.set_model(resolved_model)
+    end
 
-    # Enter REPL loop
-    loop()
+    # Run tests if --test flag is present
+    if run_tests do
+      run_tests_and_exit(verbose: verbose, report: report_path)
+    else
+      IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
+
+      # Enter REPL loop
+      loop()
+    end
+  end
+
+  defp parse_args(args) do
+    # Simple argument parser
+    opts =
+      Enum.reduce(args, %{}, fn arg, acc ->
+        cond do
+          arg == "--explore" ->
+            Map.put(acc, :explore, true)
+
+          arg == "--test" ->
+            Map.put(acc, :test, true)
+
+          arg == "--verbose" or arg == "-v" ->
+            Map.put(acc, :verbose, true)
+
+          String.starts_with?(arg, "--model=") ->
+            model = String.replace_prefix(arg, "--model=", "")
+            Map.put(acc, :model, model)
+
+          String.starts_with?(arg, "--report=") ->
+            report = String.replace_prefix(arg, "--report=", "")
+            Map.put(acc, :report, report)
+
+          String.starts_with?(arg, "--model") ->
+            # Handle --model value as next arg would require more complex parsing
+            # For now, require --model=value format
+            IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
+            System.halt(1)
+
+          String.starts_with?(arg, "--report") ->
+            IO.puts("Error: Use --report=<path> format (e.g., --report=report.md)")
+            System.halt(1)
+
+          String.starts_with?(arg, "--") ->
+            IO.puts("Unknown flag: #{arg}")
+            IO.puts(usage())
+            System.halt(1)
+
+          true ->
+            acc
+        end
+      end)
+
+    {opts, []}
+  end
+
+  defp resolve_model(name) do
+    presets = PtcDemo.LispAgent.preset_models()
+
+    case Map.get(presets, name) do
+      nil -> name
+      preset -> preset
+    end
+  end
+
+  defp run_tests_and_exit(opts) do
+    result = PtcDemo.LispTestRunner.run_all(opts)
+
+    if result.failed > 0 do
+      System.halt(1)
+    else
+      System.halt(0)
+    end
+  end
+
+  defp usage do
+    """
+
+    Usage: mix lisp [options]
+
+    Options:
+      --explore        Start in explore mode (LLM discovers schema)
+      --model=<name>   Set model (haiku, gemini, deepseek, gpt, or full model ID)
+      --test           Run automated tests and exit
+      --verbose, -v    Verbose output (for --test mode)
+      --report=<path>  Write test report to file (for --test mode)
+
+    Examples:
+      mix lisp
+      mix lisp --explore
+      mix lisp --model=haiku
+      mix lisp --model=google:gemini-2.0-flash-exp
+      mix lisp --test
+      mix lisp --test --model=haiku --verbose
+      mix lisp --test --model=gemini --report=report.md
+    """
   end
 
   defp loop do
@@ -272,6 +367,12 @@ defmodule PtcDemo.LispCLI do
       /quit         - Exit
 
     Just type your question to query the data!
+
+    CLI Options (when starting):
+      mix lisp --test              Run automated tests
+      mix lisp --test --verbose    Run tests with detailed output
+      mix lisp --model=<name>      Start with specific model
+      mix lisp --explore           Start in explore mode
     """
   end
 
@@ -301,10 +402,17 @@ defmodule PtcDemo.LispCLI do
       "How many expenses are pending approval?"
       "What's the average expense amount by category?"
 
+    Cross-dataset queries (combining multiple datasets):
+      "How many unique products have been ordered?"
+      "What is the total expense amount for engineering employees?"
+      "How many employees have submitted expenses?"
+      "What's the average order value per product category?"
+
     Expected Lisp programs:
       (count (filter (where :category = "electronics") ctx/products))
       (->> ctx/orders (filter (where :status = "delivered")) (sum-by :total))
       (avg-by :salary (filter (where :department = "engineering") ctx/employees))
+      (count (distinct (pluck :product_id ctx/orders)))
 
     """
   end

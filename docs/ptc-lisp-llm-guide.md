@@ -287,9 +287,16 @@ memory/results        ; read from persistent memory
 ; WRONG: (call :tool-name {...})   ; keyword not allowed
 ```
 
-### Memory Result Contract
+### Memory: Persisting Data Between Turns
 
-The return value determines memory behavior:
+Use memory to store intermediate results and reference them in later programs.
+
+**Reading from memory:**
+```clojure
+memory/results           ; access stored value by key
+```
+
+**Writing to memory:** Return a map to persist keys:
 
 | Return | Effect |
 |--------|--------|
@@ -297,16 +304,24 @@ The return value determines memory behavior:
 | Map without `:result` | Merge into memory, map returned |
 | Map with `:result` | Merge rest into memory, `:result` value returned |
 
+**Multi-turn example:**
+```clojure
+; Turn 1: Store expensive computation
+{:unique-products (->> ctx/orders (pluck :product_id) (distinct))}
+
+; Turn 2: Reference stored result
+{:ordered-count (count memory/unique-products)
+ :total-count (count ctx/products)
+ :result (count memory/unique-products)}
+```
+
+**Other patterns:**
 ```clojure
 ; Pure query - no memory change
 (->> ctx/items (filter (where :active)) (count))
 
-; Update memory only
+; Store tool result for later use
 {:cached-users (call "get-users" {})}
-
-; Update memory AND return different value
-{:cached-users users
- :result (pluck :email users)}
 ```
 
 ### Common Mistakes
