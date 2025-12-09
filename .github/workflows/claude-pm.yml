@@ -143,6 +143,75 @@ jobs:
           done
           echo "Stuck state reset complete"
 
+      - name: Gather phase status
+        id: phase-status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Determine current phase by finding first phase with open issues
+          # or the next phase to start if all previous are complete
+          PHASES=("api-refactor" "parser" "analyzer" "eval" "integration" "property-testing" "polish")
+          PHASE_NAMES=("API Refactor" "Parser" "Analyzer" "Eval" "Integration" "Property Testing" "Polish")
+
+          current_phase=""
+          current_phase_name=""
+          open_in_phase=0
+
+          for i in "${!PHASES[@]}"; do
+            phase="${PHASES[$i]}"
+            open=$(gh issue list --label "phase:$phase" --state open --json number | jq length)
+            if [ "$open" -gt 0 ]; then
+              current_phase="$phase"
+              current_phase_name="${PHASE_NAMES[$i]}"
+              open_in_phase=$open
+              break
+            fi
+          done
+
+          # If no open phase issues, find next phase to start
+          if [ -z "$current_phase" ]; then
+            for i in "${!PHASES[@]}"; do
+              phase="${PHASES[$i]}"
+              closed=$(gh issue list --label "phase:$phase" --state closed --json number | jq length)
+              if [ "$closed" -eq 0 ]; then
+                current_phase="$phase"
+                current_phase_name="${PHASE_NAMES[$i]}"
+                open_in_phase=0
+                break
+              fi
+            done
+          fi
+
+          # Default to property-testing if somehow not determined
+          if [ -z "$current_phase" ]; then
+            current_phase="property-testing"
+            current_phase_name="Property Testing"
+            open_in_phase=0
+          fi
+
+          echo "current_phase=$current_phase" >> $GITHUB_OUTPUT
+          echo "current_phase_name=$current_phase_name" >> $GITHUB_OUTPUT
+          echo "open_in_phase=$open_in_phase" >> $GITHUB_OUTPUT
+
+          # Tech debt / from-pr-review count
+          tech_debt=$(gh issue list --label "from-pr-review" --state open --json number | jq length)
+          echo "tech_debt=$tech_debt" >> $GITHUB_OUTPUT
+
+          # Ready for implementation count
+          ready_issues=$(gh issue list --label "ready-for-implementation" --state open --json number | jq length)
+          echo "ready_issues=$ready_issues" >> $GITHUB_OUTPUT
+
+          # Needs review count (pending review)
+          needs_review=$(gh issue list --label "needs-review" --state open --json number | jq length)
+          echo "needs_review=$needs_review" >> $GITHUB_OUTPUT
+
+          echo "Phase status determined:"
+          echo "  Current phase: $current_phase_name ($current_phase)"
+          echo "  Open in phase: $open_in_phase"
+          echo "  Tech debt: $tech_debt"
+          echo "  Ready issues: $ready_issues"
+          echo "  Needs review: $needs_review"
+
       - name: Run Claude PM
         id: claude-pm
         # Skip if there are open PRs (unless status-only which is read-only)
@@ -156,7 +225,14 @@ jobs:
             /pm-workflow **Repository**: ${{ github.repository }}
             **Trigger**: ${{ github.event_name }}
             **Action**: ${{ github.event.inputs.action || 'next-issue' }}
-            **Current failure count**: ${{ steps.status.outputs.failure_count }}
+
+            ## Pre-computed State (no need to query GitHub for this)
+            - **Current phase**: ${{ steps.phase-status.outputs.current_phase_name }} (`${{ steps.phase-status.outputs.current_phase }}`)
+            - **Open issues in current phase**: ${{ steps.phase-status.outputs.open_in_phase }}
+            - **Ready for implementation**: ${{ steps.phase-status.outputs.ready_issues }}
+            - **Pending review**: ${{ steps.phase-status.outputs.needs_review }}
+            - **Tech debt (from-pr-review)**: ${{ steps.phase-status.outputs.tech_debt }}
+            - **Failure count**: ${{ steps.status.outputs.failure_count }}
 
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh:*),Bash(git:*),Bash(mix test:*),Bash(mix compile:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(wc:*)"'
 
