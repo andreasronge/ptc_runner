@@ -566,6 +566,37 @@ Inside `where`, ordering comparisons (`>`, `<`, `>=`, `<=`) with `nil` or missin
 
 This distinction exists because `where` is designed for safe filtering over potentially incomplete data, while raw comparisons should fail explicitly on invalid input.
 
+**Flexible Key Access — String and Atom Keys:**
+
+Field accessors in `where` support both **atom keys** (preferred) and **string keys** (from external APIs), making it easy to filter data from various sources without preprocessing:
+
+```clojure
+; Atom keys (preferred Elixir style)
+(filter (where :status = "active") users)
+
+; String keys (from JSON APIs)
+(filter (where :status = "active") data)
+;; If data is %{"status" => "active"}, it will match!
+
+; Mixed: nested structure with different key types
+(filter (where [:user :email] = "alice@example.com") items)
+;; Matches both: %{user: %{"email" => ...}} and %{"user" => %{email: ...}}
+
+; Atom key takes precedence when both exist
+;; If a map has both :category and "category", the atom key wins
+%{category: "priority", "category" => "ignored"}
+;; (where :category = "priority") matches "priority", not "ignored"
+```
+
+**How it works:**
+1. When looking up a field, the accessor tries the atom key first
+2. If not found, it falls back to the string version of the key
+3. Atom keys take precedence (if both exist, atom wins)
+4. This applies to nested fields too—each level independently tries atom first, then string
+5. Missing fields at any level still return `nil`
+
+This design eliminates the need to manually convert JSON responses to atom-keyed maps before filtering, reducing friction when working with external data sources.
+
 ---
 
 ## 8. Core Functions

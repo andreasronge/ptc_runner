@@ -308,6 +308,59 @@ defmodule PtcRunner.Lisp.EvalTest do
       refute fun.(%{age: nil})
       refute fun.(%{age: 5})
     end
+
+    test "string key fallback: matches string keys when atom keys not found" do
+      predicate = {:where, {:field, [{:keyword, :category}]}, :eq, {:string, "electronics"}}
+      {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Data with string keys from API
+      assert fun.(%{"category" => "electronics"})
+      refute fun.(%{"category" => "books"})
+    end
+
+    test "atom key precedence: atom key wins over string key when both exist" do
+      predicate = {:where, {:field, [{:keyword, :category}]}, :eq, {:string, "priority"}}
+      {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
+
+      # When both atom and string keys exist, atom key takes precedence
+      assert fun.(%{"category" => "ignored", category: "priority"})
+      # String-only data still works (falls back to string key)
+      assert fun.(%{"category" => "priority"})
+      refute fun.(%{"category" => "different"})
+    end
+
+    test "mixed keys: atom keys work as before" do
+      predicate = {:where, {:field, [{:keyword, :status}]}, :eq, {:string, "active"}}
+      {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Atom-keyed data still works
+      assert fun.(%{status: "active"})
+      refute fun.(%{status: "inactive"})
+    end
+
+    test "nested field access with string keys" do
+      predicate =
+        {:where, {:field, [{:keyword, :user}, {:keyword, :email}]}, :eq,
+         {:string, "alice@example.com"}}
+
+      {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Nested structure with string keys
+      assert fun.(%{"user" => %{"email" => "alice@example.com"}})
+      refute fun.(%{"user" => %{"email" => "bob@example.com"}})
+    end
+
+    test "mixed nested keys: atom parent with string child" do
+      predicate =
+        {:where, {:field, [{:keyword, :user}, {:keyword, :email}]}, :eq,
+         {:string, "alice@example.com"}}
+
+      {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Mixed key types in nested structure
+      assert fun.(%{user: %{"email" => "alice@example.com"}})
+      refute fun.(%{user: %{"email" => "bob@example.com"}})
+    end
   end
 
   describe "predicate combinators" do
