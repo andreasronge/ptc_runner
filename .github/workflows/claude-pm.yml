@@ -185,6 +185,8 @@ jobs:
           echo "- Eval closed: $(gh issue list --label phase:eval --state closed --json number | jq length)"
           echo "- Integration open: $(gh issue list --label phase:integration --state open --json number | jq length)"
           echo "- Integration closed: $(gh issue list --label phase:integration --state closed --json number | jq length)"
+          echo "- Property Testing open: $(gh issue list --label phase:property-testing --state open --json number | jq length)"
+          echo "- Property Testing closed: $(gh issue list --label phase:property-testing --state closed --json number | jq length)"
           echo "- Polish open: $(gh issue list --label phase:polish --state open --json number | jq length)"
           echo "- Polish closed: $(gh issue list --label phase:polish --state closed --json number | jq length)"
           echo ""

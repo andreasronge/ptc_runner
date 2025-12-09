@@ -62,7 +62,8 @@ Prefer action over accumulation. A few well-maintained issues beats many stale o
 | 2: Analyzer | `docs/ptc-lisp-analyze-plan.md` | `[Lisp Analyzer]` | `phase:analyzer`, `ptc-lisp` |
 | 3: Eval | `docs/ptc-lisp-eval-plan.md` | `[Lisp Eval]` | `phase:eval`, `ptc-lisp` |
 | 4: Integration | `docs/ptc-lisp-integration-spec.md` | `[Lisp Integration]` | `phase:integration`, `ptc-lisp` |
-| 5: Polish | (review deferred issues) | `[Polish]` | `phase:polish` |
+| 5: Property Testing | `docs/ptc-lisp-property-testing-plan.md` | `[Property Testing]` | `phase:property-testing`, `ptc-lisp` |
+| 6: Polish | (review deferred issues) | `[Polish]` | `phase:polish` |
 
 **Dependencies**: Each phase depends on the previous one completing. Don't start Phase N+1 until Phase N has closed issues.
 
