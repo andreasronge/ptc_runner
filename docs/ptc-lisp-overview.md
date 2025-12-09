@@ -176,39 +176,6 @@ Programs are pure functions of `(memory, context) → result`:
 | **[ptc-lisp-specification.md](ptc-lisp-specification.md)** | Complete language specification | Language designers, implementers |
 | **[ptc-lisp-llm-guide.md](ptc-lisp-llm-guide.md)** | Quick reference for LLM prompts | Application developers, prompt engineers |
 
-### Implementation Plans
-
-| Document | Purpose | Key Content |
-|----------|---------|-------------|
-| **[ptc-lisp-parser-plan.md](ptc-lisp-parser-plan.md)** | Parser implementation guide | NimbleParsec combinators, AST node types, edge cases |
-| **[ptc-lisp-analyze-plan.md](ptc-lisp-analyze-plan.md)** | Validation/desugaring layer | Form validation, threading desugaring, CoreAST definition |
-| **[ptc-lisp-eval-plan.md](ptc-lisp-eval-plan.md)** | Interpreter implementation | Eval semantics, builtins, predicate closures, memory contract |
-| **[ptc-lisp-integration-spec.md](ptc-lisp-integration-spec.md)** | End-to-end test specification | Layer transformations, test scenarios, edge cases |
-
-### Document Relationships
-
-```
-                    ┌─────────────────────────────┐
-                    │  ptc-lisp-specification.md  │
-                    │  (Language Definition)      │
-                    └──────────────┬──────────────┘
-                                   │
-          ┌────────────────────────┼────────────────────────┐
-          │                        │                        │
-          ▼                        ▼                        ▼
-┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
-│ ptc-lisp-parser-    │   │ ptc-lisp-analyze-   │   │ ptc-lisp-eval-      │
-│ plan.md             │   │ plan.md             │   │ plan.md             │
-│ (RawAST)            │──▶│ (CoreAST)           │──▶│ (Execution)         │
-└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
-                                   │
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │  ptc-lisp-llm-guide.md      │
-                    │  (API & Prompt Reference)   │
-                    └─────────────────────────────┘
-```
-
 ---
 
 ## Quick Start
