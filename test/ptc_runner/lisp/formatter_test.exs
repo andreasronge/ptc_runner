@@ -133,6 +133,29 @@ defmodule PtcRunner.Lisp.FormatterTest do
     end
   end
 
+  describe "sets" do
+    test "empty set" do
+      assert Formatter.format({:set, []}) == "#" <> "{}"
+    end
+
+    test "set with elements" do
+      assert Formatter.format({:set, [1, 2, 3]}) == "#" <> "{1 2 3}"
+    end
+
+    test "set with mixed types" do
+      assert Formatter.format({:set, [1, {:keyword, :a}, {:symbol, :x}]}) ==
+               "#" <> "{1 :a x}"
+    end
+
+    test "nested set" do
+      assert Formatter.format({:set, [{:set, [1, 2]}]}) == "#" <> "{#" <> "{1 2}}"
+    end
+
+    test "set containing vector" do
+      assert Formatter.format({:set, [{:vector, [1, 2]}]}) == "#" <> "{[1 2]}"
+    end
+  end
+
   describe "lists (s-expressions)" do
     test "simple list" do
       assert Formatter.format({:list, [{:symbol, :+}, 1, 2]}) == "(+ 1 2)"
@@ -232,6 +255,27 @@ defmodule PtcRunner.Lisp.FormatterTest do
            {:map, [{{:keyword, :limit}, 10}]}
          ]}
 
+      formatted = Formatter.format(ast)
+      {:ok, parsed} = Parser.parse(formatted)
+      assert Formatter.format(parsed) == formatted
+    end
+
+    test "set roundtrip" do
+      ast = {:set, [1, 2, 3]}
+      formatted = Formatter.format(ast)
+      {:ok, parsed} = Parser.parse(formatted)
+      assert Formatter.format(parsed) == formatted
+    end
+
+    test "empty set roundtrip" do
+      ast = {:set, []}
+      formatted = Formatter.format(ast)
+      {:ok, parsed} = Parser.parse(formatted)
+      assert Formatter.format(parsed) == formatted
+    end
+
+    test "nested set roundtrip" do
+      ast = {:set, [{:set, [1, 2]}]}
       formatted = Formatter.format(ast)
       {:ok, parsed} = Parser.parse(formatted)
       assert Formatter.format(parsed) == formatted
