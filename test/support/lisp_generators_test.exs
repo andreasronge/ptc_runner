@@ -317,14 +317,6 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
         assert {:ok, 0, _, _} = safe_run(source, [])
       end
     end
-
-    defp assert_numbers_equal(a, b) when is_float(a) or is_float(b) do
-      assert abs(a - b) < 1.0e-9, "Expected #{b}, got #{a}"
-    end
-
-    defp assert_numbers_equal(a, b) do
-      assert a == b
-    end
   end
 
   describe "collection invariants" do
@@ -489,6 +481,14 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
 
   defp ast_equivalent?(a, b) do
     a == b
+  end
+
+  defp assert_numbers_equal(a, b) when is_float(a) or is_float(b) do
+    assert abs(a - b) < 1.0e-9, "Expected #{b}, got #{a}"
+  end
+
+  defp assert_numbers_equal(a, b) do
+    assert a == b
   end
 
   defp build_tools_for_source(source, default_result \\ :result) do
