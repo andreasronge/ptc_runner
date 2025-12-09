@@ -6,6 +6,21 @@ defmodule PtcRunner.Lisp.Runtime do
   """
 
   # ============================================================
+  # Flexible Key Access Helper
+  # ============================================================
+
+  # Try atom key first, fall back to string key
+  defp flex_get(map, key) when is_map(map) and is_atom(key) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, to_string(key))
+    end
+  end
+
+  defp flex_get(map, key) when is_map(map), do: Map.get(map, key)
+  defp flex_get(nil, _key), do: nil
+
+  # ============================================================
   # Collection Operations
   # ============================================================
 
@@ -14,17 +29,24 @@ defmodule PtcRunner.Lisp.Runtime do
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
+
+  def map(f, coll) when is_map(coll) do
+    # When mapping over a map, each entry is passed as [key, value] pair
+    Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+  end
+
   def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
-  def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &Map.get(&1, key))
+  def mapv(f, coll) when is_map(coll), do: Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+  def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &flex_get(&1, key))
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
 
   def sort_by(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.sort_by(coll, &Map.get(&1, key))
+    Enum.sort_by(coll, &flex_get(&1, key))
   end
 
   def sort_by(key, comp, coll) when is_list(coll) and is_atom(key) and is_function(comp) do
-    Enum.sort_by(coll, &Map.get(&1, key), comp)
+    Enum.sort_by(coll, &flex_get(&1, key), comp)
   end
 
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
@@ -59,13 +81,13 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def sum_by(key, coll) when is_list(coll) do
     coll
-    |> Enum.map(&Map.get(&1, key))
+    |> Enum.map(&flex_get(&1, key))
     |> Enum.reject(&is_nil/1)
     |> Enum.sum()
   end
 
   def avg_by(key, coll) when is_list(coll) do
-    values = coll |> Enum.map(&Map.get(&1, key)) |> Enum.reject(&is_nil/1)
+    values = coll |> Enum.map(&flex_get(&1, key)) |> Enum.reject(&is_nil/1)
 
     case values do
       [] -> nil
@@ -74,20 +96,20 @@ defmodule PtcRunner.Lisp.Runtime do
   end
 
   def min_by(key, coll) when is_list(coll) do
-    case Enum.reject(coll, &is_nil(Map.get(&1, key))) do
+    case Enum.reject(coll, &is_nil(flex_get(&1, key))) do
       [] -> nil
-      filtered -> Enum.min_by(filtered, &Map.get(&1, key))
+      filtered -> Enum.min_by(filtered, &flex_get(&1, key))
     end
   end
 
   def max_by(key, coll) when is_list(coll) do
-    case Enum.reject(coll, &is_nil(Map.get(&1, key))) do
+    case Enum.reject(coll, &is_nil(flex_get(&1, key))) do
       [] -> nil
-      filtered -> Enum.max_by(filtered, &Map.get(&1, key))
+      filtered -> Enum.max_by(filtered, &flex_get(&1, key))
     end
   end
 
-  def group_by(key, coll) when is_list(coll), do: Enum.group_by(coll, &Map.get(&1, key))
+  def group_by(key, coll) when is_list(coll), do: Enum.group_by(coll, &flex_get(&1, key))
 
   def some(pred, coll) when is_list(coll), do: Enum.any?(coll, pred)
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)

@@ -23,6 +23,8 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
   Results are saved to `priv/ptc_lisp_benchmark/` with timestamp.
   """
 
+  alias PtcRunner.Lisp.Schema
+
   @generator_models [
     "openrouter:google/gemini-2.5-flash",
     "openrouter:deepseek/deepseek-v3.2"
@@ -41,15 +43,17 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     "gpt-5.1-codex-mini" => {0.25, 2.0}
   }
 
-  # Extract the LLM prompt section between markers in docs/ptc-lisp-llm-guide.md
-  @ptc_lisp_prompt """
-  You are generating PTC-Lisp programs. PTC-Lisp is a minimal Clojure subset for data transformation.
+  # Build prompt at runtime using the official API
+  defp ptc_lisp_prompt do
+    """
+    You are generating PTC-Lisp programs. PTC-Lisp is a minimal Clojure subset for data transformation.
 
-  #{File.read!("docs/ptc-lisp-llm-guide.md") |> String.split("<!-- PTC_PROMPT_START -->") |> List.last() |> String.split("<!-- PTC_PROMPT_END -->") |> List.first()}
+    #{Schema.to_prompt()}
 
-  IMPORTANT:
-  - Respond with ONLY the PTC-Lisp code, no explanation or markdown formatting.
-  """
+    IMPORTANT:
+    - Respond with ONLY the PTC-Lisp code, no explanation or markdown formatting.
+    """
+  end
 
   @judge_system_prompt """
   You are a strict syntax validator for PTC-Lisp, a minimal Clojure subset.
@@ -374,7 +378,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
 
       {:ok, gen_response} =
         ReqLLM.generate_text(generator_model, prompt,
-          system_prompt: @ptc_lisp_prompt,
+          system_prompt: ptc_lisp_prompt(),
           receive_timeout: @timeout
         )
 
