@@ -489,5 +489,11 @@ defmodule PtcRunner.Lisp.E2ETest do
       {:ok, result, _, _} = Lisp.run(source)
       assert result == 1
     end
+
+    test "destructuring in fn params - vector pattern insufficient elements error" do
+      source = "((fn [[a b c]] a) [1 2])"
+      assert {:error, {:destructure_error, message}} = Lisp.run(source)
+      assert message =~ "expected at least 3 elements, got 2"
+    end
   end
 end
