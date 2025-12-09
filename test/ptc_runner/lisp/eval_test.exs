@@ -802,6 +802,107 @@ defmodule PtcRunner.Lisp.EvalTest do
       assert {:error, {:arity_error, _}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
+
+    test "get with 2 arguments (map, key) returns value or nil" do
+      env = Env.initial()
+      data = %{name: "Alice", age: 30}
+
+      # (get data :name)
+      call_ast = {:call, {:var, :get}, [{:var, :data}, {:keyword, :name}]}
+
+      assert {:ok, "Alice", %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+
+      # (get data :missing)
+      call_ast = {:call, {:var, :get}, [{:var, :data}, {:keyword, :missing}]}
+
+      assert {:ok, nil, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get with 3 arguments (map, key, default) returns value or default" do
+      env = Env.initial()
+      data = %{name: "Alice", age: 30}
+
+      # (get data :name :default)
+      call_ast = {:call, {:var, :get}, [{:var, :data}, {:keyword, :name}, {:string, "default"}]}
+
+      assert {:ok, "Alice", %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+
+      # (get data :missing :default)
+      call_ast =
+        {:call, {:var, :get}, [{:var, :data}, {:keyword, :missing}, {:string, "default"}]}
+
+      assert {:ok, "default", %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get arity error with wrong argument count" do
+      env = Env.initial()
+
+      # get only accepts 2 or 3 arguments
+      call_ast = {:call, {:var, :get}, [{:keyword, :name}]}
+
+      assert {:error, {:arity_error, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "get with nil map returns nil or default" do
+      env = Env.initial()
+
+      # (get nil :key)
+      call_ast = {:call, {:var, :get}, [nil, {:keyword, :key}]}
+
+      assert {:ok, nil, %{}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+
+      # (get nil :key "default")
+      call_ast = {:call, {:var, :get}, [nil, {:keyword, :key}, {:string, "default"}]}
+
+      assert {:ok, "default", %{}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "get-in with 2 arguments (map, path) returns nested value" do
+      env = Env.initial()
+      data = %{user: %{name: "Alice", address: %{city: "NYC"}}}
+
+      # (get-in data [:user :name])
+      call_ast =
+        {:call, {:var, :"get-in"},
+         [{:var, :data}, {:vector, [{:keyword, :user}, {:keyword, :name}]}]}
+
+      assert {:ok, "Alice", %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get-in with 3 arguments (map, path, default) returns default when path not found" do
+      env = Env.initial()
+      data = %{user: %{name: "Alice"}}
+
+      # (get-in data [:user :missing] :default)
+      call_ast =
+        {:call, {:var, :"get-in"},
+         [
+           {:var, :data},
+           {:vector, [{:keyword, :user}, {:keyword, :missing}]},
+           {:string, "default"}
+         ]}
+
+      assert {:ok, "default", %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get-in arity error with wrong argument count" do
+      env = Env.initial()
+
+      # get-in only accepts 2 or 3 arguments
+      call_ast = {:call, {:var, :"get-in"}, [{:keyword, :name}]}
+
+      assert {:error, {:arity_error, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
   end
 
   describe "builtin unwrapping for higher-order functions" do

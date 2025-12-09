@@ -69,8 +69,8 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # Map operations
       # ============================================================
-      {:get, {:normal, &Runtime.get/2}},
-      {:"get-in", {:normal, &Runtime.get_in/2}},
+      {:get, {:multi_arity, {&Runtime.get/2, &Runtime.get/3}}},
+      {:"get-in", {:multi_arity, {&Runtime.get_in/2, &Runtime.get_in/3}}},
       {:assoc, {:normal, &Runtime.assoc/3}},
       {:"assoc-in", {:normal, &Runtime.assoc_in/3}},
       {:dissoc, {:normal, &Runtime.dissoc/2}},
