@@ -136,7 +136,7 @@ jobs:
             - See `docs/guidelines/development-guidelines.md` (DRY section) and `docs/guidelines/testing-guidelines.md` (Avoid Duplication section)
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(mix:*),Bash(git:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash"'
 
           # Enable full output for debugging
           show_full_output: true
