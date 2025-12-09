@@ -206,11 +206,13 @@ memory/results        ; read from persistent memory
 ### Special Forms
 ```clojure
 (let [x 1, y 2] body)              ; local bindings
-(let [{:keys [a b]} m] body)       ; map destructuring (ONLY in let, NOT in fn params)
+(let [{:keys [a b]} m] body)       ; map destructuring
 (if cond then else)                ; conditional (else is REQUIRED)
 (when cond body)                   ; single-branch returns nil if false
 (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
-(fn [x] body)                      ; anonymous function (simple params only, no destructuring)
+(fn [x] body)                      ; anonymous function with simple param
+(fn [[a b]] body)                  ; vector destructuring in params
+(fn [{:keys [x]}] body)            ; map destructuring in params
 (< a b)                            ; comparisons are 2-arity ONLY, NOT (<= a b c)
 ```
 
@@ -314,7 +316,6 @@ The return value determines memory behavior:
 | `(where :status "active")` | `(where :status = "active")` |
 | `(where :active true)` | `(where :active)` (preferred) or `(where :active = true)` |
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
-| `(fn [{:keys [a b]}] ...)` | `(fn [m] (let [{:keys [a b]} m] ...))` |
 | `(<= 100 x 500)` | `(and (>= x 100) (<= x 500))` |
 | `(ctx :input)` | `ctx/input` |
 | `(call :get-users {})` | `(call "get-users" {})` |
@@ -324,7 +325,6 @@ The return value determines memory behavior:
 
 **Key constraints:**
 - `where` predicates MUST have an operator (except for truthy check)
-- Destructuring is ONLY allowed in `let`, NOT in `fn` params
 - Comparisons are strictly 2-arity: use `(and (>= x 100) (<= x 500))` NOT `(<= 100 x 500)`
 
 <!-- PTC_PROMPT_END -->

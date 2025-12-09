@@ -1353,12 +1353,13 @@ Anonymous functions are supported via `fn` with restrictions:
 ```clojure
 (fn [x] body)           ; single argument
 (fn [a b] body)         ; multiple arguments
+(fn [[a b]] body)       ; vector destructuring in params
+(fn [{:keys [x]}] body) ; map destructuring in params
 ```
 
 **Restrictions:**
 - No recursion within `fn` (no self-reference)
 - No `#()` short syntax (simplifies parsing)
-- No destructuring in parameters (use `let` inside the body instead)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
 
@@ -1374,9 +1375,8 @@ Anonymous functions are supported via `fn` with restrictions:
 ;; Multiple arguments with reduce
 (reduce (fn [acc x] (+ acc (:amount x))) 0 items)
 
-;; Destructuring inside fn (NOT in params)
-(mapv (fn [m] (let [{:keys [name age]} m] {:name name :years age})) users)
-;; NOT: (mapv (fn [{:keys [name age]}] ...) users)  ; INVALID
+;; Destructuring in fn params (now supported)
+(mapv (fn [{:keys [name age]}] {:name name :years age}) users)
 ```
 
 **When to use `fn` vs `where`:**
