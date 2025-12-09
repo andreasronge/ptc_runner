@@ -164,6 +164,22 @@ end
 
 The following section can be included in LLM system prompts to enable code generation.
 
+**API Access:** Use `PtcRunner.Lisp.Schema.to_prompt()` to get this reference programmatically. This API is the single source of truth - do not copy/paste this section manually.
+
+```elixir
+# Get the LLM prompt reference
+prompt = PtcRunner.Lisp.Schema.to_prompt()
+
+# Use in your system prompt
+system_prompt = """
+You are a data analyst. Query data using PTC-Lisp programs.
+
+Available datasets: ctx/users, ctx/orders
+
+#{PtcRunner.Lisp.Schema.to_prompt()}
+"""
+```
+
 <!-- PTC_PROMPT_START -->
 
 ### Language Overview
@@ -313,26 +329,20 @@ The return value determines memory behavior:
 
 ---
 
-## Extracting the LLM Prompt
+## Using the LLM Prompt
 
-To extract just the quick reference section for your LLM prompts:
+Use the official API to get the quick reference for your LLM prompts:
 
 ```elixir
-# Extract content between the HTML comment markers (see source)
-# Markers: "<" + "!-- PTC_PROMPT_START --" + ">" and "<" + "!-- PTC_PROMPT_END --" + ">"
+# Recommended: Use the API (single source of truth)
+prompt = PtcRunner.Lisp.Schema.to_prompt()
 
-@start_marker "<!" <> "-- PTC_PROMPT_START -->"
-@end_marker "<!" <> "-- PTC_PROMPT_END -->"
-
-prompt = """
+# Example system prompt for an LLM agent
+system_prompt = """
 You are an assistant that writes PTC-Lisp programs.
 
-#{File.read!("docs/ptc-lisp-llm-guide.md")
-  |> String.split(@start_marker)
-  |> List.last()
-  |> String.split(@end_marker)
-  |> List.first()}
+#{PtcRunner.Lisp.Schema.to_prompt()}
 """
 ```
 
-The markers are HTML comments `PTC_PROMPT_START` and `PTC_PROMPT_END` that are invisible when rendered.
+The `PtcRunner.Lisp.Schema.to_prompt/0` function returns the content between the `PTC_PROMPT_START` and `PTC_PROMPT_END` markers in this document, compiled into the library at build time.
