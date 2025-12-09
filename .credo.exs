@@ -77,7 +77,6 @@
           {Credo.Check.Warning.IExPry, []},
           {Credo.Check.Warning.IoInspect, []},
           {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, []},
-          {Credo.Check.Warning.OperationOnSameValues, []},
           {Credo.Check.Warning.RaiseInsideRescue, []},
           {Credo.Check.Warning.SpecWithStruct, []},
           {Credo.Check.Warning.WrongTestFileExtension, []},
