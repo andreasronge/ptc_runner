@@ -44,15 +44,23 @@ Special instructions, blockers, or decisions for PM.
 
 | Format | Meaning |
 |--------|---------|
-| `- [ ] Task description` | PM should create an issue for this |
-| `- [ ] #123 - Task title` | Existing issue, PM will track/trigger |
-| `- [x] #123 - Task title` | Completed (auto-updated when issue closes) |
+| `- [ ] Task description` | PM will create an issue when it's time to work on this |
+| `- [ ] #123 - Task title` | Existing issue (only if already created) |
+| `- [x] #123 - Task title` | Completed |
+
+## Philosophy
+
+**Keep it lightweight.** Don't create GitHub issues upfront - let the PM create them just-in-time as work progresses. The epic is a roadmap, not a detailed project plan.
+
+- Write tasks as brief descriptions, not detailed specs
+- Trust the PM to read the spec docs and create well-formed issues
+- Only link existing issues if they already exist (e.g., `from-pr-review` tech debt)
+- The PM will refine tasks into proper issues with test plans, edge cases, etc.
 
 ## Guidelines
 
-- **Task granularity**: Each task should be PR-sized (completable in one PR)
 - **Phase ordering**: PM completes phases sequentially (Phase 1 before Phase 2)
-- **Spec references**: Always link to relevant specification documents
+- **Spec references**: Link to specification documents - PM reads these when creating issues
 - **One active epic**: Only one epic should have `status:active` at a time
 
 ## References
