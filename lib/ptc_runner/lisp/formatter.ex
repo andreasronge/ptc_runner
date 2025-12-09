@@ -32,6 +32,10 @@ defmodule PtcRunner.Lisp.Formatter do
     "{#{format_pairs(pairs)}}"
   end
 
+  def format({:set, elems}) do
+    "\#{#{format_list(elems)}}"
+  end
+
   def format({:list, elems}) do
     "(#{format_list(elems)})"
   end
