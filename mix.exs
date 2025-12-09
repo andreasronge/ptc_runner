@@ -42,6 +42,7 @@ defmodule PtcRunner.MixProject do
     [
       {:jason, "~> 1.4"},
       {:nimble_parsec, "~> 1.4"},
+      {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req_llm, "~> 1.0.0-rc", only: :test}
