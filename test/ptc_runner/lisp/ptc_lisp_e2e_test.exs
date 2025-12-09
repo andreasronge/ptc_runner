@@ -62,12 +62,10 @@ defmodule PtcRunner.Lisp.E2ETest do
 
   describe "Level 2 - pipeline_filter_sort" do
     test "gets top 5 highest-paid employees" do
-      # Note: sort-by only supports 2-arity (ascending), so use reverse for descending
       source = ~S"""
       (->> ctx/employees
            (filter (where :salary > 50000))
-           (sort-by :salary)
-           reverse
+           (sort-by :salary >)
            (take 5))
       """
 
@@ -520,6 +518,68 @@ defmodule PtcRunner.Lisp.E2ETest do
                %{category: "food", average: 75.0},
                %{category: "transport", average: 30.0}
              ] = result
+    end
+  end
+
+  # ==========================================================================
+  # Builtins as Higher-Order Function Arguments
+  # ==========================================================================
+
+  describe "builtins as HOF arguments" do
+    test "sort-by with > comparator for descending order" do
+      source = ~S"""
+      (sort-by :price > ctx/products)
+      """
+
+      ctx = %{
+        products: [
+          %{name: "Book", price: 15},
+          %{name: "Laptop", price: 999},
+          %{name: "Phone", price: 599}
+        ]
+      }
+
+      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+
+      assert Enum.map(result, & &1.name) == ["Laptop", "Phone", "Book"]
+    end
+
+    test "sort-by with < comparator for ascending order" do
+      source = ~S"""
+      (sort-by :name < ctx/users)
+      """
+
+      ctx = %{
+        users: [
+          %{name: "Charlie"},
+          %{name: "Alice"},
+          %{name: "Bob"}
+        ]
+      }
+
+      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+
+      assert Enum.map(result, & &1.name) == ["Alice", "Bob", "Charlie"]
+    end
+
+    test "reduce with + accumulator" do
+      source = ~S"""
+      (reduce + 0 [1 2 3 4 5])
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == 15
+    end
+
+    test "reduce with * accumulator" do
+      source = ~S"""
+      (reduce * 1 [1 2 3 4 5])
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == 120
     end
   end
 end

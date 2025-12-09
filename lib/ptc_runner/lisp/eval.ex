@@ -411,6 +411,25 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Multi-arity builtins: select function based on argument count
+  # Tuple {fun2, fun3} means index 0 = arity 2, index 1 = arity 3, etc.
+  defp apply_fun({:multi_arity, funs}, args, ctx, memory, tool_exec) when is_tuple(funs) do
+    converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, ctx, memory, tool_exec) end)
+    arity = length(args)
+
+    # Determine min_arity from first function in tuple
+    min_arity = :erlang.fun_info(elem(funs, 0), :arity) |> elem(1)
+    idx = arity - min_arity
+
+    if idx >= 0 and idx < tuple_size(funs) do
+      fun = elem(funs, idx)
+      {:ok, apply(fun, converted_args), memory}
+    else
+      arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
+      {:error, {:arity_error, "expected arity #{inspect(arities)}, got #{arity}"}}
+    end
+  end
+
   # Plain function value (from user code or closures that escape)
   defp apply_fun(fun, args, _ctx, memory, _tool_exec) when is_function(fun) do
     {:ok, apply(fun, args), memory}
@@ -524,6 +543,21 @@ defmodule PtcRunner.Lisp.Eval do
   # The closure must have 1 parameter (enforced at evaluation time)
   defp closure_to_fun({:closure, patterns, body, closure_env}, ctx, memory, tool_exec) do
     fn arg -> eval_closure_arg(arg, patterns, body, closure_env, ctx, memory, tool_exec) end
+  end
+
+  # Unwrap builtin function tuples so they can be passed to higher-order functions
+  defp closure_to_fun({:normal, fun}, _ctx, _memory, _tool_exec) when is_function(fun) do
+    fun
+  end
+
+  defp closure_to_fun({:variadic, fun, _identity}, _ctx, _memory, _tool_exec)
+       when is_function(fun) do
+    fun
+  end
+
+  defp closure_to_fun({:variadic_nonempty, fun}, _ctx, _memory, _tool_exec)
+       when is_function(fun) do
+    fun
   end
 
   # Non-closures pass through unchanged
