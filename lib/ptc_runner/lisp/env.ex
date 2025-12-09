@@ -118,7 +118,9 @@ defmodule PtcRunner.Lisp.Env do
       {:string?, {:normal, &is_binary/1}},
       {:keyword?, {:normal, fn x -> is_atom(x) and x not in [nil, true, false] end}},
       {:vector?, {:normal, &is_list/1}},
-      {:map?, {:normal, &is_map/1}},
+      {:set?, {:normal, &Runtime.set?/1}},
+      {:set, {:normal, &Runtime.set/1}},
+      {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &is_list/1}},
 
       # ============================================================
