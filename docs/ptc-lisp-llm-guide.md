@@ -284,6 +284,10 @@ memory/results        ; read from persistent memory
 (contains? #{1 2} 1)   ; membership: true
 (count #{1 2 3})       ; count: 3
 (empty? #{})           ; empty check: true
+
+; Note: map, filter, remove work on sets but return vectors
+(map inc #{1 2})       ; returns vector: [2 3]
+(filter odd? #{1 2 3}) ; returns vector: [1 3]
 ```
 
 ### Tool Calls

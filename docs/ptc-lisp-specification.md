@@ -232,7 +232,7 @@ Sets are **unordered** - iteration order is not guaranteed.
 | `empty?` | `(empty? #{})` | Returns true if empty |
 | `contains?` | `(contains? #{1 2} 1)` | Membership test (O(1)) |
 
-**Not supported for sets:** `first`, `last`, `nth`, `map`, `filter`, `sort` (sets are unordered).
+**Not supported for sets:** `first`, `last`, `nth`, `sort`, `sort-by` (sets are unordered).
 
 **Not supported:** Lists (`'()`)
 
