@@ -10,7 +10,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 | `claude-auto-triage.yml` | After code-review completes | Inherits from code-review | Triage review findings |
 | `claude.yml` | `@claude` mention | Actor or `claude-approved` label | Execute requested work |
 | `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue specifications |
-| `claude-pm.yml` | PR merged, issue labeled, manual | Both labels required | Create issues from specs, orchestrate implementation |
+| `claude-pm.yml` | PR merged, issue labeled, manual | `ready-for-implementation` label | Create issues from epic, orchestrate implementation |
 
 ## Workflow Interactions
 
@@ -48,9 +48,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 │                    `needs-review`            │                  │
 │                                              ▼                  │
 │                                   Adds `ready-for-implementation`
-│                                              │                  │
-│                                              ▼                  │
-│                              Maintainer adds `claude-approved`  │
+│                                   + `claude-approved` (both)    │
 │                                              │                  │
 │                                              ▼                  │
 │                                         pm.yml                  │
@@ -65,18 +63,46 @@ This document describes the Claude-powered GitHub workflows and their security g
 
 ## PM Workflow
 
-The PM workflow (`claude-pm.yml`) orchestrates issue creation and implementation. It runs the `/pm-workflow` Claude command.
+The PM workflow (`claude-pm.yml`) orchestrates issue creation and implementation using an **Epic Issue** as the source of truth.
 
 **Full details**: See `.claude/commands/pm-workflow.md` for:
-- Phase structure and specification documents
+- Epic-based workflow instructions
 - Decision framework and safety rules
 
-**Key behaviors**:
-- Creates ONE issue at a time from specification documents
-- Issues are auto-added to GitHub Project when labeled (`enhancement`, `bug`, `tech-debt`)
-- Phase tracking uses labels (`phase:*`), not project fields
-- Triggers implementation automatically when issue has `ready-for-implementation` label
-- Skips if there's an open PR (prevents concurrent work)
+### Epic Issue Pattern
+
+The PM workflow reads from a human-created "epic issue" to understand what work needs to be done:
+
+```markdown
+# [Epic Name] Implementation
+
+## Specification Documents
+- [Primary Spec](docs/spec.md) - Main implementation guide
+
+## Progress
+
+### Phase 1: [Phase Name]
+- [ ] #123 - [Linked issue title]
+- [ ] Create parser module (PM will create issue)
+- [x] #124 - [Completed] (closed via #PR-456)
+
+### Phase 2: [Phase Name]
+- [ ] Next phase tasks...
+
+## Notes
+[Special instructions for PM, blockers]
+```
+
+**Epic identification**: Labels `type:epic` + `status:active` (only one epic should be active at a time)
+
+### Key Behaviors
+
+- **Epic as source of truth**: PM reads epic body to find spec docs, tasks, and progress
+- **Creates ONE issue at a time**: From unchecked text items in the epic
+- **Updates epic on progress**: Links new issues, marks checkboxes when closed
+- **Monitors tech debt**: Handles `from-pr-review` issues regardless of epic
+- **Triggers implementation**: When issue has `ready-for-implementation` label
+- **Skips if PR open**: Prevents concurrent work
 
 **GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
 
@@ -110,7 +136,7 @@ Most workflows require explicit maintainer approval before Claude can act:
 
 1. **PRs**: Maintainer must add `claude-review` label
 2. **Issues/PRs with @claude**: Requires `claude-approved` label (or be the maintainer)
-3. **Implementation**: Triggers on `ready-for-implementation` label (review gate is sufficient)
+3. **Implementation**: Issue review adds both `ready-for-implementation` AND `claude-approved` when approving
 
 ### Loop Prevention
 
@@ -165,13 +191,18 @@ gh workflow run claude-pm.yml -f action=reset-stuck
 - `ready-for-implementation` - Marks issue as ready for PM
 - `claude-approved` - Maintainer approval for Claude automation
 
-### Phase Labels (PTC-Lisp Implementation)
-- `phase:api-refactor` - API namespace refactoring (Phase 0)
-- `phase:parser` - PTC-Lisp parser implementation (Phase 1)
-- `phase:analyzer` - PTC-Lisp analyzer implementation (Phase 2)
-- `phase:eval` - PTC-Lisp interpreter implementation (Phase 3)
-- `phase:integration` - End-to-end integration (Phase 4)
-- `phase:polish` - Polish & cleanup, deferred issue review (Phase 5)
+### Epic Labels
+- `type:epic` - Issue is an epic (contains task list for PM to follow)
+- `status:active` - Currently active epic (only one at a time)
+
+### Phase Labels (Optional)
+Phase labels can be used to categorize issues, but are not required for the PM workflow (which uses the epic for tracking):
+- `phase:api-refactor` - API namespace refactoring
+- `phase:parser` - PTC-Lisp parser implementation
+- `phase:analyzer` - PTC-Lisp analyzer implementation
+- `phase:eval` - PTC-Lisp interpreter implementation
+- `phase:integration` - End-to-end integration
+- `phase:polish` - Polish & cleanup
 - `ptc-lisp` - General PTC-Lisp language work
 
 ### Status Labels
