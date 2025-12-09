@@ -131,6 +131,16 @@ defmodule PtcRunner.Lisp.Parser do
   )
 
   defcombinatorp(
+    :set,
+    ignore(string("#" <> "{"))
+    |> concat(parsec(:ws))
+    |> repeat(parsec(:expr) |> concat(parsec(:ws)))
+    |> ignore(string("}"))
+    |> tag(:set)
+    |> map({ParserHelpers, :build_set, []})
+  )
+
+  defcombinatorp(
     :list,
     ignore(string("("))
     |> concat(parsec(:ws))
@@ -156,6 +166,7 @@ defmodule PtcRunner.Lisp.Parser do
       keyword,
       symbol,
       parsec(:vector),
+      parsec(:set),
       parsec(:map_literal),
       parsec(:list)
     ])

@@ -48,6 +48,8 @@ defmodule PtcRunner.Lisp.ParserHelpers do
 
   def build_vector({:vector, elements}), do: {:vector, elements}
 
+  def build_set({:set, elements}), do: {:set, elements}
+
   def build_map({:map, elements}) do
     if rem(length(elements), 2) != 0 do
       raise ArgumentError, "Map literal requires even number of forms, got #{length(elements)}"
