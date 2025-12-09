@@ -24,7 +24,16 @@ defmodule PtcDemo.LispAgent do
   @max_iterations 5
 
   # --- State ---
-  defstruct [:model, :context, :datasets, :last_program, :last_result, :data_mode, :usage]
+  defstruct [
+    :model,
+    :context,
+    :datasets,
+    :last_program,
+    :last_result,
+    :data_mode,
+    :usage,
+    :memory
+  ]
 
   # --- Public API ---
 
@@ -160,7 +169,8 @@ defmodule PtcDemo.LispAgent do
        last_program: nil,
        last_result: nil,
        data_mode: data_mode,
-       usage: empty_usage()
+       usage: empty_usage(),
+       memory: %{}
      }}
   end
 
@@ -169,23 +179,25 @@ defmodule PtcDemo.LispAgent do
     # Add user question to context
     context = ReqLLM.Context.append(state.context, user(question))
 
-    # Run the agentic loop with initial last_exec = {nil, nil}
+    # Run the agentic loop with persisted memory from state
     case agent_loop(
            state.model,
            context,
            state.datasets,
            state.usage,
            @max_iterations,
-           {nil, nil}
+           {nil, nil},
+           state.memory
          ) do
-      {:ok, answer, final_context, new_usage, last_program, last_result} ->
+      {:ok, answer, final_context, new_usage, last_program, last_result, new_memory} ->
         {:reply, {:ok, answer},
          %{
            state
            | context: final_context,
              last_program: last_program,
              last_result: last_result,
-             usage: new_usage
+             usage: new_usage,
+             memory: new_memory
          }}
 
       {:error, reason, final_context, new_usage} ->
@@ -205,7 +217,8 @@ defmodule PtcDemo.LispAgent do
          last_program: nil,
          last_result: nil,
          data_mode: :schema,
-         usage: empty_usage()
+         usage: empty_usage(),
+         memory: %{}
      }}
   end
 
@@ -259,7 +272,14 @@ defmodule PtcDemo.LispAgent do
     new_context = ReqLLM.Context.new([system(system_prompt(mode))])
 
     {:reply, :ok,
-     %{state | data_mode: mode, context: new_context, last_program: nil, last_result: nil}}
+     %{
+       state
+       | data_mode: mode,
+         context: new_context,
+         last_program: nil,
+         last_result: nil,
+         memory: %{}
+     }}
   end
 
   @impl true
@@ -269,11 +289,11 @@ defmodule PtcDemo.LispAgent do
 
   # --- Agentic Loop ---
 
-  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec) do
+  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec, _memory) do
     {:error, "Max iterations reached", context, usage}
   end
 
-  defp agent_loop(model, context, datasets, usage, remaining, last_exec) do
+  defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
 
     case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
@@ -281,49 +301,87 @@ defmodule PtcDemo.LispAgent do
         text = ReqLLM.Response.text(response)
         new_usage = add_usage(usage, ReqLLM.Response.usage(response))
 
-        # Check if response contains a PTC-Lisp program
-        case extract_ptc_program(text) do
-          {:ok, program} ->
-            IO.puts("   [Program] #{truncate(program, 80)}")
+        # Handle nil or empty response from LLM
+        case validate_llm_response(text, response) do
+          {:error, error_msg} ->
+            IO.puts("   [LLM Error] #{error_msg}")
 
-            # Execute the program using PtcRunner.Lisp
-            case PtcRunner.Lisp.run(program, context: datasets, timeout: 5000, float_precision: 2) do
-              {:ok, result, _delta, _new_memory} ->
-                result_str = format_result(result)
-                IO.puts("   [Result] #{truncate(result_str, 80)}")
+            # Add error feedback and retry
+            new_context =
+              context
+              |> ReqLLM.Context.append(
+                user("[System Error]\n#{error_msg}\nPlease try again with a valid response.")
+              )
 
-                # Add assistant message and tool result, then continue loop
-                new_context =
-                  context
-                  |> ReqLLM.Context.append(assistant(text))
-                  |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
+            agent_loop(model, new_context, datasets, new_usage, remaining - 1, last_exec, memory)
 
-                # Track raw result for test runner
-                new_last_exec = {program, result}
-                agent_loop(model, new_context, datasets, new_usage, remaining - 1, new_last_exec)
+          :ok ->
+            # Check if response contains a PTC-Lisp program
+            case extract_ptc_program(text) do
+              {:ok, program} ->
+                IO.puts("   [Program] #{truncate(program, 80)}")
 
-              {:error, reason} ->
-                error_msg = format_lisp_error(reason)
-                IO.puts("   [Error] #{error_msg}")
+                # Execute the program using PtcRunner.Lisp with persistent memory
+                case PtcRunner.Lisp.run(program,
+                       context: datasets,
+                       memory: memory,
+                       timeout: 5000,
+                       float_precision: 2
+                     ) do
+                  {:ok, result, _delta, new_memory} ->
+                    result_str = format_result(result)
+                    IO.puts("   [Result] #{truncate(result_str, 80)}")
 
-                # Add error as tool result and continue
-                new_context =
-                  context
-                  |> ReqLLM.Context.append(assistant(text))
-                  |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
+                    # Add assistant message and tool result, then continue loop
+                    new_context =
+                      context
+                      |> ReqLLM.Context.append(assistant(text))
+                      |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
 
-                agent_loop(model, new_context, datasets, new_usage, remaining - 1, last_exec)
+                    # Track raw result for test runner
+                    new_last_exec = {program, result}
+
+                    agent_loop(
+                      model,
+                      new_context,
+                      datasets,
+                      new_usage,
+                      remaining - 1,
+                      new_last_exec,
+                      new_memory
+                    )
+
+                  {:error, reason} ->
+                    error_msg = format_lisp_error(reason)
+                    IO.puts("   [Error] #{error_msg}")
+
+                    # Add error as tool result and continue (preserve memory)
+                    new_context =
+                      context
+                      |> ReqLLM.Context.append(assistant(text))
+                      |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
+
+                    agent_loop(
+                      model,
+                      new_context,
+                      datasets,
+                      new_usage,
+                      remaining - 1,
+                      last_exec,
+                      memory
+                    )
+                end
+
+              :none ->
+                # No program found - this is the final answer
+                IO.puts("   [Answer] Final response (no program)")
+                final_context = ReqLLM.Context.append(context, assistant(text))
+
+                # Use tracked last execution (raw values, not formatted strings)
+                {last_program, last_result} = last_exec
+
+                {:ok, text, final_context, new_usage, last_program, last_result, memory}
             end
-
-          :none ->
-            # No program found - this is the final answer
-            IO.puts("   [Answer] Final response (no program)")
-            final_context = ReqLLM.Context.append(context, assistant(text))
-
-            # Use tracked last execution (raw values, not formatted strings)
-            {last_program, last_result} = last_exec
-
-            {:ok, text, final_context, new_usage, last_program, last_result}
         end
 
       {:error, reason} ->
@@ -332,6 +390,40 @@ defmodule PtcDemo.LispAgent do
   end
 
   # --- Private Functions ---
+
+  # Validate LLM response and return helpful error messages
+  defp validate_llm_response(nil, response) do
+    # Try to extract useful info from the response for debugging
+    reason =
+      cond do
+        # Check if there's a finish reason that explains the nil
+        (finish_reason = ReqLLM.Response.finish_reason(response)) != nil ->
+          "LLM returned no text content (finish_reason: #{finish_reason})"
+
+        # Check for tool calls without text
+        (tool_calls = ReqLLM.Response.tool_calls(response)) != [] ->
+          tool_names = Enum.map(tool_calls, & &1.name) |> Enum.join(", ")
+
+          "LLM returned tool calls instead of text: [#{tool_names}]. This demo expects text responses with ```lisp code blocks."
+
+        true ->
+          "LLM returned nil/empty text content. Response: #{inspect(response, limit: 300)}"
+      end
+
+    {:error, reason}
+  end
+
+  defp validate_llm_response("", _response) do
+    {:error, "LLM returned empty text content"}
+  end
+
+  defp validate_llm_response(text, _response) when is_binary(text) do
+    :ok
+  end
+
+  defp validate_llm_response(other, _response) do
+    {:error, "LLM returned unexpected content type: #{inspect(other, limit: 100)}"}
+  end
 
   defp system_prompt(:schema) do
     # Get schema from data module
@@ -343,6 +435,8 @@ defmodule PtcDemo.LispAgent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC-Lisp program in a ```lisp code block. The result will be returned to you.
+    When you have the answer, respond in plain text WITHOUT a code block.
+    Memory persists automatically between programs - reference stored values with memory/key.
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets (access via ctx/name, e.g., ctx/products):
@@ -364,6 +458,8 @@ defmodule PtcDemo.LispAgent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC-Lisp program in a ```lisp code block. The result will be returned to you.
+    When you have the answer, respond in plain text WITHOUT a code block.
+    Memory persists automatically between programs - reference stored values with memory/key.
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 

@@ -87,10 +87,17 @@ mix run -e "PtcDemo.CLI.main([\"--explore\"])"
 
 # === Lisp DSL ===
 # Run the Lisp chat (recommended - most token efficient)
+mix lisp
+
+# Or equivalently:
 mix run -e "PtcDemo.LispCLI.main([])"
 
+# Lisp with specific model
+mix lisp --model=haiku
+mix lisp --model=google:gemini-2.0-flash-exp
+
 # Lisp with explore mode
-mix run -e "PtcDemo.LispCLI.main([\"--explore\"])"
+mix lisp --explore
 ```
 
 ## Generation Modes
@@ -146,6 +153,13 @@ How many expenses are pending approval?
 Total approved expenses over $500?
 ```
 
+**Cross-dataset queries:**
+```
+How many unique products have been ordered?
+What is the total expense amount for employees in the engineering department?
+How many employees have submitted expenses?
+```
+
 ## Example Lisp Programs
 
 The Lisp DSL generates more compact, readable programs:
@@ -167,16 +181,54 @@ The Lisp DSL generates more compact, readable programs:
 
 ;; Remote employees count
 (count (filter (where :remote) ctx/employees))
+
+;; Cross-dataset: unique products ordered
+(count (distinct (pluck :product_id ctx/orders)))
+
+;; Cross-dataset: expenses for engineering employees
+(let [eng-ids (pluck :id (filter (where :department = "engineering") ctx/employees))]
+  (->> ctx/expenses
+       (filter (fn [e] (contains? eng-ids (:employee_id e))))
+       (sum-by :amount)))
 ```
 
-## Commands
+## Lisp CLI Options
+
+```bash
+mix lisp [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--model=<name>` | Set model (preset name or full model ID) |
+| `--explore` | Start in explore mode (LLM discovers schema) |
+| `--test` | Run automated tests and exit |
+| `--verbose`, `-v` | Verbose output (for test mode) |
+
+Model presets: `haiku`, `gemini`, `deepseek`, `kimi`, `gpt`
+
+Examples:
+```bash
+mix lisp                                    # Interactive with default model
+mix lisp --model=haiku                      # Use Claude Haiku
+mix lisp --model=google:gemini-2.0-flash    # Use full model ID
+mix lisp --test --model=gemini --verbose    # Test with Gemini
+```
+
+## Interactive Commands
 
 | Command | Description |
 |---------|-------------|
 | `/datasets` | List available datasets with sizes |
 | `/program` | Show the last generated PTC program |
+| `/programs` | Show all programs from this session |
+| `/result` | Show last execution result (raw value) |
 | `/examples` | Show example queries |
 | `/stats` | Show token usage and cost statistics |
+| `/mode` | Show/change data mode (schema/explore) |
+| `/model` | Show/change model |
+| `/system` | Show system prompt |
+| `/context` | Show conversation history |
 | `/reset` | Clear conversation context and stats |
 | `/help` | Show help |
 | `/quit` | Exit |
@@ -198,7 +250,80 @@ This demonstrates how text mode keeps token usage low compared to structured mod
 
 ## Automated Testing
 
-Run the test suite to verify the LLM generates correct programs:
+### Lisp DSL Tests
+
+Run the Lisp test suite from the command line:
+
+```bash
+# Run all tests (dots for progress)
+mix lisp --test
+
+# Run with verbose output
+mix lisp --test --verbose
+
+# Run with specific model
+mix lisp --test --model=haiku
+mix lisp --test --model=gemini --verbose
+
+# Generate a markdown report
+mix lisp --test --report=report.md
+mix lisp --test --model=haiku --verbose --report=haiku_report.md
+```
+
+Or programmatically in IEx:
+
+```elixir
+# Run all tests
+PtcDemo.LispTestRunner.run_all()
+
+# With options
+PtcDemo.LispTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest", verbose: true)
+
+# Generate a report
+PtcDemo.LispTestRunner.run_all(model: "google:gemini-2.0-flash", report: "gemini_report.md")
+
+# List available tests
+PtcDemo.LispTestRunner.list()
+
+# Run a single test
+PtcDemo.LispTestRunner.run_one(3)
+```
+
+Example output:
+```
+=== PTC-Lisp Demo Test Runner ===
+Model: openrouter:anthropic/claude-3.5-haiku
+Data mode: schema
+
+[1/16] How many products are there?
+   PASS: Total products should be 500
+   Attempts: 1
+   Program: (count ctx/products)
+
+[2/16] How many orders are there?
+   PASS: Total orders should be 1000
+   Attempts: 1
+   Program: (count ctx/orders)
+...
+
+==================================================
+Results: 16/16 passed, 0 failed
+Total attempts: 18 (1.1 avg per test)
+Duration: 45.2s
+Model: openrouter:anthropic/claude-3.5-haiku
+==================================================
+
+Token usage: 12,456 tokens, cost: $0.0042
+Report written to: report.md
+```
+
+The report includes:
+- Summary table with pass/fail counts, attempts, duration, and cost
+- Results table showing each test's status, attempts, and final program
+- Detailed section for failed tests showing all programs tried and their results
+- Complete list of all programs generated during the test run
+
+### JSON DSL Tests
 
 ```bash
 # Run all tests with text mode (default)
@@ -217,27 +342,15 @@ mix run -e "PtcDemo.TestRunner.list()"
 mix run -e "PtcDemo.TestRunner.run_one(5)"
 ```
 
-Example output:
-```
-=== PTC Demo Test Runner (structured mode) ===
-
-1. How many products are there?
-   [Phase 1] Generating PTC program (structured mode)...
-   [Program] {"program":{"op":"pipe","steps":[{"op":"load","name":"products"},...
-   [Phase 2] Executing in sandbox...
-   [Result] 500 (1ms)
-   ✓ Total products should be 500
-
-==================================================
-Results: 11 passed, 0 failed
-==================================================
-```
+### Test Assertions
 
 Tests use **constraint-based assertions** since data is randomly generated:
-- `:integer` / `:number` - type checks
+- `:integer` / `:number` / `:string` / `:list` - type checks
 - `{:eq, 500}` - exact value
 - `{:between, 1, 499}` - range check
 - `{:gt, 0}` - greater than
+- `{:length, 3}` - list length
+- `{:starts_with, "Product"}` - string prefix
 
 ## How It Works
 

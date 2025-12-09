@@ -63,9 +63,10 @@ defmodule PtcRunner.Lisp.SchemaTest do
       assert String.contains?(prompt, "Right")
     end
 
-    test "contains memory result contract" do
+    test "contains memory section" do
       prompt = Schema.to_prompt()
-      assert String.contains?(prompt, "Memory Result Contract")
+      assert String.contains?(prompt, "Memory: Persisting Data Between Turns")
+      assert String.contains?(prompt, "memory/")
       assert String.contains?(prompt, ":result")
     end
   end
