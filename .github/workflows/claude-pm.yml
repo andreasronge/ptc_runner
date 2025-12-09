@@ -234,7 +234,7 @@ jobs:
             - **Tech debt (from-pr-review)**: ${{ steps.epic.outputs.tech_debt }}
             - **Failure count**: ${{ steps.status.outputs.failure_count }}
 
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash(gh:*),Bash(git:*),Bash(mix test:*),Bash(mix compile:*),Bash(ls:*),Bash(cat:*),Bash(find:*),Bash(wc:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Edit,Write,Grep,Glob,Bash"'
 
           show_full_output: true
 

@@ -83,4 +83,4 @@ jobs:
                - `needs-breakdown` if issue should be split into smaller issues
                - `bug` / `enhancement` / `documentation` based on issue type
 
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Write,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label:*),Bash(mix:*),Bash(git:*)"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Write,Bash"'
