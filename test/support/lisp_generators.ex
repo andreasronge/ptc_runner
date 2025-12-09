@@ -21,11 +21,8 @@ defmodule PtcRunner.TestSupport.LispGenerators do
   def gen_integer, do: integer(-1_000_000..1_000_000)
 
   @doc "Generate float literal (bounded, avoiding special values)"
-  def gen_float do
-    float(min: -1.0e6, max: 1.0e6)
-    # NaN check: f == f is false only for NaN; this filters out invalid floats
-    |> filter(fn f -> f == f end)
-  end
+  # Note: StreamData.float/1 in BEAM never produces NaN/Infinity - no filtering needed
+  def gen_float, do: float(min: -1.0e6, max: 1.0e6)
 
   @doc "Generate simple alphanumeric string literal"
   def gen_string do

@@ -13,11 +13,10 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
       end
     end
 
-    property "gen_float produces valid floats (no NaN)" do
+    property "gen_float produces valid floats" do
       check all(f <- Gen.gen_float()) do
         assert is_float(f)
-        # NaN check: f == f is false only for NaN
-        assert f == f
+        assert f >= -1.0e6 and f <= 1.0e6
       end
     end
 

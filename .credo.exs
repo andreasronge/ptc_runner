@@ -63,6 +63,7 @@
           {Credo.Check.Refactor.MapJoin, []},
           {Credo.Check.Refactor.NegatedConditionsInUnless, []},
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
+          # StreamData generators require nested bind/map calls
           {Credo.Check.Refactor.Nesting, [max_nesting: 3]},
           {Credo.Check.Refactor.UnlessWithElse, []},
           {Credo.Check.Refactor.WithClauses, []},
@@ -78,6 +79,7 @@
           {Credo.Check.Warning.IoInspect, []},
           {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, []},
           {Credo.Check.Warning.OperationOnSameValues, []},
+          {Credo.Check.Warning.OperationWithConstantResult, []},
           {Credo.Check.Warning.RaiseInsideRescue, []},
           {Credo.Check.Warning.SpecWithStruct, []},
           {Credo.Check.Warning.WrongTestFileExtension, []},
@@ -94,9 +96,6 @@
         disabled: [
           # Disabled because we allow TODOs during development
           # {Credo.Check.Design.TagTODO, []},
-
-          # Disabled: false positive on f == f pattern used for NaN filtering in LispGenerators
-          {Credo.Check.Warning.OperationWithConstantResult, []}
         ]
       }
     }
