@@ -8,7 +8,11 @@ defmodule PtcRunner.Lisp.Env do
 
   alias PtcRunner.Lisp.Runtime
 
-  @type binding :: {:normal, function()} | {:variadic, function(), term()}
+  @type binding ::
+          {:normal, function()}
+          | {:variadic, function(), term()}
+          | {:variadic_nonempty, function()}
+          | {:multi_arity, tuple()}
   @type env :: %{atom() => binding()}
 
   @spec initial() :: env()
@@ -28,7 +32,8 @@ defmodule PtcRunner.Lisp.Env do
       {:mapv, {:normal, &Runtime.mapv/2}},
       {:pluck, {:normal, &Runtime.pluck/2}},
       {:sort, {:normal, &Runtime.sort/1}},
-      {:"sort-by", {:normal, &Runtime.sort_by/2}},
+      # sort-by: 2-arity (key, coll) or 3-arity (key, comparator, coll)
+      {:"sort-by", {:multi_arity, {&Runtime.sort_by/2, &Runtime.sort_by/3}}},
       {:reverse, {:normal, &Runtime.reverse/1}},
       {:first, {:normal, &Runtime.first/1}},
       {:last, {:normal, &Runtime.last/1}},
