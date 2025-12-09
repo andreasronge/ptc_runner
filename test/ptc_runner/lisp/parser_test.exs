@@ -100,6 +100,36 @@ defmodule PtcRunner.Lisp.ParserTest do
                  {:symbol, :users}
                ]}} = Parser.parse("(filter (where :active = true) users)")
     end
+
+    test "empty set" do
+      set_empty = "#" <> "{}"
+      assert {:ok, {:set, []}} = Parser.parse(set_empty)
+    end
+
+    test "set with elements" do
+      set_elems = "#" <> "{1 2 3}"
+      assert {:ok, {:set, [1, 2, 3]}} = Parser.parse(set_elems)
+    end
+
+    test "set with keywords" do
+      set_kw = "#" <> "{:a :b}"
+      assert {:ok, {:set, [{:keyword, :a}, {:keyword, :b}]}} = Parser.parse(set_kw)
+    end
+
+    test "nested set" do
+      set_nested = "#" <> "{#" <> "{1 2}}"
+      assert {:ok, {:set, [{:set, [1, 2]}]}} = Parser.parse(set_nested)
+    end
+
+    test "set containing vector" do
+      set_vec = "#" <> "{[1 2]}"
+      assert {:ok, {:set, [{:vector, [1, 2]}]}} = Parser.parse(set_vec)
+    end
+
+    test "set with whitespace and commas" do
+      set_ws = "#" <> "{ 1 , 2 , 3 }"
+      assert {:ok, {:set, [1, 2, 3]}} = Parser.parse(set_ws)
+    end
   end
 
   describe "whitespace and comments" do
@@ -165,6 +195,15 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "multiline strings are rejected" do
       # Single-line strings only
       assert {:error, {:parse_error, _}} = Parser.parse("\"hello\nworld\"")
+    end
+
+    test "unclosed set returns error" do
+      unclosed_set = "#" <> "{1 2 3"
+      assert {:error, {:parse_error, _}} = Parser.parse(unclosed_set)
+    end
+
+    test "space between # and { is invalid" do
+      assert {:error, {:parse_error, _}} = Parser.parse("# {1 2}")
     end
   end
 
