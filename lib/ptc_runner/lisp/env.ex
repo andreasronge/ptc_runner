@@ -3,7 +3,12 @@ defmodule PtcRunner.Lisp.Env do
   Builds the initial environment with builtins for PTC-Lisp.
 
   Provides the foundation environment with all builtin functions
-  and their descriptors (normal, variadic, etc.).
+  and their descriptors. The environment supports multiple binding types:
+
+  - `{:normal, fun}` - Fixed-arity function
+  - `{:variadic, fun, identity}` - Variadic function with identity value for 0-arg case
+  - `{:variadic_nonempty, fun}` - Variadic function requiring at least 1 argument
+  - `{:multi_arity, tuple_of_funs}` - Multiple arities where tuple index = arity - min_arity
   """
 
   alias PtcRunner.Lisp.Runtime
