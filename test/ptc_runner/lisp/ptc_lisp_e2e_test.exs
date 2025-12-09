@@ -462,14 +462,38 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert message =~ "got 3"
     end
 
-    test "destructuring in fn params" do
-      # Destructuring is only allowed in let, not fn parameters
-      # Use (fn [m] (let [{:keys [a]} m] ...)) instead
-      source = "(fn [{:keys [a]}] a)"
+    test "destructuring in fn params - map pattern with wrong argument type" do
+      # Analyzer now accepts destructuring patterns in fn parameters
+      # Evaluator supports map destructuring patterns
+      # But this test passes wrong argument type to catch runtime error
+      source = "((fn [{:keys [a]}] a) :not-a-map)"
 
-      assert {:error, {:invalid_form, message}} = Lisp.run(source)
-      assert message =~ "fn parameters must be simple symbols"
-      assert message =~ "not destructuring patterns"
+      # The error should be from destructuring error at runtime
+      assert {:error, _reason} = Lisp.run(source)
+    end
+
+    test "destructuring in fn params - vector pattern success" do
+      source = "((fn [[a b]] a) [1 2])"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 1
+    end
+
+    test "destructuring in fn params - map pattern success" do
+      source = "((fn [{:keys [x]}] x) {:x 10})"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 10
+    end
+
+    test "destructuring in fn params - vector pattern ignores extra elements" do
+      source = "((fn [[a]] a) [1 2 3])"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 1
+    end
+
+    test "destructuring in fn params - vector pattern insufficient elements error" do
+      source = "((fn [[a b c]] a) [1 2])"
+      assert {:error, {:destructure_error, message}} = Lisp.run(source)
+      assert message =~ "expected at least 3 elements, got 2"
     end
   end
 end
