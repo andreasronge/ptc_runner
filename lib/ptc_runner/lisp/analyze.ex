@@ -163,10 +163,11 @@ defmodule PtcRunner.Lisp.Analyze do
 
     case keys_pair do
       {{:keyword, :keys}, {:vector, key_asts}} ->
-        keys = extract_keys(key_asts)
-        defaults = extract_defaults(or_pair)
-        base_pattern = {:destructure, {:keys, keys, defaults}}
-        maybe_wrap_as(base_pattern, as_pair)
+        with {:ok, keys} <- extract_keys(key_asts),
+             {:ok, defaults} <- extract_defaults(or_pair) do
+          base_pattern = {:destructure, {:keys, keys, defaults}}
+          maybe_wrap_as(base_pattern, as_pair)
+        end
 
       _ ->
         {:error, {:unsupported_pattern, pairs}}
@@ -174,19 +175,43 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp extract_keys(key_asts) do
-    Enum.map(key_asts, fn
-      {:symbol, name} -> name
-      {:keyword, k} -> k
+    Enum.reduce_while(key_asts, {:ok, []}, fn
+      {:symbol, name}, {:ok, acc} ->
+        {:cont, {:ok, [name | acc]}}
+
+      {:keyword, k}, {:ok, acc} ->
+        {:cont, {:ok, [k | acc]}}
+
+      _other, _acc ->
+        {:halt, {:error, {:invalid_form, "expected keyword or symbol in destructuring key"}}}
     end)
+    |> case do
+      {:ok, rev} -> {:ok, Enum.reverse(rev)}
+      other -> other
+    end
   end
 
   defp extract_defaults(or_pair) do
     case or_pair do
       {{:keyword, :or}, {:map, default_pairs}} ->
-        Enum.map(default_pairs, fn {{:keyword, k}, v} -> {k, v} end)
+        extract_default_pairs(default_pairs)
 
       nil ->
-        []
+        {:ok, []}
+    end
+  end
+
+  defp extract_default_pairs(default_pairs) do
+    Enum.reduce_while(default_pairs, {:ok, []}, fn
+      {{:keyword, k}, v}, {:ok, acc} ->
+        {:cont, {:ok, [{k, v} | acc]}}
+
+      {_other_key, _v}, _acc ->
+        {:halt, {:error, {:invalid_form, "default keys must be keywords"}}}
+    end)
+    |> case do
+      {:ok, rev} -> {:ok, Enum.reverse(rev)}
+      other -> other
     end
   end
 
@@ -406,17 +431,31 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp analyze_field_path({:vector, elems}) do
-    segments =
-      Enum.map(elems, fn
-        {:keyword, k} -> {:keyword, k}
-        {:string, s} -> {:string, s}
-      end)
-
-    {:ok, {:field, segments}}
+    with {:ok, segments} <- extract_field_segments(elems) do
+      {:ok, {:field, segments}}
+    end
   end
 
   defp analyze_field_path(other) do
     {:error, {:invalid_where_form, "field must be keyword or vector, got: #{inspect(other)}"}}
+  end
+
+  defp extract_field_segments(elems) do
+    Enum.reduce_while(elems, {:ok, []}, fn
+      {:keyword, k}, {:ok, acc} ->
+        {:cont, {:ok, [{:keyword, k} | acc]}}
+
+      {:string, s}, {:ok, acc} ->
+        {:cont, {:ok, [{:string, s} | acc]}}
+
+      _other, _acc ->
+        {:halt,
+         {:error, {:invalid_where_form, "field path elements must be keywords or strings"}}}
+    end)
+    |> case do
+      {:ok, rev} -> {:ok, Enum.reverse(rev)}
+      other -> other
+    end
   end
 
   defp classify_where_op(:=), do: {:ok, :eq}
