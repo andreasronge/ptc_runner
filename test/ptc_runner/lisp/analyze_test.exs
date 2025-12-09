@@ -766,6 +766,77 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
       assert {:ok, {:fn, [pattern], {:var, :a}}} = Analyze.analyze(raw)
       assert {:destructure, {:seq, [{:var, :a}, {:var, :b}]}} = pattern
     end
+
+    test "nested vector pattern" do
+      # (fn [[[a b] c]] ...)
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:vector, [{:vector, [{:symbol, :a}, {:symbol, :b}]}, {:symbol, :c}]}]},
+           {:symbol, :a}
+         ]}
+
+      assert {:ok, {:fn, [pattern], {:var, :a}}} = Analyze.analyze(raw)
+
+      assert {:destructure,
+              {:seq, [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}, {:var, :c}]}} =
+               pattern
+    end
+
+    test "vector with nested map pattern" do
+      # (fn [[k {:keys [v]}]] ...)
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector,
+            [
+              {:vector,
+               [
+                 {:symbol, :k},
+                 {:map, [{{:keyword, :keys}, {:vector, [{:symbol, :v}]}}]}
+               ]}
+            ]},
+           {:symbol, :v}
+         ]}
+
+      assert {:ok, {:fn, [pattern], {:var, :v}}} = Analyze.analyze(raw)
+      assert {:destructure, {:seq, [{:var, :k}, {:destructure, {:keys, [:v], []}}]}} = pattern
+    end
+
+    test "mixed simple and destructuring params" do
+      # (fn [x [a b]] ...)
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:symbol, :x}, {:vector, [{:symbol, :a}, {:symbol, :b}]}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:fn, [param1, param2], {:var, :x}}} = Analyze.analyze(raw)
+      assert {:var, :x} = param1
+      assert {:destructure, {:seq, [{:var, :a}, {:var, :b}]}} = param2
+    end
+
+    test "error on invalid pattern type (number)" do
+      raw = {:list, [{:symbol, :fn}, {:vector, [42]}, 100]}
+      assert {:error, {:unsupported_pattern, 42}} = Analyze.analyze(raw)
+    end
+
+    test "empty vector pattern" do
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:vector, []}]},
+           100
+         ]}
+
+      assert {:ok, {:fn, [pattern], 100}} = Analyze.analyze(raw)
+      assert {:destructure, {:seq, []}} = pattern
+    end
   end
 
   describe "empty list fails" do
