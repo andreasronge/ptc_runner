@@ -260,7 +260,7 @@ memory/results        ; read from persistent memory
 ; Transforming
 (map f coll)  (mapv f coll)  (pluck :key coll)
 ; map over a map: each entry is passed as [key value] vector
-; Example: (map (fn [entry] {:cat (first entry) :avg (avg-by :amount (last entry))}) grouped)
+; Example: (map (fn [[key value]] {:cat key :avg (avg-by :amount value)}) grouped)
 
 ; Ordering
 (sort-by :key coll)  (sort-by :key > coll)  ; > for descending
