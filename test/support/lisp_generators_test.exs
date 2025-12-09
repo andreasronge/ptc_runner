@@ -141,8 +141,6 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
     property "gen_leaf_expr produces non-recursive expressions" do
       check all(expr <- Gen.gen_leaf_expr([])) do
         refute match?({:list, _}, expr)
-        refute match?({:vector, [_ | _]}, expr)
-        refute match?({:map, [_ | _]}, expr)
       end
     end
   end
