@@ -347,4 +347,4 @@ You are an assistant that writes PTC-Lisp programs.
 """
 ```
 
-The `PtcRunner.Lisp.Schema.to_prompt/0` function returns the content between the `PTC_PROMPT_START` and `PTC_PROMPT_END` markers in this document, compiled into the library at build time.
+The `PtcRunner.Lisp.Schema.to_prompt/0` function extracts the content between the `PTC_PROMPT_START` and `PTC_PROMPT_END` markers in this document at compile time, ensuring a single source of truth.
