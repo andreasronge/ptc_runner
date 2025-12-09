@@ -408,8 +408,21 @@ defmodule PtcRunner.Lisp.Eval do
         {:string, s} -> s
       end)
 
-    fn row -> get_in(row, path) end
+    fn row -> get_in_flexible(row, path) end
   end
+
+  defp get_in_flexible(data, []), do: data
+  defp get_in_flexible(nil, _), do: nil
+
+  defp get_in_flexible(data, [key | rest]) when is_map(data) do
+    # Try atom key first (faster), fall back to string
+    case Map.fetch(data, key) do
+      {:ok, value} -> get_in_flexible(value, rest)
+      :error -> get_in_flexible(Map.get(data, to_string(key)), rest)
+    end
+  end
+
+  defp get_in_flexible(_, _), do: nil
 
   defp build_where_predicate(:truthy, accessor, _value),
     do: fn row -> truthy?(accessor.(row)) end
