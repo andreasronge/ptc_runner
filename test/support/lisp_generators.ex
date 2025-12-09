@@ -23,8 +23,8 @@ defmodule PtcRunner.TestSupport.LispGenerators do
   @doc "Generate float literal (bounded, avoiding special values)"
   def gen_float do
     float(min: -1.0e6, max: 1.0e6)
-    # Filter out NaN: NaN is the only value where f != f is true
-    |> filter(fn f -> f == f end)
+    # Filter out NaN: NaN is the only value where v != v is true
+    |> filter(fn v -> v == v end)
   end
 
   @doc "Generate simple alphanumeric string literal"
