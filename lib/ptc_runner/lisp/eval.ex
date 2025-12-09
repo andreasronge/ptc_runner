@@ -20,6 +20,7 @@ defmodule PtcRunner.Lisp.Eval do
           | atom()
           | list()
           | map()
+          | MapSet.t()
           | function()
           | {:closure, [CoreAST.pattern()], CoreAST.t(), env()}
 
@@ -79,6 +80,22 @@ defmodule PtcRunner.Lisp.Eval do
 
     case result do
       {:ok, evaluated_pairs, memory2} -> {:ok, Map.new(evaluated_pairs), memory2}
+      {:error, _} = err -> err
+    end
+  end
+
+  # Sets: evaluate all elements, then create MapSet
+  defp do_eval({:set, elems}, ctx, memory, env, tool_exec) do
+    result =
+      Enum.reduce_while(elems, {:ok, [], memory}, fn elem, {:ok, acc, mem} ->
+        case do_eval(elem, ctx, mem, env, tool_exec) do
+          {:ok, v, mem2} -> {:cont, {:ok, [v | acc], mem2}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, values, memory2} -> {:ok, MapSet.new(values), memory2}
       {:error, _} = err -> err
     end
   end
