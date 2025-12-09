@@ -267,23 +267,8 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
         source = Formatter.format(ast)
         ctx = %{items: [1, 2, 3], user: %{name: "test", active: true}}
 
-        # Create a tool executor that handles any tool name
-        tools = %{"test_tool" => fn _args -> :ok end}
-
-        # Extract tool names from source and add them to tools map
-        tools =
-          Regex.scan(~r/\(call "([^"]+)"/, source)
-          |> Enum.reduce(tools, fn [_full, tool_name], acc ->
-            Map.put_new(acc, tool_name, fn _args -> :result end)
-          end)
-
-        result =
-          try do
-            PtcRunner.Lisp.run(source, context: ctx, tools: tools)
-          rescue
-            # Catch runtime errors during evaluation - these are expected for some generated programs
-            _e -> {:error, :runtime_error}
-          end
+        tools = build_tools_for_source(source)
+        result = safe_run(source, context: ctx, tools: tools)
 
         # Should return {:ok, _, _, _} or {:error, _}, never crash the interpreter
         assert match?({:ok, _, _, _}, result) or match?({:error, _}, result),
@@ -298,29 +283,10 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
         source = Formatter.format(ast)
         ctx = %{x: 42, items: [1, 2, 3]}
 
-        # Create a tool executor that handles any tool name
-        tools = %{"tool" => fn _args -> "fixed" end}
+        tools = build_tools_for_source(source, "fixed")
 
-        # Extract tool names from source and add them to tools map
-        tools =
-          Regex.scan(~r/\(call "([^"]+)"/, source)
-          |> Enum.reduce(tools, fn [_full, tool_name], acc ->
-            Map.put_new(acc, tool_name, fn _args -> "fixed" end)
-          end)
-
-        result1 =
-          try do
-            PtcRunner.Lisp.run(source, context: ctx, tools: tools)
-          rescue
-            _e -> {:error, :runtime_error}
-          end
-
-        result2 =
-          try do
-            PtcRunner.Lisp.run(source, context: ctx, tools: tools)
-          rescue
-            _e -> {:error, :runtime_error}
-          end
+        result1 = safe_run(source, context: ctx, tools: tools)
+        result2 = safe_run(source, context: ctx, tools: tools)
 
         assert result1 == result2,
                "Non-deterministic evaluation for: #{source}"
@@ -386,5 +352,20 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
 
   defp ast_equivalent?(a, b) do
     a == b
+  end
+
+  defp build_tools_for_source(source, default_result \\ :result) do
+    base_tools = %{"test_tool" => fn _args -> default_result end}
+
+    Regex.scan(~r/\(call "([^"]+)"/, source)
+    |> Enum.reduce(base_tools, fn [_full, tool_name], acc ->
+      Map.put_new(acc, tool_name, fn _args -> default_result end)
+    end)
+  end
+
+  defp safe_run(source, opts) do
+    PtcRunner.Lisp.run(source, opts)
+  rescue
+    _e -> {:error, :runtime_error}
   end
 end
