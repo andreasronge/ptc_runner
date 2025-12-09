@@ -741,7 +741,7 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
       assert msg =~ "vector"
     end
 
-    test "error case: destructuring pattern in params rejected" do
+    test "map destructuring pattern in params" do
       raw =
         {:list,
          [
@@ -750,8 +750,21 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
            100
          ]}
 
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "destructuring patterns"
+      assert {:ok, {:fn, [pattern], 100}} = Analyze.analyze(raw)
+      assert {:destructure, {:keys, [:a], []}} = pattern
+    end
+
+    test "vector destructuring pattern in params" do
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:vector, [{:symbol, :a}, {:symbol, :b}]}]},
+           {:symbol, :a}
+         ]}
+
+      assert {:ok, {:fn, [pattern], {:var, :a}}} = Analyze.analyze(raw)
+      assert {:destructure, {:seq, [{:var, :a}, {:var, :b}]}} = pattern
     end
   end
 

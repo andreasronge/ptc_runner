@@ -462,14 +462,14 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert message =~ "got 3"
     end
 
-    test "destructuring in fn params" do
-      # Destructuring is only allowed in let, not fn parameters
-      # Use (fn [m] (let [{:keys [a]} m] ...)) instead
-      source = "(fn [{:keys [a]}] a)"
+    test "destructuring in fn params - map pattern with wrong argument type" do
+      # Analyzer now accepts destructuring patterns in fn parameters
+      # Evaluator supports map destructuring patterns
+      # But this test passes wrong argument type to catch runtime error
+      source = "((fn [{:keys [a]}] a) :not-a-map)"
 
-      assert {:error, {:invalid_form, message}} = Lisp.run(source)
-      assert message =~ "fn parameters must be simple symbols"
-      assert message =~ "not destructuring patterns"
+      # The error should be from destructuring error at runtime
+      assert {:error, _reason} = Lisp.run(source)
     end
   end
 end
