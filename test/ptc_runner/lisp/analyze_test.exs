@@ -78,6 +78,36 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
     end
   end
 
+  describe "sets" do
+    test "empty set" do
+      assert {:ok, {:set, []}} = Analyze.analyze({:set, []})
+    end
+
+    test "set with literals" do
+      assert {:ok, {:set, [1, 2, 3]}} = Analyze.analyze({:set, [1, 2, 3]})
+    end
+
+    test "set with symbols analyzed to vars" do
+      assert {:ok, {:set, [{:var, :x}, {:var, :y}]}} =
+               Analyze.analyze({:set, [{:symbol, :x}, {:symbol, :y}]})
+    end
+
+    test "nested set" do
+      assert {:ok, {:set, [{:set, [1, 2]}]}} =
+               Analyze.analyze({:set, [{:set, [1, 2]}]})
+    end
+
+    test "set containing vector" do
+      assert {:ok, {:set, [{:vector, [1, 2]}]}} =
+               Analyze.analyze({:set, [{:vector, [1, 2]}]})
+    end
+
+    test "set with mixed types" do
+      assert {:ok, {:set, [1, {:string, "test"}, {:keyword, :foo}]}} =
+               Analyze.analyze({:set, [1, {:string, "test"}, {:keyword, :foo}]})
+    end
+  end
+
   describe "symbols become vars" do
     test "regular symbol becomes var" do
       assert {:ok, {:var, :filter}} = Analyze.analyze({:symbol, :filter})
