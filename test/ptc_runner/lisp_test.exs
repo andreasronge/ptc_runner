@@ -374,6 +374,43 @@ defmodule PtcRunner.LispTest do
     end
   end
 
+  describe "float_precision option" do
+    test "rounds floats in result to specified precision" do
+      assert {:ok, 3.33, %{}, %{}} = Lisp.run("(/ 10 3)", float_precision: 2)
+    end
+
+    test "full precision when not specified" do
+      {:ok, result, %{}, %{}} = Lisp.run("(/ 10 3)")
+      assert result == 10 / 3
+    end
+
+    test "rounds floats in nested structures" do
+      {:ok, result, %{}, %{}} = Lisp.run("[1.12345 2.67891]", float_precision: 2)
+      assert result == [1.12, 2.68]
+    end
+
+    test "rounds floats in map values" do
+      {:ok, result, _, _} = Lisp.run("{:value (/ 10 3)}", float_precision: 1)
+      assert result == %{value: 3.3}
+    end
+
+    test "precision 0 rounds to integers" do
+      {:ok, result, %{}, %{}} = Lisp.run("(/ 10 3)", float_precision: 0)
+      assert result == 3.0
+    end
+
+    test "does not affect integers" do
+      assert {:ok, 42, %{}, %{}} = Lisp.run("42", float_precision: 2)
+    end
+
+    test "only rounds result, not memory delta" do
+      {:ok, result, delta, _} = Lisp.run("{:result (/ 10 3), :pi 3.14159}", float_precision: 2)
+      assert result == 3.33
+      # Memory delta retains full precision (intentional - memory stores original values)
+      assert delta == %{pi: 3.14159}
+    end
+  end
+
   describe "integration - chained memory updates" do
     test "first call stores in memory" do
       source = "{:result 42, :step1 100}"
