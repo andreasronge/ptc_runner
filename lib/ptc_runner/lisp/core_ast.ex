@@ -25,6 +25,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Collections
           | {:vector, [t()]}
           | {:map, [{t(), t()}]}
+          | {:set, [t()]}
           # Variables and namespace access
           | {:var, atom()}
           | {:ctx, atom()}

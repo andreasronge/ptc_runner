@@ -11,6 +11,7 @@ defmodule PtcRunner.Lisp.AST do
           # Collections
           | {:vector, [t()]}
           | {:map, [{t(), t()}]}
+          | {:set, [t()]}
           # Symbols
           | {:symbol, atom()}
           | {:ns_symbol, :ctx | :memory, atom()}
