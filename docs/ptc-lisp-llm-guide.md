@@ -193,6 +193,7 @@ nil true false        ; nil and booleans
 "hello"               ; strings
 :keyword              ; keywords (NO namespaced keywords like :foo/bar)
 [1 2 3]               ; vectors (NO lists '(1 2 3))
+#{1 2 3}              ; sets (unordered, unique values)
 {:a 1 :b 2}           ; maps
 ```
 
@@ -276,6 +277,17 @@ memory/results        ; read from persistent memory
 (get m :key)  (get-in m [:a :b])  (assoc m :k v)  (merge m1 m2)
 (select-keys m [:a :b])  (keys m)  (vals m)
 (:key m)  (:key m default)  ; keyword as function
+
+; Sets
+(set? x)               ; is x a set?
+(set [1 2 2])          ; convert to set: #{1 2}
+(contains? #{1 2} 1)   ; membership: true
+(count #{1 2 3})       ; count: 3
+(empty? #{})           ; empty check: true
+
+; Note: map, filter, remove work on sets but return vectors
+(map inc #{1 2})       ; returns vector: [2 3]
+(filter odd? #{1 2 3}) ; returns vector: [1 3]
 ```
 
 ### Tool Calls

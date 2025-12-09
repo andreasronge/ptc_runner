@@ -209,7 +209,32 @@ Key-value associations:
 {[:a :b] "nested"}        ; VALIDATION ERROR - vector key
 ```
 
-**Not supported:** Sets (`#{}`), Lists (`'()`)
+### 3.8 Sets
+
+Unordered collections of unique values:
+
+```clojure
+#{}                    ; empty set
+#{1 2 3}               ; set with 3 elements
+#{1 1 2}               ; duplicates silently removed: equivalent to #{1 2}
+#{:a :b :c}            ; keyword set
+```
+
+Sets are **unordered** - iteration order is not guaranteed.
+
+**Set operations:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `set?` | `(set? x)` | Returns true if x is a set |
+| `set` | `(set coll)` | Convert collection to set |
+| `count` | `(count #{1 2})` | Returns element count |
+| `empty?` | `(empty? #{})` | Returns true if empty |
+| `contains?` | `(contains? #{1 2} 1)` | Membership test (O(1)) |
+
+**Not supported for sets:** `first`, `last`, `nth`, `sort`, `sort-by` (sets are unordered).
+
+**Not supported:** Lists (`'()`)
 
 ---
 
@@ -854,6 +879,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `keyword?` | Is keyword? |
 | `vector?` | Is vector? |
 | `map?` | Is map? |
+| `set?` | Is set? |
 | `coll?` | Is collection? (vectors only, not maps or strings) |
 
 **Note:** In PTC-Lisp, `coll?` returns `true` only for vectors (and any future sequence types). Maps and strings are not considered collections by `coll?`. This affects functions like `flatten` which only flatten values where `coll?` is true.
@@ -1403,6 +1429,7 @@ expression  = literal
             | symbol
             | keyword
             | vector
+            | set
             | map
             | list-expr ;
 
@@ -1430,6 +1457,8 @@ keyword     = ":" keyword-char+ ;
 keyword-char = letter | digit | "-" | "_" | "?" | "!" ;  (* no "/" in keywords *)
 
 vector      = "[" expression* "]" ;
+
+set         = "#{" expression* "}" ;
 
 map         = "{" (map-entry)* "}" ;
 map-entry   = expression expression ;
