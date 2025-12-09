@@ -802,6 +802,69 @@ defmodule PtcRunner.Lisp.EvalTest do
       assert {:error, {:arity_error, _}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
+
+    test "get with 2 arguments (map, key) returns value or nil" do
+      env = Env.initial()
+      data = %{a: 1, b: 2}
+
+      call_ast = {:call, {:var, :get}, [{:var, :data}, {:keyword, :a}]}
+
+      assert {:ok, 1, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get with 3 arguments (map, key, default) returns value or default" do
+      env = Env.initial()
+      data = %{a: 1}
+
+      call_ast = {:call, {:var, :get}, [{:var, :data}, {:keyword, :b}, {:string, "not found"}]}
+
+      assert {:ok, "not found", %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get arity error with wrong argument count" do
+      env = Env.initial()
+
+      # get only accepts 2 or 3 arguments
+      call_ast = {:call, {:var, :get}, [{:keyword, :a}]}
+
+      assert {:error, {:arity_error, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "get-in with 2 arguments (map, path) returns nested value" do
+      env = Env.initial()
+      data = %{a: %{b: 42}}
+
+      call_ast =
+        {:call, {:var, :"get-in"}, [{:var, :data}, {:vector, [{:keyword, :a}, {:keyword, :b}]}]}
+
+      assert {:ok, 42, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get-in with 3 arguments (map, path, default) returns default when path not found" do
+      env = Env.initial()
+      data = %{a: %{b: 42}}
+
+      call_ast =
+        {:call, {:var, :"get-in"},
+         [{:var, :data}, {:vector, [{:keyword, :x}, {:keyword, :y}]}, 0]}
+
+      assert {:ok, 0, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+    end
+
+    test "get-in arity error with wrong argument count" do
+      env = Env.initial()
+
+      # get-in only accepts 2 or 3 arguments
+      call_ast = {:call, {:var, :"get-in"}, [{:vector, []}]}
+
+      assert {:error, {:arity_error, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
   end
 
   describe "builtin unwrapping for higher-order functions" do
