@@ -271,3 +271,50 @@ This program:
 3. Returns a summary to the caller
 4. Persists results in memory for the next turn
 
+---
+
+## Future Improvements
+
+### LLM Guide Enhancements
+
+Testing with various LLM models has revealed common patterns where LLMs generate invalid PTC-Lisp code due to Clojure habits that don't apply to this subset. The LLM guide should be enhanced to explicitly address these issues:
+
+| Issue | LLM Mistake | Correct PTC-Lisp |
+|-------|-------------|------------------|
+| **Keyword-as-function** | `(:name map)` returns nil | Use `(get :name map)` for map access |
+| **Set literals** | `#{...}` syntax causes parse errors | Use `includes?` for membership checks |
+| **Keywords vs strings** | `:engineering` when data has `"engineering"` | String values in data require quoted strings in `where` |
+
+#### Example Corrections
+
+**Map value extraction:**
+```clojure
+;; WRONG: Clojure keyword-as-function syntax
+(->> ctx/products (max-by :price) (:name))  ; Returns nil
+
+;; CORRECT: Use get function
+(->> ctx/products (max-by :price) (get :name))
+```
+
+**Set membership:**
+```clojure
+;; WRONG: Clojure set literal syntax
+(filter (fn [id] (some #{id} other-ids)) ids)  ; ParseError
+
+;; CORRECT: Use includes? or nested fn
+(filter (fn [id] (includes? other-ids id)) ids)
+;; or
+(filter (fn [id] (some (fn [x] (= x id)) other-ids)) ids)
+```
+
+**String vs keyword comparison:**
+```clojure
+;; WRONG: Using keyword when data contains string
+(filter (where :department = :engineering) employees)  ; Returns []
+
+;; CORRECT: Use string to match string data
+(filter (where :department = "engineering") employees)
+```
+
+These patterns should be prominently documented in the "Common Mistakes" section of `ptc-lisp-llm-guide.md`.
+
