@@ -471,5 +471,23 @@ defmodule PtcRunner.Lisp.E2ETest do
       # The error should be from destructuring error at runtime
       assert {:error, _reason} = Lisp.run(source)
     end
+
+    test "destructuring in fn params - vector pattern success" do
+      source = "((fn [[a b]] a) [1 2])"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 1
+    end
+
+    test "destructuring in fn params - map pattern success" do
+      source = "((fn [{:keys [x]}] x) {:x 10})"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 10
+    end
+
+    test "destructuring in fn params - vector pattern ignores extra elements" do
+      source = "((fn [[a]] a) [1 2 3])"
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 1
+    end
   end
 end
