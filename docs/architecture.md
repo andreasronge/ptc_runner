@@ -527,6 +527,10 @@ Execute a PTC program with options.
 - `:timeout` - Execution timeout in ms (default: `1000`)
 - `:max_heap` - Max heap size in words (default: `1_250_000` ≈ 10MB)
 
+**PTC-Lisp Additional Options** (via `PtcRunner.Lisp.run/2`):
+- `:memory` - Initial memory map (default: `%{}`)
+- `:float_precision` - Decimal places for floats in result (default: `nil` = full precision)
+
 **Example:**
 ```elixir
 {:ok, result, metrics} = PtcRunner.run(
