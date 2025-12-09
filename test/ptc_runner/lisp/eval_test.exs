@@ -755,5 +755,76 @@ defmodule PtcRunner.Lisp.EvalTest do
     end
   end
 
+  describe "multi-arity builtins" do
+    test "sort-by with 2 arguments (key, coll) sorts ascending" do
+      env = Env.initial()
+      data = [%{price: 30}, %{price: 10}, %{price: 20}]
+
+      call_ast = {:call, {:var, :"sort-by"}, [{:keyword, :price}, {:var, :data}]}
+
+      assert {:ok, result, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+
+      assert result == [%{price: 10}, %{price: 20}, %{price: 30}]
+    end
+
+    test "sort-by with 3 arguments (key, comparator, coll) sorts descending" do
+      env = Env.initial()
+      data = [%{price: 10}, %{price: 30}, %{price: 20}]
+
+      # (sort-by :price > data) - sorts by price descending
+      call_ast = {:call, {:var, :"sort-by"}, [{:keyword, :price}, {:var, :>}, {:var, :data}]}
+
+      assert {:ok, result, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+
+      assert result == [%{price: 30}, %{price: 20}, %{price: 10}]
+    end
+
+    test "sort-by with 3 arguments using < comparator" do
+      env = Env.initial()
+      data = [%{name: "Bob"}, %{name: "Alice"}, %{name: "Charlie"}]
+
+      call_ast = {:call, {:var, :"sort-by"}, [{:keyword, :name}, {:var, :<}, {:var, :data}]}
+
+      assert {:ok, result, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+
+      assert result == [%{name: "Alice"}, %{name: "Bob"}, %{name: "Charlie"}]
+    end
+
+    test "sort-by arity error with wrong argument count" do
+      env = Env.initial()
+
+      # sort-by only accepts 2 or 3 arguments
+      call_ast = {:call, {:var, :"sort-by"}, [{:keyword, :price}]}
+
+      assert {:error, {:arity_error, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+  end
+
+  describe "builtin unwrapping for higher-order functions" do
+    test "passing > as comparator to reduce" do
+      env = Env.initial()
+
+      # (reduce > 0 [1 5 3]) - should find max using > as comparison function
+      # This tests that {:normal, &Kernel.>/2} gets unwrapped to &Kernel.>/2
+      call_ast = {:call, {:var, :reduce}, [{:var, :>}, 0, {:vector, [1, 5, 3]}]}
+
+      # > will act as reducer: (> (> (> 0 1) 5) 3) = (> (> false 5) 3) = (> false 3) = false
+      assert {:ok, false, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "passing + as accumulator function to reduce" do
+      env = Env.initial()
+
+      # (reduce + 0 [1 2 3]) = 6
+      call_ast = {:call, {:var, :reduce}, [{:var, :+}, 0, {:vector, [1, 2, 3]}]}
+
+      assert {:ok, 6, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+  end
+
   defp dummy_tool(_name, _args), do: :ok
 end
