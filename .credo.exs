@@ -95,7 +95,7 @@
           # Disabled because we allow TODOs during development
           # {Credo.Check.Design.TagTODO, []},
           # Disabled false positives on NaN self-comparison (f == f filters out NaN)
-          {Credo.Check.Warning.OperationWithConstantResult, []}
+          {Credo.Check.Warning.OperationOnSameValues, []}
         ]
       }
     }
