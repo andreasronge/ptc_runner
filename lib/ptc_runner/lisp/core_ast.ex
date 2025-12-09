@@ -35,8 +35,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:let, [binding()], t()}
           # Conditionals
           | {:if, t(), t(), t()}
-          # Anonymous function (simple params only, no destructuring)
-          | {:fn, [simple_param()], t()}
+          # Anonymous function
+          | {:fn, [pattern()], t()}
           # Short-circuit logic (special forms, not calls)
           | {:and, [t()]}
           | {:or, [t()]}
@@ -52,8 +52,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           {:var, atom()}
           | {:destructure, {:keys, [atom()], keyword()}}
           | {:destructure, {:as, atom(), pattern()}}
-
-  @type simple_param :: {:var, atom()}
+          | {:destructure, {:seq, [pattern()]}}
 
   @type field_path :: {:field, [field_segment()]}
   @type field_segment :: {:keyword, atom()} | {:string, String.t()}
