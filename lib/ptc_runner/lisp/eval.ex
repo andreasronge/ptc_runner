@@ -416,8 +416,10 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp get_in_flexible(data, [key | rest]) when is_map(data) do
     # Try atom key first (faster), fall back to string
-    value = Map.get(data, key) || Map.get(data, to_string(key))
-    get_in_flexible(value, rest)
+    case Map.fetch(data, key) do
+      {:ok, value} -> get_in_flexible(value, rest)
+      :error -> get_in_flexible(Map.get(data, to_string(key)), rest)
+    end
   end
 
   defp get_in_flexible(_, _), do: nil

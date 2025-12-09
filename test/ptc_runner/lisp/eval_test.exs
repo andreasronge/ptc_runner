@@ -329,6 +329,15 @@ defmodule PtcRunner.Lisp.EvalTest do
       refute fun.(%{"category" => "different"})
     end
 
+    test "atom key precedence: atom key wins even when falsy" do
+      predicate = {:where, {:field, [{:keyword, :enabled}]}, :eq, false}
+      {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Atom key false should win over string key true
+      assert fun.(%{enabled: false} |> Map.put("enabled", true))
+      refute fun.(%{enabled: true} |> Map.put("enabled", false))
+    end
+
     test "mixed keys: atom keys work as before" do
       predicate = {:where, {:field, [{:keyword, :status}]}, :eq, {:string, "active"}}
       {:ok, fun, %{}} = Eval.eval(predicate, %{}, %{}, %{}, &dummy_tool/2)
