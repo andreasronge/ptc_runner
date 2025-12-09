@@ -59,12 +59,19 @@ program = ~s({
 # metrics = %{duration_ms: 2, memory_bytes: 1024}
 ```
 
-> **Note:** The deprecated `PtcRunner.run/2` function delegates to `PtcRunner.Json.run/2`. See [Usage](#usage) for examples of both JSON and PTC-Lisp DSLs.
+> **Note:** The top-level `PtcRunner.run/2` API is deprecated. Use `PtcRunner.Json.run/2` for JSON DSL or `PtcRunner.Lisp.run/2` for PTC-Lisp programs.
 
 ## Features
 
-- **Multiple DSLs**: JSON (stable) and PTC-Lisp (efficient Clojure-like syntax)
-- **JSON DSL** with operations for filtering, mapping, aggregation, and control flow
+### Languages
+
+PtcRunner supports multiple DSL languages optimized for LLM-generated code:
+
+- **JSON DSL** - Stable, verbose, universally toolable
+- **PTC-Lisp** - Clojure-like syntax, 3-5x more token-efficient, supports closures and memory persistence
+
+### Core Features
+
 - **Variable bindings** to store and reference results across operations
 - **Tool registry** for user-defined functions
 - **Resource limits**: configurable timeout (default 1s) and memory (default 10MB)
@@ -89,9 +96,8 @@ program = ~s({
 
 ## Documentation
 
-- **[Architecture](docs/architecture.md)** - System design, API reference, resource limits
-- **[JSON DSL Operations](docs/ptc-json-specification.md)** - Complete JSON operation reference and examples (if available)
-- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Rationale, language design, and evaluation plan
+- **[Architecture](docs/architecture.md)** - System design, DSL specification, API reference
+- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Introduction to Clojure-like syntax alternative, evaluation plan, and comparisons
 - **[LLM Testing](docs/llm-testing.md)** - Benchmark results, testing modes, model comparison
 - **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
 
@@ -140,12 +146,12 @@ tools = %{
 
 ### PTC-Lisp
 
-PTC-Lisp is an efficient Clojure-like DSL that offers 3-5x better token density compared to JSON.
+PTC-Lisp offers a more compact syntax that LLMs find easier to generate correctly:
 
 ```elixir
-# Define tools
+# Same travel expenses example as above
 tools = %{
-  "get_expenses" => fn _args ->
+  "get-expenses" => fn _args ->
     [
       %{"category" => "travel", "amount" => 500},
       %{"category" => "food", "amount" => 50},
@@ -154,18 +160,18 @@ tools = %{
   end
 }
 
-# Same example using PTC-Lisp instead of JSON
+# PTC-Lisp program (Clojure-like syntax)
 program = ~s(
-  (->> (call "get_expenses" {})
+  (->> (call "get-expenses" {})
        (filter (where :category = "travel"))
        (sum-by :amount))
 )
 
-{:ok, result, _metrics} = PtcRunner.Lisp.run(program, tools: tools)
+{:ok, result, metrics} = PtcRunner.Lisp.run(program, tools: tools)
 # result = 700
 ```
 
-See [ptc-lisp-overview.md](docs/ptc-lisp-overview.md) for complete documentation.
+For a complete PTC-Lisp reference, see [docs/ptc-lisp-overview.md](docs/ptc-lisp-overview.md).
 
 ### Resource Limits
 
