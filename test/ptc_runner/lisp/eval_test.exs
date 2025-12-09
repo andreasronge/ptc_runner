@@ -721,6 +721,38 @@ defmodule PtcRunner.Lisp.EvalTest do
       assert {:ok, 1, %{}} =
                Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
     end
+
+    test "vector destructuring: error on map argument" do
+      # (fn [[a b]] a) called with {:x 1} (not a list)
+      params = [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}]
+      body = {:var, :a}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :expect_list_not_map}, closure_def}]
+      call_ast = {:call, {:var, :expect_list_not_map}, [{:map, [{{:keyword, :x}, 1}]}]}
+
+      assert {:error, _} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "vector destructuring with nested patterns: vector containing map" do
+      # (fn [[k {:keys [v]}]] v) called with [["key" {:v 42}]]
+      params = [
+        {:destructure, {:seq, [{:var, :k}, {:destructure, {:keys, [:v], []}}]}}
+      ]
+
+      body = {:var, :v}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :nested_vec_map}, closure_def}]
+
+      call_ast =
+        {:call, {:var, :nested_vec_map},
+         [{:vector, [{:string, "key"}, {:map, [{{:keyword, :v}, 42}]}]}]}
+
+      assert {:ok, 42, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
   end
 
   defp dummy_tool(_name, _args), do: :ok
