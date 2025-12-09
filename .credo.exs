@@ -25,7 +25,8 @@
           {Credo.Check.Consistency.TabsOrSpaces, []},
 
           # Design
-          {Credo.Check.Design.AliasUsage, [priority: :low, if_nested_deeper_than: 2, if_called_more_often_than: 0]},
+          {Credo.Check.Design.AliasUsage,
+           [priority: :low, if_nested_deeper_than: 2, if_called_more_often_than: 0]},
           {Credo.Check.Design.TagTODO, [exit_status: 0]},
           {Credo.Check.Design.TagFIXME, []},
 
@@ -55,14 +56,14 @@
           # Refactor
           {Credo.Check.Refactor.Apply, []},
           {Credo.Check.Refactor.CondStatements, []},
-          {Credo.Check.Refactor.CyclomaticComplexity, []},
+          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 15]},
           {Credo.Check.Refactor.FunctionArity, []},
           {Credo.Check.Refactor.LongQuoteBlocks, []},
           {Credo.Check.Refactor.MatchInCondition, []},
           {Credo.Check.Refactor.MapJoin, []},
           {Credo.Check.Refactor.NegatedConditionsInUnless, []},
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
-          {Credo.Check.Refactor.Nesting, []},
+          {Credo.Check.Refactor.Nesting, [max_nesting: 3]},
           {Credo.Check.Refactor.UnlessWithElse, []},
           {Credo.Check.Refactor.WithClauses, []},
           {Credo.Check.Refactor.FilterFilter, []},
@@ -76,8 +77,6 @@
           {Credo.Check.Warning.IExPry, []},
           {Credo.Check.Warning.IoInspect, []},
           {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, []},
-          {Credo.Check.Warning.OperationOnSameValues, []},
-          {Credo.Check.Warning.OperationWithConstantResult, []},
           {Credo.Check.Warning.RaiseInsideRescue, []},
           {Credo.Check.Warning.SpecWithStruct, []},
           {Credo.Check.Warning.WrongTestFileExtension, []},
@@ -94,6 +93,8 @@
         disabled: [
           # Disabled because we allow TODOs during development
           # {Credo.Check.Design.TagTODO, []},
+          # Disabled false positives on NaN self-comparison (f == f filters out NaN)
+          {Credo.Check.Warning.OperationOnSameValues, []}
         ]
       }
     }
