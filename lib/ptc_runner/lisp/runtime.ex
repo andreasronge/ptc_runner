@@ -10,6 +10,9 @@ defmodule PtcRunner.Lisp.Runtime do
   # ============================================================
 
   # Try atom key first, fall back to string key
+  # Handle MapSet before is_map (since is_map(%MapSet{}) returns true)
+  defp flex_get(%MapSet{}, _key), do: nil
+
   defp flex_get(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do
       {:ok, value} -> value
@@ -24,11 +27,16 @@ defmodule PtcRunner.Lisp.Runtime do
   # Collection Operations
   # ============================================================
 
+  def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
+
+  def remove(pred, %MapSet{} = set), do: Enum.reject(set, pred)
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
+
+  def map(f, %MapSet{} = set), do: Enum.map(set, f)
 
   def map(f, coll) when is_map(coll) do
     # When mapping over a map, each entry is passed as [key, value] pair
@@ -36,6 +44,9 @@ defmodule PtcRunner.Lisp.Runtime do
   end
 
   def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
+
+  def mapv(f, %MapSet{} = set), do: Enum.map(set, f)
+
   def mapv(f, coll) when is_map(coll), do: Enum.map(coll, fn {k, v} -> f.([k, v]) end)
   def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &flex_get(&1, key))
 
@@ -69,9 +80,13 @@ defmodule PtcRunner.Lisp.Runtime do
     Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
   end
 
+  def count(%MapSet{} = set), do: MapSet.size(set)
+
   def count(coll) when is_list(coll) or is_map(coll) or is_binary(coll) do
     Enum.count(coll)
   end
+
+  def empty?(%MapSet{} = set), do: MapSet.size(set) == 0
 
   def empty?(coll) when is_list(coll) or is_map(coll) or is_binary(coll) do
     Enum.empty?(coll)
@@ -114,6 +129,9 @@ defmodule PtcRunner.Lisp.Runtime do
   def some(pred, coll) when is_list(coll), do: Enum.any?(coll, pred)
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)
+
+  def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
+
   def contains?(coll, key) when is_map(coll), do: Map.has_key?(coll, key)
   def contains?(coll, val) when is_list(coll), do: val in coll
 
@@ -191,8 +209,16 @@ defmodule PtcRunner.Lisp.Runtime do
   def string?(x), do: is_binary(x)
   def keyword?(x), do: is_atom(x) and not is_nil(x) and not is_boolean(x)
   def vector?(x), do: is_list(x)
-  def map?(x), do: is_map(x)
+
+  def set?(x), do: is_struct(x, MapSet)
+
+  def map?(x), do: is_map(x) and not is_struct(x, MapSet)
+
   def coll?(x), do: is_list(x)
+
+  @doc "Convert collection to set"
+  def set(coll) when is_list(coll), do: MapSet.new(coll)
+  def set(%MapSet{} = set), do: set
 
   # ============================================================
   # Numeric Predicates

@@ -996,5 +996,55 @@ defmodule PtcRunner.Lisp.EvalTest do
     end
   end
 
+  describe "set predicates" do
+    test "set? returns true for sets" do
+      {:ok, result, _} = run(~S"(set? #{1 2})")
+      assert result == true
+    end
+
+    test "set? returns false for vectors" do
+      {:ok, result, _} = run("(set? [1 2])")
+      assert result == false
+    end
+
+    test "map? returns false for sets" do
+      {:ok, result, _} = run(~S"(map? #{1 2})")
+      assert result == false
+    end
+  end
+
+  describe "set constructor" do
+    test "set from vector deduplicates" do
+      {:ok, result, _} = run("(set [1 1 2])")
+      assert MapSet.equal?(result, MapSet.new([1, 2]))
+    end
+  end
+
+  describe "collection operations on sets" do
+    test "map on set returns vector" do
+      {:ok, result, _} = run(~S"(map inc #{1 2 3})")
+      assert is_list(result)
+      assert Enum.sort(result) == [2, 3, 4]
+    end
+
+    test "filter on set returns vector" do
+      {:ok, result, _} = run(~S"(filter odd? #{1 2 3 4})")
+      assert is_list(result)
+      assert Enum.sort(result) == [1, 3]
+    end
+
+    test "contains? on set checks membership" do
+      {:ok, result, _} = run(~S"(contains? #{1 2 3} 2)")
+      assert result == true
+    end
+  end
+
   defp dummy_tool(_name, _args), do: :ok
+
+  defp run(source) do
+    case PtcRunner.Lisp.run(source) do
+      {:ok, result, _, _} -> {:ok, result, %{}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 end
