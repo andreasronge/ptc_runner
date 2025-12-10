@@ -246,13 +246,8 @@ Testing with LLM-generated code has revealed gaps in string/atom key flexibility
 
 | Operation | String Key Support | Priority | Notes |
 |-----------|-------------------|----------|-------|
-| `where` value comparison | ❌ No | Medium | `:active` doesn't match `"active"` |
+| `where` value comparison | ✅ Yes | Complete | Flexible key matching now standard |
 | `#(...)` anonymous shorthand | ❌ Not supported | Low | Nice-to-have Clojure syntax |
-
-**Recent improvements:**
-
-- **Keyword-as-function** (`(:key map)`): Now supports flexible key matching via `flex_get`
-- **select-keys**: Now supports flexible key matching via `flex_fetch`
 
 ### LLM Guide Enhancements
 
