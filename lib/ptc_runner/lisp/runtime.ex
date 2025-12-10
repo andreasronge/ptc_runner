@@ -273,6 +273,24 @@ defmodule PtcRunner.Lisp.Runtime do
   def keys(m), do: Map.keys(m)
   def vals(m), do: Map.values(m)
 
+  @doc """
+  Apply a function to each value in a map, returning a new map with the same keys.
+  Matches Clojure 1.11's update-vals signature: `(update-vals m f)`
+
+  ## Examples
+
+      iex> Runtime.update_vals(%{a: [1, 2], b: [3]}, &length/1)
+      %{a: 2, b: 1}
+
+      iex> Runtime.update_vals(%{}, &length/1)
+      %{}
+  """
+  def update_vals(m, f) when is_map(m) and is_function(f, 1) do
+    Map.new(m, fn {k, v} -> {k, f.(v)} end)
+  end
+
+  def update_vals(nil, _f), do: nil
+
   # ============================================================
   # Arithmetic
   # ============================================================

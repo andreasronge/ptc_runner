@@ -522,6 +522,75 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   end
 
   # ==========================================================================
+  # update-vals - Map Value Transformation
+  # ==========================================================================
+
+  describe "update-vals" do
+    test "counts items per group after group-by" do
+      source = ~S"""
+      (-> (group-by :status ctx/orders)
+          (update-vals count))
+      """
+
+      ctx = %{
+        orders: [
+          %{id: 1, status: "pending"},
+          %{id: 2, status: "delivered"},
+          %{id: 3, status: "pending"},
+          %{id: 4, status: "delivered"},
+          %{id: 5, status: "cancelled"}
+        ]
+      }
+
+      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+
+      assert result["pending"] == 2
+      assert result["delivered"] == 2
+      assert result["cancelled"] == 1
+    end
+
+    test "sums amounts per category after group-by" do
+      source = ~S"""
+      (-> (group-by :category ctx/expenses)
+          (update-vals (fn [items] (sum-by :amount items))))
+      """
+
+      ctx = %{
+        expenses: [
+          %{category: "food", amount: 50},
+          %{category: "food", amount: 30},
+          %{category: "transport", amount: 20}
+        ]
+      }
+
+      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+
+      assert result["food"] == 80
+      assert result["transport"] == 20
+    end
+
+    test "applies inc to all values in a map" do
+      source = ~S"""
+      (update-vals {:a 1 :b 2 :c 3} inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{a: 2, b: 3, c: 4}
+    end
+
+    test "works with empty map" do
+      source = ~S"""
+      (update-vals {} count)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{}
+    end
+  end
+
+  # ==========================================================================
   # Builtins as Higher-Order Function Arguments
   # ==========================================================================
 
