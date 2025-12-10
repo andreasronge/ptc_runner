@@ -1,5 +1,5 @@
 defmodule PtcDemo.MockAgentTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias PtcDemo.MockAgent
 
@@ -18,12 +18,6 @@ defmodule PtcDemo.MockAgentTest do
 
       {:ok, _pid} = MockAgent.start_link(responses)
 
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
-
       {:ok, answer} = MockAgent.ask("How many products?")
       assert answer == "500 products"
     end
@@ -32,12 +26,6 @@ defmodule PtcDemo.MockAgentTest do
       responses = %{}
 
       {:ok, _pid} = MockAgent.start_link(responses)
-
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
 
       {:error, reason} = MockAgent.ask("Unknown question")
       assert String.contains?(reason, "Unknown query")
@@ -50,12 +38,6 @@ defmodule PtcDemo.MockAgentTest do
       }
 
       {:ok, _pid} = MockAgent.start_link(responses)
-
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
 
       {:ok, answer1} = MockAgent.ask("Query 1")
       assert answer1 == "Answer 1"
@@ -71,12 +53,6 @@ defmodule PtcDemo.MockAgentTest do
 
       {:ok, _pid} = MockAgent.start_link(responses)
 
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
-
       MockAgent.ask("Query")
       MockAgent.ask("Query")
 
@@ -91,12 +67,6 @@ defmodule PtcDemo.MockAgentTest do
       responses = %{"Query" => {:ok, "Answer", nil, 1}}
 
       {:ok, _pid} = MockAgent.start_link(responses)
-
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
 
       MockAgent.ask("Query")
       :ok = MockAgent.reset()
@@ -115,12 +85,6 @@ defmodule PtcDemo.MockAgentTest do
 
       {:ok, _pid} = MockAgent.start_link(responses)
 
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
-
       MockAgent.ask("Query 1")
       assert MockAgent.last_program() == "program_1"
       assert MockAgent.last_result() == 100
@@ -134,12 +98,6 @@ defmodule PtcDemo.MockAgentTest do
       responses = %{}
 
       {:ok, _pid} = MockAgent.start_link(responses)
-
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
 
       assert MockAgent.last_program() == nil
       assert MockAgent.last_result() == nil
@@ -155,12 +113,6 @@ defmodule PtcDemo.MockAgentTest do
 
       {:ok, _pid} = MockAgent.start_link(responses)
 
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
-
       MockAgent.ask("Query 1")
       MockAgent.ask("Query 2")
 
@@ -175,12 +127,6 @@ defmodule PtcDemo.MockAgentTest do
 
       {:ok, _pid} = MockAgent.start_link(responses)
 
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
-
       assert MockAgent.programs() == []
     end
   end
@@ -190,12 +136,6 @@ defmodule PtcDemo.MockAgentTest do
       responses = %{}
 
       {:ok, _pid} = MockAgent.start_link(responses)
-
-      on_exit(fn ->
-        if pid = GenServer.whereis(MockAgent) do
-          GenServer.stop(pid)
-        end
-      end)
 
       # All these should work without raising errors
       assert MockAgent.reset() == :ok
