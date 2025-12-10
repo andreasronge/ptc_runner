@@ -76,6 +76,8 @@ jobs:
 
             **NEVER modify .credo.exs** - if credo complains, fix the code or use inline `# credo:disable-for-next-line` comments.
 
+            **NEVER commit changes to `.github/workflows/` files** - GitHub App tokens cannot push workflow changes. If workflow files are modified, use `git checkout -- .github/workflows/` before committing.
+
             Workflow:
             1. Read issue AND comments: `gh issue view ${{ github.event.issue.number }} --comments`
             2. Branch: `git checkout -b claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)`
