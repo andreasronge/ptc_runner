@@ -9,7 +9,7 @@ defmodule PtcRunner.Lisp.Runtime do
   # Flexible Key Access Helper
   # ============================================================
 
-  # Try atom key first, fall back to string key
+  # Flexible key access: try both atom and string versions of the key
   # Handle MapSet before is_map (since is_map(%MapSet{}) returns true)
   defp flex_get(%MapSet{}, _key), do: nil
 
@@ -17,6 +17,21 @@ defmodule PtcRunner.Lisp.Runtime do
     case Map.fetch(map, key) do
       {:ok, value} -> value
       :error -> Map.get(map, to_string(key))
+    end
+  end
+
+  defp flex_get(map, key) when is_map(map) and is_binary(key) do
+    case Map.fetch(map, key) do
+      {:ok, value} ->
+        value
+
+      :error ->
+        # Try converting string to existing atom (safe - won't create new atoms)
+        try do
+          Map.get(map, String.to_existing_atom(key))
+        rescue
+          ArgumentError -> nil
+        end
     end
   end
 
@@ -52,11 +67,12 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
 
-  def sort_by(key, coll) when is_list(coll) and is_atom(key) do
+  def sort_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     Enum.sort_by(coll, &flex_get(&1, key))
   end
 
-  def sort_by(key, comp, coll) when is_list(coll) and is_atom(key) and is_function(comp) do
+  def sort_by(key, comp, coll)
+      when is_list(coll) and (is_atom(key) or is_binary(key)) and is_function(comp) do
     Enum.sort_by(coll, &flex_get(&1, key), comp)
   end
 
@@ -132,17 +148,48 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 
-  def contains?(coll, key) when is_map(coll), do: Map.has_key?(coll, key)
+  def contains?(coll, key) when is_map(coll) do
+    # Check both atom and string versions of the key
+    cond do
+      Map.has_key?(coll, key) -> true
+      is_atom(key) -> Map.has_key?(coll, to_string(key))
+      is_binary(key) -> Map.has_key?(coll, String.to_existing_atom(key))
+      true -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
   def contains?(coll, val) when is_list(coll), do: val in coll
 
   # ============================================================
   # Map Operations
   # ============================================================
 
-  def get(m, k) when is_map(m), do: Map.get(m, k)
+  def get(m, k) when is_map(m), do: flex_get(m, k)
   def get(nil, _k), do: nil
 
-  def get(m, k, default) when is_map(m), do: Map.get(m, k, default)
+  def get(m, k, default) when is_map(m) do
+    cond do
+      Map.has_key?(m, k) ->
+        Map.get(m, k)
+
+      is_atom(k) and Map.has_key?(m, to_string(k)) ->
+        Map.get(m, to_string(k))
+
+      is_binary(k) ->
+        try do
+          atom_key = String.to_existing_atom(k)
+          if Map.has_key?(m, atom_key), do: Map.get(m, atom_key), else: default
+        rescue
+          ArgumentError -> default
+        end
+
+      true ->
+        default
+    end
+  end
+
   def get(nil, _k, default), do: default
 
   def get_in(m, path) when is_map(m), do: Kernel.get_in(m, path)
