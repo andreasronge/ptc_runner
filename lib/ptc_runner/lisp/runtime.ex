@@ -39,6 +39,56 @@ defmodule PtcRunner.Lisp.Runtime do
   defp flex_get(nil, _key), do: nil
 
   # ============================================================
+  # Flexible Key Fetch (Public API)
+  # ============================================================
+
+  @doc """
+  Flexible key fetch: try both atom and string versions of the key.
+  Returns {:ok, value} if found, :error if missing.
+  Use this when you need to distinguish between nil values and missing keys.
+  """
+  def flex_fetch(%MapSet{}, _key), do: :error
+
+  def flex_fetch(map, key) when is_map(map) and is_atom(key) do
+    case Map.fetch(map, key) do
+      {:ok, _} = ok -> ok
+      :error -> Map.fetch(map, to_string(key))
+    end
+  end
+
+  def flex_fetch(map, key) when is_map(map) and is_binary(key) do
+    case Map.fetch(map, key) do
+      {:ok, _} = ok ->
+        ok
+
+      :error ->
+        try do
+          Map.fetch(map, String.to_existing_atom(key))
+        rescue
+          ArgumentError -> :error
+        end
+    end
+  end
+
+  def flex_fetch(map, key) when is_map(map), do: Map.fetch(map, key)
+  def flex_fetch(nil, _key), do: :error
+
+  @doc """
+  Flexible nested key access: try both atom and string versions at each level.
+  """
+  def flex_get_in(data, []), do: data
+  def flex_get_in(nil, _path), do: nil
+
+  def flex_get_in(data, [key | rest]) when is_map(data) do
+    case flex_fetch(data, key) do
+      {:ok, value} -> flex_get_in(value, rest)
+      :error -> nil
+    end
+  end
+
+  def flex_get_in(_data, _path), do: nil
+
+  # ============================================================
   # Collection Operations
   # ============================================================
 
