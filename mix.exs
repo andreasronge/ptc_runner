@@ -63,7 +63,15 @@ defmodule PtcRunner.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "docs/architecture.md", "CHANGELOG.md"],
+      extras: [
+        "README.md",
+        "docs/README.md",
+        "docs/ptc-json-specification.md",
+        "docs/ptc-lisp-overview.md",
+        "docs/ptc-lisp-specification.md",
+        "docs/ptc-lisp-llm-guide.md",
+        "CHANGELOG.md"
+      ],
       before_closing_body_tag: &before_closing_body_tag/1
     ]
   end

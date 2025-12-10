@@ -96,8 +96,10 @@ PtcRunner supports multiple DSL languages optimized for LLM-generated code:
 
 ## Documentation
 
-- **[Architecture](docs/architecture.md)** - System design, DSL specification, API reference
-- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Introduction to Clojure-like syntax alternative, evaluation plan, and comparisons
+- **[Documentation](docs/README.md)** - System design, API reference, getting started
+- **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
+- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - Complete Clojure-like DSL reference
+- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Introduction and evaluation plan
 - **[LLM Testing](docs/llm-testing.md)** - Benchmark results, testing modes, model comparison
 - **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
 
@@ -281,16 +283,34 @@ program = ReqLLM.generate_object!(
 )
 ```
 
-#### Model Compatibility
+#### Tested Models
 
-The LLM schema uses nested `anyOf` structures to define valid operations. Not all models handle complex structured output schemas equally well:
+Both DSLs are tested with cost-efficient models: Claude Haiku 4.5, DeepSeek V3.2, Kimi K2, and GPT-5.1 Codex mini.
 
-- **Recommended**: Claude Haiku 4.5, Claude Sonnet 4+ - reliably follow nested schema constraints
-- **May have issues**: Some models may not enforce required fields in deeply nested `anyOf` schemas
+See `test/ptc_runner/json/e2e_test.exs` and `test/ptc_runner/lisp/integration_test.exs` for integration examples.
 
-The schema includes operation descriptions with examples (e.g., `{op:'gt', field:'price', value:10}`) to guide models. See `PtcRunner.Schema.operations/0` for all available operations.
+#### Running E2E Tests
 
-See `test/ptc_runner/e2e_test.exs` for complete integration examples.
+E2E tests require an API key. Copy `.env.example` to `.env` and configure:
+
+```bash
+cp .env.example .env
+# Edit .env with your OPENROUTER_API_KEY
+
+# Run JSON DSL e2e tests
+mix test test/ptc_runner/json/e2e_test.exs --include e2e
+
+# Run Lisp DSL e2e tests
+mix test test/ptc_runner/lisp/e2e_test.exs --include e2e
+
+# Run all e2e tests
+mix test --include e2e
+
+# Run with specific model
+PTC_TEST_MODEL=haiku mix test --include e2e
+```
+
+The same `.env` file is used by the demo application in `demo/`.
 
 ## Development
 
