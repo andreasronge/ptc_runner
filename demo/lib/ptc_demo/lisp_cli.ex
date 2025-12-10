@@ -16,7 +16,7 @@ defmodule PtcDemo.LispCLI do
     CLIBase.ensure_api_key!()
 
     # Parse command line arguments
-    {opts, _rest} = {CLIBase.parse_common_args(args), []}
+    opts = CLIBase.parse_common_args(args)
 
     data_mode = if opts[:explore], do: :explore, else: :schema
     model = opts[:model]
