@@ -32,7 +32,7 @@ case PtcRunner.Lisp.run(source, opts) do
     handle_success(result, metrics)
   {:error, error} ->
     # Format error for LLM feedback
-    PtcRunner.format_error(error)
+    PtcRunner.Json.format_error(error)
 end
 ```
 
@@ -146,7 +146,7 @@ defmodule MyAgent do
 
       {:error, error} ->
         # 4. Feed error back to LLM for retry
-        error_msg = PtcRunner.format_error(error)
+        error_msg = PtcRunner.Json.format_error(error)
         retry_with_error(memory, turn, max_turns, error_msg)
     end
   end
