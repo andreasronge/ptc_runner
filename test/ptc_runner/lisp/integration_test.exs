@@ -528,9 +528,8 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "update-vals" do
     test "counts items per group after group-by" do
       source = ~S"""
-      (->> ctx/orders
-           (group-by :status)
-           (update-vals count))
+      (-> (group-by :status ctx/orders)
+          (update-vals count))
       """
 
       ctx = %{
@@ -552,9 +551,8 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "sums amounts per category after group-by" do
       source = ~S"""
-      (->> ctx/expenses
-           (group-by :category)
-           (update-vals (fn [items] (sum-by :amount items))))
+      (-> (group-by :category ctx/expenses)
+          (update-vals (fn [items] (sum-by :amount items))))
       """
 
       ctx = %{
@@ -572,9 +570,8 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
 
     test "applies inc to all values in a map" do
-      # Note: PTC-Lisp uses (update-vals f m) to work with thread-last
       source = ~S"""
-      (update-vals inc {:a 1 :b 2 :c 3})
+      (update-vals {:a 1 :b 2 :c 3} inc)
       """
 
       {:ok, result, _, _} = Lisp.run(source)
@@ -584,7 +581,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "works with empty map" do
       source = ~S"""
-      (update-vals count {})
+      (update-vals {} count)
       """
 
       {:ok, result, _, _} = Lisp.run(source)

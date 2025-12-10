@@ -275,25 +275,21 @@ defmodule PtcRunner.Lisp.Runtime do
 
   @doc """
   Apply a function to each value in a map, returning a new map with the same keys.
-  Inspired by Clojure 1.11's update-vals but with arguments reversed to `(f m)`
-  for natural thread-last usage: `(->> grouped (update-vals count))`
-
-  Note: Clojure's signature is `(update-vals m f)` but PTC-Lisp uses `(f m)`
-  to match other collection operations and work naturally with ->> threading.
+  Matches Clojure 1.11's update-vals signature: `(update-vals m f)`
 
   ## Examples
 
-      iex> Runtime.update_vals(&length/1, %{a: [1, 2], b: [3]})
+      iex> Runtime.update_vals(%{a: [1, 2], b: [3]}, &length/1)
       %{a: 2, b: 1}
 
-      iex> Runtime.update_vals(&length/1, %{})
+      iex> Runtime.update_vals(%{}, &length/1)
       %{}
   """
-  def update_vals(f, m) when is_map(m) and is_function(f, 1) do
+  def update_vals(m, f) when is_map(m) and is_function(f, 1) do
     Map.new(m, fn {k, v} -> {k, f.(v)} end)
   end
 
-  def update_vals(_f, nil), do: nil
+  def update_vals(nil, _f), do: nil
 
   # ============================================================
   # Arithmetic
