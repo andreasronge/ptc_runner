@@ -2,7 +2,10 @@
 
 [![Hex.pm](https://img.shields.io/hexpm/v/ptc_runner.svg)](https://hex.pm/packages/ptc_runner)
 [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/ptc_runner)
+[![CI](https://github.com/andreasronge/ptc_runner/actions/workflows/test.yml/badge.svg)](https://github.com/andreasronge/ptc_runner/actions/workflows/test.yml)
+[![Hex Downloads](https://img.shields.io/hexpm/dt/ptc_runner.svg)](https://hex.pm/packages/ptc_runner)
 [![License](https://img.shields.io/hexpm/l/ptc_runner.svg)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-repo-blue.svg)](https://github.com/andreasronge/ptc_runner)
 
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
 
@@ -119,19 +122,19 @@ end
 #### Basic Execution
 
 ```elixir
-# Simple program
-{:ok, result, _metrics} = PtcRunner.Json.run(~s({"program": {"op": "literal", "value": 42}}))
-# result = 42
+iex> {:ok, result, _metrics} = PtcRunner.Json.run(~s({"program": {"op": "literal", "value": 42}}))
+iex> result
+42
 
-# With context data
-{:ok, result, _metrics} = PtcRunner.Json.run(
-  ~s({"program": {"op": "pipe", "steps": [
-    {"op": "load", "name": "numbers"},
-    {"op": "sum", "field": "value"}
-  ]}}),
-  context: %{"numbers" => [%{"value" => 1}, %{"value" => 2}, %{"value" => 3}]}
-)
-# result = 6
+iex> {:ok, result, _metrics} = PtcRunner.Json.run(
+...>   ~s({"program": {"op": "pipe", "steps": [
+...>     {"op": "load", "name": "numbers"},
+...>     {"op": "sum", "field": "value"}
+...>   ]}}),
+...>   context: %{"numbers" => [%{"value" => 1}, %{"value" => 2}, %{"value" => 3}]}
+...> )
+iex> result
+6
 ```
 
 #### With Tools
@@ -148,6 +151,18 @@ tools = %{
 ### PTC-Lisp
 
 PTC-Lisp offers a more compact syntax that LLMs find easier to generate correctly:
+
+```elixir
+iex> {:ok, result, _, _} = PtcRunner.Lisp.run("(+ 1 2 3)")
+iex> result
+6
+
+iex> {:ok, result, _, _} = PtcRunner.Lisp.run("(->> [1 2 3 4 5] (filter (fn [x] (> x 2))) (reduce + 0))")
+iex> result
+12
+```
+
+With tools:
 
 ```elixir
 # Same travel expenses example as above
