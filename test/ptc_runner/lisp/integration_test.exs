@@ -1,4 +1,4 @@
-defmodule PtcRunner.Lisp.E2ETest do
+defmodule PtcRunner.Lisp.IntegrationTest do
   @moduledoc """
   E2E tests for PTC-Lisp covering all benchmark scenario types.
 
