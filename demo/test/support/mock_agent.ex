@@ -3,6 +3,10 @@ defmodule PtcDemo.MockAgent do
   Mock agent for testing test runners without real LLM calls.
 
   Implements the same public API as PtcDemo.Agent but returns predetermined responses.
+
+  Note: This is a simplified mock for testing purposes. Unlike the real Agent,
+  `programs/0` returns a list of query strings rather than {program, result} tuples,
+  since the mock tracks queries rather than generated PTC programs.
   """
 
   use GenServer
@@ -153,7 +157,7 @@ defmodule PtcDemo.MockAgent do
 
   @impl true
   def handle_call(:programs, _from, state) do
-    # Return list of {program, result} tuples
+    # Return list of query strings (simplified for testing)
     programs =
       state.calls
       |> Enum.reverse()
