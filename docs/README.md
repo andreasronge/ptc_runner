@@ -364,6 +364,19 @@ Errors are structured for easy LLM retry loops:
 {:error, {:memory_exceeded, 10485760}}  # Exceeded ~10MB limit
 ```
 
+### PTC-Lisp Error Examples
+
+```elixir
+iex> PtcRunner.Lisp.run("(+ 1 2")
+{:error, {:parse_error, "expected string \")\" at line 1, column 7: \"\""}}
+
+iex> PtcRunner.Lisp.run("(foobar 1 2)")
+{:error, {:unbound_var, :foobar}}
+
+iex> PtcRunner.Lisp.run("(if true 1)")
+{:error, {:invalid_arity, :if, "expected (if cond then else)"}}
+```
+
 ## Integration with LLMs
 
 PtcRunner does not include LLM integration—compose it with your LLM client:
