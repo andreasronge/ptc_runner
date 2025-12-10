@@ -403,22 +403,36 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   end
 
   describe "invalid programs - type errors" do
-    test "filter with non-collection raises FunctionClauseError" do
-      # Passing non-list to filter raises due to guard clause
+    test "filter with non-collection returns type error" do
+      # Passing non-list to filter returns error tuple
       source = "(filter (where :x) 42)"
 
-      assert_raise FunctionClauseError, fn ->
-        Lisp.run(source)
-      end
+      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert message =~ "invalid argument types"
     end
 
-    test "count with non-collection raises FunctionClauseError" do
-      # Passing non-list to count raises due to guard clause
+    test "count with non-collection returns type error" do
+      # Passing non-list to count returns error tuple
       source = "(count 42)"
 
-      assert_raise FunctionClauseError, fn ->
-        Lisp.run(source)
-      end
+      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert message =~ "invalid argument types"
+    end
+
+    test "take on set returns type error" do
+      # Sets are unordered, so take doesn't make sense
+      source = "(take 2 \#{1 2 3})"
+
+      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert message =~ "take does not support sets"
+    end
+
+    test "first on set returns type error" do
+      # Sets are unordered, so first doesn't make sense
+      source = "(first \#{1 2 3})"
+
+      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert message =~ "first does not support sets"
     end
   end
 
