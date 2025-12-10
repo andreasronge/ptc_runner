@@ -115,7 +115,7 @@ defmodule PtcDemo.Agent do
       "gemini" => "openrouter:google/gemini-2.5-flash",
       "deepseek" => "openrouter:deepseek/deepseek-v3.2",
       "kimi" => "openrouter:moonshotai/kimi-k2",
-      "gpt" => "openrouter:openai/gpt-4.1-mini"
+      "gpt" => "openrouter:openai/gpt-5.1-codex-mini"
     }
   end
 
@@ -126,7 +126,7 @@ defmodule PtcDemo.Agent do
     cond do
       System.get_env("ANTHROPIC_API_KEY") -> "anthropic:claude-haiku-4.5"
       System.get_env("OPENROUTER_API_KEY") -> "openrouter:anthropic/claude-haiku-4.5"
-      System.get_env("OPENAI_API_KEY") -> "openai:gpt-4o-mini"
+      System.get_env("OPENAI_API_KEY") -> "openai:gpt-5.1-codex-mini"
       true -> "anthropic:claude-haiku-4.5"
     end
   end
