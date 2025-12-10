@@ -397,7 +397,14 @@ defmodule PtcRunner.Lisp.Eval do
   # Special handling for closures - convert them to Erlang functions
   defp apply_fun({:normal, fun}, args, ctx, memory, tool_exec) when is_function(fun) do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, ctx, memory, tool_exec) end)
-    {:ok, apply(fun, converted_args), memory}
+
+    try do
+      {:ok, apply(fun, converted_args), memory}
+    rescue
+      FunctionClauseError ->
+        # Provide a helpful error message for type mismatches
+        {:error, type_error_for_args(fun, converted_args)}
+    end
   end
 
   # Variadic builtins: {:variadic, fun2, identity}
@@ -452,7 +459,14 @@ defmodule PtcRunner.Lisp.Eval do
 
     if idx >= 0 and idx < tuple_size(funs) do
       fun = elem(funs, idx)
-      {:ok, apply(fun, converted_args), memory}
+
+      try do
+        {:ok, apply(fun, converted_args), memory}
+      rescue
+        FunctionClauseError ->
+          # Provide a helpful error message for type mismatches
+          {:error, type_error_for_args(fun, converted_args)}
+      end
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
       {:error, {:arity_error, "expected arity #{inspect(arities)}, got #{arity}"}}
@@ -602,4 +616,46 @@ defmodule PtcRunner.Lisp.Eval do
         reraise ArgumentError.exception("destructuring error: #{e.message}"), __STACKTRACE__
     end
   end
+
+  # Generate type error for FunctionClauseError in builtins
+  defp type_error_for_args(fun, args) do
+    fun_name = function_name(fun)
+    type_descriptions = Enum.map(args, &describe_type/1)
+
+    case {fun_name, args} do
+      # Sequence functions that don't support sets
+      {name, [_, %MapSet{}]}
+      when name in [:take, :drop, :sort_by, :pluck] ->
+        {:type_error, "#{name} does not support sets (sets are unordered)", hd(tl(args))}
+
+      {name, [_, %MapSet{}]}
+      when name in [:take_while, :drop_while] ->
+        {:type_error, "#{name} does not support sets (sets are unordered)", hd(tl(args))}
+
+      {name, [%MapSet{}]}
+      when name in [:first, :last, :nth, :reverse, :distinct, :flatten, :sort] ->
+        {:type_error, "#{name} does not support sets (sets are unordered)", hd(args)}
+
+      _ ->
+        {:type_error, "invalid argument types: #{Enum.join(type_descriptions, ", ")}", args}
+    end
+  end
+
+  defp function_name(fun) when is_function(fun) do
+    case Function.info(fun, :name) do
+      {:name, name} -> name
+      _ -> :unknown
+    end
+  end
+
+  defp describe_type(%MapSet{}), do: "set"
+  defp describe_type(x) when is_list(x), do: "list"
+  defp describe_type(x) when is_map(x), do: "map"
+  defp describe_type(x) when is_binary(x), do: "string"
+  defp describe_type(x) when is_number(x), do: "number"
+  defp describe_type(x) when is_boolean(x), do: "boolean"
+  defp describe_type(x) when is_atom(x), do: "keyword"
+  defp describe_type(x) when is_function(x), do: "function"
+  defp describe_type(nil), do: "nil"
+  defp describe_type(_), do: "unknown"
 end
