@@ -9,30 +9,19 @@ defmodule PtcRunner do
   - `PtcRunner.Json` - JSON-based DSL (stable)
   - `PtcRunner.Lisp` - Clojure-like DSL (experimental)
 
-  ## Migration
-
-  The top-level `run/2` function is deprecated. Use language-specific modules:
-
-      # Before (deprecated)
-      PtcRunner.run(json_program, opts)
-
-      # After
-      PtcRunner.Json.run(json_program, opts)
-
   ## Examples
+
+  ### JSON DSL
 
       iex> program = ~s({"program": {"op": "literal", "value": 42}})
       iex> {:ok, result, _metrics} = PtcRunner.Json.run(program)
       iex> result
       42
+
+  ### PTC-Lisp
+
+      iex> {:ok, result, _delta, _memory} = PtcRunner.Lisp.run("(+ 1 2)")
+      iex> result
+      3
   """
-
-  @deprecated "Use PtcRunner.Json.run/2 instead"
-  defdelegate run(program, opts \\ []), to: PtcRunner.Json
-
-  @deprecated "Use PtcRunner.Json.run!/2 instead"
-  defdelegate run!(program, opts \\ []), to: PtcRunner.Json
-
-  @deprecated "Use PtcRunner.Json.format_error/1 instead"
-  defdelegate format_error(error), to: PtcRunner.Json
 end

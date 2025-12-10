@@ -137,9 +137,9 @@ The DSLs are designed for LLM code generation—compact syntax, predictable patt
 
 ## Public API
 
-### `PtcRunner.run/2`
+### `PtcRunner.Json.run/2`
 
-Execute a PTC program with options.
+Execute a JSON DSL program with options.
 
 ```elixir
 @spec run(String.t() | map(), keyword()) ::
@@ -164,13 +164,9 @@ Execute a PTC program with options.
 - `:timeout` - Execution timeout in ms (default: `1000`)
 - `:max_heap` - Max heap size in words (default: `1_250_000` ≈ 10MB)
 
-**PTC-Lisp Additional Options** (via `PtcRunner.Lisp.run/2`):
-- `:memory` - Initial memory map (default: `%{}`)
-- `:float_precision` - Decimal places for floats in result (default: `nil` = full precision)
-
 **Example:**
 ```elixir
-{:ok, result, metrics} = PtcRunner.run(
+{:ok, result, metrics} = PtcRunner.Json.run(
   program_json,
   context: %{"data" => [1, 2, 3]},
   tools: %{"fetch" => &MyApp.fetch/1},
@@ -181,24 +177,47 @@ IO.inspect(metrics)
 # %{duration_ms: 42, memory_bytes: 102400}
 ```
 
-### `PtcRunner.run!/2`
+### `PtcRunner.Lisp.run/2`
+
+Execute a PTC-Lisp program with options.
+
+```elixir
+@spec run(String.t(), keyword()) ::
+  {:ok, any(), map(), map()} | {:error, error()}
+```
+
+Returns `{:ok, result, memory_delta, new_memory}` on success.
+
+**Additional Options:**
+- `:memory` - Initial memory map (default: `%{}`)
+- `:float_precision` - Decimal places for floats in result (default: `nil` = full precision)
+
+**Example:**
+```elixir
+{:ok, result, _delta, _memory} = PtcRunner.Lisp.run(
+  "(filter (where :price > 10) ctx/products)",
+  context: %{"products" => products}
+)
+```
+
+### `PtcRunner.Json.run!/2`
 
 Same as `run/2` but raises on error.
 
 ```elixir
-result = PtcRunner.run!(program_json, opts)
+result = PtcRunner.Json.run!(program_json, opts)
 ```
 
-### `PtcRunner.format_error/1`
+### `PtcRunner.Json.format_error/1`
 
 Convert error tuples to LLM-friendly messages for retry loops.
 
 ```elixir
-case PtcRunner.run(program) do
+case PtcRunner.Json.run(program) do
   {:ok, result, _} -> result
   {:error, err} ->
     # Returns string like "Type error: expected list, got string"
-    PtcRunner.format_error(err)
+    PtcRunner.Json.format_error(err)
 end
 ```
 
@@ -228,7 +247,7 @@ tools = %{
 }
 
 # Use with run/2
-PtcRunner.run(program, tools: tools)
+PtcRunner.Json.run(program, tools: tools)
 ```
 
 **Tool Function Contract:**
@@ -249,7 +268,7 @@ PtcRunner.run(program, tools: tools)
 
 ```elixir
 # Per-call configuration
-PtcRunner.run(program,
+PtcRunner.Json.run(program,
   timeout: 5000,      # 5 seconds
   max_heap: 5_000_000 # ~40MB
 )
@@ -265,7 +284,7 @@ config :ptc_runner,
 Every successful execution returns metrics:
 
 ```elixir
-{:ok, result, metrics} = PtcRunner.run(program)
+{:ok, result, metrics} = PtcRunner.Json.run(program)
 
 metrics
 # %{
@@ -279,7 +298,7 @@ metrics
 Resource limit errors include the limit that was exceeded:
 
 ```elixir
-case PtcRunner.run(program, timeout: 100) do
+case PtcRunner.Json.run(program, timeout: 100) do
   {:ok, result, metrics} ->
     handle_success(result)
 
@@ -414,7 +433,7 @@ defmodule MyApp.PTCAgent do
     program = extract_json(response)
 
     # 2. Execute program
-    case PtcRunner.run(program, context: context, tools: @tools) do
+    case PtcRunner.Json.run(program, context: context, tools: @tools) do
       {:ok, result, _metrics} ->
         {:ok, result}
 
