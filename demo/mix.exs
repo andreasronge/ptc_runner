@@ -8,7 +8,8 @@ defmodule PtcDemo.MixProject do
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      escript: escript()
+      escript: escript(),
+      aliases: aliases()
     ]
   end
 
@@ -27,6 +28,12 @@ defmodule PtcDemo.MixProject do
       {:ptc_runner, path: ".."},
       {:req_llm, "~> 1.0.0-rc"},
       {:dotenvy, "~> 1.1"}
+    ]
+  end
+
+  defp aliases do
+    [
+      lisp: "run --no-halt -e \"PtcDemo.LispCLI.main(System.argv())\" --"
     ]
   end
 end
