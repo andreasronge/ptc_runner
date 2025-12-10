@@ -675,34 +675,33 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   end
 
   describe "update_vals" do
-    # Note: Arguments are (f, m) to work with thread-last macro
-    # This differs from Clojure's (update-vals m f) but matches PTC-Lisp conventions
+    # Note: Arguments are (m, f) matching Clojure's (update-vals m f)
 
     test "applies function to each value" do
       map = %{a: [1, 2], b: [3, 4, 5]}
-      result = Runtime.update_vals(&length/1, map)
+      result = Runtime.update_vals(map, &length/1)
       assert result == %{a: 2, b: 3}
     end
 
     test "works with empty map" do
-      result = Runtime.update_vals(&length/1, %{})
+      result = Runtime.update_vals(%{}, &length/1)
       assert result == %{}
     end
 
     test "works with nil map" do
-      result = Runtime.update_vals(&length/1, nil)
+      result = Runtime.update_vals(nil, &length/1)
       assert result == nil
     end
 
     test "preserves keys (string keys)" do
       map = %{"pending" => [1, 2], "done" => [3]}
-      result = Runtime.update_vals(&length/1, map)
+      result = Runtime.update_vals(map, &length/1)
       assert result == %{"pending" => 2, "done" => 1}
     end
 
     test "preserves keys (atom keys)" do
       map = %{pending: [1, 2], done: [3]}
-      result = Runtime.update_vals(&length/1, map)
+      result = Runtime.update_vals(map, &length/1)
       assert result == %{pending: 2, done: 1}
     end
 
@@ -713,7 +712,7 @@ defmodule PtcRunner.Lisp.RuntimeTest do
         "delivered" => [%{id: 3}]
       }
 
-      result = Runtime.update_vals(&Enum.count/1, grouped)
+      result = Runtime.update_vals(grouped, &Enum.count/1)
       assert result == %{"pending" => 2, "delivered" => 1}
     end
 
@@ -724,7 +723,7 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       }
 
       sum_amounts = fn items -> Enum.sum(Enum.map(items, & &1.amount)) end
-      result = Runtime.update_vals(sum_amounts, grouped)
+      result = Runtime.update_vals(grouped, sum_amounts)
       assert result == %{"a" => 30, "b" => 5}
     end
   end

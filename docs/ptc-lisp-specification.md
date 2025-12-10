@@ -788,7 +788,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `select-keys` | `(select-keys m keys)` | Pick specific keys |
 | `keys` | `(keys m)` | Get all keys |
 | `vals` | `(vals m)` | Get all values |
-| `update-vals` | `(update-vals f m)` | Apply f to each value (f first for ->> threading) |
+| `update-vals` | `(update-vals m f)` | Apply f to each value (matches Clojure 1.11) |
 
 ```clojure
 (get {:a 1} :a)                    ; => 1
@@ -803,14 +803,14 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (keys {:a 1 :b 2})                 ; => [:a :b]
 (vals {:a 1 :b 2})                 ; => [1 2]
 
-;; update-vals: apply function to each value
-;; Note: PTC-Lisp uses (f m) order for ->> threading, unlike Clojure's (m f)
-(update-vals inc {:a 1 :b 2})      ; => {:a 2 :b 3}
+;; update-vals: apply function to each value (matches Clojure 1.11)
+(update-vals {:a 1 :b 2} inc)      ; => {:a 2 :b 3}
 
 ;; Common pattern: count items per group after group-by
-(->> orders
-     (group-by :status)
-     (update-vals count))          ; => {"pending" 2 "done" 3}
+;; Note: Use -> (not ->>) since map is first argument
+(-> orders
+    (group-by :status)
+    (update-vals count))           ; => {"pending" 2 "done" 3}
 ```
 
 ### 8.3 Arithmetic
