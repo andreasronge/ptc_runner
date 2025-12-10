@@ -4,8 +4,6 @@
 
 This document provides a high-level introduction to PTC-Lisp and guides you through the documentation suite.
 
-> **Important:** PTC-Lisp is a proposed alternative to the existing JSON DSL. Before implementation, we need to evaluate whether LLMs can reliably generate this Clojure-like syntax and whether the token savings justify the added complexity.
-
 ---
 
 ## Why PTC-Lisp?
@@ -71,7 +69,7 @@ PTC-Lisp is a domain-specific language for data transformation in agentic LLM wo
 
 ## Comparison with JSON DSL
 
-PtcRunner already has a working JSON-based DSL. PTC-Lisp is a proposed alternative that trades implementation complexity for token efficiency.
+PtcRunner already has a working JSON-based DSL. PTC-Lisp is an alternative that trades implementation complexity for token efficiency.
 
 ### Side-by-Side Example
 
@@ -97,7 +95,7 @@ PtcRunner already has a working JSON-based DSL. PTC-Lisp is a proposed alternati
 }
 ```
 
-**PTC-Lisp (proposed)**
+**PTC-Lisp**
 ```clojure
 (let [high-paid (->> (call "find-employees" {})
                      (filter (where :salary > 100000)))]

@@ -1,7 +1,7 @@
 # PTC-Lisp Language Specification
 
 **Version:** 0.3.2-draft
-**Status:** Experimental
+**Status:** Stable (v0.3.0+)
 **Purpose:** A minimal Clojure subset for LLM-generated data transformation programs
 
 ---

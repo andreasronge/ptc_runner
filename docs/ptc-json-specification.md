@@ -660,7 +660,7 @@ These features are intentionally excluded:
 
 | Aspect | PTC-JSON | PTC-Lisp |
 |--------|----------|----------|
-| **Status** | Stable, production-ready | Experimental |
+| **Status** | Stable | Stable (v0.3.0+) |
 | **Token efficiency** | ~1x (baseline) | ~3-5x better |
 | **Parser complexity** | `JSON.decode` (1 line) | NimbleParsec (~500 LOC) |
 | **Error location** | Exact position | Harder to pinpoint |

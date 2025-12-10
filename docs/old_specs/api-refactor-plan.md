@@ -145,7 +145,7 @@ defmodule PtcRunner do
   PtcRunner supports multiple DSL languages:
 
   - `PtcRunner.Json` - JSON-based DSL (stable)
-  - `PtcRunner.Lisp` - Clojure-like DSL (experimental)
+  - `PtcRunner.Lisp` - Clojure-like DSL (stable)
 
   ## Migration
 
