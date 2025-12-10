@@ -191,7 +191,7 @@ jobs:
             - Only flag if the PR added significant lines to the file (not just minor edits to already-large files)
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
 
           # Enable full output for debugging
           show_full_output: true

@@ -419,7 +419,7 @@ jobs:
             Now begin the triage process.
 
           # Triage only needs to read code and interact with GitHub - no compilation or tests
-          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Bash"'
+          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
 
           # Enable full output for debugging
           show_full_output: true

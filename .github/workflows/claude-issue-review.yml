@@ -84,4 +84,4 @@ jobs:
                - `needs-breakdown` if issue should be split into smaller issues
                - `bug` / `enhancement` / `documentation` based on issue type
 
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "WebSearch,WebFetch,Read,Grep,Glob,Write,Bash"'
+          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
