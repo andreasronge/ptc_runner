@@ -9,8 +9,11 @@ defmodule PtcRunner.Lisp.Runtime do
   # Flexible Key Access Helper
   # ============================================================
 
-  # Flexible key access: try both atom and string versions of the key
-  # Handle MapSet before is_map (since is_map(%MapSet{}) returns true)
+  @doc """
+  Flexible key access: try both atom and string versions of the key.
+  Returns the value if found, nil if missing.
+  Use this for simple lookups where you don't need to distinguish between nil values and missing keys.
+  """
   def flex_get(%MapSet{}, _key), do: nil
 
   def flex_get(map, key) when is_map(map) and is_atom(key) do
