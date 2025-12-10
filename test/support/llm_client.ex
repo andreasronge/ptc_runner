@@ -6,13 +6,39 @@ defmodule PtcRunner.TestSupport.LLMClient do
   from natural language task descriptions using LLM models. It supports
   both text mode (with manual cleanup) and structured output mode
   (with guaranteed valid JSON).
+
+  ## Configuration
+
+  Set environment variables or create a `.env` file in the project root:
+
+      OPENROUTER_API_KEY=sk-or-...
+      PTC_TEST_MODEL=openrouter:anthropic/claude-haiku-4.5
+
+  Available model presets (use short name or full model ID):
+    - haiku: openrouter:anthropic/claude-haiku-4.5
+    - gemini: openrouter:google/gemini-2.5-flash
+    - deepseek: openrouter:deepseek/deepseek-v3.2
+    - kimi: openrouter:moonshotai/kimi-k2-0711
+
+  ## Usage
+
+      # Run e2e tests with default model
+      mix test test/ptc_runner/json/e2e_test.exs --include e2e
+
+      # Run with specific model
+      PTC_TEST_MODEL=haiku mix test test/ptc_runner/json/e2e_test.exs --include e2e
   """
 
-  # @model "openrouter:anthropic/claude-haiku-4.5"
-  # @model "openrouter:deepseek/deepseek-v3.2"
-  # @model "openrouter:moonshotai/kimi-linear-48b-a3b-instruct"
-  @model "openrouter:google/gemini-2.5-flash"
+  @default_model "openrouter:google/gemini-2.5-flash"
   @timeout 60_000
+
+  @model_presets %{
+    "haiku" => "openrouter:anthropic/claude-haiku-4.5",
+    "gemini" => "openrouter:google/gemini-2.5-flash",
+    "deepseek" => "openrouter:deepseek/deepseek-v3.2",
+    "kimi" => "openrouter:moonshotai/kimi-k2-0711",
+    "gpt" => "openrouter:openai/gpt-5.1-codex-mini"
+  }
 
   @doc """
   Generates a PTC program using text mode with the compact `to_prompt()` description.
@@ -42,7 +68,7 @@ defmodule PtcRunner.TestSupport.LLMClient do
     Respond with ONLY valid JSON, no explanation or markdown formatting.
     """
 
-    text = ReqLLM.generate_text!(@model, prompt, receive_timeout: @timeout)
+    text = ReqLLM.generate_text!(model(), prompt, receive_timeout: @timeout)
     clean_response(text)
   end
 
@@ -78,7 +104,7 @@ defmodule PtcRunner.TestSupport.LLMClient do
     llm_schema = PtcRunner.Schema.to_llm_schema()
 
     # Use structured output API - schema descriptions guide the LLM
-    result = ReqLLM.generate_object!(@model, prompt, llm_schema, receive_timeout: @timeout)
+    result = ReqLLM.generate_object!(model(), prompt, llm_schema, receive_timeout: @timeout)
 
     # Wrap the result in the program envelope and return as JSON string
     case result do
@@ -106,13 +132,61 @@ defmodule PtcRunner.TestSupport.LLMClient do
     |> String.trim()
   end
 
+  @doc """
+  Returns the current model to use for LLM calls.
+
+  Reads from PTC_TEST_MODEL environment variable, supporting both
+  preset names (haiku, gemini, deepseek, kimi, gpt) and full model IDs.
+  """
+  def model do
+    case System.get_env("PTC_TEST_MODEL") do
+      nil -> @default_model
+      name -> Map.get(@model_presets, name, name)
+    end
+  end
+
+  defp load_dotenv do
+    env_file =
+      cond do
+        File.exists?(".env") -> ".env"
+        File.exists?("../.env") -> "../.env"
+        true -> nil
+      end
+
+    if env_file do
+      env_file
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.each(&parse_and_set_env_line/1)
+    end
+  end
+
+  defp parse_and_set_env_line(line) do
+    case String.split(line, "=", parts: 2) do
+      [key, value] ->
+        key = String.trim(key)
+        value = String.trim(value)
+
+        # Only set if not already set (env vars take precedence)
+        unless System.get_env(key) do
+          System.put_env(key, value)
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
   defp ensure_api_key! do
+    load_dotenv()
+
     unless System.get_env("OPENROUTER_API_KEY") do
       raise """
       OPENROUTER_API_KEY not set.
 
       For local development, create .env file with:
         OPENROUTER_API_KEY=sk-or-...
+        PTC_TEST_MODEL=haiku  # optional, defaults to gemini
 
       For CI, ensure the secret is configured.
       """
