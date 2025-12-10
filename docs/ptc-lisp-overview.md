@@ -242,36 +242,55 @@ This program:
 
 ## Future Improvements
 
+### Runtime Enhancements
+
+Testing with LLM-generated code has revealed gaps in string/atom key flexibility. While many operations (`pluck`, `sort-by`, `sum-by`, `get`) use `flex_get` for bidirectional key matching, some operations still require exact key types:
+
+| Operation | String Key Support | Priority | Notes |
+|-----------|-------------------|----------|-------|
+| `(:key map)` keyword-as-function | ❌ No | High | Uses `Map.get`, should use `flex_get` |
+| `select-keys` | ❌ No | High | Uses `Map.take`, needs flexible key matching |
+| `where` value comparison | ❌ No | Medium | `:active` doesn't match `"active"` |
+| `#(...)` anonymous shorthand | ❌ Not supported | Low | Nice-to-have Clojure syntax |
+
+**Recommended fixes:**
+
+1. **Keyword-as-function** (`eval.ex:347`): Replace `Map.get(m, k)` with `flex_get(m, k)` pattern
+2. **select-keys** (`runtime.ex:196`): Implement flexible key matching instead of `Map.take`
+
 ### LLM Guide Enhancements
 
 Testing with various LLM models has revealed common patterns where LLMs generate invalid PTC-Lisp code due to Clojure habits that don't apply to this subset. The LLM guide should be enhanced to explicitly address these issues:
 
 | Issue | LLM Mistake | Correct PTC-Lisp |
 |-------|-------------|------------------|
-| **Keyword-as-function** | `(:name map)` returns nil | Use `(get :name map)` for map access |
-| **Set literals** | `#{...}` syntax causes parse errors | Use `includes?` for membership checks |
+| **Keyword-as-function** | `(:name map)` returns nil with string keys | Use `(get :name map)` for map access |
+| **select-keys** | `(select-keys m [:a :b])` returns `%{}` with string keys | Use `get` in a `map` or ensure consistent key types |
 | **Keywords vs strings** | `:engineering` when data has `"engineering"` | String values in data require quoted strings in `where` |
 
 #### Example Corrections
 
 **Map value extraction:**
 ```clojure
-;; WRONG: Clojure keyword-as-function syntax
+;; WRONG: Clojure keyword-as-function syntax (fails with string-keyed maps)
 (->> ctx/products (max-by :price) (:name))  ; Returns nil
 
-;; CORRECT: Use get function
+;; CORRECT: Use get function (works with both atom and string keys)
 (->> ctx/products (max-by :price) (get :name))
 ```
 
-**Set membership:**
+**Set membership (now supported):**
 ```clojure
-;; WRONG: Clojure set literal syntax
-(filter (fn [id] (some #{id} other-ids)) ids)  ; ParseError
+;; Set literals are now supported with #{...} syntax
+(let [ids #{1 2 3}]
+  (filter (fn [x] (contains? ids (:id x))) items))
 
-;; CORRECT: Use includes? or nested fn
-(filter (fn [id] (includes? other-ids id)) ids)
-;; or
-(filter (fn [id] (some (fn [x] (= x id)) other-ids)) ids)
+;; Or create sets dynamically
+(let [engineering-ids (->> employees
+                           (filter (where :department = "engineering"))
+                           (pluck :id)
+                           (set))]
+  (filter (fn [e] (contains? engineering-ids (:employee_id e))) expenses))
 ```
 
 **String vs keyword comparison:**
@@ -284,4 +303,20 @@ Testing with various LLM models has revealed common patterns where LLMs generate
 ```
 
 These patterns should be prominently documented in the "Common Mistakes" section of `ptc-lisp-llm-guide.md`.
+
+### Test Report Analysis (2025-12-10)
+
+From testing with DeepSeek V3.2 model (19/21 tests passed, 90% pass rate):
+
+**What works well:**
+- Core operations: `count`, `filter`, `sum-by`, `avg-by`, `sort-by`, `take`, `pluck`, `distinct`
+- Threading macros (`->>`) used naturally
+- `where` macro with string comparisons
+- Set creation with `(set ...)` and `contains?` for membership
+- Memory persistence for multi-turn queries
+- Complex `let` bindings and pipelines
+
+**Remaining issues:**
+- Keyword-as-function `(:name map)` fails with string-keyed data (test 12)
+- LLMs sometimes use `:keyword` instead of `"string"` in `where` clauses (test 21)
 
