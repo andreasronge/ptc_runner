@@ -11,16 +11,16 @@ defmodule PtcRunner.Lisp.Runtime do
 
   # Flexible key access: try both atom and string versions of the key
   # Handle MapSet before is_map (since is_map(%MapSet{}) returns true)
-  defp flex_get(%MapSet{}, _key), do: nil
+  def flex_get(%MapSet{}, _key), do: nil
 
-  defp flex_get(map, key) when is_map(map) and is_atom(key) do
+  def flex_get(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do
       {:ok, value} -> value
       :error -> Map.get(map, to_string(key))
     end
   end
 
-  defp flex_get(map, key) when is_map(map) and is_binary(key) do
+  def flex_get(map, key) when is_map(map) and is_binary(key) do
     case Map.fetch(map, key) do
       {:ok, value} ->
         value
@@ -35,8 +35,8 @@ defmodule PtcRunner.Lisp.Runtime do
     end
   end
 
-  defp flex_get(map, key) when is_map(map), do: Map.get(map, key)
-  defp flex_get(nil, _key), do: nil
+  def flex_get(map, key) when is_map(map), do: Map.get(map, key)
+  def flex_get(nil, _key), do: nil
 
   # ============================================================
   # Flexible Key Fetch (Public API)
@@ -242,10 +242,10 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def get(nil, _k, default), do: default
 
-  def get_in(m, path) when is_map(m), do: Kernel.get_in(m, path)
+  def get_in(m, path) when is_map(m), do: flex_get_in(m, path)
 
   def get_in(m, path, default) when is_map(m) do
-    case Kernel.get_in(m, path) do
+    case flex_get_in(m, path) do
       nil -> default
       val -> val
     end
@@ -257,7 +257,16 @@ defmodule PtcRunner.Lisp.Runtime do
   def update_in(m, path, f), do: Kernel.update_in(m, path, f)
   def dissoc(m, k), do: Map.delete(m, k)
   def merge(m1, m2), do: Map.merge(m1, m2)
-  def select_keys(m, ks), do: Map.take(m, ks)
+
+  def select_keys(m, ks) do
+    Enum.reduce(ks, %{}, fn k, acc ->
+      case flex_fetch(m, k) do
+        {:ok, val} -> Map.put(acc, k, val)
+        :error -> acc
+      end
+    end)
+  end
+
   def keys(m), do: Map.keys(m)
   def vals(m), do: Map.values(m)
 
