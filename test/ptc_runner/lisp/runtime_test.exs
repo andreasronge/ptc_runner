@@ -130,6 +130,18 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       map = %{"name" => "Alice"}
       assert Runtime.get(map, "age", 0) == 0
     end
+
+    test "get with default preserves explicit nil values" do
+      map = %{status: nil}
+      assert Runtime.get(map, :status, "unknown") == nil
+      assert Runtime.get(map, "status", "unknown") == nil
+    end
+
+    test "get with default and string key preserves explicit nil values in string-keyed map" do
+      map = %{"status" => nil}
+      assert Runtime.get(map, "status", "unknown") == nil
+      assert Runtime.get(map, :status, "unknown") == nil
+    end
   end
 
   describe "string key parameters - contains?" do

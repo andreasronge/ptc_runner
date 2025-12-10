@@ -170,9 +170,23 @@ defmodule PtcRunner.Lisp.Runtime do
   def get(nil, _k), do: nil
 
   def get(m, k, default) when is_map(m) do
-    case flex_get(m, k) do
-      nil -> default
-      val -> val
+    cond do
+      Map.has_key?(m, k) ->
+        Map.get(m, k)
+
+      is_atom(k) and Map.has_key?(m, to_string(k)) ->
+        Map.get(m, to_string(k))
+
+      is_binary(k) ->
+        try do
+          atom_key = String.to_existing_atom(k)
+          if Map.has_key?(m, atom_key), do: Map.get(m, atom_key), else: default
+        rescue
+          ArgumentError -> default
+        end
+
+      true ->
+        default
     end
   end
 
