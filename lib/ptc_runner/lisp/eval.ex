@@ -9,6 +9,8 @@ defmodule PtcRunner.Lisp.Eval do
 
   alias PtcRunner.Lisp.CoreAST
 
+  import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2, flex_get_in: 2]
+
   @type env :: %{atom() => term()}
   @type tool_executor :: (String.t(), map() -> term())
 
@@ -114,12 +116,12 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Context access: ctx/input → ctx[:input]
   defp do_eval({:ctx, key}, ctx, memory, _env, _tool_exec) do
-    {:ok, Map.get(ctx, key), memory}
+    {:ok, flex_get(ctx, key), memory}
   end
 
   # Memory access: memory/results → memory[:results]
   defp do_eval({:memory, key}, _ctx, memory, _env, _tool_exec) do
-    {:ok, Map.get(memory, key), memory}
+    {:ok, flex_get(memory, key), memory}
   end
 
   # Short-circuit logic: and
@@ -307,7 +309,14 @@ defmodule PtcRunner.Lisp.Eval do
   defp match_pattern({:destructure, {:keys, keys, defaults}}, value) when is_map(value) do
     Enum.reduce(keys, %{}, fn key, acc ->
       default = Keyword.get(defaults, key)
-      Map.put(acc, key, Map.get(value, key, default))
+
+      val =
+        case flex_fetch(value, key) do
+          {:ok, v} -> v
+          :error -> default
+        end
+
+      Map.put(acc, key, val)
     end)
   end
 
@@ -344,10 +353,13 @@ defmodule PtcRunner.Lisp.Eval do
   defp apply_fun(k, args, _ctx, memory, _tool_exec) when is_atom(k) do
     case args do
       [m] when is_map(m) ->
-        {:ok, Map.get(m, k), memory}
+        {:ok, flex_get(m, k), memory}
 
       [m, default] when is_map(m) ->
-        {:ok, Map.get(m, k, default), memory}
+        case flex_fetch(m, k) do
+          {:ok, val} -> {:ok, val, memory}
+          :error -> {:ok, default, memory}
+        end
 
       [nil] ->
         {:ok, nil, memory}
@@ -472,21 +484,8 @@ defmodule PtcRunner.Lisp.Eval do
         {:string, s} -> s
       end)
 
-    fn row -> get_in_flexible(row, path) end
+    fn row -> flex_get_in(row, path) end
   end
-
-  defp get_in_flexible(data, []), do: data
-  defp get_in_flexible(nil, _), do: nil
-
-  defp get_in_flexible(data, [key | rest]) when is_map(data) do
-    # Try atom key first (faster), fall back to string
-    case Map.fetch(data, key) do
-      {:ok, value} -> get_in_flexible(value, rest)
-      :error -> get_in_flexible(Map.get(data, to_string(key)), rest)
-    end
-  end
-
-  defp get_in_flexible(_, _), do: nil
 
   defp build_where_predicate(:truthy, accessor, _value),
     do: fn row -> truthy?(accessor.(row)) end

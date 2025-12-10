@@ -246,15 +246,13 @@ Testing with LLM-generated code has revealed gaps in string/atom key flexibility
 
 | Operation | String Key Support | Priority | Notes |
 |-----------|-------------------|----------|-------|
-| `(:key map)` keyword-as-function | ❌ No | High | Uses `Map.get`, should use `flex_get` |
-| `select-keys` | ❌ No | High | Uses `Map.take`, needs flexible key matching |
 | `where` value comparison | ❌ No | Medium | `:active` doesn't match `"active"` |
 | `#(...)` anonymous shorthand | ❌ Not supported | Low | Nice-to-have Clojure syntax |
 
-**Recommended fixes:**
+**Recent improvements:**
 
-1. **Keyword-as-function** (`eval.ex:347`): Replace `Map.get(m, k)` with `flex_get(m, k)` pattern
-2. **select-keys** (`runtime.ex:196`): Implement flexible key matching instead of `Map.take`
+- **Keyword-as-function** (`(:key map)`): Now supports flexible key matching via `flex_get`
+- **select-keys**: Now supports flexible key matching via `flex_fetch`
 
 ### LLM Guide Enhancements
 
@@ -262,19 +260,15 @@ Testing with various LLM models has revealed common patterns where LLMs generate
 
 | Issue | LLM Mistake | Correct PTC-Lisp |
 |-------|-------------|------------------|
-| **Keyword-as-function** | `(:name map)` returns nil with string keys | Use `(get :name map)` for map access |
-| **select-keys** | `(select-keys m [:a :b])` returns `%{}` with string keys | Use `get` in a `map` or ensure consistent key types |
 | **Keywords vs strings** | `:engineering` when data has `"engineering"` | String values in data require quoted strings in `where` |
 
 #### Example Corrections
 
 **Map value extraction:**
 ```clojure
-;; WRONG: Clojure keyword-as-function syntax (fails with string-keyed maps)
-(->> ctx/products (max-by :price) (:name))  ; Returns nil
-
-;; CORRECT: Use get function (works with both atom and string keys)
-(->> ctx/products (max-by :price) (get :name))
+;; Both styles now work with string-keyed maps (via flex_get)
+(->> ctx/products (max-by :price) (:name))      ; Works
+(->> ctx/products (max-by :price) (get :name))  ; Also works
 ```
 
 **Set membership (now supported):**
@@ -315,6 +309,5 @@ From testing with DeepSeek V3.2 model (19/21 tests passed, 90% pass rate):
 - Complex `let` bindings and pipelines
 
 **Remaining issues:**
-- Keyword-as-function `(:name map)` fails with string-keyed data (test 12)
 - LLMs sometimes use `:keyword` instead of `"string"` in `where` clauses (test 21)
 
