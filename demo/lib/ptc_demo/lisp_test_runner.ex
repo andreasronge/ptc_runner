@@ -94,11 +94,6 @@ defmodule PtcDemo.LispTestRunner do
     Base.print_summary(summary)
     Base.print_failed_tests(results)
 
-    # Print stats
-    IO.puts(
-      "\nToken usage: #{summary.stats.total_tokens} tokens, cost: #{Base.format_cost(summary.stats.total_cost)}"
-    )
-
     # Write report if requested
     if report_path do
       Report.write(report_path, summary, "Lisp")
