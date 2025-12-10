@@ -12,10 +12,10 @@ For the complete language specification, see [ptc-lisp-specification.md](ptc-lis
 
 ```elixir
 # Run a PTC-Lisp program
-{:ok, result, metrics} = PtcRunner.Lisp.run(source, opts)
+{:ok, result, memory_delta, new_memory} = PtcRunner.Lisp.run(source, opts)
 
 # Run with context and tools
-{:ok, result, metrics} = PtcRunner.Lisp.run(source,
+{:ok, result, memory_delta, new_memory} = PtcRunner.Lisp.run(source,
   context: %{input: data, user_id: "user-123"},
   memory: %{cached_users: previous_users},
   tools: %{
@@ -28,8 +28,8 @@ For the complete language specification, see [ptc-lisp-specification.md](ptc-lis
 
 # Handle errors with LLM-friendly messages
 case PtcRunner.Lisp.run(source, opts) do
-  {:ok, result, metrics} ->
-    handle_success(result, metrics)
+  {:ok, result, memory_delta, new_memory} ->
+    handle_success(result, memory_delta, new_memory)
   {:error, error} ->
     # Format error for LLM feedback
     PtcRunner.Json.format_error(error)
@@ -134,9 +134,8 @@ defmodule MyAgent do
            context: %{turn: turn},
            tools: my_tools()
          ) do
-      {:ok, result, _metrics} ->
-        # 3. Update memory based on result contract
-        new_memory = apply_result_contract(memory, result)
+      {:ok, result, _memory_delta, new_memory} ->
+        # 3. Memory is already updated based on result contract
 
         if done?(result) do
           {:ok, new_memory}

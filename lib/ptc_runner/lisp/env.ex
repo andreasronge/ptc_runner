@@ -78,6 +78,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"select-keys", {:normal, &Runtime.select_keys/2}},
       {:keys, {:normal, &Runtime.keys/1}},
       {:vals, {:normal, &Runtime.vals/1}},
+      {:"update-vals", {:normal, &Runtime.update_vals/2}},
 
       # ============================================================
       # Arithmetic — variadic with identity

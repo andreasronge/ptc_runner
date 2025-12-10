@@ -185,7 +185,7 @@ Programs are pure functions of `(memory, context) → result`:
 3. Register your tools and execute programs
 
 ```elixir
-{:ok, result, metrics} = PtcRunner.Lisp.run(
+{:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(
   ~s/(->> ctx/users (filter (where :active = true)) (count))/,
   context: %{users: users},
   tools: %{"get-orders" => &MyApp.get_orders/1}
@@ -305,4 +305,8 @@ From testing with DeepSeek V3.2 model (19/21 tests passed, 90% pass rate):
 
 **Remaining issues:**
 - LLMs sometimes use `:keyword` instead of `"string"` in `where` clauses (test 21)
+- LLMs sometimes forget to extract specific fields when task asks for them. E.g., "find most expensive product and return its name" → LLM returns whole product map instead of `(:name product)` or `(get product :name)`
+
+**Resolved issues:**
+- `update-vals` added (Clojure 1.11+) to transform map values after `group-by`. Example: `(update-vals (group-by :status orders) count)` → `{"pending" 2 "done" 3}`
 

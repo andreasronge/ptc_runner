@@ -673,4 +673,58 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       assert Runtime.flex_get_in(data, [:user, :name]) == "Alice"
     end
   end
+
+  describe "update_vals" do
+    # Note: Arguments are (m, f) matching Clojure's (update-vals m f)
+
+    test "applies function to each value" do
+      map = %{a: [1, 2], b: [3, 4, 5]}
+      result = Runtime.update_vals(map, &length/1)
+      assert result == %{a: 2, b: 3}
+    end
+
+    test "works with empty map" do
+      result = Runtime.update_vals(%{}, &length/1)
+      assert result == %{}
+    end
+
+    test "works with nil map" do
+      result = Runtime.update_vals(nil, &length/1)
+      assert result == nil
+    end
+
+    test "preserves keys (string keys)" do
+      map = %{"pending" => [1, 2], "done" => [3]}
+      result = Runtime.update_vals(map, &length/1)
+      assert result == %{"pending" => 2, "done" => 1}
+    end
+
+    test "preserves keys (atom keys)" do
+      map = %{pending: [1, 2], done: [3]}
+      result = Runtime.update_vals(map, &length/1)
+      assert result == %{pending: 2, done: 1}
+    end
+
+    test "works with count function for group-by use case" do
+      # Simulates (->> (group-by :status orders) (update-vals count))
+      grouped = %{
+        "pending" => [%{id: 1}, %{id: 2}],
+        "delivered" => [%{id: 3}]
+      }
+
+      result = Runtime.update_vals(grouped, &Enum.count/1)
+      assert result == %{"pending" => 2, "delivered" => 1}
+    end
+
+    test "works with sum aggregation" do
+      grouped = %{
+        "a" => [%{amount: 10}, %{amount: 20}],
+        "b" => [%{amount: 5}]
+      }
+
+      sum_amounts = fn items -> Enum.sum(Enum.map(items, & &1.amount)) end
+      result = Runtime.update_vals(grouped, sum_amounts)
+      assert result == %{"a" => 30, "b" => 5}
+    end
+  end
 end
