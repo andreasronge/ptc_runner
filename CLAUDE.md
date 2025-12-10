@@ -43,16 +43,15 @@ test/
 ├── ptc_runner/             # Unit tests by module
 └── ...
 docs/
-├── architecture.md         # System design and DSL specification
-├── api-refactor-plan.md    # Multi-language support roadmap
+├── README.md               # Main documentation entry point
+├── ptc-json-specification.md   # JSON DSL complete reference
+├── ptc-lisp-specification.md   # PTC-Lisp complete reference
 └── guidelines/             # Development guidelines
 ```
 
-> **Note**: A PTC-Lisp DSL is planned. See `docs/api-refactor-plan.md`.
-
 ## Documentation
 
-- **[Architecture](docs/architecture.md)** - System design, DSL specification, and API reference
+- **[Documentation](docs/README.md)** - System design, API reference, and getting started
 - **[Development Guidelines](docs/guidelines/development-guidelines.md)** - Elixir standards
 - **[Testing Guidelines](docs/guidelines/testing-guidelines.md)** - Test quality and patterns
 - **[Planning Guidelines](docs/guidelines/planning-guidelines.md)** - Issue review and feature planning
@@ -71,7 +70,7 @@ docs/
 
 ## Architecture Overview
 
-See **[docs/architecture.md](docs/architecture.md)** for full details.
+See **[docs/README.md](docs/README.md)** for full details.
 
 The library has four main layers:
 
