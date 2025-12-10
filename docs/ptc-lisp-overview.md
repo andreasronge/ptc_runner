@@ -195,9 +195,9 @@ Programs are pure functions of `(memory, context) → result`:
 ### For Language Implementers
 
 1. Start with **[ptc-lisp-specification.md](ptc-lisp-specification.md)** for full semantics
-2. Follow **[ptc-lisp-parser-plan.md](ptc-lisp-parser-plan.md)** to build the parser
-3. Implement validation per **[ptc-lisp-analyze-plan.md](ptc-lisp-analyze-plan.md)**
-4. Build the interpreter using **[ptc-lisp-eval-plan.md](ptc-lisp-eval-plan.md)**
+2. Review the parser implementation in `lib/ptc_runner/lisp/parser.ex`
+3. Review the analyzer in `lib/ptc_runner/lisp/analyzer.ex`
+4. Review the interpreter in `lib/ptc_runner/lisp/eval.ex`
 
 ### For LLM Prompt Engineers
 

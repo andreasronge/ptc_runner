@@ -65,7 +65,8 @@ defmodule PtcRunner.MixProject do
       main: "readme",
       extras: [
         "README.md",
-        "docs/README.md",
+        "LICENSE",
+        "docs/guide.md",
         "docs/ptc-json-specification.md",
         "docs/ptc-lisp-overview.md",
         "docs/ptc-lisp-specification.md",
