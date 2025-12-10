@@ -277,7 +277,6 @@ memory/results        ; read from persistent memory
 ; Maps
 (get m :key)  (get-in m [:a :b])  (assoc m :k v)  (merge m1 m2)
 (select-keys m [:a :b])  (keys m)  (vals m)
-(update-vals f m)  ; apply f to each value (note: f first for ->> threading)
 (:key m)  (:key m default)  ; keyword as function
 (update-vals m f)  ; apply f to each value in map
 (update-vals {:a 1 :b 2} inc)                        ; => {:a 2 :b 3}
