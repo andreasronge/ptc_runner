@@ -459,7 +459,14 @@ defmodule PtcRunner.Lisp.Eval do
 
     if idx >= 0 and idx < tuple_size(funs) do
       fun = elem(funs, idx)
-      {:ok, apply(fun, converted_args), memory}
+
+      try do
+        {:ok, apply(fun, converted_args), memory}
+      rescue
+        FunctionClauseError ->
+          # Provide a helpful error message for type mismatches
+          {:error, type_error_for_args(fun, converted_args)}
+      end
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
       {:error, {:arity_error, "expected arity #{inspect(arities)}, got #{arity}"}}
@@ -618,7 +625,7 @@ defmodule PtcRunner.Lisp.Eval do
     case {fun_name, args} do
       # Sequence functions that don't support sets
       {name, [_, %MapSet{}]}
-      when name in [:take, :drop] ->
+      when name in [:take, :drop, :sort_by, :pluck] ->
         {:type_error, "#{name} does not support sets (sets are unordered)", hd(tl(args))}
 
       {name, [_, %MapSet{}]}
@@ -626,7 +633,7 @@ defmodule PtcRunner.Lisp.Eval do
         {:type_error, "#{name} does not support sets (sets are unordered)", hd(tl(args))}
 
       {name, [%MapSet{}]}
-      when name in [:first, :last, :nth, :reverse, :distinct, :flatten] ->
+      when name in [:first, :last, :nth, :reverse, :distinct, :flatten, :sort] ->
         {:type_error, "#{name} does not support sets (sets are unordered)", hd(args)}
 
       _ ->
