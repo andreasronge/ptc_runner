@@ -33,7 +33,7 @@ Each issue should be:
 
 ## Context
 
-**Architecture reference**: [Link to relevant section in docs/architecture.md]
+**Architecture reference**: [Link to relevant section in docs/README.md or DSL specifications]
 **Dependencies**: [What must be implemented first, or "None"]
 **Related issues**: [Links to related issues, or "None"]
 
@@ -76,7 +76,9 @@ Each issue should be:
 ## Documentation Updates
 
 [List docs that need updating, or "None" if purely internal change]
-- `docs/architecture.md` - [what section needs update]
+- `docs/README.md` - [what section needs update]
+- `docs/ptc-json-specification.md` - [if JSON DSL changes]
+- `docs/ptc-lisp-specification.md` - [if PTC-Lisp changes]
 - [Other affected docs]
 ```
 
@@ -125,7 +127,7 @@ Each is independently testable and delivers value.
 Before submitting an issue for review:
 
 - [ ] Summary explains value to library users
-- [ ] Context references architecture.md
+- [ ] Context references relevant docs (README.md, specifications)
 - [ ] Current state based on actual codebase analysis (not assumptions)
 - [ ] Acceptance criteria are specific and testable
 - [ ] E2E test scenario is described
@@ -217,4 +219,6 @@ See [GitHub Workflows](github-workflows.md#labels-reference) for the complete la
 - [Planning Guidelines](planning-guidelines.md) - The 9-point review checklist
 - [Testing Guidelines](testing-guidelines.md) - How to write good tests
 - [PR Review Guidelines](pr-review-guidelines.md) - What PR reviewers look for
-- [Architecture](../architecture.md) - System design and DSL specification
+- [Documentation](../README.md) - System design and API reference
+- [PTC-JSON Specification](../ptc-json-specification.md) - JSON DSL reference
+- [PTC-Lisp Specification](../ptc-lisp-specification.md) - PTC-Lisp reference
