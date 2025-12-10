@@ -5,6 +5,12 @@ defmodule PtcRunner.Json.E2ETest do
 
   alias PtcRunner.TestSupport.LLMClient
 
+  setup_all do
+    IO.puts("\n=== PTC-JSON E2E Tests ===")
+    IO.puts("Model: #{LLMClient.model()}\n")
+    :ok
+  end
+
   describe "Text mode - uses Schema.to_prompt() (~300 tokens)" do
     @describetag :text_mode
 
