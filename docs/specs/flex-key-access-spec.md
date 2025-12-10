@@ -1,6 +1,6 @@
 # Specification: Flexible Key Access for PTC-Lisp
 
-**Status:** Proposed
+**Status:** Implemented
 **Created:** 2024-12-10
 **Updated:** 2024-12-10 (v2 - addressed nil vs missing key, get-in consistency)
 **Issue:** String/atom key mismatch causes runtime failures in LLM-generated code
