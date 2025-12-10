@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.EvalDataTypesTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers
+
   alias PtcRunner.Lisp.Eval
 
   describe "literal evaluation" do
@@ -176,6 +178,4 @@ defmodule PtcRunner.Lisp.EvalDataTypesTest do
       assert MapSet.equal?(result, MapSet.new([1, 2, 3]))
     end
   end
-
-  defp dummy_tool(_name, _args), do: :ok
 end

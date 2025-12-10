@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.EvalErrorsTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers
+
   alias PtcRunner.Lisp.{Env, Eval}
 
   describe "error propagation in nested structures" do
@@ -165,6 +167,4 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                Eval.eval(call_ast, %{}, %{}, %{}, &dummy_tool/2)
     end
   end
-
-  defp dummy_tool(_name, _args), do: :ok
 end
