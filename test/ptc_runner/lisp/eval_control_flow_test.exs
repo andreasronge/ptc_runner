@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.EvalControlFlowTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers
+
   alias PtcRunner.Lisp.{Env, Eval}
 
   describe "variable access" do
@@ -240,6 +242,4 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
       assert fun.(%{a: 1, b: 2})
     end
   end
-
-  defp dummy_tool(_name, _args), do: :ok
 end

@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.EvalFunctionsTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers
+
   alias PtcRunner.Lisp.{Env, Eval}
 
   describe "function definition: fn" do
@@ -392,6 +394,4 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       assert {:ok, 6, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
   end
-
-  defp dummy_tool(_name, _args), do: :ok
 end

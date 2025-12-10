@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.EvalMemoryTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers
+
   alias PtcRunner.Lisp.Eval
 
   describe "memory threading" do
@@ -30,6 +32,4 @@ defmodule PtcRunner.Lisp.EvalMemoryTest do
       assert new_memory == memory
     end
   end
-
-  defp dummy_tool(_name, _args), do: :ok
 end
