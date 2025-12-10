@@ -5,18 +5,15 @@ defmodule PtcDemo.TestRunner.ReportTest do
 
   describe "generate/2" do
     test "generates report with correct DSL name" do
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "test-model",
-        data_mode: :schema,
-        passed: 2,
-        failed: 1,
-        total: 3,
-        total_attempts: 5,
-        duration_ms: 1000,
-        stats: %{total_tokens: 1000, total_cost: 0.5},
-        results: []
-      }
+      summary =
+        build_test_summary(
+          passed: 2,
+          failed: 1,
+          total: 3,
+          total_attempts: 5,
+          duration_ms: 1000,
+          stats: %{total_tokens: 1000, total_cost: 0.5}
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -26,18 +23,13 @@ defmodule PtcDemo.TestRunner.ReportTest do
     end
 
     test "generates report with Lisp DSL name" do
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "test-model",
-        data_mode: :full,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 500,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: []
-      }
+      summary =
+        build_test_summary(
+          data_mode: :full,
+          passed: 1,
+          duration_ms: 500,
+          stats: %{total_tokens: 100, total_cost: 0.1}
+        )
 
       report = Report.generate(summary, "Lisp")
 
@@ -45,18 +37,16 @@ defmodule PtcDemo.TestRunner.ReportTest do
     end
 
     test "includes summary metrics in report" do
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "my-model",
-        data_mode: :schema,
-        passed: 18,
-        failed: 2,
-        total: 20,
-        total_attempts: 45,
-        duration_ms: 5000,
-        stats: %{total_tokens: 10000, total_cost: 0.25},
-        results: []
-      }
+      summary =
+        build_test_summary(
+          model: "my-model",
+          passed: 18,
+          failed: 2,
+          total: 20,
+          total_attempts: 45,
+          duration_ms: 5000,
+          stats: %{total_tokens: 10000, total_cost: 0.25}
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -75,18 +65,11 @@ defmodule PtcDemo.TestRunner.ReportTest do
         description: "Test description"
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          passed: 1,
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -111,18 +94,14 @@ defmodule PtcDemo.TestRunner.ReportTest do
         ]
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 0,
-        failed: 1,
-        total: 1,
-        total_attempts: 2,
-        duration_ms: 200,
-        stats: %{total_tokens: 200, total_cost: 0.2},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          failed: 1,
+          total_attempts: 2,
+          duration_ms: 200,
+          stats: %{total_tokens: 200, total_cost: 0.2},
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -141,18 +120,11 @@ defmodule PtcDemo.TestRunner.ReportTest do
         all_programs: [{"program1", {:ok, 42}}]
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          passed: 1,
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -161,18 +133,7 @@ defmodule PtcDemo.TestRunner.ReportTest do
     end
 
     test "handles empty results list" do
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 0,
-        failed: 0,
-        total: 0,
-        total_attempts: 0,
-        duration_ms: 0,
-        stats: %{total_tokens: 0, total_cost: 0.0},
-        results: []
-      }
+      summary = build_test_summary()
 
       report = Report.generate(summary, "JSON")
 
@@ -187,18 +148,13 @@ defmodule PtcDemo.TestRunner.ReportTest do
         %{index: 2, query: "Q2", passed: true, attempts: 3}
       ]
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 2,
-        failed: 0,
-        total: 2,
-        total_attempts: 5,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: results
-      }
+      summary =
+        build_test_summary(
+          passed: 2,
+          total: 2,
+          total_attempts: 5,
+          results: results
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -209,18 +165,7 @@ defmodule PtcDemo.TestRunner.ReportTest do
     test "formats timestamp in report" do
       timestamp = ~U[2025-01-15 14:30:45Z]
 
-      summary = %{
-        timestamp: timestamp,
-        model: "model",
-        data_mode: :schema,
-        passed: 0,
-        failed: 0,
-        total: 0,
-        total_attempts: 0,
-        duration_ms: 0,
-        stats: %{total_tokens: 0, total_cost: 0.0},
-        results: []
-      }
+      summary = build_test_summary(timestamp: timestamp)
 
       report = Report.generate(summary, "JSON")
 
@@ -231,26 +176,19 @@ defmodule PtcDemo.TestRunner.ReportTest do
 
   describe "write/3" do
     test "writes report to file" do
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "test-model",
-        data_mode: :schema,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [
-          %{
-            index: 1,
-            query: "Test",
-            passed: true,
-            attempts: 1,
-            description: "Test"
-          }
-        ]
-      }
+      summary =
+        build_test_summary(
+          passed: 1,
+          results: [
+            %{
+              index: 1,
+              query: "Test",
+              passed: true,
+              attempts: 1,
+              description: "Test"
+            }
+          ]
+        )
 
       temp_file = Path.join(System.tmp_dir!(), "test_report_#{:erlang.phash2(self())}.md")
 
@@ -277,18 +215,11 @@ defmodule PtcDemo.TestRunner.ReportTest do
         assert File.read!(temp_file) == "old content"
 
         # Generate new report
-        summary = %{
-          timestamp: DateTime.utc_now(),
-          model: "new-model",
-          data_mode: :schema,
-          passed: 1,
-          failed: 0,
-          total: 1,
-          total_attempts: 1,
-          duration_ms: 100,
-          stats: %{total_tokens: 100, total_cost: 0.1},
-          results: []
-        }
+        summary =
+          build_test_summary(
+            model: "new-model",
+            passed: 1
+          )
 
         :ok = Report.write(temp_file, summary, "Test")
 
@@ -321,18 +252,14 @@ defmodule PtcDemo.TestRunner.ReportTest do
         ]
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 0,
-        failed: 1,
-        total: 1,
-        total_attempts: 5,
-        duration_ms: 1000,
-        stats: %{total_tokens: 500, total_cost: 0.5},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          failed: 1,
+          total_attempts: 5,
+          duration_ms: 1000,
+          stats: %{total_tokens: 500, total_cost: 0.5},
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -350,18 +277,11 @@ defmodule PtcDemo.TestRunner.ReportTest do
         attempts: 1
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          passed: 1,
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -377,18 +297,11 @@ defmodule PtcDemo.TestRunner.ReportTest do
         attempts: 1
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          passed: 1,
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -408,18 +321,11 @@ defmodule PtcDemo.TestRunner.ReportTest do
         all_programs: []
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 0,
-        failed: 1,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          failed: 1,
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
@@ -428,18 +334,7 @@ defmodule PtcDemo.TestRunner.ReportTest do
     end
 
     test "handles very high token count and cost" do
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 0,
-        failed: 0,
-        total: 0,
-        total_attempts: 0,
-        duration_ms: 0,
-        stats: %{total_tokens: 1_000_000, total_cost: 123.4567},
-        results: []
-      }
+      summary = build_test_summary(stats: %{total_tokens: 1_000_000, total_cost: 123.4567})
 
       report = Report.generate(summary, "JSON")
 
@@ -456,22 +351,32 @@ defmodule PtcDemo.TestRunner.ReportTest do
         program: "(some lisp code)"
       }
 
-      summary = %{
-        timestamp: DateTime.utc_now(),
-        model: "model",
-        data_mode: :schema,
-        passed: 1,
-        failed: 0,
-        total: 1,
-        total_attempts: 1,
-        duration_ms: 100,
-        stats: %{total_tokens: 100, total_cost: 0.1},
-        results: [result]
-      }
+      summary =
+        build_test_summary(
+          passed: 1,
+          results: [result]
+        )
 
       report = Report.generate(summary, "JSON")
 
       assert String.contains?(report, "(some lisp code)")
     end
+  end
+
+  defp build_test_summary(overrides \\ []) do
+    defaults = %{
+      timestamp: DateTime.utc_now(),
+      model: "test-model",
+      data_mode: :schema,
+      passed: 0,
+      failed: 0,
+      total: 0,
+      total_attempts: 0,
+      duration_ms: 0,
+      stats: %{total_tokens: 0, total_cost: 0.0},
+      results: []
+    }
+
+    Map.merge(defaults, Map.new(overrides))
   end
 end
