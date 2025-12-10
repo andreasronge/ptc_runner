@@ -1,4 +1,4 @@
-# PtcRunner Architecture
+# PtcRunner Guide
 
 ## Overview
 
@@ -6,11 +6,11 @@ PtcRunner is a BEAM-native library for executing Programmatic Tool Calling (PTC)
 
 ```mermaid
 flowchart TD
-      User([User / LLM Client]) -->|"run/2 (JSON program)"| Runner[PtcRunner]
+      User([User / LLM Client]) -->|"run/2 (program)"| Runner[PtcRunner.Json / PtcRunner.Lisp]
 
       subgraph "PtcRunner Process"
           Runner -->|parse/1| Parser[Parser]
-          Parser -->|AST| Validator[Validator]
+          Parser -->|AST| Validator[Validator / Analyzer]
           Validator -->|":ok"| Runner
           Runner -->|Creates| Context[Execution Context]
           Context -- Contains --> Tools[Tool Registry]
@@ -19,8 +19,8 @@ flowchart TD
       subgraph "Sandbox Process"
           direction TB
           Sandbox[Sandbox<br/>max_heap: 10MB<br/>timeout: 1s]
-          Sandbox -->|eval/2| Interpreter[Interpreter]
-          Interpreter -->|Dispatch| Ops[Operations]
+          Sandbox -->|eval/2| Interpreter[Interpreter / Eval]
+          Interpreter -->|Dispatch| Ops[Operations / Runtime]
           Ops -->|Access vars| ContextRef[Context]
           Ops -->|Call| ToolsRef[Tools]
       end
@@ -29,7 +29,7 @@ flowchart TD
       Sandbox -->|Result| Runner
 ```
 
-The diagram shows the two-phase execution model: first the JSON program is parsed and validated in the main process, then execution happens in an isolated sandbox process with memory and timeout limits. The Context (containing variables and registered tools) is passed into the sandbox where the Interpreter dispatches operations.
+The diagram shows the two-phase execution model: first the program is parsed and validated in the main process, then execution happens in an isolated sandbox process with memory and timeout limits. The Context (containing variables and registered tools) is passed into the sandbox where the Interpreter dispatches operations.
 
 ## Design Principles
 
@@ -43,18 +43,20 @@ The diagram shows the two-phase execution model: first the JSON program is parse
 
 ```
 lib/
-├── ptc_runner.ex                 # Public API: run/2, run!/2
+├── ptc_runner.ex                 # Public API (deprecated, use Json/Lisp modules)
 ├── ptc_runner/
 │   ├── sandbox.ex                # Shared: Process isolation + resource limits
 │   ├── context.ex                # Shared: Variable bindings and tool registry
 │   ├── schema.ex                 # Shared: Operation definitions for validation
 │   │
+│   ├── json.ex                   # JSON DSL entry point: Json.run/2
 │   ├── json/                     # JSON DSL implementation
 │   │   ├── parser.ex             # JSON parsing → AST
 │   │   ├── validator.ex          # AST schema validation
 │   │   ├── interpreter.ex        # AST evaluation
 │   │   └── operations.ex         # Built-in operations
 │   │
+│   ├── lisp.ex                   # Lisp DSL entry point: Lisp.run/2
 │   └── lisp/                     # PTC-Lisp DSL implementation
 │       ├── parser.ex             # S-expression parsing
 │       ├── parser_helpers.ex     # Parsing utilities
@@ -64,11 +66,12 @@ lib/
 │       ├── eval.ex               # CoreAST evaluation
 │       ├── runtime.ex            # Builtin functions (~90 operations)
 │       ├── schema.ex             # LLM prompt generation
+│       ├── formatter.ex          # Code formatting utilities
 │       └── env.ex                # Environment/bindings management
 ```
 
 > **Note**: PTC-Lisp is a Clojure-like DSL that provides an alternative syntax
-> to the JSON DSL. See `docs/api-refactor-plan.md` for implementation details.
+> to the JSON DSL. See [ptc-lisp-overview.md](ptc-lisp-overview.md) for details.
 
 ## DSL Specifications
 

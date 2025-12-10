@@ -99,7 +99,7 @@ PtcRunner supports multiple DSL languages optimized for LLM-generated code:
 
 ## Documentation
 
-- **[Documentation](docs/README.md)** - System design, API reference, getting started
+- **[Guide](docs/guide.md)** - System design, API reference, getting started
 - **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
 - **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - Complete Clojure-like DSL reference
 - **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Introduction and evaluation plan
