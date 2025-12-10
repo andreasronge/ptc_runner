@@ -26,7 +26,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
 
       assert is_list(result)
       assert length(result) == 2
@@ -47,7 +47,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == 60
     end
 
@@ -65,7 +65,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == 2
     end
   end
@@ -85,7 +85,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == "Laptop"
     end
 
@@ -105,7 +105,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
 
       # Result should be a map or list with counts per status
       assert is_map(result) or is_list(result)
@@ -141,7 +141,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
 
       assert is_list(result)
       assert length(result) == 2
@@ -168,7 +168,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
 
       assert is_list(result)
       assert length(result) == 3
@@ -197,7 +197,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
 
       # Average of 1000 + 500 + 200 = 1700 / 3 ≈ 566.67
       assert is_number(result)
@@ -221,7 +221,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _metrics} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == 3
     end
   end

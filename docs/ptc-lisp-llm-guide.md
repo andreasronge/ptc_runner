@@ -271,12 +271,19 @@ memory/results        ; read from persistent memory
 
 ; Aggregation
 (count coll)  (sum-by :key coll)  (avg-by :key coll)
-(min-by :key coll)  (max-by :key coll)  (group-by :key coll)
+(min-by :key coll)  (max-by :key coll)
+(group-by :key coll)  ; returns {key => [items...]}, NOT counts!
+; To count per group: (update-vals (group-by :key coll) count) - do NOT use ->>
 
 ; Maps
 (get m :key)  (get-in m [:a :b])  (assoc m :k v)  (merge m1 m2)
 (select-keys m [:a :b])  (keys m)  (vals m)
 (:key m)  (:key m default)  ; keyword as function
+(update-vals m f)  ; apply f to each value in map
+(update-vals {:a 1 :b 2} inc)                        ; => {:a 2 :b 3}
+(update-vals (group-by :dept employees) count)       ; count per group
+; IMPORTANT (update-vals m f) - map first, use -> not ->>
+(-> (group-by :category products) (update-vals (fn [items] (sum-by :price items))))
 
 ; Sets
 (set? x)               ; is x a set?

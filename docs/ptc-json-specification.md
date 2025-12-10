@@ -426,7 +426,7 @@ Result: `[[1, "a"], [2, "b"]]`
 
 ```elixir
 # Running with pre-bound context
-PtcRunner.run(program,
+PtcRunner.Json.run(program,
   context: %{
     "previous_expenses" => [...],
     "user_preferences" => %{...}
@@ -536,13 +536,13 @@ PtcRunner.run(program,
 
 ```elixir
 # Turn 1: Get expenses
-{:ok, expenses, _metrics} = PtcRunner.run(
+{:ok, expenses, _metrics} = PtcRunner.Json.run(
   ~s({"program": {"op": "call", "tool": "get_expenses"}}),
   tools: tools
 )
 
 # Turn 2: Use previous result
-{:ok, total, _metrics} = PtcRunner.run(
+{:ok, total, _metrics} = PtcRunner.Json.run(
   ~s({
     "program": {
       "op": "pipe",
@@ -632,7 +632,7 @@ PtcRunner.run(program,
 ### 10.2 Configuring Limits
 
 ```elixir
-PtcRunner.run(program,
+PtcRunner.Json.run(program,
   timeout: 5000,      # 5 seconds
   max_heap: 5_000_000 # ~40MB
 )

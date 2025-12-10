@@ -62,8 +62,6 @@ program = ~s({
 # metrics = %{duration_ms: 2, memory_bytes: 1024}
 ```
 
-> **Note:** The top-level `PtcRunner.run/2` API is deprecated. Use `PtcRunner.Json.run/2` for JSON DSL or `PtcRunner.Lisp.run/2` for PTC-Lisp programs.
-
 ## Features
 
 ### Languages
@@ -301,7 +299,7 @@ program = ReqLLM.generate_object!(
 
 Both DSLs are tested with cost-efficient models: Claude Haiku 4.5, DeepSeek V3.2, Kimi K2, and GPT-5.1 Codex mini.
 
-See `test/ptc_runner/json/e2e_test.exs` and `test/ptc_runner/lisp/integration_test.exs` for integration examples.
+See `test/ptc_runner/json/e2e_test.exs` and `test/ptc_runner/lisp/e2e_test.exs` for integration examples.
 
 #### Running E2E Tests
 
