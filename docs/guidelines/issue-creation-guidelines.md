@@ -21,7 +21,7 @@ Issues can be created by:
 
 Each issue should be:
 - **Self-contained**: All information needed to implement is in the issue
-- **Right-sized**: Large enough to be testable via E2E test, small enough for one PR
+- **Right-sized**: Large enough to be testable via E2E/integration test, small enough for one PR
 - **Verified**: Based on actual codebase analysis, not assumptions
 
 ## Issue Template
