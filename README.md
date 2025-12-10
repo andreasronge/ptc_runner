@@ -168,7 +168,7 @@ program = ~s(
        (sum-by :amount))
 )
 
-{:ok, result, metrics} = PtcRunner.Lisp.run(program, tools: tools)
+{:ok, result, _memory_delta, _new_memory} = PtcRunner.Lisp.run(program, tools: tools)
 # result = 700
 ```
 
