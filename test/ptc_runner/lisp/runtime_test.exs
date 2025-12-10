@@ -525,4 +525,152 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       assert length(result[nil]) == 1
     end
   end
+
+  describe "flex_fetch - flexible key fetching" do
+    test "flex_fetch with atom key finds value in atom-keyed map" do
+      map = %{name: "Alice"}
+      assert Runtime.flex_fetch(map, :name) == {:ok, "Alice"}
+    end
+
+    test "flex_fetch with atom key finds value in string-keyed map" do
+      map = %{"name" => "Alice"}
+      assert Runtime.flex_fetch(map, :name) == {:ok, "Alice"}
+    end
+
+    test "flex_fetch with string key finds value in string-keyed map" do
+      map = %{"name" => "Alice"}
+      assert Runtime.flex_fetch(map, "name") == {:ok, "Alice"}
+    end
+
+    test "flex_fetch with string key finds value in atom-keyed map" do
+      map = %{name: "Alice"}
+      assert Runtime.flex_fetch(map, "name") == {:ok, "Alice"}
+    end
+
+    test "flex_fetch with atom key returns :error for missing key" do
+      map = %{name: "Alice"}
+      assert Runtime.flex_fetch(map, :age) == :error
+    end
+
+    test "flex_fetch with string key returns :error for missing key" do
+      map = %{"name" => "Alice"}
+      assert Runtime.flex_fetch(map, "age") == :error
+    end
+
+    test "flex_fetch preserves nil values" do
+      map = %{status: nil}
+      assert Runtime.flex_fetch(map, :status) == {:ok, nil}
+    end
+
+    test "flex_fetch preserves nil values in string-keyed map" do
+      map = %{"status" => nil}
+      assert Runtime.flex_fetch(map, "status") == {:ok, nil}
+    end
+
+    test "flex_fetch with MapSet returns :error" do
+      set = MapSet.new([1, 2, 3])
+      assert Runtime.flex_fetch(set, :key) == :error
+    end
+
+    test "flex_fetch with nil returns :error" do
+      assert Runtime.flex_fetch(nil, :key) == :error
+      assert Runtime.flex_fetch(nil, "key") == :error
+    end
+
+    test "flex_fetch prefers atom key when both exist" do
+      map = %{"name" => "Bob", name: "Alice"}
+      assert Runtime.flex_fetch(map, :name) == {:ok, "Alice"}
+    end
+
+    test "flex_fetch with non-atom/string key uses Map.fetch directly" do
+      map = %{1 => "value"}
+      assert Runtime.flex_fetch(map, 1) == {:ok, "value"}
+    end
+  end
+
+  describe "flex_get_in - flexible nested key access" do
+    test "flex_get_in with empty path returns data" do
+      data = %{name: "Alice"}
+      assert Runtime.flex_get_in(data, []) == data
+    end
+
+    test "flex_get_in with single key in atom-keyed map" do
+      data = %{user: %{name: "Alice"}}
+      assert Runtime.flex_get_in(data, [:user, :name]) == "Alice"
+    end
+
+    test "flex_get_in with single key in string-keyed map" do
+      data = %{"user" => %{"name" => "Alice"}}
+      assert Runtime.flex_get_in(data, [:user, :name]) == "Alice"
+    end
+
+    test "flex_get_in with mixed atom and string keys" do
+      data = %{"user" => %{name: "Alice"}}
+      assert Runtime.flex_get_in(data, [:user, :name]) == "Alice"
+    end
+
+    test "flex_get_in with string path keys" do
+      data = %{user: %{name: "Alice"}}
+      assert Runtime.flex_get_in(data, ["user", "name"]) == "Alice"
+    end
+
+    test "flex_get_in with missing key returns nil" do
+      data = %{user: %{name: "Alice"}}
+      assert Runtime.flex_get_in(data, [:user, :age]) == nil
+    end
+
+    test "flex_get_in with nil in path returns nil" do
+      data = %{user: nil}
+      assert Runtime.flex_get_in(data, [:user, :name]) == nil
+    end
+
+    test "flex_get_in with nil data returns nil" do
+      assert Runtime.flex_get_in(nil, [:user, :name]) == nil
+    end
+
+    test "flex_get_in preserves nil values at leaf" do
+      data = %{user: %{status: nil}}
+      assert Runtime.flex_get_in(data, [:user, :status]) == nil
+    end
+
+    test "flex_get_in distinguishes nil value from missing key" do
+      # This test shows that flex_get_in returns nil in both cases,
+      # which is acceptable because get_in semantics treat both the same
+      data_with_nil = %{user: %{status: nil}}
+      data_without_key = %{user: %{}}
+
+      assert Runtime.flex_get_in(data_with_nil, [:user, :status]) == nil
+      assert Runtime.flex_get_in(data_without_key, [:user, :status]) == nil
+    end
+
+    test "flex_get_in with deeply nested path" do
+      data = %{
+        "company" => %{
+          "departments" => [
+            %{name: "Engineering"}
+          ]
+        }
+      }
+
+      assert Runtime.flex_get_in(data, ["company", "departments"]) == [
+               %{name: "Engineering"}
+             ]
+    end
+
+    test "flex_get_in with non-map intermediate value returns nil" do
+      data = %{user: "Alice"}
+      assert Runtime.flex_get_in(data, [:user, :name]) == nil
+    end
+
+    test "flex_get_in handles atom key preference when both exist" do
+      data = %{
+        user: %{
+          "name" => "Bob",
+          name: "Alice"
+        }
+      }
+
+      assert Runtime.flex_get_in(data, [:user, :name]) == "Alice"
+    end
+  end
 end
