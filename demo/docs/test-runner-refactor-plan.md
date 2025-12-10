@@ -688,6 +688,7 @@ Tasks are sized for single PRs (100-500 lines). Dependencies shown with →.
 5. Multi-turn tests pass for both DSLs
 6. Unit tests pass without any API calls
 7. Integration tests work with mock agent
+8. Most tests pass using DeepSeek 3.2 model (`mix lisp --test` and `mix json --test`) Notice, the GitHub secret variable OPENROUTER_API_KEY is exposed in the GH workflows as an environment variable. However, there is a limit how mony times the e2e can be run (the API key only is valid for $5)
 
 ## Risks and Mitigations
 
