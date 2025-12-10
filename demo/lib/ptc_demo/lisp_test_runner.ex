@@ -112,8 +112,8 @@ defmodule PtcDemo.LispTestRunner do
   Run a single test by index (1-based).
   """
   def run_one(index, opts \\ []) do
-    load_dotenv()
-    ensure_api_key!()
+    CLIBase.load_dotenv()
+    CLIBase.ensure_api_key!()
 
     cases = test_cases()
 
@@ -374,20 +374,5 @@ defmodule PtcDemo.LispTestRunner do
     end
 
     result
-  end
-
-  # Ensure agent is started
-  defp ensure_agent_started(data_mode) do
-    case Process.whereis(LispAgent) do
-      nil ->
-        {:ok, _pid} = LispAgent.start_link(data_mode: data_mode)
-        :ok
-
-      _pid ->
-        # Reset to ensure clean state
-        LispAgent.reset()
-        LispAgent.set_data_mode(data_mode)
-        :ok
-    end
   end
 end
