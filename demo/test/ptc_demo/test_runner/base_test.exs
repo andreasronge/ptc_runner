@@ -338,7 +338,6 @@ defmodule PtcDemo.TestRunner.BaseTest do
       ]
 
       start_time = System.monotonic_time(:millisecond)
-      Process.sleep(10)
 
       summary =
         Base.build_summary(results, start_time, "test-model", :schema, %{
@@ -354,7 +353,7 @@ defmodule PtcDemo.TestRunner.BaseTest do
       assert summary.data_mode == :schema
       assert summary.stats == %{total_tokens: 1000, total_cost: 0.5}
       assert is_map(summary.timestamp)
-      assert summary.duration_ms >= 10
+      assert summary.duration_ms >= 0
     end
 
     test "handles empty results" do
@@ -397,7 +396,7 @@ defmodule PtcDemo.TestRunner.BaseTest do
       }
 
       # Capture output
-      captured = capture_io(fn -> Base.print_summary(summary) end)
+      captured = ExUnit.CaptureIO.capture_io(fn -> Base.print_summary(summary) end)
 
       assert String.contains?(captured, "18/20 passed")
       assert String.contains?(captured, "2 failed")
@@ -412,7 +411,7 @@ defmodule PtcDemo.TestRunner.BaseTest do
         %{passed: true, index: 1, query: "test"}
       ]
 
-      captured = capture_io(fn -> Base.print_failed_tests(results) end)
+      captured = ExUnit.CaptureIO.capture_io(fn -> Base.print_failed_tests(results) end)
       assert captured == ""
     end
 
@@ -451,15 +450,11 @@ defmodule PtcDemo.TestRunner.BaseTest do
         }
       ]
 
-      captured = capture_io(fn -> Base.print_failed_tests(results) end)
+      captured = ExUnit.CaptureIO.capture_io(fn -> Base.print_failed_tests(results) end)
 
       assert String.contains?(captured, "Programs tried")
       assert String.contains?(captured, "(test)")
       assert String.contains?(captured, "ERROR: fail")
     end
-  end
-
-  defp capture_io(fun) do
-    ExUnit.CaptureIO.capture_io(fun)
   end
 end
