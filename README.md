@@ -100,7 +100,6 @@ PtcRunner supports multiple DSL languages optimized for LLM-generated code:
 - **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
 - **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - Complete Clojure-like DSL reference
 - **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Introduction and evaluation plan
-- **[LLM Testing](docs/llm-testing.md)** - Benchmark results, testing modes, model comparison
 - **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
 
 ## Installation

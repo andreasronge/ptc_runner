@@ -77,7 +77,7 @@ PtcRunner supports two DSL formats for writing programs:
 | DSL | Status | Use Case | Documentation |
 |-----|--------|----------|---------------|
 | **PTC-JSON** | Stable | Universal compatibility, structured format | [ptc-json-specification.md](ptc-json-specification.md) |
-| **PTC-Lisp** | Experimental | Token efficiency, complex predicates | [ptc-lisp-specification.md](ptc-lisp-specification.md) |
+| **PTC-Lisp** | Stable | Token efficiency, closures, complex predicates | [ptc-lisp-specification.md](ptc-lisp-specification.md) |
 
 ### Quick Comparison
 
