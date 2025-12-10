@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Introspection operations (`keys`, `typeof`) for exploring data structure
 - New operations: `sort_by`, `min_by`, `max_by` for better data manipulation
-- `PtcRunner.format_error/1` for LLM-friendly error messages
+- `PtcRunner.Json.format_error/1` for LLM-friendly error messages
 - Explore mode for schema discovery (see demo app)
 
 ## [0.1.0] - 2025-12-03
