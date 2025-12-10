@@ -266,11 +266,9 @@ Testing with various LLM models has revealed common patterns where LLMs generate
 
 **Map value extraction:**
 ```clojure
-;; WRONG: Clojure keyword-as-function syntax (fails with string-keyed maps)
-(->> ctx/products (max-by :price) (:name))  ; Returns nil
-
-;; CORRECT: Use get function (works with both atom and string keys)
-(->> ctx/products (max-by :price) (get :name))
+;; Both styles now work with string-keyed maps (via flex_get)
+(->> ctx/products (max-by :price) (:name))      ; Works
+(->> ctx/products (max-by :price) (get :name))  ; Also works
 ```
 
 **Set membership (now supported):**
@@ -311,6 +309,5 @@ From testing with DeepSeek V3.2 model (19/21 tests passed, 90% pass rate):
 - Complex `let` bindings and pipelines
 
 **Remaining issues:**
-- Keyword-as-function `(:name map)` fails with string-keyed data (test 12)
 - LLMs sometimes use `:keyword` instead of `"string"` in `where` clauses (test 21)
 
