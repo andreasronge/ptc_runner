@@ -7,14 +7,16 @@ defmodule PtcDemo.LispCLI do
   LLM context.
   """
 
+  alias PtcDemo.CLIBase
+
   def main(args) do
     # Load .env if present (check both demo dir and parent)
-    load_dotenv()
+    CLIBase.load_dotenv()
 
-    ensure_api_key!()
+    CLIBase.ensure_api_key!()
 
     # Parse command line arguments
-    {opts, _rest} = parse_args(args)
+    opts = CLIBase.parse_common_args(args)
 
     data_mode = if opts[:explore], do: :explore, else: :schema
     model = opts[:model]
@@ -42,58 +44,8 @@ defmodule PtcDemo.LispCLI do
     end
   end
 
-  defp parse_args(args) do
-    # Simple argument parser
-    opts =
-      Enum.reduce(args, %{}, fn arg, acc ->
-        cond do
-          arg == "--explore" ->
-            Map.put(acc, :explore, true)
-
-          arg == "--test" ->
-            Map.put(acc, :test, true)
-
-          arg == "--verbose" or arg == "-v" ->
-            Map.put(acc, :verbose, true)
-
-          String.starts_with?(arg, "--model=") ->
-            model = String.replace_prefix(arg, "--model=", "")
-            Map.put(acc, :model, model)
-
-          String.starts_with?(arg, "--report=") ->
-            report = String.replace_prefix(arg, "--report=", "")
-            Map.put(acc, :report, report)
-
-          String.starts_with?(arg, "--model") ->
-            # Handle --model value as next arg would require more complex parsing
-            # For now, require --model=value format
-            IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
-            System.halt(1)
-
-          String.starts_with?(arg, "--report") ->
-            IO.puts("Error: Use --report=<path> format (e.g., --report=report.md)")
-            System.halt(1)
-
-          String.starts_with?(arg, "--") ->
-            IO.puts("Unknown flag: #{arg}")
-            IO.puts(usage())
-            System.halt(1)
-
-          true ->
-            acc
-        end
-      end)
-
-    {opts, []}
-  end
-
   defp resolve_model(name) do
-    presets = PtcDemo.LispAgent.preset_models()
-
-    case Map.get(presets, name) do
-      nil -> name
-      preset -> preset
-    end
+    CLIBase.resolve_model(name, PtcDemo.LispAgent.preset_models())
   end
 
   defp run_tests_and_exit(opts) do
@@ -104,29 +56,6 @@ defmodule PtcDemo.LispCLI do
     else
       System.halt(0)
     end
-  end
-
-  defp usage do
-    """
-
-    Usage: mix lisp [options]
-
-    Options:
-      --explore        Start in explore mode (LLM discovers schema)
-      --model=<name>   Set model (haiku, gemini, deepseek, gpt, or full model ID)
-      --test           Run automated tests and exit
-      --verbose, -v    Verbose output (for --test mode)
-      --report=<path>  Write test report to file (for --test mode)
-
-    Examples:
-      mix lisp
-      mix lisp --explore
-      mix lisp --model=haiku
-      mix lisp --model=google:gemini-2.0-flash-exp
-      mix lisp --test
-      mix lisp --test --model=haiku --verbose
-      mix lisp --test --model=gemini --report=report.md
-    """
   end
 
   defp loop do
@@ -305,7 +234,7 @@ defmodule PtcDemo.LispCLI do
 
   defp handle_input("/stats") do
     stats = PtcDemo.LispAgent.stats()
-    IO.puts(format_stats(stats))
+    IO.puts(CLIBase.format_stats(stats))
     loop()
   end
 
@@ -421,36 +350,6 @@ defmodule PtcDemo.LispCLI do
   defp format_program_result({:error, msg}), do: "ERROR: #{msg}"
   defp format_program_result(result), do: truncate(result, 200)
 
-  defp format_stats(stats) do
-    cost_str = format_cost(stats.total_cost)
-
-    """
-
-    Session Statistics:
-      Requests:      #{stats.requests}
-      Input tokens:  #{format_number(stats.input_tokens)}
-      Output tokens: #{format_number(stats.output_tokens)}
-      Total tokens:  #{format_number(stats.total_tokens)}
-      Total cost:    #{cost_str}
-    """
-  end
-
-  defp format_number(n) when is_integer(n) do
-    n
-    |> Integer.to_string()
-    |> String.reverse()
-    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
-    |> String.reverse()
-  end
-
-  defp format_number(n), do: inspect(n)
-
-  defp format_cost(cost) when is_float(cost) and cost > 0 do
-    "$#{:erlang.float_to_binary(cost, decimals: 6)}"
-  end
-
-  defp format_cost(_), do: "$0.00 (not available for this provider)"
-
   defp format_message_content(content) when is_binary(content), do: content
 
   defp format_message_content(content) when is_list(content) do
@@ -466,49 +365,6 @@ defmodule PtcDemo.LispCLI do
       String.slice(str, 0, max_len) <> "..."
     else
       str
-    end
-  end
-
-  defp load_dotenv do
-    env_file =
-      cond do
-        File.exists?(".env") -> ".env"
-        File.exists?("../.env") -> "../.env"
-        true -> nil
-      end
-
-    if env_file do
-      env_file
-      |> Dotenvy.source!()
-      |> Enum.each(fn {key, value} -> System.put_env(key, value) end)
-    end
-  end
-
-  defp ensure_api_key! do
-    has_key =
-      System.get_env("OPENROUTER_API_KEY") ||
-        System.get_env("ANTHROPIC_API_KEY") ||
-        System.get_env("OPENAI_API_KEY")
-
-    unless has_key do
-      IO.puts("""
-
-      ERROR: No API key found!
-
-      Set one of these environment variables:
-        - OPENROUTER_API_KEY (recommended, supports many models)
-        - ANTHROPIC_API_KEY
-        - OPENAI_API_KEY
-
-      You can create a .env file in the demo directory:
-        OPENROUTER_API_KEY=sk-or-...
-
-      Or export directly:
-        export OPENROUTER_API_KEY=sk-or-...
-
-      """)
-
-      System.halt(1)
     end
   end
 end
