@@ -427,7 +427,7 @@ defmodule PtcDemo.TestRunner.BaseTest do
         }
       ]
 
-      captured = capture_io(fn -> Base.print_failed_tests(results) end)
+      captured = ExUnit.CaptureIO.capture_io(fn -> Base.print_failed_tests(results) end)
 
       assert String.contains?(captured, "Failed tests")
       assert String.contains?(captured, "How many?")
