@@ -3,20 +3,11 @@ defmodule PtcDemo.MockAgentTest do
 
   alias PtcDemo.MockAgent
 
-  setup do
-    # Clean up any existing MockAgent process
-    if pid = GenServer.whereis(MockAgent) do
-      GenServer.stop(pid)
-    end
-
-    :ok
-  end
-
   describe "ask/1" do
     test "returns predetermined response for known query" do
       responses = %{"How many products?" => {:ok, "500 products", nil, 500}}
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       {:ok, answer} = MockAgent.ask("How many products?")
       assert answer == "500 products"
@@ -25,7 +16,7 @@ defmodule PtcDemo.MockAgentTest do
     test "returns error for unknown query" do
       responses = %{}
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       {:error, reason} = MockAgent.ask("Unknown question")
       assert String.contains?(reason, "Unknown query")
@@ -37,7 +28,7 @@ defmodule PtcDemo.MockAgentTest do
         "Query 2" => {:ok, "Answer 2", nil, 2}
       }
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       {:ok, answer1} = MockAgent.ask("Query 1")
       assert answer1 == "Answer 1"
@@ -51,7 +42,7 @@ defmodule PtcDemo.MockAgentTest do
         "Query" => {:ok, "Answer", nil, 1}
       }
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       MockAgent.ask("Query")
       MockAgent.ask("Query")
@@ -66,7 +57,7 @@ defmodule PtcDemo.MockAgentTest do
     test "clears state" do
       responses = %{"Query" => {:ok, "Answer", nil, 1}}
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       MockAgent.ask("Query")
       :ok = MockAgent.reset()
@@ -83,7 +74,7 @@ defmodule PtcDemo.MockAgentTest do
         "Query 2" => {:ok, "Answer 2", "program_2", 200}
       }
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       MockAgent.ask("Query 1")
       assert MockAgent.last_program() == "program_1"
@@ -97,7 +88,7 @@ defmodule PtcDemo.MockAgentTest do
     test "returns nil when no program executed" do
       responses = %{}
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       assert MockAgent.last_program() == nil
       assert MockAgent.last_result() == nil
@@ -111,7 +102,7 @@ defmodule PtcDemo.MockAgentTest do
         "Query 2" => {:ok, "Answer 2", nil, 2}
       }
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       MockAgent.ask("Query 1")
       MockAgent.ask("Query 2")
@@ -125,7 +116,7 @@ defmodule PtcDemo.MockAgentTest do
     test "returns empty list when no queries asked" do
       responses = %{}
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       assert MockAgent.programs() == []
     end
@@ -135,7 +126,7 @@ defmodule PtcDemo.MockAgentTest do
     test "implements all required public functions" do
       responses = %{}
 
-      {:ok, _pid} = MockAgent.start_link(responses)
+      start_supervised!({MockAgent, responses})
 
       # All these should work without raising errors
       assert MockAgent.reset() == :ok
