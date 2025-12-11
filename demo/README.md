@@ -226,6 +226,7 @@ mix lisp [options]
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run automated tests and exit |
 | `--verbose`, `-v` | Verbose output (for test mode) |
+| `--report=<file>` | Generate markdown report (for test mode) |
 
 Model presets: `haiku`, `gemini`, `deepseek`, `kimi`, `gpt`
 
