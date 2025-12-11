@@ -239,6 +239,262 @@ defmodule PtcRunner.Json.Operations.TransformationTest do
     assert result == nil
   end
 
+  # Take operation
+  test "take returns first N elements from list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3, 4, 5]},
+        {"op": "take", "count": 3}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [1, 2, 3]
+  end
+
+  test "take with count=0 returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "take", "count": 0}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "take with count > length returns entire list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "take", "count": 10}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [1, 2, 3]
+  end
+
+  test "take on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "take", "count": 5}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "take requires count parameter" do
+    program = ~s({"program": {"op": "take"}})
+    {:error, {:validation_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "count")
+  end
+
+  test "take rejects negative count" do
+    program = ~s({"program": {"op": "take", "count": -1}})
+    {:error, {:validation_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "non-negative")
+  end
+
+  test "take on non-list raises execution error" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "take", "count": 1}
+      ]
+    }})
+
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "take requires a list")
+  end
+
+  # Drop operation
+  test "drop skips first N elements from list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3, 4, 5]},
+        {"op": "drop", "count": 2}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [3, 4, 5]
+  end
+
+  test "drop with count=0 returns entire list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "drop", "count": 0}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [1, 2, 3]
+  end
+
+  test "drop with count > length returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "drop", "count": 10}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "drop on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "drop", "count": 5}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "drop requires count parameter" do
+    program = ~s({"program": {"op": "drop"}})
+    {:error, {:validation_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "count")
+  end
+
+  test "drop rejects negative count" do
+    program = ~s({"program": {"op": "drop", "count": -1}})
+    {:error, {:validation_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "non-negative")
+  end
+
+  test "drop on non-list raises execution error" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": "string"},
+        {"op": "drop", "count": 1}
+      ]
+    }})
+
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "drop requires a list")
+  end
+
+  # Distinct operation
+  test "distinct removes duplicate values from list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 2, 3, 1, 4]},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [1, 2, 3, 4]
+  end
+
+  test "distinct preserves first occurrence order" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [3, 1, 2, 1, 3, 2]},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [3, 1, 2]
+  end
+
+  test "distinct with no duplicates returns same list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == [1, 2, 3]
+  end
+
+  test "distinct with strings removes duplicates" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": ["apple", "banana", "apple", "cherry"]},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == ["apple", "banana", "cherry"]
+  end
+
+  test "distinct on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "distinct with objects uses structural equality" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"id": 1, "name": "Alice"},
+          {"id": 2, "name": "Bob"},
+          {"id": 1, "name": "Alice"}
+        ]},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"id" => 1, "name" => "Alice"},
+             %{"id" => 2, "name" => "Bob"}
+           ]
+  end
+
+  test "distinct on non-list raises execution error" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": 42},
+        {"op": "distinct"}
+      ]
+    }})
+
+    {:error, {:execution_error, msg}} = PtcRunner.Json.run(program)
+    assert String.contains?(msg, "distinct requires a list")
+  end
+
   # Reject operation
   test "reject removes matching items" do
     program = ~s({"program": {

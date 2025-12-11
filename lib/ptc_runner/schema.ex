@@ -265,6 +265,22 @@ defmodule PtcRunner.Schema do
         "index" => %{"type" => :non_neg_integer, "required" => true}
       }
     },
+    "take" => %{
+      "description" => "Take first N elements from list. Example: {op:'take', count:5}",
+      "fields" => %{
+        "count" => %{"type" => :non_neg_integer, "required" => true}
+      }
+    },
+    "drop" => %{
+      "description" => "Drop first N elements from list. Example: {op:'drop', count:5}",
+      "fields" => %{
+        "count" => %{"type" => :non_neg_integer, "required" => true}
+      }
+    },
+    "distinct" => %{
+      "description" => "Remove duplicate values from list. Example: {op:'distinct'}",
+      "fields" => %{}
+    },
 
     # Introspection operations
     "keys" => %{

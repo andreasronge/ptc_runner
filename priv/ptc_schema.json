@@ -162,6 +162,19 @@
         },
         {
           "additionalProperties": false,
+          "description": "Remove duplicate values from list. Example: {op:'distinct'}",
+          "properties": {
+            "op": {
+              "const": "distinct"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Reject collection elements based on condition. Example: {op:'reject', where:{op:'eq', field:'status', value:'inactive'}}",
           "properties": {
             "op": {
@@ -434,6 +447,24 @@
         },
         {
           "additionalProperties": false,
+          "description": "Drop first N elements from list. Example: {op:'drop', count:5}",
+          "properties": {
+            "count": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "drop"
+            }
+          },
+          "required": [
+            "op",
+            "count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Get element at index. Example: {op:'nth', index:2}",
           "properties": {
             "index": {
@@ -496,6 +527,24 @@
             "op",
             "field",
             "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Take first N elements from list. Example: {op:'take', count:5}",
+          "properties": {
+            "count": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "take"
+            }
+          },
+          "required": [
+            "op",
+            "count"
           ],
           "type": "object"
         },
