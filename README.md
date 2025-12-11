@@ -67,6 +67,7 @@ end
 - **Simple**: No external dependencies (Python, containers, etc.)
 - **Cost-efficient**: Tested with budget models (DeepSeek 3.2, Gemini 2.5 Flash)
 - **Retry-friendly**: Structured errors with actionable messages for LLM retry loops
+- **Stateful**: Context refs enable persistent memory across agentic loop iterations
 
 ## Documentation
 

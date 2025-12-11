@@ -1,9 +1,5 @@
 # PTC-Lisp Language Specification
 
-**Version:** 0.3.2-draft
-**Status:** Stable (v0.3.0+)
-**Purpose:** A minimal Clojure subset for LLM-generated data transformation programs
-
 ---
 
 ## 1. Overview
@@ -1865,74 +1861,7 @@ The LLM receives this error and can generate a corrected program.
 
 ---
 
-## Appendix B: Minimal Subset for LLM Testing
-
-For initial experiments, implement this minimal subset:
-
-### Literals
-- `nil`, `true`, `false`
-- Integers, floats
-- Strings
-- Keywords
-- Vectors `[]`
-- Maps `{}`
-
-### Special Forms
-- `let` (with basic destructuring: `{:keys [...]}`)
-- `if`
-- `cond`
-- `fn` (anonymous functions, no recursion)
-
-### Threading
-- `->>`
-
-### Predicates
-- `where` (operators: `=`, `not=`, `>`, `<`, `>=`, `<=`, `includes`, `in`)
-- `all-of`, `any-of`, `none-of` (predicate combinators)
-
-### Collections
-- `filter`, `remove`, `find`
-- `map`, `mapv`, `pluck`
-- `sort-by`
-- `first`, `last`, `nth`
-- `take`, `drop`
-- `count`, `empty?`
-- `concat`
-
-### Aggregation
-- `sum-by`, `avg-by`, `min-by`, `max-by`
-- `group-by`
-
-### Maps
-- `get`, `get-in`
-- `assoc`, `merge`
-- `select-keys`
-- `keys`, `vals`
-- Keyword-as-function access
-
-### Comparison & Logic
-- `=`, `not=`, `<`, `>`, `<=`, `>=`
-- `and`, `or`, `not`
-
-### Namespaces & Tools
-- `memory/` — persistent memory access
-- `ctx/` — request context access
-- `call` — tool invocation
-
-### Arithmetic (Can defer for minimal prototype)
-- `+`, `-`, `*`, `/`
-- `inc`, `dec`
-
-*Note: These are part of the full spec (Section 8.3) but can be deferred if building a minimal prototype focused on collection operations.*
-
-### Memory Result Contract
-- Non-map return → no memory update
-- Map return → shallow merge into memory
-- Map with `:result` → merge rest, return `:result`
-
----
-
-## Appendix C: Symbol Resolution
+## Appendix B: Symbol Resolution
 
 ### Resolution Order
 
@@ -1972,15 +1901,3 @@ ctx            ; ERROR - cannot access whole ctx map
 ```
 
 This restriction prevents accidental data leakage and simplifies reasoning about what data a program can access.
-
----
-
-## Revision History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1.0-draft | 2024-XX-XX | Initial draft |
-| 0.2.0-draft | 2024-XX-XX | Added memory model, agentic loops, namespace syntax |
-| 0.3.0-draft | 2024-XX-XX | Fixed predicate combinators (`all-of`/`any-of`/`none-of`), added `fn` support, grammar fixes (`/` in symbols, expression in operator position), clarified nil/type error semantics, renamed `contains` to `includes` |
-| 0.3.1-draft | 2024-XX-XX | Added `?` and `!` to keyword grammar, clarified collection function behavior on maps/strings, documented division returns float, documented `:result` as reserved key, resolved sort vs comparison operator semantics for strings, noted map/mapv equivalence |
-| 0.3.2-draft | 2024-XX-XX | Standardized timeout to 5000ms, added tokenization precedence rules, clarified map keys restricted to keywords/strings, documented `even?`/`odd?` require integers |

@@ -1,9 +1,5 @@
 # PTC-JSON Language Specification
 
-**Version:** 1.0.0
-**Status:** Stable
-**Purpose:** A JSON-based DSL for LLM-generated data transformation programs
-
 ---
 
 ## 1. Overview
@@ -779,10 +775,3 @@ These features are intentionally excluded:
 - `concat` — `{"op": "concat", "lists": [...]}`
 - `zip` — `{"op": "zip", "lists": [...]}`
 
----
-
-## Revision History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | 2024-XX-XX | Initial stable release, extracted from architecture.md |
