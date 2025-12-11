@@ -478,6 +478,25 @@ Check if field is truthy (not `nil` or `false`):
 (where [:user :premium])  ; nested truthy check
 ```
 
+#### Keyword/String Coercion
+
+For the equality operators (`=`, `not=`), `in`, and `includes`, keywords are coerced to strings for comparison. This allows LLM-generated keywords to match string data values:
+
+```clojure
+;; Keyword coerces to string
+(where :status = :active)        ; matches if field is "active"
+(where :status in [:active :pending])  ; both keywords coerce to strings
+(where :tags includes :urgent)   ; keyword "urgent" matches in ["urgent" "bug"]
+```
+
+**Coercion rules:**
+- Keywords (atoms that are not booleans) coerce to their string representation
+- `true` and `false` do **not** coerce (prevent `true` from matching `"true"`)
+- Empty keyword `:""` coerces to empty string `""`
+- Other types (`strings`, `numbers`, `nil`) are unchanged
+
+**Note:** Ordering comparisons (`>`, `<`, `>=`, `<=`) do **not** use coercion. Type mismatches return `false` (same as `nil` handling).
+
 ### 7.2 Combining Predicates
 
 Use `all-of`, `any-of`, `none-of` to combine predicate functions:
