@@ -2,7 +2,7 @@ defmodule PtcRunner.Json.Operations.Access do
   @moduledoc """
   Element access operations for the JSON DSL.
 
-  Implements element and item access: get, first, last, nth, sort_by, max_by, min_by.
+  Implements element and item access: get, first, last, nth, take, drop, distinct, sort_by, max_by, min_by.
   """
 
   @doc """
