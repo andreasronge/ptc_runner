@@ -664,6 +664,12 @@ defmodule PtcRunner.Lisp.Eval do
       when name in [:first, :last, :nth, :reverse, :distinct, :flatten, :sort] ->
         {:type_error, "#{name} does not support sets (sets are unordered)", hd(args)}
 
+      # update_vals with swapped arguments (function, map) instead of (map, function)
+      {:update_vals, [f, m]} when is_function(f) and is_map(m) ->
+        {:type_error,
+         "update-vals expects (map, function) but got (function, map). " <>
+           "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}
+
       _ ->
         {:type_error, "invalid argument types: #{Enum.join(type_descriptions, ", ")}", args}
     end
