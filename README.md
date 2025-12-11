@@ -11,322 +11,68 @@ A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-ge
 
 ## What is PTC?
 
-Programmatic Tool Calling is an execution model where an LLM writes small programs to process data, rather than making individual tool calls. Instead of returning large datasets to the model (which bloats context), the model generates a program that:
+Programmatic Tool Calling is an execution model where an LLM writes small programs to process data, rather than making individual tool calls. Instead of returning large datasets to the model (which bloats context), the model generates a program that calls tools, filters/transforms results, and returns only the final answer.
 
-1. Calls tools to fetch data
-2. Filters, transforms, and aggregates the results
-3. Returns only the final answer
-
-This can dramatically reduce token usage for data-heavy workflows.
-
-The PTC pattern was introduced by Anthropic in their engineering blog posts on [advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use) and [code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp). See also [open-ptc-agent](https://github.com/Chen-zexi/open-ptc-agent) for a Python-based implementation.
-
-## Why PtcRunner?
-
-Existing PTC implementations rely on Python sandboxes. PtcRunner provides a BEAM-native alternative:
-
-- **Safe**: JSON DSL with fixed operations—no arbitrary code execution
-- **Fast**: Runs in isolated BEAM processes with resource limits
-- **Simple**: No external dependencies (Python, containers, etc.)
-- **LLM-friendly**: JSON format that models generate reliably
+The pattern was introduced by Anthropic in their blog posts on [advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use) and [code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp).
 
 ## Quick Example
 
 ```elixir
-# Define your tools
-tools = %{
-  "get_expenses" => fn _args ->
-    [
-      %{"category" => "travel", "amount" => 500},
-      %{"category" => "food", "amount" => 50},
-      %{"category" => "travel", "amount" => 200}
-    ]
-  end
-}
-
-# LLM generates this JSON program
-program = ~s({
-  "program": {
-    "op": "pipe",
-    "steps": [
-      {"op": "call", "tool": "get_expenses"},
-      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-      {"op": "sum", "field": "amount"}
-    ]
-  }
-})
-
-# Execute safely with resource limits
-{:ok, result, metrics} = PtcRunner.Json.run(program, tools: tools)
-# result = 700
-# metrics = %{duration_ms: 2, memory_bytes: 1024}
+iex> tools = %{
+...>   "get_expenses" => fn _args ->
+...>     [
+...>       %{"category" => "travel", "amount" => 500},
+...>       %{"category" => "food", "amount" => 50},
+...>       %{"category" => "travel", "amount" => 200}
+...>     ]
+...>   end
+...> }
+iex> program = ~s({"program": {"op": "pipe", "steps": [
+...>   {"op": "call", "tool": "get_expenses"},
+...>   {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+...>   {"op": "sum", "field": "amount"}
+...> ]}})
+iex> {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
+iex> result
+700
 ```
 
-## Features
+PTC-Lisp (same result, more compact):
 
-### Languages
-
-PtcRunner supports multiple DSL languages optimized for LLM-generated code:
-
-- **JSON DSL** - Stable, verbose, universally toolable
-- **PTC-Lisp** - Clojure-like syntax, 3-5x more token-efficient, supports closures and memory persistence
-
-### Core Features
-
-- **Variable bindings** to store and reference results across operations
-- **Tool registry** for user-defined functions
-- **Resource limits**: configurable timeout (default 1s) and memory (default 10MB)
-- **Execution metrics**: duration and memory usage for every call
-- **Structured errors** optimized for LLM retry loops
-- **Explore mode**: Introspection ops (`keys`, `typeof`) for LLMs to discover data structure
-
-## DSL Operations
-
-| Category | Operations |
-|----------|------------|
-| **Data** | `literal`, `var`, `load`, `let` |
-| **Collections** | `pipe`, `filter`, `reject`, `map`, `select`, `sort_by`, `first`, `last`, `count`, `nth` |
-| **Aggregation** | `sum`, `avg`, `min`, `max`, `min_by`, `max_by` |
-| **Access** | `get` (single field or nested path) |
-| **Comparison** | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains` |
-| **Logic** | `and`, `or`, `not`, `if` |
-| **Introspection** | `keys`, `typeof` |
-| **Tools** | `call` |
-| **Combine** | `merge`, `concat`, `zip` |
-
-
-## Documentation
-
-- **[Guide](docs/guide.md)** - System design, API reference, getting started
-- **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
-- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - Complete Clojure-like DSL reference
-- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Introduction and evaluation plan
-- **Demo App** - Interactive CLI chat showing PTC with ReqLLM integration (see `demo/` directory)
+```elixir
+iex> tools = %{"get-expenses" => fn _args ->
+...>   [%{"category" => "travel", "amount" => 500},
+...>    %{"category" => "food", "amount" => 50},
+...>    %{"category" => "travel", "amount" => 200}]
+...> end}
+iex> program = "(->> (call \"get-expenses\" {}) (filter (where :category = \"travel\")) (sum-by :amount))"
+iex> {:ok, result, _, _} = PtcRunner.Lisp.run(program, tools: tools)
+iex> result
+700
+```
 
 ## Installation
 
 ```elixir
 def deps do
-  [
-    {:ptc_runner, "~> 0.2.0"}
-  ]
+  [{:ptc_runner, "~> 0.2.0"}]
 end
 ```
 
-## Usage
+## Features
 
-### JSON DSL
+- **Two DSLs**: PTC-JSON (verbose, universal) and PTC-Lisp (3-5x more token-efficient)
+- **Safe**: Fixed operations, no arbitrary code execution
+- **Fast**: Isolated BEAM processes with configurable timeout (1s) and memory (10MB) limits
+- **Simple**: No external dependencies (Python, containers, etc.)
+- **Cost-efficient**: Tested with budget models (DeepSeek 3.2, Gemini 2.5 Flash)
+- **Retry-friendly**: Structured errors with actionable messages for LLM retry loops
 
-#### Basic Execution
+## Documentation
 
-```elixir
-iex> {:ok, result, _metrics} = PtcRunner.Json.run(~s({"program": {"op": "literal", "value": 42}}))
-iex> result
-42
-
-iex> {:ok, result, _metrics} = PtcRunner.Json.run(
-...>   ~s({"program": {"op": "pipe", "steps": [
-...>     {"op": "load", "name": "numbers"},
-...>     {"op": "sum", "field": "value"}
-...>   ]}}),
-...>   context: %{"numbers" => [%{"value" => 1}, %{"value" => 2}, %{"value" => 3}]}
-...> )
-iex> result
-6
-```
-
-#### With Tools
-
-```elixir
-tools = %{
-  "get_users" => fn _args -> [%{"name" => "Alice"}, %{"name" => "Bob"}] end,
-  "search" => fn %{"query" => q} -> MyApp.search(q) end
-}
-
-{:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
-```
-
-### PTC-Lisp
-
-PTC-Lisp offers a more compact syntax that LLMs find easier to generate correctly:
-
-```elixir
-iex> {:ok, result, _, _} = PtcRunner.Lisp.run("(+ 1 2 3)")
-iex> result
-6
-
-iex> {:ok, result, _, _} = PtcRunner.Lisp.run("(->> [1 2 3 4 5] (filter (fn [x] (> x 2))) (reduce + 0))")
-iex> result
-12
-```
-
-With tools:
-
-```elixir
-# Same travel expenses example as above
-tools = %{
-  "get-expenses" => fn _args ->
-    [
-      %{"category" => "travel", "amount" => 500},
-      %{"category" => "food", "amount" => 50},
-      %{"category" => "travel", "amount" => 200}
-    ]
-  end
-}
-
-# PTC-Lisp program (Clojure-like syntax)
-program = ~s(
-  (->> (call "get-expenses" {})
-       (filter (where :category = "travel"))
-       (sum-by :amount))
-)
-
-{:ok, result, _memory_delta, _new_memory} = PtcRunner.Lisp.run(program, tools: tools)
-# result = 700
-```
-
-For a complete PTC-Lisp reference, see [docs/ptc-lisp-overview.md](docs/ptc-lisp-overview.md).
-
-### Resource Limits
-
-```elixir
-# Custom limits
-{:ok, result, metrics} = PtcRunner.Json.run(program,
-  timeout: 5000,       # 5 seconds
-  max_heap: 5_000_000  # ~40MB
-)
-
-# Handle resource errors
-case PtcRunner.Json.run(program) do
-  {:ok, result, metrics} -> handle_success(result)
-  {:error, {:timeout, ms}} -> handle_timeout(ms)
-  {:error, {:memory_exceeded, bytes}} -> handle_oom(bytes)
-  {:error, {:execution_error, msg}} -> handle_error(msg)
-end
-```
-
-### Multi-turn Conversations
-
-Store results from previous turns and reference them:
-
-```elixir
-# Turn 1: Fetch data
-{:ok, users, _} = PtcRunner.Json.run(~s({"program": {"op": "call", "tool": "get_users"}}), tools: tools)
-
-# Turn 2: Use previous result
-{:ok, count, _} = PtcRunner.Json.run(
-  ~s({"program": {"op": "pipe", "steps": [
-    {"op": "load", "name": "previous_users"},
-    {"op": "count"}
-  ]}}),
-  context: %{"previous_users" => users}
-)
-```
-
-### Dynamic Context Refs
-
-When integrating PtcRunner as a tool in an LLM agent, consider automatically storing large tool results as **context refs** instead of returning them directly to the LLM. This keeps large datasets in BEAM memory while giving the LLM a handle to query them:
-
-```elixir
-def handle_tool_result(state, tool_name, result) do
-  if large_result?(result) do
-    # Store data, give LLM a reference
-    ref = "#{tool_name}_#{System.unique_integer([:positive])}"
-    state = %{state | context: Map.put(state.context, ref, result)}
-
-    # Return summary to LLM (not the full data)
-    summary = %{ref: ref, count: length(result), fields: Map.keys(hd(result))}
-    {state, {:context_ref, summary}}
-  else
-    {state, {:inline, result}}
-  end
-end
-```
-
-The LLM can then query the ref via PtcRunner: `{"op": "load", "name": "get_orders_42"}`. See the demo app in the `demo/` directory for a working example with static datasets.
-
-## Integration with LLMs
-
-PtcRunner is execution-only—compose it with your LLM client (e.g., [ReqLLM](https://hexdocs.pm/req_llm)):
-
-### Text Mode (Recommended)
-
-Use `PtcRunner.Schema.to_prompt/0` for a compact operation description (~300 tokens):
-
-```elixir
-# Build system prompt with operation descriptions
-system_prompt = """
-Generate PTC programs to answer questions about data.
-Respond with ONLY valid JSON.
-
-#{PtcRunner.Schema.to_prompt()}
-"""
-
-# LLM generates program as text
-{:ok, response} = ReqLLM.generate_text("anthropic:claude-haiku-4.5",
-  [%{role: :system, content: system_prompt}, %{role: :user, content: question}])
-program = extract_json(response)
-
-# Execute with retry on validation errors
-case PtcRunner.Json.run(program, tools: tools) do
-  {:ok, result, _} -> {:ok, result}
-  {:error, error} -> retry_with_feedback(prompt, error)
-end
-```
-
-### Structured Output Mode
-
-Use `PtcRunner.Schema.to_llm_schema/0` for guaranteed valid JSON (~10k tokens):
-
-```elixir
-# Get the LLM-optimized schema (includes usage hints in descriptions)
-schema = PtcRunner.Schema.to_llm_schema()
-
-# LLM generates valid program directly - no JSON parsing needed
-program = ReqLLM.generate_object!(
-  "openrouter:anthropic/claude-haiku-4.5",
-  "Filter products where price > 100, then count them",
-  schema
-)
-
-# Execute the program
-{:ok, result, _metrics} = PtcRunner.Json.run(Jason.encode!(program),
-  context: %{"input" => products}
-)
-```
-
-#### Tested Models
-
-Both DSLs are tested with cost-efficient models: Claude Haiku 4.5, DeepSeek V3.2, Kimi K2, and GPT-5.1 Codex mini.
-
-See `test/ptc_runner/json/e2e_test.exs` and `test/ptc_runner/lisp/e2e_test.exs` for integration examples.
-
-#### Running E2E Tests
-
-E2E tests require an API key. Copy `.env.example` to `.env` and configure:
-
-```bash
-cp .env.example .env
-# Edit .env with your OPENROUTER_API_KEY
-
-# Run JSON DSL e2e tests
-mix test test/ptc_runner/json/e2e_test.exs --include e2e
-
-# Run Lisp DSL e2e tests
-mix test test/ptc_runner/lisp/e2e_test.exs --include e2e
-
-# Run all e2e tests
-mix test --include e2e
-
-# Run with specific model
-PTC_TEST_MODEL=haiku mix test --include e2e
-```
-
-The same `.env` file is used by the demo application in `demo/`.
-
-## Development
-
-This library was primarily developed by Claude (Anthropic) via GitHub Actions workflows, with human oversight and direction. See the commit history for details.
+- **[Guide](docs/guide.md)** - Architecture, API reference, detailed examples
+- **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
+- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Lisp DSL introduction
 
 ## License
 
