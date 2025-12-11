@@ -177,7 +177,7 @@ defmodule PtcDemo.LispCLI do
         |> Enum.each(fn {{program, result}, idx} ->
           IO.puts("--- Program #{idx} ---")
           IO.puts(program)
-          IO.puts("\nResult: #{format_program_result(result)}\n")
+          IO.puts("\nResult: #{CLIBase.format_program_result(result)}\n")
         end)
     end
 
@@ -208,9 +208,9 @@ defmodule PtcDemo.LispCLI do
 
       for msg <- messages do
         role = msg.role |> to_string() |> String.upcase()
-        content = format_message_content(msg.content)
+        content = CLIBase.format_message_content(msg.content)
         IO.puts("\n[#{role}]")
-        IO.puts(truncate(content, 500))
+        IO.puts(CLIBase.truncate(content, 500))
       end
 
       IO.puts("")
@@ -344,27 +344,5 @@ defmodule PtcDemo.LispCLI do
       (count (distinct (pluck :product_id ctx/orders)))
 
     """
-  end
-
-  defp format_program_result(nil), do: "(no result captured)"
-  defp format_program_result({:error, msg}), do: "ERROR: #{msg}"
-  defp format_program_result(result), do: truncate(result, 200)
-
-  defp format_message_content(content) when is_binary(content), do: content
-
-  defp format_message_content(content) when is_list(content) do
-    Enum.map_join(content, "\n", &format_message_content/1)
-  end
-
-  defp format_message_content(%{text: text}), do: text
-  defp format_message_content(%{content: content}), do: format_message_content(content)
-  defp format_message_content(other), do: inspect(other)
-
-  defp truncate(str, max_len) do
-    if String.length(str) > max_len do
-      String.slice(str, 0, max_len) <> "..."
-    else
-      str
-    end
   end
 end
