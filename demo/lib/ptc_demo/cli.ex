@@ -101,17 +101,17 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/model " <> name) do
-    presets = PtcDemo.Agent.preset_models()
     name = String.trim(name)
 
-    model =
-      case Map.get(presets, name) do
-        nil -> name
-        preset -> preset
-      end
+    case PtcDemo.ModelRegistry.resolve(name) do
+      {:ok, model} ->
+        PtcDemo.Agent.set_model(model)
+        IO.puts("   [Switched to model: #{model}]\n")
 
-    PtcDemo.Agent.set_model(model)
-    IO.puts("   [Switched to model: #{model}]\n")
+      {:error, reason} ->
+        IO.puts("   [Error] #{reason}\n")
+    end
+
     loop()
   end
 
