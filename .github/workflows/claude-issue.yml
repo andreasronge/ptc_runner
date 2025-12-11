@@ -84,7 +84,7 @@ jobs:
             3. Make minimal changes
             4. Run `mix precommit` - only proceed if it passes
             5. `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
-            6. `gh pr create --title "Fix #${{ github.event.issue.number }}: [desc]" --body "Fixes #${{ github.event.issue.number }}"`
+            6. `gh pr create --title "feat: [desc] (#${{ github.event.issue.number }})" --body "...summary...\n\nCloses #${{ github.event.issue.number }}"` (MUST include "Closes #N" to auto-close issue)
             7. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
 
             NEVER include "@claude" in comments.
