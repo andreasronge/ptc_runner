@@ -7,35 +7,28 @@ defmodule PtcDemo.LispTestRunnerTest do
 
   setup do
     # Define mock responses for all test queries used by LispTestRunner
-    # LispTestRunner uses: common_test_cases + lisp_specific_cases + multi_turn_cases
+    # LispTestRunner uses: common_test_cases (12 tests) + multi_turn_cases (2 tests)
+    # (lisp_specific_cases is now empty - all tests unified into common)
     responses = %{
-      # Common test cases
+      # Level 1: Basic Operations
       "How many products are there?" => {:ok, "500 products", nil, 500},
-      "How many orders are there?" => {:ok, "1000 orders", nil, 1000},
-      "How many employees are there?" => {:ok, "200 employees", nil, 200},
-      "How many products are in the electronics category?" =>
-        {:ok, "250 electronics products", nil, 250},
+      "How many orders have status 'delivered'?" => {:ok, "200 delivered orders", nil, 200},
+      "What is the total revenue from all orders? (sum the total field)" =>
+        {:ok, "Total is 2500000", nil, 2_500_000},
+      "What is the average product rating?" => {:ok, "Average rating is 3.5", nil, 3.5},
+      # Level 2: Intermediate Operations
       "How many employees work remotely?" => {:ok, "100 remote employees", nil, 100},
-      "What is the total of all order amounts?" => {:ok, "Total is 50000", nil, 50_000},
-      "What is the average employee salary?" => {:ok, "Average is 100000", nil, 100_000},
-      "Count employees in engineering department" => {:ok, "50 employees", nil, 50},
-      "Sum all travel expenses" => {:ok, "Total is 5000", nil, 5_000},
-      # Lisp-specific cases
-      "How many expenses are there?" => {:ok, "800 expenses", nil, 800},
-      "How many orders have status delivered?" => {:ok, "750 delivered", nil, 750},
-      "How many expenses are pending approval?" => {:ok, "200 pending", nil, 200},
-      "What is the average product price?" => {:ok, "Average is 500", nil, 500},
-      "Find the most expensive product and return its name" =>
-        {:ok, "Product Z", nil, "Product Z"},
-      "Get the names of the top 3 highest paid employees" =>
-        {:ok, "[Employee1, Employee2, Employee3]", nil, ["Employee1", "Employee2", "Employee3"]},
-      "How many orders over 500 have status delivered?" => {:ok, "500 orders", nil, 500},
+      "How many products cost more than $500?" => {:ok, "250 products", nil, 250},
+      "How many orders over $1000 were paid by credit card?" => {:ok, "150 orders", nil, 150},
+      "What is the name of the cheapest product?" => {:ok, "Product 42", nil, "Product 42"},
+      # Level 3: Advanced Operations
+      "Get the names of the 3 most expensive products" =>
+        {:ok, "[Product A, Product B, Product C]", nil, ["Product A", "Product B", "Product C"]},
+      "How many orders are either cancelled or refunded?" => {:ok, "300 orders", nil, 300},
+      "What is the average salary of senior-level employees?" =>
+        {:ok, "Average is 150000", nil, 150_000},
       "How many unique products have been ordered? (count distinct product_id values in orders)" =>
         {:ok, "300 unique products", nil, 300},
-      "What is the total expense amount for employees in the engineering department?" =>
-        {:ok, "Total is 10000", nil, 10_000},
-      "How many employees have submitted expenses? (count unique employee_ids in expenses that exist in employees)" =>
-        {:ok, "150 employees", nil, 150},
       # Multi-turn cases
       "Count delivered orders and store the result in memory as delivered-count" =>
         {:ok, "750 delivered orders", nil, 750},
@@ -82,19 +75,11 @@ defmodule PtcDemo.LispTestRunnerTest do
       assert is_integer(result.total)
     end
 
-    test "includes lisp-specific test cases", %{mock_agent: mock_agent} do
+    test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
       result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
 
-      # LispTestRunner should include common + lisp_specific + multi_turn test cases
-      # This verifies that lisp-specific cases are included
-      assert result.total >= 3
-    end
-
-    test "runs multi-turn tests", %{mock_agent: mock_agent} do
-      result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
-
-      # LispTestRunner should run multi-turn tests
-      assert result.total >= 2
+      # LispTestRunner should include 12 common + 2 multi_turn = 14 test cases
+      assert result.total == 14
     end
   end
 

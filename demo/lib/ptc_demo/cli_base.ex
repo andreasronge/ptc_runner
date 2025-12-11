@@ -68,8 +68,9 @@ defmodule PtcDemo.CLIBase do
     - --verbose or -v: verbose output
     - --model=<name>: specify model (e.g., --model=haiku)
     - --report=<path>: generate report file (e.g., --report=report.md)
+    - --list-models: list available models and exit
 
-  Returns a map with keys: :explore, :test, :verbose, :model, :report
+  Returns a map with keys: :explore, :test, :verbose, :model, :report, :list_models
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -82,6 +83,9 @@ defmodule PtcDemo.CLIBase do
 
         arg == "--verbose" or arg == "-v" ->
           Map.put(acc, :verbose, true)
+
+        arg == "--list-models" ->
+          Map.put(acc, :list_models, true)
 
         String.starts_with?(arg, "--model=") ->
           model = String.replace_prefix(arg, "--model=", "")
@@ -110,7 +114,33 @@ defmodule PtcDemo.CLIBase do
   end
 
   @doc """
-  Resolve a model name using a presets map.
+  Handle --list-models flag. Prints model list and exits if flag is set.
+  """
+  def handle_list_models(opts) do
+    if opts[:list_models] do
+      IO.puts(PtcDemo.ModelRegistry.format_model_list())
+      System.halt(0)
+    end
+  end
+
+  @doc """
+  Resolve a model name using ModelRegistry.
+
+  Returns the resolved model ID or exits with an error message.
+  """
+  def resolve_model(name) do
+    case PtcDemo.ModelRegistry.resolve(name) do
+      {:ok, model_id} ->
+        model_id
+
+      {:error, reason} ->
+        IO.puts("\nError: #{reason}")
+        System.halt(1)
+    end
+  end
+
+  @doc """
+  Resolve a model name using a presets map (legacy, for backwards compatibility).
 
   If the name is found in presets, returns the preset value.
   Otherwise returns the name as-is.
