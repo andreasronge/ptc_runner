@@ -60,4 +60,109 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
                PtcRunner.Lisp.run(program, context: context)
     end
   end
+
+  describe "where clause with keyword/string coercion" do
+    test "where = coerces keyword to string for equality" do
+      program = ~S"(->> ctx/items (filter (where :status = :active)))"
+
+      context = %{
+        "items" => [
+          %{"status" => "active", "name" => "A"},
+          %{"status" => "inactive", "name" => "B"}
+        ]
+      }
+
+      assert {:ok, [%{"status" => "active", "name" => "A"}], _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+
+    test "where not= with keyword/string coercion" do
+      program = ~S"(->> ctx/items (filter (where :status not= :active)))"
+
+      context = %{
+        "items" => [
+          %{"status" => "active", "name" => "A"},
+          %{"status" => "inactive", "name" => "B"}
+        ]
+      }
+
+      assert {:ok, [%{"status" => "inactive", "name" => "B"}], _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+
+    test "where in coerces keywords in collection to strings" do
+      program = ~S"(->> ctx/items (filter (where :status in [:active :pending])))"
+
+      context = %{
+        "items" => [
+          %{"status" => "active", "name" => "A"},
+          %{"status" => "inactive", "name" => "B"},
+          %{"status" => "pending", "name" => "C"}
+        ]
+      }
+
+      assert {:ok,
+              [%{"status" => "active", "name" => "A"}, %{"status" => "pending", "name" => "C"}],
+              _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+
+    test "where includes with list membership using keyword/string coercion" do
+      program = ~S"(->> ctx/items (filter (where :tags includes :urgent)))"
+
+      context = %{
+        "items" => [
+          %{"tags" => ["urgent", "bug"], "name" => "A"},
+          %{"tags" => ["feature"], "name" => "B"}
+        ]
+      }
+
+      assert {:ok, [%{"tags" => ["urgent", "bug"], "name" => "A"}], _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+
+    test "where = does not coerce booleans" do
+      program = ~S"(->> ctx/items (filter (where :active = true)))"
+
+      context = %{
+        "items" => [
+          %{"active" => true, "name" => "A"},
+          %{"active" => "true", "name" => "B"}
+        ]
+      }
+
+      # Only the boolean true should match, not the string "true"
+      assert {:ok, [%{"active" => true, "name" => "A"}], _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+
+    test "where = does not coerce false to string" do
+      program = ~S"(->> ctx/items (filter (where :active = false)))"
+
+      context = %{
+        "items" => [
+          %{"active" => false, "name" => "A"},
+          %{"active" => "false", "name" => "B"}
+        ]
+      }
+
+      # Only the boolean false should match, not the string "false"
+      assert {:ok, [%{"active" => false, "name" => "A"}], _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+
+    test "where = coerces empty atom to empty string" do
+      program = ~S'(->> ctx/items (filter (where :value = "")))'
+
+      context = %{
+        "items" => [
+          %{"value" => "", "name" => "A"},
+          %{"value" => "nonempty", "name" => "B"}
+        ]
+      }
+
+      assert {:ok, [%{"value" => "", "name" => "A"}], _, _} =
+               PtcRunner.Lisp.run(program, context: context)
+    end
+  end
 end
