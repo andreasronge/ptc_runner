@@ -293,7 +293,24 @@ defmodule PtcRunner.Lisp.Eval do
         # Short-circuit: return truthy value
         {:ok, value, memory2}
       else
-        do_eval_or(rest, ctx, memory2, env, tool_exec)
+        # Continue evaluating, tracking this value as last evaluated
+        do_eval_or_rest(rest, value, ctx, memory2, env, tool_exec)
+      end
+    end
+  end
+
+  defp do_eval_or_rest([], last_value, _ctx, memory, _env, _tool_exec) do
+    {:ok, last_value, memory}
+  end
+
+  defp do_eval_or_rest([e | rest], _last_value, ctx, memory, env, tool_exec) do
+    with {:ok, value, memory2} <- do_eval(e, ctx, memory, env, tool_exec) do
+      if truthy?(value) do
+        # Short-circuit: return truthy value
+        {:ok, value, memory2}
+      else
+        # Continue evaluating, tracking this value as last evaluated
+        do_eval_or_rest(rest, value, ctx, memory2, env, tool_exec)
       end
     end
   end
@@ -407,6 +424,15 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Special handling for unary minus (must come before general variadic handler)
+  defp apply_fun({:variadic, fun2, _identity}, [x], _ctx, memory, _tool_exec) do
+    if fun2 == (&Kernel.-/2) do
+      {:ok, -x, memory}
+    else
+      {:error, {:not_callable, fun2}}
+    end
+  end
+
   # Variadic builtins: {:variadic, fun2, identity}
   defp apply_fun({:variadic, fun2, identity}, args, _ctx, memory, _tool_exec)
        when is_function(fun2, 2) do
@@ -415,7 +441,7 @@ defmodule PtcRunner.Lisp.Eval do
         [] -> identity
         [x] -> x
         [x, y] -> fun2.(x, y)
-        [h | t] -> Enum.reduce(t, h, fun2)
+        [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
 
     {:ok, result, memory}
@@ -432,19 +458,10 @@ defmodule PtcRunner.Lisp.Eval do
       case args do
         [x] -> x
         [x, y] -> fun2.(x, y)
-        [h | t] -> Enum.reduce(t, h, fun2)
+        [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
 
     {:ok, result, memory}
-  end
-
-  # Special handling for unary minus
-  defp apply_fun({:variadic, fun2, _identity}, [x], _ctx, memory, _tool_exec) do
-    if fun2 == (&Kernel.-/2) do
-      {:ok, -x, memory}
-    else
-      {:error, {:not_callable, fun2}}
-    end
   end
 
   # Multi-arity builtins: select function based on argument count

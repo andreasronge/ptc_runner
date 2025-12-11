@@ -777,7 +777,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `empty?` | `(empty? coll)` | True if empty |
-| `some` | `(some pred coll)` | True if any match |
+| `some` | `(some pred coll)` | First truthy result of pred, or nil |
 | `every?` | `(every? pred coll)` | True if all match |
 | `not-any?` | `(not-any? pred coll)` | True if none match |
 | `contains?` | `(contains? coll key)` | True if key exists |
