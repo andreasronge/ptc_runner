@@ -1,73 +1,100 @@
 defmodule PtcRunner.Context do
   @moduledoc """
-  Manages variable bindings for program execution.
+  Manages context, memory, and tools for program execution.
 
-  Stores context variables and provides lookup functionality.
+  - `ctx`: External input data (read-only)
+  - `memory`: Mutable state passed through evaluation
+  - `tools`: Tool registry
   """
 
-  defstruct [:variables, :tools]
+  defstruct [:ctx, :memory, :tools]
 
   @typedoc """
-  Context structure containing variables and tool registry.
+  Context structure containing external data, memory, and tool registry.
   """
   @type t :: %__MODULE__{
-          variables: map(),
+          ctx: map(),
+          memory: map(),
           tools: map()
         }
 
   @doc """
-  Creates a new context with variables and tools.
+  Creates a new context with external data, memory, and tools.
 
   ## Arguments
-    - variables: Map of variable names to values
-    - tools: Map of tool names to functions (reserved for Phase 4)
+    - ctx: Map of external context data (default: `%{}`)
+    - memory: Map of mutable state (default: `%{}`)
+    - tools: Map of tool names to functions (default: `%{}`)
 
   ## Returns
     - New Context struct
   """
-  @spec new(map(), map()) :: t()
-  def new(variables \\ %{}, tools \\ %{}) do
+  @spec new(map(), map(), map()) :: t()
+  def new(ctx \\ %{}, memory \\ %{}, tools \\ %{}) do
     %__MODULE__{
-      variables: variables,
+      ctx: ctx,
+      memory: memory,
       tools: tools
     }
   end
 
   @doc """
-  Retrieves a variable from context.
+  Retrieves a value from context (external data).
 
-  Returns nil if variable doesn't exist, per architecture.md specifications.
+  Returns nil if key doesn't exist.
 
   ## Arguments
     - context: The context
-    - name: Variable name to retrieve
+    - name: Key to retrieve
 
   ## Returns
-    - `{:ok, value}` if variable exists
-    - `{:ok, nil}` if variable doesn't exist
+    - `{:ok, value}` if key exists
+    - `{:ok, nil}` if key doesn't exist
   """
-  @spec get_var(t(), String.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
-  def get_var(context, name) when is_binary(name) do
-    {:ok, Map.get(context.variables, name)}
+  @spec get_ctx(t(), String.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
+  def get_ctx(context, name) when is_binary(name) do
+    {:ok, Map.get(context.ctx, name)}
   end
 
-  def get_var(_context, name) do
-    {:error, {:execution_error, "Variable name must be a string, got #{inspect(name)}"}}
+  def get_ctx(_context, name) do
+    {:error, {:execution_error, "Context key must be a string, got #{inspect(name)}"}}
   end
 
   @doc """
-  Sets a variable in context.
+  Retrieves a value from memory (mutable state).
+
+  Returns nil if key doesn't exist.
 
   ## Arguments
     - context: The context
-    - name: Variable name
+    - name: Key to retrieve
+
+  ## Returns
+    - `{:ok, value}` if key exists
+    - `{:ok, nil}` if key doesn't exist
+  """
+  @spec get_memory(t(), String.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
+  def get_memory(context, name) when is_binary(name) do
+    {:ok, Map.get(context.memory, name)}
+  end
+
+  def get_memory(_context, name) do
+    {:error, {:execution_error, "Memory key must be a string, got #{inspect(name)}"}}
+  end
+
+  @doc """
+  Sets a value in memory.
+
+  ## Arguments
+    - context: The context
+    - name: Key name
     - value: Value to set
 
   ## Returns
     - Updated context
   """
-  @spec put_var(t(), String.t(), any()) :: t()
-  def put_var(context, name, value) when is_binary(name) do
-    %{context | variables: Map.put(context.variables, name, value)}
+  @spec put_memory(t(), String.t(), any()) :: t()
+  def put_memory(context, name, value) when is_binary(name) do
+    %{context | memory: Map.put(context.memory, name, value)}
   end
 end

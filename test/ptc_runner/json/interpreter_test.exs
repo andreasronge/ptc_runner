@@ -92,16 +92,16 @@ defmodule PtcRunner.Json.InterpreterTest do
       node = %{"op" => "literal", "value" => 42}
       context = PtcRunner.Context.new()
 
-      {:ok, result} = Interpreter.eval(node, context)
+      {:ok, result, _memory} = Interpreter.eval(node, context)
 
       assert result == 42
     end
 
     test "evaluates load operation" do
       node = %{"op" => "load", "name" => "x"}
-      context = PtcRunner.Context.new(%{"x" => 100})
+      context = PtcRunner.Context.new(%{"x" => 100}, %{}, %{})
 
-      {:ok, result} = Interpreter.eval(node, context)
+      {:ok, result, _memory} = Interpreter.eval(node, context)
 
       assert result == 100
     end

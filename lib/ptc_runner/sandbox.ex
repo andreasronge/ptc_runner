@@ -26,11 +26,12 @@ defmodule PtcRunner.Sandbox do
     - opts: Options (timeout, max_heap)
 
   ## Returns
-    - `{:ok, result, metrics}` on success
+    - `{:ok, result, metrics, memory}` on success
     - `{:error, reason}` on failure
   """
   @spec execute(map(), Context.t(), keyword()) ::
-          {:ok, any(), metrics()} | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
+          {:ok, any(), metrics(), map()}
+          | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
 
   def execute(ast, context, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 1000)
@@ -62,8 +63,8 @@ defmodule PtcRunner.Sandbox do
         Process.demonitor(ref, [:flush])
 
         case result do
-          {:ok, value} ->
-            {:ok, value, %{duration_ms: duration, memory_bytes: memory}}
+          {:ok, value, eval_memory} ->
+            {:ok, value, %{duration_ms: duration, memory_bytes: memory}, eval_memory}
 
           {:error, reason} ->
             {:error, reason}

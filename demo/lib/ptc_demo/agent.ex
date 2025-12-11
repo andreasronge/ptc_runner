@@ -317,9 +317,9 @@ defmodule PtcDemo.Agent do
 
             # Execute the program
             case PtcRunner.Json.run(program_json, context: context_with_memory, timeout: 5000) do
-              {:ok, result, metrics} ->
+              {:ok, result, _memory_delta, _new_memory} ->
                 result_str = format_result(result)
-                IO.puts("   [Result] #{truncate(result_str, 80)} (#{metrics.duration_ms}ms)")
+                IO.puts("   [Result] #{truncate(result_str, 80)}")
 
                 # Detect "store as {name}" pattern in the original query
                 new_memory =

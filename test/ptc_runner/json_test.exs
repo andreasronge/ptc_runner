@@ -6,14 +6,14 @@ defmodule PtcRunner.Json.JsonTest do
   describe "run/2" do
     test "valid wrapped JSON string extracts program and runs successfully" do
       program = ~s({"program": {"op": "literal", "value": 42}})
-      {:ok, result, _metrics} = PtcRunner.Json.run(program)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
 
       assert result == 42
     end
 
     test "valid wrapped map extracts program and runs successfully" do
       program = %{"program" => %{"op" => "literal", "value" => 99}}
-      {:ok, result, _metrics} = PtcRunner.Json.run(program)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
 
       assert result == 99
     end
@@ -77,7 +77,7 @@ defmodule PtcRunner.Json.JsonTest do
         "tool": "slow_tool"
       }})
 
-      result = PtcRunner.Json.run(program, tools: tools, timeout_ms: 100)
+      result = PtcRunner.Json.run(program, tools: tools, timeout: 100)
 
       assert match?({:error, {:timeout, _}}, result) or
                match?({:error, {:execution_error, _}}, result)
@@ -92,7 +92,7 @@ defmodule PtcRunner.Json.JsonTest do
       }})
 
       # With a reasonable memory limit, this should succeed
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, memory_limit_bytes: 1_000_000)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, max_heap: 1_000_000)
       assert result == [1, 2, 3]
     end
   end
@@ -116,11 +116,9 @@ defmodule PtcRunner.Json.JsonTest do
         ]
       }
 
-      {:ok, result, metrics} = PtcRunner.Json.run(program, context: context)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, context: context)
 
       assert result == 500
-      assert metrics.duration_ms >= 0
-      assert metrics.memory_bytes > 0
     end
 
     test "extract nested user emails from list of users" do
@@ -139,7 +137,7 @@ defmodule PtcRunner.Json.JsonTest do
         ]
       }
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, context: context)
       assert result == ["alice@example.com", "bob@example.com"]
     end
 
@@ -162,7 +160,7 @@ defmodule PtcRunner.Json.JsonTest do
         ]
       }
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, context: context)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, context: context)
       assert result == 700
     end
   end

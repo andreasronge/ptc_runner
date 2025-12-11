@@ -304,14 +304,14 @@ defmodule PtcRunner.Json.Operations.ErrorHandlingTest do
 
   test "valid wrapped JSON string extracts program and runs successfully" do
     program = ~s({"program": {"op": "literal", "value": 42}})
-    {:ok, result, _metrics} = PtcRunner.Json.run(program)
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
 
     assert result == 42
   end
 
   test "valid wrapped map extracts program and runs successfully" do
     program = %{"program" => %{"op" => "literal", "value" => 99}}
-    {:ok, result, _metrics} = PtcRunner.Json.run(program)
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
 
     assert result == 99
   end

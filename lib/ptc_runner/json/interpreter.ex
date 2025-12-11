@@ -2,7 +2,8 @@ defmodule PtcRunner.Json.Interpreter do
   @moduledoc """
   Interprets and evaluates AST nodes.
 
-  Recursively evaluates operations by dispatching to the Operations module.
+  Recursively evaluates operations by dispatching to the Operations module,
+  threading memory through the evaluation.
   """
 
   alias PtcRunner.Context
@@ -16,10 +17,10 @@ defmodule PtcRunner.Json.Interpreter do
     - context: The execution context
 
   ## Returns
-    - `{:ok, result}` on success
+    - `{:ok, result, memory}` on success
     - `{:error, reason}` on failure
   """
-  @spec eval(map(), Context.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
+  @spec eval(map(), Context.t()) :: {:ok, any(), map()} | {:error, {atom(), String.t()}}
   def eval(node, context) when is_map(node) do
     # Handle input from pipe - if __input is set, use that value
     input = Map.get(node, "__input")
@@ -33,7 +34,7 @@ defmodule PtcRunner.Json.Interpreter do
         # For operations that need input (everything except literal, load, var)
         if Map.has_key?(node, "__input") and op not in ["literal", "load", "var"] do
           # Create a context with the input value available
-          input_context = Context.put_var(context, "__input", input)
+          input_context = Context.put_memory(context, "__input", input)
           eval_operation(op, node_without_input, input_context)
         else
           eval_operation(op, node_without_input, context)
@@ -49,8 +50,8 @@ defmodule PtcRunner.Json.Interpreter do
     # Create a wrapper function for recursive evaluation
     eval_fn = fn ctx, _acc ->
       # Get the input value if it exists
-      if Map.has_key?(ctx.variables, "__input") do
-        {:ok, Map.get(ctx.variables, "__input")}
+      if Map.has_key?(ctx.memory, "__input") do
+        {:ok, Map.get(ctx.memory, "__input"), ctx.memory}
       else
         {:error, {:execution_error, "No input available"}}
       end
