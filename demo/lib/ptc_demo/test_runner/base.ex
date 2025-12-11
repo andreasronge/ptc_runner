@@ -336,6 +336,9 @@ defmodule PtcDemo.TestRunner.Base do
     total = length(results)
     total_attempts = Enum.sum(Enum.map(results, & &1.attempts))
 
+    # Apply cost fallback if needed
+    stats_with_fallback = apply_cost_fallback(stats, model)
+
     %{
       passed: passed,
       failed: failed,
@@ -345,9 +348,27 @@ defmodule PtcDemo.TestRunner.Base do
       model: model,
       data_mode: data_mode,
       results: results,
-      stats: stats,
+      stats: stats_with_fallback,
       timestamp: DateTime.utc_now()
     }
+  end
+
+  defp apply_cost_fallback(stats, model) do
+    case stats do
+      %{total_cost: cost} when cost == nil or cost == 0.0 ->
+        # Calculate cost from tokens if not provided by API
+        calculated_cost =
+          PtcDemo.ModelRegistry.calculate_cost(
+            model,
+            Map.get(stats, :input_tokens, 0),
+            Map.get(stats, :output_tokens, 0)
+          )
+
+        %{stats | total_cost: calculated_cost}
+
+      _ ->
+        stats
+    end
   end
 
   @doc """

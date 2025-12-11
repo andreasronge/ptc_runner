@@ -68,6 +68,10 @@ defmodule PtcDemo.TestRunner.Report do
     | Total Attempts | #{summary.total_attempts} |
     | Avg Attempts/Test | #{if summary.total > 0, do: Float.round(summary.total_attempts / summary.total, 2), else: 0.0} |
     | Duration | #{Base.format_duration(summary.duration_ms)} |
+    | Total Runs | #{summary.stats.total_runs} |
+    | System Prompt Tokens | #{summary.stats.system_prompt_tokens} |
+    | Input Tokens | #{summary.stats.input_tokens} |
+    | Output Tokens | #{summary.stats.output_tokens} |
     | Total Tokens | #{summary.stats.total_tokens} |
     | Cost | #{Base.format_cost(summary.stats.total_cost)} |
 
