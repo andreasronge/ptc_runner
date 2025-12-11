@@ -188,4 +188,50 @@ defmodule PtcDemo.CLIBase do
   end
 
   def format_cost(_), do: "$0.00 (not available for this provider)"
+
+  @doc """
+  Format a program result for display.
+
+  Handles nil results, errors, and regular values.
+  Truncates long results to 200 characters.
+  """
+  def format_program_result(nil), do: "(no result captured)"
+  def format_program_result({:error, msg}), do: "ERROR: #{msg}"
+  def format_program_result(result), do: truncate(result, 200)
+
+  @doc """
+  Format message content which can be various types.
+
+  Handles binary strings, lists, and structured content with text/content fields.
+  """
+  def format_message_content(content) when is_binary(content), do: content
+
+  def format_message_content(content) when is_list(content) do
+    Enum.map_join(content, "\n", &format_message_content/1)
+  end
+
+  def format_message_content(%{text: text}), do: text
+  def format_message_content(%{content: content}), do: format_message_content(content)
+  def format_message_content(other), do: inspect(other)
+
+  @doc """
+  Truncate a string to a maximum length.
+
+  If the string exceeds max_len characters, it is truncated and "..." is appended.
+
+  ## Examples
+
+      iex> truncate("hello world", 5)
+      "hello..."
+
+      iex> truncate("hi", 5)
+      "hi"
+  """
+  def truncate(str, max_len) do
+    if String.length(str) > max_len do
+      String.slice(str, 0, max_len) <> "..."
+    else
+      str
+    end
+  end
 end
