@@ -65,9 +65,14 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
       assert {:ok, 42, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
     end
 
-    test "all falsy returns last falsy" do
+    test "all falsy returns last falsy value" do
       exprs = [false, nil]
       assert {:ok, nil, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "all falsy with different last value" do
+      exprs = [nil, false]
+      assert {:ok, false, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
     end
   end
 

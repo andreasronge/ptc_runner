@@ -195,7 +195,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def group_by(key, coll) when is_list(coll), do: Enum.group_by(coll, &flex_get(&1, key))
 
-  def some(pred, coll) when is_list(coll), do: Enum.any?(coll, pred)
+  def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, pred)
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)
 
