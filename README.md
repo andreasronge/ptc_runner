@@ -27,11 +27,11 @@ iex> tools = %{
 ...>     ]
 ...>   end
 ...> }
-iex> program = ~s({"program": {"op": "pipe", "steps": [
+iex> program = ~S|{"program": {"op": "pipe", "steps": [
 ...>   {"op": "call", "tool": "get_expenses"},
 ...>   {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
 ...>   {"op": "sum", "field": "amount"}
-...> ]}})
+...> ]}}|
 iex> {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
 iex> result
 700
@@ -45,7 +45,7 @@ iex> tools = %{"get-expenses" => fn _args ->
 ...>    %{"category" => "food", "amount" => 50},
 ...>    %{"category" => "travel", "amount" => 200}]
 ...> end}
-iex> program = "(->> (call \"get-expenses\" {}) (filter (where :category = \"travel\")) (sum-by :amount))"
+iex> program = ~S|(->> (call "get-expenses" {}) (filter (where :category = "travel")) (sum-by :amount))|
 iex> {:ok, result, _, _} = PtcRunner.Lisp.run(program, tools: tools)
 iex> result
 700
