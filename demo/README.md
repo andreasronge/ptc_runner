@@ -327,19 +327,19 @@ The report includes:
 
 ```bash
 # Run all tests with text mode (default)
-mix run -e "PtcDemo.TestRunner.run_all(verbose: true)"
+mix run -e "PtcDemo.JsonTestRunner.run_all(verbose: true)"
 
 # Run all tests with structured mode
-mix run -e "PtcDemo.TestRunner.run_all(mode: :structured, verbose: true)"
+mix run -e "PtcDemo.JsonTestRunner.run_all(mode: :structured, verbose: true)"
 
 # Quick run (dots for progress)
-mix run -e "PtcDemo.TestRunner.run_all()"
+mix run -e "PtcDemo.JsonTestRunner.run_all()"
 
 # List available test cases
-mix run -e "PtcDemo.TestRunner.list()"
+mix run -e "PtcDemo.JsonTestRunner.list()"
 
 # Run a single test by number
-mix run -e "PtcDemo.TestRunner.run_one(5)"
+mix run -e "PtcDemo.JsonTestRunner.run_one(5)"
 ```
 
 ### Test Assertions
