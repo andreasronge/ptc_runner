@@ -154,7 +154,7 @@ config :ptc_runner,
 
 ```elixir
 case PtcRunner.Json.run(program) do
-  {:ok, result, metrics} -> handle_success(result)
+  {:ok, result, _memory_delta, _new_memory} -> handle_success(result)
   {:error, {:timeout, ms}} -> Logger.warning("Exceeded #{ms}ms timeout")
   {:error, {:memory_exceeded, bytes}} -> Logger.warning("Exceeded memory: #{bytes}")
   {:error, {:parse_error, msg}} -> Logger.error("Invalid JSON: #{msg}")
