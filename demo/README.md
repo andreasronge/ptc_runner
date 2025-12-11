@@ -8,7 +8,7 @@ This demo includes two language implementations:
 
 | DSL | Module | Description |
 |-----|--------|-------------|
-| **PTC-JSON** | `PtcDemo.CLI` | JSON-based DSL (stable) |
+| **PTC-JSON** | `PtcDemo.JsonCLI` | JSON-based DSL (stable) |
 | **PTC-Lisp** | `PtcDemo.LispCLI` | Clojure-like DSL (experimental, ~3-5x more token efficient) |
 
 ## The Problem with Traditional Function Calling
@@ -76,14 +76,12 @@ export REQ_LLM_MODEL=anthropic:claude-sonnet-4-20250514
 mix deps.get
 
 # === JSON DSL ===
-# Run the chat (text mode - default, token-efficient)
-mix run -e "PtcDemo.CLI.main([])"
+# Run the JSON chat (default model)
+mix json
 
-# Run in structured mode (reliable but expensive)
-mix run -e "PtcDemo.CLI.main([\"--structured\"])"
-
-# Run in explore mode (LLM discovers schema via introspection)
-mix run -e "PtcDemo.CLI.main([\"--explore\"])"
+# Or with options:
+mix json --model=haiku              # Use Claude Haiku
+mix json --explore                  # Start in explore mode
 
 # === Lisp DSL ===
 # Run the Lisp chat (recommended - most token efficient)
@@ -190,6 +188,30 @@ The Lisp DSL generates more compact, readable programs:
   (->> ctx/expenses
        (filter (fn [e] (contains? eng-ids (:employee_id e))))
        (sum-by :amount)))
+```
+
+## JSON CLI Options
+
+```bash
+mix json [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--model=<name>` | Set model (preset name or full model ID) |
+| `--explore` | Start in explore mode (LLM discovers schema) |
+| `--test` | Run automated tests and exit |
+| `--verbose`, `-v` | Verbose output (for test mode) |
+| `--report=<file>` | Generate markdown report (for test mode) |
+
+Model presets: `haiku`, `gemini`, `deepseek`, `kimi`, `gpt`
+
+Examples:
+```bash
+mix json                                    # Interactive with default model
+mix json --model=haiku                      # Use Claude Haiku
+mix json --model=google:gemini-2.0-flash    # Use full model ID
+mix json --test --model=gemini --verbose    # Test with Gemini
 ```
 
 ## Lisp CLI Options
@@ -325,21 +347,41 @@ The report includes:
 
 ### JSON DSL Tests
 
+Run the JSON test suite from the command line:
+
 ```bash
-# Run all tests with text mode (default)
-mix run -e "PtcDemo.JsonTestRunner.run_all(verbose: true)"
+# Run all tests (dots for progress)
+mix json --test
 
-# Run all tests with structured mode
-mix run -e "PtcDemo.JsonTestRunner.run_all(mode: :structured, verbose: true)"
+# Run with verbose output
+mix json --test --verbose
 
-# Quick run (dots for progress)
-mix run -e "PtcDemo.JsonTestRunner.run_all()"
+# Run with specific model
+mix json --test --model=haiku
+mix json --test --model=gemini --verbose
 
-# List available test cases
-mix run -e "PtcDemo.JsonTestRunner.list()"
+# Generate a markdown report
+mix json --test --report=report.md
+mix json --test --model=haiku --verbose --report=haiku_report.md
+```
 
-# Run a single test by number
-mix run -e "PtcDemo.JsonTestRunner.run_one(5)"
+Or programmatically in IEx:
+
+```elixir
+# Run all tests
+PtcDemo.JsonTestRunner.run_all()
+
+# With options
+PtcDemo.JsonTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest", verbose: true)
+
+# Generate a report
+PtcDemo.JsonTestRunner.run_all(model: "google:gemini-2.0-flash", report: "json_report.md")
+
+# List available tests
+PtcDemo.JsonTestRunner.list()
+
+# Run a single test
+PtcDemo.JsonTestRunner.run_one(3)
 ```
 
 ### Test Assertions
