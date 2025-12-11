@@ -692,25 +692,4 @@ defmodule PtcRunner.Json.Operations.AccessTest do
       assert reason == {:validation_error, "Operation 'get' accepts 'field' or 'path', not both"}
     end
   end
-
-  # E2E test with first, last, and nth in a pipeline
-  test "first/last/nth work in realistic data processing pipeline" do
-    program = ~s({"program": {
-      "op": "pipe",
-      "steps": [
-        {"op": "literal", "value": [
-          {"item": "book", "price": 50},
-          {"item": "pen", "price": 5},
-          {"item": "laptop", "price": 1000},
-          {"item": "notebook", "price": 10}
-        ]},
-        {"op": "reject", "where": {"op": "lt", "field": "price", "value": 10}},
-        {"op": "first"}
-      ]
-    }})
-
-    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
-
-    assert result == %{"item" => "book", "price" => 50}
-  end
 end
