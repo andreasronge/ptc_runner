@@ -47,6 +47,7 @@ defmodule PtcDemo.LispTestRunner do
     * `:data_mode` - Data mode :schema or :explore (default: :schema)
     * `:report` - Path to write markdown report file (optional)
     * `:runs` - Number of times to run all tests (default: 1)
+    * `:validate_clojure` - Validate generated programs against Babashka (default: false)
 
   ## Examples
 
@@ -55,6 +56,7 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest")
       PtcDemo.LispTestRunner.run_all(report: "test_report.md")
       PtcDemo.LispTestRunner.run_all(runs: 3)
+      PtcDemo.LispTestRunner.run_all(validate_clojure: true)
   """
   def run_all(opts \\ []) do
     agent_mod = Keyword.get(opts, :agent, LispAgent)
@@ -70,6 +72,10 @@ defmodule PtcDemo.LispTestRunner do
     data_mode = Keyword.get(opts, :data_mode, :schema)
     report_path = Keyword.get(opts, :report)
     runs = Keyword.get(opts, :runs, 1)
+    validate_clojure = Keyword.get(opts, :validate_clojure, false)
+
+    # Check Babashka availability if Clojure validation requested
+    clojure_available = check_clojure_validation(validate_clojure)
 
     # Ensure agent is started
     ensure_agent_started(data_mode, agent_mod)
@@ -89,12 +95,24 @@ defmodule PtcDemo.LispTestRunner do
       IO.puts("Runs: #{runs}")
     end
 
+    if clojure_available do
+      IO.puts("Clojure validation: enabled")
+    end
+
     IO.puts("")
 
     # Run tests multiple times if requested
     summaries =
       for run_num <- 1..runs do
-        run_single_batch(run_num, runs, data_mode, verbose, agent_mod, current_model)
+        run_single_batch(
+          run_num,
+          runs,
+          data_mode,
+          verbose,
+          agent_mod,
+          current_model,
+          clojure_available
+        )
       end
 
     # Print aggregate summary if multiple runs
@@ -114,7 +132,15 @@ defmodule PtcDemo.LispTestRunner do
     Map.put(last_summary, :all_runs, summaries)
   end
 
-  defp run_single_batch(run_num, total_runs, data_mode, verbose, agent_mod, current_model) do
+  defp run_single_batch(
+         run_num,
+         total_runs,
+         data_mode,
+         verbose,
+         agent_mod,
+         current_model,
+         clojure_available
+       ) do
     if total_runs > 1 do
       IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
     end
@@ -128,7 +154,7 @@ defmodule PtcDemo.LispTestRunner do
         # Reset context before each test to get clean attempt count
         agent_mod.reset()
         agent_mod.set_data_mode(data_mode)
-        run_test(test_case, index, length(test_cases()), verbose, agent_mod)
+        run_test(test_case, index, length(test_cases()), verbose, agent_mod, clojure_available)
       end)
 
     stats = agent_mod.stats()
@@ -182,6 +208,7 @@ defmodule PtcDemo.LispTestRunner do
     if index > 0 and index <= length(cases) do
       data_mode = Keyword.get(opts, :data_mode, :schema)
       model = Keyword.get(opts, :model)
+      validate_clojure = Keyword.get(opts, :validate_clojure, false)
 
       ensure_agent_started(data_mode, agent_mod)
 
@@ -189,8 +216,9 @@ defmodule PtcDemo.LispTestRunner do
         agent_mod.set_model(model)
       end
 
+      clojure_available = check_clojure_validation(validate_clojure)
       test_case = Enum.at(cases, index - 1)
-      run_test(test_case, index, length(cases), true, agent_mod)
+      run_test(test_case, index, length(cases), true, agent_mod, clojure_available)
     else
       IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
       nil
@@ -245,18 +273,34 @@ defmodule PtcDemo.LispTestRunner do
     end
   end
 
-  defp run_test(test_case, index, total, verbose, agent_mod) do
+  defp run_test(test_case, index, total, verbose, agent_mod, clojure_available) do
     # Handle multi-turn tests (queries list) vs single-turn (query string)
     case test_case do
       %{queries: queries} ->
-        run_multi_turn_test(test_case, queries, index, total, verbose, agent_mod)
+        run_multi_turn_test(
+          test_case,
+          queries,
+          index,
+          total,
+          verbose,
+          agent_mod,
+          clojure_available
+        )
 
       %{query: query} ->
-        run_single_turn_test(test_case, query, index, total, verbose, agent_mod)
+        run_single_turn_test(
+          test_case,
+          query,
+          index,
+          total,
+          verbose,
+          agent_mod,
+          clojure_available
+        )
     end
   end
 
-  defp run_single_turn_test(test_case, query, index, total, verbose, agent_mod) do
+  defp run_single_turn_test(test_case, query, index, total, verbose, agent_mod, clojure_available) do
     if verbose do
       IO.puts("\n[#{index}/#{total}] #{query}")
     else
@@ -302,6 +346,14 @@ defmodule PtcDemo.LispTestRunner do
           }
       end
 
+    # Add Clojure validation if enabled and we have a program
+    result =
+      if clojure_available and result[:program] do
+        add_clojure_validation(result, verbose)
+      else
+        result
+      end
+
     result =
       Map.merge(result, %{
         query: query,
@@ -337,7 +389,15 @@ defmodule PtcDemo.LispTestRunner do
     result
   end
 
-  defp run_multi_turn_test(test_case, queries, index, total, verbose, agent_mod) do
+  defp run_multi_turn_test(
+         test_case,
+         queries,
+         index,
+         total,
+         verbose,
+         agent_mod,
+         clojure_available
+       ) do
     query_display = Enum.join(queries, " → ")
 
     if verbose do
@@ -402,6 +462,14 @@ defmodule PtcDemo.LispTestRunner do
           error_result
       end
 
+    # Add Clojure validation if enabled and we have a program
+    result =
+      if clojure_available and result[:program] do
+        add_clojure_validation(result, verbose)
+      else
+        result
+      end
+
     result =
       Map.merge(result, %{
         query: query_display,
@@ -443,5 +511,53 @@ defmodule PtcDemo.LispTestRunner do
     end
 
     result
+  end
+
+  # Add Clojure syntax validation to a test result
+  defp add_clojure_validation(result, verbose) do
+    program = result[:program]
+
+    case PtcRunner.Lisp.ClojureValidator.validate_syntax(program) do
+      :ok ->
+        if verbose do
+          IO.puts("   Clojure: valid syntax")
+        end
+
+        Map.put(result, :clojure_valid, true)
+
+      {:error, msg} ->
+        if verbose do
+          IO.puts("   Clojure: INVALID - #{msg}")
+        end
+
+        result
+        |> Map.put(:clojure_valid, false)
+        |> Map.put(:clojure_error, msg)
+    end
+  end
+
+  # Check if Clojure validation is available and requested
+  defp check_clojure_validation(validate_clojure) do
+    cond do
+      validate_clojure == false ->
+        # Explicitly disabled
+        false
+
+      validate_clojure == true ->
+        # Explicitly enabled - check availability
+        if PtcRunner.Lisp.ClojureValidator.available?() do
+          IO.puts("Clojure validation: enabled (Babashka found)")
+          true
+        else
+          IO.puts("WARNING: Clojure validation requested but Babashka not installed.")
+          IO.puts("Install with: mix ptc.install_babashka")
+          IO.puts("")
+          false
+        end
+
+      true ->
+        # Not specified - don't enable by default in demo
+        false
+    end
   end
 end

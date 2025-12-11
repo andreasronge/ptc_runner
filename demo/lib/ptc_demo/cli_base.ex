@@ -70,8 +70,10 @@ defmodule PtcDemo.CLIBase do
     - --report=<path>: generate report file (e.g., --report=report.md)
     - --runs=<n>: number of test runs (e.g., --runs=3)
     - --list-models: list available models and exit
+    - --validate-clojure: validate generated programs against Babashka
+    - --no-validate-clojure: skip Clojure validation
 
-  Returns a map with keys: :explore, :test, :verbose, :model, :report, :runs, :list_models
+  Returns a map with keys: :explore, :test, :verbose, :model, :report, :runs, :list_models, :validate_clojure
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -87,6 +89,12 @@ defmodule PtcDemo.CLIBase do
 
         arg == "--list-models" ->
           Map.put(acc, :list_models, true)
+
+        arg == "--validate-clojure" ->
+          Map.put(acc, :validate_clojure, true)
+
+        arg == "--no-validate-clojure" ->
+          Map.put(acc, :validate_clojure, false)
 
         String.starts_with?(arg, "--model=") ->
           model = String.replace_prefix(arg, "--model=", "")
