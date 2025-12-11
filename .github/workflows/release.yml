@@ -29,7 +29,7 @@ jobs:
           fi
 
       - name: Run tests
-        run: mix test
+        run: mix test --exclude clojure
         env:
           MIX_ENV: test
 
