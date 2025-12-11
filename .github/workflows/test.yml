@@ -24,7 +24,7 @@ jobs:
         run: mix compile --warnings-as-errors
 
       - name: Run tests
-        run: mix test --max-failures 1 --trace --warnings-as-errors
+        run: mix test --max-failures 1 --trace --warnings-as-errors --exclude clojure
 
       - name: Check code is formatted
         run: mix format --check-formatted

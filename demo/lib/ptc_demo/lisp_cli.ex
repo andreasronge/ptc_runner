@@ -27,6 +27,7 @@ defmodule PtcDemo.LispCLI do
     verbose = opts[:verbose]
     report_path = opts[:report]
     runs = opts[:runs]
+    validate_clojure = opts[:validate_clojure]
 
     # Start the agent
     {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode)
@@ -39,7 +40,12 @@ defmodule PtcDemo.LispCLI do
 
     # Run tests if --test flag is present
     if run_tests do
-      run_tests_and_exit(verbose: verbose, report: report_path, runs: runs)
+      run_tests_and_exit(
+        verbose: verbose,
+        report: report_path,
+        runs: runs,
+        validate_clojure: validate_clojure
+      )
     else
       IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
 
