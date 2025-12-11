@@ -332,7 +332,7 @@ defmodule PtcDemo.Agent do
 
                 # Detect "store as {name}" pattern in the original query
                 new_memory =
-                  case Regex.run(~r/store (?:it |the result |this )?as (\w+)/i, original_query) do
+                  case Regex.run(~r/store (?:it |the result |this )?as ([\w-]+)/i, original_query) do
                     [_, name] -> Map.put(memory, name, result)
                     nil -> memory
                   end
