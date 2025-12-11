@@ -602,6 +602,22 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       assert result == %{}
     end
+
+    test "provides helpful error when using ->> instead of ->" do
+      # Common mistake: using ->> (thread-last) with update-vals
+      # which puts the map as the last argument instead of first
+      source = ~S"""
+      (->> ctx/orders
+           (group-by :status)
+           (update-vals count))
+      """
+
+      ctx = %{orders: [%{id: 1, status: "pending"}]}
+
+      assert {:error, {:type_error, message, _}} = Lisp.run(source, context: ctx)
+      assert message =~ "update-vals expects (map, function)"
+      assert message =~ "Use -> (thread-first)"
+    end
   end
 
   # ==========================================================================
