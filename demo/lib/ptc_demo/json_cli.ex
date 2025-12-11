@@ -26,6 +26,7 @@ defmodule PtcDemo.JsonCLI do
     run_tests = opts[:test]
     verbose = opts[:verbose]
     report_path = opts[:report]
+    runs = opts[:runs]
 
     # Start the agent
     {:ok, _pid} = PtcDemo.Agent.start_link(data_mode: data_mode)
@@ -38,7 +39,7 @@ defmodule PtcDemo.JsonCLI do
 
     # Run tests if --test flag is present
     if run_tests do
-      run_tests_and_exit(verbose: verbose, report: report_path)
+      run_tests_and_exit(verbose: verbose, report: report_path, runs: runs)
     else
       IO.puts(banner(PtcDemo.Agent.model(), PtcDemo.Agent.data_mode()))
 
@@ -299,6 +300,7 @@ defmodule PtcDemo.JsonCLI do
     CLI Options (when starting):
       mix json --test              Run automated tests
       mix json --test --verbose    Run tests with detailed output
+      mix json --test --runs=3     Run tests multiple times
       mix json --model=<name>      Start with specific model
       mix json --explore           Start in explore mode
       mix json --list-models       Show available models and exit

@@ -26,6 +26,7 @@ defmodule PtcDemo.LispCLI do
     run_tests = opts[:test]
     verbose = opts[:verbose]
     report_path = opts[:report]
+    runs = opts[:runs]
 
     # Start the agent
     {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode)
@@ -38,7 +39,7 @@ defmodule PtcDemo.LispCLI do
 
     # Run tests if --test flag is present
     if run_tests do
-      run_tests_and_exit(verbose: verbose, report: report_path)
+      run_tests_and_exit(verbose: verbose, report: report_path, runs: runs)
     else
       IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
 
@@ -299,6 +300,7 @@ defmodule PtcDemo.LispCLI do
     CLI Options (when starting):
       mix lisp --test              Run automated tests
       mix lisp --test --verbose    Run tests with detailed output
+      mix lisp --test --runs=3     Run tests multiple times
       mix lisp --model=<name>      Start with specific model
       mix lisp --explore           Start in explore mode
       mix lisp --list-models       Show available models and exit
