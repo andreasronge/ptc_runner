@@ -624,5 +624,19 @@ defmodule PtcRunner.LispTest do
 
       assert delta == %{threshold: 100}
     end
+
+    test "invalid map destructuring in fn returns error instead of crashing" do
+      # This tests the case where an LLM generates invalid map destructuring syntax
+      # like {id :id} (symbol as key) instead of {:keys [id]}
+      # The analyzer should return an error, not crash with FunctionClauseError
+      source = ~S"""
+      (map (fn [{id :id}] id) ctx/items)
+      """
+
+      ctx = %{items: [%{id: 1}, %{id: 2}]}
+
+      # Should return an error tuple, not crash
+      assert {:error, _reason} = Lisp.run(source, context: ctx)
+    end
   end
 end

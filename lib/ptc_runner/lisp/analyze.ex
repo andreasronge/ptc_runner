@@ -183,9 +183,23 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp analyze_destructure_map(pairs) do
-    keys_pair = Enum.find(pairs, fn {{:keyword, k}, _} -> k == :keys end)
-    or_pair = Enum.find(pairs, fn {{:keyword, k}, _} -> k == :or end)
-    as_pair = Enum.find(pairs, fn {{:keyword, k}, _} -> k == :as end)
+    keys_pair =
+      Enum.find(pairs, fn
+        {{:keyword, k}, _} -> k == :keys
+        _ -> false
+      end)
+
+    or_pair =
+      Enum.find(pairs, fn
+        {{:keyword, k}, _} -> k == :or
+        _ -> false
+      end)
+
+    as_pair =
+      Enum.find(pairs, fn
+        {{:keyword, k}, _} -> k == :as
+        _ -> false
+      end)
 
     case keys_pair do
       {{:keyword, :keys}, {:vector, key_asts}} ->
