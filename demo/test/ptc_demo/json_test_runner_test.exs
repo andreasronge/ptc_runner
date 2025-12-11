@@ -31,18 +31,7 @@ defmodule PtcDemo.JsonTestRunnerTest do
         {:ok, "Average salary is 100000", nil, 100_000}
     }
 
-    # Stop any existing MockAgent first
-    if Process.whereis(MockAgent) do
-      GenServer.stop(MockAgent)
-    end
-
-    {:ok, _pid} = MockAgent.start_link(responses)
-
-    on_exit(fn ->
-      if Process.whereis(MockAgent) do
-        GenServer.stop(MockAgent)
-      end
-    end)
+    start_supervised!({MockAgent, responses})
 
     {:ok, mock_agent: MockAgent}
   end
