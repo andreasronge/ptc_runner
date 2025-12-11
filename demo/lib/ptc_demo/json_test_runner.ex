@@ -45,6 +45,7 @@ defmodule PtcDemo.JsonTestRunner do
     * `:model` - Model to use (default: agent's current model)
     * `:data_mode` - Data mode :schema or :explore (default: :schema)
     * `:report` - Path to write markdown report file (optional)
+    * `:runs` - Number of times to run all tests (default: 1)
 
   ## Examples
 
@@ -52,6 +53,7 @@ defmodule PtcDemo.JsonTestRunner do
       PtcDemo.JsonTestRunner.run_all(verbose: true)
       PtcDemo.JsonTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest")
       PtcDemo.JsonTestRunner.run_all(report: "test_report.md")
+      PtcDemo.JsonTestRunner.run_all(runs: 3)
   """
   def run_all(opts \\ []) do
     agent_mod = Keyword.get(opts, :agent, Agent)
@@ -66,6 +68,7 @@ defmodule PtcDemo.JsonTestRunner do
     model = Keyword.get(opts, :model)
     data_mode = Keyword.get(opts, :data_mode, :schema)
     report_path = Keyword.get(opts, :report)
+    runs = Keyword.get(opts, :runs, 1)
 
     # Ensure agent is started
     ensure_agent_started(data_mode, agent_mod)
@@ -76,11 +79,46 @@ defmodule PtcDemo.JsonTestRunner do
     end
 
     current_model = agent_mod.model()
-    start_time = System.monotonic_time(:millisecond)
 
     IO.puts("\n=== PTC-JSON Demo Test Runner ===")
     IO.puts("Model: #{current_model}")
-    IO.puts("Data mode: #{data_mode}\n")
+    IO.puts("Data mode: #{data_mode}")
+
+    if runs > 1 do
+      IO.puts("Runs: #{runs}")
+    end
+
+    IO.puts("")
+
+    # Run tests multiple times if requested
+    summaries =
+      for run_num <- 1..runs do
+        run_single_batch(run_num, runs, data_mode, verbose, agent_mod, current_model)
+      end
+
+    # Print aggregate summary if multiple runs
+    if runs > 1 do
+      print_aggregate_summary(summaries)
+    end
+
+    # Write report for last run if requested
+    last_summary = List.last(summaries)
+
+    if report_path do
+      Report.write(report_path, last_summary, "JSON")
+      IO.puts("\nReport written to: #{report_path}")
+    end
+
+    # Return the last summary for CLI exit code, but include all summaries
+    Map.put(last_summary, :all_runs, summaries)
+  end
+
+  defp run_single_batch(run_num, total_runs, data_mode, verbose, agent_mod, current_model) do
+    if total_runs > 1 do
+      IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
+    end
+
+    start_time = System.monotonic_time(:millisecond)
 
     results =
       test_cases()
@@ -98,13 +136,32 @@ defmodule PtcDemo.JsonTestRunner do
     Base.print_summary(summary)
     Base.print_failed_tests(results)
 
-    # Write report if requested
-    if report_path do
-      Report.write(report_path, summary, "JSON")
-      IO.puts("\nReport written to: #{report_path}")
-    end
-
     summary
+  end
+
+  defp print_aggregate_summary(summaries) do
+    total_passed = Enum.sum(Enum.map(summaries, & &1.passed))
+    total_failed = Enum.sum(Enum.map(summaries, & &1.failed))
+    total_tests = total_passed + total_failed
+    runs = length(summaries)
+
+    IO.puts("\n========================================")
+    IO.puts("AGGREGATE SUMMARY (#{runs} runs)")
+    IO.puts("========================================")
+    IO.puts("Total tests run: #{total_tests}")
+    IO.puts("Total passed:    #{total_passed}")
+    IO.puts("Total failed:    #{total_failed}")
+    IO.puts("Pass rate:       #{Float.round(total_passed / total_tests * 100, 1)}%")
+
+    # Show per-run breakdown
+    IO.puts("\nPer-run results:")
+
+    summaries
+    |> Enum.with_index(1)
+    |> Enum.each(fn {summary, idx} ->
+      status = if summary.failed == 0, do: "PASS", else: "FAIL"
+      IO.puts("  Run #{idx}: #{summary.passed}/#{summary.total} (#{status})")
+    end)
   end
 
   @doc """

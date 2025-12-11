@@ -68,9 +68,10 @@ defmodule PtcDemo.CLIBase do
     - --verbose or -v: verbose output
     - --model=<name>: specify model (e.g., --model=haiku)
     - --report=<path>: generate report file (e.g., --report=report.md)
+    - --runs=<n>: number of test runs (e.g., --runs=3)
     - --list-models: list available models and exit
 
-  Returns a map with keys: :explore, :test, :verbose, :model, :report, :list_models
+  Returns a map with keys: :explore, :test, :verbose, :model, :report, :runs, :list_models
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -94,6 +95,18 @@ defmodule PtcDemo.CLIBase do
         String.starts_with?(arg, "--report=") ->
           report = String.replace_prefix(arg, "--report=", "")
           Map.put(acc, :report, report)
+
+        String.starts_with?(arg, "--runs=") ->
+          runs_str = String.replace_prefix(arg, "--runs=", "")
+
+          case Integer.parse(runs_str) do
+            {n, ""} when n > 0 ->
+              Map.put(acc, :runs, n)
+
+            _ ->
+              IO.puts("Error: --runs must be a positive integer (e.g., --runs=3)")
+              System.halt(1)
+          end
 
         String.starts_with?(arg, "--model") ->
           IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
