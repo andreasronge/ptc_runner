@@ -240,6 +240,30 @@ PTC_TEST_MODEL=haiku mix test --include e2e
 
 The same `.env` file is used by the demo application in `demo/`.
 
+## Clojure Validation
+
+PTC-Lisp is designed as a Clojure subset. You can validate programs against real Clojure using [Babashka](https://babashka.org/):
+
+```bash
+# Install Babashka (one-time)
+mix ptc.install_babashka
+
+# Run Clojure conformance tests
+mix test --only clojure
+
+# Skip Clojure tests (if Babashka not installed)
+mix test --exclude clojure
+
+# Demo test runner with Clojure syntax validation
+cd demo && mix lisp --test --validate-clojure
+```
+
+### Known Differences from Clojure
+
+PTC-Lisp aims for semantic compatibility with Clojure. All conformance tests currently pass.
+
+The main intentional difference is that sequence functions (`filter`, `map`, `sort`, etc.) return vectors instead of lazy sequences. This is practical for LLM use cases and doesn't affect program correctness.
+
 ## References
 
 - [Anthropic PTC Blog Post](https://www.anthropic.com/research/ptc)
