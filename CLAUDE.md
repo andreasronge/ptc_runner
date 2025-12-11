@@ -27,27 +27,11 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 
 ## Project Structure
 
-```
-lib/
-├── ptc_runner.ex           # Main public API
-├── ptc_runner/
-│   ├── sandbox.ex          # Process isolation + resource limits
-│   ├── context.ex          # Variable bindings and tool registry
-│   ├── schema.ex           # Operation definitions for validation
-│   └── json/               # JSON DSL implementation
-│       ├── parser.ex       # JSON parsing → AST
-│       ├── validator.ex    # AST schema validation
-│       ├── interpreter.ex  # AST evaluation
-│       └── operations.ex   # Built-in operations
-test/
-├── ptc_runner/             # Unit tests by module
-└── ...
-docs/
-├── guide.md                # Main documentation entry point
-├── ptc-json-specification.md   # JSON DSL complete reference
-├── ptc-lisp-specification.md   # PTC-Lisp complete reference
-└── guidelines/             # Development guidelines
-```
+- `lib/ptc_runner/` - Core library (sandbox, context, schema)
+- `lib/ptc_runner/json/` - JSON DSL implementation
+- `lib/ptc_runner/lisp/` - Lisp DSL implementation
+- `test/` - Tests mirroring lib structure
+- `docs/` - Guide, specifications, and guidelines
 
 ## Documentation
 
@@ -59,14 +43,12 @@ docs/
 - **[PR Review Guidelines](docs/guidelines/pr-review-guidelines.md)** - PR review structure and severity
 - **[GitHub Workflows](docs/guidelines/github-workflows.md)** - Claude automation workflows and security gates
 - **[Release Process](docs/guidelines/release-process.md)** - How to publish releases to Hex.pm
-- **[Research Notes](docs/research.md)** - PTC specification research
 
 ## Key Commands
 
 - `mix test` - Run all tests
 - `mix test --failed` - Re-run failed tests
 - `mix format` - Format code
-- `mix docs` - Generate documentation
 
 ## Architecture Overview
 
@@ -84,7 +66,6 @@ Programs execute in isolated BEAM processes with configurable timeout (default 1
 ## Development Reminders
 
 - **GitHub CLI**: Use `gh` command for GitHub tasks (reading issues, PRs, creating PRs, etc.)
-- **HTTP Client**: Use `Req` if HTTP is needed, never `:httpoison`, `:tesla`, or `:httpc`
 - **Timestamps**: Always use `:utc_datetime`, never `:naive_datetime`
 - **Durations**: Store as **integer milliseconds** (`duration_ms`), convert to human-readable only at display time
 
@@ -119,11 +100,13 @@ Programs execute in isolated BEAM processes with configurable timeout (default 1
 
 See [Testing Guidelines](docs/guidelines/testing-guidelines.md) for details.
 
-**Core principles:**
-- Test behavior, not implementation
-- Strong assertions (specific values, not just shape matching)
+- **Skip tests** for simple, pure functions with no dependencies (e.g., single-expression transforms, basic accessors)
+- **Focus tests** on integration points where multiple modules interact
+- **Unit test** only when functions have complex logic, branching, or edge cases
+- **Remove low-value tests** when encountered - tests that merely duplicate implementation or test trivial behavior add maintenance
+  cost without catching real bugs
+- Rule of thumb: if the test is as simple as the implementation, skip or remove it
 - No `Process.sleep` for timing - use monitors or async helpers
-- Each test should catch real bugs, not just increase coverage
 
 ## Planning & Issue Review
 
