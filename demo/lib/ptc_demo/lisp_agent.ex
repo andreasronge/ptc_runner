@@ -312,6 +312,9 @@ defmodule PtcDemo.LispAgent do
               {:ok, program} ->
                 IO.puts("   [Program] #{truncate(program, 80)}")
 
+                # Increment run counter when program is generated
+                run_tracked_usage = increment_run_count(new_usage)
+
                 # Execute the program using PtcRunner.Lisp with persistent memory
                 case PtcRunner.Lisp.run(program,
                        context: datasets,
@@ -336,7 +339,7 @@ defmodule PtcDemo.LispAgent do
                       model,
                       new_context,
                       datasets,
-                      new_usage,
+                      run_tracked_usage,
                       remaining - 1,
                       new_last_exec,
                       new_memory
@@ -356,7 +359,7 @@ defmodule PtcDemo.LispAgent do
                       model,
                       new_context,
                       datasets,
-                      new_usage,
+                      run_tracked_usage,
                       remaining - 1,
                       last_exec,
                       memory
@@ -653,11 +656,18 @@ defmodule PtcDemo.LispAgent do
 
   # --- Usage Tracking Helpers ---
 
+  defp estimate_system_prompt_tokens(prompt) when is_binary(prompt) do
+    # Rough approximation: ~4 characters per token on average
+    div(String.length(prompt), 4)
+  end
+
   defp empty_usage do
     %{
       input_tokens: 0,
       output_tokens: 0,
       total_tokens: 0,
+      system_prompt_tokens: estimate_system_prompt_tokens(system_prompt(:schema)),
+      total_runs: 0,
       total_cost: 0.0,
       requests: 0
     }
@@ -673,9 +683,15 @@ defmodule PtcDemo.LispAgent do
       input_tokens: acc.input_tokens + normalized.input_tokens,
       output_tokens: acc.output_tokens + normalized.output_tokens,
       total_tokens: acc.total_tokens + normalized.total_tokens,
+      system_prompt_tokens: acc.system_prompt_tokens,
+      total_runs: acc.total_runs,
       total_cost: acc.total_cost + normalized.total_cost,
       requests: acc.requests + 1
     }
+  end
+
+  defp increment_run_count(usage) do
+    %{usage | total_runs: usage.total_runs + 1}
   end
 
   defp normalize_usage(usage) when is_map(usage) do
