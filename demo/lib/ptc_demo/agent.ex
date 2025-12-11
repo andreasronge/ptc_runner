@@ -376,7 +376,7 @@ defmodule PtcDemo.Agent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
-    Memory persists automatically between programs - reference stored values with (var "key").
+    Memory persists automatically between programs - reference stored values with {"op": "var", "name": "key"}.
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets (with field types):
@@ -399,7 +399,7 @@ defmodule PtcDemo.Agent do
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
-    Memory persists automatically between programs - reference stored values with (var "key").
+    Memory persists automatically between programs - reference stored values with {"op": "var", "name": "key"}.
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets: #{dataset_names}
