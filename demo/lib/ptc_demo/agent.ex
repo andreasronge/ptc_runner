@@ -6,7 +6,7 @@ defmodule PtcDemo.Agent do
   - LLM decides when to query data by outputting a PTC program
   - Program results are returned as tool results
   - LLM continues until it provides a final answer (no program)
-  - Values can be stored and retrieved across queries using "store as X" pattern
+  - Memory persists automatically between program executions via native memory model
 
   This demonstrates the key advantage of Programmatic Tool Calling:
   - Large datasets stay in BEAM memory, never enter LLM context
@@ -287,16 +287,6 @@ defmodule PtcDemo.Agent do
 
   defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
-
-    # Capture the original question from the most recent user message
-    original_query =
-      context.messages
-      |> Enum.reverse()
-      |> Enum.find(&(&1.role == :user))
-      |> case do
-        nil -> ""
-        msg -> extract_text_content(msg.content)
-      end
 
     case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
       {:ok, response} ->
