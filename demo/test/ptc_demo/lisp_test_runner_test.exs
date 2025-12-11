@@ -1,6 +1,8 @@
 defmodule PtcDemo.LispTestRunnerTest do
   use ExUnit.Case, async: false
 
+  import PtcDemo.TestHelpers
+
   alias PtcDemo.{LispTestRunner, MockAgent}
 
   setup do
@@ -72,22 +74,12 @@ defmodule PtcDemo.LispTestRunnerTest do
 
     test "skips API key check when mock agent is provided", %{mock_agent: mock_agent} do
       # This should not raise an error even without API key set
-      old_api_key = System.get_env("OPENROUTER_API_KEY")
-
-      try do
-        System.delete_env("OPENROUTER_API_KEY")
-        System.delete_env("ANTHROPIC_API_KEY")
-        System.delete_env("OPENAI_API_KEY")
-
+      without_api_keys(fn ->
         result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
 
         assert is_map(result)
         assert result.passed >= 1
-      after
-        if old_api_key do
-          System.put_env("OPENROUTER_API_KEY", old_api_key)
-        end
-      end
+      end)
     end
 
     test "returns results with correct structure", %{mock_agent: mock_agent} do
@@ -134,22 +126,12 @@ defmodule PtcDemo.LispTestRunnerTest do
     end
 
     test "skips API key check for mock agent in run_one", %{mock_agent: mock_agent} do
-      old_api_key = System.get_env("OPENROUTER_API_KEY")
-
-      try do
-        System.delete_env("OPENROUTER_API_KEY")
-        System.delete_env("ANTHROPIC_API_KEY")
-        System.delete_env("OPENAI_API_KEY")
-
+      without_api_keys(fn ->
         result = LispTestRunner.run_one(1, agent: mock_agent, verbose: false)
 
         assert is_map(result)
         assert result.index == 1
-      after
-        if old_api_key do
-          System.put_env("OPENROUTER_API_KEY", old_api_key)
-        end
-      end
+      end)
     end
   end
 end
