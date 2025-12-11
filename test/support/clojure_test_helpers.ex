@@ -29,19 +29,14 @@ defmodule PtcRunner.TestSupport.ClojureTestHelpers do
   alias PtcRunner.Lisp.ClojureValidator
 
   @doc """
-  Skip test if Babashka is not installed.
+  Check if Babashka is available for Clojure validation.
 
-  Use in setup or setup_all blocks. Will skip the test with a helpful message
-  if Babashka is not available.
+  Returns `:ok` if Babashka is installed, `{:skip, message}` otherwise.
 
-  ## Example
-
-      setup do
-        require_babashka()
-        :ok
-      end
+  Note: Clojure tests are excluded in CI via `--exclude clojure` flag.
+  For local development, install Babashka with `mix ptc.install_babashka`.
   """
-  @spec require_babashka() :: :ok | no_return()
+  @spec require_babashka() :: :ok | {:skip, String.t()}
   def require_babashka do
     if ClojureValidator.available?() do
       :ok

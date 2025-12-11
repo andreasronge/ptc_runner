@@ -161,6 +161,15 @@ defmodule PtcRunner.Lisp.Runtime do
     Enum.empty?(coll)
   end
 
+  # reduce with 2 args: (reduce f coll) - uses first element as initial value
+  def reduce(f, coll) when is_list(coll) do
+    case coll do
+      [] -> nil
+      [h | t] -> Enum.reduce(t, h, f)
+    end
+  end
+
+  # reduce with 3 args: (reduce f init coll)
   def reduce(f, init, coll) when is_list(coll), do: Enum.reduce(coll, init, f)
 
   def sum_by(key, coll) when is_list(coll) do

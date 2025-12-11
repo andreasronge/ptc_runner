@@ -741,11 +741,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   describe "Clojure conformance - arithmetic" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "addition" do
       assert_clojure_equivalent("(+ 1 2)")
       assert_clojure_equivalent("(+ 1 2 3 4 5)")
@@ -801,11 +796,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   describe "Clojure conformance - collections" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "count" do
       assert_clojure_equivalent("(count [1 2 3])")
       assert_clojure_equivalent("(count [])")
@@ -860,11 +850,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   describe "Clojure conformance - map operations" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "get" do
       assert_clojure_equivalent("(get {:a 1 :b 2} :a)")
       assert_clojure_equivalent("(get {:a 1} :missing)")
@@ -900,11 +885,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   describe "Clojure conformance - logic" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "and" do
       assert_clojure_equivalent("(and true true)")
       assert_clojure_equivalent("(and true false)")
@@ -927,11 +907,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
 
   describe "Clojure conformance - predicates" do
     @describetag :clojure
-
-    setup do
-      require_babashka()
-      :ok
-    end
 
     test "nil?" do
       assert_clojure_equivalent("(nil? nil)")
@@ -976,11 +951,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   describe "Clojure conformance - higher-order functions" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "map" do
       assert_clojure_equivalent("(map inc [1 2 3])")
       assert_clojure_equivalent("(map dec [1 2 3])")
@@ -1017,11 +987,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
   describe "Clojure conformance - control flow" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "if" do
       assert_clojure_equivalent("(if true 1 2)")
       assert_clojure_equivalent("(if false 1 2)")
@@ -1047,11 +1012,6 @@ defmodule PtcRunner.Lisp.RuntimeTest do
 
   describe "Clojure conformance - threading macros" do
     @describetag :clojure
-
-    setup do
-      require_babashka()
-      :ok
-    end
 
     test "thread-last" do
       assert_clojure_equivalent("(->> [1 2 3] (map inc))")

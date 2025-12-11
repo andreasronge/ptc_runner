@@ -206,9 +206,14 @@ defmodule PtcRunner.Lisp.ClojureValidator do
         {:error, "Babashka not available"}
 
       bb ->
+        # Use read-string to safely parse EDN (handles lists like (1 2 3))
+        # Then convert to JSON. The read-string prevents (1 2 3) being interpreted
+        # as a function call.
+        escaped = output |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
+
         json_convert = """
         (require '[cheshire.core :as json])
-        (println (json/generate-string #{output}))
+        (println (json/generate-string (read-string "#{escaped}")))
         """
 
         case run_bb(bb, json_convert) do
@@ -252,6 +257,10 @@ defmodule PtcRunner.Lisp.ClojureValidator do
       String.starts_with?(str, "[") and String.ends_with?(str, "]") ->
         parse_edn_collection(str)
 
+      # List (Clojure lazy seq) - parse as list
+      String.starts_with?(str, "(") and String.ends_with?(str, ")") ->
+        parse_edn_collection(str)
+
       # Map
       String.starts_with?(str, "{") and String.ends_with?(str, "}") ->
         parse_edn_collection(str)
@@ -269,9 +278,11 @@ defmodule PtcRunner.Lisp.ClojureValidator do
         str
 
       bb ->
+        # Convert lists to vectors for JSON serialization
+        # (1 2 3) -> [1 2 3] since JSON doesn't support Clojure lists
         json_convert = """
         (require '[cheshire.core :as json])
-        (println (json/generate-string #{str}))
+        (println (json/generate-string (vec #{str})))
         """
 
         case run_bb(bb, json_convert) do

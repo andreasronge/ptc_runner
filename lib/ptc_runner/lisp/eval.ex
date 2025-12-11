@@ -424,12 +424,13 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Special handling for unary minus (must come before general variadic handler)
+  # Special handling for unary minus: (- x) means negation, not (identity - x)
   defp apply_fun({:variadic, fun2, _identity}, [x], _ctx, memory, _tool_exec) do
     if fun2 == (&Kernel.-/2) do
       {:ok, -x, memory}
     else
-      {:error, {:not_callable, fun2}}
+      # For other variadic functions like *, single arg returns the arg itself
+      {:ok, x, memory}
     end
   end
 

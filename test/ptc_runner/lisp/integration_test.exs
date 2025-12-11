@@ -768,11 +768,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "Clojure syntax validation - threading macros" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "thread-last pipeline is valid Clojure" do
       assert_valid_clojure_syntax("(->> [1 2 3] (map inc) (filter even?))")
     end
@@ -793,11 +788,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
   describe "Clojure syntax validation - let bindings" do
     @describetag :clojure
-
-    setup do
-      require_babashka()
-      :ok
-    end
 
     test "simple let binding is valid Clojure" do
       assert_valid_clojure_syntax("(let [x 10] x)")
@@ -825,11 +815,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "Clojure syntax validation - anonymous functions" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "fn with single parameter is valid Clojure" do
       assert_valid_clojure_syntax("(fn [x] (* x 2))")
     end
@@ -845,11 +830,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
   describe "Clojure syntax validation - control flow" do
     @describetag :clojure
-
-    setup do
-      require_babashka()
-      :ok
-    end
 
     test "if expression is valid Clojure" do
       assert_valid_clojure_syntax(~S/(if (> x 10) "big" "small")/)
@@ -872,11 +852,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "Clojure syntax validation - collections" do
     @describetag :clojure
 
-    setup do
-      require_babashka()
-      :ok
-    end
-
     test "vector literal is valid Clojure" do
       assert_valid_clojure_syntax("[1 2 3 4 5]")
     end
@@ -897,11 +872,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
   describe "Clojure syntax validation - complex programs" do
     @describetag :clojure
-
-    setup do
-      require_babashka()
-      :ok
-    end
 
     test "data transformation pipeline is valid Clojure" do
       assert_valid_clojure_syntax("""

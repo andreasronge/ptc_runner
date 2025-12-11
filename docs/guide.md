@@ -260,15 +260,9 @@ cd demo && mix lisp --test --validate-clojure
 
 ### Known Differences from Clojure
 
-The conformance tests have identified these semantic differences:
+PTC-Lisp aims for semantic compatibility with Clojure. All conformance tests currently pass.
 
-| Expression | PTC-Lisp | Clojure | Notes |
-|------------|----------|---------|-------|
-| `(or false false)` | `nil` | `false` | Short-circuit semantics |
-| `(some pred coll)` when no match | `false` | `nil` | Return value on failure |
-| `(and nil x)` | `nil` | `nil` | Same behavior |
-
-These differences are intentional trade-offs for LLM-friendly behavior or are pending alignment.
+The main intentional difference is that sequence functions (`filter`, `map`, `sort`, etc.) return vectors instead of lazy sequences. This is practical for LLM use cases and doesn't affect program correctness.
 
 ## References
 
