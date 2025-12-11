@@ -138,6 +138,52 @@ defmodule PtcRunner.Json.Operations.Access do
     end
   end
 
+  def eval("take", node, context, eval_fn) do
+    count = Map.get(node, "count")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data, memory} ->
+        if is_list(data) do
+          {:ok, Enum.take(data, count), memory}
+        else
+          {:error, {:execution_error, "take requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("drop", node, context, eval_fn) do
+    count = Map.get(node, "count")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data, memory} ->
+        if is_list(data) do
+          {:ok, Enum.drop(data, count), memory}
+        else
+          {:error, {:execution_error, "drop requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("distinct", _node, context, eval_fn) do
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data, memory} ->
+        if is_list(data) do
+          {:ok, Enum.uniq(data), memory}
+        else
+          {:error, {:execution_error, "distinct requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
   # Private helpers
 
   defp eval_nth(data, index) when is_list(data) do

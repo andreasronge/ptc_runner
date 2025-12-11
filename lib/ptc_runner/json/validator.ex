@@ -53,6 +53,8 @@ defmodule PtcRunner.Json.Validator do
     case op do
       "let" -> validate_let(op, node, fields)
       "nth" -> validate_nth(node, fields)
+      "take" -> validate_take(node, fields)
+      "drop" -> validate_drop(node, fields)
       "select" -> validate_select(node, fields)
       "get" -> validate_get(node, fields)
       "sort_by" -> validate_sort_by(node, fields)
@@ -81,6 +83,38 @@ defmodule PtcRunner.Json.Validator do
 
       _ ->
         {:error, {:validation_error, "Operation 'nth' field 'index' must be an integer"}}
+    end
+  end
+
+  defp validate_take(node, _fields) do
+    case Map.get(node, "count") do
+      nil ->
+        {:error, {:validation_error, "Operation 'take' requires field 'count'"}}
+
+      count when is_integer(count) and count >= 0 ->
+        :ok
+
+      count when is_integer(count) ->
+        {:error, {:validation_error, "Operation 'take' count must be non-negative, got #{count}"}}
+
+      _ ->
+        {:error, {:validation_error, "Operation 'take' field 'count' must be an integer"}}
+    end
+  end
+
+  defp validate_drop(node, _fields) do
+    case Map.get(node, "count") do
+      nil ->
+        {:error, {:validation_error, "Operation 'drop' requires field 'count'"}}
+
+      count when is_integer(count) and count >= 0 ->
+        :ok
+
+      count when is_integer(count) ->
+        {:error, {:validation_error, "Operation 'drop' count must be non-negative, got #{count}"}}
+
+      _ ->
+        {:error, {:validation_error, "Operation 'drop' field 'count' must be an integer"}}
     end
   end
 

@@ -151,6 +151,9 @@ Binds a value to a name for use in the body expression.
 | `first` | Get first item | `{"op": "first"}` |
 | `last` | Get last item | `{"op": "last"}` |
 | `nth` | Get nth item (0-indexed) | `{"op": "nth", "index": 2}` |
+| `take` | Take first N items | `{"op": "take", "count": 5}` |
+| `drop` | Drop first N items | `{"op": "drop", "count": 5}` |
+| `distinct` | Remove duplicates | `{"op": "distinct"}` |
 | `count` | Count items | `{"op": "count"}` |
 
 #### `pipe`
@@ -220,6 +223,44 @@ Sorts items by a field.
 {"op": "sort_by", "field": "price", "order": "asc"}
 {"op": "sort_by", "field": "created_at", "order": "desc"}
 ```
+
+#### `take`
+
+Takes the first N items from a list.
+
+```json
+{"op": "take", "count": 5}
+```
+
+- `count` (required, non-negative integer): Number of items to take from the beginning
+- Returns the first `count` items, or the entire list if `count` exceeds the list length
+- Returns `[]` if applied to an empty list or if `count` is 0
+
+#### `drop`
+
+Drops (skips) the first N items from a list.
+
+```json
+{"op": "drop", "count": 5}
+```
+
+- `count` (required, non-negative integer): Number of items to skip
+- Returns the remaining items after dropping the first `count` items
+- Returns `[]` if `count` is greater than or equal to the list length
+- Returns the entire list if `count` is 0
+
+#### `distinct`
+
+Removes duplicate values from a list, preserving the first occurrence order.
+
+```json
+{"op": "distinct"}
+```
+
+- Works with values of any type (numbers, strings, objects, etc.)
+- Uses structural equality for comparison (e.g., objects with the same content are equal)
+- Returns a list with duplicates removed while maintaining the order of first occurrences
+- Returns `[]` if applied to an empty list
 
 ### 5.3 Aggregation Operations
 
