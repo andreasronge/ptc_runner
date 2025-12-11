@@ -381,4 +381,202 @@ defmodule PtcRunner.Json.Operations.CollectionTest do
     {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
     assert result == %{"id" => 1, "name" => "Alice", "total" => 100, "status" => "shipped"}
   end
+
+  # Filter operation
+  test "filter with numeric comparison returns matching items" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"item": "book", "price": 50},
+          {"item": "pen", "price": 5},
+          {"item": "laptop", "price": 1000},
+          {"item": "notebook", "price": 10}
+        ]},
+        {"op": "filter", "where": {"op": "gt", "field": "price", "value": 10}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"item" => "book", "price" => 50},
+             %{"item" => "laptop", "price" => 1000}
+           ]
+  end
+
+  test "filter keeps matching items" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "food", "amount": 50},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"category" => "travel", "amount" => 500},
+             %{"category" => "travel", "amount" => 200}
+           ]
+  end
+
+  test "filter on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  # Map operation
+  test "map transforms each item" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [1, 2, 3]},
+        {"op": "map", "expr": {"op": "literal", "value": "x"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == ["x", "x", "x"]
+  end
+
+  test "map on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "map", "expr": {"op": "literal", "value": "x"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  # Select operation
+  test "select picks specific fields from each map" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"name": "Alice", "age": 30, "city": "NYC"},
+          {"name": "Bob", "age": 25, "city": "LA"}
+        ]},
+        {"op": "select", "fields": ["name", "age"]}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"name" => "Alice", "age" => 30},
+             %{"name" => "Bob", "age" => 25}
+           ]
+  end
+
+  # Reject operation
+  test "reject removes matching items" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "food", "amount": 50},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"category" => "food", "amount" => 50}
+           ]
+  end
+
+  test "reject with no matches returns full list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "food"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"category" => "travel", "amount" => 500},
+             %{"category" => "travel", "amount" => 200}
+           ]
+  end
+
+  test "reject with all matches returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"category": "travel", "amount": 500},
+          {"category": "travel", "amount": 200}
+        ]},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == []
+  end
+
+  test "reject on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "reject", "where": {"op": "eq", "field": "category", "value": "travel"}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == []
+  end
+
+  # E2E test with filter/reject and access operations
+  test "E2E: filter/reject work in realistic data processing pipeline" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"item": "book", "price": 50},
+          {"item": "pen", "price": 5},
+          {"item": "laptop", "price": 1000},
+          {"item": "notebook", "price": 10}
+        ]},
+        {"op": "reject", "where": {"op": "lt", "field": "price", "value": 10}},
+        {"op": "first"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == %{"item" => "book", "price" => 50}
+  end
 end
