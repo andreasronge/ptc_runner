@@ -460,5 +460,5 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 | Readability | Verbose | Concise |
 | Token usage | Higher | ~3-5x lower |
 | Maturity | Stable | Experimental |
-| Memory contract | N/A | Supports persistent memory |
+| Memory contract | Supports persistent memory | Supports persistent memory |
 | Test cases | 14 (same) | 14 (same) |
