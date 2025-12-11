@@ -72,9 +72,7 @@ Two-phase execution: parse and validate in the main process, then execute in an 
 
 ```elixir
 @spec run(String.t() | map(), keyword()) ::
-  {:ok, any(), metrics()} | {:error, error()}
-
-@type metrics :: %{duration_ms: non_neg_integer(), memory_bytes: non_neg_integer()}
+  {:ok, any(), map(), map()} | {:error, error()}
 
 @type error ::
   {:parse_error, String.t()} |
@@ -84,8 +82,11 @@ Two-phase execution: parse and validate in the main process, then execute in an 
   {:memory_exceeded, non_neg_integer()}
 ```
 
+Returns `{:ok, result, memory_delta, new_memory}` on success.
+
 **Options:**
 - `:context` - Map of pre-bound variables (default: `%{}`)
+- `:memory` - Map of initial memory state (default: `%{}`)
 - `:tools` - Map of tool name to function (default: `%{}`)
 - `:timeout` - Execution timeout in ms (default: `1000`)
 - `:max_heap` - Max heap size in words (default: `1_250_000` ≈ 10MB)
@@ -153,7 +154,7 @@ config :ptc_runner,
 
 ```elixir
 case PtcRunner.Json.run(program) do
-  {:ok, result, metrics} -> handle_success(result)
+  {:ok, result, _memory_delta, _new_memory} -> handle_success(result)
   {:error, {:timeout, ms}} -> Logger.warning("Exceeded #{ms}ms timeout")
   {:error, {:memory_exceeded, bytes}} -> Logger.warning("Exceeded memory: #{bytes}")
   {:error, {:parse_error, msg}} -> Logger.error("Invalid JSON: #{msg}")

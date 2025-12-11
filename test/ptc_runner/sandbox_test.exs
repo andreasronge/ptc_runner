@@ -6,7 +6,7 @@ defmodule PtcRunner.SandboxTest do
       ast = %{"op" => "literal", "value" => 42}
       context = PtcRunner.Context.new()
 
-      {:ok, result, metrics} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, result, metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
 
       assert result == 42
       assert is_map(metrics)
@@ -25,7 +25,7 @@ defmodule PtcRunner.SandboxTest do
       ast = %{"op" => "load", "name" => "x"}
       context = PtcRunner.Context.new(%{"x" => "hello"})
 
-      {:ok, result, _metrics} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, result, _metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
 
       assert result == "hello"
     end
@@ -37,7 +37,7 @@ defmodule PtcRunner.SandboxTest do
       context = PtcRunner.Context.new()
       opts = [timeout_ms: 5000]
 
-      {:ok, result, _metrics} = PtcRunner.Sandbox.execute(ast, context, opts)
+      {:ok, result, _metrics, _memory} = PtcRunner.Sandbox.execute(ast, context, opts)
 
       assert result == 100
     end
@@ -47,7 +47,7 @@ defmodule PtcRunner.SandboxTest do
       context = PtcRunner.Context.new()
       opts = [max_memory_mb: 50]
 
-      {:ok, result, _metrics} = PtcRunner.Sandbox.execute(ast, context, opts)
+      {:ok, result, _metrics, _memory} = PtcRunner.Sandbox.execute(ast, context, opts)
 
       assert result == "data"
     end
@@ -57,7 +57,7 @@ defmodule PtcRunner.SandboxTest do
       context = PtcRunner.Context.new()
       opts = [timeout_ms: 3000, max_memory_mb: 20]
 
-      {:ok, result, _metrics} = PtcRunner.Sandbox.execute(ast, context, opts)
+      {:ok, result, _metrics, _memory} = PtcRunner.Sandbox.execute(ast, context, opts)
 
       assert result == [1, 2, 3]
     end
@@ -92,7 +92,7 @@ defmodule PtcRunner.SandboxTest do
       ast = %{"op" => "literal", "value" => 1}
       context = PtcRunner.Context.new()
 
-      {:ok, _result, metrics} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, _result, metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
 
       assert is_integer(metrics.duration_ms)
       assert metrics.duration_ms >= 0
@@ -102,7 +102,7 @@ defmodule PtcRunner.SandboxTest do
       ast = %{"op" => "literal", "value" => 2}
       context = PtcRunner.Context.new()
 
-      {:ok, _result, metrics} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, _result, metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
 
       assert is_integer(metrics.memory_bytes)
       assert metrics.memory_bytes >= 0
@@ -112,7 +112,7 @@ defmodule PtcRunner.SandboxTest do
       ast = %{"op" => "literal", "value" => 42}
       context = PtcRunner.Context.new()
 
-      {:ok, result, metrics} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, result, metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
 
       assert result == 42
       assert metrics.duration_ms >= 0
@@ -125,7 +125,7 @@ defmodule PtcRunner.SandboxTest do
       ast = %{"op" => "literal", "value" => "isolated"}
       context = PtcRunner.Context.new()
 
-      {:ok, result, _metrics} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, result, _metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
 
       assert result == "isolated"
       # Outer process is unaffected
@@ -136,10 +136,10 @@ defmodule PtcRunner.SandboxTest do
       context = PtcRunner.Context.new()
 
       ast1 = %{"op" => "literal", "value" => 1}
-      {:ok, result1, _} = PtcRunner.Sandbox.execute(ast1, context)
+      {:ok, result1, _, _} = PtcRunner.Sandbox.execute(ast1, context)
 
       ast2 = %{"op" => "literal", "value" => 2}
-      {:ok, result2, _} = PtcRunner.Sandbox.execute(ast2, context)
+      {:ok, result2, _, _} = PtcRunner.Sandbox.execute(ast2, context)
 
       assert result1 == 1
       assert result2 == 2
