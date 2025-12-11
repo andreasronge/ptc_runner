@@ -21,25 +21,33 @@ defmodule PtcRunner.Json.Operations do
     - eval_fn: Function to recursively evaluate expressions
 
   ## Returns
-    - `{:ok, result}` on success
+    - `{:ok, result, memory}` on success
     - `{:error, reason}` on failure
   """
   @spec eval(String.t(), map(), Context.t(), function()) ::
-          {:ok, any()} | {:error, {atom(), String.t()}}
+          {:ok, any(), map()} | {:error, {atom(), String.t()}}
 
   # Data operations
-  def eval("literal", node, _context, _eval_fn) do
-    {:ok, Map.get(node, "value")}
+  def eval("literal", node, context, _eval_fn) do
+    {:ok, Map.get(node, "value"), context.memory}
   end
 
   def eval("load", node, context, _eval_fn) do
     name = Map.get(node, "name")
-    Context.get_var(context, name)
+
+    case Context.get_ctx(context, name) do
+      {:ok, value} -> {:ok, value, context.memory}
+      {:error, _} = err -> err
+    end
   end
 
   def eval("var", node, context, _eval_fn) do
     name = Map.get(node, "name")
-    Context.get_var(context, name)
+
+    case Context.get_memory(context, name) do
+      {:ok, value} -> {:ok, value, context.memory}
+      {:error, _} = err -> err
+    end
   end
 
   def eval("let", node, context, _eval_fn) do
@@ -51,8 +59,8 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, value} ->
-        new_context = Context.put_var(context, name, value)
+      {:ok, value, memory} ->
+        new_context = Context.put_memory(%{context | memory: memory}, name, value)
         Interpreter.eval(in_expr, new_context)
     end
   end
@@ -66,11 +74,13 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, result} ->
+      {:ok, result, memory} ->
+        new_context = %{context | memory: memory}
+
         if result in [false, nil] do
-          Interpreter.eval(else_expr, context)
+          Interpreter.eval(else_expr, new_context)
         else
-          Interpreter.eval(then_expr, context)
+          Interpreter.eval(then_expr, new_context)
         end
     end
   end
@@ -92,11 +102,11 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, result} ->
+      {:ok, result, memory} ->
         if result in [false, nil] do
-          {:ok, true}
+          {:ok, true, memory}
         else
-          {:ok, false}
+          {:ok, false, memory}
         end
     end
   end
@@ -130,9 +140,11 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
+        new_context = %{context | memory: memory}
+
         if is_list(data) do
-          filter_list(data, where_clause, context, eval_fn)
+          filter_list(data, where_clause, new_context, eval_fn)
         else
           {:error, {:execution_error, "filter requires a list, got #{inspect(data)}"}}
         end
@@ -146,9 +158,11 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
+        new_context = %{context | memory: memory}
+
         if is_list(data) do
-          map_list(data, expr, context, eval_fn)
+          map_list(data, expr, new_context, eval_fn)
         else
           {:error, {:execution_error, "map requires a list, got #{inspect(data)}"}}
         end
@@ -162,9 +176,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          select_list(data, fields)
+          {:ok, select_list(data, fields), memory}
         else
           {:error, {:execution_error, "select requires a list, got #{inspect(data)}"}}
         end
@@ -195,10 +209,10 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_map(data) do
           field_value = Map.get(data, field)
-          {:ok, contains_value?(field_value, value)}
+          {:ok, contains_value?(field_value, value), memory}
         else
           {:error, {:execution_error, "contains requires a map, got #{inspect(data)}"}}
         end
@@ -218,7 +232,7 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         result =
           if path == [] do
             data
@@ -226,7 +240,8 @@ defmodule PtcRunner.Json.Operations do
             get_nested(data, path)
           end
 
-        handle_get_result(result, node)
+        {_result_status, result_value} = handle_get_result(result, node)
+        {:ok, result_value, memory}
     end
   end
 
@@ -238,9 +253,12 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          sum_list(data, field)
+          case sum_list(data, field) do
+            {:ok, result} -> {:ok, result, memory}
+            {:error, _} = err -> err
+          end
         else
           {:error, {:execution_error, "sum requires a list, got #{inspect(data)}"}}
         end
@@ -252,9 +270,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          {:ok, length(data)}
+          {:ok, length(data), memory}
         else
           {:error, {:execution_error, "count requires a list, got #{inspect(data)}"}}
         end
@@ -268,9 +286,11 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          avg_list(data, field)
+          case avg_list(data, field) do
+            {:ok, result} -> {:ok, result, memory}
+          end
         else
           {:error, {:execution_error, "avg requires a list, got #{inspect(data)}"}}
         end
@@ -284,9 +304,12 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          min_list(data, field)
+          case min_list(data, field) do
+            {:ok, result} -> {:ok, result, memory}
+            {:error, _} = err -> err
+          end
         else
           {:error, {:execution_error, "min requires a list, got #{inspect(data)}"}}
         end
@@ -300,9 +323,12 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          max_list(data, field)
+          case max_list(data, field) do
+            {:ok, result} -> {:ok, result, memory}
+            {:error, _} = err -> err
+          end
         else
           {:error, {:execution_error, "max requires a list, got #{inspect(data)}"}}
         end
@@ -314,9 +340,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          {:ok, List.first(data)}
+          {:ok, List.first(data), memory}
         else
           {:error, {:execution_error, "first requires a list, got #{inspect(data)}"}}
         end
@@ -328,9 +354,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          {:ok, List.last(data)}
+          {:ok, List.last(data), memory}
         else
           {:error, {:execution_error, "last requires a list, got #{inspect(data)}"}}
         end
@@ -344,8 +370,11 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
-        eval_nth(data, index)
+      {:ok, data, memory} ->
+        case eval_nth(data, index) do
+          {:ok, result} -> {:ok, result, memory}
+          {:error, _} = err -> err
+        end
     end
   end
 
@@ -356,9 +385,11 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
+        new_context = %{context | memory: memory}
+
         if is_list(data) do
-          reject_list(data, where_clause, context, eval_fn)
+          reject_list(data, where_clause, new_context, eval_fn)
         else
           {:error, {:execution_error, "reject requires a list, got #{inspect(data)}"}}
         end
@@ -373,9 +404,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          sort_by_list(data, field, order)
+          {:ok, sort_by_list(data, field, order), memory}
         else
           {:error, {:execution_error, "sort_by requires a list, got #{inspect(data)}"}}
         end
@@ -389,9 +420,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          max_by_list(data, field)
+          {:ok, max_by_list(data, field), memory}
         else
           {:error, {:execution_error, "max_by requires a list, got #{inspect(data)}"}}
         end
@@ -405,9 +436,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_list(data) do
-          min_by_list(data, field)
+          {:ok, min_by_list(data, field), memory}
         else
           {:error, {:execution_error, "min_by requires a list, got #{inspect(data)}"}}
         end
@@ -420,9 +451,9 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_map(data) do
-          {:ok, data |> Map.keys() |> Enum.sort()}
+          {:ok, data |> Map.keys() |> Enum.sort(), memory}
         else
           {:error, {:execution_error, "keys requires a map, got #{inspect(data)}"}}
         end
@@ -434,8 +465,8 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
-        {:ok, get_type_name(data)}
+      {:ok, data, memory} ->
+        {:ok, get_type_name(data), memory}
     end
   end
 
@@ -455,7 +486,7 @@ defmodule PtcRunner.Json.Operations do
               {:error, {:execution_error, "Tool '#{tool_name}' error: #{inspect(reason)}"}}
 
             result ->
-              {:ok, result}
+              {:ok, result, context.memory}
           end
         rescue
           e -> {:error, {:execution_error, "Tool '#{tool_name}' raised: #{Exception.message(e)}"}}
@@ -490,18 +521,18 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, data} ->
+      {:ok, data, memory} ->
         if is_map(data) do
           data_value = Map.get(data, field)
-          {:ok, compare_fn.(data_value, value)}
+          {:ok, compare_fn.(data_value, value), memory}
         else
           {:error, {:execution_error, "#{op_name} requires a map, got #{inspect(data)}"}}
         end
     end
   end
 
-  defp eval_pipe([], acc, _context, _eval_fn) do
-    {:ok, acc}
+  defp eval_pipe([], acc, context, _eval_fn) do
+    {:ok, acc, context.memory}
   end
 
   defp eval_pipe([step | rest], acc, context, eval_fn) do
@@ -509,54 +540,61 @@ defmodule PtcRunner.Json.Operations do
     step_with_input = Map.put(step, "__input", acc)
 
     case Interpreter.eval(step_with_input, context) do
-      {:ok, result} -> eval_pipe(rest, result, context, eval_fn)
-      {:error, _} = err -> err
+      {:ok, result, memory} ->
+        new_context = %{context | memory: memory}
+        eval_pipe(rest, result, new_context, eval_fn)
+
+      {:error, _} = err ->
+        err
     end
   end
 
-  defp eval_and([], _context), do: {:ok, true}
+  defp eval_and([], context), do: {:ok, true, context.memory}
 
   defp eval_and([cond_expr | rest], context) do
     case Interpreter.eval(cond_expr, context) do
       {:error, _} = err ->
         err
 
-      {:ok, result} when result in [false, nil] ->
-        {:ok, false}
+      {:ok, result, memory} when result in [false, nil] ->
+        {:ok, false, memory}
 
-      {:ok, _} ->
-        eval_and(rest, context)
+      {:ok, _result, memory} ->
+        new_context = %{context | memory: memory}
+        eval_and(rest, new_context)
     end
   end
 
-  defp eval_or([], _context), do: {:ok, false}
+  defp eval_or([], context), do: {:ok, false, context.memory}
 
   defp eval_or([cond_expr | rest], context) do
     case Interpreter.eval(cond_expr, context) do
       {:error, _} = err ->
         err
 
-      {:ok, result} when result in [false, nil] ->
-        eval_or(rest, context)
+      {:ok, result, memory} when result in [false, nil] ->
+        new_context = %{context | memory: memory}
+        eval_or(rest, new_context)
 
-      {:ok, _} ->
-        {:ok, true}
+      {:ok, _result, memory} ->
+        {:ok, true, memory}
     end
   end
 
   defp filter_list(data, where_clause, context, _eval_fn) do
-    Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+    Enum.reduce_while(data, {:ok, [], context.memory}, fn item, {:ok, acc, memory} ->
       # Inject item as __input for evaluation
       where_clause_with_input = Map.put(where_clause, "__input", item)
+      ctx = %{context | memory: memory}
 
-      case Interpreter.eval(where_clause_with_input, context) do
-        {:ok, true} ->
-          {:cont, {:ok, acc ++ [item]}}
+      case Interpreter.eval(where_clause_with_input, ctx) do
+        {:ok, true, new_memory} ->
+          {:cont, {:ok, acc ++ [item], new_memory}}
 
-        {:ok, false} ->
-          {:cont, {:ok, acc}}
+        {:ok, false, new_memory} ->
+          {:cont, {:ok, acc, new_memory}}
 
-        {:ok, result} ->
+        {:ok, result, _memory} ->
           {:halt,
            {:error,
             {:execution_error, "filter where clause must return boolean, got #{inspect(result)}"}}}
@@ -565,21 +603,26 @@ defmodule PtcRunner.Json.Operations do
           {:halt, err}
       end
     end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
   end
 
   defp reject_list(data, where_clause, context, _eval_fn) do
-    Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+    Enum.reduce_while(data, {:ok, [], context.memory}, fn item, {:ok, acc, memory} ->
       # Inject item as __input for evaluation
       where_clause_with_input = Map.put(where_clause, "__input", item)
+      ctx = %{context | memory: memory}
 
-      case Interpreter.eval(where_clause_with_input, context) do
-        {:ok, true} ->
-          {:cont, {:ok, acc}}
+      case Interpreter.eval(where_clause_with_input, ctx) do
+        {:ok, true, new_memory} ->
+          {:cont, {:ok, acc, new_memory}}
 
-        {:ok, false} ->
-          {:cont, {:ok, acc ++ [item]}}
+        {:ok, false, new_memory} ->
+          {:cont, {:ok, acc ++ [item], new_memory}}
 
-        {:ok, result} ->
+        {:ok, result, _memory} ->
           {:halt,
            {:error,
             {:execution_error, "reject where clause must return boolean, got #{inspect(result)}"}}}
@@ -588,31 +631,37 @@ defmodule PtcRunner.Json.Operations do
           {:halt, err}
       end
     end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
   end
 
   defp map_list(data, expr, context, _eval_fn) do
-    Enum.reduce_while(data, {:ok, []}, fn item, {:ok, acc} ->
+    Enum.reduce_while(data, {:ok, [], context.memory}, fn item, {:ok, acc, memory} ->
       # Inject item as __input for evaluation
       expr_with_input = Map.put(expr, "__input", item)
+      ctx = %{context | memory: memory}
 
-      case Interpreter.eval(expr_with_input, context) do
-        {:ok, result} -> {:cont, {:ok, acc ++ [result]}}
+      case Interpreter.eval(expr_with_input, ctx) do
+        {:ok, result, new_memory} -> {:cont, {:ok, acc ++ [result], new_memory}}
         {:error, _} = err -> {:halt, err}
       end
     end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
   end
 
   defp select_list(data, fields) do
-    result =
-      Enum.map(data, fn item ->
-        if is_map(item) do
-          Map.take(item, fields)
-        else
-          item
-        end
-      end)
-
-    {:ok, result}
+    Enum.map(data, fn item ->
+      if is_map(item) do
+        Map.take(item, fields)
+      else
+        item
+      end
+    end)
   end
 
   defp sum_list(data, field) do
@@ -750,47 +799,59 @@ defmodule PtcRunner.Json.Operations do
     {:ok, value}
   end
 
-  defp eval_merge([], _context) do
-    {:ok, %{}}
+  defp eval_merge([], context) do
+    {:ok, %{}, context.memory}
   end
 
   defp eval_merge(objects, context) do
-    Enum.reduce_while(objects, {:ok, %{}}, fn obj_expr, {:ok, acc} ->
-      case Interpreter.eval(obj_expr, context) do
+    Enum.reduce_while(objects, {:ok, %{}, context.memory}, fn obj_expr, {:ok, acc, memory} ->
+      ctx = %{context | memory: memory}
+
+      case Interpreter.eval(obj_expr, ctx) do
         {:error, _} = err ->
           {:halt, err}
 
-        {:ok, obj} when is_map(obj) ->
-          {:cont, {:ok, Map.merge(acc, obj)}}
+        {:ok, obj, new_memory} when is_map(obj) ->
+          {:cont, {:ok, Map.merge(acc, obj), new_memory}}
 
-        {:ok, obj} ->
+        {:ok, obj, _memory} ->
           {:halt, {:error, {:execution_error, "merge requires map values, got #{inspect(obj)}"}}}
       end
     end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
   end
 
-  defp eval_concat([], _context) do
-    {:ok, []}
+  defp eval_concat([], context) do
+    {:ok, [], context.memory}
   end
 
   defp eval_concat(lists, context) do
-    Enum.reduce_while(lists, {:ok, []}, fn list_expr, {:ok, acc} ->
-      case Interpreter.eval(list_expr, context) do
+    Enum.reduce_while(lists, {:ok, [], context.memory}, fn list_expr, {:ok, acc, memory} ->
+      ctx = %{context | memory: memory}
+
+      case Interpreter.eval(list_expr, ctx) do
         {:error, _} = err ->
           {:halt, err}
 
-        {:ok, list} when is_list(list) ->
-          {:cont, {:ok, acc ++ list}}
+        {:ok, list, new_memory} when is_list(list) ->
+          {:cont, {:ok, acc ++ list, new_memory}}
 
-        {:ok, list} ->
+        {:ok, list, _memory} ->
           {:halt,
            {:error, {:execution_error, "concat requires list values, got #{inspect(list)}"}}}
       end
     end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
   end
 
-  defp eval_zip([], _context) do
-    {:ok, []}
+  defp eval_zip([], context) do
+    {:ok, [], context.memory}
   end
 
   defp eval_zip(lists, context) do
@@ -798,13 +859,13 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, evaluated_lists} ->
-        {:ok, Enum.zip_with(evaluated_lists, & &1)}
+      {:ok, evaluated_lists, memory} ->
+        {:ok, Enum.zip_with(evaluated_lists, & &1), memory}
     end
   end
 
-  defp eval_all_lists([], _context, acc) do
-    {:ok, Enum.reverse(acc)}
+  defp eval_all_lists([], context, acc) do
+    {:ok, Enum.reverse(acc), context.memory}
   end
 
   defp eval_all_lists([list_expr | rest], context, acc) do
@@ -812,15 +873,16 @@ defmodule PtcRunner.Json.Operations do
       {:error, _} = err ->
         err
 
-      {:ok, list} when is_list(list) ->
-        eval_all_lists(rest, context, [list | acc])
+      {:ok, list, new_memory} when is_list(list) ->
+        new_context = %{context | memory: new_memory}
+        eval_all_lists(rest, new_context, [list | acc])
 
-      {:ok, list} ->
+      {:ok, list, _memory} ->
         {:error, {:execution_error, "zip requires list values, got #{inspect(list)}"}}
     end
   end
 
-  defp sort_by_list([], _field, _order), do: {:ok, []}
+  defp sort_by_list([], _field, _order), do: []
 
   defp sort_by_list(data, field, order) do
     sorter =
@@ -829,44 +891,35 @@ defmodule PtcRunner.Json.Operations do
         _ -> &<=/2
       end
 
-    sorted =
-      Enum.sort_by(
-        data,
-        fn item ->
-          if is_map(item), do: Map.get(item, field), else: nil
-        end,
-        sorter
-      )
-
-    {:ok, sorted}
+    Enum.sort_by(
+      data,
+      fn item ->
+        if is_map(item), do: Map.get(item, field), else: nil
+      end,
+      sorter
+    )
   end
 
-  defp max_by_list([], _field), do: {:ok, nil}
+  defp max_by_list([], _field), do: nil
 
   defp max_by_list(data, field) do
-    result =
-      data
-      |> Enum.filter(fn item -> is_map(item) and Map.get(item, field) != nil end)
-      |> case do
-        [] -> nil
-        items -> Enum.max_by(items, fn item -> Map.get(item, field) end)
-      end
-
-    {:ok, result}
+    data
+    |> Enum.filter(fn item -> is_map(item) and Map.get(item, field) != nil end)
+    |> case do
+      [] -> nil
+      items -> Enum.max_by(items, fn item -> Map.get(item, field) end)
+    end
   end
 
-  defp min_by_list([], _field), do: {:ok, nil}
+  defp min_by_list([], _field), do: nil
 
   defp min_by_list(data, field) do
-    result =
-      data
-      |> Enum.filter(fn item -> is_map(item) and Map.get(item, field) != nil end)
-      |> case do
-        [] -> nil
-        items -> Enum.min_by(items, fn item -> Map.get(item, field) end)
-      end
-
-    {:ok, result}
+    data
+    |> Enum.filter(fn item -> is_map(item) and Map.get(item, field) != nil end)
+    |> case do
+      [] -> nil
+      items -> Enum.min_by(items, fn item -> Map.get(item, field) end)
+    end
   end
 
   defp get_type_name(nil), do: "null"
