@@ -19,7 +19,7 @@ defmodule PtcDemo.LispAgent do
 
   alias PtcDemo.SampleData
 
-  @model_env "REQ_LLM_MODEL"
+  @model_env "PTC_DEMO_MODEL"
   @timeout 60_000
   @max_iterations 5
 
@@ -117,27 +117,18 @@ defmodule PtcDemo.LispAgent do
 
   @doc """
   Available preset models for easy switching.
+  Delegates to ModelRegistry for single source of truth.
   """
   def preset_models do
-    %{
-      "haiku" => "openrouter:anthropic/claude-haiku-4.5",
-      "gemini" => "openrouter:google/gemini-2.5-flash",
-      "deepseek" => "openrouter:deepseek/deepseek-v3.2",
-      "kimi" => "openrouter:moonshotai/kimi-k2",
-      "gpt" => "openrouter:openai/gpt-5.1-codex-mini"
-    }
+    PtcDemo.ModelRegistry.preset_models()
   end
 
   @doc """
   Auto-detect which model to use based on available API keys.
+  Delegates to ModelRegistry for single source of truth.
   """
   def detect_model do
-    cond do
-      System.get_env("ANTHROPIC_API_KEY") -> "openrouter:anthropic:claude-haiku-4.5"
-      System.get_env("OPENROUTER_API_KEY") -> "openrouter:anthropic/claude-haiku-4.5"
-      System.get_env("OPENAI_API_KEY") -> "openrouter:openai/gpt-5.1-codex-mini"
-      true -> "openrouter:anthropic:claude-haiku-4.5"
-    end
+    PtcDemo.ModelRegistry.default_model()
   end
 
   # --- GenServer Callbacks ---

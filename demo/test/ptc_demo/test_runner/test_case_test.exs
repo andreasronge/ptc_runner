@@ -12,8 +12,8 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
 
     test "returns expected number of common test cases" do
       cases = TestCase.common_test_cases()
-      # Based on the test case definitions, should have 9 common cases
-      assert length(cases) == 9
+      # Unified test suite has 12 common cases covering 3 difficulty levels
+      assert length(cases) == 12
     end
 
     test "each test case has required fields" do
@@ -85,14 +85,14 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
     test "includes filtered count test cases" do
       cases = TestCase.common_test_cases()
 
-      # Check for filtered category test
-      category_test =
-        Enum.find(cases, fn tc -> String.contains?(tc.query, "electronics") end)
+      # Check for filtered status test (delivered orders)
+      status_test =
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "delivered") end)
 
-      assert category_test != nil
-      assert category_test.expect == :integer
+      assert status_test != nil
+      assert status_test.expect == :integer
       # Constraint should be a range check
-      assert elem(category_test.constraint, 0) == :between
+      assert elem(status_test.constraint, 0) == :between
     end
 
     test "includes aggregation test cases" do
@@ -100,9 +100,87 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
 
       # Check for total orders aggregation
       aggregation_test =
-        Enum.find(cases, fn tc -> String.contains?(tc.query, "total") end)
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "total revenue") end)
 
       assert aggregation_test != nil
+    end
+
+    test "includes boolean field filtering" do
+      cases = TestCase.common_test_cases()
+
+      # Check for remote employees test
+      boolean_test =
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "remotely") end)
+
+      assert boolean_test != nil
+      assert boolean_test.expect == :integer
+    end
+
+    test "includes numeric comparison tests" do
+      cases = TestCase.common_test_cases()
+
+      # Check for price > $500 test
+      numeric_test =
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "more than $500") end)
+
+      assert numeric_test != nil
+    end
+
+    test "includes AND logic tests" do
+      cases = TestCase.common_test_cases()
+
+      # Check for combined conditions test
+      and_test =
+        Enum.find(cases, fn tc ->
+          String.contains?(tc.query, "over $1000") and String.contains?(tc.query, "credit card")
+        end)
+
+      assert and_test != nil
+    end
+
+    test "includes OR logic tests" do
+      cases = TestCase.common_test_cases()
+
+      # Check for OR conditions test
+      or_test =
+        Enum.find(cases, fn tc ->
+          String.contains?(tc.query, "cancelled or refunded")
+        end)
+
+      assert or_test != nil
+    end
+
+    test "includes find extreme value tests" do
+      cases = TestCase.common_test_cases()
+
+      # Check for cheapest product test
+      min_test =
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "cheapest") end)
+
+      assert min_test != nil
+      assert min_test.expect == :string
+    end
+
+    test "includes top-N tests" do
+      cases = TestCase.common_test_cases()
+
+      # Check for top 3 most expensive products test
+      topn_test =
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "3 most expensive") end)
+
+      assert topn_test != nil
+      assert topn_test.expect == :list
+      assert topn_test.constraint == {:length, 3}
+    end
+
+    test "includes cross-dataset tests" do
+      cases = TestCase.common_test_cases()
+
+      # Check for distinct products ordered test
+      cross_test =
+        Enum.find(cases, fn tc -> String.contains?(tc.query, "unique products") end)
+
+      assert cross_test != nil
     end
 
     test "does not have duplicate queries" do
@@ -116,116 +194,10 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
   end
 
   describe "lisp_specific_cases/0" do
-    test "returns a list of test cases" do
+    test "returns an empty list (all tests unified into common_test_cases)" do
       cases = TestCase.lisp_specific_cases()
       assert is_list(cases)
-      assert length(cases) > 0
-    end
-
-    test "returns expected number of lisp-specific test cases" do
-      cases = TestCase.lisp_specific_cases()
-      # Based on the test case definitions, should have 10 lisp-specific cases
-      assert length(cases) == 10
-    end
-
-    test "each test case has required fields" do
-      cases = TestCase.lisp_specific_cases()
-
-      Enum.each(cases, fn test_case ->
-        assert Map.has_key?(test_case, :query)
-        assert Map.has_key?(test_case, :expect)
-        assert Map.has_key?(test_case, :constraint)
-        assert Map.has_key?(test_case, :description)
-
-        # Verify types
-        assert is_binary(test_case.query)
-        assert is_atom(test_case.expect)
-        assert is_binary(test_case.description)
-      end)
-    end
-
-    test "expect field contains valid types" do
-      valid_types = [:integer, :number, :list, :string, :map]
-      cases = TestCase.lisp_specific_cases()
-
-      Enum.each(cases, fn test_case ->
-        assert test_case.expect in valid_types,
-               "Invalid expect type: #{test_case.expect}"
-      end)
-    end
-
-    test "includes expense count test" do
-      cases = TestCase.lisp_specific_cases()
-
-      expense_test = Enum.find(cases, fn tc -> String.contains?(tc.query, "expenses") end)
-      assert expense_test != nil
-      assert expense_test.expect == :integer
-      assert expense_test.constraint == {:eq, 800}
-    end
-
-    test "includes sort operation test cases" do
-      cases = TestCase.lisp_specific_cases()
-
-      # Check for sort-related tests (expensive product, highest paid employees)
-      sort_tests =
-        Enum.filter(cases, fn tc ->
-          String.contains?(tc.query, "most expensive") or
-            String.contains?(tc.query, "highest paid")
-        end)
-
-      assert length(sort_tests) >= 2, "Should have at least 2 sort-related tests"
-    end
-
-    test "includes list result test cases" do
-      cases = TestCase.lisp_specific_cases()
-
-      # Check for test with list expectation
-      list_tests = Enum.filter(cases, fn tc -> tc.expect == :list end)
-      assert length(list_tests) > 0
-
-      # Check for length constraint
-      length_tests =
-        Enum.filter(list_tests, fn tc ->
-          tc.constraint && elem(tc.constraint, 0) == :length
-        end)
-
-      assert length(length_tests) > 0
-    end
-
-    test "includes cross-dataset query tests" do
-      cases = TestCase.lisp_specific_cases()
-
-      # Check for tests that mention distinct, unique, or joining
-      cross_dataset_tests =
-        Enum.filter(cases, fn tc ->
-          String.contains?(tc.query, "unique") or
-            String.contains?(tc.query, "distinct") or
-            String.contains?(tc.query, "department")
-        end)
-
-      assert length(cross_dataset_tests) > 0
-    end
-
-    test "does not have duplicate queries" do
-      cases = TestCase.lisp_specific_cases()
-      queries = Enum.map(cases, & &1.query)
-      unique_queries = Enum.uniq(queries)
-
-      assert length(queries) == length(unique_queries),
-             "Found duplicate test case queries"
-    end
-
-    test "queries are different from common test cases" do
-      common_queries = TestCase.common_test_cases() |> Enum.map(& &1.query)
-      lisp_queries = TestCase.lisp_specific_cases() |> Enum.map(& &1.query)
-
-      # There should be minimal overlap (some queries might be similar but not identical)
-      common_set = MapSet.new(common_queries)
-      lisp_set = MapSet.new(lisp_queries)
-      overlap = MapSet.intersection(common_set, lisp_set)
-
-      # Allow some overlap but most should be distinct
-      assert MapSet.size(overlap) < length(lisp_queries) / 2
+      assert length(cases) == 0
     end
   end
 
@@ -396,18 +368,6 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
   end
 
   describe "test case consistency across functions" do
-    test "common and lisp cases do not have exact duplicate queries" do
-      common_queries = TestCase.common_test_cases() |> Enum.map(& &1.query)
-      lisp_queries = TestCase.lisp_specific_cases() |> Enum.map(& &1.query)
-
-      common_set = MapSet.new(common_queries)
-      lisp_set = MapSet.new(lisp_queries)
-
-      # Some overlap is acceptable, but should be minority
-      overlap = MapSet.intersection(common_set, lisp_set)
-      assert MapSet.size(overlap) <= 1
-    end
-
     test "multi-turn cases are distinct from common cases" do
       common_queries = TestCase.common_test_cases() |> Enum.map(& &1.query)
       multi_queries = TestCase.multi_turn_cases() |> Enum.map(&Enum.join(&1.queries))
@@ -425,7 +385,6 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
     test "all test cases have meaningful descriptions" do
       all_cases =
         TestCase.common_test_cases() ++
-          TestCase.lisp_specific_cases() ++
           TestCase.multi_turn_cases()
 
       Enum.each(all_cases, fn test_case ->
@@ -447,7 +406,6 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
     test "all constraint values are reasonable" do
       all_cases =
         TestCase.common_test_cases() ++
-          TestCase.lisp_specific_cases() ++
           TestCase.multi_turn_cases()
 
       Enum.each(all_cases, fn test_case ->
@@ -496,7 +454,6 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
 
       all_cases =
         TestCase.common_test_cases() ++
-          TestCase.lisp_specific_cases() ++
           TestCase.multi_turn_cases()
 
       Enum.each(all_cases, fn test_case ->

@@ -14,9 +14,11 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
 
   Available model presets (use short name or full model ID):
     - haiku: openrouter:anthropic/claude-haiku-4.5
+    - devstral: openrouter:mistralai/devstral-2512:free
     - gemini: openrouter:google/gemini-2.5-flash
     - deepseek: openrouter:deepseek/deepseek-v3.2
-    - kimi: openrouter:moonshotai/kimi-k2-0711
+    - kimi: openrouter:moonshotai/kimi-k2
+    - gpt: openrouter:openai/gpt-5.1-codex-mini
 
   ## Usage
 
@@ -34,9 +36,10 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
 
   @model_presets %{
     "haiku" => "openrouter:anthropic/claude-haiku-4.5",
+    "devstral" => "openrouter:mistralai/devstral-2512:free",
     "gemini" => "openrouter:google/gemini-2.5-flash",
     "deepseek" => "openrouter:deepseek/deepseek-v3.2",
-    "kimi" => "openrouter:moonshotai/kimi-k2-0711",
+    "kimi" => "openrouter:moonshotai/kimi-k2",
     "gpt" => "openrouter:openai/gpt-5.1-codex-mini"
   }
 
