@@ -13,7 +13,7 @@ defmodule PtcRunner.Json.Operations.ToolCallTest do
         "args": {"a": 5, "b": 3}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, tools: tools)
       assert result == 8
     end
 
@@ -27,7 +27,7 @@ defmodule PtcRunner.Json.Operations.ToolCallTest do
         "tool": "get_default"
       }})
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, tools: tools)
       assert result == "default_value"
     end
 
@@ -140,14 +140,14 @@ defmodule PtcRunner.Json.Operations.ToolCallTest do
         "args": {"a": 2, "b": 3}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, tools: tools)
       assert result == 5
     end
 
     test "tool validation passes with empty tools map" do
       program = ~s({"program": {"op": "literal", "value": 42}})
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: %{})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, tools: %{})
       assert result == 42
     end
 
@@ -190,7 +190,7 @@ defmodule PtcRunner.Json.Operations.ToolCallTest do
         ]
       }})
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, tools: tools)
       assert result == 1
     end
 
@@ -206,7 +206,7 @@ defmodule PtcRunner.Json.Operations.ToolCallTest do
         "in": {"op": "var", "name": "balance"}
       }})
 
-      {:ok, result, _metrics} = PtcRunner.Json.run(program, tools: tools)
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program, tools: tools)
       assert result == 500
     end
   end
