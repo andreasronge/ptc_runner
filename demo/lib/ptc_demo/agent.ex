@@ -6,11 +6,13 @@ defmodule PtcDemo.Agent do
   - LLM decides when to query data by outputting a PTC program
   - Program results are returned as tool results
   - LLM continues until it provides a final answer (no program)
+  - Values can be stored and retrieved across queries using "store as X" pattern
 
   This demonstrates the key advantage of Programmatic Tool Calling:
   - Large datasets stay in BEAM memory, never enter LLM context
   - LLM generates compact programs (~200 bytes) instead of processing raw data
   - Only small results return to LLM for final response
+  - Multi-turn conversations with persistent memory across queries
   """
 
   use GenServer
@@ -24,7 +26,16 @@ defmodule PtcDemo.Agent do
   @max_iterations 5
 
   # --- State ---
-  defstruct [:model, :context, :datasets, :last_program, :last_result, :data_mode, :usage]
+  defstruct [
+    :model,
+    :context,
+    :datasets,
+    :last_program,
+    :last_result,
+    :data_mode,
+    :usage,
+    :memory
+  ]
 
   # --- Public API ---
 
@@ -159,7 +170,8 @@ defmodule PtcDemo.Agent do
        last_program: nil,
        last_result: nil,
        data_mode: data_mode,
-       usage: empty_usage()
+       usage: empty_usage(),
+       memory: %{}
      }}
   end
 
@@ -168,23 +180,25 @@ defmodule PtcDemo.Agent do
     # Add user question to context
     context = ReqLLM.Context.append(state.context, user(question))
 
-    # Run the agentic loop with initial last_exec = {nil, nil}
+    # Run the agentic loop with initial last_exec = {nil, nil} and persisted memory
     case agent_loop(
            state.model,
            context,
            state.datasets,
            state.usage,
            @max_iterations,
-           {nil, nil}
+           {nil, nil},
+           state.memory
          ) do
-      {:ok, answer, final_context, new_usage, last_program, last_result} ->
+      {:ok, answer, final_context, new_usage, last_program, last_result, new_memory} ->
         {:reply, {:ok, answer},
          %{
            state
            | context: final_context,
              last_program: last_program,
              last_result: last_result,
-             usage: new_usage
+             usage: new_usage,
+             memory: new_memory
          }}
 
       {:error, reason, final_context, new_usage} ->
@@ -204,7 +218,8 @@ defmodule PtcDemo.Agent do
          last_program: nil,
          last_result: nil,
          data_mode: :schema,
-         usage: empty_usage()
+         usage: empty_usage(),
+         memory: %{}
      }}
   end
 
@@ -258,7 +273,14 @@ defmodule PtcDemo.Agent do
     new_context = ReqLLM.Context.new([system(system_prompt(mode))])
 
     {:reply, :ok,
-     %{state | data_mode: mode, context: new_context, last_program: nil, last_result: nil}}
+     %{
+       state
+       | data_mode: mode,
+         context: new_context,
+         last_program: nil,
+         last_result: nil,
+         memory: %{}
+     }}
   end
 
   @impl true
@@ -268,12 +290,22 @@ defmodule PtcDemo.Agent do
 
   # --- Agentic Loop ---
 
-  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec) do
+  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec, _memory) do
     {:error, "Max iterations reached", context, usage}
   end
 
-  defp agent_loop(model, context, datasets, usage, remaining, last_exec) do
+  defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
+
+    # Capture the original question from the most recent user message
+    original_query =
+      context.messages
+      |> Enum.reverse()
+      |> Enum.find(&(&1.role == :user))
+      |> case do
+        nil -> ""
+        msg -> extract_text_content(msg.content)
+      end
 
     case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
       {:ok, response} ->
@@ -285,11 +317,25 @@ defmodule PtcDemo.Agent do
           {:ok, program_json} ->
             IO.puts("   [Program] #{truncate(program_json, 80)}")
 
+            # Inject memory into context with memory_ prefix
+            context_with_memory =
+              memory
+              |> Enum.reduce(datasets, fn {key, value}, acc ->
+                Map.put(acc, "memory_#{key}", value)
+              end)
+
             # Execute the program
-            case PtcRunner.Json.run(program_json, context: datasets, timeout: 5000) do
+            case PtcRunner.Json.run(program_json, context: context_with_memory, timeout: 5000) do
               {:ok, result, metrics} ->
                 result_str = format_result(result)
                 IO.puts("   [Result] #{truncate(result_str, 80)} (#{metrics.duration_ms}ms)")
+
+                # Detect "store as {name}" pattern in the original query
+                new_memory =
+                  case Regex.run(~r/store (?:it |the result |this )?as ([\w-]+)/i, original_query) do
+                    [_, name] -> Map.put(memory, name, result)
+                    nil -> memory
+                  end
 
                 # Add assistant message and tool result, then continue loop
                 new_context =
@@ -299,7 +345,16 @@ defmodule PtcDemo.Agent do
 
                 # Track raw result for test runner
                 new_last_exec = {program_json, result}
-                agent_loop(model, new_context, datasets, new_usage, remaining - 1, new_last_exec)
+
+                agent_loop(
+                  model,
+                  new_context,
+                  datasets,
+                  new_usage,
+                  remaining - 1,
+                  new_last_exec,
+                  new_memory
+                )
 
               {:error, reason} ->
                 error_msg = PtcRunner.Json.format_error(reason)
@@ -311,7 +366,15 @@ defmodule PtcDemo.Agent do
                   |> ReqLLM.Context.append(assistant(text))
                   |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
 
-                agent_loop(model, new_context, datasets, new_usage, remaining - 1, last_exec)
+                agent_loop(
+                  model,
+                  new_context,
+                  datasets,
+                  new_usage,
+                  remaining - 1,
+                  last_exec,
+                  memory
+                )
             end
 
           :none ->
@@ -322,7 +385,7 @@ defmodule PtcDemo.Agent do
             # Use tracked last execution (raw values, not formatted strings)
             {last_program, last_result} = last_exec
 
-            {:ok, text, final_context, new_usage, last_program, last_result}
+            {:ok, text, final_context, new_usage, last_program, last_result, memory}
         end
 
       {:error, reason} ->
@@ -342,6 +405,8 @@ defmodule PtcDemo.Agent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
+    Memory: Store results across queries with "store as X" in your question.
+    Access stored values with: {"op": "load", "name": "memory_X"}
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets (with field types):
@@ -364,6 +429,8 @@ defmodule PtcDemo.Agent do
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
+    Memory: Store results across queries with "store as X" in your question.
+    Access stored values with: {"op": "load", "name": "memory_X"}
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets: #{dataset_names}
