@@ -545,7 +545,12 @@ defmodule PtcRunner.Lisp.Eval do
   defp safe_eq(nil, nil), do: true
   defp safe_eq(nil, _), do: false
   defp safe_eq(_, nil), do: false
-  defp safe_eq(a, b), do: a == b
+
+  defp safe_eq(a, b) do
+    a_normalized = normalize_for_comparison(a)
+    b_normalized = normalize_for_comparison(b)
+    a_normalized == b_normalized
+  end
 
   defp safe_cmp(nil, _, _op), do: false
   defp safe_cmp(_, nil, _op), do: false
@@ -556,18 +561,41 @@ defmodule PtcRunner.Lisp.Eval do
 
   # `in` operator: field value is member of collection
   defp safe_in(nil, _coll), do: false
-  defp safe_in(value, coll) when is_list(coll), do: value in coll
+
+  defp safe_in(value, coll) when is_list(coll) do
+    normalized_value = normalize_for_comparison(value)
+
+    Enum.any?(coll, fn item ->
+      normalize_for_comparison(item) == normalized_value
+    end)
+  end
+
   defp safe_in(_, _), do: false
 
   # `includes` operator: collection includes value
   defp safe_includes(nil, _value), do: false
-  defp safe_includes(coll, value) when is_list(coll), do: value in coll
+
+  defp safe_includes(coll, value) when is_list(coll) do
+    normalized_value = normalize_for_comparison(value)
+
+    Enum.any?(coll, fn item ->
+      normalize_for_comparison(item) == normalized_value
+    end)
+  end
 
   defp safe_includes(coll, value) when is_binary(coll) and is_binary(value) do
     String.contains?(coll, value)
   end
 
   defp safe_includes(_, _), do: false
+
+  # Coerce keywords to strings for comparison, but preserve other types
+  # This allows LLM-generated keywords to match string data values
+  defp normalize_for_comparison(value) when is_atom(value) and not is_boolean(value) do
+    to_string(value)
+  end
+
+  defp normalize_for_comparison(value), do: value
 
   # Convert Lisp closures to Erlang functions for use with higher-order functions
   # The closure must have 1 parameter (enforced at evaluation time)
