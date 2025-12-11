@@ -55,8 +55,13 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all(report: "test_report.md")
   """
   def run_all(opts \\ []) do
-    CLIBase.load_dotenv()
-    CLIBase.ensure_api_key!()
+    agent_mod = Keyword.get(opts, :agent, LispAgent)
+
+    # Only load dotenv and check API key if using real agent
+    if agent_mod == LispAgent do
+      CLIBase.load_dotenv()
+      CLIBase.ensure_api_key!()
+    end
 
     verbose = Keyword.get(opts, :verbose, false)
     model = Keyword.get(opts, :model)
@@ -64,14 +69,14 @@ defmodule PtcDemo.LispTestRunner do
     report_path = Keyword.get(opts, :report)
 
     # Ensure agent is started
-    ensure_agent_started(data_mode)
+    ensure_agent_started(data_mode, agent_mod)
 
     # Set model if specified
     if model do
-      LispAgent.set_model(model)
+      agent_mod.set_model(model)
     end
 
-    current_model = LispAgent.model()
+    current_model = agent_mod.model()
     start_time = System.monotonic_time(:millisecond)
 
     IO.puts("\n=== PTC-Lisp Demo Test Runner ===")
@@ -83,12 +88,12 @@ defmodule PtcDemo.LispTestRunner do
       |> Enum.with_index(1)
       |> Enum.map(fn {test_case, index} ->
         # Reset context before each test to get clean attempt count
-        LispAgent.reset()
-        LispAgent.set_data_mode(data_mode)
-        run_test(test_case, index, length(test_cases()), verbose)
+        agent_mod.reset()
+        agent_mod.set_data_mode(data_mode)
+        run_test(test_case, index, length(test_cases()), verbose, agent_mod)
       end)
 
-    stats = LispAgent.stats()
+    stats = agent_mod.stats()
     summary = Base.build_summary(results, start_time, current_model, data_mode, stats)
 
     Base.print_summary(summary)
@@ -107,8 +112,13 @@ defmodule PtcDemo.LispTestRunner do
   Run a single test by index (1-based).
   """
   def run_one(index, opts \\ []) do
-    CLIBase.load_dotenv()
-    CLIBase.ensure_api_key!()
+    agent_mod = Keyword.get(opts, :agent, LispAgent)
+
+    # Only load dotenv and check API key if using real agent
+    if agent_mod == LispAgent do
+      CLIBase.load_dotenv()
+      CLIBase.ensure_api_key!()
+    end
 
     cases = test_cases()
 
@@ -116,14 +126,14 @@ defmodule PtcDemo.LispTestRunner do
       data_mode = Keyword.get(opts, :data_mode, :schema)
       model = Keyword.get(opts, :model)
 
-      ensure_agent_started(data_mode)
+      ensure_agent_started(data_mode, agent_mod)
 
       if model do
-        LispAgent.set_model(model)
+        agent_mod.set_model(model)
       end
 
       test_case = Enum.at(cases, index - 1)
-      run_test(test_case, index, length(cases), true)
+      run_test(test_case, index, length(cases), true, agent_mod)
     else
       IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
       nil
@@ -157,32 +167,39 @@ defmodule PtcDemo.LispTestRunner do
 
   # Private functions
 
-  defp ensure_agent_started(data_mode) do
-    case Process.whereis(LispAgent) do
-      nil ->
-        {:ok, _pid} = LispAgent.start_link(data_mode: data_mode)
-        :ok
+  defp ensure_agent_started(data_mode, agent_mod) do
+    # For mock agents, assume they're already started or will be in test setup
+    # For real LispAgent, check and start if needed
+    if agent_mod == LispAgent do
+      case Process.whereis(LispAgent) do
+        nil ->
+          {:ok, _pid} = LispAgent.start_link(data_mode: data_mode)
+          :ok
 
-      _pid ->
-        # Reset to ensure clean state
-        LispAgent.reset()
-        LispAgent.set_data_mode(data_mode)
-        :ok
+        _pid ->
+          # Reset to ensure clean state
+          LispAgent.reset()
+          LispAgent.set_data_mode(data_mode)
+          :ok
+      end
+    else
+      # Mock agents are started in test setup, just ensure they're ready
+      :ok
     end
   end
 
-  defp run_test(test_case, index, total, verbose) do
+  defp run_test(test_case, index, total, verbose, agent_mod) do
     # Handle multi-turn tests (queries list) vs single-turn (query string)
     case test_case do
       %{queries: queries} ->
-        run_multi_turn_test(test_case, queries, index, total, verbose)
+        run_multi_turn_test(test_case, queries, index, total, verbose, agent_mod)
 
       %{query: query} ->
-        run_single_turn_test(test_case, query, index, total, verbose)
+        run_single_turn_test(test_case, query, index, total, verbose, agent_mod)
     end
   end
 
-  defp run_single_turn_test(test_case, query, index, total, verbose) do
+  defp run_single_turn_test(test_case, query, index, total, verbose, agent_mod) do
     if verbose do
       IO.puts("\n[#{index}/#{total}] #{query}")
     else
@@ -190,14 +207,14 @@ defmodule PtcDemo.LispTestRunner do
     end
 
     result =
-      case LispAgent.ask(query) do
+      case agent_mod.ask(query) do
         {:ok, _answer} ->
           # Get all programs attempted during this query
-          all_programs = LispAgent.programs()
+          all_programs = agent_mod.programs()
           attempts = length(all_programs)
 
           # Get the actual result from running the program
-          case LispAgent.last_result() do
+          case agent_mod.last_result() do
             nil ->
               %{
                 passed: false,
@@ -210,19 +227,19 @@ defmodule PtcDemo.LispTestRunner do
               validation = Base.validate_result(value, test_case)
 
               validation
-              |> Map.put(:program, LispAgent.last_program())
+              |> Map.put(:program, agent_mod.last_program())
               |> Map.put(:attempts, attempts)
               |> Map.put(:all_programs, all_programs)
               |> Map.put(:final_result, value)
           end
 
         {:error, reason} ->
-          all_programs = LispAgent.programs()
+          all_programs = agent_mod.programs()
 
           %{
             passed: false,
             error: "Query failed: #{inspect(reason)}",
-            program: LispAgent.last_program(),
+            program: agent_mod.last_program(),
             attempts: length(all_programs),
             all_programs: all_programs
           }
@@ -263,7 +280,7 @@ defmodule PtcDemo.LispTestRunner do
     result
   end
 
-  defp run_multi_turn_test(test_case, queries, index, total, verbose) do
+  defp run_multi_turn_test(test_case, queries, index, total, verbose, agent_mod) do
     query_display = Enum.join(queries, " → ")
 
     if verbose do
@@ -279,19 +296,19 @@ defmodule PtcDemo.LispTestRunner do
           IO.puts("   Turn: #{query}")
         end
 
-        case LispAgent.ask(query) do
+        case agent_mod.ask(query) do
           {:ok, _answer} ->
-            new_programs = LispAgent.programs()
+            new_programs = agent_mod.programs()
             {:cont, {:ok, all_programs_acc ++ new_programs}}
 
           {:error, reason} ->
-            new_programs = LispAgent.programs()
+            new_programs = agent_mod.programs()
 
             {:halt,
              {%{
                 passed: false,
                 error: "Query failed: #{inspect(reason)}",
-                program: LispAgent.last_program(),
+                program: agent_mod.last_program(),
                 attempts: length(all_programs_acc) + length(new_programs),
                 all_programs: all_programs_acc ++ new_programs
               }, []}}
@@ -302,10 +319,10 @@ defmodule PtcDemo.LispTestRunner do
     result =
       case result do
         :ok ->
-          all_programs = LispAgent.programs()
+          all_programs = agent_mod.programs()
           attempts = length(all_programs)
 
-          case LispAgent.last_result() do
+          case agent_mod.last_result() do
             nil ->
               %{
                 passed: false,
@@ -318,7 +335,7 @@ defmodule PtcDemo.LispTestRunner do
               validation = Base.validate_result(value, test_case)
 
               validation
-              |> Map.put(:program, LispAgent.last_program())
+              |> Map.put(:program, agent_mod.last_program())
               |> Map.put(:attempts, attempts)
               |> Map.put(:all_programs, all_programs)
               |> Map.put(:final_result, value)
