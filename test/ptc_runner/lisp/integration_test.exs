@@ -680,5 +680,78 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       assert result == 120
     end
+
+    # Issue #245: Fix `or` to track last evaluated value
+    test "or with all falsy values returns last evaluated value" do
+      source = ~S"""
+      (or false nil)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == nil
+    end
+
+    test "or with all falsy values (different order) returns last evaluated value" do
+      source = ~S"""
+      (or nil false)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == false
+    end
+
+    # Issue #245: Fix `some` to return predicate result (not boolean)
+    test "some returns first truthy predicate result" do
+      source = ~S"""
+      (some nil? [1 nil 3])
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == true
+    end
+
+    test "some returns nil when no match" do
+      source = ~S"""
+      (some nil? [1 2 3])
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == nil
+    end
+
+    # Issue #245: Fix subtraction to use correct reduce order
+    test "unary minus returns negation" do
+      source = ~S"""
+      (- 10)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == -10
+    end
+
+    test "binary subtraction works correctly" do
+      source = ~S"""
+      (- 10 3)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == 7
+    end
+
+    test "variadic subtraction evaluates left-to-right" do
+      source = ~S"""
+      (- 10 3 2 1)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == 4
+    end
   end
 end
