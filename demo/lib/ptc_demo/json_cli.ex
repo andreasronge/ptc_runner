@@ -13,10 +13,13 @@ defmodule PtcDemo.JsonCLI do
     # Load .env if present (check both demo dir and parent)
     CLIBase.load_dotenv()
 
-    CLIBase.ensure_api_key!()
-
     # Parse command line arguments
     opts = CLIBase.parse_common_args(args)
+
+    # Handle --list-models early (before API key check)
+    CLIBase.handle_list_models(opts)
+
+    CLIBase.ensure_api_key!()
 
     data_mode = if opts[:explore], do: :explore, else: :schema
     model = opts[:model]
@@ -29,7 +32,7 @@ defmodule PtcDemo.JsonCLI do
 
     # Set model if specified
     if model do
-      resolved_model = resolve_model(model)
+      resolved_model = CLIBase.resolve_model(model)
       PtcDemo.Agent.set_model(resolved_model)
     end
 
@@ -42,10 +45,6 @@ defmodule PtcDemo.JsonCLI do
       # Enter REPL loop
       loop()
     end
-  end
-
-  defp resolve_model(name) do
-    CLIBase.resolve_model(name, PtcDemo.Agent.preset_models())
   end
 
   defp run_tests_and_exit(opts) do
@@ -125,17 +124,17 @@ defmodule PtcDemo.JsonCLI do
   end
 
   defp handle_input("/model " <> name) do
-    presets = PtcDemo.Agent.preset_models()
     name = String.trim(name)
 
-    model =
-      case Map.get(presets, name) do
-        nil -> name
-        preset -> preset
-      end
+    case PtcDemo.ModelRegistry.resolve(name) do
+      {:ok, model} ->
+        PtcDemo.Agent.set_model(model)
+        IO.puts("   [Switched to model: #{model}]\n")
 
-    PtcDemo.Agent.set_model(model)
-    IO.puts("   [Switched to model: #{model}]\n")
+      {:error, reason} ->
+        IO.puts("   [Error] #{reason}\n")
+    end
+
     loop()
   end
 
@@ -302,6 +301,7 @@ defmodule PtcDemo.JsonCLI do
       mix json --test --verbose    Run tests with detailed output
       mix json --model=<name>      Start with specific model
       mix json --explore           Start in explore mode
+      mix json --list-models       Show available models and exit
     """
   end
 

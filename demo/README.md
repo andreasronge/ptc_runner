@@ -69,11 +69,14 @@ export OPENROUTER_API_KEY=sk-or-v1-...    # Recommended - many models
 # OR
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Optional: choose a different model
-export REQ_LLM_MODEL=anthropic:claude-sonnet-4-20250514
+# Optional: choose a different model via environment variable
+export PTC_DEMO_MODEL=deepseek
 
 # Install dependencies
 mix deps.get
+
+# === See Available Models ===
+mix json --list-models   # Show all available models
 
 # === JSON DSL ===
 # Run the JSON chat (default model)
@@ -81,18 +84,16 @@ mix json
 
 # Or with options:
 mix json --model=haiku              # Use Claude Haiku
+mix json --model=devstral           # Use Mistral Devstral (free)
 mix json --explore                  # Start in explore mode
 
 # === Lisp DSL ===
 # Run the Lisp chat (recommended - most token efficient)
 mix lisp
 
-# Or equivalently:
-mix run -e "PtcDemo.LispCLI.main([])"
-
 # Lisp with specific model
 mix lisp --model=haiku
-mix lisp --model=google:gemini-2.0-flash-exp
+mix lisp --model=openrouter:anthropic/claude-haiku-4.5
 
 # Lisp with explore mode
 mix lisp --explore
@@ -199,19 +200,21 @@ mix json [options]
 | Option | Description |
 |--------|-------------|
 | `--model=<name>` | Set model (preset name or full model ID) |
+| `--list-models` | Show available models and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run automated tests and exit |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--report=<file>` | Generate markdown report (for test mode) |
 
-Model presets: `haiku`, `gemini`, `deepseek`, `kimi`, `gpt`
+Model presets: `haiku`, `devstral`, `gemini`, `deepseek`, `kimi`, `gpt`
 
 Examples:
 ```bash
-mix json                                    # Interactive with default model
-mix json --model=haiku                      # Use Claude Haiku
-mix json --model=google:gemini-2.0-flash    # Use full model ID
-mix json --test --model=gemini --verbose    # Test with Gemini
+mix json                                      # Interactive with default model
+mix json --list-models                        # Show available models
+mix json --model=haiku                        # Use Claude Haiku
+mix json --model=openrouter:anthropic/claude-haiku-4.5  # Use full model ID
+mix json --test --model=gemini --verbose      # Test with Gemini
 ```
 
 ## Lisp CLI Options
@@ -223,19 +226,21 @@ mix lisp [options]
 | Option | Description |
 |--------|-------------|
 | `--model=<name>` | Set model (preset name or full model ID) |
+| `--list-models` | Show available models and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run automated tests and exit |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--report=<file>` | Generate markdown report (for test mode) |
 
-Model presets: `haiku`, `gemini`, `deepseek`, `kimi`, `gpt`
+Model presets: `haiku`, `devstral`, `gemini`, `deepseek`, `kimi`, `gpt`
 
 Examples:
 ```bash
-mix lisp                                    # Interactive with default model
-mix lisp --model=haiku                      # Use Claude Haiku
-mix lisp --model=google:gemini-2.0-flash    # Use full model ID
-mix lisp --test --model=gemini --verbose    # Test with Gemini
+mix lisp                                      # Interactive with default model
+mix lisp --list-models                        # Show available models
+mix lisp --model=haiku                        # Use Claude Haiku
+mix lisp --model=openrouter:anthropic/claude-haiku-4.5  # Use full model ID
+mix lisp --test --model=gemini --verbose      # Test with Gemini
 ```
 
 ## Interactive Commands
@@ -318,20 +323,20 @@ Example output:
 Model: openrouter:anthropic/claude-3.5-haiku
 Data mode: schema
 
-[1/16] How many products are there?
-   PASS: Total products should be 500
+[1/14] How many products are there?
+   PASS: Simple count of products
    Attempts: 1
    Program: (count ctx/products)
 
-[2/16] How many orders are there?
-   PASS: Total orders should be 1000
+[2/14] How many orders have status 'delivered'?
+   PASS: Filter by string equality + count
    Attempts: 1
-   Program: (count ctx/orders)
+   Program: (count (filter (where :status = "delivered") ctx/orders))
 ...
 
 ==================================================
-Results: 16/16 passed, 0 failed
-Total attempts: 18 (1.1 avg per test)
+Results: 14/14 passed, 0 failed
+Total attempts: 16 (1.1 avg per test)
 Duration: 45.2s
 Model: openrouter:anthropic/claude-3.5-haiku
 ==================================================
@@ -384,6 +389,19 @@ PtcDemo.JsonTestRunner.list()
 # Run a single test
 PtcDemo.JsonTestRunner.run_one(3)
 ```
+
+### Test Suite Structure
+
+Both JSON and Lisp runners use the **same 14 test cases** for fair comparison:
+
+| Level | Tests | Description |
+|-------|-------|-------------|
+| **Level 1: Basic** | 4 | Simple count, filtered count, sum, average |
+| **Level 2: Intermediate** | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
+| **Level 3: Advanced** | 4 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset |
+| **Multi-turn** | 2 | Memory persistence between queries |
+
+This unified test suite enables direct comparison of DSL capabilities and LLM performance.
 
 ### Test Assertions
 
@@ -443,3 +461,4 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 | Token usage | Higher | ~3-5x lower |
 | Maturity | Stable | Experimental |
 | Memory contract | N/A | Supports persistent memory |
+| Test cases | 14 (same) | 14 (same) |
