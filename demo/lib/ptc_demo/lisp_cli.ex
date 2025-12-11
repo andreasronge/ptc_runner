@@ -49,6 +49,8 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp run_tests_and_exit(opts) do
+    # Filter out nil values so Keyword.get defaults work properly
+    opts = Enum.reject(opts, fn {_k, v} -> is_nil(v) end)
     result = PtcDemo.LispTestRunner.run_all(opts)
 
     if result.failed > 0 do
