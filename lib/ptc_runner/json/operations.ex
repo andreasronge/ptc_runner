@@ -5,13 +5,14 @@ defmodule PtcRunner.Json.Operations do
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
   last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, merge,
-  concat, zip; Phase 4: keys, typeof - introspection operations).
+  concat, zip; Phase 4: keys, typeof - introspection operations; Phase 5: take, drop,
+  distinct - list filtering and deduplication).
 
   This module acts as a dispatcher, delegating to specialized sub-modules:
   - PtcRunner.Json.Operations.Comparison - eq, neq, gt, gte, lt, lte, contains
   - PtcRunner.Json.Operations.Aggregation - sum, count, avg, min, max
   - PtcRunner.Json.Operations.Collection - filter, map, select, reject
-  - PtcRunner.Json.Operations.Access - get, first, last, nth, sort_by, max_by, min_by
+  - PtcRunner.Json.Operations.Access - get, first, last, nth, sort_by, max_by, min_by, take, drop, distinct
   """
 
   alias PtcRunner.Context
@@ -160,7 +161,18 @@ defmodule PtcRunner.Json.Operations do
 
   # Access operations - delegate to sub-module
   def eval(op, node, context, eval_fn)
-      when op in ["get", "first", "last", "nth", "sort_by", "max_by", "min_by"] do
+      when op in [
+             "get",
+             "first",
+             "last",
+             "nth",
+             "sort_by",
+             "max_by",
+             "min_by",
+             "take",
+             "drop",
+             "distinct"
+           ] do
     Access.eval(op, node, context, eval_fn)
   end
 
