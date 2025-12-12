@@ -124,8 +124,15 @@ defmodule PtcDemo.LispTestRunner do
     last_summary = List.last(summaries)
 
     if report_path do
-      Report.write(report_path, last_summary, "Lisp")
-      IO.puts("\nReport written to: #{report_path}")
+      actual_path =
+        if report_path == :auto do
+          CLIBase.generate_report_filename("lisp", current_model)
+        else
+          report_path
+        end
+
+      written_path = Report.write(actual_path, last_summary, "Lisp")
+      IO.puts("\nReport written to: #{written_path}")
     end
 
     # Return the last summary for CLI exit code, but include all summaries
@@ -513,21 +520,42 @@ defmodule PtcDemo.LispTestRunner do
     result
   end
 
-  # Add Clojure syntax validation to a test result
+  # Execute program in Clojure and compare results
   defp add_clojure_validation(result, verbose) do
     program = result[:program]
+    ptc_result = result[:final_result]
 
-    case PtcRunner.Lisp.ClojureValidator.validate_syntax(program) do
-      :ok ->
-        if verbose do
-          IO.puts("   Clojure: valid syntax")
+    # Build context with the same data used by PTC-Lisp
+    context = %{
+      "products" => PtcDemo.SampleData.products(),
+      "orders" => PtcDemo.SampleData.orders(),
+      "employees" => PtcDemo.SampleData.employees(),
+      "expenses" => PtcDemo.SampleData.expenses()
+    }
+
+    case PtcRunner.Lisp.ClojureValidator.execute(program, context: context) do
+      {:ok, clj_result} ->
+        case PtcRunner.Lisp.ClojureValidator.compare_results(ptc_result, clj_result) do
+          :match ->
+            if verbose do
+              IO.puts("   Clojure: executed, results match")
+            end
+
+            Map.put(result, :clojure_valid, true)
+
+          {:mismatch, details} ->
+            if verbose do
+              IO.puts("   Clojure: MISMATCH - #{details}")
+            end
+
+            result
+            |> Map.put(:clojure_valid, false)
+            |> Map.put(:clojure_error, "Result mismatch: #{details}")
         end
-
-        Map.put(result, :clojure_valid, true)
 
       {:error, msg} ->
         if verbose do
-          IO.puts("   Clojure: INVALID - #{msg}")
+          IO.puts("   Clojure: ERROR - #{msg}")
         end
 
         result
