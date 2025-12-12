@@ -34,6 +34,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "Multiply two numbers. Example: {op:'mul', left:{op:'literal', value:5}, right:{op:'literal', value:3}}",
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "mul"
+            },
+            "right": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Sequence of operations. Example: {op:'pipe', steps:[{op:'load', name:'input'}, {op:'filter', where:{op:'gt', field:'price', value:10}}]}",
           "properties": {
             "op": {
@@ -464,6 +485,24 @@
         },
         {
           "additionalProperties": false,
+          "description": "Round a number to N decimal places (default 0). Use negative precision to round to tens, hundreds, etc. Example: {op:'round', value:{op:'var', name:'x'}, precision:2}",
+          "properties": {
+            "op": {
+              "const": "round"
+            },
+            "precision": {},
+            "value": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Drop first N elements from list. Example: {op:'drop', count:5}",
           "properties": {
             "count": {
@@ -603,6 +642,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "Calculate percentage: (part / whole) * 100. Convenience operation for common ratio calculations. Example: {op:'pct', part:{op:'var', name:'delivered'}, whole:{op:'var', name:'total'}}",
+          "properties": {
+            "op": {
+              "const": "pct"
+            },
+            "part": {
+              "$ref": "#/$defs/operation"
+            },
+            "whole": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "part",
+            "whole"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Field less than value. Example: {op:'lt', field:'price', value:100}",
           "properties": {
             "field": {
@@ -617,6 +677,48 @@
             "op",
             "field",
             "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Divide two numbers (always returns float; error on divide by zero). Example: {op:'div', left:{op:'literal', value:10}, right:{op:'literal', value:4}}",
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "div"
+            },
+            "right": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Add two numbers. Example: {op:'add', left:{op:'var', name:'a'}, right:{op:'literal', value:10}}",
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "add"
+            },
+            "right": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
           ],
           "type": "object"
         },
@@ -696,6 +798,27 @@
           "required": [
             "op",
             "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Subtract two numbers. Example: {op:'sub', left:{op:'var', name:'total'}, right:{op:'var', name:'spent'}}",
+          "properties": {
+            "left": {
+              "$ref": "#/$defs/operation"
+            },
+            "op": {
+              "const": "sub"
+            },
+            "right": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "required": [
+            "op",
+            "left",
+            "right"
           ],
           "type": "object"
         },
