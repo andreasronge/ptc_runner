@@ -294,7 +294,8 @@ defmodule PtcRunner.Json.Operations do
     end
   end
 
-  defp eval_object(fields_map, context) when is_map(fields_map) do
+  @doc false
+  def eval_object(fields_map, context) when is_map(fields_map) do
     Enum.reduce_while(fields_map, {:ok, %{}, context.memory}, fn {key, value},
                                                                  {:ok, acc, memory} ->
       ctx = %{context | memory: memory}

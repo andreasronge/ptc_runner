@@ -18,7 +18,8 @@ defmodule PtcRunner.SandboxTest do
       ast = %{}
       context = PtcRunner.Context.new()
 
-      {:error, _} = PtcRunner.Sandbox.execute(ast, context)
+      {:ok, result, _metrics, _memory} = PtcRunner.Sandbox.execute(ast, context)
+      assert result == %{}
     end
 
     test "executes program with context variables using default options" do
