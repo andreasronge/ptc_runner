@@ -104,6 +104,10 @@ defmodule PtcDemo.CLIBase do
           report = String.replace_prefix(arg, "--report=", "")
           Map.put(acc, :report, report)
 
+        arg == "--report" ->
+          # Flag without value - will generate default filename later
+          Map.put(acc, :report, :auto)
+
         String.starts_with?(arg, "--runs=") ->
           runs_str = String.replace_prefix(arg, "--runs=", "")
 
@@ -118,10 +122,6 @@ defmodule PtcDemo.CLIBase do
 
         String.starts_with?(arg, "--model") ->
           IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
-          System.halt(1)
-
-        String.starts_with?(arg, "--report") ->
-          IO.puts("Error: Use --report=<path> format (e.g., --report=report.md)")
           System.halt(1)
 
         String.starts_with?(arg, "--") ->
@@ -284,5 +284,38 @@ defmodule PtcDemo.CLIBase do
     else
       str
     end
+  end
+
+  @doc """
+  Generate a default report filename based on DSL, model, and timestamp.
+
+  Format: `{dsl}_{model_short}_{YYYYMMDD-HHMM}.md`
+
+  ## Examples
+
+      iex> generate_report_filename("lisp", "openrouter:anthropic/claude-3-5-haiku-latest")
+      "lisp_claude-3-5-haiku-latest_20251212-1430.md"
+
+      iex> generate_report_filename("json", "deepseek")
+      "json_deepseek_20251212-1430.md"
+  """
+  def generate_report_filename(dsl, model) do
+    model_short = extract_model_short_name(model)
+    timestamp = format_timestamp_for_filename()
+    "#{dsl}_#{model_short}_#{timestamp}.md"
+  end
+
+  defp extract_model_short_name(model) do
+    model
+    |> String.split("/")
+    |> List.last()
+    |> String.split(":")
+    |> List.last()
+    |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+  end
+
+  defp format_timestamp_for_filename do
+    now = DateTime.utc_now()
+    Calendar.strftime(now, "%Y%m%d-%H%M")
   end
 end
