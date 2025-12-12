@@ -4,8 +4,8 @@ defmodule PtcRunner.Json.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, merge,
-  concat, zip; Phase 4: keys, typeof - introspection operations; Phase 5: take, drop,
+  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, object,
+  merge, concat, zip; Phase 4: keys, typeof - introspection operations; Phase 5: take, drop,
   distinct - list filtering and deduplication).
 
   This module acts as a dispatcher, delegating to specialized sub-modules:
@@ -125,6 +125,11 @@ defmodule PtcRunner.Json.Operations do
   def eval("merge", node, context, _eval_fn) do
     objects = Map.get(node, "objects", [])
     eval_merge(objects, context)
+  end
+
+  def eval("object", node, context, _eval_fn) do
+    fields = Map.get(node, "fields", %{})
+    eval_object(fields, context)
   end
 
   def eval("concat", node, context, _eval_fn) do
@@ -279,6 +284,31 @@ defmodule PtcRunner.Json.Operations do
       {:ok, _result, memory} ->
         {:ok, true, memory}
     end
+  end
+
+  defp eval_object(fields_map, context) when is_map(fields_map) do
+    Enum.reduce_while(fields_map, {:ok, %{}, context.memory}, fn {key, value},
+                                                                 {:ok, acc, memory} ->
+      ctx = %{context | memory: memory}
+
+      case evaluate_object_field_value(value, ctx) do
+        {:ok, result, new_memory} -> {:cont, {:ok, Map.put(acc, key, result), new_memory}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp evaluate_object_field_value(value, context)
+       when is_map(value) and is_map_key(value, "op") do
+    Interpreter.eval(value, context)
+  end
+
+  defp evaluate_object_field_value(value, context) do
+    {:ok, value, context.memory}
   end
 
   defp eval_merge([], context) do

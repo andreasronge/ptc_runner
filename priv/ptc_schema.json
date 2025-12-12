@@ -192,6 +192,23 @@
         },
         {
           "additionalProperties": false,
+          "description": "Construct object with evaluated values. Example: {op:'object', fields:{count:{op:'var', name:'n'}, name:'test'}}",
+          "properties": {
+            "fields": {
+              "type": "object"
+            },
+            "op": {
+              "const": "object"
+            }
+          },
+          "required": [
+            "op",
+            "fields"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Get value at field or path. Use field for single key: {op:'get', field:'name'}. Use path for nested: {op:'get', path:['user', 'name']}",
           "properties": {
             "default": {},
