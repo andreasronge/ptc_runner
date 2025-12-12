@@ -253,6 +253,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Keep items where field value is a member of a set. Example: {op:'filter_in', field:'status', value:['active', 'pending']}",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "filter_in"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Sum numeric field. Example: {op:'sum', field:'price'}",
           "properties": {
             "field": {
@@ -534,6 +553,25 @@
           "required": [
             "op",
             "index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Value is member of field set. Example: {op:'in', field:'tags', value:'featured'}",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "const": "in"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "field",
+            "value"
           ],
           "type": "object"
         },
