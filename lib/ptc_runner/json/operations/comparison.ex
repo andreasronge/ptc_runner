@@ -67,7 +67,7 @@ defmodule PtcRunner.Json.Operations.Comparison do
       {:ok, data, memory} ->
         if is_map(data) do
           field_value = Map.get(data, field)
-          {:ok, value_in?(field_value, value), memory}
+          {:ok, Helpers.member_of?(value, field_value), memory}
         else
           {:error, {:execution_error, "in requires a map, got #{inspect(data)}"}}
         end
@@ -103,6 +103,4 @@ defmodule PtcRunner.Json.Operations.Comparison do
     do: Map.has_key?(field_value, value)
 
   defp contains_value?(_field_value, _value), do: false
-
-  defp value_in?(set, value), do: Helpers.member_of?(value, set)
 end
