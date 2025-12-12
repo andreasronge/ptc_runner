@@ -5,6 +5,8 @@ defmodule PtcRunner.Json.Operations.Comparison do
   Implements comparison and containment checks: eq, neq, gt, gte, lt, lte, contains, in.
   """
 
+  alias PtcRunner.Json.Operations.Helpers
+
   @doc """
   Evaluates a comparison operation.
 
@@ -102,10 +104,5 @@ defmodule PtcRunner.Json.Operations.Comparison do
 
   defp contains_value?(_field_value, _value), do: false
 
-  defp value_in?(set, value) when is_list(set), do: value in set
-
-  defp value_in?(set, value) when is_map(set),
-    do: Map.has_key?(set, value)
-
-  defp value_in?(_set, _value), do: false
+  defp value_in?(set, value), do: Helpers.member_of?(value, set)
 end

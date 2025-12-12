@@ -6,6 +6,7 @@ defmodule PtcRunner.Json.Operations.Collection do
   """
 
   alias PtcRunner.Json.Interpreter
+  alias PtcRunner.Json.Operations.Helpers
 
   @doc """
   Evaluates a collection operation.
@@ -202,7 +203,7 @@ defmodule PtcRunner.Json.Operations.Collection do
       Enum.filter(data, fn item ->
         if is_map(item) do
           field_value = Map.get(item, field)
-          member?(field_value, value)
+          Helpers.member_of?(field_value, value)
         else
           false
         end
@@ -210,8 +211,4 @@ defmodule PtcRunner.Json.Operations.Collection do
 
     {:ok, result, context.memory}
   end
-
-  defp member?(field_value, set) when is_list(set), do: field_value in set
-  defp member?(field_value, set) when is_map(set), do: Map.has_key?(set, field_value)
-  defp member?(_field_value, _set), do: false
 end
