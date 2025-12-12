@@ -2,8 +2,10 @@ defmodule PtcRunner.Json.Operations.Comparison do
   @moduledoc """
   Comparison operations for the JSON DSL.
 
-  Implements comparison and containment checks: eq, neq, gt, gte, lt, lte, contains.
+  Implements comparison and containment checks: eq, neq, gt, gte, lt, lte, contains, in.
   """
+
+  alias PtcRunner.Json.Operations.Helpers
 
   @doc """
   Evaluates a comparison operation.
@@ -50,6 +52,24 @@ defmodule PtcRunner.Json.Operations.Comparison do
           {:ok, contains_value?(field_value, value), memory}
         else
           {:error, {:execution_error, "contains requires a map, got #{inspect(data)}"}}
+        end
+    end
+  end
+
+  def eval("in", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data, memory} ->
+        if is_map(data) do
+          field_value = Map.get(data, field)
+          {:ok, Helpers.member_of?(value, field_value), memory}
+        else
+          {:error, {:execution_error, "in requires a map, got #{inspect(data)}"}}
         end
     end
   end

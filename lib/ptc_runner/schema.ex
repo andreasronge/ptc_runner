@@ -148,6 +148,14 @@ defmodule PtcRunner.Schema do
         "where" => %{"type" => :expr, "required" => true}
       }
     },
+    "filter_in" => %{
+      "description" =>
+        "Keep items where field value is a member of a set. Example: {op:'filter_in', field:'status', value:['active', 'pending']}",
+      "fields" => %{
+        "field" => %{"type" => :string, "required" => true},
+        "value" => %{"type" => :any, "required" => true}
+      }
+    },
 
     # Comparison operations
     "eq" => %{
@@ -198,6 +206,14 @@ defmodule PtcRunner.Schema do
     "contains" => %{
       "description" =>
         "Field contains value. Example: {op:'contains', field:'tags', value:'featured'}",
+      "fields" => %{
+        "field" => %{"type" => :string, "required" => true},
+        "value" => %{"type" => :any, "required" => true}
+      }
+    },
+    "in" => %{
+      "description" =>
+        "Value is member of field set. Example: {op:'in', field:'tags', value:'featured'}",
       "fields" => %{
         "field" => %{"type" => :string, "required" => true},
         "value" => %{"type" => :any, "required" => true}
@@ -501,8 +517,8 @@ defmodule PtcRunner.Schema do
       {"Data", ~w(load literal var)},
       {"Flow", ~w(pipe let if)},
       {"Logic", ~w(and or not)},
-      {"Filter/Transform", ~w(filter map select reject sort_by)},
-      {"Compare", ~w(eq neq gt gte lt lte contains)},
+      {"Filter/Transform", ~w(filter map select reject sort_by filter_in)},
+      {"Compare", ~w(eq neq gt gte lt lte contains in)},
       {"Aggregate", ~w(count sum avg min max min_by max_by first last nth take drop distinct)},
       {"Combine", ~w(object merge concat zip)},
       {"Access", ~w(get)},
