@@ -82,6 +82,13 @@ defmodule PtcRunner.Schema do
         "objects" => %{"type" => {:list, :expr}, "required" => true}
       }
     },
+    "object" => %{
+      "description" =>
+        "Construct object with evaluated values. Example: {op:'object', fields:{count:{op:'var', name:'n'}, name:'test'}}",
+      "fields" => %{
+        "fields" => %{"type" => :map, "required" => true}
+      }
+    },
     "concat" => %{
       "description" =>
         "Concatenate multiple lists. Example: {op:'concat', lists:[{op:'literal', value:[1,2]}, {op:'literal', value:[3,4]}]}",
@@ -447,7 +454,7 @@ defmodule PtcRunner.Schema do
       {"Filter/Transform", ~w(filter map select reject sort_by)},
       {"Compare", ~w(eq neq gt gte lt lte contains)},
       {"Aggregate", ~w(count sum avg min max min_by max_by first last nth take drop distinct)},
-      {"Combine", ~w(merge concat zip)},
+      {"Combine", ~w(object merge concat zip)},
       {"Access", ~w(get)},
       {"Introspect", ~w(keys typeof)},
       {"Tools", ~w(call)}
@@ -485,7 +492,7 @@ defmodule PtcRunner.Schema do
     | {"result":X,"key":Y} | Store key→Y, return X |
 
     Store to memory (use let to compute once, include in result map):
-    {"program":{"op":"let","name":"cnt","value":{"op":"pipe","steps":[{"op":"load","name":"items"},{"op":"filter","where":{"op":"eq","field":"type","value":"A"}},{"op":"count"}]},"in":{"op":"merge","objects":[{"op":"literal","value":{"type-a-count":null}},{"type-a-count":{"op":"var","name":"cnt"}},{"result":{"op":"var","name":"cnt"}}]}}}
+    {"program":{"op":"let","name":"cnt","value":{"op":"pipe","steps":[{"op":"load","name":"items"},{"op":"filter","where":{"op":"eq","field":"type","value":"A"}},{"op":"count"}]},"in":{"op":"object","fields":{"type-a-count":{"op":"var","name":"cnt"},"result":{"op":"var","name":"cnt"}}}}}
 
     Read from memory:
     {"program":{"op":"var","name":"type-a-count"}}

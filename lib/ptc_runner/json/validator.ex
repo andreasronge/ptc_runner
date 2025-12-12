@@ -58,8 +58,38 @@ defmodule PtcRunner.Json.Validator do
       "select" -> validate_select(node, fields)
       "get" -> validate_get(node, fields)
       "sort_by" -> validate_sort_by(node, fields)
+      "object" -> validate_object(op, node, fields)
       _ -> validate_fields_generic(op, node, fields)
     end
+  end
+
+  defp validate_object(op, node, fields) do
+    with :ok <- validate_required_fields(op, node, fields) do
+      fields_map = Map.get(node, "fields", %{})
+
+      validate_object_fields(fields_map)
+    end
+  end
+
+  defp validate_object_fields(fields_map) when is_map(fields_map) do
+    Enum.reduce_while(fields_map, :ok, fn {_key, value}, :ok ->
+      case validate_object_field_value(value) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp validate_object_fields(_fields_map) do
+    {:error, {:validation_error, "Field 'fields' must be a map"}}
+  end
+
+  defp validate_object_field_value(value) when is_map(value) and is_map_key(value, "op") do
+    validate_node(value)
+  end
+
+  defp validate_object_field_value(_value) do
+    :ok
   end
 
   defp validate_let(op, node, fields) do

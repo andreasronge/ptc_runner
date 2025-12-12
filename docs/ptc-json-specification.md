@@ -396,9 +396,26 @@ Invokes a registered tool function.
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
+| `object` | Construct object with evaluated values | `{"op": "object", "fields": {...}}` |
 | `merge` | Merge objects | `{"op": "merge", "objects": [...]}` |
 | `concat` | Concatenate lists | `{"op": "concat", "lists": [...]}` |
 | `zip` | Zip lists together | `{"op": "zip", "lists": [...]}` |
+
+#### `object`
+
+Constructs a map from literal and expression field values. Field values that are objects with an `"op"` field are evaluated as expressions; other values are passed through as literals.
+
+```json
+{
+  "op": "object",
+  "fields": {
+    "count": {"op": "var", "name": "n"},
+    "name": "test"
+  }
+}
+```
+
+Result: `{"count": <value of n>, "name": "test"}`
 
 #### `merge`
 
@@ -771,6 +788,7 @@ These features are intentionally excluded:
 - `call` — `{"op": "call", "tool": "name", "args": {...}}`
 
 ### Combine
+- `object` — `{"op": "object", "fields": {...}}`
 - `merge` — `{"op": "merge", "objects": [...]}`
 - `concat` — `{"op": "concat", "lists": [...]}`
 - `zip` — `{"op": "zip", "lists": [...]}`
