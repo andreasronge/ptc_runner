@@ -239,7 +239,7 @@ defmodule PtcRunner.Schema do
     },
     "round" => %{
       "description" =>
-        "Round a number to N decimal places (default 0). Use negative precision to round to tens, hundreds, etc. Example: {op:'round', value:{op:'var', name:'x'}, precision:2}",
+        "Round a number to N decimal places (default 0). Precision must be a non-negative integer (0-15). Example: {op:'round', value:{op:'var', name:'x'}, precision:2}",
       "fields" => %{
         "value" => %{"type" => :expr, "required" => true},
         "precision" => %{"type" => :any, "required" => false}

@@ -485,7 +485,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Round a number to N decimal places (default 0). Use negative precision to round to tens, hundreds, etc. Example: {op:'round', value:{op:'var', name:'x'}, precision:2}",
+          "description": "Round a number to N decimal places (default 0). Precision must be a non-negative integer (0-15). Example: {op:'round', value:{op:'var', name:'x'}, precision:2}",
           "properties": {
             "op": {
               "const": "round"
