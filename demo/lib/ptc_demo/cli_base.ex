@@ -70,10 +70,11 @@ defmodule PtcDemo.CLIBase do
     - --report=<path>: generate report file (e.g., --report=report.md)
     - --runs=<n>: number of test runs (e.g., --runs=3)
     - --list-models: list available models and exit
+    - --show-prompt: show system prompt and exit
     - --validate-clojure: validate generated programs against Babashka
     - --no-validate-clojure: skip Clojure validation
 
-  Returns a map with keys: :explore, :test, :verbose, :model, :report, :runs, :list_models, :validate_clojure
+  Returns a map with keys: :explore, :test, :verbose, :model, :report, :runs, :list_models, :show_prompt, :validate_clojure
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -89,6 +90,9 @@ defmodule PtcDemo.CLIBase do
 
         arg == "--list-models" ->
           Map.put(acc, :list_models, true)
+
+        arg == "--show-prompt" ->
+          Map.put(acc, :show_prompt, true)
 
         arg == "--validate-clojure" ->
           Map.put(acc, :validate_clojure, true)
@@ -140,6 +144,23 @@ defmodule PtcDemo.CLIBase do
   def handle_list_models(opts) do
     if opts[:list_models] do
       IO.puts(PtcDemo.ModelRegistry.format_model_list())
+      System.halt(0)
+    end
+  end
+
+  @doc """
+  Handle --show-prompt flag. Starts the agent, prints the system prompt, and exits.
+
+  Takes opts map and the agent module (PtcDemo.Agent or PtcDemo.LispAgent).
+  The data_mode is determined from opts[:explore].
+  """
+  def handle_show_prompt(opts, agent_module) do
+    if opts[:show_prompt] do
+      data_mode = if opts[:explore], do: :explore, else: :schema
+      {:ok, _pid} = agent_module.start_link(data_mode: data_mode)
+      prompt = agent_module.system_prompt()
+      IO.puts("\n[SYSTEM PROMPT]\n")
+      IO.puts(prompt)
       System.halt(0)
     end
   end

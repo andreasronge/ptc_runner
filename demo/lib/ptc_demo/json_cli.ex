@@ -19,6 +19,9 @@ defmodule PtcDemo.JsonCLI do
     # Handle --list-models early (before API key check)
     CLIBase.handle_list_models(opts)
 
+    # Handle --show-prompt (needs agent but not API key)
+    CLIBase.handle_show_prompt(opts, PtcDemo.Agent)
+
     CLIBase.ensure_api_key!()
 
     data_mode = if opts[:explore], do: :explore, else: :schema
@@ -306,6 +309,7 @@ defmodule PtcDemo.JsonCLI do
       mix json --model=<name>      Start with specific model
       mix json --explore           Start in explore mode
       mix json --list-models       Show available models and exit
+      mix json --show-prompt       Show system prompt and exit
     """
   end
 
