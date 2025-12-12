@@ -127,6 +127,11 @@ defmodule PtcRunner.Json.Operations do
     eval_merge(objects, context)
   end
 
+  def eval("object", node, context, _eval_fn) do
+    fields = Map.get(node, "fields", %{})
+    eval_object(fields, context)
+  end
+
   def eval("concat", node, context, _eval_fn) do
     lists = Map.get(node, "lists", [])
     eval_concat(lists, context)
@@ -279,6 +284,31 @@ defmodule PtcRunner.Json.Operations do
       {:ok, _result, memory} ->
         {:ok, true, memory}
     end
+  end
+
+  defp eval_object(fields_map, context) when is_map(fields_map) do
+    Enum.reduce_while(fields_map, {:ok, %{}, context.memory}, fn {key, value},
+                                                                 {:ok, acc, memory} ->
+      ctx = %{context | memory: memory}
+
+      case evaluate_object_field_value(value, ctx) do
+        {:ok, result, new_memory} -> {:cont, {:ok, Map.put(acc, key, result), new_memory}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, result, final_memory} -> {:ok, result, final_memory}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp evaluate_object_field_value(value, context)
+       when is_map(value) and is_map_key(value, "op") do
+    Interpreter.eval(value, context)
+  end
+
+  defp evaluate_object_field_value(value, context) do
+    {:ok, value, context.memory}
   end
 
   defp eval_merge([], context) do

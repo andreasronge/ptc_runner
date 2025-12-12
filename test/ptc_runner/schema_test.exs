@@ -5,18 +5,18 @@ defmodule PtcRunner.SchemaTest do
     test "operations/0 returns a map" do
       operations = PtcRunner.Schema.operations()
       assert is_map(operations)
-      assert map_size(operations) == 41
+      assert map_size(operations) == 42
     end
 
-    test "valid_operation_names/0 returns 41 operation names in sorted order" do
+    test "valid_operation_names/0 returns 42 operation names in sorted order" do
       names = PtcRunner.Schema.valid_operation_names()
 
       assert is_list(names)
-      assert length(names) == 41
+      assert length(names) == 42
       assert names == Enum.sort(names)
 
       expected_ops =
-        ~w(and avg call concat contains count distinct drop eq filter first get gt gte if keys last let literal load lt lte map max max_by merge min min_by neq not nth or pipe reject select sort_by sum take typeof var zip)
+        ~w(and avg call concat contains count distinct drop eq filter first get gt gte if keys last let literal load lt lte map max max_by merge min min_by neq not nth object or pipe reject select sort_by sum take typeof var zip)
 
       assert Enum.sort(names) == expected_ops
     end
@@ -342,9 +342,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 41 operation schemas" do
+    test "generates 42 operation schemas" do
       schema = PtcRunner.Schema.to_json_schema()
-      assert length(schema["$defs"]["operation"]["oneOf"]) == 41
+      assert length(schema["$defs"]["operation"]["oneOf"]) == 42
     end
 
     test "each operation schema has required structure" do
@@ -515,9 +515,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 41 operation schemas" do
+    test "generates 42 operation schemas" do
       schema = PtcRunner.Schema.to_llm_schema()
-      assert length(schema["properties"]["program"]["anyOf"]) == 41
+      assert length(schema["properties"]["program"]["anyOf"]) == 42
     end
 
     test "each operation schema has required structure" do
