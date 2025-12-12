@@ -6,11 +6,12 @@ defmodule PtcRunner.Json.Operations do
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
   last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, object,
   merge, concat, zip; Phase 4: keys, typeof - introspection operations; Phase 5: take, drop,
-  distinct - list filtering and deduplication).
+  distinct - list filtering and deduplication; Phase 6: add, sub, mul, div, round, pct - arithmetic operations).
 
   This module acts as a dispatcher, delegating to specialized sub-modules:
   - PtcRunner.Json.Operations.Comparison - eq, neq, gt, gte, lt, lte, contains
   - PtcRunner.Json.Operations.Aggregation - sum, count, avg, min, max
+  - PtcRunner.Json.Operations.Arithmetic - add, sub, mul, div, round, pct
   - PtcRunner.Json.Operations.Collection - filter, map, select, reject
   - PtcRunner.Json.Operations.Access - get, first, last, nth, sort_by, max_by, min_by, take, drop, distinct
   """
@@ -19,6 +20,7 @@ defmodule PtcRunner.Json.Operations do
   alias PtcRunner.Json.Interpreter
   alias PtcRunner.Json.Operations.Access
   alias PtcRunner.Json.Operations.Aggregation
+  alias PtcRunner.Json.Operations.Arithmetic
   alias PtcRunner.Json.Operations.Collection
   alias PtcRunner.Json.Operations.Comparison
 
@@ -162,6 +164,11 @@ defmodule PtcRunner.Json.Operations do
   # Aggregation operations - delegate to sub-module
   def eval(op, node, context, eval_fn) when op in ["sum", "count", "avg", "min", "max"] do
     Aggregation.eval(op, node, context, eval_fn)
+  end
+
+  # Arithmetic operations - delegate to sub-module
+  def eval(op, node, context, eval_fn) when op in ["add", "sub", "mul", "div", "round", "pct"] do
+    Arithmetic.eval(op, node, context, eval_fn)
   end
 
   # Access operations - delegate to sub-module

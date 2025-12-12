@@ -5,18 +5,18 @@ defmodule PtcRunner.SchemaTest do
     test "operations/0 returns a map" do
       operations = PtcRunner.Schema.operations()
       assert is_map(operations)
-      assert map_size(operations) == 42
+      assert map_size(operations) == 48
     end
 
-    test "valid_operation_names/0 returns 42 operation names in sorted order" do
+    test "valid_operation_names/0 returns 48 operation names in sorted order" do
       names = PtcRunner.Schema.valid_operation_names()
 
       assert is_list(names)
-      assert length(names) == 42
+      assert length(names) == 48
       assert names == Enum.sort(names)
 
       expected_ops =
-        ~w(and avg call concat contains count distinct drop eq filter first get gt gte if keys last let literal load lt lte map max max_by merge min min_by neq not nth object or pipe reject select sort_by sum take typeof var zip)
+        ~w(add and avg call concat contains count distinct div drop eq filter first get gt gte if keys last let literal load lt lte map max max_by merge min min_by mul neq not nth object or pct pipe reject round select sort_by sub sum take typeof var zip)
 
       assert Enum.sort(names) == expected_ops
     end
@@ -342,9 +342,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 42 operation schemas" do
+    test "generates 48 operation schemas" do
       schema = PtcRunner.Schema.to_json_schema()
-      assert length(schema["$defs"]["operation"]["oneOf"]) == 42
+      assert length(schema["$defs"]["operation"]["oneOf"]) == 48
     end
 
     test "each operation schema has required structure" do
@@ -515,9 +515,9 @@ defmodule PtcRunner.SchemaTest do
       assert schema["additionalProperties"] == false
     end
 
-    test "generates 42 operation schemas" do
+    test "generates 48 operation schemas" do
       schema = PtcRunner.Schema.to_llm_schema()
-      assert length(schema["properties"]["program"]["anyOf"]) == 42
+      assert length(schema["properties"]["program"]["anyOf"]) == 48
     end
 
     test "each operation schema has required structure" do

@@ -204,6 +204,56 @@ defmodule PtcRunner.Schema do
       }
     },
 
+    # Arithmetic operations
+    "add" => %{
+      "description" =>
+        "Add two numbers. Example: {op:'add', left:{op:'var', name:'a'}, right:{op:'literal', value:10}}",
+      "fields" => %{
+        "left" => %{"type" => :expr, "required" => true},
+        "right" => %{"type" => :expr, "required" => true}
+      }
+    },
+    "sub" => %{
+      "description" =>
+        "Subtract two numbers. Example: {op:'sub', left:{op:'var', name:'total'}, right:{op:'var', name:'spent'}}",
+      "fields" => %{
+        "left" => %{"type" => :expr, "required" => true},
+        "right" => %{"type" => :expr, "required" => true}
+      }
+    },
+    "mul" => %{
+      "description" =>
+        "Multiply two numbers. Example: {op:'mul', left:{op:'literal', value:5}, right:{op:'literal', value:3}}",
+      "fields" => %{
+        "left" => %{"type" => :expr, "required" => true},
+        "right" => %{"type" => :expr, "required" => true}
+      }
+    },
+    "div" => %{
+      "description" =>
+        "Divide two numbers (always returns float; error on divide by zero). Example: {op:'div', left:{op:'literal', value:10}, right:{op:'literal', value:4}}",
+      "fields" => %{
+        "left" => %{"type" => :expr, "required" => true},
+        "right" => %{"type" => :expr, "required" => true}
+      }
+    },
+    "round" => %{
+      "description" =>
+        "Round a number to N decimal places (default 0). Precision must be a non-negative integer (0-15). Example: {op:'round', value:{op:'var', name:'x'}, precision:2}",
+      "fields" => %{
+        "value" => %{"type" => :expr, "required" => true},
+        "precision" => %{"type" => :any, "required" => false}
+      }
+    },
+    "pct" => %{
+      "description" =>
+        "Calculate percentage: (part / whole) * 100. Convenience operation for common ratio calculations. Example: {op:'pct', part:{op:'var', name:'delivered'}, whole:{op:'var', name:'total'}}",
+      "fields" => %{
+        "part" => %{"type" => :expr, "required" => true},
+        "whole" => %{"type" => :expr, "required" => true}
+      }
+    },
+
     # Access operations
     "get" => %{
       "description" =>
@@ -626,6 +676,7 @@ defmodule PtcRunner.Schema do
   defp type_to_llm_json_schema(:string), do: %{"type" => "string"}
   defp type_to_llm_json_schema(:map), do: %{"type" => "object"}
   defp type_to_llm_json_schema(:non_neg_integer), do: %{"type" => "integer", "minimum" => 0}
+  defp type_to_llm_json_schema(:integer), do: %{"type" => "integer"}
 
   defp type_to_llm_json_schema({:list, :string}),
     do: %{"type" => "array", "items" => %{"type" => "string"}}
@@ -670,6 +721,7 @@ defmodule PtcRunner.Schema do
   defp type_to_nested_schema(:string), do: %{"type" => "string"}
   defp type_to_nested_schema(:map), do: %{"type" => "object"}
   defp type_to_nested_schema(:non_neg_integer), do: %{"type" => "integer", "minimum" => 0}
+  defp type_to_nested_schema(:integer), do: %{"type" => "integer"}
 
   defp type_to_nested_schema({:list, :string}),
     do: %{"type" => "array", "items" => %{"type" => "string"}}
@@ -723,5 +775,9 @@ defmodule PtcRunner.Schema do
       "type" => "integer",
       "minimum" => 0
     }
+  end
+
+  defp type_to_json_schema(:integer) do
+    %{"type" => "integer"}
   end
 end
