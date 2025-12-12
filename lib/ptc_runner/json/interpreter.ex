@@ -74,7 +74,21 @@ defmodule PtcRunner.Json.Interpreter do
 
   # Evaluate an implicit object literal
   # Uses the same logic as the explicit "object" operation but on the map directly
+  # Implicit objects support "result" key extraction for memory contract
   defp eval_implicit_object(fields_map, context) do
-    Operations.eval_object(fields_map, context)
+    case Operations.eval_object(fields_map, context) do
+      {:ok, result, memory} ->
+        # For implicit objects with "result" key, mark it for extraction
+        # by wrapping in a marker that apply_memory_contract recognizes
+        if is_map(result) and Map.has_key?(result, "result") do
+          result_with_marker = Map.put(result, "__implicit_object_result__", true)
+          {:ok, result_with_marker, memory}
+        else
+          {:ok, result, memory}
+        end
+
+      other ->
+        other
+    end
   end
 end

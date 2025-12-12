@@ -130,27 +130,31 @@ defmodule PtcRunner.Json do
     {:ok, value, %{}, memory}
   end
 
-  # Apply memory contract: map result with "result" key
+  # Apply memory contract: map result with "result" or :result key
   defp apply_memory_contract(value, memory) when is_map(value) do
+    # Check if this is an implicit object with "result" key (marked by interpreter)
+    is_implicit_with_result = Map.get(value, "__implicit_object_result__", false)
+    value_without_marker = Map.delete(value, "__implicit_object_result__")
+
     cond do
-      Map.has_key?(value, "result") ->
-        # Map with "result" → extract "result" value, merge rest into memory
-        result_value = Map.fetch!(value, "result")
-        rest = Map.delete(value, "result")
+      is_implicit_with_result and Map.has_key?(value_without_marker, "result") ->
+        # Implicit object with "result" → extract "result" value, merge rest into memory
+        result_value = Map.fetch!(value_without_marker, "result")
+        rest = Map.delete(value_without_marker, "result")
         new_memory = Map.merge(memory, rest)
         {:ok, result_value, rest, new_memory}
 
-      Map.has_key?(value, :result) ->
+      Map.has_key?(value_without_marker, :result) ->
         # Map with :result (atom key) → merge rest into memory, :result value returned
-        result_value = Map.fetch!(value, :result)
-        rest = Map.delete(value, :result)
+        result_value = Map.fetch!(value_without_marker, :result)
+        rest = Map.delete(value_without_marker, :result)
         new_memory = Map.merge(memory, rest)
         {:ok, result_value, rest, new_memory}
 
       true ->
-        # Map without "result" or :result → merge into memory, map is returned
-        new_memory = Map.merge(memory, value)
-        {:ok, value, value, new_memory}
+        # Map without special result handling → merge into memory, map is returned
+        new_memory = Map.merge(memory, value_without_marker)
+        {:ok, value_without_marker, value_without_marker, new_memory}
     end
   end
 
