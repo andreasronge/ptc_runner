@@ -51,17 +51,24 @@ iex> result
 700
 ```
 
+## Why Two DSLs?
+
+Both DSLs run on the same execution engine and support the same operations:
+
+- **PTC-JSON** — Easy to generate and validate (JSON schema)
+- **PTC-Lisp** — 3-5x more token-efficient, more expressive
+
 ## Installation
 
 ```elixir
 def deps do
-  [{:ptc_runner, "~> 0.2.0"}]
+  [{:ptc_runner, "~> 0.3"}]
 end
 ```
 
 ## Features
 
-- **Two DSLs**: PTC-JSON (verbose, universal) and PTC-Lisp (3-5x more token-efficient)
+- **Two DSLs**: JSON (verbose, universal) and Lisp (compact, LLM-friendly)
 - **Safe**: Fixed operations, no arbitrary code execution
 - **Fast**: Isolated BEAM processes with configurable timeout (1s) and memory (10MB) limits
 - **Simple**: No external dependencies (Python, containers, etc.)

@@ -116,3 +116,12 @@ When planning features, reviewing issues, or entering plan mode:
 2. **Use Explore agents** to investigate relevant code before making assumptions
 3. **Check** `docs/guidelines/testing-guidelines.md` for test strategy
 4. **Follow** the output format for consistent reviews
+
+## Documentation Rules
+
+- **@doc**: Required for public functions. Use doctests (`iex>`) over prose.
+- **@moduledoc**: Explain module responsibility, link to relevant guides.
+- **docs/*.md**: Concepts, workflows, architecture. Not API reference.
+- **README.md**: Onboarding only (<200 lines). Link to HexDocs.
+- **No duplication**: Cross-link between layers instead of copying.
+- **Keep in sync**: Update docs when behavior changes.

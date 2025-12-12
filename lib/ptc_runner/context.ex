@@ -5,6 +5,8 @@ defmodule PtcRunner.Context do
   - `ctx`: External input data (read-only)
   - `memory`: Mutable state passed through evaluation
   - `tools`: Tool registry
+
+  See the [Guide](guide.md) for details on how context, memory, and tools interact.
   """
 
   defstruct [:ctx, :memory, :tools]
@@ -21,13 +23,16 @@ defmodule PtcRunner.Context do
   @doc """
   Creates a new context with external data, memory, and tools.
 
-  ## Arguments
-    - ctx: Map of external context data (default: `%{}`)
-    - memory: Map of mutable state (default: `%{}`)
-    - tools: Map of tool names to functions (default: `%{}`)
+  ## Examples
 
-  ## Returns
-    - New Context struct
+      iex> ctx = PtcRunner.Context.new(%{"users" => [1, 2, 3]})
+      iex> ctx.ctx
+      %{"users" => [1, 2, 3]}
+
+      iex> ctx = PtcRunner.Context.new(%{}, %{"counter" => 0})
+      iex> ctx.memory
+      %{"counter" => 0}
+
   """
   @spec new(map(), map(), map()) :: t()
   def new(ctx \\ %{}, memory \\ %{}, tools \\ %{}) do
@@ -41,15 +46,18 @@ defmodule PtcRunner.Context do
   @doc """
   Retrieves a value from context (external data).
 
-  Returns nil if key doesn't exist.
+  Returns `{:ok, nil}` if key doesn't exist.
 
-  ## Arguments
-    - context: The context
-    - name: Key to retrieve
+  ## Examples
 
-  ## Returns
-    - `{:ok, value}` if key exists
-    - `{:ok, nil}` if key doesn't exist
+      iex> ctx = PtcRunner.Context.new(%{"users" => [1, 2, 3]})
+      iex> PtcRunner.Context.get_ctx(ctx, "users")
+      {:ok, [1, 2, 3]}
+
+      iex> ctx = PtcRunner.Context.new()
+      iex> PtcRunner.Context.get_ctx(ctx, "missing")
+      {:ok, nil}
+
   """
   @spec get_ctx(t(), String.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
   def get_ctx(context, name) when is_binary(name) do
@@ -63,15 +71,18 @@ defmodule PtcRunner.Context do
   @doc """
   Retrieves a value from memory (mutable state).
 
-  Returns nil if key doesn't exist.
+  Returns `{:ok, nil}` if key doesn't exist.
 
-  ## Arguments
-    - context: The context
-    - name: Key to retrieve
+  ## Examples
 
-  ## Returns
-    - `{:ok, value}` if key exists
-    - `{:ok, nil}` if key doesn't exist
+      iex> ctx = PtcRunner.Context.new(%{}, %{"counter" => 42})
+      iex> PtcRunner.Context.get_memory(ctx, "counter")
+      {:ok, 42}
+
+      iex> ctx = PtcRunner.Context.new()
+      iex> PtcRunner.Context.get_memory(ctx, "missing")
+      {:ok, nil}
+
   """
   @spec get_memory(t(), String.t()) :: {:ok, any()} | {:error, {atom(), String.t()}}
   def get_memory(context, name) when is_binary(name) do
@@ -85,13 +96,13 @@ defmodule PtcRunner.Context do
   @doc """
   Sets a value in memory.
 
-  ## Arguments
-    - context: The context
-    - name: Key name
-    - value: Value to set
+  ## Examples
 
-  ## Returns
-    - Updated context
+      iex> ctx = PtcRunner.Context.new()
+      iex> ctx = PtcRunner.Context.put_memory(ctx, "result", 100)
+      iex> ctx.memory
+      %{"result" => 100}
+
   """
   @spec put_memory(t(), String.t(), any()) :: t()
   def put_memory(context, name, value) when is_binary(name) do

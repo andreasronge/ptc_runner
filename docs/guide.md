@@ -68,100 +68,12 @@ Two-phase execution: parse and validate in the main process, then execute in an 
 
 ## API Reference
 
-### `PtcRunner.Json.run/2`
+See the module documentation for complete API details:
 
-```elixir
-@spec run(String.t() | map(), keyword()) ::
-  {:ok, any(), map(), map()} | {:error, error()}
-
-@type error ::
-  {:parse_error, String.t()} |
-  {:validation_error, String.t()} |
-  {:execution_error, String.t()} |
-  {:timeout, non_neg_integer()} |
-  {:memory_exceeded, non_neg_integer()}
-```
-
-Returns `{:ok, result, memory_delta, new_memory}` on success.
-
-**Options:**
-- `:context` - Map of pre-bound variables (default: `%{}`)
-- `:memory` - Map of initial memory state (default: `%{}`)
-- `:tools` - Map of tool name to function (default: `%{}`)
-- `:timeout` - Execution timeout in ms (default: `1000`)
-- `:max_heap` - Max heap size in words (default: `1_250_000` ≈ 10MB)
-
-### `PtcRunner.Lisp.run/2`
-
-```elixir
-@spec run(String.t(), keyword()) ::
-  {:ok, any(), map(), map()} | {:error, error()}
-```
-
-Returns `{:ok, result, memory_delta, new_memory}` on success.
-
-**Additional Options:**
-- `:memory` - Initial memory map (default: `%{}`)
-- `:float_precision` - Decimal places for floats (default: `nil` = full precision)
-
-### `PtcRunner.Json.run!/2`
-
-Same as `run/2` but raises on error.
-
-### `PtcRunner.Json.format_error/1`
-
-Convert error tuples to LLM-friendly messages for retry loops.
-
-## Tool Registration
-
-Tools are functions that receive arguments and return results:
-
-```elixir
-tools = %{
-  "get_expenses" => fn _args ->
-    [%{"id" => 1, "category" => "travel", "amount" => 500}]
-  end,
-  "get_user" => fn %{"id" => id} -> MyApp.Users.get(id) end,
-  "search" => fn %{"query" => q, "limit" => n} -> MyApp.Search.run(q, limit: n) end
-}
-
-PtcRunner.Json.run(program, tools: tools)
-```
-
-**Contract:**
-- Receives: `map()` of arguments (may be empty `%{}`)
-- Returns: Any Elixir term (maps, lists, primitives)
-- Should not raise (return `{:error, reason}` for errors)
-
-## Resource Limits
-
-| Resource | Default | Notes |
-|----------|---------|-------|
-| Timeout | 1,000 ms | Execution time limit |
-| Max Heap | ~10 MB | Memory limit (1,250,000 words) |
-
-```elixir
-# Per-call configuration
-PtcRunner.Json.run(program, timeout: 5000, max_heap: 5_000_000)
-
-# Application-level defaults (in config.exs)
-config :ptc_runner,
-  default_timeout: 2000,
-  default_max_heap: 2_500_000
-```
-
-### Error Handling
-
-```elixir
-case PtcRunner.Json.run(program) do
-  {:ok, result, _memory_delta, _new_memory} -> handle_success(result)
-  {:error, {:timeout, ms}} -> Logger.warning("Exceeded #{ms}ms timeout")
-  {:error, {:memory_exceeded, bytes}} -> Logger.warning("Exceeded memory: #{bytes}")
-  {:error, {:parse_error, msg}} -> Logger.error("Invalid JSON: #{msg}")
-  {:error, {:validation_error, msg}} -> Logger.error("Invalid program: #{msg}")
-  {:error, {:execution_error, msg}} -> Logger.error("Runtime error: #{msg}")
-end
-```
+- `PtcRunner.Json` - JSON DSL entry point, tool registration, error handling
+- `PtcRunner.Lisp` - Lisp DSL entry point, tool registration
+- `PtcRunner.Sandbox` - Resource limits and configuration
+- `PtcRunner.Context` - Context, memory, and tools management
 
 ## LLM Integration
 
