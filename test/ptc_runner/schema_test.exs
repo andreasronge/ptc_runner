@@ -668,7 +668,8 @@ defmodule PtcRunner.SchemaTest do
       prompt = PtcRunner.Schema.to_prompt()
 
       assert is_binary(prompt)
-      assert String.contains?(prompt, "PTC Operations")
+      assert String.contains?(prompt, "PTC-JSON")
+      assert String.contains?(prompt, "## Operations")
       assert String.contains?(prompt, "pipe(steps)")
       assert String.contains?(prompt, "load(name)")
       assert String.contains?(prompt, "filter(where)")
@@ -705,11 +706,14 @@ defmodule PtcRunner.SchemaTest do
       refute String.contains?(prompt_none, "Examples:")
 
       assert String.contains?(prompt_one, "Count filtered items")
-      refute String.contains?(prompt_one, "Sum with multiple conditions")
+      refute String.contains?(prompt_one, "Count distinct values")
 
       assert String.contains?(prompt_three, "Count filtered items")
-      assert String.contains?(prompt_three, "Sum with multiple conditions")
-      assert String.contains?(prompt_three, "Average of filtered data")
+      assert String.contains?(prompt_three, "Count distinct values")
+      # Examples use generic domains (tasks, events, transactions) not test domains
+      refute String.contains?(prompt_three, "orders")
+      refute String.contains?(prompt_three, "products")
+      refute String.contains?(prompt_three, "expenses")
     end
 
     test "is much smaller than to_llm_schema" do

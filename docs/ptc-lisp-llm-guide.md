@@ -280,9 +280,9 @@ memory/results        ; read from persistent memory
 (:key m)  (:key m default)  ; keyword as function
 (update-vals m f)  ; apply f to each value in map
 (update-vals {:a 1 :b 2} inc)                        ; => {:a 2 :b 3}
-(update-vals (group-by :dept employees) count)       ; count per group
+(update-vals (group-by :region sales) count)         ; count per group
 ; IMPORTANT (update-vals m f) - map first, use -> not ->>
-(-> (group-by :category products) (update-vals (fn [items] (sum-by :price items))))
+(-> (group-by :type records) (update-vals (fn [items] (sum-by :value items))))
 
 ; Sets
 (set? x)               ; is x a set?
@@ -325,12 +325,12 @@ memory/results           ; access stored value by key
 **Multi-turn example:**
 ```clojure
 ; Turn 1: Store expensive computation
-{:unique-products (->> ctx/orders (pluck :product_id) (distinct))}
+{:unique-users (->> ctx/events (pluck :user_id) (distinct))}
 
 ; Turn 2: Reference stored result
-{:ordered-count (count memory/unique-products)
- :total-count (count ctx/products)
- :result (count memory/unique-products)}
+{:active-count (count memory/unique-users)
+ :total-count (count ctx/sessions)
+ :result (count memory/unique-users)}
 ```
 
 **Other patterns:**

@@ -427,19 +427,18 @@ defmodule PtcRunner.Schema do
   @doc """
   Generate a concise prompt describing PTC operations for LLM text mode.
 
-  This produces a compact (~300 tokens) human-readable description of operations
-  suitable for system prompts. Much smaller than `to_llm_schema/0` (~10k tokens)
-  while still enabling LLMs to generate valid programs.
+  This produces a human-readable description of operations suitable for system
+  prompts. Includes operation reference, memory contract, key rules, and examples.
 
   ## Options
-    - `:examples` - number of full JSON examples to include (default: 2)
+    - `:examples` - number of full JSON examples to include (default: 3)
 
   ## Returns
     A string containing operation descriptions and examples.
   """
   @spec to_prompt(keyword()) :: String.t()
   def to_prompt(opts \\ []) do
-    num_examples = Keyword.get(opts, :examples, 2)
+    num_examples = Keyword.get(opts, :examples, 3)
 
     categories = [
       {"Data", ~w(load literal var)},
@@ -447,7 +446,7 @@ defmodule PtcRunner.Schema do
       {"Logic", ~w(and or not)},
       {"Filter/Transform", ~w(filter map select reject sort_by)},
       {"Compare", ~w(eq neq gt gte lt lte contains)},
-      {"Aggregate", ~w(count sum avg min max min_by max_by first last nth)},
+      {"Aggregate", ~w(count sum avg min max min_by max_by first last nth take drop distinct)},
       {"Combine", ~w(merge concat zip)},
       {"Access", ~w(get)},
       {"Introspect", ~w(keys typeof)},
@@ -459,9 +458,47 @@ defmodule PtcRunner.Schema do
     examples_text = build_examples(num_examples)
 
     """
-    PTC Operations (JSON format, wrap in {"program": ...}):
+    PTC-JSON: Data transformation DSL. Programs are JSON wrapped in {"program": ...}
 
+    ## Program Structure
+    Use pipe to chain operations: {"op":"pipe","steps":[step1, step2, ...]}
+    Start with load: {"op":"load","name":"datasetName"}
+
+    ## Operations
     #{ops_text}
+
+    ## Key Rules
+    - Every nested object MUST have an "op" field - no bare JSON objects
+    - Comparisons need field AND value: {"op":"gt","field":"price","value":100}
+    - Aggregations (sum/avg/min/max) need field: {"op":"sum","field":"amount"}
+    - count/first/last/distinct have NO field: {"op":"count"}
+    - let requires ALL THREE fields: {"op":"let","name":"x","value":{...},"in":{...}}
+    - let is for LOCAL bindings only, NOT for storing to memory
+
+    ## Memory: Persisting Data Between Turns
+    Return a map to persist keys to memory. Use var to read memory later.
+
+    | Return | Effect |
+    |--------|--------|
+    | Non-map | No memory change |
+    | {"key":val} | Store key→val in memory |
+    | {"result":X,"key":Y} | Store key→Y, return X |
+
+    Store to memory (use let to compute once, include in result map):
+    {"program":{"op":"let","name":"cnt","value":{"op":"pipe","steps":[{"op":"load","name":"items"},{"op":"filter","where":{"op":"eq","field":"type","value":"A"}},{"op":"count"}]},"in":{"op":"merge","objects":[{"op":"literal","value":{"type-a-count":null}},{"type-a-count":{"op":"var","name":"cnt"}},{"result":{"op":"var","name":"cnt"}}]}}}
+
+    Read from memory:
+    {"program":{"op":"var","name":"type-a-count"}}
+
+    ## Common Mistakes
+    WRONG: {"op":"let","in":"x"} (let needs name, value, AND in)
+    RIGHT: {"op":"let","name":"x","value":{"op":"literal","value":5},"in":{"op":"var","name":"x"}}
+
+    WRONG: {"op":"sum"} (missing field)
+    RIGHT: {"op":"sum","field":"price"}
+
+    WRONG: {"op":"filter","where":"active"} (where needs comparison op)
+    RIGHT: {"op":"filter","where":{"op":"eq","field":"status","value":"active"}}
     #{examples_text}
     """
     |> String.trim()
@@ -496,11 +533,11 @@ defmodule PtcRunner.Schema do
 
   @prompt_examples [
     {"Count filtered items",
-     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"orders"},{"op":"filter","where":{"op":"gt","field":"total","value":100}},{"op":"count"}]}}|},
-    {"Sum with multiple conditions",
-     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"expenses"},{"op":"filter","where":{"op":"and","conditions":[{"op":"eq","field":"status","value":"approved"},{"op":"eq","field":"category","value":"travel"}]}},{"op":"sum","field":"amount"}]}}|},
-    {"Average of filtered data",
-     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"products"},{"op":"filter","where":{"op":"eq","field":"category","value":"electronics"}},{"op":"avg","field":"price"}]}}|}
+     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"tasks"},{"op":"filter","where":{"op":"gt","field":"priority","value":5}},{"op":"count"}]}}|},
+    {"Count distinct values",
+     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"events"},{"op":"map","expr":{"op":"get","field":"user_id"}},{"op":"distinct"},{"op":"count"}]}}|},
+    {"Sum with AND conditions",
+     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"transactions"},{"op":"filter","where":{"op":"and","conditions":[{"op":"eq","field":"type","value":"purchase"},{"op":"eq","field":"region","value":"west"}]}},{"op":"sum","field":"value"}]}}|}
   ]
 
   defp build_examples(n) do
