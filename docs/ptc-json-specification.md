@@ -348,7 +348,129 @@ Accesses a field or nested path.
 - All comparison ops use `field` to access the current item
 - To compare the current value directly, use `field: null` or omit `field`
 
-### 5.7 Logic Operations
+### 5.7 Arithmetic Operations
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| `add` | Add two numbers | `{"op": "add", "left": 5, "right": 3}` |
+| `sub` | Subtract two numbers | `{"op": "sub", "left": 10, "right": 3}` |
+| `mul` | Multiply two numbers | `{"op": "mul", "left": 5, "right": 3}` |
+| `div` | Divide two numbers (returns float) | `{"op": "div", "left": 10, "right": 4}` |
+| `round` | Round to N decimal places | `{"op": "round", "value": 3.14159, "precision": 2}` |
+| `pct` | Calculate percentage | `{"op": "pct", "part": 50, "whole": 100}` |
+
+#### `add`
+
+Adds two numbers. Both operands are expressions (recursively evaluated).
+
+```json
+{"op": "add", "left": {"op": "literal", "value": 5}, "right": {"op": "literal", "value": 3}}
+```
+
+Result: `8`
+
+#### `sub`
+
+Subtracts the right operand from the left operand.
+
+```json
+{"op": "sub", "left": {"op": "literal", "value": 10}, "right": {"op": "literal", "value": 3}}
+```
+
+Result: `7`
+
+#### `mul`
+
+Multiplies two numbers.
+
+```json
+{"op": "mul", "left": {"op": "literal", "value": 5}, "right": {"op": "literal", "value": 3}}
+```
+
+Result: `15`
+
+#### `div`
+
+Divides the left operand by the right operand. Always returns a float (Elixir's `/` operator behavior). Returns an error if the divisor is zero.
+
+```json
+{"op": "div", "left": {"op": "literal", "value": 10}, "right": {"op": "literal", "value": 4}}
+```
+
+Result: `2.5`
+
+**Note:** For integer division, use `div` followed by `round` with `precision: 0`.
+
+#### `round`
+
+Rounds a number to a specified number of decimal places. Precision defaults to 0 (round to nearest integer). Precision must be a non-negative integer (0-15).
+
+```json
+{"op": "round", "value": {"op": "literal", "value": 3.14159}, "precision": 2}
+```
+
+Result: `3.14`
+
+**Precision examples:**
+- `"precision": 0` — round to nearest integer
+- `"precision": 1` — round to tenths
+- `"precision": 2` — round to hundredths
+- `"precision": 3` — round to thousandths
+
+#### `pct`
+
+Calculates a percentage: `(part / whole) * 100`. This is a convenience operation for the common case of calculating ratios as percentages. Returns an error if `whole` is zero.
+
+```json
+{"op": "pct", "part": {"op": "literal", "value": 50}, "whole": {"op": "literal", "value": 100}}
+```
+
+Result: `50.0`
+
+**With variables (memory):**
+
+```json
+{
+  "op": "let",
+  "name": "delivered",
+  "value": {
+    "op": "pipe",
+    "steps": [
+      {"op": "load", "name": "orders"},
+      {"op": "filter", "where": {"op": "eq", "field": "status", "value": "delivered"}},
+      {"op": "count"}
+    ]
+  },
+  "in": {
+    "op": "let",
+    "name": "total",
+    "value": {
+      "op": "pipe",
+      "steps": [
+        {"op": "load", "name": "orders"},
+        {"op": "count"}
+      ]
+    },
+    "in": {
+      "op": "pct",
+      "part": {"op": "var", "name": "delivered"},
+      "whole": {"op": "var", "name": "total"}
+    }
+  }
+}
+```
+
+Result (with 2 delivered out of 3 orders): `66.66666...`
+
+#### Arithmetic Operation Semantics
+
+- All arithmetic operations work with both integers and floats
+- Operations take **expressions** as operands (not just literals) — operands are recursively evaluated
+- Non-numeric operands → `{:error, {:execution_error, "...requires numeric operands..."}}`
+- Division by zero → `{:error, {:execution_error, "division by zero"}}`
+- Percentage with zero whole → `{:error, {:execution_error, "division by zero"}}`
+
+### 5.8 Logic Operations
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
@@ -370,7 +492,7 @@ Two-branch conditional. The `else` branch is **required**.
 }
 ```
 
-### 5.8 Tool Operations
+### 5.9 Tool Operations
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
@@ -392,7 +514,7 @@ Invokes a registered tool function.
 - Tool errors propagate as execution errors
 - Tool results count toward memory limit
 
-### 5.9 Combine Operations
+### 5.10 Combine Operations
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
@@ -703,7 +825,8 @@ These features are intentionally excluded:
 | `group_by` | Use tools for grouping |
 | String operations | Use tools |
 | Regex matching | Use tools |
-| Arithmetic operations | Use tools or `let` with literals |
+| Modulo / bitwise operations | Can add if needed |
+| Math functions (sqrt, pow, log) | Use tools for advanced math |
 | Parallel tool execution | Tools execute sequentially |
 | Anonymous functions | Not supported in JSON DSL |
 | Closures | Not supported in JSON DSL |
@@ -777,6 +900,14 @@ These features are intentionally excluded:
 - `lt` — `{"op": "lt", "field": "x", "value": v}`
 - `lte` — `{"op": "lte", "field": "x", "value": v}`
 - `contains` — `{"op": "contains", "field": "x", "value": v}`
+
+### Arithmetic
+- `add` — `{"op": "add", "left": ..., "right": ...}`
+- `sub` — `{"op": "sub", "left": ..., "right": ...}`
+- `mul` — `{"op": "mul", "left": ..., "right": ...}`
+- `div` — `{"op": "div", "left": ..., "right": ...}`
+- `round` — `{"op": "round", "value": ..., "precision": n}`
+- `pct` — `{"op": "pct", "part": ..., "whole": ...}`
 
 ### Logic
 - `and` — `{"op": "and", "conditions": [...]}`

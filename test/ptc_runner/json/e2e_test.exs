@@ -215,5 +215,26 @@ defmodule PtcRunner.Json.E2ETest do
 
       assert result == 2
     end
+
+    test "calculates percentage using arithmetic operations" do
+      task = "What percentage of orders have been delivered?"
+
+      program_json = LLMClient.generate_program_structured!(task)
+
+      context = %{
+        "input" => [
+          %{"status" => "delivered"},
+          %{"status" => "pending"},
+          %{"status" => "delivered"}
+        ]
+      }
+
+      assert {:ok, result, _memory_delta, _new_memory} =
+               PtcRunner.Json.run(program_json, context: context)
+
+      # 2 delivered out of 3 total = 66.67%
+      assert is_number(result)
+      assert_in_delta result, 66.67, 1.0
+    end
   end
 end
