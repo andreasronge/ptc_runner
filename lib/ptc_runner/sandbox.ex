@@ -4,6 +4,25 @@ defmodule PtcRunner.Sandbox do
 
   Spawns isolated processes with configurable timeout and memory limits,
   ensuring safe program execution.
+
+  ## Resource Limits
+
+  | Resource | Default | Option |
+  |----------|---------|--------|
+  | Timeout | 1,000 ms | `:timeout` |
+  | Max Heap | ~10 MB (1,250,000 words) | `:max_heap` |
+
+  ## Configuration
+
+  Limits can be set per-call:
+
+      PtcRunner.Json.run(program, timeout: 5000, max_heap: 5_000_000)
+
+  Or as application-level defaults in `config.exs`:
+
+      config :ptc_runner,
+        default_timeout: 2000,
+        default_max_heap: 2_500_000
   """
 
   alias PtcRunner.Context

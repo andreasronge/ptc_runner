@@ -5,6 +5,34 @@ defmodule PtcRunner.Json do
   PtcRunner.Json enables LLMs to write safe programs that orchestrate tools
   and transform data inside a sandboxed environment using JSON syntax.
 
+  See the [PTC-JSON Specification](ptc-json-specification.md) for the complete
+  DSL reference and the [Guide](guide.md) for architecture overview.
+
+  ## Tool Registration
+
+  Tools are functions that receive a map of arguments and return results:
+
+      tools = %{
+        "get_user" => fn %{"id" => id} -> MyApp.Users.get(id) end,
+        "search" => fn %{"query" => q, "limit" => n} -> MyApp.Search.run(q, limit: n) end
+      }
+
+      PtcRunner.Json.run(program, tools: tools)
+
+  **Contract:**
+  - Receives: `map()` of arguments (may be empty `%{}`)
+  - Returns: Any Elixir term (maps, lists, primitives)
+  - Should not raise (return `{:error, reason}` for errors)
+
+  ## Error Handling
+
+  Use `format_error/1` to convert errors into LLM-friendly messages:
+
+      case PtcRunner.Json.run(program, tools: tools) do
+        {:ok, result, _, _} -> handle_success(result)
+        {:error, error} -> retry_with_feedback(format_error(error))
+      end
+
   ## Examples
 
       iex> program = ~s({"program": {"op": "literal", "value": 42}})

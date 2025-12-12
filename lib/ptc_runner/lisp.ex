@@ -1,5 +1,30 @@
 defmodule PtcRunner.Lisp do
-  @moduledoc "Main entry point for PTC-Lisp execution"
+  @moduledoc """
+  Execute PTC programs written in Lisp DSL (Clojure subset).
+
+  PtcRunner.Lisp enables LLMs to write safe programs that orchestrate tools
+  and transform data inside a sandboxed environment using Lisp syntax.
+
+  See the [PTC-Lisp Specification](ptc-lisp-specification.md) for the complete
+  DSL reference and the [PTC-Lisp Overview](ptc-lisp-overview.md) for an introduction.
+
+  ## Tool Registration
+
+  Tools are functions that receive a map of arguments and return results.
+  Note: tool names use kebab-case in Lisp (e.g., `"get-user"` not `"get_user"`):
+
+      tools = %{
+        "get-user" => fn %{"id" => id} -> MyApp.Users.get(id) end,
+        "search" => fn %{"query" => q} -> MyApp.Search.run(q) end
+      }
+
+      PtcRunner.Lisp.run(~S|(call "get-user" {:id 123})|, tools: tools)
+
+  **Contract:**
+  - Receives: `map()` of arguments (may be empty `%{}`)
+  - Returns: Any Elixir term (maps, lists, primitives)
+  - Should not raise (return `{:error, reason}` for errors)
+  """
 
   alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser}
 

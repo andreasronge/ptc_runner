@@ -67,12 +67,16 @@ defmodule PtcRunner.MixProject do
       extras: [
         "README.md",
         "LICENSE",
+        "CHANGELOG.md",
+        # Guides (basic → advanced)
         "docs/guide.md",
         "docs/ptc-json-specification.md",
         "docs/ptc-lisp-overview.md",
         "docs/ptc-lisp-specification.md",
-        "docs/ptc-lisp-llm-guide.md",
-        "CHANGELOG.md"
+        "docs/ptc-lisp-llm-guide.md"
+      ],
+      groups_for_extras: [
+        Guides: ~r/docs\/.+\.md/
       ],
       before_closing_body_tag: &before_closing_body_tag/1
     ]
