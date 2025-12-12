@@ -81,6 +81,8 @@ defmodule PtcDemo.TestRunner.Report do
 
     #{generate_failed_details(summary.results)}
 
+    #{generate_invalid_clojure_section(summary.results)}
+
     #{generate_all_programs_section(summary.results)}
     """
   end
@@ -91,24 +93,54 @@ defmodule PtcDemo.TestRunner.Report do
   Generates a markdown report from the summary and writes it to the specified path.
   Creates the file if it doesn't exist, overwrites if it does.
 
+  Relative paths are automatically placed in the `reports/` directory and the
+  directory is created if it doesn't exist. Absolute paths are used as-is.
+
   ## Parameters
 
-    - `path` - File path to write the report to
+    - `path` - File path to write the report to (relative paths go to reports/)
     - `summary` - Test summary map
     - `dsl_name` - DSL name string for the report title
 
   ## Returns
 
-  `:ok` on success, or raises an error if the file cannot be written.
+  The resolved file path where the report was written.
 
   ## Example
 
+      # Writes to reports/test_report.md
       PtcDemo.TestRunner.Report.write("test_report.md", summary, "Lisp")
+
+      # Writes to /tmp/report.md
+      PtcDemo.TestRunner.Report.write("/tmp/report.md", summary, "JSON")
   """
-  @spec write(String.t(), map(), String.t()) :: :ok
+  @default_reports_dir "reports"
+
+  @spec write(String.t(), map(), String.t()) :: String.t()
   def write(path, summary, dsl_name) do
+    full_path = resolve_report_path(path)
+    ensure_report_dir!(full_path)
     content = generate(summary, dsl_name)
-    File.write!(path, content)
+    File.write!(full_path, content)
+    full_path
+  end
+
+  # Resolves a report path - relative paths are placed in the reports/ directory
+  defp resolve_report_path(path) do
+    if Path.type(path) == :absolute do
+      path
+    else
+      Path.join(@default_reports_dir, path)
+    end
+  end
+
+  # Ensures the parent directory exists for a given file path
+  defp ensure_report_dir!(path) do
+    dir = Path.dirname(path)
+
+    unless File.dir?(dir) do
+      File.mkdir_p!(dir)
+    end
   end
 
   # Private helpers
@@ -164,6 +196,39 @@ defmodule PtcDemo.TestRunner.Report do
       ## Failed Tests
 
       #{Enum.join(details, "\n---\n")}
+      """
+    end
+  end
+
+  defp generate_invalid_clojure_section(results) do
+    # Find programs that passed PTC execution but failed Clojure validation
+    invalid =
+      results
+      |> Enum.filter(fn r -> r.passed and r[:clojure_valid] == false end)
+
+    if Enum.empty?(invalid) do
+      ""
+    else
+      entries =
+        Enum.map(invalid, fn r ->
+          """
+          ### #{r.index}. #{r.query}
+
+          **Program:**
+          ```clojure
+          #{r[:program] || "(no program)"}
+          ```
+
+          **Clojure error:** #{r[:clojure_error] || "Unknown error"}
+          """
+        end)
+
+      """
+      ## Clojure Validation Failures
+
+      The following programs executed successfully in PTC-Lisp but failed Clojure validation:
+
+      #{Enum.join(entries, "\n---\n")}
       """
     end
   end

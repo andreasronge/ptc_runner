@@ -13,3 +13,6 @@
 
 # Environment
 .env
+
+# Reports
+/reports/
