@@ -204,7 +204,8 @@ mix json [options]
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run automated tests and exit |
 | `--verbose`, `-v` | Verbose output (for test mode) |
-| `--report=<file>` | Generate markdown report (for test mode) |
+| `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
+| `--runs=<n>` | Run tests multiple times for reliability testing |
 
 Model presets: `haiku`, `devstral`, `gemini`, `deepseek`, `kimi`, `gpt`
 
@@ -215,6 +216,7 @@ mix json --list-models                        # Show available models
 mix json --model=haiku                        # Use Claude Haiku
 mix json --model=openrouter:anthropic/claude-haiku-4.5  # Use full model ID
 mix json --test --model=gemini --verbose      # Test with Gemini
+mix json --test --runs=3 --report=gemini.md   # Run 3x, save report
 ```
 
 ## Lisp CLI Options
@@ -230,7 +232,9 @@ mix lisp [options]
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run automated tests and exit |
 | `--verbose`, `-v` | Verbose output (for test mode) |
-| `--report=<file>` | Generate markdown report (for test mode) |
+| `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
+| `--runs=<n>` | Run tests multiple times for reliability testing |
+| `--validate-clojure` | Validate generated programs against Babashka |
 
 Model presets: `haiku`, `devstral`, `gemini`, `deepseek`, `kimi`, `gpt`
 
@@ -241,6 +245,8 @@ mix lisp --list-models                        # Show available models
 mix lisp --model=haiku                        # Use Claude Haiku
 mix lisp --model=openrouter:anthropic/claude-haiku-4.5  # Use full model ID
 mix lisp --test --model=gemini --verbose      # Test with Gemini
+mix lisp --test --runs=3 --report=gemini.md   # Run 3x, save report
+mix lisp --test --validate-clojure            # Validate syntax with Babashka
 ```
 
 ## Interactive Commands
@@ -335,7 +341,7 @@ Data mode: schema
 ...
 
 ==================================================
-Results: 14/14 passed, 0 failed
+Results: 15/15 passed, 0 failed
 Total attempts: 16 (1.1 avg per test)
 Duration: 45.2s
 Model: openrouter:anthropic/claude-3.5-haiku
@@ -350,6 +356,81 @@ The report includes:
 - Results table showing each test's status, attempts, and final program
 - Detailed section for failed tests showing all programs tried and their results
 - Complete list of all programs generated during the test run
+
+### Report Output Directory
+
+Reports are saved to the `reports/` directory by default (git-ignored):
+
+```bash
+# Auto-generate filename: reports/lisp_deepseek_20251212-1430.md
+mix lisp --test --model=deepseek --report
+
+# Explicit filename: reports/haiku.md
+mix lisp --test --report=haiku.md
+
+# Subdirectories created automatically: reports/models/gemini.md
+mix lisp --test --report=models/gemini.md
+
+# Absolute paths are used as-is
+mix lisp --test --report=/tmp/report.md
+```
+
+The auto-generated filename format is `{dsl}_{model}_{YYYYMMDD-HHMM}.md`.
+
+### Multiple Test Runs
+
+Use `--runs=<n>` to run the test suite multiple times for reliability testing:
+
+```bash
+# Run tests 5 times
+mix lisp --test --runs=5
+
+# With verbose output and report
+mix lisp --test --runs=3 --verbose --report=stability-test.md
+```
+
+This shows aggregate statistics across all runs:
+```
+========================================
+AGGREGATE SUMMARY (3 runs)
+========================================
+Total tests run: 42
+Total passed:    40
+Total failed:    2
+Pass rate:       95.2%
+
+Per-run results:
+  Run 1: 15/15 (PASS)
+  Run 2: 13/14 (FAIL)
+  Run 3: 13/14 (FAIL)
+```
+
+### Clojure Validation (Lisp only)
+
+The `--validate-clojure` flag executes generated programs in Babashka and compares results with PTC-Lisp:
+
+```bash
+# Validate with Babashka
+mix lisp --test --validate-clojure
+```
+
+This does more than syntax checking - it actually runs each program in Clojure with the same dataset and verifies the results match. This helps ensure PTC-Lisp programs are fully compatible with real Clojure.
+
+**Installing Babashka:**
+
+Babashka must be installed from the parent `ptc_runner` directory (not `demo/`):
+
+```bash
+# From ptc_runner root
+cd ..
+mix ptc.install_babashka
+
+# Or with options
+mix ptc.install_babashka --force           # Reinstall
+mix ptc.install_babashka --version 1.4.192 # Specific version
+```
+
+This downloads the appropriate binary for your platform (macOS/Linux) and installs it to `_build/tools/bb`.
 
 ### JSON DSL Tests
 
@@ -392,13 +473,13 @@ PtcDemo.JsonTestRunner.run_one(3)
 
 ### Test Suite Structure
 
-Both JSON and Lisp runners use the **same 14 test cases** for fair comparison:
+Both JSON and Lisp runners use the **same 15 test cases** for fair comparison:
 
 | Level | Tests | Description |
 |-------|-------|-------------|
 | **Level 1: Basic** | 4 | Simple count, filtered count, sum, average |
 | **Level 2: Intermediate** | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
-| **Level 3: Advanced** | 4 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset |
+| **Level 3: Advanced** | 5 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset join |
 | **Multi-turn** | 2 | Memory persistence between queries |
 
 This unified test suite enables direct comparison of DSL capabilities and LLM performance.

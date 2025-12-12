@@ -16,7 +16,7 @@ defmodule PtcDemo.TestRunner.TestCase do
   @doc """
   Return test cases that work with both DSLs.
 
-  These 12 tests cover different aspects of the DSL with progressive difficulty.
+  These 13 tests cover different aspects of the DSL with progressive difficulty.
   Both JSON and Lisp runners use these same tests for fair comparison.
 
   Returns a list of test case maps with keys:
@@ -135,6 +135,16 @@ defmodule PtcDemo.TestRunner.TestCase do
         expect: :integer,
         constraint: {:between, 1, 500},
         description: "Distinct + count (cross-dataset reasoning)"
+      },
+
+      # 13. Cross-dataset join query (harder)
+      %{
+        query:
+          "What is the total expense amount for employees in the engineering department? " <>
+            "(Find engineering employee IDs, then sum expenses for those employees)",
+        expect: :number,
+        constraint: {:gt, 0},
+        description: "Cross-dataset join: filter employees, lookup expenses by employee_id, sum"
       }
     ]
   end
