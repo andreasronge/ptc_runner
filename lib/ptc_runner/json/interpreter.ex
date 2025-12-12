@@ -28,7 +28,12 @@ defmodule PtcRunner.Json.Interpreter do
 
     case Map.get(node_without_input, "op") do
       nil ->
-        {:error, {:execution_error, "Missing required field 'op'"}}
+        # Check if this is an implicit object literal (no "op" field)
+        if is_implicit_object(node_without_input) do
+          eval_implicit_object(node_without_input, context)
+        else
+          {:error, {:execution_error, "Missing required field 'op'"}}
+        end
 
       op ->
         # For operations that need input (everything except literal, load, var)
@@ -58,5 +63,18 @@ defmodule PtcRunner.Json.Interpreter do
     end
 
     Operations.eval(op, node, context, eval_fn)
+  end
+
+  # Check if a map is an implicit object literal
+  # An implicit object literal is a map that has no "op" field
+  # Empty maps are implicit objects
+  defp is_implicit_object(node) when is_map(node) do
+    not Map.has_key?(node, "op")
+  end
+
+  # Evaluate an implicit object literal
+  # Uses the same logic as the explicit "object" operation but on the map directly
+  defp eval_implicit_object(fields_map, context) do
+    Operations.eval_object(fields_map, context)
   end
 end

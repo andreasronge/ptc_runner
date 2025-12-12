@@ -165,6 +165,80 @@ defmodule PtcRunner.Json.JsonTest do
     end
   end
 
+  describe "implicit object literals" do
+    test "simple implicit object with literal values" do
+      program = ~s({"program": {"name": "Alice", "age": 30}})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{"name" => "Alice", "age" => 30}
+    end
+
+    test "empty implicit object" do
+      program = ~s({"program": {}})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{}
+    end
+
+    test "implicit object with null values" do
+      program = ~s({"program": {"name": "Bob", "email": null}})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{"name" => "Bob", "email" => nil}
+    end
+
+    test "implicit object with operation values" do
+      program = ~s({"program": {
+        "x": {"op": "literal", "value": 10},
+        "y": {"op": "literal", "value": 20}
+      }})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{"x" => 10, "y" => 20}
+    end
+
+    test "implicit object inside let expression" do
+      program = ~s({"program": {
+        "op": "let",
+        "name": "user",
+        "value": {"name": "Charlie", "active": true},
+        "in": {"op": "var", "name": "user"}
+      }})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{"name" => "Charlie", "active" => true}
+    end
+
+    test "implicit object with result key extracts result" do
+      program = ~s({"program": {"result": 42, "extra": "data"}})
+      {:ok, result, memory_delta, new_memory} = PtcRunner.Json.run(program)
+
+      assert result == 42
+      assert Map.get(memory_delta, "extra") == "data"
+      assert Map.get(new_memory, "extra") == "data"
+    end
+
+    test "implicit object without result key merges into memory" do
+      program = ~s({"program": {"x": 1, "y": 2}})
+      {:ok, result, memory_delta, new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{"x" => 1, "y" => 2}
+      assert memory_delta == %{"x" => 1, "y" => 2}
+      assert Map.get(new_memory, "x") == 1
+      assert Map.get(new_memory, "y") == 2
+    end
+
+    test "nested implicit objects" do
+      program = ~s({"program": {
+        "user": {"name": "Diana", "age": 25},
+        "active": true
+      }})
+      {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+      assert result == %{"user" => %{"name" => "Diana", "age" => 25}, "active" => true}
+    end
+  end
+
   describe "format_error/1" do
     test "formats parse errors" do
       assert PtcRunner.Json.format_error({:parse_error, "unexpected token"}) ==

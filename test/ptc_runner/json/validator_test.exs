@@ -61,19 +61,20 @@ defmodule PtcRunner.Json.ValidatorTest do
     end
   end
 
-  describe "Validator.validate/1 - missing op field" do
-    test "returns error when 'op' field is missing" do
-      ast = %{"value" => 42}
-      {:error, {:validation_error, message}} = Validator.validate(ast)
-
-      assert message == "Missing required field 'op'"
+  describe "Validator.validate/1 - missing op field (implicit objects)" do
+    test "accepts empty map as implicit object literal" do
+      ast = %{}
+      assert :ok = Validator.validate(ast)
     end
 
-    test "returns error for empty map (no op)" do
-      ast = %{}
-      {:error, {:validation_error, message}} = Validator.validate(ast)
+    test "accepts map with only literal values as implicit object" do
+      ast = %{"value" => 42}
+      assert :ok = Validator.validate(ast)
+    end
 
-      assert message == "Missing required field 'op'"
+    test "accepts map with mixed literal and operation values as implicit object" do
+      ast = %{"value" => 42, "operation" => %{"op" => "literal", "value" => "test"}}
+      assert :ok = Validator.validate(ast)
     end
 
     test "returns error when op is nil" do
@@ -932,10 +933,10 @@ defmodule PtcRunner.Json.ValidatorTest do
       assert :ok = Validator.validate(ast)
     end
 
-    test "rejects operations with completely wrong structure" do
+    test "accepts maps with any fields as implicit objects" do
+      # Maps without "op" are now treated as implicit objects
       ast = %{"wrong_field" => "value"}
-      {:error, {:validation_error, message}} = Validator.validate(ast)
-      assert message == "Missing required field 'op'"
+      assert :ok = Validator.validate(ast)
     end
 
     test "validates list with mixed element types via pipe" do

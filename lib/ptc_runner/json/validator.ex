@@ -30,8 +30,16 @@ defmodule PtcRunner.Json.Validator do
 
   defp validate_node(node) do
     case Map.get(node, "op") do
-      nil -> {:error, {:validation_error, "Missing required field 'op'"}}
-      op -> validate_operation(op, node)
+      nil ->
+        # Check if this is an implicit object literal (no "op" field)
+        if is_implicit_object(node) do
+          validate_implicit_object(node)
+        else
+          {:error, {:validation_error, "Missing required field 'op'"}}
+        end
+
+      op ->
+        validate_operation(op, node)
     end
   end
 
@@ -344,5 +352,17 @@ defmodule PtcRunner.Json.Validator do
       name when is_binary(name) -> :ok
       _ -> {:error, {:validation_error, "Field 'name' must be a string"}}
     end
+  end
+
+  # Check if a map is an implicit object literal
+  # An implicit object literal is a map that has no "op" field
+  defp is_implicit_object(node) when is_map(node) do
+    not Map.has_key?(node, "op")
+  end
+
+  # Validate an implicit object literal
+  # Each value in the map is either a literal value or an operation
+  defp validate_implicit_object(fields_map) do
+    validate_object_fields(fields_map)
   end
 end

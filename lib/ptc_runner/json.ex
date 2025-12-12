@@ -84,8 +84,9 @@ defmodule PtcRunner.Json do
 
   The return format follows the memory contract:
   - If result is not a map: `memory_delta` is empty, `new_memory` is unchanged
+  - If result is a map with `"result"` key: `"result"` value is returned, other keys merged to memory
   - If result is a map with `:result` key: `:result` value is returned, other keys merged to memory
-  - If result is a map without `:result`: result is returned as-is, merged to memory
+  - If result is a map without `"result"` or `:result`: result is returned as-is, merged to memory
 
   ## Examples
 
@@ -129,18 +130,27 @@ defmodule PtcRunner.Json do
     {:ok, value, %{}, memory}
   end
 
-  # Apply memory contract: map result with :result key
+  # Apply memory contract: map result with "result" key
   defp apply_memory_contract(value, memory) when is_map(value) do
-    if Map.has_key?(value, :result) do
-      # Map with :result → merge rest into memory, :result value returned
-      result_value = Map.fetch!(value, :result)
-      rest = Map.delete(value, :result)
-      new_memory = Map.merge(memory, rest)
-      {:ok, result_value, rest, new_memory}
-    else
-      # Map without :result → merge into memory, map is returned
-      new_memory = Map.merge(memory, value)
-      {:ok, value, value, new_memory}
+    cond do
+      Map.has_key?(value, "result") ->
+        # Map with "result" → extract "result" value, merge rest into memory
+        result_value = Map.fetch!(value, "result")
+        rest = Map.delete(value, "result")
+        new_memory = Map.merge(memory, rest)
+        {:ok, result_value, rest, new_memory}
+
+      Map.has_key?(value, :result) ->
+        # Map with :result (atom key) → merge rest into memory, :result value returned
+        result_value = Map.fetch!(value, :result)
+        rest = Map.delete(value, :result)
+        new_memory = Map.merge(memory, rest)
+        {:ok, result_value, rest, new_memory}
+
+      true ->
+        # Map without "result" or :result → merge into memory, map is returned
+        new_memory = Map.merge(memory, value)
+        {:ok, value, value, new_memory}
     end
   end
 
