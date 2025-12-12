@@ -732,4 +732,122 @@ defmodule PtcRunner.Json.Operations.CollectionTest do
     {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
     assert String.contains?(message, "must be a map")
   end
+
+  # Filter_in operation (membership filtering)
+  test "filter_in keeps items where field value is in list set" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"status": "active", "count": 1},
+          {"status": "pending", "count": 2},
+          {"status": "inactive", "count": 3},
+          {"status": "active", "count": 4}
+        ]},
+        {"op": "filter_in", "field": "status", "value": ["active", "pending"]}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"status" => "active", "count" => 1},
+             %{"status" => "pending", "count" => 2},
+             %{"status" => "active", "count" => 4}
+           ]
+  end
+
+  test "filter_in on empty list returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": []},
+        {"op": "filter_in", "field": "status", "value": ["active"]}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "filter_in with no matching items returns empty list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"status": "active", "count": 1},
+          {"status": "active", "count": 2}
+        ]},
+        {"op": "filter_in", "field": "status", "value": ["inactive"]}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == []
+  end
+
+  test "filter_in with string field value and map set" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"role": "admin"},
+          {"role": "viewer"},
+          {"role": "admin"}
+        ]},
+        {"op": "filter_in", "field": "role", "value": {"admin": 1, "editor": 2}}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"role" => "admin"},
+             %{"role" => "admin"}
+           ]
+  end
+
+  test "filter_in skips non-map items in collection" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"status": "active"},
+          "not a map",
+          {"status": "pending"}
+        ]},
+        {"op": "filter_in", "field": "status", "value": ["active", "pending"]}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"status" => "active"},
+             %{"status" => "pending"}
+           ]
+  end
+
+  test "filter_in with numeric values in list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": [
+          {"priority": 1},
+          {"priority": 2},
+          {"priority": 3},
+          {"priority": 1}
+        ]},
+        {"op": "filter_in", "field": "priority", "value": [1, 3]}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"priority" => 1},
+             %{"priority" => 3},
+             %{"priority" => 1}
+           ]
+  end
 end

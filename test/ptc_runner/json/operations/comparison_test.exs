@@ -267,4 +267,83 @@ defmodule PtcRunner.Json.Operations.ComparisonTest do
     {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
     assert result == false
   end
+
+  # In operation (membership)
+  test "in checks if value is member of list field" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"tags": [1, 2, 3]}},
+        {"op": "in", "field": "tags", "value": 2}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == true
+  end
+
+  test "in returns false when value is not member of list" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"tags": [1, 2, 3]}},
+        {"op": "in", "field": "tags", "value": 5}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == false
+  end
+
+  test "in checks if value is key in map field" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"metadata": {"a": 1, "b": 2}}},
+        {"op": "in", "field": "metadata", "value": "a"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == true
+  end
+
+  test "in returns false when key not in map field" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"metadata": {"a": 1, "b": 2}}},
+        {"op": "in", "field": "metadata", "value": "c"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == false
+  end
+
+  test "in on nil field value returns false" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"data": null}},
+        {"op": "in", "field": "data", "value": "foo"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == false
+  end
+
+  test "in on other types returns false" do
+    program = ~s({"program": {
+      "op": "pipe",
+      "steps": [
+        {"op": "literal", "value": {"count": 42}},
+        {"op": "in", "field": "count", "value": "foo"}
+      ]
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+    assert result == false
+  end
 end

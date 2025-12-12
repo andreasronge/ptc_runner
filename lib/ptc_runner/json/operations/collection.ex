@@ -2,7 +2,7 @@ defmodule PtcRunner.Json.Operations.Collection do
   @moduledoc """
   Collection operations for the JSON DSL.
 
-  Implements collection transformations: filter, map, select, reject.
+  Implements collection transformations: filter, map, select, reject, filter_in.
   """
 
   alias PtcRunner.Json.Interpreter
@@ -93,6 +93,25 @@ defmodule PtcRunner.Json.Operations.Collection do
     end
   end
 
+  def eval("filter_in", node, context, eval_fn) do
+    field = Map.get(node, "field")
+    value = Map.get(node, "value")
+
+    case eval_fn.(context, nil) do
+      {:error, _} = err ->
+        err
+
+      {:ok, data, memory} ->
+        new_context = %{context | memory: memory}
+
+        if is_list(data) do
+          filter_in_list(data, field, value, new_context)
+        else
+          {:error, {:execution_error, "filter_in requires a list, got #{inspect(data)}"}}
+        end
+    end
+  end
+
   # Private helpers
 
   defp filter_list(data, where_clause, context, _eval_fn) do
@@ -177,4 +196,22 @@ defmodule PtcRunner.Json.Operations.Collection do
       end
     end)
   end
+
+  defp filter_in_list(data, field, value, context) do
+    result =
+      Enum.filter(data, fn item ->
+        if is_map(item) do
+          field_value = Map.get(item, field)
+          member?(field_value, value)
+        else
+          false
+        end
+      end)
+
+    {:ok, result, context.memory}
+  end
+
+  defp member?(field_value, set) when is_list(set), do: field_value in set
+  defp member?(field_value, set) when is_map(set), do: Map.has_key?(set, field_value)
+  defp member?(_field_value, _set), do: false
 end
