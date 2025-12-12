@@ -700,4 +700,36 @@ defmodule PtcRunner.Json.Operations.CollectionTest do
 
     assert result2 == 42
   end
+
+  test "object with error in field expression propagates error" do
+    program = ~s({"program": {
+      "op": "object",
+      "fields": {
+        "a": 1,
+        "b": {"op": "invalid_op"}
+      }
+    }})
+
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
+    assert String.contains?(message, "invalid_op")
+  end
+
+  test "object validation fails when fields is missing" do
+    program = ~s({"program": {
+      "op": "object"
+    }})
+
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
+    assert String.contains?(message, "requires field 'fields'")
+  end
+
+  test "object validation fails when fields is not a map" do
+    program = ~s({"program": {
+      "op": "object",
+      "fields": [1, 2, 3]
+    }})
+
+    {:error, {:validation_error, message}} = PtcRunner.Json.run(program)
+    assert String.contains?(message, "must be a map")
+  end
 end

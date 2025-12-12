@@ -80,6 +80,10 @@ defmodule PtcRunner.Json.Validator do
     end)
   end
 
+  defp validate_object_fields(_fields_map) do
+    {:error, {:validation_error, "Field 'fields' must be a map"}}
+  end
+
   defp validate_object_field_value(value) when is_map(value) and is_map_key(value, "op") do
     validate_node(value)
   end

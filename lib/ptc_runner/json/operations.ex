@@ -4,8 +4,8 @@ defmodule PtcRunner.Json.Operations do
 
   Implements built-in operations for the DSL (Phase 1: literal, load, var, pipe,
   filter, map, select, eq, sum, count; Phase 2: get, neq, gt, gte, lt, lte, first,
-  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, merge,
-  concat, zip; Phase 4: keys, typeof - introspection operations; Phase 5: take, drop,
+  last, nth, reject, contains, avg, min, max; Phase 3: let, if, and, or, not, object,
+  merge, concat, zip; Phase 4: keys, typeof - introspection operations; Phase 5: take, drop,
   distinct - list filtering and deduplication).
 
   This module acts as a dispatcher, delegating to specialized sub-modules:
