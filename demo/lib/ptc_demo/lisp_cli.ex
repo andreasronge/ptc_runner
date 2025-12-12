@@ -19,6 +19,9 @@ defmodule PtcDemo.LispCLI do
     # Handle --list-models early (before API key check)
     CLIBase.handle_list_models(opts)
 
+    # Handle --show-prompt (needs agent but not API key)
+    CLIBase.handle_show_prompt(opts, PtcDemo.LispAgent)
+
     CLIBase.ensure_api_key!()
 
     data_mode = if opts[:explore], do: :explore, else: :schema
@@ -312,6 +315,7 @@ defmodule PtcDemo.LispCLI do
       mix lisp --model=<name>      Start with specific model
       mix lisp --explore           Start in explore mode
       mix lisp --list-models       Show available models and exit
+      mix lisp --show-prompt       Show system prompt and exit
     """
   end
 
