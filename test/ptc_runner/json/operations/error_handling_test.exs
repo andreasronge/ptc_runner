@@ -2,11 +2,11 @@ defmodule PtcRunner.Json.Operations.ErrorHandlingTest do
   use ExUnit.Case
 
   # Validation errors
-  test "missing 'op' field raises validation error" do
+  test "missing 'op' field is valid implicit object" do
     program = ~s({"program": {"value": 42}})
-    {:error, reason} = PtcRunner.Json.run(program)
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
 
-    assert reason == {:validation_error, "Missing required field 'op'"}
+    assert result == %{"value" => 42}
   end
 
   test "unknown operation raises validation error" do
