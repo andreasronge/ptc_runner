@@ -30,3 +30,6 @@ ptc_runner-*.tar
 
 # Benchmark output (generated results).
 /priv/ptc_lisp_benchmark/
+
+# Eval Reports
+/demo/reports

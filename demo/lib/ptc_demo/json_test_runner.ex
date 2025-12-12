@@ -105,8 +105,15 @@ defmodule PtcDemo.JsonTestRunner do
     last_summary = List.last(summaries)
 
     if report_path do
-      Report.write(report_path, last_summary, "JSON")
-      IO.puts("\nReport written to: #{report_path}")
+      actual_path =
+        if report_path == :auto do
+          CLIBase.generate_report_filename("json", current_model)
+        else
+          report_path
+        end
+
+      written_path = Report.write(actual_path, last_summary, "JSON")
+      IO.puts("\nReport written to: #{written_path}")
     end
 
     # Return the last summary for CLI exit code, but include all summaries
