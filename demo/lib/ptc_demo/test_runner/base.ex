@@ -71,26 +71,26 @@ defmodule PtcDemo.TestRunner.Base do
   """
   @spec check_constraint(any(), tuple() | any()) :: boolean() | String.t()
   def check_constraint(value, {:eq, expected}) do
-    if value == expected, do: true, else: "Expected #{expected}, got #{value}"
+    if value == expected, do: true, else: "Expected #{inspect(expected)}, got #{inspect(value)}"
   end
 
   def check_constraint(value, {:gt, min}) do
-    if value > min, do: true, else: "Expected > #{min}, got #{value}"
+    if value > min, do: true, else: "Expected > #{min}, got #{inspect(value)}"
   end
 
   def check_constraint(value, {:gte, min}) do
-    if value >= min, do: true, else: "Expected >= #{min}, got #{value}"
+    if value >= min, do: true, else: "Expected >= #{min}, got #{inspect(value)}"
   end
 
   def check_constraint(value, {:lt, max}) do
-    if value < max, do: true, else: "Expected < #{max}, got #{value}"
+    if value < max, do: true, else: "Expected < #{max}, got #{inspect(value)}"
   end
 
   def check_constraint(value, {:between, min, max}) do
     if value >= min and value <= max do
       true
     else
-      "Expected between #{min}-#{max}, got #{value}"
+      "Expected between #{min}-#{max}, got #{inspect(value)}"
     end
   end
 

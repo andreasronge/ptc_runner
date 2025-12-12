@@ -22,8 +22,10 @@ defmodule PtcDemo.Agent do
   alias PtcDemo.SampleData
 
   @model_env "PTC_DEMO_MODEL"
-  @timeout 60_000
+  @llm_timeout 60_000
   @max_iterations 5
+  # GenServer timeout must accommodate worst case: max_iterations * llm_timeout + processing buffer
+  @genserver_timeout @max_iterations * @llm_timeout + 30_000
 
   # --- State ---
   defstruct [
@@ -44,7 +46,7 @@ defmodule PtcDemo.Agent do
   end
 
   def ask(question) do
-    GenServer.call(__MODULE__, {:ask, question}, @timeout)
+    GenServer.call(__MODULE__, {:ask, question}, @genserver_timeout)
   end
 
   def reset do
@@ -288,7 +290,7 @@ defmodule PtcDemo.Agent do
   defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
 
-    case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
+    case ReqLLM.generate_text(model, context.messages, receive_timeout: @llm_timeout) do
       {:ok, response} ->
         text = ReqLLM.Response.text(response)
         new_usage = add_usage(usage, ReqLLM.Response.usage(response))
