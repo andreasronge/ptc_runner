@@ -651,6 +651,8 @@ When an implicit object literal contains a `"result"` key, it participates in th
 
 **Reserved key:** `"result"` is reserved at the top level of returned objects. It controls what value is returned to the caller while allowing other fields to be persisted to memory. Do not use `"result"` as a memory key name—use alternatives like `"result_data"`, `"query_result"`, or `"output"`.
 
+**See also:** PTC-Lisp has an equivalent `:result` key memory contract documented in Section 16.3 (Result Contract) of the PTC-Lisp specification.
+
 ##### Example: Single Value Output with Memory
 
 Return a filtered count while storing the full list in memory:
