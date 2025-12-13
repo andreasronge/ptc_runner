@@ -430,7 +430,8 @@ defmodule PtcDemo.LispAgent do
 
     To query data, output a PTC-Lisp program in a ```lisp code block. The result will be returned to you.
     When you have the answer, respond in plain text WITHOUT a code block.
-    Memory persists automatically between programs - reference stored values with memory/key.
+    Memory persists between programs - reference stored values with memory/key.
+    Return types: "store X as Y" → {:Y value}, "what is X?" → return the value directly (not a map).
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets (access via ctx/name, e.g., ctx/products):
@@ -453,7 +454,8 @@ defmodule PtcDemo.LispAgent do
 
     To query data, output a PTC-Lisp program in a ```lisp code block. The result will be returned to you.
     When you have the answer, respond in plain text WITHOUT a code block.
-    Memory persists automatically between programs - reference stored values with memory/key.
+    Memory persists between programs - reference stored values with memory/key.
+    Return types: "store X as Y" → {:Y value}, "what is X?" → return the value directly (not a map).
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
