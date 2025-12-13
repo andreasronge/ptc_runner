@@ -850,4 +850,30 @@ defmodule PtcRunner.Json.Operations.CollectionTest do
              %{"priority" => 1}
            ]
   end
+
+  test "filter_in with value as var expression" do
+    program = ~s({"program": {
+      "op": "let",
+      "name": "allowed_statuses",
+      "value": {"op": "literal", "value": ["active", "pending"]},
+      "in": {
+        "op": "pipe",
+        "steps": [
+          {"op": "literal", "value": [
+            {"status": "active", "count": 1},
+            {"status": "inactive", "count": 2},
+            {"status": "pending", "count": 3}
+          ]},
+          {"op": "filter_in", "field": "status", "value": {"op": "var", "name": "allowed_statuses"}}
+        ]
+      }
+    }})
+
+    {:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program)
+
+    assert result == [
+             %{"status" => "active", "count" => 1},
+             %{"status" => "pending", "count" => 3}
+           ]
+  end
 end
