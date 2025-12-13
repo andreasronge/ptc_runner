@@ -641,7 +641,7 @@ An empty map `{}` is a valid implicit object literal:
 
 #### Memory Contract with `"result"` Key
 
-When an implicit object literal (or any map) contains a `"result"` key, it participates in the **memory contract**:
+When an implicit object literal contains a `"result"` key, it participates in the **memory contract**:
 
 | Scenario | Return Value | Memory Update |
 |----------|--------------|---------------|
