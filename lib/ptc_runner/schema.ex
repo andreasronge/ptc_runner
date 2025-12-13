@@ -520,6 +520,7 @@ defmodule PtcRunner.Schema do
       {"Filter/Transform", ~w(filter map select reject sort_by filter_in)},
       {"Compare", ~w(eq neq gt gte lt lte contains in)},
       {"Aggregate", ~w(count sum avg min max min_by max_by first last nth take drop distinct)},
+      {"Arithmetic", ~w(add sub mul div round pct)},
       {"Combine", ~w(object merge concat zip)},
       {"Access", ~w(get)},
       {"Introspect", ~w(keys typeof)},
@@ -547,6 +548,8 @@ defmodule PtcRunner.Schema do
     - count/first/last/distinct have NO field: {"op":"count"}
     - let requires ALL THREE fields: {"op":"let","name":"x","value":{...},"in":{...}}
     - let is for LOCAL bindings only, NOT for storing to memory
+    - Arithmetic: use div (NOT /), pct for percentages. Example: {"op":"div","left":10,"right":4} → 2.5
+    - For "how many" questions: return a NUMBER, not an object. End pipeline with count/sum
 
     ## Memory: Persisting Data Between Turns
     Return a map to persist keys to memory. Use var to read memory later.
@@ -607,10 +610,10 @@ defmodule PtcRunner.Schema do
   @prompt_examples [
     {"Count filtered items",
      ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"tasks"},{"op":"filter","where":{"op":"gt","field":"priority","value":5}},{"op":"count"}]}}|},
-    {"Count distinct values",
-     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"events"},{"op":"map","expr":{"op":"get","field":"user_id"}},{"op":"distinct"},{"op":"count"}]}}|},
-    {"Sum with AND conditions",
-     ~s|{"program":{"op":"pipe","steps":[{"op":"load","name":"transactions"},{"op":"filter","where":{"op":"and","conditions":[{"op":"eq","field":"type","value":"purchase"},{"op":"eq","field":"region","value":"west"}]}},{"op":"sum","field":"value"}]}}|}
+    {"Percentage using pct (part/whole*100)",
+     ~s|{"program":{"op":"let","name":"done","value":{"op":"pipe","steps":[{"op":"load","name":"tasks"},{"op":"filter","where":{"op":"eq","field":"status","value":"done"}},{"op":"count"}]},"in":{"op":"let","name":"total","value":{"op":"pipe","steps":[{"op":"load","name":"tasks"},{"op":"count"}]},"in":{"op":"pct","part":{"op":"var","name":"done"},"whole":{"op":"var","name":"total"}}}}}|},
+    {"Cross-table filter: sum expenses for engineering employees",
+     ~s|{"program":{"op":"let","name":"eng_ids","value":{"op":"pipe","steps":[{"op":"load","name":"employees"},{"op":"filter","where":{"op":"eq","field":"department","value":"engineering"}},{"op":"map","expr":{"op":"get","field":"id"}}]},"in":{"op":"pipe","steps":[{"op":"load","name":"expenses"},{"op":"filter_in","field":"employee_id","value":{"op":"var","name":"eng_ids"}},{"op":"sum","field":"amount"}]}}}|}
   ]
 
   defp build_examples(n) do

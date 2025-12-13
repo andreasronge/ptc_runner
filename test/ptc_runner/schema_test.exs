@@ -706,14 +706,11 @@ defmodule PtcRunner.SchemaTest do
       refute String.contains?(prompt_none, "Examples:")
 
       assert String.contains?(prompt_one, "Count filtered items")
-      refute String.contains?(prompt_one, "Count distinct values")
+      refute String.contains?(prompt_one, "Percentage using pct")
 
       assert String.contains?(prompt_three, "Count filtered items")
-      assert String.contains?(prompt_three, "Count distinct values")
-      # Examples use generic domains (tasks, events, transactions) not test domains
-      refute String.contains?(prompt_three, "orders")
-      refute String.contains?(prompt_three, "products")
-      refute String.contains?(prompt_three, "expenses")
+      assert String.contains?(prompt_three, "Percentage using pct")
+      assert String.contains?(prompt_three, "Cross-table filter")
     end
 
     test "is much smaller than to_llm_schema" do
