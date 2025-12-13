@@ -531,15 +531,5 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 │  • Receives small result                                    │
 │  • Generates natural language answer                        │
 └─────────────────────────────────────────────────────────────┘
-```
 
-## Lisp vs JSON Comparison
 
-| Aspect | JSON DSL | Lisp DSL |
-|--------|----------|----------|
-| Program size | ~200 bytes | ~50-100 bytes |
-| Readability | Verbose | Concise |
-| Token usage | Higher | ~3-5x lower |
-| Maturity | Stable | Experimental |
-| Memory contract | Supports persistent memory | Supports persistent memory |
-| Test cases | 14 (same) | 14 (same) |
