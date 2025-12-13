@@ -32,6 +32,7 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 - `lib/ptc_runner/lisp/` - Lisp DSL implementation
 - `test/` - Tests mirroring lib structure
 - `docs/` - Guide, specifications, and guidelines
+- `demo/` - Separate Mix project for LLM integration testing and benchmarks
 
 ## Documentation
 
