@@ -96,7 +96,7 @@ defmodule PtcRunner.Json.Operations.Collection do
 
   def eval("filter_in", node, context, eval_fn) do
     field = Map.get(node, "field")
-    value = Map.get(node, "value")
+    value_node = Map.get(node, "value")
 
     case eval_fn.(context, nil) do
       {:error, _} = err ->
@@ -106,7 +106,14 @@ defmodule PtcRunner.Json.Operations.Collection do
         new_context = %{context | memory: memory}
 
         if is_list(data) do
-          filter_in_list(data, field, value, new_context)
+          # Evaluate value if it's an expression (has "op" key), otherwise use as literal
+          case evaluate_if_expression(value_node, new_context) do
+            {:ok, value, final_memory} ->
+              filter_in_list(data, field, value, %{new_context | memory: final_memory})
+
+            {:error, _} = err ->
+              err
+          end
         else
           {:error, {:execution_error, "filter_in requires a list, got #{inspect(data)}"}}
         end
@@ -211,4 +218,11 @@ defmodule PtcRunner.Json.Operations.Collection do
 
     {:ok, result, context.memory}
   end
+
+  # Evaluates the node if it's an expression (has "op" key), otherwise returns it as a literal
+  defp evaluate_if_expression(node, context) when is_map(node) and is_map_key(node, "op") do
+    Interpreter.eval(node, context)
+  end
+
+  defp evaluate_if_expression(value, context), do: {:ok, value, context.memory}
 end
