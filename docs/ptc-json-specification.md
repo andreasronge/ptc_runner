@@ -583,6 +583,113 @@ Combines arrays into tuples. Stops at the shortest array length.
 
 Result: `[[1, "a"], [2, "b"]]`
 
+### 5.11 Implicit Object Literals
+
+Objects without an `"op"` field are treated as **implicit object literals**. Field values that are objects with an `"op"` field are evaluated as expressions; all other values are passed through as literals.
+
+This provides a concise syntax for constructing objects without requiring the explicit `"op": "object"` wrapper.
+
+#### Implicit Object Shorthand
+
+Instead of:
+```json
+{
+  "op": "object",
+  "fields": {
+    "id": 42,
+    "name": "test"
+  }
+}
+```
+
+You can write:
+```json
+{
+  "id": 42,
+  "name": "test"
+}
+```
+
+Both produce the same result: `{"id": 42, "name": "test"}`
+
+#### Mixing Literals and Expressions
+
+Field values can be either literals or operations (identified by the `"op"` key):
+
+```json
+{
+  "count": {"op": "literal", "value": 5},
+  "name": "test",
+  "total": {"op": "sum", "field": "amount"}
+}
+```
+
+This evaluates to: `{"count": 5, "name": "test", "total": <sum of amount field>}`
+
+#### Empty Implicit Objects
+
+An empty map `{}` is a valid implicit object literal:
+
+```json
+{
+  "op": "if",
+  "condition": {"op": "eq", "field": "status", "value": "active"},
+  "then": {},
+  "else": {"op": "literal", "value": null}
+}
+```
+
+#### Memory Contract with `"result"` Key
+
+When an implicit object literal contains a `"result"` key, it participates in the **memory contract**:
+
+| Scenario | Return Value | Memory Update |
+|----------|--------------|---------------|
+| Non-map result | Value itself | No change |
+| Map without `"result"` | Entire map | Merged into memory |
+| Map with `"result"` | Value of `"result"` | Rest of map merged |
+
+**Reserved key:** `"result"` is reserved at the top level of returned objects. It controls what value is returned to the caller while allowing other fields to be persisted to memory. Do not use `"result"` as a memory key name—use alternatives like `"result_data"`, `"query_result"`, or `"output"`.
+
+**See also:** PTC-Lisp has an equivalent `:result` key memory contract documented in Section 16.3 (Result Contract) of the PTC-Lisp specification.
+
+##### Example: Single Value Output with Memory
+
+Return a filtered count while storing the full list in memory:
+
+```json
+{
+  "op": "pipe",
+  "steps": [
+    {"op": "load", "name": "expenses"},
+    {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+    {
+      "op": "map",
+      "expr": {
+        "result": {"op": "get", "field": "amount"},
+        "all_travel_expenses": {"op": "get", "path": []}
+      }
+    }
+  ]
+}
+```
+
+Each item's amount is returned, while the full item is stored in `memory.all_travel_expenses`.
+
+##### Example: Multiple Values Output
+
+Return computed values while storing original data:
+
+```json
+{
+  "result": {"op": "count"},
+  "items": {"op": "load", "name": "data"}
+}
+```
+
+- Caller receives: `5` (the count)
+- Memory after: `{"items": [...]}`  (original data stored for later use)
+
 ---
 
 ## 6. Variable Bindings and Context
@@ -923,4 +1030,5 @@ These features are intentionally excluded:
 - `merge` — `{"op": "merge", "objects": [...]}`
 - `concat` — `{"op": "concat", "lists": [...]}`
 - `zip` — `{"op": "zip", "lists": [...]}`
+- **Implicit objects** — `{"key": value, ...}` (no `"op"` field; shorthand for `object` operation)
 
