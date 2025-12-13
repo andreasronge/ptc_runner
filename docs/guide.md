@@ -42,6 +42,7 @@ Two-phase execution: parse and validate in the main process, then execute in an 
 - **[PTC-JSON Specification](ptc-json-specification.md)** - Complete JSON DSL reference
 - **[PTC-Lisp Specification](ptc-lisp-specification.md)** - Complete Lisp DSL reference
 - **[PTC-Lisp Overview](ptc-lisp-overview.md)** - Lisp DSL introduction
+- **[Performance and Use Cases](performance-and-use-cases.md)** - Benchmarks, cost analysis, when to use PTC
 
 ### Quick Comparison
 

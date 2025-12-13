@@ -51,12 +51,32 @@ iex> result
 700
 ```
 
-## Why Two DSLs?
+## Why PTC?
 
-Both DSLs run on the same execution engine and support the same operations:
+Traditional tool calling requires multiple LLM round-trips:
 
-- **PTC-JSON** — Easy to generate and validate (JSON schema)
-- **PTC-Lisp** — 3-5x more token-efficient, more expressive
+```
+LLM → get_employees() → LLM → filter(dept=eng) → LLM → avg(salary) → LLM
+```
+
+With PTC, the LLM writes one program executed locally:
+
+```clojure
+(->> (call "get-employees" {}) (filter (where :department = "engineering")) (avg-by :salary))
+```
+
+**Benchmark snapshot** (DeepSeek V3.2, 15 queries, 2500 records):
+
+| DSL | Passed | Avg Attempts | Cost |
+|-----|--------|--------------|------|
+| PTC-JSON | 15/15 | 1.3 | $0.002 |
+| PTC-Lisp | 14/15 | 1.2 | $0.002 |
+
+Small sample—see [Performance and Use Cases](docs/performance-and-use-cases.md) for methodology.
+
+**Two DSLs** — same engine, same operations:
+- **PTC-JSON** — Easy to generate and validate
+- **PTC-Lisp** — 8x fewer output tokens, Clojure-compatible
 
 ## Installation
 
@@ -79,6 +99,7 @@ end
 ## Documentation
 
 - **[Guide](docs/guide.md)** - Architecture, API reference, detailed examples
+- **[Performance and Use Cases](docs/performance-and-use-cases.md)** - Benchmarks, cost analysis, when to use PTC
 - **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
 - **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Lisp DSL introduction
 
