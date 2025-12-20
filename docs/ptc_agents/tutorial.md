@@ -486,7 +486,7 @@ For deterministic tests without API calls:
 
 ```elixir
 # Fixed response
-mock = PtcDemo.MockLLM.fixed(~s'```lisp\n(+ 1 2)\n```')
+mock = PtcDemo.MockLLM.fixed(~s'```clojure\n(+ 1 2)\n```')
 
 {:ok, result} = PtcDemo.SubAgent.delegate("add numbers",
   tools: %{},
@@ -496,7 +496,7 @@ assert result.result == 3
 
 # Sequence of responses (for multi-turn interactions)
 mock = PtcDemo.MockLLM.sequence([
-  ~s'```lisp\n(call "get_data")\n```',
+  ~s'```clojure\n(call "get_data")\n```',
   "Summary of the data"
 ])
 ```
