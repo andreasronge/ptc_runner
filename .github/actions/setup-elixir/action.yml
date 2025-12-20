@@ -26,3 +26,11 @@ runs:
       if: steps.cache-deps.outputs.cache-hit != 'true'
       run: mix deps.get
       shell: bash
+
+    - name: Cache Dialyzer PLT
+      uses: actions/cache@v4
+      with:
+        path: priv/plts
+        key: plt-${{ runner.os }}-otp28.1-elixir1.19.3-${{ hashFiles('**/mix.lock') }}
+        restore-keys: |
+          plt-${{ runner.os }}-otp28.1-elixir1.19.3-

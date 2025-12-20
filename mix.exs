@@ -18,6 +18,11 @@ defmodule PtcRunner.MixProject do
       package: package(),
       test_coverage: [
         ignore_modules: [PtcRunner.TestSupport.LLMClient]
+      ],
+      dialyzer: [
+        plt_core_path: "priv/plts",
+        plt_file: {:no_warn, "priv/plts/project.plt"},
+        plt_add_apps: [:ex_unit, :mix]
       ]
     ]
   end
@@ -45,6 +50,7 @@ defmodule PtcRunner.MixProject do
       {:nimble_parsec, "~> 1.4"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req_llm, "~> 1.0.0-rc", only: :test}
     ]
@@ -56,6 +62,7 @@ defmodule PtcRunner.MixProject do
         "format --check-formatted",
         "compile --force --warnings-as-errors",
         "credo --strict",
+        "dialyzer",
         "test --warnings-as-errors"
       ]
     ]

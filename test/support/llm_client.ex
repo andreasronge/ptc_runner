@@ -90,6 +90,8 @@ defmodule PtcRunner.TestSupport.LLMClient do
   ## Raises
     Raises if the API key is not set or if the LLM call fails.
   """
+  # Dialyzer struggles with ReqLLM's dynamic API - suppress for test support code
+  @dialyzer {:nowarn_function, generate_program_structured!: 1}
   @spec generate_program_structured!(String.t()) :: String.t()
   def generate_program_structured!(task) do
     ensure_api_key!()

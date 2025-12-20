@@ -9,7 +9,7 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    name: Compile, test, format, credo & deps check
+    name: Compile, test, format, credo, dialyzer & deps check
     env:
       MIX_ENV: test
 
@@ -31,6 +31,9 @@ jobs:
 
       - name: Run Credo
         run: mix credo --strict
+
+      - name: Dialyzer
+        run: mix dialyzer --format github
 
       - name: Check unused dependencies
         run: mix deps.unlock --check-unused
