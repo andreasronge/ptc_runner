@@ -280,7 +280,7 @@ defmodule PtcRunner.TestSupport.LLMBenchmark do
 
       # Parse and run
       case PtcRunner.Json.run(cleaned, context: %{"input" => test.input}) do
-        {:ok, result, _metrics} ->
+        {:ok, result, _metrics, _memory} ->
           passed = validate(test.validator, result)
           duration = System.monotonic_time(:millisecond) - start_time
 
