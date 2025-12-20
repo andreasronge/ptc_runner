@@ -23,8 +23,11 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
+      - name: Install Babashka
+        run: mix ptc.install_babashka
+
       - name: Run tests
-        run: mix test --max-failures 1 --trace --warnings-as-errors --exclude clojure
+        run: mix test --max-failures 1 --trace --warnings-as-errors
 
       - name: Check code is formatted
         run: mix format --check-formatted
