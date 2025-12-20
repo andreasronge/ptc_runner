@@ -5,14 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2025-12-20
+
+### Added
+
+- Add format_error/1 for human-readable error messages
+
+### Fixed
+
+- Include ptc-lisp-llm-guide.md in hex package
+
 ## [0.3.1] - 2025-12-13
 
 ### Added
 
 - Improve PTC-JSON system prompt for better LLM accuracy
-- Add object operation to construct maps with evaluated values (#253) (#254)
+- Add object operation to construct maps with evaluated values (#253) (#254) ([#254](https://github.com/andreasronge/ptc_runner/pull/254))
 - Enhance Clojure validation to execute and compare results
+- Add auto-generated report filenames and reports directory
 - Add cross-dataset join test case and clean up old reports
+- Add --show-prompt option to display system prompts
 - Add arithmetic operations (add, sub, mul, div, round, pct) #255
 - Add membership operations (in, filter_in) (#257) (#259) ([#259](https://github.com/andreasronge/ptc_runner/pull/259))
 - Add implicit object literals for memory storage (#256) (#261) ([#261](https://github.com/andreasronge/ptc_runner/pull/261))
@@ -29,36 +41,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **PTC-Lisp DSL**: Introduced a Lisp-based DSL as a first-class language for LLM interactions, with full parser and evaluator support.
-- **Enhanced Evaluations**: Improved testing infrastructure with `Mix` tasks for multi-model evaluations, detailed markdown reporting, and `ModelRegistry`.
-- **Clojure Compliance**: Added integration with Babashka to verify PTC-Lisp semantics against real Clojure, ensuring strict alignment.
-- **LLM-Friendly Semantics**: Extended the language with flexible key access (string/keyword interoperability) and type coercions to better handle LLM-generated output.
-- **Language Extensions**: Added support for set literals, function parameter destructuring, and property-based testing for safety.
+- Add PTC-Lisp LLM generation benchmark (Phase 1)
+- Improve generation and judge prompts for PTC-Lisp benchmark
+- Improve benchmark with edge cases, better judge, and dry run output
+- Add autonomous issue creation and GitHub Project integration to PM workflow
+- Enhance PM workflow with tech debt priority and efficiency fixes
+- Auto-trigger implementation on ready-for-implementation label
+- Auto-trigger code review for PRs from claude/* branches
+- Install git pre-commit hook in Claude workflow
+- Create PtcRunner.Json public API and deprecate PtcRunner (#103) ([#103](https://github.com/andreasronge/ptc_runner/pull/103))
+- Allow full Bash access in claude.yml workflow
+- Implement PTC-Lisp parser infrastructure (Phase 1) - Closes #106 (#107) ([#107](https://github.com/andreasronge/ptc_runner/pull/107))
+- Implement PTC-Lisp analyzer infrastructure (Phase 2) - Closes #108 (#109) ([#109](https://github.com/andreasronge/ptc_runner/pull/109))
+- Implement PTC-Lisp eval infrastructure (Phase 1) - Closes #111 (#112) ([#112](https://github.com/andreasronge/ptc_runner/pull/112))
+- Implement PtcRunner.Lisp entry point with memory contract - Closes #115 (#116) ([#116](https://github.com/andreasronge/ptc_runner/pull/116))
+- Add hourly schedule trigger to PM workflow
+- Add pre-computed phase status to PM workflow prompt
+- Implement LispGenerators module with StreamData generators (#130) (#132) ([#132](https://github.com/andreasronge/ptc_runner/pull/132))
+- Add property tests for evaluation safety and determinism (#133) (#134) ([#134](https://github.com/andreasronge/ptc_runner/pull/134))
+- Add domain property tests for arithmetic, collections, types, and logic (#135) (#136) ([#136](https://github.com/andreasronge/ptc_runner/pull/136))
+- Support flexible key access in where clause field accessors (#137) (#138) ([#138](https://github.com/andreasronge/ptc_runner/pull/138))
+- Add Lisp.Schema module and extend Runtime with flexible key access (#139) ([#139](https://github.com/andreasronge/ptc_runner/pull/139))
+- Add truncation hints to guide LLM query refinement
+- Add PTC-Lisp CLI and enhance demo infrastructure
+- Refactor PM workflow to use Epic Issue pattern
+- Add LispTestRunner and improve multi-turn support
+- Add file size analysis to PR review workflow
+- Add #{...} set literal syntax support (Phase 1 of #164) (#166) ([#166](https://github.com/andreasronge/ptc_runner/pull/166))
+- Add {:set, [t()]} to AST type specifications (#167) (#168) ([#168](https://github.com/andreasronge/ptc_runner/pull/168))
+- Add set analysis support (Phase 3 of #164) (#170) ([#170](https://github.com/andreasronge/ptc_runner/pull/170))
+- Add set evaluation support (Phase 4 of #164) (#172) ([#172](https://github.com/andreasronge/ptc_runner/pull/172))
+- Add .env support and model selection for e2e tests
+- Add flex_fetch/2 and flex_get_in/2 to Runtime module (#188) ([#188](https://github.com/andreasronge/ptc_runner/pull/188))
+- Add update-vals for map value transformation
+- Create TestRunner.Base with shared constraint/formatting functions (#197) ([#197](https://github.com/andreasronge/ptc_runner/pull/197))
+- Create TestRunner.Report with markdown generation (#199) ([#199](https://github.com/andreasronge/ptc_runner/pull/199))
+- Create TestRunner.TestCase with shared test definitions (#201) ([#201](https://github.com/andreasronge/ptc_runner/pull/201))
+- Create CLIBase with shared CLI utilities (#203) ([#203](https://github.com/andreasronge/ptc_runner/pull/203))
+- Set up demo test infrastructure (MockAgent, test config) - Closes #205 (#206) ([#206](https://github.com/andreasronge/ptc_runner/pull/206))
+- Create JsonTestRunner with shared modules support
+- Create JsonCLI module with test mode support (#217) ([#217](https://github.com/andreasronge/ptc_runner/pull/217))
+- Add memory support to JSON Agent (#220) (#221) ([#221](https://github.com/andreasronge/ptc_runner/pull/221))
+- Add agent injection to test runners for MockAgent testing (#222) (#223) ([#223](https://github.com/andreasronge/ptc_runner/pull/223))
+- Add ModelRegistry and unify test cases (#227) ([#227](https://github.com/andreasronge/ptc_runner/pull/227))
+- Add --runs=N option for running tests multiple times
+- Add keyword/string type coercion to where clause comparisons (#232) (#233) ([#233](https://github.com/andreasronge/ptc_runner/pull/233))
+- Align JSON DSL memory model with Lisp (#234)
+- Add take, drop, and distinct operations to JSON DSL (#236) (#243) ([#243](https://github.com/andreasronge/ptc_runner/pull/243))
+- Add enhanced stats to demo test runner report (#246) (#249) ([#249](https://github.com/andreasronge/ptc_runner/pull/249))
 
 ### Fixed
 
-- **Workflow Improvements**: Hardened GitHub workflows for PM and Code Review with better prompting and safety checks.
-- **Semantic Fixes**: Aligned `update-vals`, `sort-by`, and destructuring behaviors strictly with Clojure specifications.
-- **Documentation**: Comprehensive updates to guides, README, and API docs to reflect the new Lisp DSL and migration paths.
+- Move PM prompt to command file to fix expression length limit
+- Use Bash(gh:*) pattern for PM workflow
+- Trigger PM workflow on claude-approved label too
+- Re-trigger code review on sync for claude/* branches
+- Use --force in precommit to catch stale .beam files
+- Add spec document verification to code review prompt
+- Include PR comments and review comments in claude.yml
+- Add mkdir permission to claude.yml workflow
+- Add explicit Claude CLI install to workaround action bug
+- Add safety net to push unpushed commits in PR fix workflow
+- Mark PTC-Lisp implementation checklist items as complete (#123) ([#123](https://github.com/andreasronge/ptc_runner/pull/123))
+- Update README with PTC-Lisp announcement and API migration guidance
+- Complete API migration in Integration with LLMs section
+- Implement compile-time extraction for PTC-Lisp schema prompt (#144) ([#144](https://github.com/andreasronge/ptc_runner/pull/144))
+- Configure StreamData to run 300 iterations in CI (#146) ([#146](https://github.com/andreasronge/ptc_runner/pull/146))
+- Make issue review always update the issue body
+- Add sequential destructuring pattern type to CoreAST (#149) ([#149](https://github.com/andreasronge/ptc_runner/pull/149))
+- Extend analyze_pattern for vector destructuring patterns
+- Complete PR #151 - Add fn parameter destructuring documentation and tests
+- Complete PR #151 - Remove stale documentation and add insufficient elements test
+- Complete PR #151 - Remove stale documentation and add insufficient elements test
+- Add E2E test for group-by with destructuring (#153) ([#153](https://github.com/andreasronge/ptc_runner/pull/153))
+- Add analyzer unit tests for fn parameter destructuring patterns (#155) ([#155](https://github.com/andreasronge/ptc_runner/pull/155))
+- Add evaluator unit tests for fn parameter destructuring patterns (#157) ([#157](https://github.com/andreasronge/ptc_runner/pull/157))
+- Update LLM guide map example to use fn destructuring syntax (#159) ([#159](https://github.com/andreasronge/ptc_runner/pull/159))
+- Enable sort-by with comparator and builtin HOF arguments (#160) ([#160](https://github.com/andreasronge/ptc_runner/pull/160))
+- Extend multi-arity support to get and get-in (#163) ([#163](https://github.com/andreasronge/ptc_runner/pull/163))
+- Unify concurrency groups for Claude issue workflows
+- Add MapSet-safe collection operations and set runtime support (#175) ([#175](https://github.com/andreasronge/ptc_runner/pull/175))
+- Add set literal formatting support to formatter (Phase 6 of #164) (#178) ([#178](https://github.com/andreasronge/ptc_runner/pull/178))
+- Add test coverage for remove, mapv, empty?, and count on sets (#181) ([#181](https://github.com/andreasronge/ptc_runner/pull/181))
+- Split eval_test.exs into multiple focused test files (#182) ([#182](https://github.com/andreasronge/ptc_runner/pull/182))
+- Extract shared dummy_tool test helper (#183) (#184) ([#184](https://github.com/andreasronge/ptc_runner/pull/184))
+- Support string key parameters in Lisp runtime functions (#185) ([#185](https://github.com/andreasronge/ptc_runner/pull/185))
+- Standardize OpenAI model to gpt-5.1-codex-mini
+- Rename duplicate module name in integration_test.exs
+- Wire all call sites to use flex_fetch/flex_get_in for string/atom key interop
+- Add integration tests and update docs for flexible key access (Phase 3)
+- Update docs for flexible key access implementation
+- Add @doc annotation to flex_get for API consistency
+- Update ptc-lisp-overview.md to reflect completed flex key access (#192) ([#192](https://github.com/andreasronge/ptc_runner/pull/192))
+- Update format_error references to PtcRunner.Json.format_error
+- Update CHANGELOG format_error reference
+- Change update-vals argument order to match Clojure 1.11
+- Remove duplicate incorrect update-vals signature from LLM guide
+- Handle FunctionClauseError in builtins with descriptive type errors
+- Handle FunctionClauseError in multi-arity functions and complete type error messages
+- Delete old TestRunner module and update README references (#219) ([#219](https://github.com/andreasronge/ptc_runner/pull/219))
+- Require closing keyword in PR body for auto-close
+- Add --report option to Lisp CLI Options table
+- Update demo CLI to use ModelRegistry.resolve pattern (#229) ([#229](https://github.com/andreasronge/ptc_runner/pull/229))
+- Update guide.md to reflect new JSON DSL API signature
+- Update guide.md and demo to use new 4-tuple return format
+- Handle invalid map destructuring syntax gracefully in analyzer
+- Improve error message for update-vals with swapped arguments
+- Update JSON agent to use new memory model API (#235) (#241) ([#241](https://github.com/andreasronge/ptc_runner/pull/241))
+- Filter nil opts in CLI to allow Keyword.get defaults
+- Split transformation_test.exs into access_test.exs and collection_test.exs (#244) (#247) ([#247](https://github.com/andreasronge/ptc_runner/pull/247))
+- Align PTC-Lisp semantics with Clojure specification (#245) (#248) ([#248](https://github.com/andreasronge/ptc_runner/pull/248))
+- Resolve remaining Clojure conformance test failures (#250) ([#250](https://github.com/andreasronge/ptc_runner/pull/250))
 
 ## [0.2.0] - 2025-12-05
 
 ### Added
 
-- Introspection operations (`keys`, `typeof`) for exploring data structure
-- New operations: `sort_by`, `min_by`, `max_by` for better data manipulation
-- `PtcRunner.Json.format_error/1` for LLM-friendly error messages
-- Explore mode for schema discovery (see demo app)
-
+- Add introspection operations (keys, typeof) to DSL (#92) ([#92](https://github.com/andreasronge/ptc_runner/pull/92))
+- Improve DSL consistency for better LLM program generation (#94) ([#94](https://github.com/andreasronge/ptc_runner/pull/94))
+- Add explore mode for schema discovery (#97) ([#97](https://github.com/andreasronge/ptc_runner/pull/97))
+- Enable async execution for test modules (#98) ([#98](https://github.com/andreasronge/ptc_runner/pull/98))
 ## [0.1.0] - 2025-12-03
 
-Initial release of PtcRunner - a BEAM-native Elixir library for Programmatic Tool Calling (PTC).
+### Added
 
-### Features
+- Add CI check to verify STATUS.md is updated in PRs
+- Implement Phase 1 core interpreter with JSON parsing and sandbox execution (#10) ([#10](https://github.com/andreasronge/ptc_runner/pull/10))
+- Add pre-implementation check for blockers in PM workflow
+- Implement get operation for nested path access (fixes #17) (#18) ([#18](https://github.com/andreasronge/ptc_runner/pull/18))
+- Implement comparison operations (neq, gt, gte, lt, lte) (#22) ([#22](https://github.com/andreasronge/ptc_runner/pull/22))
+- Implement collection operations (first, last, nth, reject) (#26) (#27) ([#27](https://github.com/andreasronge/ptc_runner/pull/27))
+- Implement contains, avg, min, max operations (#28)
+- Implement let variable bindings for Phase 3 (#30) (#31) ([#31](https://github.com/andreasronge/ptc_runner/pull/31))
+- Implement if conditional operation for Phase 3 (#32) (#33) ([#33](https://github.com/andreasronge/ptc_runner/pull/33))
+- Implement boolean logic operations (and, or, not) for Phase 3 (#34) (#35) ([#35](https://github.com/andreasronge/ptc_runner/pull/35))
+- Implement combine operations (merge, concat, zip) for Phase 3 (#37) ([#37](https://github.com/andreasronge/ptc_runner/pull/37))
+- Implement call operation for tool invocation (#41) ([#41](https://github.com/andreasronge/ptc_runner/pull/41))
+- Add Jaro-Winkler typo suggestions for unknown operations (#44) ([#44](https://github.com/andreasronge/ptc_runner/pull/44))
+- Add ExDoc and Hex package metadata (#45) (#46) ([#46](https://github.com/andreasronge/ptc_runner/pull/46))
+- Implement declarative schema module for DSL operations (#52) ([#52](https://github.com/andreasronge/ptc_runner/pull/52))
+- [Phase 5] JSON Schema Generation (#50) (#55) ([#55](https://github.com/andreasronge/ptc_runner/pull/55))
+- [Phase 5] E2E LLM Testing Infrastructure (#51) (#57) ([#57](https://github.com/andreasronge/ptc_runner/pull/57))
+- Adopt program wrapper as canonical PTC format - Update to_json_schema/0 (#63) ([#63](https://github.com/andreasronge/ptc_runner/pull/63))
+- Adopt program wrapper as canonical PTC format in parser (#58) (#64) ([#64](https://github.com/andreasronge/ptc_runner/pull/64))
+- Add structured output support with generate_program_structured! for E2E tests (#65) (#67) ([#67](https://github.com/andreasronge/ptc_runner/pull/67))
+- Validate tool function arities at registration time (#42) (#68) ([#68](https://github.com/andreasronge/ptc_runner/pull/68))
+- Add interactive demo CLI for PTC with ReqLLM integration (#75) ([#75](https://github.com/andreasronge/ptc_runner/pull/75))
+- Add to_prompt/0 for token-efficient LLM text mode (#80) ([#80](https://github.com/andreasronge/ptc_runner/pull/80))
+- Add security gates and hardening to Claude workflows
 
-- JSON-based DSL for safe program execution
-- Sandboxed interpreter with configurable timeout and memory limits
-- Built-in operations: arithmetic, comparison, collection, string, and logic
-- Tool registry for user-defined functions
-- JSON Schema generation for LLM structured output
-- Comprehensive validation with helpful error messages
+### Fixed
+
+- Add safety improvements to GitHub workflows
+- PM workflow commits STATUS.md directly to main
+- Avoid parallel PRs by including STATUS.md in implementation PR
+- Simplify STATUS.md update rules to prevent merge conflicts
+- Improve PM workflow action handling
+- Trigger PM workflow when issue becomes ready-for-implementation
+- Ensure git push happens immediately after commit in Claude workflow
+- Use PAT in issue-review workflow to trigger PM workflow
+- Optimize min_list and max_list performance and update avg docs
+- Correct documentation for sum vs avg behavior with non-numeric values
+- Use anyOf for nested expressions in LLM schema (#71) ([#71](https://github.com/andreasronge/ptc_runner/pull/71))
+- Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
+- Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
+- Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.3.2]: https://github.com/andreasronge/ptc_runner/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/andreasronge/ptc_runner/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/andreasronge/ptc_runner/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/andreasronge/ptc_runner/compare/v0.1.0...v0.2.0
+
