@@ -1,0 +1,104 @@
+# PTC Runner Playground
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    # Local clone (dev)
+    [{:ptc_runner, path: repo_root}]
+  else
+    # Opened from URL / badge (public)
+    [{:ptc_runner, "~> 0.3"}]
+  end
+
+Mix.install(deps)
+```
+
+## Introduction
+
+This notebook lets you explore the two PTC (Programmatic Tool Calling) DSLs:
+
+* **PTC-JSON** - Verbose but easy to parse and validate
+* **PTC-Lisp** - Compact (8x fewer tokens), Clojure-compatible syntax
+
+Both DSLs run the same operations in sandboxed BEAM processes with resource limits.
+
+## PTC-JSON Playground
+
+Define some sample tools and run a pipeline that filters and sums expenses:
+
+```elixir
+tools = %{
+  "get_expenses" => fn _args ->
+    [
+      %{"category" => "travel", "amount" => 500},
+      %{"category" => "food", "amount" => 50},
+      %{"category" => "travel", "amount" => 200}
+    ]
+  end
+}
+
+program_json = ~S"""
+{
+  "program": {
+    "op": "pipe",
+    "steps": [
+      {"op": "call", "tool": "get_expenses"},
+      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
+      {"op": "sum", "field": "amount"}
+    ]
+  }
+}
+"""
+
+{:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program_json, tools: tools)
+
+IO.puts("Travel expenses total: #{result}")
+result
+```
+
+### How it works
+
+1. `call` invokes the `get_expenses` tool, returning a list of expense maps
+2. `filter` keeps only items where `category == "travel"`
+3. `sum` adds up the `amount` field
+
+The result is `700` (500 + 200).
+
+## PTC-Lisp Playground
+
+The same logic in Lisp syntax (note: tool names use kebab-case):
+
+```elixir
+tools = %{
+  "get-expenses" => fn _args ->
+    [
+      %{"category" => "travel", "amount" => 500},
+      %{"category" => "food", "amount" => 50},
+      %{"category" => "travel", "amount" => 200}
+    ]
+  end
+}
+
+program_lisp = ~S|(->> (call "get-expenses" {}) (filter (where :category = "travel")) (sum-by :amount))|
+
+{:ok, result, _memory_delta, _new_memory} = PtcRunner.Lisp.run(program_lisp, tools: tools)
+
+IO.puts("Travel expenses total: #{result}")
+result
+```
+
+### Lisp syntax highlights
+
+* `->>` is a threading macro (like Elixir's `|>`)
+* `:category` is a keyword (converted to string key internally)
+* `where` creates a predicate for filtering
+* `sum-by` is the Lisp equivalent of JSON's `{"op": "sum", "field": "amount"}`
+
+## Learn More
+
+* [LLM Agent Livebook](ptc_runner_llm_agent.livemd) - Build an LLM-powered data analyst with retry loop
+* [PTC-JSON Specification](https://hexdocs.pm/ptc_runner/ptc-json-specification.html) - Complete JSON DSL reference
+* [PTC-Lisp Overview](https://hexdocs.pm/ptc_runner/ptc-lisp-overview.html) - Lisp DSL introduction
+* [Guide](https://hexdocs.pm/ptc_runner/guide.html) - Architecture and API reference
