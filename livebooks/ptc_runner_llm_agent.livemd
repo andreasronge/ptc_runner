@@ -7,7 +7,7 @@ deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
     [{:ptc_runner, path: repo_root}]
   else
-    [{:ptc_runner, "~> 0.3"}]
+    [{:ptc_runner, "~> 0.3.2"}]
   end
 
 Mix.install(deps ++ [
