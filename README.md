@@ -6,6 +6,7 @@
 [![Hex Downloads](https://img.shields.io/hexpm/dt/ptc_runner.svg)](https://hex.pm/packages/ptc_runner)
 [![License](https://img.shields.io/hexpm/l/ptc_runner.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue.svg)](https://github.com/andreasronge/ptc_runner)
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
 
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
 
@@ -102,6 +103,7 @@ end
 - **[Performance and Use Cases](docs/performance-and-use-cases.md)** - Benchmarks, cost analysis, when to use PTC
 - **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
 - **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Lisp DSL introduction
+- **Livebooks**: [Playground](livebooks/ptc_runner_playground.livemd) (try the DSLs) · [LLM Agent](livebooks/ptc_runner_llm_agent.livemd) (build an agent)
 
 ## License
 
