@@ -398,7 +398,7 @@ defmodule PtcDemo.LispAgent do
         (tool_calls = ReqLLM.Response.tool_calls(response)) != [] ->
           tool_names = Enum.map(tool_calls, & &1.name) |> Enum.join(", ")
 
-          "LLM returned tool calls instead of text: [#{tool_names}]. This demo expects text responses with ```lisp code blocks."
+          "LLM returned tool calls instead of text: [#{tool_names}]. This demo expects text responses with ```clojure code blocks."
 
         true ->
           "LLM returned nil/empty text content. Response: #{inspect(response, limit: 300)}"
@@ -428,7 +428,7 @@ defmodule PtcDemo.LispAgent do
     """
     You are a data analyst. Answer questions about data by querying datasets.
 
-    To query data, output a PTC-Lisp program in a ```lisp code block. The result will be returned to you.
+    To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
     When you have the answer, respond in plain text WITHOUT a code block.
     Memory persists between programs - reference stored values with memory/key.
     Return types: "store X as Y" → {:Y value}, "what is X?" → return the value directly (not a map).
@@ -452,7 +452,7 @@ defmodule PtcDemo.LispAgent do
     """
     You are a data analyst. Answer questions about data by querying datasets.
 
-    To query data, output a PTC-Lisp program in a ```lisp code block. The result will be returned to you.
+    To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
     When you have the answer, respond in plain text WITHOUT a code block.
     Memory persists between programs - reference stored values with memory/key.
     Return types: "store X as Y" → {:Y value}, "what is X?" → return the value directly (not a map).
