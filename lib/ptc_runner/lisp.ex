@@ -94,6 +94,28 @@ defmodule PtcRunner.Lisp do
     end
   end
 
+  @doc """
+  Format an error tuple into a human-readable string.
+
+  Useful for displaying errors to users or feeding back to LLMs for retry.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.format_error({:parse_error, "unexpected token"})
+      "Parse error: unexpected token"
+
+      iex> PtcRunner.Lisp.format_error({:eval_error, "undefined variable: x"})
+      "Eval error: undefined variable: x"
+  """
+  @spec format_error(term()) :: String.t()
+  def format_error({:parse_error, msg}), do: "Parse error: #{msg}"
+  def format_error({:analysis_error, msg}), do: "Analysis error: #{msg}"
+  def format_error({:eval_error, msg}), do: "Eval error: #{msg}"
+  def format_error({:timeout, ms}), do: "Timeout: execution exceeded #{ms}ms limit"
+  def format_error({:memory_exceeded, bytes}), do: "Memory exceeded: #{bytes} byte limit"
+  def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
+  def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
+
   # Non-map result: no memory update
   defp apply_memory_contract(value, memory, precision) when not is_map(value) do
     {:ok, round_floats(value, precision), %{}, memory}
