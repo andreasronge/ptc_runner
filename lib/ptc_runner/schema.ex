@@ -551,6 +551,7 @@ defmodule PtcRunner.Schema do
     - Arithmetic: use div (NOT /), pct for percentages. Example: {"op":"div","left":10,"right":4} → 2.5
     - For "how many" questions: return a NUMBER, not an object. End pipeline with count/sum
     - sort_by defaults to ascending. Use order:"desc" for descending: {"op":"sort_by","field":"price","order":"desc"}
+    - min_by/max_by return a SINGLE ROW (not a list). Do NOT add first after them: {"op":"max_by","field":"score"}
 
     ## Memory: Persisting Data Between Turns
     Return a map to persist keys to memory. Use var to read memory later.
