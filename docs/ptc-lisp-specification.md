@@ -935,11 +935,21 @@ Although maps and strings are not "collections" per `coll?`, some collection fun
 | `empty?` | ✓ | ✓ | True if no keys / no characters |
 | `first` | ✗ | ✗ | Use `(first (keys m))` or `(first (vals m))` |
 | `last` | ✗ | ✗ | Use `(last (keys m))` or `(last (vals m))` |
-| `map` | ✗ | ✗ | Use `(map f (vals m))` or `(map f (keys m))` |
+| `map` | ✓ | ✗ | Iterates over `[key value]` pairs (Clojure-compatible) |
 | `filter` | ✗ | ✗ | Not applicable to maps/strings |
 | `nth` | ✗ | ✗ | String indexing not supported |
 
-To iterate over maps, extract keys or values first:
+**Mapping over maps:** When you call `map` on a map, each entry is passed as a `[key value]` vector. Use destructuring to extract the key and value:
+
+```clojure
+;; Transform grouped data
+(let [by-category (group-by :category expenses)]
+  (map (fn [[cat items]]
+         {:category cat :total (sum-by :amount items)})
+       by-category))
+```
+
+To iterate over just keys or values, extract them first:
 ```clojure
 (->> (keys my-map)
      (map (fn [k] {:key k :val (get my-map k)})))
