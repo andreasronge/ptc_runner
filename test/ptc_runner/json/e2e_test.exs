@@ -72,8 +72,8 @@ defmodule PtcRunner.Json.E2ETest do
 
     # Tests targeting issue #93 - DSL consistency problems
 
-    test "find row with max value (needs max_by - currently missing)" do
-      task = "Find the employee who has been employed the longest"
+    test "find row with max value using max_by" do
+      task = "Find the employee with the highest years_employed value"
       program_json = LLMClient.generate_program_text!(task)
       IO.puts("\n=== LLM Generated (max_by test) ===\n#{program_json}\n")
 
@@ -92,8 +92,8 @@ defmodule PtcRunner.Json.E2ETest do
       assert result["years_employed"] == 7
     end
 
-    test "find row with min value (needs min_by - currently missing)" do
-      task = "Find the cheapest product"
+    test "find row with min value using min_by" do
+      task = "Find the product with the lowest price"
       program_json = LLMClient.generate_program_text!(task)
       IO.puts("\n=== LLM Generated (min_by test) ===\n#{program_json}\n")
 
@@ -131,7 +131,7 @@ defmodule PtcRunner.Json.E2ETest do
       assert result == ["Apple", "Book", "Laptop"]
     end
 
-    test "sort by field (needs sort_by - currently missing)" do
+    test "sort by field using sort_by" do
       task = "Sort products by price from lowest to highest"
       program_json = LLMClient.generate_program_text!(task)
       IO.puts("\n=== LLM Generated (sort_by test) ===\n#{program_json}\n")
