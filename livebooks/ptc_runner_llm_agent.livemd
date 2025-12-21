@@ -138,12 +138,6 @@ You are a data analyst. Answer questions about data by querying datasets.
 To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
 Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
-Example:
-
-```clojure
-(->> (call "get-expenses" {}) (filter (where :category = "travel")) (sum-by :amount))
-```
-
 Available data:
 
 #{schema}
@@ -275,12 +269,12 @@ defmodule PtcLispAgent do
 
         case extract_program(text) do
           {:ok, program} ->
-            IO.puts("[Program] #{truncate(program, 100)}")
+            IO.puts("[Program] #{program}")
 
             case PtcRunner.Lisp.run(program, tools: tools, memory: memory) do
               {:ok, result, _delta, new_memory} ->
                 result_str = inspect(result)
-                IO.puts("[Result] #{truncate(result_str, 100)}")
+                IO.puts("[Result] #{result_str}")
 
                 new_llm_context =
                   llm_context
@@ -291,7 +285,7 @@ defmodule PtcLispAgent do
 
               {:error, reason} ->
                 error_msg = PtcRunner.Lisp.format_error(reason)
-                IO.puts("[Error] #{truncate(error_msg, 100)}")
+                IO.puts("[Error] #{error_msg}")
 
                 new_llm_context =
                   llm_context
@@ -316,14 +310,6 @@ defmodule PtcLispAgent do
     case Regex.scan(~r/```(?:clojure|lisp)\s*(.*?)\s*```/s, text) do
       [] -> :none
       matches -> {:ok, matches |> List.last() |> Enum.at(1) |> String.trim()}
-    end
-  end
-
-  defp truncate(str, max) do
-    if String.length(str) > max do
-      String.slice(str, 0, max) <> "..."
-    else
-      str
     end
   end
 end
@@ -425,4 +411,4 @@ end
 * [PTC-Lisp Overview](https://hexdocs.pm/ptc_runner/ptc-lisp-overview.html) - Lisp DSL reference
 * [OpenRouter](https://openrouter.ai/) - Multi-model API provider
 
-<!-- livebook:{"offset":12012,"stamp":{"token":"XCP.B_mUcg-v5nrbCSgctx15YjAHKo5JhHMZxHhrGpu1sqAmM2frU30UC8pM3DlyNWhkR8iNvfZZTAqHeX6UUDbwLiOwxxrKKoNsCKbVYdRQn5bU7QOPf0N2o5jcUuts","version":2}} -->
+<!-- livebook:{"offset":12381,"stamp":{"token":"XCP.ex4NP9t4Y5vYHA9c6n8SD8x8rybWjDxlxj9JLggYLtMnaEdEtKqCgxNtS2VRpuhscvBf6e_mGW9MLjE5dPbA_2bdELxqColmKWP70H8aIKrdZtmFRJdzEnosC5o6","version":2}} -->

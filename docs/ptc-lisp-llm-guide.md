@@ -184,6 +184,7 @@ Available datasets: ctx/users, ctx/orders
 ### Language Overview
 
 **PTC-Lisp** is a minimal Clojure subset for data transformation. Programs are **single expressions**.
+**Only use functions documented below** - many Clojure functions (seq, vector, apply, rest, etc.) are not available.
 
 ### Data Types
 ```clojure
@@ -266,7 +267,7 @@ memory/results        ; read from persistent memory
 (sort-by :key coll)  (sort-by :key > coll)  ; > for descending
 
 ; Subsetting
-(first coll)  (last coll)  (take n coll)  (drop n coll)  (nth coll i)
+(first coll)  (second coll)  (last coll)  (take n coll)  (drop n coll)  (nth coll i)
 
 ; Aggregation
 (count coll)  (sum-by :key coll)  (avg-by :key coll)
@@ -281,8 +282,10 @@ memory/results        ; read from persistent memory
 (update-vals m f)  ; apply f to each value in map
 (update-vals {:a 1 :b 2} inc)                        ; => {:a 2 :b 3}
 (update-vals (group-by :region sales) count)         ; count per group
-; IMPORTANT (update-vals m f) - map first, use -> not ->>
-(-> (group-by :type records) (update-vals (fn [items] (sum-by :value items))))
+
+; group-by + update-vals: don't thread data through both, call group-by directly:
+(-> (group-by :cat data) (update-vals f))   ; CORRECT
+(->> data (group-by :cat) (update-vals f))  ; WRONG - incompatible arg positions
 
 ; Sets
 (set? x)               ; is x a set?
@@ -355,6 +358,7 @@ memory/results           ; access stored value by key
 | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
 | `'(1 2 3)` | `[1 2 3]` |
 | `:foo/bar` | `:foo-bar` (no namespaced keywords) |
+| `(->> d (group-by :k) (update-vals f))` | `(-> (group-by :k d) (update-vals f))` |
 
 **Key constraints:**
 - `where` predicates MUST have an operator (except for truthy check)

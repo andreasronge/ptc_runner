@@ -712,6 +712,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `first` | `(first coll)` | First item or nil |
+| `second` | `(second coll)` | Second item or nil |
 | `last` | `(last coll)` | Last item or nil |
 | `nth` | `(nth coll idx)` | Item at index or nil |
 | `take` | `(take n coll)` | First n items |
@@ -723,6 +724,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ```clojure
 (first [1 2 3])       ; => 1
 (first [])            ; => nil
+(second [1 2 3])      ; => 2
 (last [1 2 3])        ; => 3
 (nth [1 2 3] 1)       ; => 2
 (nth [1 2 3] 10)      ; => nil (out of bounds)
