@@ -243,6 +243,31 @@ defmodule PtcRunner.Lisp.RuntimeTest do
     end
   end
 
+  describe "sort_by - function key support" do
+    test "sort_by with function key on vectors" do
+      pairs = [["b", 2], ["a", 1], ["c", 3]]
+      result = Runtime.sort_by(&List.first/1, pairs)
+      assert result == [["a", 1], ["b", 2], ["c", 3]]
+    end
+
+    test "sort_by with function key and comparator" do
+      pairs = [["a", 1], ["b", 3], ["c", 2]]
+      result = Runtime.sort_by(&Enum.at(&1, 1), &>=/2, pairs)
+      assert result == [["b", 3], ["c", 2], ["a", 1]]
+    end
+
+    test "sort_by with anonymous function" do
+      data = [
+        %{price: 100},
+        %{price: 50},
+        %{price: 75}
+      ]
+
+      result = Runtime.sort_by(fn item -> item.price end, data)
+      assert Enum.map(result, & &1.price) == [50, 75, 100]
+    end
+  end
+
   describe "sum_by - flexible key access" do
     test "string key fallback: sum_by with string keys in data" do
       data = [
@@ -286,6 +311,31 @@ defmodule PtcRunner.Lisp.RuntimeTest do
 
       result = Runtime.sum_by(:amount, data)
       assert result == 30
+    end
+  end
+
+  describe "sum_by - function key support" do
+    test "sum_by with function key on vectors" do
+      pairs = [["a", 10], ["b", 20], ["c", 30]]
+      result = Runtime.sum_by(&Enum.at(&1, 1), pairs)
+      assert result == 60
+    end
+
+    test "sum_by with anonymous function" do
+      data = [
+        %{price: 100},
+        %{price: 50},
+        %{price: 75}
+      ]
+
+      result = Runtime.sum_by(fn item -> item.price end, data)
+      assert result == 225
+    end
+
+    test "sum_by with function key ignores nil values" do
+      pairs = [["a", 10], ["b", nil], ["c", 30]]
+      result = Runtime.sum_by(&Enum.at(&1, 1), pairs)
+      assert result == 40
     end
   end
 
@@ -350,6 +400,31 @@ defmodule PtcRunner.Lisp.RuntimeTest do
     end
   end
 
+  describe "avg_by - function key support" do
+    test "avg_by with function key on vectors" do
+      pairs = [["a", 10], ["b", 20], ["c", 30]]
+      result = Runtime.avg_by(&Enum.at(&1, 1), pairs)
+      assert result == 20.0
+    end
+
+    test "avg_by with anonymous function" do
+      data = [
+        %{price: 100},
+        %{price: 50},
+        %{price: 75}
+      ]
+
+      result = Runtime.avg_by(fn item -> item.price end, data)
+      assert result == 75.0
+    end
+
+    test "avg_by with function key ignores nil values" do
+      pairs = [["a", 10], ["b", nil], ["c", 30]]
+      result = Runtime.avg_by(&Enum.at(&1, 1), pairs)
+      assert result == 20.0
+    end
+  end
+
   describe "min_by - flexible key access" do
     test "string key fallback: min_by with string keys in data" do
       data = [
@@ -407,6 +482,30 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       ]
 
       result = Runtime.min_by(:score, data)
+      assert result == nil
+    end
+  end
+
+  describe "min_by - function key support" do
+    test "min_by with function key on vectors" do
+      pairs = [["a", 10], ["b", 5], ["c", 30]]
+      result = Runtime.min_by(&Enum.at(&1, 1), pairs)
+      assert result == ["b", 5]
+    end
+
+    test "min_by with anonymous function" do
+      data = [
+        %{price: 100},
+        %{price: 50},
+        %{price: 75}
+      ]
+
+      result = Runtime.min_by(fn item -> item.price end, data)
+      assert result.price == 50
+    end
+
+    test "min_by with function key returns nil for empty collection" do
+      result = Runtime.min_by(&Enum.at(&1, 1), [])
       assert result == nil
     end
   end
@@ -473,6 +572,30 @@ defmodule PtcRunner.Lisp.RuntimeTest do
     end
   end
 
+  describe "max_by - function key support" do
+    test "max_by with function key on vectors" do
+      pairs = [["a", 10], ["b", 5], ["c", 30]]
+      result = Runtime.max_by(&Enum.at(&1, 1), pairs)
+      assert result == ["c", 30]
+    end
+
+    test "max_by with anonymous function" do
+      data = [
+        %{price: 100},
+        %{price: 50},
+        %{price: 75}
+      ]
+
+      result = Runtime.max_by(fn item -> item.price end, data)
+      assert result.price == 100
+    end
+
+    test "max_by with function key returns nil for empty collection" do
+      result = Runtime.max_by(&Enum.at(&1, 1), [])
+      assert result == nil
+    end
+  end
+
   describe "group_by - flexible key access" do
     test "string key fallback: group_by with string keys in data" do
       data = [
@@ -524,6 +647,32 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       result = Runtime.group_by(:category, data)
       assert length(result["books"]) == 2
       assert length(result[nil]) == 1
+    end
+  end
+
+  describe "group_by - function key support" do
+    test "group_by with function key on vectors" do
+      pairs = [[1, "a"], [2, "a"], [1, "b"]]
+      result = Runtime.group_by(&List.first/1, pairs)
+      assert result == %{1 => [[1, "a"], [1, "b"]], 2 => [[2, "a"]]}
+    end
+
+    test "group_by with anonymous function" do
+      data = [
+        %{category: "books", title: "Book 1"},
+        %{category: "electronics", title: "Phone"},
+        %{category: "books", title: "Book 2"}
+      ]
+
+      result = Runtime.group_by(fn item -> item.category end, data)
+      assert length(result["books"]) == 2
+      assert length(result["electronics"]) == 1
+    end
+
+    test "group_by with function key on complex data" do
+      pairs = [["a", 1], ["b", 1], ["c", 2]]
+      result = Runtime.group_by(&Enum.at(&1, 1), pairs)
+      assert result == %{1 => [["a", 1], ["b", 1]], 2 => [["c", 2]]}
     end
   end
 

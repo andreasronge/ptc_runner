@@ -700,6 +700,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (sort-by :price products)     ; ascending by price
 (sort-by :price > products)   ; descending by price
 (sort-by :name products)      ; alphabetical by name
+(sort-by first [["b" 2] ["a" 1] ["c" 3]])  ; => [["a" 1] ["b" 2] ["c" 3]]
+(sort-by (fn [x] (nth x 1)) > [["a" 2] ["b" 1] ["c" 3]])  ; descending by second element
 (reverse [1 2 3])             ; => [3 2 1]
 ```
 
@@ -766,6 +768,10 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (min-by :price products)          ; item with lowest price
 (max-by :years employees)         ; item with highest years
 (group-by :category products)     ; map of category -> items
+(min-by first [["b" 2] ["a" 1]])  ; => ["a" 1] (item with minimum first element)
+(max-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; item with maximum second element
+(sum-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; => 5 (sum second elements)
+(group-by first [["a" 1] ["a" 2] ["b" 3]])  ; {"a" [["a" 1] ["a" 2]], "b" [["b" 3]]}
 ```
 
 #### Predicates on Collections
