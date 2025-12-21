@@ -421,6 +421,21 @@ defmodule PtcRunner.Lisp.Eval do
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
         {:error, type_error_for_args(fun, converted_args)}
+
+      e in BadArityError ->
+        # Extract function name and format a cleaner message
+        msg = Exception.message(e)
+
+        clean_msg =
+          case Regex.run(~r/&[\w.]+\.(\w+)\/(\d+).*called with (\d+)/, msg) do
+            [_, func, expected, actual] ->
+              "#{func} expects #{expected} argument(s), got #{actual}"
+
+            _ ->
+              msg
+          end
+
+        {:error, {:arity_error, clean_msg}}
     end
   end
 

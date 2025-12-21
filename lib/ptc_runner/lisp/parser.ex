@@ -98,8 +98,8 @@ defmodule PtcRunner.Lisp.Parser do
     |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ??, ?!], min: 1)
     |> reduce({ParserHelpers, :build_keyword, []})
 
-  # Symbols (/ allowed for namespacing)
-  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!]
+  # Symbols (/ allowed for namespacing, _ for ignored bindings)
+  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_]
 
   symbol =
     ascii_string(symbol_first, 1)

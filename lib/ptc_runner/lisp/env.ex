@@ -41,6 +41,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"sort-by", {:multi_arity, {&Runtime.sort_by/2, &Runtime.sort_by/3}}},
       {:reverse, {:normal, &Runtime.reverse/1}},
       {:first, {:normal, &Runtime.first/1}},
+      {:second, {:normal, &Runtime.second/1}},
       {:last, {:normal, &Runtime.last/1}},
       {:nth, {:normal, &Runtime.nth/2}},
       {:take, {:normal, &Runtime.take/2}},

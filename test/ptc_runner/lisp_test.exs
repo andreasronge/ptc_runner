@@ -315,6 +315,10 @@ defmodule PtcRunner.LispTest do
       assert {:ok, 1, %{}, %{}} = Lisp.run("(first [1 2 3])")
     end
 
+    test "second" do
+      assert {:ok, 2, %{}, %{}} = Lisp.run("(second [1 2 3])")
+    end
+
     test "last" do
       assert {:ok, 3, %{}, %{}} = Lisp.run("(last [1 2 3])")
     end
@@ -598,6 +602,11 @@ defmodule PtcRunner.LispTest do
       ctx = %{user: %{name: "Alice", age: 30}}
       {:ok, result, _, _} = Lisp.run(source, context: ctx)
       assert result == %{name: "Alice", age: 30}
+    end
+
+    test "underscore in vector destructuring ignores values" do
+      assert {:ok, 2, _, _} = Lisp.run("(let [[_ b] [1 2]] b)")
+      assert {:ok, 3, _, _} = Lisp.run("(let [[_ _ c] [1 2 3]] c)")
     end
 
     test "closure captures let-bound variable in filter" do
