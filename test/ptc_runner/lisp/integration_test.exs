@@ -662,6 +662,83 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert Enum.map(result, & &1.name) == ["Alice", "Bob", "Charlie"]
     end
 
+    test "sort-by with first function" do
+      source = ~S"""
+      (let [pairs [["b" 2] ["a" 1] ["c" 3]]]
+        (sort-by first pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == [["a", 1], ["b", 2], ["c", 3]]
+    end
+
+    test "sort-by with function key and comparator" do
+      source = ~S"""
+      (let [pairs [["Food" 500] ["Transport" 300] ["Entertainment" 800]]]
+        (sort-by (fn [x] (nth x 1)) > pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == [["Entertainment", 800], ["Food", 500], ["Transport", 300]]
+    end
+
+    test "group-by with first function" do
+      source = ~S"""
+      (let [pairs [["a" 1] ["a" 2] ["b" 3]]]
+        (group-by first pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{"a" => [["a", 1], ["a", 2]], "b" => [["b", 3]]}
+    end
+
+    test "min-by with function key" do
+      source = ~S"""
+      (let [pairs [["a" 10] ["b" 5] ["c" 30]]]
+        (min-by (fn [x] (nth x 1)) pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == ["b", 5]
+    end
+
+    test "max-by with function key" do
+      source = ~S"""
+      (let [pairs [["a" 10] ["b" 5] ["c" 30]]]
+        (max-by (fn [x] (nth x 1)) pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == ["c", 30]
+    end
+
+    test "sum-by with function key" do
+      source = ~S"""
+      (let [pairs [["a" 10] ["b" 20] ["c" 30]]]
+        (sum-by (fn [x] (nth x 1)) pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == 60
+    end
+
+    test "avg-by with function key" do
+      source = ~S"""
+      (let [pairs [["a" 10] ["b" 20] ["c" 30]]]
+        (avg-by (fn [x] (nth x 1)) pairs))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == 20.0
+    end
+
     test "reduce with + accumulator" do
       source = ~S"""
       (reduce + 0 [1 2 3 4 5])

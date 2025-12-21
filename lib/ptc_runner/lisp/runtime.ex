@@ -120,8 +120,17 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
 
+  def sort_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    Enum.sort_by(coll, keyfn)
+  end
+
   def sort_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     Enum.sort_by(coll, &flex_get(&1, key))
+  end
+
+  def sort_by(keyfn, comp, coll)
+      when is_list(coll) and is_function(keyfn, 1) and is_function(comp) do
+    Enum.sort_by(coll, keyfn, comp)
   end
 
   def sort_by(key, comp, coll)
@@ -172,11 +181,27 @@ defmodule PtcRunner.Lisp.Runtime do
   # reduce with 3 args: (reduce f init coll)
   def reduce(f, init, coll) when is_list(coll), do: Enum.reduce(coll, init, f)
 
+  def sum_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    coll
+    |> Enum.map(keyfn)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sum()
+  end
+
   def sum_by(key, coll) when is_list(coll) do
     coll
     |> Enum.map(&flex_get(&1, key))
     |> Enum.reject(&is_nil/1)
     |> Enum.sum()
+  end
+
+  def avg_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    values = coll |> Enum.map(keyfn) |> Enum.reject(&is_nil/1)
+
+    case values do
+      [] -> nil
+      vs -> Enum.sum(vs) / length(vs)
+    end
   end
 
   def avg_by(key, coll) when is_list(coll) do
@@ -188,10 +213,24 @@ defmodule PtcRunner.Lisp.Runtime do
     end
   end
 
+  def min_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    case Enum.reject(coll, &is_nil(keyfn.(&1))) do
+      [] -> nil
+      filtered -> Enum.min_by(filtered, keyfn)
+    end
+  end
+
   def min_by(key, coll) when is_list(coll) do
     case Enum.reject(coll, &is_nil(flex_get(&1, key))) do
       [] -> nil
       filtered -> Enum.min_by(filtered, &flex_get(&1, key))
+    end
+  end
+
+  def max_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    case Enum.reject(coll, &is_nil(keyfn.(&1))) do
+      [] -> nil
+      filtered -> Enum.max_by(filtered, keyfn)
     end
   end
 
@@ -200,6 +239,10 @@ defmodule PtcRunner.Lisp.Runtime do
       [] -> nil
       filtered -> Enum.max_by(filtered, &flex_get(&1, key))
     end
+  end
+
+  def group_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    Enum.group_by(coll, keyfn)
   end
 
   def group_by(key, coll) when is_list(coll), do: Enum.group_by(coll, &flex_get(&1, key))
