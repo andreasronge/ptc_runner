@@ -271,7 +271,7 @@ defmodule PtcLispAgent do
           {:ok, program} ->
             IO.puts("[Program] #{program}")
 
-            case PtcRunner.Lisp.run(program, tools: tools, memory: memory) do
+            case PtcRunner.Lisp.run(program, tools: tools, memory: memory, float_precision: 2) do
               {:ok, result, _delta, new_memory} ->
                 result_str = inspect(result)
                 IO.puts("[Result] #{result_str}")
@@ -411,4 +411,4 @@ end
 * [PTC-Lisp Overview](https://hexdocs.pm/ptc_runner/ptc-lisp-overview.html) - Lisp DSL reference
 * [OpenRouter](https://openrouter.ai/) - Multi-model API provider
 
-<!-- livebook:{"offset":12381,"stamp":{"token":"XCP.ex4NP9t4Y5vYHA9c6n8SD8x8rybWjDxlxj9JLggYLtMnaEdEtKqCgxNtS2VRpuhscvBf6e_mGW9MLjE5dPbA_2bdELxqColmKWP70H8aIKrdZtmFRJdzEnosC5o6","version":2}} -->
+<!-- livebook:{"offset":12381,"stamp":{"token":"XCP.-HorDhh8vbVfu5B_kyp8FjdwCUCabVTmWXD_62avzia6jrG08Tpz713JedH-ltVF5D9Qjh8OhtF8wOMZ7x5nX0KWQdkvo9JHQQhuMa8LeDIFOJpc1Z6VDSAc3FR4","version":2}} -->
