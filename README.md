@@ -66,18 +66,28 @@ With PTC, the LLM writes one program executed locally:
 (->> (call "get-employees" {}) (filter (where :department = "engineering")) (avg-by :salary))
 ```
 
-**Benchmark snapshot** (DeepSeek V3.2, 15 queries, 2500 records):
+## Why two DSLs?
 
-| DSL | Passed | Avg Attempts | Cost |
-|-----|--------|--------------|------|
-| PTC-JSON | 15/15 | 1.3 | $0.002 |
-| PTC-Lisp | 14/15 | 1.2 | $0.002 |
+- **PTC-JSON** — Easy for weaker models; JSON schema enforces valid programs.
+- **PTC-Lisp** — More expressive (anonymous functions, destructuring), ~8x fewer tokens. Clojure-inspired syntax (small subset).
 
-Small sample—see [Performance and Use Cases](docs/performance-and-use-cases.md) for methodology.
+**Can LLMs reliably generate these?** See [Performance and Use Cases](docs/performance-and-use-cases.md) for benchmarks, or try the [LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd) to test with your own queries.
 
-**Two DSLs** — same engine, same operations:
-- **PTC-JSON** — Easy to generate and validate
-- **PTC-Lisp** — 8x fewer output tokens, Clojure-compatible
+Example of PTC-Lisp that can not be expressed in PTC-JSON from the LiveBook page [![Run with LLM](https://livebook.dev/badge/v1/gray.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd): Question: Which category has the highest total spending? Show the breakdown.
+
+```clojure
+(let [expenses (call "get-expenses" {})
+      by-category (group-by :category expenses)
+      spending-by-cat (map (fn [[cat items]]
+                             {:category cat
+                              :total (sum-by :amount items)
+                              :count (count items)
+                              :avg (avg-by :amount items)})
+                           by-category)
+      sorted (sort-by :total > spending-by-cat)]
+  {:highest (first sorted)
+   :breakdown sorted})
+```
 
 ## Installation
 
