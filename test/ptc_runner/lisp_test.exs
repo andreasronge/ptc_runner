@@ -604,7 +604,7 @@ defmodule PtcRunner.LispTest do
       assert result == %{name: "Alice", age: 30}
     end
 
-    test "underscore in vector destructuring ignores values" do
+    test "underscore in vector destructuring skips positions" do
       assert {:ok, 2, _, _} = Lisp.run("(let [[_ b] [1 2]] b)")
       assert {:ok, 3, _, _} = Lisp.run("(let [[_ _ c] [1 2 3]] c)")
     end
