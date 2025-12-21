@@ -132,6 +132,7 @@ defmodule PtcRunner.Lisp.Runtime do
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
 
   def first(coll) when is_list(coll), do: List.first(coll)
+  def second(coll) when is_list(coll), do: Enum.at(coll, 1)
   def last(coll) when is_list(coll), do: List.last(coll)
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
