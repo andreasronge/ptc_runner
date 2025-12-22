@@ -295,73 +295,78 @@ defmodule PtcDemo.Agent do
         text = ReqLLM.Response.text(response)
         new_usage = add_usage(usage, ReqLLM.Response.usage(response))
 
-        # Check if response contains a PTC program
-        case extract_ptc_program(text) do
-          {:ok, program_json} ->
-            IO.puts("   [Program] #{truncate(program_json, 80)}")
+        # Handle empty/nil responses from LLM
+        if is_nil(text) or text == "" do
+          {:error, "LLM returned empty response", context, new_usage}
+        else
+          # Check if response contains a PTC program
+          case extract_ptc_program(text) do
+            {:ok, program_json} ->
+              IO.puts("   [Program] #{truncate(program_json, 80)}")
 
-            # Increment run counter when program is generated
-            run_tracked_usage = increment_run_count(new_usage)
+              # Increment run counter when program is generated
+              run_tracked_usage = increment_run_count(new_usage)
 
-            # Execute the program with native memory support
-            case PtcRunner.Json.run(program_json,
-                   context: datasets,
-                   memory: memory,
-                   timeout: 5000
-                 ) do
-              {:ok, result, _memory_delta, new_memory} ->
-                result_str = format_result(result)
-                IO.puts("   [Result] #{truncate(result_str, 80)}")
+              # Execute the program with native memory support
+              case PtcRunner.Json.run(program_json,
+                     context: datasets,
+                     memory: memory,
+                     timeout: 5000
+                   ) do
+                {:ok, result, _memory_delta, new_memory} ->
+                  result_str = format_result(result)
+                  IO.puts("   [Result] #{truncate(result_str, 80)}")
 
-                # Add assistant message and tool result, then continue loop
-                new_context =
-                  context
-                  |> ReqLLM.Context.append(assistant(text))
-                  |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
+                  # Add assistant message and tool result, then continue loop
+                  new_context =
+                    context
+                    |> ReqLLM.Context.append(assistant(text))
+                    |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
 
-                # Track raw result for test runner
-                new_last_exec = {program_json, result}
+                  # Track raw result for test runner
+                  new_last_exec = {program_json, result}
 
-                agent_loop(
-                  model,
-                  new_context,
-                  datasets,
-                  run_tracked_usage,
-                  remaining - 1,
-                  new_last_exec,
-                  new_memory
-                )
+                  agent_loop(
+                    model,
+                    new_context,
+                    datasets,
+                    run_tracked_usage,
+                    remaining - 1,
+                    new_last_exec,
+                    new_memory
+                  )
 
-              {:error, reason} ->
-                error_msg = PtcRunner.Json.format_error(reason)
-                IO.puts("   [Error] #{error_msg}")
+                {:error, reason} ->
+                  error_msg = PtcRunner.Json.format_error(reason)
+                  IO.puts("   [Error] #{error_msg}")
 
-                # Add error as tool result and continue
-                new_context =
-                  context
-                  |> ReqLLM.Context.append(assistant(text))
-                  |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
+                  # Add error as tool result and continue
+                  new_context =
+                    context
+                    |> ReqLLM.Context.append(assistant(text))
+                    |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
 
-                agent_loop(
-                  model,
-                  new_context,
-                  datasets,
-                  run_tracked_usage,
-                  remaining - 1,
-                  last_exec,
-                  memory
-                )
-            end
+                  agent_loop(
+                    model,
+                    new_context,
+                    datasets,
+                    run_tracked_usage,
+                    remaining - 1,
+                    last_exec,
+                    memory
+                  )
+              end
 
-          :none ->
-            # No program found - this is the final answer
-            IO.puts("   [Answer] Final response (no program)")
-            final_context = ReqLLM.Context.append(context, assistant(text))
+            :none ->
+              # No program found - this is the final answer
+              IO.puts("   [Answer] Final response (no program)")
+              final_context = ReqLLM.Context.append(context, assistant(text))
 
-            # Use tracked last execution (raw values, not formatted strings)
-            {last_program, last_result} = last_exec
+              # Use tracked last execution (raw values, not formatted strings)
+              {last_program, last_result} = last_exec
 
-            {:ok, text, final_context, new_usage, last_program, last_result, memory}
+              {:ok, text, final_context, new_usage, last_program, last_result, memory}
+          end
         end
 
       {:error, reason} ->
