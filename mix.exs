@@ -63,7 +63,11 @@ defmodule PtcRunner.MixProject do
         "compile --force --warnings-as-errors",
         "credo --strict",
         "dialyzer",
+        "schema.gen",
         "test --warnings-as-errors"
+      ],
+      "schema.gen": [
+        "run -e 'File.write!(\"priv/ptc_schema.json\", Jason.encode!(PtcRunner.Schema.to_json_schema(), pretty: true))'"
       ]
     ]
   end

@@ -2,42 +2,52 @@
 
 ## Prerequisites
 
-- `git-cliff` installed: `brew install git-cliff`
 - `HEX_API_KEY` secret configured in GitHub repo settings
+- Claude CLI installed (for changelog generation)
 
-## Release Steps
-
-### 1. Update Changelog
-
-```bash
-# Preview unreleased changes
-git-cliff --unreleased
-
-# Generate full changelog
-git-cliff --tag vX.Y.Z --output CHANGELOG.md
-
-# Review and edit as needed
-```
-
-### 2. Update Version
-
-Edit `mix.exs`:
-```elixir
-version: "X.Y.Z",
-```
-
-### 3. Commit and Tag
+## Quick Release (Recommended)
 
 ```bash
-git add -A
-git commit -m "chore: prepare release X.Y.Z"
-git tag -a vX.Y.Z -m "Release X.Y.Z"
-git push && git push --tags
+# Step 1: Generate changelog with Claude
+./scripts/update-changelog.sh 0.3.3
+
+# Step 2: Review CHANGELOG.md, edit if needed
+
+# Step 3: Run release script (validates, bumps version, commits, tags, pushes)
+./scripts/release.sh 0.3.3
 ```
 
-### 4. Automated Publishing
+## What the Scripts Do
 
-The `release.yml` workflow automatically:
+### `update-changelog.sh`
+- Extracts only `feat:` and `fix:` commits since last tag
+- Uses Claude (Haiku) to write user-facing descriptions
+- Filters out internal/CI/demo changes
+- Groups related small fixes
+
+### `release.sh`
+Runs these checks before releasing:
+1. ✓ On main branch
+2. ✓ In sync with remote
+3. ✓ Working directory clean (except CHANGELOG.md)
+4. ✓ CHANGELOG.md modified with correct version
+5. ✓ Tag doesn't already exist
+6. ✓ Code formatted (`mix format --check-formatted`)
+7. ✓ No compiler warnings (`mix compile --warnings-as-errors`)
+8. ✓ Tests pass (`mix test`)
+9. ✓ Credo passes (if installed)
+10. ✓ Docs build without warnings (`mix docs`)
+11. ✓ Hex package builds (`mix hex.build`)
+
+Then:
+- Updates version in `mix.exs`
+- Commits with release message
+- Creates annotated tag
+- Pushes to origin
+
+## Automated Publishing
+
+The `release.yml` GitHub Action automatically:
 1. Verifies tag matches `mix.exs` version
 2. Runs tests
 3. Publishes package to Hex.pm
