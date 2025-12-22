@@ -45,10 +45,20 @@ Benchmark results comparing LLM accuracy on PTC-Lisp and PTC-JSON DSLs.
 | DeepSeek v3.2 | 97.5% | **100%** |
 | Haiku 4.5 | 95.0% | **100%** |
 
+## Token Efficiency
+
+| Metric | JSON | Lisp |
+|--------|------|------|
+| System prompt | ~1,500 tokens | ~2,100 tokens |
+| Output per query | ~44 tokens | ~20 tokens |
+
+Lisp has a larger system prompt (+40%) but generates smaller programs (2.2x fewer tokens).
+After ~23 queries per session, Lisp's smaller outputs offset its larger prompt.
+
 ## Conclusions
 
 1. **Both DSLs now achieve 95%+ accuracy** across all models after prompt improvements
-2. **Lisp is more token-efficient**: ~50% fewer tokens than JSON for equivalent queries
+2. **Lisp is more token-efficient for multi-query sessions** (smaller output offsets larger prompt)
 3. **Speed**: Gemini is fastest (17-26s), DeepSeek is slowest (1.4-2.2m)
 4. **Cost**: DeepSeek is 3-6x cheaper than alternatives
 
