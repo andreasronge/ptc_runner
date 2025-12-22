@@ -91,6 +91,76 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def flex_get_in(_data, _path), do: nil
 
+  @doc """
+  Flexible nested key insertion: creates intermediate maps as needed at each level.
+  Aligns with Clojure's assoc-in behavior.
+  """
+  def flex_put_in(_data, [], v), do: v
+  def flex_put_in(nil, path, v), do: flex_put_in(%{}, path, v)
+
+  def flex_put_in(data, [key | rest], v) when is_map(data) do
+    case rest do
+      [] ->
+        # Last key in path: put the value
+        Map.put(data, key, v)
+
+      _ ->
+        # More path to traverse: get or create intermediate map
+        case flex_fetch(data, key) do
+          {:ok, nested} when is_map(nested) ->
+            # Key exists with a map value: recurse
+            nested_result = flex_put_in(nested, rest, v)
+            Map.put(data, key, nested_result)
+
+          {:ok, _} ->
+            # Key exists with a non-map value: can't traverse further
+            raise ArgumentError,
+                  "could not put/update key #{inspect(key)} on a non-map value"
+
+          :error ->
+            # Key missing: create new intermediate map
+            nested_result = flex_put_in(%{}, rest, v)
+            Map.put(data, key, nested_result)
+        end
+    end
+  end
+
+  @doc """
+  Flexible nested key update: creates intermediate maps as needed at each level.
+  Aligns with Clojure's update-in behavior.
+  """
+  def flex_update_in(data, [], f), do: f.(data)
+  def flex_update_in(nil, path, f), do: flex_update_in(%{}, path, f)
+
+  def flex_update_in(data, [key | rest], f) when is_map(data) do
+    case rest do
+      [] ->
+        # Last key in path: update the value at this key
+        old_val = flex_get(data, key)
+        new_val = f.(old_val)
+        Map.put(data, key, new_val)
+
+      _ ->
+        # More path to traverse: get or create intermediate map
+        case flex_fetch(data, key) do
+          {:ok, nested} when is_map(nested) ->
+            # Key exists with a map value: recurse
+            nested_result = flex_update_in(nested, rest, f)
+            Map.put(data, key, nested_result)
+
+          {:ok, _} ->
+            # Key exists with a non-map value: can't traverse further
+            raise ArgumentError,
+                  "could not put/update key #{inspect(key)} on a non-map value"
+
+          :error ->
+            # Key missing: create new intermediate map and update
+            nested_result = flex_update_in(%{}, rest, f)
+            Map.put(data, key, nested_result)
+        end
+    end
+  end
+
   # ============================================================
   # Collection Operations
   # ============================================================
@@ -323,7 +393,7 @@ defmodule PtcRunner.Lisp.Runtime do
   end
 
   def assoc(m, k, v), do: Map.put(m, k, v)
-  def assoc_in(m, path, v), do: put_in(m, path, v)
+  def assoc_in(m, path, v), do: flex_put_in(m, path, v)
 
   def update(m, k, f) do
     old_val = Map.get(m, k)
@@ -331,7 +401,7 @@ defmodule PtcRunner.Lisp.Runtime do
     Map.put(m, k, new_val)
   end
 
-  def update_in(m, path, f), do: Kernel.update_in(m, path, f)
+  def update_in(m, path, f), do: flex_update_in(m, path, f)
   def dissoc(m, k), do: Map.delete(m, k)
   def merge(m1, m2), do: Map.merge(m1, m2)
 
