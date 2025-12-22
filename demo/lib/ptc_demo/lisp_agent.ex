@@ -41,8 +41,8 @@ defmodule PtcDemo.LispAgent do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def ask(question) do
-    GenServer.call(__MODULE__, {:ask, question}, @timeout)
+  def ask(question, opts \\ []) do
+    GenServer.call(__MODULE__, {:ask, question, opts}, @timeout)
   end
 
   def reset do
@@ -166,9 +166,10 @@ defmodule PtcDemo.LispAgent do
   end
 
   @impl true
-  def handle_call({:ask, question}, _from, state) do
+  def handle_call({:ask, question, opts}, _from, state) do
     # Add user question to context
     context = ReqLLM.Context.append(state.context, user(question))
+    stop_on_success = Keyword.get(opts, :stop_on_success, false)
 
     # Run the agentic loop with persisted memory from state
     case agent_loop(
@@ -178,7 +179,8 @@ defmodule PtcDemo.LispAgent do
            state.usage,
            @max_iterations,
            {nil, nil},
-           state.memory
+           state.memory,
+           stop_on_success
          ) do
       {:ok, answer, final_context, new_usage, last_program, last_result, new_memory} ->
         {:reply, {:ok, answer},
@@ -280,11 +282,11 @@ defmodule PtcDemo.LispAgent do
 
   # --- Agentic Loop ---
 
-  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec, _memory) do
+  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec, _memory, _stop_on_success) do
     {:error, "Max iterations reached", context, usage}
   end
 
-  defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
+  defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory, stop_on_success) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
 
     case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
@@ -304,7 +306,16 @@ defmodule PtcDemo.LispAgent do
                 user("[System Error]\n#{error_msg}\nPlease try again with a valid response.")
               )
 
-            agent_loop(model, new_context, datasets, new_usage, remaining - 1, last_exec, memory)
+            agent_loop(
+              model,
+              new_context,
+              datasets,
+              new_usage,
+              remaining - 1,
+              last_exec,
+              memory,
+              stop_on_success
+            )
 
           :ok ->
             # Check if response contains a PTC-Lisp program
@@ -326,24 +337,36 @@ defmodule PtcDemo.LispAgent do
                     result_str = format_result(result)
                     IO.puts("   [Result] #{truncate(result_str, 80)}")
 
-                    # Add assistant message and tool result, then continue loop
-                    new_context =
-                      context
-                      |> ReqLLM.Context.append(assistant(text))
-                      |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
-
                     # Track raw result for test runner
                     new_last_exec = {program, result}
 
-                    agent_loop(
-                      model,
-                      new_context,
-                      datasets,
-                      run_tracked_usage,
-                      remaining - 1,
-                      new_last_exec,
-                      new_memory
-                    )
+                    # If stop_on_success, return immediately with the result
+                    if stop_on_success do
+                      final_context =
+                        context
+                        |> ReqLLM.Context.append(assistant(text))
+                        |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
+
+                      {:ok, result_str, final_context, run_tracked_usage, program, result,
+                       new_memory}
+                    else
+                      # Add assistant message and tool result, then continue loop
+                      new_context =
+                        context
+                        |> ReqLLM.Context.append(assistant(text))
+                        |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
+
+                      agent_loop(
+                        model,
+                        new_context,
+                        datasets,
+                        run_tracked_usage,
+                        remaining - 1,
+                        new_last_exec,
+                        new_memory,
+                        stop_on_success
+                      )
+                    end
 
                   {:error, reason} ->
                     error_msg = format_lisp_error(reason)
@@ -362,7 +385,8 @@ defmodule PtcDemo.LispAgent do
                       run_tracked_usage,
                       remaining - 1,
                       last_exec,
-                      memory
+                      memory,
+                      stop_on_success
                     )
                 end
 

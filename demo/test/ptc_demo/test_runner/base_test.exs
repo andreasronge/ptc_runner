@@ -49,7 +49,7 @@ defmodule PtcDemo.TestRunner.BaseTest do
 
     test "eq constraint returns error message on mismatch" do
       assert Base.check_constraint(499, {:eq, 500}) == "Expected 500, got 499"
-      assert Base.check_constraint("hello", {:eq, "world"}) == "Expected world, got hello"
+      assert Base.check_constraint("hello", {:eq, "world"}) == ~s(Expected "world", got "hello")
     end
 
     test "gt constraint passes when value is greater" do

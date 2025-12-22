@@ -12,8 +12,8 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
 
     test "returns expected number of common test cases" do
       cases = TestCase.common_test_cases()
-      # Unified test suite has 12 common cases covering 3 difficulty levels
-      assert length(cases) == 12
+      # Unified test suite has 13 common cases covering 3 difficulty levels
+      assert length(cases) == 13
     end
 
     test "each test case has required fields" do
@@ -194,10 +194,10 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
   end
 
   describe "lisp_specific_cases/0" do
-    test "returns an empty list (all tests unified into common_test_cases)" do
+    test "returns Lisp-only test cases" do
       cases = TestCase.lisp_specific_cases()
       assert is_list(cases)
-      assert length(cases) == 0
+      assert length(cases) == 1
     end
   end
 

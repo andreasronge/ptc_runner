@@ -152,14 +152,33 @@ defmodule PtcDemo.TestRunner.TestCase do
   @doc """
   Return test cases specific to Lisp DSL.
 
-  These tests are now empty since all tests have been unified into common_test_cases/0.
-  Kept for backwards compatibility - may be used for Lisp-only features in the future.
+  These tests use PTC-Lisp features that cannot be expressed in PTC-JSON:
+  - `group-by` returning a map
+  - `map` over map entries with destructuring
+  - Complex `let` bindings with multiple aggregations
 
-  Returns an empty list.
+  Returns a list of Lisp-only test case maps.
   """
   @spec lisp_specific_cases() :: [map()]
   def lisp_specific_cases do
-    []
+    [
+      # ═══════════════════════════════════════════════════════════════════════════
+      # LISP-ONLY: Advanced Features (not expressible in PTC-JSON)
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # 1. Group-by with map over map entries + destructuring
+      %{
+        query:
+          "Which expense category has the highest total spending? " <>
+            "Return a map with :highest (the top category with its stats) and :breakdown " <>
+            "(all categories sorted by total descending). Each category should have " <>
+            ":category, :total, :count, and :avg fields.",
+        expect: :map,
+        constraint: {:has_keys, [:highest, :breakdown]},
+        description:
+          "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
+      }
+    ]
   end
 
   @doc """

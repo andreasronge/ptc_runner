@@ -27,6 +27,7 @@ defmodule PtcDemo.LispCLI do
     data_mode = if opts[:explore], do: :explore, else: :schema
     model = opts[:model]
     run_tests = opts[:test]
+    test_index = opts[:test_index]
     verbose = opts[:verbose]
     report_path = opts[:report]
     runs = opts[:runs]
@@ -47,7 +48,8 @@ defmodule PtcDemo.LispCLI do
         verbose: verbose,
         report: report_path,
         runs: runs,
-        validate_clojure: validate_clojure
+        validate_clojure: validate_clojure,
+        test_index: test_index
       )
     else
       IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
@@ -60,12 +62,26 @@ defmodule PtcDemo.LispCLI do
   defp run_tests_and_exit(opts) do
     # Filter out nil values so Keyword.get defaults work properly
     opts = Enum.reject(opts, fn {_k, v} -> is_nil(v) end)
-    result = PtcDemo.LispTestRunner.run_all(opts)
+    test_index = Keyword.get(opts, :test_index)
 
-    if result.failed > 0 do
-      System.halt(1)
+    if test_index do
+      # Run a single test
+      result = PtcDemo.LispTestRunner.run_one(test_index, opts)
+
+      if result && result.passed do
+        System.halt(0)
+      else
+        System.halt(1)
+      end
     else
-      System.halt(0)
+      # Run all tests
+      result = PtcDemo.LispTestRunner.run_all(opts)
+
+      if result.failed > 0 do
+        System.halt(1)
+      else
+        System.halt(0)
+      end
     end
   end
 
@@ -309,7 +325,8 @@ defmodule PtcDemo.LispCLI do
     Just type your question to query the data!
 
     CLI Options (when starting):
-      mix lisp --test              Run automated tests
+      mix lisp --test              Run all automated tests
+      mix lisp --test=14           Run a single test by index
       mix lisp --test --verbose    Run tests with detailed output
       mix lisp --test --runs=3     Run tests multiple times
       mix lisp --model=<name>      Start with specific model

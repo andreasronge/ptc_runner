@@ -193,7 +193,8 @@ defmodule PtcDemo.TestRunner.ReportTest do
       temp_file = Path.join(System.tmp_dir!(), "test_report_#{:erlang.phash2(self())}.md")
 
       try do
-        :ok = Report.write(temp_file, summary, "Test")
+        result = Report.write(temp_file, summary, "Test")
+        assert result == temp_file
 
         assert File.exists?(temp_file)
 
@@ -221,7 +222,8 @@ defmodule PtcDemo.TestRunner.ReportTest do
             passed: 1
           )
 
-        :ok = Report.write(temp_file, summary, "Test")
+        result = Report.write(temp_file, summary, "Test")
+        assert result == temp_file
 
         # Verify old content is replaced
         content = File.read!(temp_file)
@@ -364,6 +366,16 @@ defmodule PtcDemo.TestRunner.ReportTest do
   end
 
   defp build_test_summary(overrides \\ []) do
+    default_stats = %{
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      system_prompt_tokens: 0,
+      total_runs: 0,
+      total_cost: 0.0,
+      requests: 0
+    }
+
     defaults = %{
       timestamp: DateTime.utc_now(),
       model: "test-model",
@@ -373,10 +385,22 @@ defmodule PtcDemo.TestRunner.ReportTest do
       total: 0,
       total_attempts: 0,
       duration_ms: 0,
-      stats: %{total_tokens: 0, total_cost: 0.0},
+      stats: default_stats,
       results: []
     }
 
-    Map.merge(defaults, Map.new(overrides))
+    overrides_map = Map.new(overrides)
+
+    # Merge stats separately to preserve all fields
+    merged_stats =
+      if Map.has_key?(overrides_map, :stats) do
+        Map.merge(default_stats, overrides_map.stats)
+      else
+        default_stats
+      end
+
+    defaults
+    |> Map.merge(overrides_map)
+    |> Map.put(:stats, merged_stats)
   end
 end

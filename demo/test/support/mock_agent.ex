@@ -3,15 +3,12 @@ defmodule PtcDemo.MockAgent do
   Mock agent for testing test runners without real LLM calls.
 
   Implements the same public API as PtcDemo.Agent but returns predetermined responses.
-
-  Note: This is a simplified mock for testing purposes. Unlike the real Agent,
-  `programs/0` returns a list of query strings rather than {program, result} tuples,
-  since the mock tracks queries rather than generated PTC programs.
+  `programs/0` returns a list of {program, result} tuples matching the real agent format.
   """
 
   use GenServer
 
-  defstruct [:responses, :call_count, :last_result, :last_program, :calls]
+  defstruct [:responses, :call_count, :last_result, :last_program, :calls, :program_results]
 
   # --- Public API ---
 
@@ -20,6 +17,11 @@ defmodule PtcDemo.MockAgent do
   end
 
   def ask(question) do
+    GenServer.call(__MODULE__, {:ask, question})
+  end
+
+  def ask(question, _opts) do
+    # Options like stop_on_success are ignored in mock
     GenServer.call(__MODULE__, {:ask, question})
   end
 
@@ -52,6 +54,8 @@ defmodule PtcDemo.MockAgent do
       input_tokens: 0,
       output_tokens: 0,
       total_tokens: 0,
+      system_prompt_tokens: 0,
+      total_runs: 0,
       total_cost: 0.0,
       requests: 0
     }
@@ -87,7 +91,8 @@ defmodule PtcDemo.MockAgent do
        call_count: 0,
        last_result: nil,
        last_program: nil,
-       calls: []
+       calls: [],
+       program_results: []
      }}
   end
 
@@ -100,7 +105,10 @@ defmodule PtcDemo.MockAgent do
       nil ->
         # Unknown query - return error with query text
         error = "Unknown query: #{question}"
-        {:reply, {:error, error}, %{state | calls: new_calls}}
+        new_program_results = [{question, {:error, error}} | state.program_results]
+
+        {:reply, {:error, error},
+         %{state | calls: new_calls, program_results: new_program_results}}
 
       response ->
         # Response can be a tuple {status, answer} or just the answer value
@@ -121,12 +129,17 @@ defmodule PtcDemo.MockAgent do
               {:ok, inspect(ans), nil, ans}
           end
 
+        # Track program and result for programs/0
+        program_entry = {last_program || question, last_result}
+        new_program_results = [program_entry | state.program_results]
+
         new_state = %{
           state
           | call_count: state.call_count + 1,
             last_result: last_result,
             last_program: last_program,
-            calls: new_calls
+            calls: new_calls,
+            program_results: new_program_results
         }
 
         {:reply, {status, answer}, new_state}
@@ -141,7 +154,8 @@ defmodule PtcDemo.MockAgent do
        | call_count: 0,
          last_result: nil,
          last_program: nil,
-         calls: []
+         calls: [],
+         program_results: []
      }}
   end
 
@@ -157,12 +171,8 @@ defmodule PtcDemo.MockAgent do
 
   @impl true
   def handle_call(:programs, _from, state) do
-    # Return list of query strings (simplified for testing)
-    programs =
-      state.calls
-      |> Enum.reverse()
-      |> Enum.filter(&is_binary/1)
-
+    # Return list of {program, result} tuples (matching real agent format)
+    programs = Enum.reverse(state.program_results)
     {:reply, programs, state}
   end
 end

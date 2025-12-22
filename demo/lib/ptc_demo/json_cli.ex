@@ -27,6 +27,7 @@ defmodule PtcDemo.JsonCLI do
     data_mode = if opts[:explore], do: :explore, else: :schema
     model = opts[:model]
     run_tests = opts[:test]
+    test_index = opts[:test_index]
     verbose = opts[:verbose]
     report_path = opts[:report]
     runs = opts[:runs]
@@ -42,7 +43,12 @@ defmodule PtcDemo.JsonCLI do
 
     # Run tests if --test flag is present
     if run_tests do
-      run_tests_and_exit(verbose: verbose, report: report_path, runs: runs)
+      run_tests_and_exit(
+        verbose: verbose,
+        report: report_path,
+        runs: runs,
+        test_index: test_index
+      )
     else
       IO.puts(banner(PtcDemo.Agent.model(), PtcDemo.Agent.data_mode()))
 
@@ -54,12 +60,26 @@ defmodule PtcDemo.JsonCLI do
   defp run_tests_and_exit(opts) do
     # Filter out nil values so Keyword.get defaults work properly
     opts = Enum.reject(opts, fn {_k, v} -> is_nil(v) end)
-    result = PtcDemo.JsonTestRunner.run_all(opts)
+    test_index = Keyword.get(opts, :test_index)
 
-    if result.failed > 0 do
-      System.halt(1)
+    if test_index do
+      # Run a single test
+      result = PtcDemo.JsonTestRunner.run_one(test_index, opts)
+
+      if result && result.passed do
+        System.halt(0)
+      else
+        System.halt(1)
+      end
     else
-      System.halt(0)
+      # Run all tests
+      result = PtcDemo.JsonTestRunner.run_all(opts)
+
+      if result.failed > 0 do
+        System.halt(1)
+      else
+        System.halt(0)
+      end
     end
   end
 
@@ -303,7 +323,8 @@ defmodule PtcDemo.JsonCLI do
     Just type your question to query the data!
 
     CLI Options (when starting):
-      mix json --test              Run automated tests
+      mix json --test              Run all automated tests
+      mix json --test=14           Run a single test by index
       mix json --test --verbose    Run tests with detailed output
       mix json --test --runs=3     Run tests multiple times
       mix json --model=<name>      Start with specific model
