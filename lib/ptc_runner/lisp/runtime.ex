@@ -154,10 +154,15 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def into(to, from) when is_list(to) and is_map(from) do
     # When collecting from a map, each entry is converted to [key, value] pair
-    Enum.into(from, to, fn {k, v} -> [k, v] end)
+    # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists
+    to ++ Enum.map(from, fn {k, v} -> [k, v] end)
   end
 
-  def into(to, from) when is_list(to), do: Enum.into(from, to)
+  def into(to, from) when is_list(to) do
+    # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists
+    to ++ Enum.to_list(from)
+  end
+
   def flatten(coll) when is_list(coll), do: List.flatten(coll)
 
   def zip(c1, c2) when is_list(c1) and is_list(c2) do
