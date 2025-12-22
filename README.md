@@ -107,6 +107,13 @@ end
 - **Retry-friendly**: Structured errors with actionable messages for LLM retry loops
 - **Stateful**: Context refs enable persistent memory across agentic loop iterations
 
+## Key Commands
+
+- `mix test` - Run all tests
+- `mix test --failed` - Re-run failed tests
+- `mix format` - Format code
+- `mix ptc.validate_spec` - Validate PTC-Lisp spec examples
+
 ## Documentation
 
 - **[Guide](docs/guide.md)** - Architecture, API reference, detailed examples
