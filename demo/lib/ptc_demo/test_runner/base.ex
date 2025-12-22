@@ -360,7 +360,9 @@ defmodule PtcDemo.TestRunner.Base do
       data_mode: data_mode,
       results: results,
       stats: stats_with_fallback,
-      timestamp: DateTime.utc_now()
+      timestamp: DateTime.utc_now(),
+      version: get_ptc_runner_version(),
+      commit: get_git_commit()
     }
   end
 
@@ -471,6 +473,22 @@ defmodule PtcDemo.TestRunner.Base do
       end)
 
       :ok
+    end
+  end
+
+  # Gets the PtcRunner library version from the application spec
+  defp get_ptc_runner_version do
+    case Application.spec(:ptc_runner, :vsn) do
+      nil -> "unknown"
+      vsn -> to_string(vsn)
+    end
+  end
+
+  # Gets the current git commit hash (short form)
+  defp get_git_commit do
+    case System.cmd("git", ["rev-parse", "--short", "HEAD"], stderr_to_stdout: true) do
+      {hash, 0} -> String.trim(hash)
+      _ -> "unknown"
     end
   end
 end

@@ -58,6 +58,8 @@ defmodule PtcDemo.TestRunner.Report do
     **Generated:** #{format_timestamp(summary.timestamp)}
     **Model:** #{summary.model}
     **Data Mode:** #{summary.data_mode}
+    **PtcRunner Version:** #{summary[:version] || "unknown"}
+    **Git Commit:** #{summary[:commit] || "unknown"}
 
     ## Summary
 
