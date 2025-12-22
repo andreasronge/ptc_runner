@@ -28,8 +28,11 @@ jobs:
             exit 1
           fi
 
+      - name: Install Babashka
+        run: mix ptc.install_babashka
+
       - name: Run tests
-        run: mix test --exclude clojure
+        run: mix test
         env:
           MIX_ENV: test
 
