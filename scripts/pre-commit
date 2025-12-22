@@ -16,6 +16,7 @@ HAS_CONFIG_FILES=$(echo "$STAGED_FILES" | grep -E '^config/.*\.exs$' || true)
 HAS_MIX_FILES=$(echo "$STAGED_FILES" | grep -E '^mix\.(exs|lock)$' || true)
 HAS_DELETED_MODULES=$(git diff --cached --diff-filter=D --name-only | grep -E '\.(ex|exs)$' || true)
 HAS_RENAMED_MODULES=$(git diff --cached --diff-filter=R --name-only | grep -E '\.(ex|exs)$' || true)
+HAS_LISP_CHANGES=$(echo "$STAGED_FILES" | grep -E '^lib/ptc_runner/lisp/|^docs/ptc-lisp-specification\.md$' || true)
 
 # Determine if tests should run
 SHOULD_RUN_TESTS=false
@@ -74,7 +75,19 @@ else
   echo "  ⏭️  Skipping Credo (no Elixir files)"
 fi
 
-# 4. Run tests (only if code could affect behavior)
+# 4. Spec validation (only if lisp-related files changed)
+if [ -n "$HAS_LISP_CHANGES" ]; then
+  echo "  ⏳ Validating PTC-Lisp specification..."
+  if ! mix ptc.validate_spec > /dev/null 2>&1; then
+    echo "  ❌ Spec validation failed. Run: mix ptc.validate_spec"
+    exit 1
+  fi
+  echo "  ✅ Spec validation passed"
+else
+  echo "  ⏭️  Skipping spec validation (no lisp changes)"
+fi
+
+# 5. Run tests (only if code could affect behavior)
 if [ "$SHOULD_RUN_TESTS" = true ]; then
   # Check for changed test files to run them specifically
   changed_test_files=$(echo "$STAGED_FILES" | grep "^test/.*_test\.exs$" || true)
