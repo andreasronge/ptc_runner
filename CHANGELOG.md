@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2025-12-22
+
+### Added
+
+- Add `update` and `update-in` map bindings for transforming values with functions
+- Add function-based key support to `*-by` operations for custom sorting and grouping
+- Add spec validation system for PTC-Lisp with multi-line examples and section reporting
+- Improve JSON DSL prompts for better LLM accuracy
+
+### Fixed
+
+- Fix JSON agent to retry on empty LLM responses
+- Improve deterministic ordering in keys/vals output
+- Align `assoc-in` and `update-in` with Clojure semantics for intermediate path creation
+- Correct `update/3` semantics to pass nil to function for missing keys
+- Fix zip and into operations to return vectors instead of tuples
+- Handle empty and nil LLM responses gracefully in agent loop
+
 ## [0.3.2] - 2025-12-20
 
 ### Added
