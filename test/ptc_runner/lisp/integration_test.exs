@@ -622,6 +622,94 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   end
 
   # ==========================================================================
+  # update and update-in - Map Key/Path Value Updates
+  # ==========================================================================
+
+  describe "update" do
+    test "basic update with function" do
+      source = ~S"""
+      (update {:n 1} :n inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{n: 2}
+    end
+
+    test "missing key gets nil default value without function application" do
+      source = ~S"""
+      (update {} :missing inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{missing: nil}
+    end
+
+    test "applies function to existing value and leaves missing keys as nil" do
+      source = ~S"""
+      (update {:a 1} :a inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{a: 2}
+    end
+
+    test "multiple keys in map" do
+      source = ~S"""
+      (update {:a 1 :b 2 :c 3} :b inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{a: 1, b: 3, c: 3}
+    end
+  end
+
+  describe "update-in" do
+    test "nested update-in with single level" do
+      source = ~S"""
+      (update-in {:a {:b 1}} [:a :b] inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{a: %{b: 2}}
+    end
+
+    test "multiple levels deep" do
+      source = ~S"""
+      (update-in {:x {:y {:z 5}}} [:x :y :z] (fn [v] (* v 2)))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{x: %{y: %{z: 10}}}
+    end
+
+    test "works with empty nested map" do
+      source = ~S"""
+      (update-in {:a {}} [:a :b] (fn [v] (if v (inc v) 0)))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{a: %{b: 0}}
+    end
+
+    test "single key path is equivalent to update" do
+      source = ~S"""
+      (update-in {:n 1} [:n] inc)
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      assert result == %{n: 2}
+    end
+  end
+
+  # ==========================================================================
   # Builtins as Higher-Order Function Arguments
   # ==========================================================================
 
