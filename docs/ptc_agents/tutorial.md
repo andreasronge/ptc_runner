@@ -303,6 +303,334 @@ The main agent decides which sub-agents to call and in what order.
 
 ---
 
+## Planning Agents
+
+A **Planning Agent** orchestrates multiple SubAgents to complete complex, multi-step tasks. The key insight: the plan itself is data, and the executor is a PTC-Lisp function that operates on that data.
+
+### Why Plan-as-Data?
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Planning Agent                            │
+│  "Process urgent emails and schedule follow-ups"            │
+│                         │                                    │
+│                         ▼                                    │
+│              ┌──────────────────┐                           │
+│              │   Plan (data)    │  ← queryable, modifiable  │
+│              │  [{:id :step1}   │                           │
+│              │   {:id :step2}]  │                           │
+│              └────────┬─────────┘                           │
+│                       │                                      │
+│              ┌────────▼─────────┐                           │
+│              │ Executor (code)  │  ← also PTC-Lisp!         │
+│              │ (run-plan steps) │                           │
+│              └────────┬─────────┘                           │
+└───────────────────────┼─────────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+   [SubAgent]      [SubAgent]      [SubAgent]
+```
+
+**Benefits:**
+- **Homoiconic**: Plan is data, executor is code, both in PTC-Lisp
+- **Queryable**: Agents can inspect what was tried, what failed
+- **Modifiable**: Plans can be adjusted mid-execution
+- **Auditable**: Full execution history for debugging
+
+### Plan Structure
+
+A plan consists of steps and execution history:
+
+```clojure
+{:id "email-workflow-001"
+ :goal "Process urgent emails and draft replies"
+
+ :steps
+ [{:id :find-emails
+   :task "Find urgent emails from today"
+   :tools [:email-tools]
+   :output {:email_ids [:* :id]}}
+
+  {:id :draft-replies
+   :task "Draft brief acknowledgments"
+   :tools [:draft-tools]
+   :needs [:email_ids]
+   :output {:draft_ids [:* :draft_id]}
+   :on-error :replan}]
+
+ :history []      ; execution log (appended during run)
+ :context {}}     ; accumulated refs from completed steps
+```
+
+**Step fields:**
+
+| Field | Purpose |
+|-------|---------|
+| `:id` | Unique identifier for the step |
+| `:task` | Natural language task for SubAgent |
+| `:tools` | Tool set keys the SubAgent can use |
+| `:needs` | Context keys required from previous steps |
+| `:output` | Ref extractors (paths or functions) |
+| `:on-error` | Strategy: `:abort`, `:skip`, `:retry`, `:replan` |
+
+### The Executor (PTC-Lisp)
+
+The executor is itself a PTC-Lisp function:
+
+```clojure
+(defn run-plan [plan]
+  (reduce
+    (fn [plan step]
+      (if (step-completed? plan (:id step))
+        plan  ; skip already completed steps
+        (run-step plan step)))
+    plan
+    (:steps plan)))
+
+(defn run-step [plan step]
+  (let [;; Build context from accumulated refs
+        ctx (-> (:context plan)
+                (select-keys (:needs step))
+                (assoc :_failed (failed-approaches plan (:id step))))
+
+        ;; Execute via SubAgent
+        result (call "subagent"
+                 {:task (:task step)
+                  :tools (:tools step)
+                  :context ctx})]
+
+    (if (:error result)
+      (handle-error plan step result)
+      (-> plan
+          (append-history step :success result)
+          (merge-context (:output step) result)))))
+
+(defn handle-error [plan step result]
+  (let [plan (append-history plan step :failed result)]
+    (case (:on-error step)
+      :abort (assoc plan :status :failed)
+      :skip plan
+      :retry (run-step plan step)  ; will see previous failure in ctx
+      :replan (replan plan step result))))
+```
+
+### Execution History
+
+Every step execution is logged to `:history`:
+
+```clojure
+{:step-id :draft-replies
+ :attempt 1
+ :status :failed
+ :started-at "2024-01-15T10:00:01Z"
+ :duration-ms 2340
+ :program "(call \"draft\" {:template \"formal\"})"
+ :error "Template 'formal' not found"}
+
+{:step-id :draft-replies
+ :attempt 2
+ :status :success
+ :started-at "2024-01-15T10:00:05Z"
+ :duration-ms 1890
+ :program "(call \"draft\" {:template \"simple\"})"
+ :result {:draft_ids [10 11 12]}
+ :summary "Created 3 draft replies"}
+```
+
+### Querying the Plan
+
+SubAgents (and the executor) can query the plan to make informed decisions:
+
+```clojure
+;; What has failed?
+(defn failures [plan]
+  (-> plan :history (filter #(= :failed (:status %)))))
+
+;; What approaches were tried for a step?
+(defn attempted-programs [plan step-id]
+  (-> plan :history
+      (filter #(= step-id (:step-id %)))
+      (map :program)))
+
+;; Get accumulated context
+(defn get-context [plan & keys]
+  (select-keys (:context plan) keys))
+
+;; Has step succeeded at least once?
+(defn step-completed? [plan step-id]
+  (-> plan :history
+      (some #(and (= step-id (:step-id %))
+                  (= :success (:status %))))))
+```
+
+**Example: Avoiding repeated failures**
+
+```clojure
+(defn run-step [plan step]
+  (let [;; Tell SubAgent what NOT to try
+        failed (attempted-programs plan (:id step))
+        hint (when (seq failed)
+               (str "Avoid these approaches that failed: " failed))
+
+        result (call "subagent"
+                 {:task (:task step)
+                  :tools (:tools step)
+                  :context (get-context plan (:needs step))
+                  :hint hint})]
+    ...))
+```
+
+### Replanning
+
+When a step fails with `:on-error :replan`, the planning agent can revise the remaining steps:
+
+```clojure
+(defn replan [plan failed-step error]
+  (let [;; Ask planning SubAgent to revise
+        result (call "subagent"
+                 {:task "Revise the plan given this failure"
+                  :tools [:plan-tools]
+                  :context {:failed_step failed-step
+                            :error error
+                            :remaining_steps (remaining-steps plan)
+                            :history (:history plan)}})]
+
+    ;; Replace remaining steps with revised plan
+    (-> plan
+        (assoc :steps (concat (completed-steps plan)
+                              (:revised_steps result)))
+        (append-history :replan :success result))))
+```
+
+### Plan Tools
+
+Tools that let SubAgents query and modify the plan:
+
+```elixir
+plan_tools = %{
+  "plan_status" => {
+    &Plan.status/1,
+    "(step-id :keyword) -> {:status :keyword :attempts :int :last-error :string}"
+  },
+
+  "plan_history" => {
+    &Plan.history/1,
+    "(step-id :keyword) -> [{:attempt :int :status :keyword :program :string :error :string}]"
+  },
+
+  "plan_context" => {
+    &Plan.get_context/0,
+    "() -> :map"
+  },
+
+  "plan_failures" => {
+    &Plan.all_failures/0,
+    "() -> [{:step-id :keyword :error :string :program :string}]"
+  }
+}
+```
+
+### Example: Complete Planning Workflow
+
+```elixir
+# 1. Define tool sets
+tool_registry = %{
+  email_tools: %{
+    "list_emails" => {&Email.list/1, "(filter :map) -> [{:id :int :subject :string :urgent :bool}]"},
+    "get_email" => {&Email.get/1, "(id :int) -> {:id :int :body :string}"}
+  },
+  draft_tools: %{
+    "create_draft" => {&Email.draft/2, "(email_id :int, content :string) -> {:draft_id :int}"}
+  },
+  calendar_tools: %{
+    "find_slots" => {&Calendar.available/1, "(date :string) -> [{:start :string :end :string}]"},
+    "create_meeting" => {&Calendar.create/1, "(opts :map) -> {:meeting_id :int}"}
+  }
+}
+
+# 2. Create initial plan (could be generated by a planning SubAgent)
+plan = %{
+  id: "workflow-001",
+  goal: "Process urgent emails and schedule follow-ups",
+  steps: [
+    %{id: :find_urgent, task: "Find urgent emails", tools: [:email_tools],
+      output: %{email_ids: [:*, :id]}},
+    %{id: :draft_replies, task: "Draft acknowledgments", tools: [:draft_tools],
+      needs: [:email_ids], output: %{draft_ids: [:*, :draft_id]}, on_error: :retry},
+    %{id: :schedule, task: "Find time slots for follow-up meetings", tools: [:calendar_tools],
+      needs: [:email_ids], output: %{slots: :result}, on_error: :skip}
+  ],
+  history: [],
+  context: %{}
+}
+
+# 3. Run the plan (executor is PTC-Lisp)
+{:ok, completed_plan} = PtcDemo.Plan.run(plan, tool_registry)
+
+# 4. Inspect results
+completed_plan.context
+#=> %{email_ids: [101, 102], draft_ids: [201, 202], slots: [...]}
+
+completed_plan.history
+#=> [%{step_id: :find_urgent, status: :success, ...}, ...]
+```
+
+### Generating Plans
+
+A planning SubAgent can generate the plan structure:
+
+```elixir
+planning_tools = %{
+  "create_plan" => {fn steps -> steps end,
+    "(steps [{:id :keyword :task :string :tools [:keyword] :needs [:keyword] :on-error :keyword}]) -> :plan"}
+}
+
+{:ok, result} = PtcDemo.SubAgent.delegate(
+  "Create a plan to: find urgent emails, draft replies, and schedule follow-ups",
+  tools: planning_tools,
+  context: %{available_tool_sets: [:email_tools, :draft_tools, :calendar_tools]}
+)
+
+plan = %{
+  id: generate_id(),
+  goal: "find urgent emails, draft replies, and schedule follow-ups",
+  steps: result.result,
+  history: [],
+  context: %{}
+}
+```
+
+### Persistence (Future)
+
+The plan structure is designed for easy persistence:
+
+```elixir
+# Current: in-memory only
+{:ok, plan} = Plan.run(plan, tools)
+
+# Future: file-based
+{:ok, plan} = Plan.load("plans/workflow-001.json")
+{:ok, plan} = Plan.run(plan, tools)
+Plan.save(plan)
+
+# Future: GitHub Issues (collaborative, auditable)
+{:ok, plan} = Plan.from_github_issue("owner/repo", 275)
+{:ok, plan} = Plan.run(plan, tools)
+Plan.sync_to_github(plan)  # updates issue, adds comments for history
+```
+
+### Best Practices for Planning
+
+1. **Keep steps focused** - Each step should do one thing well
+2. **Use `:needs` explicitly** - Makes dependencies clear and enables parallel execution
+3. **Set appropriate `:on-error`** - `:abort` for critical steps, `:skip` for optional, `:replan` for complex recovery
+4. **Extract meaningful refs** - Pass IDs and summaries, not raw data
+5. **Query history before retrying** - Avoid repeating failed approaches
+6. **Let SubAgents see failures** - Pass `_failed` context so they can try alternatives
+
+---
+
 ## CLI Commands
 
 Try SubAgents interactively in the demo CLI:
@@ -405,6 +733,9 @@ tool = PtcDemo.SubAgent.as_tool(description: "...", tools: %{...})
 # Generate reusable functions
 {:ok, defn} = PtcDemo.SubAgent.generate(task, tools: tools, params: [:x])
 {:ok, result} = PtcDemo.SubAgent.run_with_defn(defn, "(fn-name arg)", tools: tools)
+
+# Planning (orchestrate multi-step workflows)
+{:ok, plan} = PtcDemo.Plan.run(plan, tool_registry)
 ```
 
 ### Options for `delegate/2`
@@ -455,6 +786,42 @@ When `trace: true`, the trace includes all turns:
 | `{:execution_error, reason}` | Program failed during execution |
 | `:empty_response` | LLM returned empty response |
 | `:max_turns_exceeded` | Reached `max_turns` limit without completing |
+
+### Plan Structure
+
+```elixir
+%{
+  id: String.t(),             # Unique plan identifier
+  goal: String.t(),           # Human-readable goal description
+  steps: [step()],            # List of steps to execute
+  history: [history_entry()], # Execution log (append-only)
+  context: map(),             # Accumulated refs from completed steps
+  status: :pending | :running | :completed | :failed
+}
+
+# Step structure
+%{
+  id: atom(),                 # Unique step identifier
+  task: String.t(),           # Natural language task for SubAgent
+  tools: [atom()],            # Tool set keys from registry
+  needs: [atom()],            # Context keys required (dependencies)
+  output: map(),              # Ref extractors for results
+  on_error: :abort | :skip | :retry | :replan
+}
+
+# History entry structure
+%{
+  step_id: atom(),            # Which step this entry is for
+  attempt: integer(),         # Attempt number (1-based)
+  status: :success | :failed | :running,
+  started_at: String.t(),     # ISO 8601 timestamp
+  duration_ms: integer(),     # Execution time
+  program: String.t(),        # PTC-Lisp program executed
+  result: term(),             # Result value (if success)
+  error: String.t(),          # Error message (if failed)
+  summary: String.t()         # Human-readable summary
+}
+```
 
 ### LLM Providers
 
@@ -507,3 +874,36 @@ mock = PtcDemo.MockLLM.sequence([
 
 - [GitHub Epic #275](https://github.com/andreasronge/ptc_runner/issues/275) - Full specification and related issues
 - [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation
+
+## Design Notes
+
+### Why PTC-Lisp for Planning?
+
+The planning system uses PTC-Lisp at multiple levels:
+
+1. **Plan data** - Steps and history are PTC-Lisp data structures (maps, vectors)
+2. **Executor** - The `run-plan` function is itself PTC-Lisp
+3. **Query functions** - `failures`, `step-completed?`, etc. are PTC-Lisp
+4. **SubAgent programs** - Each step generates PTC-Lisp to execute
+
+This homoiconicity (code-as-data) enables:
+- Plans can be inspected, modified, and serialized uniformly
+- The executor can be customized without changing the runtime
+- SubAgents can query and modify plans using the same language they execute
+
+### Relationship to GitHub Workflows
+
+The plan history concept mirrors how GitHub Issues track work:
+
+| GitHub Issues | Plan History |
+|---------------|--------------|
+| Issue body | `:goal` + `:steps` |
+| Comments | `:history` entries |
+| Labels/status | `:status` field |
+| Issue search | PTC-Lisp queries |
+| Cross-references | `:needs` dependencies |
+
+Future persistence could sync plans bidirectionally with GitHub Issues, enabling:
+- Human oversight of automated workflows
+- Collaborative editing of plans
+- Audit trail via issue comments
