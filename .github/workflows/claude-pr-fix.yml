@@ -152,6 +152,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
+          # Configure git to use token for authentication
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+
           # Check if there are unpushed commits
           UNPUSHED=$(git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --oneline 2>/dev/null || echo "")
           if [ -n "$UNPUSHED" ]; then
