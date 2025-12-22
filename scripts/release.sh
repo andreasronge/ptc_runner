@@ -55,9 +55,9 @@ else
   echo "✓ In sync with remote"
 fi
 
-# 3. Check working directory is clean except CHANGELOG.md
+# 3. Check working directory is clean except CHANGELOG.md and mix.exs
 echo "Checking working directory..."
-DIRTY_FILES=$(git status --porcelain | grep -v "^ M CHANGELOG.md" | grep -v "^M  CHANGELOG.md" || true)
+DIRTY_FILES=$(git status --porcelain | grep -v "CHANGELOG.md" | grep -v "mix.exs" || true)
 if [ -n "$DIRTY_FILES" ]; then
   if [ "$DRY_RUN" = "--dry-run" ]; then
     echo "⚠ Working directory has uncommitted changes (skipped in dry-run):"
