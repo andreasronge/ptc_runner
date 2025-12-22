@@ -874,6 +874,37 @@ defmodule PtcRunner.Lisp.RuntimeTest do
     end
   end
 
+  describe "zip - returns vectors not tuples" do
+    test "zip returns list of vectors" do
+      result = Runtime.zip([1, 2, 3], [:a, :b, :c])
+      assert result == [[1, :a], [2, :b], [3, :c]]
+    end
+
+    test "zip with empty lists returns empty list" do
+      result = Runtime.zip([], [])
+      assert result == []
+    end
+
+    test "zip with unequal lengths truncates to shorter" do
+      result = Runtime.zip([1, 2], [:a, :b, :c])
+      assert result == [[1, :a], [2, :b]]
+    end
+
+    test "zip elements are accessible with first/second" do
+      result = Runtime.zip([1, 2], [:a, :b])
+      first_pair = List.first(result)
+      assert Runtime.first(first_pair) == 1
+      assert Runtime.second(first_pair) == :a
+    end
+
+    test "zip elements are accessible with nth" do
+      result = Runtime.zip([1, 2], [:a, :b])
+      first_pair = List.first(result)
+      assert Runtime.nth(first_pair, 0) == 1
+      assert Runtime.nth(first_pair, 1) == :a
+    end
+  end
+
   describe "update_vals" do
     # Note: Arguments are (m, f) matching Clojure's (update-vals m f)
 

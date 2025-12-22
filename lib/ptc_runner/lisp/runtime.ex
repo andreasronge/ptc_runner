@@ -159,7 +159,11 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def into(to, from) when is_list(to), do: Enum.into(from, to)
   def flatten(coll) when is_list(coll), do: List.flatten(coll)
-  def zip(c1, c2) when is_list(c1) and is_list(c2), do: Enum.zip(c1, c2)
+
+  def zip(c1, c2) when is_list(c1) and is_list(c2) do
+    # Return vectors [a, b] instead of tuples {a, b} for consistency with PTC-Lisp data model
+    Enum.zip_with(c1, c2, fn a, b -> [a, b] end)
+  end
 
   def interleave(c1, c2) when is_list(c1) and is_list(c2) do
     Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
