@@ -636,24 +636,14 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert result == %{n: 2}
     end
 
-    test "missing key gets nil default value without function application" do
+    test "missing key passes nil to function" do
       source = ~S"""
-      (update {} :missing inc)
+      (update {} :missing (fn [v] (if v (inc v) 0)))
       """
 
       {:ok, result, _, _} = Lisp.run(source)
 
-      assert result == %{missing: nil}
-    end
-
-    test "applies function to existing value and leaves missing keys as nil" do
-      source = ~S"""
-      (update {:a 1} :a inc)
-      """
-
-      {:ok, result, _, _} = Lisp.run(source)
-
-      assert result == %{a: 2}
+      assert result == %{missing: 0}
     end
 
     test "multiple keys in map" do
