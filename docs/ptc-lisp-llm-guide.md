@@ -45,6 +45,7 @@ end
 | `:tools` | map | `%{}` | Tool functions (arity 1, receives args map) |
 | `:timeout` | integer | 5000 | Execution timeout in milliseconds |
 | `:max_heap` | integer | 1_250_000 | Max heap size in words (~10MB) |
+| `:float_precision` | integer | `nil` | Decimal places for floats in result (`nil` = full precision) |
 
 ### Return Values
 
