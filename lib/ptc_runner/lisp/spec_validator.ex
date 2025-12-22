@@ -1,6 +1,4 @@
 defmodule PtcRunner.Lisp.SpecValidator do
-  @dialyzer [:no_match]
-
   @moduledoc """
   Validates PTC-Lisp specification against implementation.
 
@@ -447,17 +445,13 @@ defmodule PtcRunner.Lisp.SpecValidator do
     |> Enum.into(%{})
   end
 
-  defp error_matches_type?(error, expected) do
-    cond do
-      is_tuple(error) and tuple_size(error) >= 1 and is_atom(elem(error, 0)) ->
-        check_error_type(elem(error, 0), expected)
+  defp error_matches_type?(error, expected)
+       when is_tuple(error) and tuple_size(error) >= 1 and is_atom(elem(error, 0)) do
+    check_error_type(elem(error, 0), expected)
+  end
 
-      is_atom(error) ->
-        check_error_type(error, expected)
-
-      true ->
-        false
-    end
+  defp error_matches_type?(_error, _expected) do
+    false
   end
 
   defp check_error_type(error_type, expected) do
