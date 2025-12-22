@@ -177,6 +177,85 @@ PTC-Lisp aims for semantic compatibility with Clojure. All conformance tests cur
 
 The main intentional difference is that sequence functions (`filter`, `map`, `sort`, etc.) return vectors instead of lazy sequences. This is practical for LLM use cases and doesn't affect program correctness.
 
+## Spec Validation
+
+PtcRunner includes tools to validate that the PTC-Lisp implementation matches the specification.
+
+### Overview
+
+The specification validator extracts examples from the specification markdown and verifies that executing them produces the expected results. This helps detect drift between specification and implementation.
+
+### Running Validation
+
+```bash
+# Validate all examples in the specification
+mix ptc.validate_spec
+
+# Validate against Clojure (requires Babashka)
+mix ptc.validate_spec --clojure
+
+# Update section checksums after intentional spec changes
+mix ptc.update_spec_checksums
+```
+
+### Output Format
+
+The validator displays:
+
+1. **Summary** - Total examples, pass/fail counts, success rate
+2. **Section Results** - Results grouped by specification section (e.g., "Section 3. Data Types")
+3. **Failures** - Detailed failure information for any examples that didn't pass
+
+Example output:
+
+```
+=== PTC-Lisp Specification Validation ===
+
+Total examples:  106
+Passed:          106
+Failed:          0
+Success rate:    100%
+
+=== Results by Section ===
+
+✓ ## 1. Overview: 3 passed
+✓ ## 2. Lexical Structure: 8 passed
+✓ ## 3. Data Types: 12 passed
+...
+```
+
+### Adding Examples to the Spec
+
+Examples in the specification use a simple format within code blocks:
+
+```clojure
+; Single-line examples
+(+ 1 2)  ; => 3
+(filter even? [1 2 3 4])  ; => [2 4]
+
+; Multi-line examples
+(let [x 10
+      y (+ x 5)]
+  (* x y))  ; => 150
+```
+
+The validator extracts any code with a `; =>` comment, treating the comment as the expected result.
+
+### Section Tracking
+
+When examples are validated, they are grouped by their specification section (headers starting with `## N.`). The `by_section` field in results shows pass/fail counts per section, helping identify which areas need attention.
+
+### Updating Checksums
+
+The specification file has checksums to detect unintended changes. After intentionally modifying the specification:
+
+```bash
+mix ptc.update_spec_checksums
+git add test/spec_cases/checksums.exs
+```
+
+The checksums file tracks content hashes for each section, allowing the validator to warn when sections change unexpectedly.
+
 ## References
 
 - [Anthropic PTC Blog Post](https://www.anthropic.com/research/ptc)

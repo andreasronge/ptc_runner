@@ -49,13 +49,13 @@ defmodule PtcRunner.Lisp.SpecValidator do
   @doc """
   Extract all examples from the specification.
 
-  Returns a list of example tuples: `{code, expected_output}`.
+  Returns a list of example tuples: `{code, expected_output, section}`.
 
   ## Returns
 
       [
-        {"(+ 1 2)", 3},
-        {"(filter even? [1 2 3 4])", [2, 4]},
+        {"(+ 1 2)", 3, "## 1. Overview"},
+        {"(filter even? [1 2 3 4])", [2, 4], "## 3. Data Types"},
         ...
       ]
   """
@@ -74,6 +74,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
   Extract examples from specification content string.
 
   Parses the markdown content and extracts code examples with expected values.
+  Returns tuples of `{code, expected, section}` with section tracking.
 
   ## Parameters
 
@@ -82,8 +83,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
   ## Returns
 
       [
-        {"(+ 1 2)", 3},
-        {"(filter even? [1 2 3 4])", [2, 4]},
+        {"(+ 1 2)", 3, "## 1. Overview"},
+        {"(filter even? [1 2 3 4])", [2, 4], "## 3. Data Types"},
         ...
       ]
   """
@@ -236,32 +237,56 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
   defp extract_examples_from_content(content) do
     lines = String.split(content, "\n")
-    extract_examples_from_lines(lines, [])
+    extract_examples_from_lines(lines, [], nil)
   end
 
-  defp extract_examples_from_lines([], acc) do
+  defp extract_examples_from_lines([], acc, _current_section) do
     Enum.reverse(acc)
   end
 
-  defp extract_examples_from_lines([line | rest], acc) do
-    case extract_example_from_line(line) do
-      {:ok, code, expected} ->
-        # Parse the expected value from the comment
-        case parse_expected(expected) do
-          {:ok, value} ->
-            extract_examples_from_lines(rest, [{code, value} | acc])
+  defp extract_examples_from_lines([line | rest], acc, current_section) do
+    # Check if this is a section header
+    section = extract_section_header(line)
 
-          :error ->
-            # Skip examples we can't parse
-            extract_examples_from_lines(rest, acc)
-        end
+    if section do
+      # Update current section
+      extract_examples_from_lines(rest, acc, section)
+    else
+      # Try to extract example from this line
+      case extract_example_from_line(line) do
+        {:ok, code, expected} ->
+          # Parse the expected value from the comment
+          case parse_expected(expected) do
+            {:ok, value} ->
+              example = {code, value, current_section}
+              extract_examples_from_lines(rest, [example | acc], current_section)
 
-      :no_example ->
-        extract_examples_from_lines(rest, acc)
+            :error ->
+              # Skip examples we can't parse
+              extract_examples_from_lines(rest, acc, current_section)
+          end
+
+        :no_example ->
+          extract_examples_from_lines(rest, acc, current_section)
+      end
+    end
+  end
+
+  # Extract section header from line (pattern: ## N. Title)
+  defp extract_section_header(line) do
+    line = String.trim(line)
+
+    if String.match?(line, ~r/^##\s+\d+\./) do
+      line
+    else
+      nil
     end
   end
 
   # Extract example from a single line with pattern: code  ; => expected
+  # Returns:
+  # - {:ok, code, expected} - example found
+  # - :no_example - no example on this line
   defp extract_example_from_line(line) do
     line = String.trim(line)
 
@@ -271,7 +296,12 @@ defmodule PtcRunner.Lisp.SpecValidator do
         expected = String.trim(expected)
 
         if String.length(code) > 0 and String.length(expected) > 0 do
-          {:ok, code, expected}
+          # Check if this is a fragment (incomplete expression)
+          if fragment?(code) do
+            :no_example
+          else
+            {:ok, code, expected}
+          end
         else
           :no_example
         end
@@ -279,6 +309,47 @@ defmodule PtcRunner.Lisp.SpecValidator do
       _ ->
         :no_example
     end
+  end
+
+  # Detect if a code string is a fragment (incomplete expression)
+  # Fragments are lines that end with ) but are not complete expressions
+  # Examples: "name)", "age)", "x))", "(* x y))"
+  defp fragment?(code) do
+    code = String.trim(code)
+
+    # A fragment is something that:
+    # 1. Ends with one or more )
+    # 2. Is not a complete, balanced expression
+    cond do
+      not String.ends_with?(code, ")") ->
+        false
+
+      # Simple cases: just identifiers with closing parens (e.g., "name)", "age)", "the-name)")
+      String.match?(code, ~r/^[\w\-]+\)+$/) ->
+        true
+
+      # Cases like "(* x y))" - has unbalanced parentheses
+      has_unbalanced_parens?(code) ->
+        true
+
+      true ->
+        false
+    end
+  end
+
+  # Check if a code string has unbalanced parentheses
+  # Returns true if there are more closing parens than opening parens at any point
+  defp has_unbalanced_parens?(code) do
+    code
+    |> String.graphemes()
+    |> Enum.reduce_while(0, fn char, count ->
+      case char do
+        "(" -> {:cont, count + 1}
+        ")" -> if count > 0, do: {:cont, count - 1}, else: {:halt, -1}
+        _ -> {:cont, count}
+      end
+    end)
+    |> Kernel.==(-1)
   end
 
   # Parse expected values from string format
@@ -406,27 +477,50 @@ defmodule PtcRunner.Lisp.SpecValidator do
   defp parse_map_tokens(_, _), do: :error
 
   defp validate_examples(examples) do
-    validate_examples(examples, %{passed: 0, failed: 0, skipped: 0, failures: []})
+    validate_examples(examples, %{passed: 0, failed: 0, skipped: 0, failures: [], by_section: %{}})
   end
 
   defp validate_examples([], results) do
     {:ok, results}
   end
 
-  defp validate_examples([{code, expected} | rest], results) do
+  defp validate_examples([{code, expected, section} | rest], results) do
     case validate_example(code, expected) do
       :ok ->
-        validate_examples(rest, %{results | passed: results.passed + 1})
+        # Update section stats
+        by_section = update_section_stats(results.by_section, section, :pass)
+
+        validate_examples(rest, %{
+          results
+          | passed: results.passed + 1,
+            by_section: by_section
+        })
 
       {:error, reason} ->
-        failure = {code, expected, reason}
+        failure = {code, expected, reason, section}
+
+        # Update section stats
+        by_section = update_section_stats(results.by_section, section, :fail)
 
         validate_examples(rest, %{
           results
           | failed: results.failed + 1,
-            failures: [failure | results.failures]
+            failures: [failure | results.failures],
+            by_section: by_section
         })
     end
+  end
+
+  defp update_section_stats(by_section, section, status) do
+    current = Map.get(by_section, section, %{passed: 0, failed: 0})
+
+    updated =
+      case status do
+        :pass -> %{current | passed: current.passed + 1}
+        :fail -> %{current | failed: current.failed + 1}
+      end
+
+    Map.put(by_section, section, updated)
   end
 
   defp extract_section_hashes(content) do

@@ -10,11 +10,11 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       assert is_list(examples)
       assert length(examples) > 0
 
-      # Verify we got tuples of code and expected
+      # Verify we got tuples of code, expected, and section
       Enum.each(examples, fn item ->
         assert is_tuple(item)
-        assert tuple_size(item) == 2
-        {code, _expected} = item
+        assert tuple_size(item) == 3
+        {code, _expected, _section} = item
         assert is_binary(code)
       end)
     end
@@ -22,8 +22,8 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     test "extracts expected number of examples" do
       {:ok, examples} = SpecValidator.extract_examples()
 
-      # The spec should have ~106 examples as per issue review
-      # Some may not parse perfectly, so we allow a range
+      # The spec should have ~100+ examples after multi-line extraction
+      # Some may be fragments that are filtered, so we allow a range
       assert length(examples) >= 70
     end
   end
@@ -125,8 +125,8 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       if results.failed > 0 do
         Enum.each(results.failures, fn failure ->
           assert is_tuple(failure)
-          assert tuple_size(failure) == 3
-          {code, _expected, reason} = failure
+          assert tuple_size(failure) == 4
+          {code, _expected, reason, _section} = failure
           assert is_binary(code)
           assert is_binary(reason)
         end)
