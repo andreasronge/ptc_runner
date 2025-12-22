@@ -298,9 +298,15 @@ defmodule PtcDemo.Agent do
         text = ReqLLM.Response.text(response)
         new_usage = add_usage(usage, ReqLLM.Response.usage(response))
 
-        # Handle empty/nil responses from LLM
+        # Handle empty/nil responses from LLM - retry instead of failing immediately
         if is_nil(text) or text == "" do
-          {:error, "LLM returned empty response", context, new_usage}
+          if remaining > 1 do
+            IO.puts("   [Retry] Empty response, retrying...")
+            Process.sleep(1000)
+            agent_loop(model, context, datasets, new_usage, remaining - 1, last_exec, memory)
+          else
+            {:error, "LLM returned empty response", context, new_usage}
+          end
         else
           # Check if response contains a PTC program
           case extract_ptc_program(text) do
