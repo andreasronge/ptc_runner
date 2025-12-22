@@ -45,6 +45,25 @@ Benchmark results comparing LLM accuracy on PTC-Lisp and PTC-JSON DSLs.
 | Gemini 2.5 Flash | **98.75%** | 90.7% | -8% |
 | DeepSeek v3.2 | 97.5% | 70.7% | **-27%** |
 
+## Failure Analysis
+
+### DeepSeek JSON Issues
+
+DeepSeek's 27% accuracy drop on JSON (vs Lisp) is not timeout-related. Primary causes:
+
+| Error Type | % of Failures |
+|------------|---------------|
+| Empty LLM responses | 68% |
+| Over-engineered output | 9% |
+| Other (logic errors) | 23% |
+
+- **Empty responses**: DeepSeek returns no content unpredictably (0 occurrences with Lisp)
+- **Over-engineering**: Returns `{"count": 105, "percentage": 52.5}` instead of just `105`
+
+### Gemini JSON Issues
+
+Gemini's consistent failure on "count distinct" queries (returns 1000 instead of correct count). No empty response issues.
+
 ## Conclusions
 
 1. **DSL choice matters by model**: Gemini excels at Lisp, Haiku excels at JSON
