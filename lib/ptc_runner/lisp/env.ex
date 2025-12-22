@@ -74,6 +74,8 @@ defmodule PtcRunner.Lisp.Env do
       {:"get-in", {:multi_arity, {&Runtime.get_in/2, &Runtime.get_in/3}}},
       {:assoc, {:normal, &Runtime.assoc/3}},
       {:"assoc-in", {:normal, &Runtime.assoc_in/3}},
+      {:update, {:normal, &Runtime.update/3}},
+      {:"update-in", {:normal, &Runtime.update_in/3}},
       {:dissoc, {:normal, &Runtime.dissoc/2}},
       {:merge, {:variadic, &Runtime.merge/2, %{}}},
       {:"select-keys", {:normal, &Runtime.select_keys/2}},
