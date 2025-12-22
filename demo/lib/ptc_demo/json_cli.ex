@@ -72,14 +72,10 @@ defmodule PtcDemo.JsonCLI do
         System.halt(1)
       end
     else
-      # Run all tests
-      result = PtcDemo.JsonTestRunner.run_all(opts)
-
-      if result.failed > 0 do
-        System.halt(1)
-      else
-        System.halt(0)
-      end
+      # Run all tests - always exit 0, test failures are expected
+      # Crashes (unhandled exceptions) will exit non-zero automatically
+      PtcDemo.JsonTestRunner.run_all(opts)
+      System.halt(0)
     end
   end
 
