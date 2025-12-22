@@ -290,7 +290,11 @@ defmodule PtcDemo.Agent do
   defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
 
-    case ReqLLM.generate_text(model, context.messages, receive_timeout: @llm_timeout) do
+    case ReqLLM.generate_text(model, context.messages,
+           receive_timeout: @llm_timeout,
+           retry: :transient,
+           max_retries: 3
+         ) do
       {:ok, response} ->
         text = ReqLLM.Response.text(response)
         new_usage = add_usage(usage, ReqLLM.Response.usage(response))

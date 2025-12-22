@@ -22,6 +22,8 @@ defmodule PtcDemo.LispAgent do
   @model_env "PTC_DEMO_MODEL"
   @timeout 60_000
   @max_iterations 5
+  # GenServer timeout must accommodate worst case: max_iterations * timeout + retries + buffer
+  @genserver_timeout @max_iterations * @timeout + 30_000
 
   # --- State ---
   defstruct [
@@ -42,7 +44,7 @@ defmodule PtcDemo.LispAgent do
   end
 
   def ask(question, opts \\ []) do
-    GenServer.call(__MODULE__, {:ask, question, opts}, @timeout)
+    GenServer.call(__MODULE__, {:ask, question, opts}, @genserver_timeout)
   end
 
   def reset do
@@ -289,7 +291,11 @@ defmodule PtcDemo.LispAgent do
   defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory, stop_on_success) do
     IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
 
-    case ReqLLM.generate_text(model, context.messages, receive_timeout: @timeout) do
+    case ReqLLM.generate_text(model, context.messages,
+           receive_timeout: @timeout,
+           retry: :transient,
+           max_retries: 3
+         ) do
       {:ok, response} ->
         text = ReqLLM.Response.text(response)
         new_usage = add_usage(usage, ReqLLM.Response.usage(response))
