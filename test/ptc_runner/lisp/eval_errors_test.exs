@@ -167,4 +167,158 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                Eval.eval(call_ast, %{}, %{}, %{}, &dummy_tool/2)
     end
   end
+
+  describe "destructuring errors in let bindings" do
+    test "map pattern with list value returns error" do
+      # Destructure {:keys [:a]} with list value [1, 2, 3]
+      pattern = {:destructure, {:keys, [:a], []}}
+      bindings = [{:binding, pattern, {:vector, [1, 2, 3]}}]
+      body = {:var, :a}
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert msg =~ "expected map"
+    end
+
+    test "seq pattern with map value returns error" do
+      # Destructure [a b] with map value
+      pattern = {:destructure, {:seq, [{:var, :a}, {:var, :b}]}}
+      bindings = [{:binding, pattern, {:map, [{{:keyword, :x}, 1}]}}]
+      body = {:var, :a}
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert msg =~ "expected list"
+    end
+
+    test "seq pattern with fewer elements than required returns error" do
+      # Destructure [a b c] with only 2-element list
+      pattern = {:destructure, {:seq, [{:var, :a}, {:var, :b}, {:var, :c}]}}
+      bindings = [{:binding, pattern, {:vector, [1, 2]}}]
+      body = {:var, :a}
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert msg =~ "expected at least 3 elements"
+    end
+
+    test "nested destructuring failure propagates" do
+      # Destructure [[a b]] where inner value is not a list
+      inner_pattern = {:destructure, {:seq, [{:var, :a}, {:var, :b}]}}
+      pattern = {:destructure, {:seq, [inner_pattern]}}
+      # [[1]] - inner has only 1 element but pattern expects 2
+      bindings = [{:binding, pattern, {:vector, [{:vector, [1]}]}}]
+      body = {:var, :a}
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert msg =~ "expected at least 2 elements"
+    end
+
+    test ":as binding with failing inner pattern returns error" do
+      # Pattern: {:as :all {:keys [:x]}} with a list value [1, 2, 3]
+      # The :as binding should work, but the inner {:keys [:x]} should fail on a list
+      pattern = {:destructure, {:as, :all, {:destructure, {:keys, [:x], []}}}}
+      bindings = [{:binding, pattern, {:vector, [1, 2, 3]}}]
+      body = {:var, :all}
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert msg =~ "expected map"
+    end
+  end
+
+  describe "destructuring errors in closure application" do
+    setup do
+      {:ok, %{env: Env.initial()}}
+    end
+
+    test "closure with seq pattern on map returns error", %{env: env} do
+      # (fn [[k v]] k) applied to a map (which iterates as [key, value] pairs)
+      # This simulates: (map (fn [amount] amount) [{:amount 100} {:amount 200}])
+      # where the closure expects a simple value but gets a map
+
+      # Closure with destructuring pattern [a]
+      closure_def = {:fn, [{:destructure, {:seq, [{:var, :a}]}}], {:var, :a}}
+      bindings = [{:binding, {:var, :get_first}, closure_def}]
+      # Apply to a map - should fail because maps aren't lists
+      call_ast = {:call, {:var, :get_first}, [{:map, [{{:keyword, :x}, 1}]}]}
+      body = call_ast
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "expected list"
+    end
+
+    test "closure with map pattern on list returns error", %{env: env} do
+      # Closure expecting map destructuring {:keys [:amount]}
+      closure_def = {:fn, [{:destructure, {:keys, [:amount], []}}], {:var, :amount}}
+      bindings = [{:binding, {:var, :get_amount}, closure_def}]
+      # Apply to a list - should fail
+      call_ast = {:call, {:var, :get_amount}, [{:vector, [1, 2, 3]}]}
+      body = call_ast
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "expected map"
+    end
+  end
+
+  describe "destructuring errors in higher-order functions" do
+    setup do
+      {:ok, %{env: Env.initial()}}
+    end
+
+    test "map with closure that fails destructuring returns type_error", %{env: env} do
+      # (map (fn [[a b]] a) [1 2 3])
+      # Each element is a number, not a list, so [a b] destructuring fails
+      closure_def = {:fn, [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}], {:var, :a}}
+
+      call_ast =
+        {:call, {:var, :map}, [closure_def, {:vector, [1, 2, 3]}]}
+
+      assert {:error, {:type_error, msg, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "destructure error"
+      assert msg =~ "expected list"
+    end
+
+    test "filter with closure that fails destructuring returns type_error", %{env: env} do
+      # (filter (fn [{:keys [active]}] active) [1 2 3])
+      # Elements are numbers, not maps, so {:keys [active]} fails
+      closure_def = {:fn, [{:destructure, {:keys, [:active], []}}], {:var, :active}}
+
+      call_ast =
+        {:call, {:var, :filter}, [closure_def, {:vector, [1, 2, 3]}]}
+
+      assert {:error, {:type_error, msg, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "destructure error"
+      assert msg =~ "expected map"
+    end
+
+    test "sort-by with closure that fails destructuring returns type_error", %{env: env} do
+      # (sort-by (fn [{:keys [name]}] name) [1 2 3])
+      # Elements are numbers, not maps, so {:keys [name]} fails
+      closure_def = {:fn, [{:destructure, {:keys, [:name], []}}], {:var, :name}}
+
+      call_ast =
+        {:call, {:var, :"sort-by"}, [closure_def, {:vector, [1, 2, 3]}]}
+
+      assert {:error, {:type_error, msg, _}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "destructure error"
+      assert msg =~ "expected map"
+    end
+  end
 end
