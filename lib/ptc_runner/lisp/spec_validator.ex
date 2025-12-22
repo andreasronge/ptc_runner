@@ -1,4 +1,6 @@
 defmodule PtcRunner.Lisp.SpecValidator do
+  @dialyzer [:no_match]
+
   @moduledoc """
   Validates PTC-Lisp specification against implementation.
 
@@ -135,6 +137,88 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  @doc """
+  Get hashes for each section of the specification.
+
+  Returns a map of section headers to their content hashes.
+  Used to detect drift in specific sections of the spec.
+
+  ## Returns
+
+      {:ok, %{
+        "## 1. Overview" => "hash1",
+        "## 2. Lexical Structure" => "hash2",
+        ...
+      }}
+  """
+  @spec section_hashes() :: {:ok, map()} | {:error, String.t()}
+  def section_hashes do
+    case load_spec() do
+      {:ok, content} ->
+        {:ok, extract_section_hashes(content)}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Get negative test cases for Section 13 (unsupported features).
+
+  Returns a list of tuples: `{feature_name, code, expected_error_type}`.
+  These programs should all fail with specific error types.
+
+  ## Returns
+
+      [
+        {"def", "(def x 10)", :validation_error},
+        {"defn", "(defn foo [x] x)", :validation_error},
+        ...
+      ]
+  """
+  @spec negative_tests() :: [tuple()]
+  def negative_tests do
+    [
+      {"def", "(def x 10)", :validation_error},
+      {"defn", "(defn foo [x] x)", :validation_error},
+      {"#()", "#(+ % 1)", :parse_error},
+      {"loop/recur", "(loop [x 0] x)", :validation_error},
+      {"lazy-seq", "(lazy-seq [1])", :unbound_var},
+      {"str", "(str \"a\" \"b\")", :unbound_var},
+      {"range", "(range 10)", :unbound_var},
+      {"partial", "(partial + 1)", :unbound_var},
+      {"comp", "(comp inc inc)", :unbound_var},
+      {"eval", "(eval (+ 1 2))", :unbound_var},
+      {"read-string", "(read-string \"(+ 1 2)\")", :unbound_var},
+      {"println", "(println \"hi\")", :unbound_var}
+    ]
+  end
+
+  @doc """
+  Validate a negative test case (should fail with specific error).
+
+  Returns `:ok` if the code fails with the expected error type,
+  `{:error, reason}` otherwise.
+  """
+  @spec validate_negative_test(String.t(), atom()) :: :ok | {:error, String.t()}
+  def validate_negative_test(code, expected_error_type) do
+    case PtcRunner.Lisp.run(code) do
+      {:ok, _result, _delta, _memory} ->
+        {:error, "Expected #{expected_error_type} but code executed successfully"}
+
+      {:error, reason} ->
+        validate_error_type(reason, expected_error_type)
+    end
+  end
+
+  defp validate_error_type(reason, expected_error_type) do
+    if error_matches_type?(reason, expected_error_type) do
+      :ok
+    else
+      {:error, "Expected #{expected_error_type} but got: #{inspect(reason)}"}
     end
   end
 
@@ -344,6 +428,49 @@ defmodule PtcRunner.Lisp.SpecValidator do
           | failed: results.failed + 1,
             failures: [failure | results.failures]
         })
+    end
+  end
+
+  defp extract_section_hashes(content) do
+    content
+    |> String.split(~r/^## /m, include_captures: false)
+    |> Enum.drop(1)
+    |> Enum.map(fn section ->
+      # Get section header from first line
+      [header | rest] = String.split(section, "\n", parts: 2)
+      section_content = Enum.join(rest, "\n")
+
+      # Hash the content
+      hash = :crypto.hash(:sha256, section_content) |> Base.encode16()
+      {"## #{header}", hash}
+    end)
+    |> Enum.into(%{})
+  end
+
+  defp error_matches_type?(error, expected) do
+    cond do
+      is_tuple(error) and tuple_size(error) >= 1 and is_atom(elem(error, 0)) ->
+        check_error_type(elem(error, 0), expected)
+
+      is_atom(error) ->
+        check_error_type(error, expected)
+
+      true ->
+        false
+    end
+  end
+
+  defp check_error_type(error_type, expected) do
+    cond do
+      error_type == expected ->
+        true
+
+      # Map :unbound_var to validation_error if that's expected
+      error_type == :unbound_var and expected == :validation_error ->
+        true
+
+      true ->
+        false
     end
   end
 end
