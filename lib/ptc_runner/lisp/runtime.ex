@@ -151,6 +151,12 @@ defmodule PtcRunner.Lisp.Runtime do
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
+
+  def into(to, from) when is_list(to) and is_map(from) do
+    # When collecting from a map, each entry is converted to [key, value] pair
+    Enum.into(from, to, fn {k, v} -> [k, v] end)
+  end
+
   def into(to, from) when is_list(to), do: Enum.into(from, to)
   def flatten(coll) when is_list(coll), do: List.flatten(coll)
   def zip(c1, c2) when is_list(c1) and is_list(c2), do: Enum.zip(c1, c2)

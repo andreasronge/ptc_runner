@@ -824,6 +824,56 @@ defmodule PtcRunner.Lisp.RuntimeTest do
     end
   end
 
+  describe "into - collecting from maps" do
+    test "into [] with empty map returns empty list" do
+      result = Runtime.into([], %{})
+      assert result == []
+    end
+
+    test "into [] with map converts entries to vectors" do
+      result = Runtime.into([], %{a: 1, b: 2})
+      # Result is a list of [key, value] vectors
+      assert length(result) == 2
+      assert [:a, 1] in result
+      assert [:b, 2] in result
+    end
+
+    test "into [] with string-keyed map converts entries to vectors" do
+      result = Runtime.into([], %{"x" => 10, "y" => 20})
+      assert length(result) == 2
+      assert ["x", 10] in result
+      assert ["y", 20] in result
+    end
+
+    test "into [] with nested map values preserves structure" do
+      result = Runtime.into([], %{a: %{b: 1}})
+      assert result == [[:a, %{b: 1}]]
+    end
+
+    test "into with existing vector preserves existing elements" do
+      result = Runtime.into([99], %{a: 1})
+      assert 99 in result
+      assert [:a, 1] in result
+    end
+  end
+
+  describe "into - collecting from lists" do
+    test "into [] with empty list returns empty list" do
+      result = Runtime.into([], [])
+      assert result == []
+    end
+
+    test "into [] with list keeps elements as-is (no map conversion)" do
+      result = Runtime.into([], [1, 2, 3])
+      assert result == [1, 2, 3]
+    end
+
+    test "into with existing vector appends list elements" do
+      result = Runtime.into([99], [1, 2])
+      assert result == [99, 1, 2]
+    end
+  end
+
   describe "update_vals" do
     # Note: Arguments are (m, f) matching Clojure's (update-vals m f)
 
