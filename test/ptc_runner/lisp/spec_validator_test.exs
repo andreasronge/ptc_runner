@@ -112,7 +112,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       assert total >= 70
     end
 
-    test "has empty failures when all pass" do
+    test "passes more examples than it fails" do
       {:ok, results} = SpecValidator.validate_spec()
 
       # Most examples should pass
