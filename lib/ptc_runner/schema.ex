@@ -351,7 +351,8 @@ defmodule PtcRunner.Schema do
       }
     },
     "distinct" => %{
-      "description" => "Remove duplicate values from list. Example: {op:'distinct'}",
+      "description" =>
+        "Remove duplicate values from list. For count distinct: pipe | map(get field) | distinct | count",
       "fields" => %{}
     },
 
@@ -577,6 +578,10 @@ defmodule PtcRunner.Schema do
 
     WRONG: {"op":"filter","where":"active"} (where needs comparison op)
     RIGHT: {"op":"filter","where":{"op":"eq","field":"status","value":"active"}}
+
+    ## Common Patterns
+    Count distinct values: pipe | map(get field) | distinct | count
+    {"op":"pipe","steps":[{"op":"load","name":"orders"},{"op":"map","expr":{"op":"get","field":"product_id"}},{"op":"distinct"},{"op":"count"}]}
     #{examples_text}
     """
     |> String.trim()
