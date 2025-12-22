@@ -64,7 +64,8 @@ defmodule PtcDemo.CLIBase do
 
   Supports:
     - --explore: use explore data mode
-    - --test: run tests
+    - --test: run all tests
+    - --test=<n>: run a single test by index (e.g., --test=14)
     - --verbose or -v: verbose output
     - --model=<name>: specify model (e.g., --model=haiku)
     - --report=<path>: generate report file (e.g., --report=report.md)
@@ -74,7 +75,7 @@ defmodule PtcDemo.CLIBase do
     - --validate-clojure: validate generated programs against Babashka
     - --no-validate-clojure: skip Clojure validation
 
-  Returns a map with keys: :explore, :test, :verbose, :model, :report, :runs, :list_models, :show_prompt, :validate_clojure
+  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :report, :runs, :list_models, :show_prompt, :validate_clojure
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -84,6 +85,18 @@ defmodule PtcDemo.CLIBase do
 
         arg == "--test" ->
           Map.put(acc, :test, true)
+
+        String.starts_with?(arg, "--test=") ->
+          index_str = String.replace_prefix(arg, "--test=", "")
+
+          case Integer.parse(index_str) do
+            {n, ""} when n > 0 ->
+              acc |> Map.put(:test, true) |> Map.put(:test_index, n)
+
+            _ ->
+              IO.puts("Error: --test=N requires a positive integer (e.g., --test=14)")
+              System.halt(1)
+          end
 
         arg == "--verbose" or arg == "-v" ->
           Map.put(acc, :verbose, true)

@@ -202,7 +202,8 @@ mix json [options]
 | `--model=<name>` | Set model (preset name or full model ID) |
 | `--list-models` | Show available models and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
-| `--test` | Run automated tests and exit |
+| `--test` | Run all automated tests and exit |
+| `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
@@ -230,7 +231,8 @@ mix lisp [options]
 | `--model=<name>` | Set model (preset name or full model ID) |
 | `--list-models` | Show available models and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
-| `--test` | Run automated tests and exit |
+| `--test` | Run all automated tests and exit |
+| `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
@@ -291,6 +293,9 @@ Run the Lisp test suite from the command line:
 ```bash
 # Run all tests (dots for progress)
 mix lisp --test
+
+# Run a single test by index
+mix lisp --test=14 --verbose
 
 # Run with verbose output
 mix lisp --test --verbose
@@ -473,16 +478,18 @@ PtcDemo.JsonTestRunner.run_one(3)
 
 ### Test Suite Structure
 
-Both JSON and Lisp runners use the **same 15 test cases** for fair comparison:
+Both runners share a common test suite, with Lisp having additional tests for Lisp-only features:
 
-| Level | Tests | Description |
-|-------|-------|-------------|
-| **Level 1: Basic** | 4 | Simple count, filtered count, sum, average |
-| **Level 2: Intermediate** | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
-| **Level 3: Advanced** | 5 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset join |
-| **Multi-turn** | 2 | Memory persistence between queries |
+| Level | JSON | Lisp | Description |
+|-------|------|------|-------------|
+| **Level 1: Basic** | 4 | 4 | Simple count, filtered count, sum, average |
+| **Level 2: Intermediate** | 4 | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
+| **Level 3: Advanced** | 5 | 5 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset join |
+| **Lisp-only** | - | 1 | group-by + map with destructuring, multiple aggregations |
+| **Multi-turn** | 2 | 2 | Memory persistence between queries |
+| **Total** | **15** | **16** | |
 
-This unified test suite enables direct comparison of DSL capabilities and LLM performance.
+The common tests enable direct comparison. The Lisp-only test exercises advanced features (like `fn [[key items]]` destructuring) not expressible in JSON.
 
 ### Test Assertions
 

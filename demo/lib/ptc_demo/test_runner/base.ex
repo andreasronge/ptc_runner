@@ -53,6 +53,7 @@ defmodule PtcDemo.TestRunner.Base do
     - `{:between, min, max}` - value between min and max (inclusive)
     - `{:length, expected}` - list has expected length
     - `{:starts_with, prefix}` - string starts with prefix
+    - `{:has_keys, keys}` - map has all specified keys
     - Other constraints return true (no validation)
 
   ## Examples
@@ -104,6 +105,16 @@ defmodule PtcDemo.TestRunner.Base do
       true
     else
       "Expected to start with '#{prefix}', got '#{value}'"
+    end
+  end
+
+  def check_constraint(value, {:has_keys, keys}) when is_map(value) and is_list(keys) do
+    missing = Enum.filter(keys, fn key -> not Map.has_key?(value, key) end)
+
+    if missing == [] do
+      true
+    else
+      "Expected keys #{inspect(keys)}, missing #{inspect(missing)}"
     end
   end
 

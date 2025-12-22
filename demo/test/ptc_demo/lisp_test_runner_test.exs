@@ -7,8 +7,7 @@ defmodule PtcDemo.LispTestRunnerTest do
 
   setup do
     # Define mock responses for all test queries used by LispTestRunner
-    # LispTestRunner uses: common_test_cases (12 tests) + multi_turn_cases (2 tests)
-    # (lisp_specific_cases is now empty - all tests unified into common)
+    # LispTestRunner uses: common_test_cases (13 tests) + lisp_specific_cases (1 test) + multi_turn_cases (2 tests) = 16 tests
     responses = %{
       # Level 1: Basic Operations
       "How many products are there?" => {:ok, "500 products", nil, 500},
@@ -29,6 +28,18 @@ defmodule PtcDemo.LispTestRunnerTest do
         {:ok, "Average is 150000", nil, 150_000},
       "How many unique products have been ordered? (count distinct product_id values in orders)" =>
         {:ok, "300 unique products", nil, 300},
+      "What is the total expense amount for employees in the engineering department? (Find engineering employee IDs, then sum expenses for those employees)" =>
+        {:ok, "Total expenses: 50000", nil, 50_000},
+      # Lisp-specific cases
+      "Which expense category has the highest total spending? Return a map with :highest (the top category with its stats) and :breakdown (all categories sorted by total descending). Each category should have :category, :total, :count, and :avg fields." =>
+        {:ok, "Travel category", nil,
+         %{
+           highest: %{category: "travel", total: 25000, count: 50, avg: 500},
+           breakdown: [
+             %{category: "travel", total: 25000, count: 50, avg: 500},
+             %{category: "equipment", total: 15000, count: 30, avg: 500}
+           ]
+         }},
       # Multi-turn cases
       "Count delivered orders and store the result in memory as delivered-count" =>
         {:ok, "750 delivered orders", nil, 750},
@@ -78,8 +89,8 @@ defmodule PtcDemo.LispTestRunnerTest do
     test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
       result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
 
-      # LispTestRunner should include 12 common + 2 multi_turn = 14 test cases
-      assert result.total == 14
+      # LispTestRunner: 13 common + 1 lisp_specific + 2 multi_turn = 16 test cases
+      assert result.total == 16
     end
   end
 
