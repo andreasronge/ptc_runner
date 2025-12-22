@@ -416,6 +416,8 @@ defmodule PtcDemo.Agent do
   end
 
   # Extract PTC program from LLM response (looks for ```json blocks)
+  defp extract_ptc_program(nil), do: :none
+
   defp extract_ptc_program(text) do
     # Try extracting from markdown code block
     case Regex.run(~r/```(?:json)?\s*([\s\S]+?)\s*```/, text) do
