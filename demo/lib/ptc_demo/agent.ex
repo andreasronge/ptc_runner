@@ -389,7 +389,9 @@ defmodule PtcDemo.Agent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
+    When you have the answer, respond in plain text WITHOUT a code block.
     Memory persists automatically between programs - reference stored values with {"op": "var", "name": "key"}.
+    Return types: "store X as Y" → use let to bind, "what is X?" → return the value directly (not a map).
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets (with field types):
@@ -411,8 +413,10 @@ defmodule PtcDemo.Agent do
     You are a data analyst. Answer questions about data by querying datasets.
 
     To query data, output a PTC program in a ```json code block. The result will be returned to you.
+    When you have the answer, respond in plain text WITHOUT a code block.
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
     Memory persists automatically between programs - reference stored values with {"op": "var", "name": "key"}.
+    Return types: "store X as Y" → use let to bind, "what is X?" → return the value directly (not a map).
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
     Available datasets: #{dataset_names}
