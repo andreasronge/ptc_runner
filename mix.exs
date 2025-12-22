@@ -77,13 +77,18 @@ defmodule PtcRunner.MixProject do
         "CHANGELOG.md",
         # Guides (basic → advanced)
         "docs/guide.md",
+        "docs/benchmark-eval.md",
         "docs/ptc-json-specification.md",
         "docs/ptc-lisp-overview.md",
         "docs/ptc-lisp-specification.md",
-        "docs/ptc-lisp-llm-guide.md"
+        "docs/ptc-lisp-llm-guide.md",
+        # Livebooks
+        "livebooks/ptc_runner_playground.livemd",
+        "livebooks/ptc_runner_llm_agent.livemd"
       ],
       groups_for_extras: [
-        Guides: ~r/docs\/.+\.md/
+        Guides: ~r/docs\/.+\.md/,
+        Livebooks: ~r/livebooks\/.+\.livemd/
       ],
       before_closing_body_tag: &before_closing_body_tag/1
     ]
