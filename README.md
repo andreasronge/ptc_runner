@@ -6,7 +6,7 @@
 [![Hex Downloads](https://img.shields.io/hexpm/dt/ptc_runner.svg)](https://hex.pm/packages/ptc_runner)
 [![License](https://img.shields.io/hexpm/l/ptc_runner.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue.svg)](https://github.com/andreasronge/ptc_runner)
-[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
+[![Run in Livebook](https://img.shields.io/badge/Run_in-Livebook-purple)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
 
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
 
@@ -99,7 +99,7 @@ end
 
 ## Features
 
-- **Two DSLs**: JSON (verbose, universal) and Lisp (compact, LLM-friendly)
+- **Two DSLs**: JSON (verbose, simple) and Lisp (compact, expressive)
 - **Safe**: Fixed operations, no arbitrary code execution
 - **Fast**: Isolated BEAM processes with configurable timeout (1s) and memory (10MB) limits
 - **Simple**: No external dependencies (Python, containers, etc.)
