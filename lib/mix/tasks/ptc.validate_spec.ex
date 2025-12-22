@@ -71,16 +71,18 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
     Mix.shell().info("Failed:          #{results.failed}")
     Mix.shell().info("Success rate:    #{percentage}%")
 
+    # Display section-grouped results
+    if map_size(results.by_section) > 0 do
+      display_section_results(results.by_section)
+    end
+
     if results.failed > 0 do
       Mix.shell().info("")
       Mix.shell().info("=== Failures ===")
       Mix.shell().info("")
 
-      Enum.each(Enum.reverse(results.failures), fn {code, expected, reason} ->
-        Mix.shell().error("Code: #{code}")
-        Mix.shell().error("Expected: #{inspect(expected)}")
-        Mix.shell().error("Reason: #{reason}")
-        Mix.shell().info("")
+      Enum.each(Enum.reverse(results.failures), fn failure ->
+        display_failure(failure)
       end)
     end
 
@@ -88,6 +90,46 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
       compare_with_clojure(results)
     end
 
+    Mix.shell().info("")
+  end
+
+  defp display_section_results(by_section) do
+    Mix.shell().info("")
+    Mix.shell().info("=== Results by Section ===")
+    Mix.shell().info("")
+
+    by_section
+    |> Enum.sort()
+    |> Enum.each(fn {section, stats} ->
+      total = stats.passed + stats.failed
+
+      display_section =
+        if section do
+          section
+        else
+          "Unlabeled"
+        end
+
+      if stats.failed == 0 do
+        Mix.shell().info("✓ #{display_section}: #{total} passed")
+      else
+        Mix.shell().info("✗ #{display_section}: #{stats.passed}/#{total} passed")
+      end
+    end)
+  end
+
+  defp display_failure({code, expected, reason, _section}) do
+    Mix.shell().error("Code: #{code}")
+    Mix.shell().error("Expected: #{inspect(expected)}")
+    Mix.shell().error("Reason: #{reason}")
+    Mix.shell().info("")
+  end
+
+  # Handle old format for backwards compatibility
+  defp display_failure({code, expected, reason}) do
+    Mix.shell().error("Code: #{code}")
+    Mix.shell().error("Expected: #{inspect(expected)}")
+    Mix.shell().error("Reason: #{reason}")
     Mix.shell().info("")
   end
 
@@ -172,7 +214,7 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
     {matched, mismatched} =
       examples
       |> Enum.filter(&ptc_compatible?/1)
-      |> Enum.reduce({0, 0}, fn {code, expected}, acc ->
+      |> Enum.reduce({0, 0}, fn {code, expected, _section}, acc ->
         validate_code_against_clojure(code, expected, acc)
       end)
 
@@ -201,7 +243,7 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
     end
   end
 
-  defp ptc_compatible?({code, _expected}) do
+  defp ptc_compatible?({code, _expected, _section}) do
     # Skip examples with PTC-specific features
     ptc_specific = ["memory/", "ctx/", "where", "all-of", "any-of", "none-of", "call"]
     not Enum.any?(ptc_specific, &String.contains?(code, &1))
