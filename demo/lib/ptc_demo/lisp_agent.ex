@@ -293,8 +293,7 @@ defmodule PtcDemo.LispAgent do
 
     case ReqLLM.generate_text(model, context.messages,
            receive_timeout: @timeout,
-           retry: :transient,
-           max_retries: 3
+           req_http_options: [retry: :transient, max_retries: 3]
          ) do
       {:ok, response} ->
         text = ReqLLM.Response.text(response)
