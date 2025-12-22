@@ -214,7 +214,7 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
     {matched, mismatched} =
       examples
       |> Enum.filter(&ptc_compatible?/1)
-      |> Enum.reduce({0, 0}, fn {code, expected}, acc ->
+      |> Enum.reduce({0, 0}, fn {code, expected, _section}, acc ->
         validate_code_against_clojure(code, expected, acc)
       end)
 
@@ -243,7 +243,7 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
     end
   end
 
-  defp ptc_compatible?({code, _expected}) do
+  defp ptc_compatible?({code, _expected, _section}) do
     # Skip examples with PTC-specific features
     ptc_specific = ["memory/", "ctx/", "where", "all-of", "any-of", "none-of", "call"]
     not Enum.any?(ptc_specific, &String.contains?(code, &1))
