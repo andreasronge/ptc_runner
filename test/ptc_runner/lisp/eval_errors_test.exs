@@ -218,14 +218,30 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
 
       assert msg =~ "expected at least 2 elements"
     end
+
+    test ":as binding with failing inner pattern returns error" do
+      # Pattern: {:as :all {:keys [:x]}} with a list value [1, 2, 3]
+      # The :as binding should work, but the inner {:keys [:x]} should fail on a list
+      pattern = {:destructure, {:as, :all, {:destructure, {:keys, [:x], []}}}}
+      bindings = [{:binding, pattern, {:vector, [1, 2, 3]}}]
+      body = {:var, :all}
+
+      assert {:error, {:destructure_error, msg}} =
+               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert msg =~ "expected map"
+    end
   end
 
   describe "destructuring errors in closure application" do
-    test "closure with seq pattern on map returns error" do
+    setup do
+      {:ok, %{env: Env.initial()}}
+    end
+
+    test "closure with seq pattern on map returns error", %{env: env} do
       # (fn [[k v]] k) applied to a map (which iterates as [key, value] pairs)
       # This simulates: (map (fn [amount] amount) [{:amount 100} {:amount 200}])
       # where the closure expects a simple value but gets a map
-      env = Env.initial()
 
       # Closure with destructuring pattern [a]
       closure_def = {:fn, [{:destructure, {:seq, [{:var, :a}]}}], {:var, :a}}
@@ -240,9 +256,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg =~ "expected list"
     end
 
-    test "closure with map pattern on list returns error" do
-      env = Env.initial()
-
+    test "closure with map pattern on list returns error", %{env: env} do
       # Closure expecting map destructuring {:keys [:amount]}
       closure_def = {:fn, [{:destructure, {:keys, [:amount], []}}], {:var, :amount}}
       bindings = [{:binding, {:var, :get_amount}, closure_def}]
@@ -258,9 +272,11 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
   end
 
   describe "destructuring errors in higher-order functions" do
-    test "map with closure that fails destructuring returns type_error" do
-      env = Env.initial()
+    setup do
+      {:ok, %{env: Env.initial()}}
+    end
 
+    test "map with closure that fails destructuring returns type_error", %{env: env} do
       # (map (fn [[a b]] a) [1 2 3])
       # Each element is a number, not a list, so [a b] destructuring fails
       closure_def = {:fn, [{:destructure, {:seq, [{:var, :a}, {:var, :b}]}}], {:var, :a}}
@@ -275,9 +291,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg =~ "expected list"
     end
 
-    test "filter with closure that fails destructuring returns type_error" do
-      env = Env.initial()
-
+    test "filter with closure that fails destructuring returns type_error", %{env: env} do
       # (filter (fn [{:keys [active]}] active) [1 2 3])
       # Elements are numbers, not maps, so {:keys [active]} fails
       closure_def = {:fn, [{:destructure, {:keys, [:active], []}}], {:var, :active}}
@@ -292,9 +306,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg =~ "expected map"
     end
 
-    test "sort-by with closure that fails destructuring returns type_error" do
-      env = Env.initial()
-
+    test "sort-by with closure that fails destructuring returns type_error", %{env: env} do
       # (sort-by (fn [{:keys [name]}] name) [1 2 3])
       # Elements are numbers, not maps, so {:keys [name]} fails
       closure_def = {:fn, [{:destructure, {:keys, [:name], []}}], {:var, :name}}
