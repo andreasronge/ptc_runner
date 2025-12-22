@@ -125,14 +125,6 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
     Mix.shell().info("")
   end
 
-  # Handle old format for backwards compatibility
-  defp display_failure({code, expected, reason}) do
-    Mix.shell().error("Code: #{code}")
-    Mix.shell().error("Expected: #{inspect(expected)}")
-    Mix.shell().error("Reason: #{reason}")
-    Mix.shell().info("")
-  end
-
   defp check_section_hashes do
     case load_stored_checksums() do
       {:ok, stored} ->
