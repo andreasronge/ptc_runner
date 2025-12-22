@@ -30,7 +30,7 @@ defmodule PtcDemo.MixProject do
   defp deps do
     [
       {:ptc_runner, path: ".."},
-      {:req_llm, "~> 1.0.0-rc"},
+      {:req_llm, "~> 1.1.0"},
       {:dotenvy, "~> 1.1"}
     ]
   end
