@@ -73,7 +73,7 @@ With PTC, the LLM writes one program executed locally:
 
 **Can LLMs reliably generate these?** See [Performance and Use Cases](docs/performance-and-use-cases.md) for benchmarks, or try the [LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd) to test with your own queries.
 
-Example of PTC-Lisp that can not be expressed in PTC-JSON from the LiveBook page [![Run with LLM](https://livebook.dev/badge/v1/gray.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd): Question: Which category has the highest total spending? Show the breakdown.
+Example of a LLM generated PTC-Lisp program that can not be expressed in PTC-JSON, see [LiveBook page](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd): Question: Which category has the highest total spending? Show the breakdown.
 
 ```clojure
 (let [expenses (call "get-expenses" {})
