@@ -71,7 +71,7 @@ With PTC, the LLM writes one program executed locally:
 - **PTC-JSON** — Easy for weaker models; JSON schema enforces valid programs.
 - **PTC-Lisp** — More expressive (anonymous functions, destructuring), ~8x fewer tokens. Clojure-inspired syntax (small subset).
 
-**Can LLMs reliably generate these?** See [Performance and Use Cases](docs/performance-and-use-cases.md) for benchmarks, or try the [LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd) to test with your own queries.
+**Can LLMs reliably generate these?** See [Benchmark Evaluation](docs/benchmark-eval.md) for results, or try the [LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd) to test with your own queries.
 
 Example of a LLM generated PTC-Lisp program that can not be expressed in PTC-JSON, see [LiveBook page](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd): Question: Which category has the highest total spending? Show the breakdown.
 
@@ -110,7 +110,7 @@ end
 ## Documentation
 
 - **[Guide](docs/guide.md)** - Architecture, API reference, detailed examples
-- **[Performance and Use Cases](docs/performance-and-use-cases.md)** - Benchmarks, cost analysis, when to use PTC
+- **[Benchmark Evaluation](docs/benchmark-eval.md)** - LLM accuracy benchmarks by model and DSL
 - **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
 - **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Lisp DSL introduction
 - **Livebooks**: [Playground](livebooks/ptc_runner_playground.livemd) (try the DSLs) · [LLM Agent](livebooks/ptc_runner_llm_agent.livemd) (build an agent)
