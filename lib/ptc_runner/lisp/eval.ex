@@ -152,8 +152,13 @@ defmodule PtcRunner.Lisp.Eval do
                                                          {:ok, acc_env, acc_mem} ->
         case do_eval(value_ast, ctx, acc_mem, acc_env, tool_exec) do
           {:ok, value, mem2} ->
-            new_bindings = match_pattern(pattern, value)
-            {:cont, {:ok, Map.merge(acc_env, new_bindings), mem2}}
+            case match_pattern(pattern, value) do
+              {:ok, new_bindings} ->
+                {:cont, {:ok, Map.merge(acc_env, new_bindings), mem2}}
+
+              {:error, _} = err ->
+                {:halt, err}
+            end
 
           {:error, _} = err ->
             {:halt, err}
@@ -320,46 +325,56 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp match_pattern({:var, name}, value) do
-    %{name => value}
+    {:ok, %{name => value}}
   end
 
   defp match_pattern({:destructure, {:keys, keys, defaults}}, value) when is_map(value) do
-    Enum.reduce(keys, %{}, fn key, acc ->
-      default = Keyword.get(defaults, key)
+    bindings =
+      Enum.reduce(keys, %{}, fn key, acc ->
+        default = Keyword.get(defaults, key)
 
-      val =
-        case flex_fetch(value, key) do
-          {:ok, v} -> v
-          :error -> default
-        end
+        val =
+          case flex_fetch(value, key) do
+            {:ok, v} -> v
+            :error -> default
+          end
 
-      Map.put(acc, key, val)
-    end)
+        Map.put(acc, key, val)
+      end)
+
+    {:ok, bindings}
   end
 
   defp match_pattern({:destructure, {:keys, _keys, _defaults}}, value) do
-    raise "destructure error: expected map, got #{inspect(value)}"
+    {:error, {:destructure_error, "expected map, got #{inspect(value)}"}}
   end
 
   defp match_pattern({:destructure, {:seq, patterns}}, value) when is_list(value) do
     if length(value) < length(patterns) do
-      raise "destructure error: expected at least #{length(patterns)} elements, got #{length(value)}"
+      {:error,
+       {:destructure_error,
+        "expected at least #{length(patterns)} elements, got #{length(value)}"}}
+    else
+      patterns
+      |> Enum.zip(value)
+      |> Enum.reduce_while({:ok, %{}}, fn {pattern, val}, {:ok, acc} ->
+        case match_pattern(pattern, val) do
+          {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
     end
-
-    patterns
-    |> Enum.zip(value)
-    |> Enum.reduce(%{}, fn {pattern, val}, acc ->
-      Map.merge(acc, match_pattern(pattern, val))
-    end)
   end
 
   defp match_pattern({:destructure, {:seq, _}}, value) do
-    raise "destructure error: expected list, got #{inspect(value)}"
+    {:error, {:destructure_error, "expected list, got #{inspect(value)}"}}
   end
 
   defp match_pattern({:destructure, {:as, as_name, inner_pattern}}, value) do
-    inner_bindings = match_pattern(inner_pattern, value)
-    Map.put(inner_bindings, as_name, value)
+    case match_pattern(inner_pattern, value) do
+      {:ok, inner_bindings} -> {:ok, Map.put(inner_bindings, as_name, value)}
+      {:error, _} = err -> err
+    end
   end
 
   # ============================================================
@@ -394,18 +409,22 @@ defmodule PtcRunner.Lisp.Eval do
     if length(patterns) != length(args) do
       {:error, {:arity_mismatch, length(patterns), length(args)}}
     else
-      try do
-        bindings =
-          Enum.zip(patterns, args)
-          |> Enum.reduce(%{}, fn {pattern, arg}, acc ->
-            Map.merge(acc, match_pattern(pattern, arg))
-          end)
+      result =
+        Enum.zip(patterns, args)
+        |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
+          case match_pattern(pattern, arg) do
+            {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+            {:error, _} = err -> {:halt, err}
+          end
+        end)
 
-        new_env = Map.merge(closure_env, bindings)
-        do_eval(body, ctx, memory, new_env, tool_exec)
-      rescue
-        e in RuntimeError ->
-          {:error, {:destructure_error, e.message}}
+      case result do
+        {:ok, bindings} ->
+          new_env = Map.merge(closure_env, bindings)
+          do_eval(body, ctx, memory, new_env, tool_exec)
+
+        {:error, _} = err ->
+          err
       end
     end
   end
@@ -436,6 +455,10 @@ defmodule PtcRunner.Lisp.Eval do
           end
 
         {:error, {:arity_error, clean_msg}}
+
+      e in RuntimeError ->
+        # Catch errors from closure evaluation (destructuring, arity, eval errors)
+        {:error, {:type_error, Exception.message(e), converted_args}}
     end
   end
 
@@ -499,6 +522,10 @@ defmodule PtcRunner.Lisp.Eval do
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
           {:error, type_error_for_args(fun, converted_args)}
+
+        e in RuntimeError ->
+          # Catch errors from closure evaluation (destructuring, arity, eval errors)
+          {:error, {:type_error, Exception.message(e), converted_args}}
       end
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
@@ -656,25 +683,28 @@ defmodule PtcRunner.Lisp.Eval do
     value
   end
 
-  # Helper to evaluate closure with a single argument
+  # Helper to evaluate closure with a single argument.
+  # This function is used inside Erlang functions passed to builtins like Enum.map,
+  # so it must raise (not return error tuples) to signal errors.
+  # The raised RuntimeError is caught in apply_fun and converted to an error tuple.
   defp eval_closure_arg(arg, patterns, body, closure_env, ctx, memory, tool_exec) do
     if length(patterns) != 1 do
-      raise ArgumentError, "arity mismatch: expected 1, got #{length(patterns)}"
+      raise RuntimeError, "closure arity mismatch: expected 1, got #{length(patterns)}"
     end
 
     [pattern] = patterns
 
-    try do
-      bindings = match_pattern(pattern, arg)
-      new_env = Map.merge(closure_env, bindings)
+    case match_pattern(pattern, arg) do
+      {:ok, bindings} ->
+        new_env = Map.merge(closure_env, bindings)
 
-      case do_eval(body, ctx, memory, new_env, tool_exec) do
-        {:ok, result, _} -> result
-        {:error, _} = err -> raise inspect(err)
-      end
-    rescue
-      e in RuntimeError ->
-        reraise ArgumentError.exception("destructuring error: #{e.message}"), __STACKTRACE__
+        case do_eval(body, ctx, memory, new_env, tool_exec) do
+          {:ok, result, _} -> result
+          {:error, reason} -> raise RuntimeError, "closure eval error: #{inspect(reason)}"
+        end
+
+      {:error, {:destructure_error, reason}} ->
+        raise RuntimeError, "destructure error: #{reason}"
     end
   end
 
