@@ -324,7 +324,13 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def assoc(m, k, v), do: Map.put(m, k, v)
   def assoc_in(m, path, v), do: put_in(m, path, v)
-  def update(m, k, f), do: Map.update!(m, k, f)
+
+  def update(m, k, f) do
+    old_val = Map.get(m, k)
+    new_val = f.(old_val)
+    Map.put(m, k, new_val)
+  end
+
   def update_in(m, path, f), do: Kernel.update_in(m, path, f)
   def dissoc(m, k), do: Map.delete(m, k)
   def merge(m1, m2), do: Map.merge(m1, m2)
