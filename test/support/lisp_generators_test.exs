@@ -174,7 +174,7 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
         assert match?({:list, [{:symbol, _} | _]}, value)
         {:list, [{:symbol, op} | args]} = value
         assert op in [:+, :-, :*]
-        assert length(args) >= 1
+        assert args != []
         Enum.each(args, fn arg -> assert valid_ast?(arg) end)
       end
     end
@@ -194,7 +194,7 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
       check all(value <- Gen.gen_and(1, [])) do
         assert match?({:list, [{:symbol, :and} | _]}, value)
         {:list, [{:symbol, :and} | args]} = value
-        assert length(args) >= 1
+        assert args != []
         Enum.each(args, fn arg -> assert valid_ast?(arg) end)
       end
     end
@@ -203,7 +203,7 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
       check all(value <- Gen.gen_or(1, [])) do
         assert match?({:list, [{:symbol, :or} | _]}, value)
         {:list, [{:symbol, :or} | args]} = value
-        assert length(args) >= 1
+        assert args != []
         Enum.each(args, fn arg -> assert valid_ast?(arg) end)
       end
     end

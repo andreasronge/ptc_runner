@@ -8,7 +8,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       {:ok, examples} = SpecValidator.extract_examples()
 
       assert is_list(examples)
-      assert length(examples) > 0
+      assert examples != []
 
       # Verify we got tuples of code, expected, and section
       Enum.each(examples, fn item ->
@@ -45,7 +45,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       examples = SpecValidator.extract_examples(content)
 
       # At least one example should be extracted
-      assert length(examples) > 0
+      assert examples != []
     end
   end
 
