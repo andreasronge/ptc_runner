@@ -1,0 +1,145 @@
+name: Benchmark Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      dsl:
+        description: 'Which DSL to test'
+        required: false
+        type: choice
+        options:
+          - lisp
+          - json
+          - both
+        default: 'lisp'
+      runs:
+        description: 'Number of test runs per model'
+        required: false
+        type: number
+        default: 1
+      verbose:
+        description: 'Enable verbose output'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    name: Benchmark ${{ matrix.model }}
+    strategy:
+      fail-fast: true
+      matrix:
+        model: [deepseek, gemini, haiku]
+    env:
+      MIX_ENV: dev
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Install demo dependencies
+        working-directory: demo
+        run: mix deps.get
+
+      - name: Compile demo
+        working-directory: demo
+        run: mix compile
+
+      - name: Run Lisp benchmark
+        if: inputs.dsl == 'lisp' || inputs.dsl == 'both'
+        working-directory: demo
+        run: |
+          mix lisp --test \
+            --model=${{ matrix.model }} \
+            --runs=${{ inputs.runs }} \
+            ${{ inputs.verbose && '--verbose' || '' }} \
+            --report
+        timeout-minutes: 30
+
+      - name: Run JSON benchmark
+        if: inputs.dsl == 'json' || inputs.dsl == 'both'
+        working-directory: demo
+        run: |
+          mix json --test \
+            --model=${{ matrix.model }} \
+            --runs=${{ inputs.runs }} \
+            ${{ inputs.verbose && '--verbose' || '' }} \
+            --report
+        timeout-minutes: 30
+
+      - name: Generate job summary
+        if: always()
+        working-directory: demo
+        run: |
+          echo "## Benchmark Results: ${{ matrix.model }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for report in reports/*.md; do
+            if [ -f "$report" ]; then
+              echo "### $(basename "$report")" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              cat "$report" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "---" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports-${{ matrix.model }}
+          path: demo/reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: always()
+    name: Aggregate Reports
+
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-reports-*
+          path: all-reports
+          merge-multiple: true
+
+      - name: Create combined summary
+        run: |
+          echo "# Benchmark Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**DSL:** ${{ inputs.dsl }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Runs:** ${{ inputs.runs }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Models:** deepseek, gemini, haiku" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Reports" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for report in all-reports/*.md; do
+            if [ -f "$report" ]; then
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>$(basename "$report")</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              cat "$report" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      - name: Upload combined reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-benchmark-reports
+          path: all-reports/
+          if-no-files-found: warn
+          retention-days: 30
