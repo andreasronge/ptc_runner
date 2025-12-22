@@ -414,8 +414,8 @@ defmodule PtcRunner.Lisp.Runtime do
     end)
   end
 
-  def keys(m), do: Map.keys(m)
-  def vals(m), do: Map.values(m)
+  def keys(m), do: m |> Map.keys() |> Enum.sort()
+  def vals(m), do: m |> Enum.sort_by(fn {k, _v} -> k end) |> Enum.map(fn {_k, v} -> v end)
 
   @doc """
   Apply a function to each value in a map, returning a new map with the same keys.
