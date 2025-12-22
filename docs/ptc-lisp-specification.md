@@ -249,6 +249,16 @@ Only `nil` and `false` are **falsy**. Everything else is **truthy**:
 | `{}` (empty map) | Yes |
 | Any other value | Yes |
 
+```clojure
+(if nil "truthy" "falsy")    ; => "falsy"
+(if false "truthy" "falsy")  ; => "falsy"
+(if true "truthy" "falsy")   ; => "truthy"
+(if 0 "truthy" "falsy")      ; => "truthy"
+(if "" "truthy" "falsy")     ; => "truthy"
+(if [] "truthy" "falsy")     ; => "truthy"
+(if {} "truthy" "falsy")     ; => "truthy"
+```
+
 ---
 
 ## 5. Special Forms
@@ -273,6 +283,13 @@ Binds names to values for use in the body expression:
 - Later bindings can reference earlier ones
 - Bindings are scoped to the body
 - Inner `let` can shadow outer bindings
+
+```clojure
+(let [x 10] x)                    ; => 10
+(let [x 10] (+ x 5))              ; => 15
+(let [x 1 y 2] (+ x y))           ; => 3
+(let [x 1 y (+ x 1)] y)           ; => 2
+```
 
 ```clojure
 (let [x 10
@@ -324,13 +341,12 @@ Two-branch conditional (else is **required**):
 ```
 
 ```clojure
-(if (> x 10)
-  "big"
-  "small")
-
-(if (empty? items)
-  nil
-  (first items))
+(if true "yes" "no")              ; => "yes"
+(if false "yes" "no")             ; => "no"
+(if (> 5 3) "bigger" "smaller")   ; => "bigger"
+(if (< 5 3) "bigger" "smaller")   ; => "smaller"
+(if (empty? []) "empty" "full")   ; => "empty"
+(if (empty? [1]) "empty" "full")  ; => "full"
 ```
 
 **Single-branch `if` is not allowed.** Use `when` instead.
@@ -345,8 +361,10 @@ Returns body if condition is truthy, otherwise `nil`:
 ```
 
 ```clojure
-(when (> x 10)
-  "big")  ; => "big" or nil
+(when true "yes")                 ; => "yes"
+(when false "yes")                ; => nil
+(when (> 5 3) "bigger")           ; => "bigger"
+(when (< 5 3) "smaller")          ; => nil
 ```
 
 ### 5.4 `cond` — Multi-way Conditional
@@ -373,6 +391,15 @@ Tests conditions in order, returns first matching result:
 - `:else` is conventional for default (it's truthy)
 - Returns `nil` if no condition matches and no `:else`
 
+```clojure
+(cond true "first" :else "default")           ; => "first"
+(cond false "first" :else "default")          ; => "default"
+(cond false "a" false "b" :else "c")          ; => "c"
+(cond (> 5 3) "yes" :else "no")               ; => "yes"
+(cond (< 5 3) "yes" :else "no")               ; => "no"
+(cond false "only")                           ; => nil
+```
+
 ---
 
 ## 6. Threading Macros
@@ -398,10 +425,11 @@ Equivalent to:
 **Primary use:** Collection pipelines where data is the last argument.
 
 ```clojure
-(->> ctx/products
-     (filter (where :in-stock))
-     (sort-by :price)
-     (take 10))
+(->> [1 2 3] (map inc))                       ; => [2 3 4]
+(->> [1 2 3 4] (filter odd?))                 ; => [1 3]
+(->> [3 1 2] (sort))                          ; => [1 2 3]
+(->> [1 2 3] (map inc) (filter even?))        ; => [2 4]
+(->> [1 2 3 4 5] (filter odd?) (take 2))      ; => [1 3]
 ```
 
 ### 6.2 `->` — Thread First
@@ -422,9 +450,11 @@ Equivalent to:
 **Primary use:** Map transformations where data is the first argument.
 
 ```clojure
-(-> user
-    (assoc :updated-at now)
-    (dissoc :password))
+(-> {:a 1} (assoc :b 2))                      ; => {:a 1 :b 2}
+(-> {:a 1 :b 2} (dissoc :b))                  ; => {:a 1}
+(-> {:a 1} (assoc :b 2) (assoc :c 3))         ; => {:a 1 :b 2 :c 3}
+(-> {:a {:b 1}} (get-in [:a :b]))             ; => 1
+(-> {:a 1} (update :a inc))                   ; => {:a 2}
 ```
 
 ---
@@ -454,6 +484,15 @@ Creates a predicate function that compares a field value:
 (where :tags includes "urgent") ; field includes value (substring or member)
 ```
 
+```clojure
+(count (filter (where :x = 1) [{:x 1} {:x 2}]))           ; => 1
+(count (filter (where :x > 1) [{:x 1} {:x 2} {:x 3}]))    ; => 2
+(count (filter (where :x < 2) [{:x 1} {:x 2} {:x 3}]))    ; => 1
+(count (filter (where :x not= 2) [{:x 1} {:x 2} {:x 3}])) ; => 2
+(count (filter (where :x >= 2) [{:x 1} {:x 2} {:x 3}]))   ; => 2
+(count (filter (where :x <= 2) [{:x 1} {:x 2} {:x 3}]))   ; => 2
+```
+
 #### Nested Field (Path)
 
 Use a vector for nested access:
@@ -464,6 +503,10 @@ Use a vector for nested access:
 (where [:address :country] = "US")
 ```
 
+```clojure
+(count (filter (where [:a :b] = 1) [{:a {:b 1}} {:a {:b 2}}]))  ; => 1
+```
+
 #### Field Exists / Is Truthy
 
 Check if field is truthy (not `nil` or `false`):
@@ -472,6 +515,11 @@ Check if field is truthy (not `nil` or `false`):
 (where :active)           ; field is truthy (not nil, not false)
 (where :verified = true)    ; explicit boolean check
 (where [:user :premium])  ; nested truthy check
+```
+
+```clojure
+(count (filter (where :a) [{:a 1} {:a nil} {:a false}]))  ; => 1
+(count (filter (where :a = true) [{:a true} {:a false}])) ; => 1
 ```
 
 #### Keyword/String Coercion
@@ -492,6 +540,12 @@ For the equality operators (`=`, `not=`), `in`, and `includes`, keywords are coe
 - Other types (`strings`, `numbers`, `nil`) are unchanged
 
 **Note:** Ordering comparisons (`>`, `<`, `>=`, `<=`) do **not** use coercion. Type mismatches return `false` (same as `nil` handling).
+
+```clojure
+(count (filter (where :s = :a) [{:s "a"} {:s "b"}]))             ; => 1
+(count (filter (where :s in [:a :b]) [{:s "a"} {:s "c"}]))       ; => 1
+(count (filter (where :t includes :x) [{:t ["x" "y"]} {:t []}])) ; => 1
+```
 
 ### 7.2 Combining Predicates
 
@@ -520,6 +574,12 @@ Use `all-of`, `any-of`, `none-of` to combine predicate functions:
         users)
 ```
 
+```clojure
+(count (filter (all-of (where :a = 1) (where :b = 2)) [{:a 1 :b 2} {:a 1 :b 3}]))  ; => 1
+(count (filter (any-of (where :a = 1) (where :a = 2)) [{:a 1} {:a 2} {:a 3}]))     ; => 2
+(count (filter (none-of (where :a = 1)) [{:a 1} {:a 2}]))                          ; => 1
+```
+
 **Zero predicates:**
 
 | Expression | Result |
@@ -527,6 +587,12 @@ Use `all-of`, `any-of`, `none-of` to combine predicate functions:
 | `(all-of)` | Always true (vacuous truth) |
 | `(any-of)` | Always false (no predicate matches) |
 | `(none-of)` | Always true (no predicate to fail) |
+
+```clojure
+(count (filter (all-of) [{:a 1} {:a 2}]))     ; => 2
+(count (filter (any-of) [{:a 1} {:a 2}]))     ; => 0
+(count (filter (none-of) [{:a 1} {:a 2}]))    ; => 2
+```
 
 **Why not `and`/`or`/`not`?**
 
