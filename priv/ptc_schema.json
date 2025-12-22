@@ -183,7 +183,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Remove duplicate values from list. Example: {op:'distinct'}",
+          "description": "Remove duplicate values from list. For count distinct: pipe | map(get field) | distinct | count",
           "properties": {
             "op": {
               "const": "distinct"
