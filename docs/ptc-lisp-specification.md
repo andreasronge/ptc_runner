@@ -731,6 +731,18 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (find (where :id = 42) users)
 ```
 
+**Map support:** `filter` and `remove` accept maps as input, treating each entry as a `[key value]` pair passed to the predicate. They return a **list** of `[key value]` pairs (not a map):
+
+```clojure
+;; Filter map entries by value
+(filter (fn [[k v]] (> v 100)) {:food 50 :travel 200 :office 150})
+;; => [[:travel 200] [:office 150]]
+
+;; Remove entries where value is nil
+(remove (fn [[k v]] (nil? v)) {:a 1 :b nil :c 3})
+;; => [[:a 1] [:c 3]]
+```
+
 #### Transforming
 
 | Function | Signature | Description |
@@ -772,6 +784,18 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ```
 
 **Note:** While `sort` and `sort-by` support string comparison internally, the explicit comparison operators (`>`, `<`, `>=`, `<=`) only work on numbers. This prevents ambiguous comparisons in user code while allowing natural sorting.
+
+**Map support:** `sort-by` accepts maps, treating each entry as a `[key value]` pair. Returns a **list** of `[key value]` pairs (not a map) to preserve sort order:
+
+```clojure
+;; Sort map by values (descending)
+(sort-by second > {:food 100 :travel 500 :office 200})
+;; => [[:travel 500] [:office 200] [:food 100]]
+
+;; Sort map by keys
+(sort-by first {:z 1 :a 2 :m 3})
+;; => [[:a 2] [:m 3] [:z 1]]
+```
 
 #### Subsetting
 
@@ -878,6 +902,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `select-keys` | `(select-keys m keys)` | Pick specific keys |
 | `keys` | `(keys m)` | Get all keys |
 | `vals` | `(vals m)` | Get all values |
+| `entries` | `(entries m)` | Get all `[key value]` pairs as a list |
 | `update-vals` | `(update-vals m f)` | Apply f to each value (matches Clojure 1.11) |
 
 ```clojure
@@ -892,6 +917,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (select-keys {:a 1 :b 2 :c 3} [:a :c])  ; => {:a 1 :c 3}
 (keys {:a 1 :b 2})                 ; => [:a :b]
 (vals {:a 1 :b 2})                 ; => [1 2]
+(entries {:a 1 :b 2})              ; => [[:a 1] [:b 2]]
 
 ;; update-vals: apply function to each value (matches Clojure 1.11)
 (update-vals {:a 1 :b 2} inc)      ; => {:a 2 :b 3}
@@ -964,6 +990,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `and` | `(and x y ...)` | Logical AND (short-circuits) |
 | `or` | `(or x y ...)` | Logical OR (short-circuits) |
 | `not` | `(not x)` | Logical NOT |
+| `identity` | `(identity x)` | Returns argument unchanged |
 
 ```clojure
 (and true true)     ; => true
@@ -973,7 +1000,10 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (or nil false "x")  ; => "x" (returns first truthy)
 (not true)          ; => false
 (not nil)           ; => true
+(identity 42)       ; => 42
 ```
+
+**`identity` function:** Returns its argument unchanged. Useful as a default function argument, for passing to higher-order functions, or in pipelines where no transformation is needed.
 
 ### 8.6 Type Predicates
 
@@ -1003,7 +1033,10 @@ Although maps and strings are not "collections" per `coll?`, some collection fun
 | `first` | ✗ | ✗ | Use `(first (keys m))` or `(first (vals m))` |
 | `last` | ✗ | ✗ | Use `(last (keys m))` or `(last (vals m))` |
 | `map` | ✓ | ✗ | Iterates over `[key value]` pairs (Clojure-compatible) |
-| `filter` | ✗ | ✗ | Not applicable to maps/strings |
+| `filter` | ✓ | ✗ | Returns list of `[key value]` pairs matching predicate |
+| `remove` | ✓ | ✗ | Returns list of `[key value]` pairs not matching predicate |
+| `sort-by` | ✓ | ✗ | Returns sorted list of `[key value]` pairs |
+| `entries` | ✓ | ✗ | Explicit conversion to list of `[key value]` pairs |
 | `nth` | ✗ | ✗ | String indexing not supported |
 
 **Mapping over maps:** When you call `map` on a map, each entry is passed as a `[key value]` vector. Use destructuring to extract the key and value:
