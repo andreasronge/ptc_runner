@@ -1619,11 +1619,10 @@ This means `-1` is always the integer negative one, never a symbol named "-1".
 
 | Resource | Default | Notes |
 |----------|---------|-------|
-| Timeout | 5,000 ms | Execution time limit |
-| Max Heap | ~10 MB | Memory limit |
-| Max Depth | 50 | Nesting depth limit |
+| Timeout | 1,000 ms | Execution time limit |
+| Max Heap | ~10 MB | Memory limit (1,250,000 words) |
 
-*Note: The 5,000 ms default accommodates tool calls in agentic loops. Hosts may configure lower limits for pure computation.*
+*Note: Hosts may configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 
 ### 15.3 Compatibility Testing
 
@@ -1878,11 +1877,11 @@ Every execution produces a log entry:
 
 | Limit | Default | Description |
 |-------|---------|-------------|
-| `timeout_ms` | 5,000 | Max execution time per program |
-| `max_heap` | ~10 MB | Memory limit |
-| `max_tool_calls` | 10 | Max tool invocations per program |
-| `max_depth` | 50 | Max AST nesting depth |
-| `max_memory_size` | ~1 MB | Max size of memory after update |
+| `timeout_ms` | 1,000 | Max execution time per program |
+| `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
+| `max_tool_calls` | 10 | Max tool invocations per program *(planned)* |
+
+*Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 
 On limit violation:
 - Execution aborts immediately
