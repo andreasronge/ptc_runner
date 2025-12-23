@@ -874,6 +874,141 @@ defmodule PtcRunner.Lisp.RuntimeTest do
     end
   end
 
+  describe "filter - seqable map support" do
+    test "filter on empty map returns empty list" do
+      result = Runtime.filter(fn _entry -> true end, %{})
+      assert result == []
+    end
+
+    test "filter on map keeps entries where predicate is true, returns list of pairs" do
+      map = %{a: 1, b: 2, c: 3}
+      result = Runtime.filter(fn entry -> Enum.at(entry, 1) > 1 end, map)
+      # Returns list of [key, value] pairs, sorted for comparison
+      assert Enum.sort(result) == [[:b, 2], [:c, 3]]
+    end
+
+    test "filter on map removes entries where predicate is false" do
+      map = %{a: 10, b: 5, c: 15}
+      result = Runtime.filter(fn entry -> Enum.at(entry, 1) > 7 end, map)
+      assert Enum.sort(result) == [[:a, 10], [:c, 15]]
+    end
+
+    test "filter on map with atom keys works correctly" do
+      map = %{x: "hello", y: "world", z: "test"}
+      result = Runtime.filter(fn entry -> String.length(Enum.at(entry, 1)) > 4 end, map)
+      assert Enum.sort(result) == [[:x, "hello"], [:y, "world"]]
+    end
+
+    test "filter on map with string keys works correctly" do
+      map = %{"a" => 1, "b" => 2, "c" => 3}
+      result = Runtime.filter(fn entry -> Enum.at(entry, 1) <= 2 end, map)
+      assert Enum.sort(result) == [["a", 1], ["b", 2]]
+    end
+  end
+
+  describe "remove - seqable map support" do
+    test "remove on empty map returns empty list" do
+      result = Runtime.remove(fn _entry -> true end, %{})
+      assert result == []
+    end
+
+    test "remove on map removes entries where predicate is true, returns list of pairs" do
+      map = %{a: 1, b: 2, c: 3}
+      result = Runtime.remove(fn entry -> Enum.at(entry, 1) == 2 end, map)
+      assert Enum.sort(result) == [[:a, 1], [:c, 3]]
+    end
+
+    test "remove on map keeps entries where predicate is false" do
+      map = %{a: 10, b: 5, c: 15}
+      result = Runtime.remove(fn entry -> Enum.at(entry, 1) > 7 end, map)
+      assert result == [[:b, 5]]
+    end
+
+    test "remove on map with atom keys works correctly" do
+      map = %{x: "hello", y: "world", z: "test"}
+      result = Runtime.remove(fn entry -> String.length(Enum.at(entry, 1)) > 4 end, map)
+      assert result == [[:z, "test"]]
+    end
+
+    test "remove on map with string keys works correctly" do
+      map = %{"a" => 1, "b" => 2, "c" => 3}
+      result = Runtime.remove(fn entry -> Enum.at(entry, 1) <= 2 end, map)
+      assert result == [["c", 3]]
+    end
+  end
+
+  describe "sort_by - seqable map support" do
+    test "sort_by on map returns list of pairs in sorted order" do
+      map = %{a: 3, b: 1, c: 2}
+      result = Runtime.sort_by(fn entry -> Enum.at(entry, 1) end, map)
+      # Returns list of [key, value] pairs in sorted order (preserves order unlike maps)
+      assert result == [[:b, 1], [:c, 2], [:a, 3]]
+    end
+
+    test "sort_by on empty map with function returns empty list" do
+      result = Runtime.sort_by(fn entry -> Enum.at(entry, 1) end, %{})
+      assert result == []
+    end
+
+    test "sort_by on map with comparator sorts entries in order" do
+      map = %{a: 1, b: 3, c: 2}
+      result = Runtime.sort_by(fn entry -> Enum.at(entry, 1) end, &>=/2, map)
+      assert result == [[:b, 3], [:c, 2], [:a, 1]]
+    end
+
+    test "sort_by on map with string values preserves sort order" do
+      map = %{x: "cherry", y: "apple", z: "banana"}
+      result = Runtime.sort_by(fn entry -> Enum.at(entry, 1) end, map)
+      assert result == [[:y, "apple"], [:z, "banana"], [:x, "cherry"]]
+    end
+
+    test "sort_by on map with numeric values descending preserves order" do
+      map = %{a: 100, b: 50, c: 75}
+      result = Runtime.sort_by(fn entry -> Enum.at(entry, 1) end, &>=/2, map)
+      assert result == [[:a, 100], [:c, 75], [:b, 50]]
+    end
+  end
+
+  describe "entries function" do
+    test "entries on empty map returns empty list" do
+      result = Runtime.entries(%{})
+      assert result == []
+    end
+
+    test "entries on map returns list of [key, value] pairs" do
+      result = Runtime.entries(%{a: 1, b: 2})
+      assert result == [[:a, 1], [:b, 2]]
+    end
+
+    test "entries returns pairs sorted by key" do
+      result = Runtime.entries(%{z: 26, a: 1, m: 13})
+      assert result == [[:a, 1], [:m, 13], [:z, 26]]
+    end
+
+    test "entries with string keys returns sorted pairs" do
+      result = Runtime.entries(%{"z" => 26, "a" => 1, "m" => 13})
+      assert result == [["a", 1], ["m", 13], ["z", 26]]
+    end
+
+    test "entries with mixed string and numeric values" do
+      result = Runtime.entries(%{x: "hello", y: 42})
+      assert result == [[:x, "hello"], [:y, 42]]
+    end
+  end
+
+  describe "identity function" do
+    test "identity returns its argument unchanged" do
+      assert Runtime.identity(42) == 42
+      assert Runtime.identity("hello") == "hello"
+      assert Runtime.identity([1, 2, 3]) == [1, 2, 3]
+      assert Runtime.identity(%{a: 1}) == %{a: 1}
+    end
+
+    test "identity with nil returns nil" do
+      assert Runtime.identity(nil) == nil
+    end
+  end
+
   describe "zip - returns vectors not tuples" do
     test "zip returns list of vectors" do
       result = Runtime.zip([1, 2, 3], [:a, :b, :c])
