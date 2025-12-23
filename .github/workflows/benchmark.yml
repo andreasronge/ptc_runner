@@ -50,10 +50,6 @@ jobs:
         working-directory: demo
         run: mix compile
 
-      - name: Install Babashka (for Clojure validation)
-        if: inputs.dsl == 'lisp' || inputs.dsl == 'both'
-        run: mix ptc.install_babashka
-
       - name: Run Lisp benchmark
         if: inputs.dsl == 'lisp' || inputs.dsl == 'both'
         working-directory: demo
