@@ -168,8 +168,25 @@ defmodule PtcRunner.Lisp.Runtime do
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
 
+  def filter(pred, coll) when is_map(coll) do
+    # When filtering a map, each entry is passed as [key, value] pair
+    # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
+    coll
+    |> Enum.filter(fn {k, v} -> pred.([k, v]) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
   def remove(pred, %MapSet{} = set), do: Enum.reject(set, pred)
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
+
+  def remove(pred, coll) when is_map(coll) do
+    # When removing from a map, each entry is passed as [key, value] pair
+    # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
+    coll
+    |> Enum.reject(fn {k, v} -> pred.([k, v]) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
@@ -190,6 +207,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
 
+  # sort_by with 2 args: (keyfn/key, coll)
   def sort_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     Enum.sort_by(coll, keyfn)
   end
@@ -198,6 +216,15 @@ defmodule PtcRunner.Lisp.Runtime do
     Enum.sort_by(coll, &flex_get(&1, key))
   end
 
+  def sort_by(keyfn, coll) when is_map(coll) and is_function(keyfn, 1) do
+    # When sorting a map, each entry is passed as [key, value] pair
+    # Returns a list of [key, value] pairs (not a map) to preserve sort order
+    coll
+    |> Enum.sort_by(fn {k, v} -> keyfn.([k, v]) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
+  # sort_by with 3 args: (keyfn/key, comparator, coll)
   def sort_by(keyfn, comp, coll)
       when is_list(coll) and is_function(keyfn, 1) and is_function(comp) do
     Enum.sort_by(coll, keyfn, comp)
@@ -206,6 +233,15 @@ defmodule PtcRunner.Lisp.Runtime do
   def sort_by(key, comp, coll)
       when is_list(coll) and (is_atom(key) or is_binary(key)) and is_function(comp) do
     Enum.sort_by(coll, &flex_get(&1, key), comp)
+  end
+
+  def sort_by(keyfn, comp, coll)
+      when is_map(coll) and is_function(keyfn, 1) and is_function(comp) do
+    # When sorting a map with custom comparator, each entry is passed as [key, value] pair
+    # Returns a list of [key, value] pairs (not a map) to preserve sort order
+    coll
+    |> Enum.sort_by(fn {k, v} -> keyfn.([k, v]) end, comp)
+    |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
@@ -418,6 +454,13 @@ defmodule PtcRunner.Lisp.Runtime do
   def vals(m), do: m |> Enum.sort_by(fn {k, _v} -> k end) |> Enum.map(fn {_k, v} -> v end)
 
   @doc """
+  Convert map to a list of [key, value] pairs, sorted by key.
+  """
+  def entries(m) when is_map(m) do
+    m |> Enum.sort_by(fn {k, _v} -> k end) |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
+  @doc """
   Apply a function to each value in a map, returning a new map with the same keys.
   Matches Clojure 1.11's update-vals signature: `(update-vals m f)`
 
@@ -464,6 +507,12 @@ defmodule PtcRunner.Lisp.Runtime do
   # ============================================================
 
   def not_(x), do: not truthy?(x)
+
+  @doc """
+  Identity function: returns its argument unchanged.
+  Useful as a default function argument or for composition.
+  """
+  def identity(x), do: x
 
   defp truthy?(nil), do: false
   defp truthy?(false), do: false
