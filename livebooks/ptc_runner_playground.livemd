@@ -9,7 +9,7 @@ deps =
     [{:ptc_runner, path: repo_root}]
   else
     # Opened from URL / badge (public)
-    [{:ptc_runner, "~> 0.3.2"}]
+    [{:ptc_runner, "~> 0.3.3"}]
   end
 
 Mix.install(deps)
