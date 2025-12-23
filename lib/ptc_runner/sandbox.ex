@@ -36,25 +36,34 @@ defmodule PtcRunner.Sandbox do
           memory_bytes: integer()
         }
 
+  @typedoc """
+  Evaluator function that takes AST and context and returns result with memory.
+  """
+  @type eval_fn :: (any(), Context.t() -> {:ok, any(), map()} | {:error, {atom(), String.t()}})
+
   @doc """
   Executes an AST in an isolated sandbox process.
 
   ## Arguments
     - ast: The AST to execute
     - context: The execution context
-    - opts: Options (timeout, max_heap)
+    - opts: Options (timeout, max_heap, eval_fn)
+      - `:eval_fn` - Custom evaluator function (default: Interpreter.eval/2)
+      - `:timeout` - Timeout in milliseconds (default: 1000)
+      - `:max_heap` - Max heap size in words (default: 1_250_000)
 
   ## Returns
     - `{:ok, result, metrics, memory}` on success
     - `{:error, reason}` on failure
   """
-  @spec execute(map(), Context.t(), keyword()) ::
+  @spec execute(any(), Context.t(), keyword()) ::
           {:ok, any(), metrics(), map()}
           | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
 
   def execute(ast, context, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 1000)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    eval_fn = Keyword.get(opts, :eval_fn, &Interpreter.eval/2)
 
     # Spawn isolated process with resource limits
     start_time = System.monotonic_time(:millisecond)
@@ -66,7 +75,7 @@ defmodule PtcRunner.Sandbox do
         fn ->
           # Set process priority to normal within the process
           Process.flag(:priority, :normal)
-          result = Interpreter.eval(ast, context)
+          result = eval_fn.(ast, context)
           memory = get_process_memory()
           send(parent, {:result, result, memory})
         end,

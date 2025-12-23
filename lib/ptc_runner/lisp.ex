@@ -39,6 +39,8 @@ defmodule PtcRunner.Lisp do
     - `:memory` - Initial memory map (default: %{})
     - `:tools` - Map of tool names to functions (default: %{})
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
+    - `:timeout` - Timeout in milliseconds (default: 1000)
+    - `:max_heap` - Max heap size in words (default: 1_250_000)
 
   ## Return Value
 
@@ -49,7 +51,7 @@ defmodule PtcRunner.Lisp do
     - `new_memory`: Complete memory state after merge
 
   On error, returns:
-  - `{:error, reason}` from parser, analyzer, or evaluator
+  - `{:error, reason}` from parser, analyzer, evaluator, or resource limits
 
   ## Memory Contract
 
@@ -70,6 +72,16 @@ defmodule PtcRunner.Lisp do
       # Rounded to 2 decimals
       PtcRunner.Lisp.run("(/ 10 3)", float_precision: 2)
       #=> {:ok, 3.33, %{}, %{}}
+
+  ## Resource Limits
+
+  Lisp programs execute with configurable timeout and memory limits:
+
+      PtcRunner.Lisp.run(source, timeout: 5000, max_heap: 5_000_000)
+
+  Exceeding limits returns an error:
+  - `{:error, {:timeout, ms}}` - execution exceeded timeout
+  - `{:error, {:memory_exceeded, bytes}}` - heap limit exceeded
   """
   @spec run(String.t(), keyword()) ::
           {:ok, term(), map(), map()} | {:error, term()}
@@ -78,6 +90,8 @@ defmodule PtcRunner.Lisp do
     memory = Keyword.get(opts, :memory, %{})
     tools = Keyword.get(opts, :tools, %{})
     float_precision = Keyword.get(opts, :float_precision)
+    timeout = Keyword.get(opts, :timeout, 1000)
+    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
 
     tool_executor = fn name, args ->
       case Map.fetch(tools, name) do
@@ -87,10 +101,34 @@ defmodule PtcRunner.Lisp do
     end
 
     with {:ok, raw_ast} <- Parser.parse(source),
-         {:ok, core_ast} <- Analyze.analyze(raw_ast),
-         {:ok, value, _eval_memory} <-
-           Eval.eval(core_ast, ctx, memory, Env.initial(), tool_executor) do
-      apply_memory_contract(value, memory, float_precision)
+         {:ok, core_ast} <- Analyze.analyze(raw_ast) do
+      # Build Context for sandbox
+      context = PtcRunner.Context.new(ctx, memory, tools)
+
+      # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
+      eval_fn = fn _ast, sandbox_context ->
+        Eval.eval(
+          core_ast,
+          sandbox_context.ctx,
+          sandbox_context.memory,
+          Env.initial(),
+          tool_executor
+        )
+      end
+
+      sandbox_opts = [
+        timeout: timeout,
+        max_heap: max_heap,
+        eval_fn: eval_fn
+      ]
+
+      case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
+        {:ok, value, _metrics, eval_memory} ->
+          apply_memory_contract(value, eval_memory, float_precision)
+
+        {:error, _} = err ->
+          err
+      end
     end
   end
 

@@ -22,7 +22,7 @@ For the complete language specification, see [ptc-lisp-specification.md](ptc-lis
     "get-users" => &MyApp.get_users/1,
     "get-orders" => &MyApp.get_orders/1
   },
-  timeout: 5000,
+  timeout: 1000,
   max_heap: 1_250_000
 )
 
@@ -43,7 +43,7 @@ end
 | `:context` | map | `%{}` | Request context, accessible via `ctx/` |
 | `:memory` | map | `%{}` | Persistent memory, accessible via `memory/` |
 | `:tools` | map | `%{}` | Tool functions (arity 1, receives args map) |
-| `:timeout` | integer | 5000 | Execution timeout in milliseconds |
+| `:timeout` | integer | 1000 | Execution timeout in milliseconds |
 | `:max_heap` | integer | 1_250_000 | Max heap size in words (~10MB) |
 | `:float_precision` | integer | `nil` | Decimal places for floats in result (`nil` = full precision) |
 
@@ -77,7 +77,7 @@ end
 {:error, {:validation_error, "unknown function: foo"}}
 {:error, {:type_error, "expected number, got string"}}
 {:error, {:execution_error, "tool 'get-users' failed: connection refused"}}
-{:error, {:timeout, 5000}}
+{:error, {:timeout, 1000}}
 {:error, {:memory_exceeded, 10_000_000}}
 ```
 
