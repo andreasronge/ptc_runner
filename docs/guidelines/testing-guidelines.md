@@ -215,6 +215,22 @@ test "full pipeline" do
 end
 ```
 
+## PTC-Lisp Specification Tests
+
+The spec (`docs/ptc-lisp-specification.md`) contains executable examples (lines with `; =>`) validated against the implementation:
+
+```bash
+mix ptc.validate_spec              # Validate all spec examples
+mix ptc.validate_spec --clojure    # Also compare with Babashka
+```
+
+Section checksums detect unintended spec changes. After intentionally modifying the spec:
+
+```bash
+mix ptc.update_spec_checksums
+git add test/spec_cases/checksums.exs
+```
+
 ## Property-Based Testing
 
 Use StreamData for testing invariants across many random inputs. Good candidates:
