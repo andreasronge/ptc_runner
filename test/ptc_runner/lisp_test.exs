@@ -351,9 +351,9 @@ defmodule PtcRunner.LispTest do
       assert {:ok, "hello", %{}, %{}} = Lisp.run("(call \"greet\" {})", tools: tools)
     end
 
-    test "raises on unknown tool during execution" do
-      # Tool executor raises RuntimeError for unknown tools
-      catch_error(Lisp.run("(call \"unknown\" {})"))
+    test "returns error for unknown tool during execution" do
+      # Unknown tool raises error in the sandbox process
+      assert {:error, _} = Lisp.run("(call \"unknown\" {})")
     end
   end
 
@@ -646,6 +646,86 @@ defmodule PtcRunner.LispTest do
 
       # Should return an error tuple, not crash
       assert {:error, _reason} = Lisp.run(source, context: ctx)
+    end
+  end
+
+  describe "sandbox - timeout" do
+    test "simple expression completes within default timeout" do
+      assert {:ok, 6, %{}, %{}} = Lisp.run("(+ 1 2 3)")
+    end
+
+    test "respects custom timeout option" do
+      # Simple fast operation should complete within generous timeout
+      assert {:ok, 5, %{}, %{}} = Lisp.run("(+ 2 3)", timeout: 5000)
+    end
+
+    test "timeout option is accepted without error" do
+      # Just verify that timeout option doesn't cause errors
+      # Actual timeout behavior is hard to test without expensive computations
+      assert {:ok, 3, %{}, %{}} = Lisp.run("(+ 1 2)", timeout: 100)
+    end
+  end
+
+  describe "sandbox - memory limits" do
+    test "simple expression stays within memory limit" do
+      assert {:ok, 42, %{}, %{}} = Lisp.run("42")
+    end
+
+    test "respects custom max_heap option" do
+      # Small computation should complete with larger heap
+      assert {:ok, _result, %{}, %{}} =
+               Lisp.run("[1 2 3 4 5]", max_heap: 5_000_000)
+    end
+
+    test "max_heap option is accepted without error" do
+      # Just verify that max_heap option doesn't cause errors
+      assert {:ok, 5, %{}, %{}} = Lisp.run("(+ 2 3)", max_heap: 100_000)
+    end
+  end
+
+  describe "sandbox - integration with existing features" do
+    test "float_precision still works with sandbox" do
+      assert {:ok, 3.33, %{}, %{}} =
+               Lisp.run("(/ 10 3)", float_precision: 2, timeout: 1000)
+    end
+
+    test "memory contract works with sandbox execution" do
+      source = "{:result 42, :stored 100}"
+
+      {:ok, result, delta, new_memory} =
+        Lisp.run(source, timeout: 1000)
+
+      assert result == 42
+      assert delta == %{stored: 100}
+      assert new_memory == %{stored: 100}
+    end
+
+    test "context and tools still work with sandbox" do
+      tools = %{
+        "double" => fn args ->
+          # Tools receive map from Lisp which might have atom or string keys
+          x = args[:x] || args["x"]
+          x * 2
+        end
+      }
+
+      ctx = %{value: 5}
+      source = "(call \"double\" {:x ctx/value})"
+
+      assert {:ok, 10, %{}, %{}} = Lisp.run(source, context: ctx, tools: tools)
+    end
+
+    test "tool results work with memory updates" do
+      tools = %{
+        "get-data" => fn _args -> "success" end
+      }
+
+      source = "{:result (call \"get-data\" {}), :status \"done\"}"
+      {:ok, result, delta, new_memory} = Lisp.run(source, tools: tools)
+
+      assert result == "success"
+      assert delta == %{status: "done"}
+      assert new_memory == %{status: "done"}
     end
   end
 end
