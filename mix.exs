@@ -52,7 +52,7 @@ defmodule PtcRunner.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
-      {:req_llm, "~> 1.0.0-rc", only: :test}
+      {:req_llm, "~> 1.2.0", only: :test}
     ]
   end
 
