@@ -351,6 +351,7 @@ defmodule PtcRunner.LispTest do
       assert {:ok, "hello", %{}, %{}} = Lisp.run("(call \"greet\" {})", tools: tools)
     end
 
+    @tag :capture_log
     test "returns error for unknown tool during execution" do
       # Unknown tool raises error in the sandbox process
       assert {:error, _} = Lisp.run("(call \"unknown\" {})")
