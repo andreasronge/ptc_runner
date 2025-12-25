@@ -1,3 +1,7 @@
+# Suppress error logs from sandbox processes during tests
+Logger.configure(level: :warning)
+:logger.set_primary_config(:level, :warning)
+
 if System.get_env("CI") do
   Application.put_env(:stream_data, :max_runs, 300)
 end
