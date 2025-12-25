@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2025-12-25
+
+### Added
+
+- Add seqable map support to filter, remove, and sort-by operations
+- Add entries and identity functions to PTC-Lisp
+- Add sandbox support to PtcRunner.Lisp for resource limits
+
+### Fixed
+
+- Replace length() comparisons with Enum.empty? alternative
+- Update error handling to use error tuples instead of raised exceptions
+
 ## [0.3.3] - 2025-12-22
 
 ### Added
@@ -224,6 +237,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.3.4]: https://github.com/andreasronge/ptc_runner/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/andreasronge/ptc_runner/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/andreasronge/ptc_runner/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/andreasronge/ptc_runner/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/andreasronge/ptc_runner/compare/v0.2.0...v0.3.0
