@@ -25,9 +25,9 @@ Benchmark results comparing LLM accuracy on PTC-Lisp and PTC-JSON DSLs.
 
 | Model | Pass Rate | Perfect Runs | Avg Duration | Total Cost |
 |-------|-----------|--------------|--------------|------------|
-| Gemini 2.5 Flash | **98.75%** | 4/5 | 16.9s | $0.0046 |
-| DeepSeek v3.2 | 97.5% | 3/5 | 83.6s | $0.0039 |
-| Haiku 4.5 | 95.0% | 1/5 | 35.3s | $0.0317 |
+| Gemini 2.5 Flash | **100%** | 5/5 | 11.4s | $0.0050 |
+| DeepSeek v3.2 | 98.8% | 4/5 | 76s | $0.0089 |
+| Haiku 4.5 | 98.8% | 4/5 | 34s | $0.0318 |
 
 ### PTC-JSON (15 tests)
 
@@ -41,9 +41,9 @@ Benchmark results comparing LLM accuracy on PTC-Lisp and PTC-JSON DSLs.
 
 | Model | Lisp | JSON |
 |-------|------|------|
-| Gemini 2.5 Flash | **98.75%** | 98.7% |
-| DeepSeek v3.2 | 97.5% | **100%** |
-| Haiku 4.5 | 95.0% | **100%** |
+| Gemini 2.5 Flash | **100%** | 98.7% |
+| DeepSeek v3.2 | 98.8% | **100%** |
+| Haiku 4.5 | 98.8% | **100%** |
 
 ## Token Efficiency
 
@@ -57,18 +57,19 @@ After ~23 queries per session, Lisp's smaller outputs offset its larger prompt.
 
 ## Conclusions
 
-1. **Both DSLs now achieve 95%+ accuracy** across all models after prompt improvements
-2. **Lisp is more token-efficient for multi-query sessions** (smaller output offsets larger prompt)
-3. **Speed**: Gemini is fastest (17-26s), DeepSeek is slowest (1.4-2.2m)
-4. **Cost**: DeepSeek is 3-6x cheaper than alternatives
+1. **Both DSLs achieve 98%+ accuracy** across all models after prompt improvements
+2. **Gemini + Lisp now achieves 100%** - the best performing combination
+3. **Lisp is more token-efficient for multi-query sessions** (smaller output offsets larger prompt)
+4. **Speed**: Gemini is fastest (~11s), DeepSeek is slowest (~76s)
+5. **Cost**: DeepSeek is 3-6x cheaper than alternatives
 
 ### Recommendations
 
 | Priority | Model + DSL | Accuracy | Speed | Cost |
 |----------|-------------|----------|-------|------|
-| **Best overall** | Gemini + Lisp | 98.75% | Fast | Low |
-| **Highest accuracy** | Haiku/DeepSeek + JSON | 100% | Med/Slow | Med/Low |
-| **Budget** | DeepSeek + either | 97.5-100% | Slow | Lowest |
+| **Best overall** | Gemini + Lisp | 100% | Fast | Low |
+| **Highest accuracy** | Gemini + Lisp or Haiku/DeepSeek + JSON | 100% | Varies | Varies |
+| **Budget** | DeepSeek + either | 98.8-100% | Slow | Lowest |
 
 ## Running Benchmarks
 
