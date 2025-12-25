@@ -91,6 +91,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.pr-branch.outputs.head_ref }}
           repository: ${{ steps.pr-branch.outputs.head_repo }}
+          token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Install git pre-commit hook
         if: steps.pr-branch.outputs.is_fork != 'true'
@@ -139,7 +140,8 @@ jobs:
             3. Make minimal changes
             4. Run `mix precommit` - only proceed if it passes
             5. `git add -A && git commit -m "fix: ..." && git push`
-            6. Post summary: `gh pr comment ${{ steps.pr-branch.outputs.pr_number }} --body "..."`
+            6. Verify push succeeded: `git status` should show "Your branch is up to date with 'origin/...'"
+            7. Post summary: `gh pr comment ${{ steps.pr-branch.outputs.pr_number }} --body "..."`
 
             NEVER include "@claude" in comments.
 
@@ -147,14 +149,10 @@ jobs:
           show_full_output: true
 
       # Safety net: ensure any commits Claude made are pushed
+      # Uses credentials from checkout step (token already configured via persist-credentials)
       - name: Push unpushed commits
         if: steps.pr-branch.outputs.is_fork != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
-          # Configure git to use token for authentication
-          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-
           # Check if there are unpushed commits
           UNPUSHED=$(git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --oneline 2>/dev/null || echo "")
           if [ -n "$UNPUSHED" ]; then

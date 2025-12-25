@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Install git pre-commit hook
         run: |
@@ -84,10 +85,45 @@ jobs:
             3. Make minimal changes
             4. Run `mix precommit` - only proceed if it passes
             5. `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
-            6. `gh pr create --title "feat: [desc] (#${{ github.event.issue.number }})" --body "...summary...\n\nCloses #${{ github.event.issue.number }}"` (MUST include "Closes #N" to auto-close issue)
-            7. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
+            6. Verify push succeeded: `git status` should show "Your branch is up to date with 'origin/...'"
+            7. `gh pr create --title "feat: [desc] (#${{ github.event.issue.number }})" --body "...summary...\n\nCloses #${{ github.event.issue.number }}"` (MUST include "Closes #N" to auto-close issue)
+            8. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
 
             NEVER include "@claude" in comments.
 
           claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
           show_full_output: true
+
+      # Safety net: ensure any commits Claude made are pushed
+      # Uses credentials from checkout step (token already configured via persist-credentials)
+      - name: Push unpushed commits
+        run: |
+          # Get current branch name
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+          # Check if branch exists on remote
+          if git ls-remote --exit-code --heads origin "$CURRENT_BRANCH" > /dev/null 2>&1; then
+            # Branch exists on remote, check for unpushed commits
+            UNPUSHED=$(git log origin/$CURRENT_BRANCH..HEAD --oneline 2>/dev/null || echo "")
+            if [ -n "$UNPUSHED" ]; then
+              echo "Found unpushed commits on existing branch:"
+              echo "$UNPUSHED"
+              echo "Pushing to origin..."
+              git push origin HEAD:$CURRENT_BRANCH
+              echo "::notice::Pushed commits that Claude forgot to push"
+            else
+              echo "No unpushed commits found"
+            fi
+          else
+            # Branch doesn't exist on remote, check if we have local commits
+            LOCAL_COMMITS=$(git log main..HEAD --oneline 2>/dev/null || git log --oneline -1 2>/dev/null || echo "")
+            if [ -n "$LOCAL_COMMITS" ] && [ "$CURRENT_BRANCH" != "main" ]; then
+              echo "Found unpushed branch with commits:"
+              echo "$LOCAL_COMMITS"
+              echo "Pushing new branch to origin..."
+              git push -u origin HEAD
+              echo "::notice::Pushed new branch that Claude forgot to push"
+            else
+              echo "No unpushed commits found (or still on main branch)"
+            fi
+          fi
