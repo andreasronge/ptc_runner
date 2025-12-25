@@ -393,6 +393,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert {:error, {:not_callable, 42}} = Lisp.run(source)
     end
 
+    @tag :capture_log
     test "unknown tool returns execution error" do
       # Tool calls to unregistered tools return error tuple
       source = ~S|(call "unknown-tool" {})|
