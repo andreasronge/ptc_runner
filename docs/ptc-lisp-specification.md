@@ -400,6 +400,54 @@ Tests conditions in order, returns first matching result:
 (cond false "only")                           ; => nil
 ```
 
+### 5.5 `if-let` and `when-let` — Conditional Binding
+
+Binds a value from an expression and evaluates the body only if the value is truthy.
+
+**`if-let` syntax:**
+```clojure
+(if-let [name condition-expr]
+  then-expr
+  else-expr)
+```
+
+**`when-let` syntax:**
+```clojure
+(when-let [name condition-expr]
+  body-expr)
+```
+
+**Semantics:**
+- `if-let` evaluates `condition-expr`, binds result to `name`, then evaluates `then-expr` if truthy, otherwise `else-expr`
+- `when-let` is like `if-let` but returns `nil` instead of an else branch
+- Both only support single symbol bindings (no destructuring)
+- Desugars at analysis time: `(if-let [x expr] then else)` → `(let [x expr] (if x then else))`
+
+**Examples:**
+```clojure
+(if-let [user (get-user 123)]
+  (str "Hello " user)
+  "User not found")               ; => "Hello Alice" or "User not found"
+
+(when-let [result (compute)]
+  (process result))               ; => result of process, or nil
+
+(if-let [x 0]
+  "truthy"
+  "falsy")                        ; => "truthy" (0 is truthy in Lisp)
+
+(if-let [x nil]
+  "yes"
+  "no")                           ; => "no"
+
+(when-let [x false]
+  (do-something))                 ; => nil
+```
+
+**Limitations:**
+- Only single bindings are supported (no sequential bindings like Clojure)
+- Binding names must be symbols (no destructuring patterns)
+
 ---
 
 ## 6. Threading Macros

@@ -286,6 +286,18 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(let [x 10 y 20] (+ x y))")
       assert_clojure_equivalent("(let [x 5 y (* x 2)] (+ x y))")
     end
+
+    test "if-let" do
+      assert_clojure_equivalent("(if-let [x 42] x 0)")
+      assert_clojure_equivalent("(if-let [x nil] x 0)")
+      assert_clojure_equivalent("(if-let [x false] x 0)")
+    end
+
+    test "when-let" do
+      assert_clojure_equivalent("(when-let [x 42] x)")
+      assert_clojure_equivalent("(when-let [x nil] x)")
+      assert_clojure_equivalent("(when-let [x false] x)")
+    end
   end
 
   describe "Clojure conformance - threading macros" do
