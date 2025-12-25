@@ -86,6 +86,8 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :if}, rest, _list), do: analyze_if(rest)
   defp dispatch_list_form({:symbol, :fn}, rest, _list), do: analyze_fn(rest)
   defp dispatch_list_form({:symbol, :when}, rest, _list), do: analyze_when(rest)
+  defp dispatch_list_form({:symbol, :"if-let"}, rest, _list), do: analyze_if_let(rest)
+  defp dispatch_list_form({:symbol, :"when-let"}, rest, _list), do: analyze_when_let(rest)
   defp dispatch_list_form({:symbol, :cond}, rest, _list), do: analyze_cond(rest)
   defp dispatch_list_form({:symbol, :->}, rest, _list), do: analyze_thread(:->, rest)
   defp dispatch_list_form({:symbol, :"->>"}, rest, _list), do: analyze_thread(:"->>", rest)
@@ -290,6 +292,54 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_when(_) do
     {:error, {:invalid_arity, :when, "expected (when cond body)"}}
+  end
+
+  # ============================================================
+  # Special form: if-let and when-let (conditional binding)
+  # ============================================================
+
+  # Desugar (if-let [x cond] then else) to (let [x cond] (if x then else))
+  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast]) do
+    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
+         {:ok, c} <- do_analyze(cond_ast),
+         {:ok, t} <- do_analyze(then_ast),
+         {:ok, e} <- do_analyze(else_ast) do
+      binding = {:binding, name, c}
+      {:ok, {:let, [binding], {:if, name, t, e}}}
+    end
+  end
+
+  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast]) when length(bindings) != 2 do
+    {:error, {:invalid_form, "if-let requires exactly one binding pair [name expr]"}}
+  end
+
+  defp analyze_if_let(_) do
+    {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
+  end
+
+  # Desugar (when-let [x cond] body) to (let [x cond] (if x body nil))
+  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, body_ast]) do
+    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
+         {:ok, c} <- do_analyze(cond_ast),
+         {:ok, b} <- do_analyze(body_ast) do
+      binding = {:binding, name, c}
+      {:ok, {:let, [binding], {:if, name, b, nil}}}
+    end
+  end
+
+  defp analyze_when_let([{:vector, bindings}, _body_ast]) when length(bindings) != 2 do
+    {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
+  end
+
+  defp analyze_when_let(_) do
+    {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body)"}}
+  end
+
+  # Helper: only allow simple symbol bindings (no destructuring)
+  defp analyze_simple_binding({:symbol, name}), do: {:ok, {:var, name}}
+
+  defp analyze_simple_binding(_) do
+    {:error, {:invalid_form, "binding must be a simple symbol, not a destructuring pattern"}}
   end
 
   # ============================================================
