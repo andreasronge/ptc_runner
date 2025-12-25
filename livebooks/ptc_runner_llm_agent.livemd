@@ -323,7 +323,7 @@ The default question involves grouping and aggregation, which some models find t
 
 ```elixir
 agent_question_input = Kino.Input.textarea("Ask the agent",
-  default: "Which category has the highest total spending? Show the breakdown."
+  default: "Show total spending by category with count and average for each, sorted by total descending."
 )
 ```
 
