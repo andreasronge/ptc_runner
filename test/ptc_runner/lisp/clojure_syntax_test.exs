@@ -98,6 +98,14 @@ defmodule PtcRunner.Lisp.ClojureSyntaxTest do
         :else "positive")
       """)
     end
+
+    test "if-let expression is valid Clojure" do
+      assert_valid_clojure_syntax("(if-let [x 42] x 0)")
+    end
+
+    test "when-let expression is valid Clojure" do
+      assert_valid_clojure_syntax("(when-let [x 42] x)")
+    end
   end
 
   describe "Clojure syntax validation - collections" do
