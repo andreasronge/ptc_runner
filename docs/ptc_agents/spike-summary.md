@@ -218,6 +218,20 @@ The LLM successfully generates plan-as-data with dependencies. A deterministic e
 
 ---
 
+### Ref-Driven Self-Correction [PROPOSED]
+
+A critical improvement identified during the spike is moving from passive extraction to **active contract enforcement**.
+
+**The Pattern**:
+If a required reference (e.g., `:email_id`) extracts to `nil` or fails validation, the system does not return immediately. Instead:
+1.  An error message is generated: *"Required ref 'email_id' was nil. Result was: [...]. Please include the missing field."*
+2.  This error is fed back to the `AgenticLoop`.
+3.  The SubAgent gets a limited number of **Ref Retries** (default: 1) to self-correct its output.
+
+**Benefit**: This prevents "Silent Failures" where a mission fails 3 steps later because of a missing ID. It enforces a strict interface between agents without requiring complex parent-level retry logic.
+
+---
+
 ## Open Questions
 
 ### Concurrent SubAgents
