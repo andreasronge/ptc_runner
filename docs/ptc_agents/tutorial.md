@@ -235,7 +235,18 @@ Pass small values (IDs, settings) to the sub-agent. These are available in PTC-L
 )
 ```
 
-The sub-agent can access these as `ctx/order_id` and `ctx/include-history` in its PTC-Lisp program.
+The sub-agent can access these as `ctx/order_id` in its PTC-Lisp program.
+
+#### `ctx/last-result`
+
+In a multi-turn agentic loop, you can access the result of the *most recent* program's execution using `ctx/last-result`:
+
+```clojure
+(let [urgent-emails (filter (where :is_urgent) (ctx/last-result))]
+  (mapv (fn [e] (call "read_email" {:id (:id e)})) urgent-emails))
+```
+
+This is the primary way agents chain transformations across turns without parent intervention.
 
 ### Refs (Extracting Values for Chaining)
 
@@ -269,6 +280,35 @@ memory/cached-data                 # Shorthand access
 ```
 
 **Important:** Memory is scoped per-agent. SubAgents do not share memory with their parent or siblings. This prevents state leaks and enables safe parallel execution.
+
+### Hardened Lisp for Agents
+
+The spike implemented several features to support common LLM patterns:
+
+#### Sequential Execution (`do`)
+Group multiple expressions for side effects. Only the last expression's result is returned.
+```clojure
+(do
+  (memory/put :step1 result)
+  (call "cleanup" {}))
+```
+
+#### Multiple Body Expressions
+`let` and `fn` blocks now support multiple body expressions, implicitly wrapped in a `do` block.
+
+#### Multi-Arity `map` and `mapv`
+Apply a function to elements from multiple collections simultaneously:
+```clojure
+(mapv (fn [email body] (assoc email :body body))
+      emails
+      bodies)
+```
+
+#### Keywords as Functions
+Look up keys in maps using the keyword itself as a function:
+```clojure
+(mapv :id urgent-emails) ; Equivalent to (mapv (fn [e] (:id e)) ...)
+```
 
 ---
 
@@ -621,13 +661,13 @@ assert refs == %{missing: nil}
 
 From spike testing with Gemini 2.5 Flash:
 
-1. **Missing functions**: LLM tries `(str ...)` and `(conj ...)` which don't exist in PTC-Lisp
-2. **Wrong data paths**: Uses `[:result :id]` instead of `[:result 0 :id]` for lists
-3. **Invalid comparators**: Uses `(sort-by :total >)` but `>` isn't a valid comparator
+1. **Missing functions**: LLM tries `(str ...)` and `(conj ...)` which are currently missing.
+2. **Data Path Confusion**: Uses `[:result :id]` instead of `[:result 0 :id]` for list-wrapped results.
+3. **Invalid comparators**: Uses `(sort-by :total >)` but `>` isn't a valid comparator function in the env (operators are syntax, not first-class functions yet).
 
 These should be addressed by either:
-- Adding missing functions to PTC-Lisp (`str`, `conj`)
-- Improving system prompts with SubAgent return structure
+- Adding `str` and `conj` to `PtcRunner.Lisp.Runtime`
+- Adding numeric safety (handling `nil` in arithmetic)
 - Adding custom comparator support to `sort-by`
 
 ---
