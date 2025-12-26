@@ -33,8 +33,8 @@ defmodule PtcRunner.Lisp.Env do
       {:filter, {:normal, &Runtime.filter/2}},
       {:remove, {:normal, &Runtime.remove/2}},
       {:find, {:normal, &Runtime.find/2}},
-      {:map, {:normal, &Runtime.map/2}},
-      {:mapv, {:normal, &Runtime.mapv/2}},
+      {:map, {:multi_arity, {&Runtime.map/2, &Runtime.map/3, &Runtime.map/4}}},
+      {:mapv, {:multi_arity, {&Runtime.mapv/2, &Runtime.mapv/3}}},
       {:pluck, {:normal, &Runtime.pluck/2}},
       {:sort, {:normal, &Runtime.sort/1}},
       # sort-by: 2-arity (key, coll) or 3-arity (key, comparator, coll)
@@ -88,6 +88,13 @@ defmodule PtcRunner.Lisp.Env do
       # Utility functions
       # ============================================================
       {:identity, {:normal, &Runtime.identity/1}},
+      {:doall, {:normal, &Runtime.identity/1}},
+      {:println,
+       {:variadic,
+        fn xs ->
+          IO.puts(Enum.join(xs, " "))
+          nil
+        end, nil}},
 
       # ============================================================
       # Arithmetic — variadic with identity

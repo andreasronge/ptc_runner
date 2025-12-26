@@ -148,33 +148,31 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
                Analyze.analyze(raw)
     end
 
-    test "error: if-let with wrong arity (missing else)" do
+    test "if-let without else defaults to nil" do
       raw = {:list, [{:symbol, :"if-let"}, {:vector, [{:symbol, :x}, 1]}, {:symbol, :x}]}
-      assert {:error, {:invalid_arity, :"if-let", msg}} = Analyze.analyze(raw)
-      assert msg =~ "expected"
+      assert {:ok, _} = Analyze.analyze(raw)
     end
 
-    test "error: if-let with multiple bindings" do
+    test "error: if-let with wrong binding count" do
       raw =
         {:list,
          [{:symbol, :"if-let"}, {:vector, [{:symbol, :x}, 1, {:symbol, :y}, 2]}, :ok, :err]}
 
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "one binding"
+      assert {:error, {:invalid_arity, :"if-let", msg}} = Analyze.analyze(raw)
+      assert msg =~ "expected"
     end
 
-    test "error: if-let with destructuring pattern" do
+    test "if-let supports destructuring pattern" do
       raw =
         {:list,
          [
            {:symbol, :"if-let"},
            {:vector, [{:map, [{{:keyword, :keys}, {:vector, [{:symbol, :a}]}}]}, {:map, []}]},
-           :ok,
-           :err
+           {:keyword, :ok},
+           {:keyword, :err}
          ]}
 
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "simple symbol"
+      assert {:ok, _} = Analyze.analyze(raw)
     end
 
     test "error: if-let with non-vector binding" do
@@ -185,8 +183,8 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
 
     test "error: if-let with empty vector" do
       raw = {:list, [{:symbol, :"if-let"}, {:vector, []}, {:symbol, :x}, 0]}
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "one binding"
+      assert {:error, {:invalid_arity, :"if-let", msg}} = Analyze.analyze(raw)
+      assert msg =~ "expected"
     end
   end
 
@@ -219,25 +217,24 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
       assert msg =~ "expected"
     end
 
-    test "error: when-let with multiple bindings" do
+    test "error: when-let with wrong binding count" do
       raw =
         {:list, [{:symbol, :"when-let"}, {:vector, [{:symbol, :x}, 1, {:symbol, :y}, 2]}, :ok]}
 
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "one binding"
+      assert {:error, {:invalid_arity, :"when-let", msg}} = Analyze.analyze(raw)
+      assert msg =~ "expected"
     end
 
-    test "error: when-let with destructuring pattern" do
+    test "when-let supports destructuring pattern" do
       raw =
         {:list,
          [
            {:symbol, :"when-let"},
            {:vector, [{:vector, [{:symbol, :a}]}, {:vector, []}]},
-           :ok
+           {:keyword, :ok}
          ]}
 
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "simple symbol"
+      assert {:ok, _} = Analyze.analyze(raw)
     end
 
     test "error: when-let with non-vector binding" do
@@ -248,8 +245,8 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
 
     test "error: when-let with empty vector" do
       raw = {:list, [{:symbol, :"when-let"}, {:vector, []}, {:symbol, :x}]}
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "one binding"
+      assert {:error, {:invalid_arity, :"when-let", msg}} = Analyze.analyze(raw)
+      assert msg =~ "expected"
     end
   end
 

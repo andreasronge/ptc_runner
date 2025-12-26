@@ -189,8 +189,8 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
+  @doc "Map function over one or more collections. Arity of function must match number of collections."
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
-
   def map(f, %MapSet{} = set), do: Enum.map(set, f)
 
   def map(f, coll) when is_map(coll) do
@@ -198,11 +198,23 @@ defmodule PtcRunner.Lisp.Runtime do
     Enum.map(coll, fn {k, v} -> f.([k, v]) end)
   end
 
-  def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
+  def map(f, coll, coll2) when is_list(coll) and is_list(coll2) do
+    Enum.zip(coll, coll2) |> Enum.map(fn {a, b} -> f.(a, b) end)
+  end
 
+  def map(f, coll, coll2, coll3) when is_list(coll) and is_list(coll2) and is_list(coll3) do
+    Enum.zip([coll, coll2, coll3]) |> Enum.map(fn [a, b, c] -> f.(a, b, c) end)
+  end
+
+  def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
   def mapv(f, %MapSet{} = set), do: Enum.map(set, f)
 
   def mapv(f, coll) when is_map(coll), do: Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+
+  def mapv(f, coll1, coll2) when is_list(coll1) and is_list(coll2) do
+    Enum.zip(coll1, coll2) |> Enum.map(fn {a, b} -> f.(a, b) end)
+  end
+
   def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &flex_get(&1, key))
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)

@@ -259,6 +259,29 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  defp do_eval({:do, exprs}, ctx, memory, env, tool_exec) do
+    Enum.reduce_while(exprs, {:ok, nil, memory}, fn expr, {:ok, _prev, mem} ->
+      case do_eval(expr, ctx, mem, env, tool_exec) do
+        {:ok, v, mem2} -> {:cont, {:ok, v, mem2}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp do_eval({:memory_put, key_ast, val_ast}, ctx, memory, env, tool_exec) do
+    with {:ok, key, memory2} <- do_eval(key_ast, ctx, memory, env, tool_exec),
+         {:ok, val, memory3} <- do_eval(val_ast, ctx, memory2, env, tool_exec) do
+      new_memory = Map.put(memory3, key, val)
+      {:ok, val, new_memory}
+    end
+  end
+
+  defp do_eval({:memory_get, key_ast}, ctx, memory, env, tool_exec) do
+    with {:ok, key, memory2} <- do_eval(key_ast, ctx, memory, env, tool_exec) do
+      {:ok, flex_get(memory2, key), memory2}
+    end
+  end
+
   # ============================================================
   # Evaluation helpers
   # ============================================================
@@ -694,9 +717,25 @@ defmodule PtcRunner.Lisp.Eval do
   defp normalize_for_comparison(value), do: value
 
   # Convert Lisp closures to Erlang functions for use with higher-order functions
-  # The closure must have 1 parameter (enforced at evaluation time)
+  # Arities 1, 2, and 3 are supported to match builtin map/mapv arities.
   defp closure_to_fun({:closure, patterns, body, closure_env}, ctx, memory, tool_exec) do
-    fn arg -> eval_closure_arg(arg, patterns, body, closure_env, ctx, memory, tool_exec) end
+    case length(patterns) do
+      1 ->
+        fn a -> eval_closure_args([a], patterns, body, closure_env, ctx, memory, tool_exec) end
+
+      2 ->
+        fn a, b ->
+          eval_closure_args([a, b], patterns, body, closure_env, ctx, memory, tool_exec)
+        end
+
+      3 ->
+        fn a, b, c ->
+          eval_closure_args([a, b, c], patterns, body, closure_env, ctx, memory, tool_exec)
+        end
+
+      ar ->
+        raise RuntimeError, "closures with arity #{ar} cannot be used as function arguments"
+    end
   end
 
   # Unwrap builtin function tuples so they can be passed to higher-order functions
@@ -714,26 +753,39 @@ defmodule PtcRunner.Lisp.Eval do
     fun
   end
 
-  # Non-closures pass through unchanged
+  # Non-closures pass through unchanged, except keywords which become lookup functions
+  defp closure_to_fun(k, _ctx, _memory, _tool_exec)
+       when is_atom(k) and not is_boolean(k) and not is_nil(k) do
+    fn m -> flex_get(m, k) end
+  end
+
   defp closure_to_fun(value, _ctx, _memory, _tool_exec) do
     value
   end
 
-  # Helper to evaluate closure with a single argument.
-  # This function is used inside Erlang functions passed to builtins like Enum.map,
+  # Helper to evaluate closure with multiple arguments.
+  # This function is used inside Erlang functions passed to builtins,
   # so it must raise (not return error tuples) to signal errors.
   # The raised RuntimeError is caught in apply_fun and converted to an error tuple.
-  defp eval_closure_arg(arg, patterns, body, closure_env, ctx, memory, tool_exec) do
-    if length(patterns) != 1 do
-      raise RuntimeError, "closure arity mismatch: expected 1, got #{length(patterns)}"
+  defp eval_closure_args(args, patterns, body, closure_env, ctx, memory, tool_exec) do
+    if length(patterns) != length(args) do
+      raise RuntimeError,
+            "closure arity mismatch: expected #{length(patterns)}, got #{length(args)}"
     end
 
-    [pattern] = patterns
+    result =
+      Enum.zip(patterns, args)
+      |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
+        case match_pattern(pattern, arg) do
+          {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
 
-    case match_pattern(pattern, arg) do
+    case result do
       {:ok, bindings} ->
         new_env = Map.merge(closure_env, bindings)
-
+        # Use do_eval, but we must handle error tuple by raising
         case do_eval(body, ctx, memory, new_env, tool_exec) do
           {:ok, result, _} -> result
           {:error, reason} -> raise RuntimeError, "closure eval error: #{inspect(reason)}"
@@ -787,8 +839,8 @@ defmodule PtcRunner.Lisp.Eval do
   defp describe_type(x) when is_binary(x), do: "string"
   defp describe_type(x) when is_number(x), do: "number"
   defp describe_type(x) when is_boolean(x), do: "boolean"
+  defp describe_type(nil), do: "nil"
   defp describe_type(x) when is_atom(x), do: "keyword"
   defp describe_type(x) when is_function(x), do: "function"
-  defp describe_type(nil), do: "nil"
   defp describe_type(_), do: "unknown"
 end
