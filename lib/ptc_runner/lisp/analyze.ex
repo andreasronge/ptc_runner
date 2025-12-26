@@ -89,6 +89,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :"if-let"}, rest, _list), do: analyze_if_let(rest)
   defp dispatch_list_form({:symbol, :"when-let"}, rest, _list), do: analyze_when_let(rest)
   defp dispatch_list_form({:symbol, :cond}, rest, _list), do: analyze_cond(rest)
+  defp dispatch_list_form({:symbol, :do}, rest, _list), do: analyze_do(rest)
   defp dispatch_list_form({:symbol, :->}, rest, _list), do: analyze_thread(:->, rest)
   defp dispatch_list_form({:symbol, :"->>"}, rest, _list), do: analyze_thread(:"->>", rest)
   defp dispatch_list_form({:symbol, :and}, rest, _list), do: analyze_and(rest)
@@ -101,6 +102,8 @@ defmodule PtcRunner.Lisp.Analyze do
     do: analyze_pred_comb(:none_of, rest)
 
   defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
+  defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
+  defp dispatch_list_form({:ns_symbol, :memory, :get}, rest, _list), do: analyze_memory_get(rest)
 
   # Comparison operators (strict 2-arity per spec section 8.4)
   defp dispatch_list_form({:symbol, op}, rest, _list)
@@ -108,16 +111,88 @@ defmodule PtcRunner.Lisp.Analyze do
        do: analyze_comparison(op, rest)
 
   # Generic function call
+  defp dispatch_list_form({:ns_symbol, ns, key}, [], _list) when ns in [:ctx, :memory] do
+    {:ok, {ns, key}}
+  end
+
   defp dispatch_list_form(_head, _rest, list), do: analyze_call(list)
+
+  # ============================================================
+  # Special form: do
+  # ============================================================
+
+  defp analyze_do(exprs_ast) do
+    with {:ok, exprs} <- analyze_list(exprs_ast) do
+      {:ok, {:do, exprs}}
+    end
+  end
+
+  defp analyze_memory_put([key_ast, val_ast]) do
+    with {:ok, key} <- do_analyze(key_ast),
+         {:ok, val} <- do_analyze(val_ast) do
+      {:ok, {:memory_put, key, val}}
+    end
+  end
+
+  defp analyze_memory_put(_) do
+    {:error, {:invalid_arity, :"memory/put", "expected (memory/put key value)"}}
+  end
+
+  defp analyze_memory_get([key_ast]) do
+    with {:ok, key} <- do_analyze(key_ast) do
+      {:ok, {:memory_get, key}}
+    end
+  end
+
+  defp analyze_memory_get(_) do
+    {:error, {:invalid_arity, :"memory/get", "expected (memory/get key)"}}
+  end
+
+  # ============================================================
+  # Special form: if-let and when-let
+  # ============================================================
+
+  defp analyze_if_let([{:vector, [pattern_ast, value_ast]}, then_ast]) do
+    analyze_if_let([{:vector, [pattern_ast, value_ast]}, then_ast, nil])
+  end
+
+  defp analyze_if_let([{:vector, [pattern_ast, value_ast]}, then_ast, else_ast]) do
+    # Desugar: (if-let [x val] then else) -> (let [x val] (if x then else))
+    # Note: Our 'let' already handles destructuring and bindings.
+    # This is a slightly simplified version of Clojure's if-let but covers most agent needs.
+    analyze_let([
+      {:vector, [pattern_ast, value_ast]},
+      {:list, [{:symbol, :if}, pattern_ast, then_ast, else_ast]}
+    ])
+  end
+
+  defp analyze_if_let(_) do
+    {:error,
+     {:invalid_arity, :"if-let",
+      "expected (if-let [pattern value] then) or (if-let [pattern value] then else)"}}
+  end
+
+  # Desugar: (when-let [x val] body) -> (if-let [x val] body nil)
+  defp analyze_when_let([{:vector, [pattern_ast, value_ast]}, body_ast]) do
+    analyze_if_let([{:vector, [pattern_ast, value_ast]}, body_ast, nil])
+  end
+
+  defp analyze_when_let(_) do
+    {:error, {:invalid_arity, :"when-let", "expected (when-let [pattern value] body)"}}
+  end
 
   # ============================================================
   # Special form: let
   # ============================================================
 
-  defp analyze_let([bindings_ast, body_ast]) do
+  defp analyze_let([bindings_ast | body_asts]) do
     with {:ok, bindings} <- analyze_bindings(bindings_ast),
-         {:ok, body} <- do_analyze(body_ast) do
-      {:ok, {:let, bindings, body}}
+         {:ok, body_exprs} <- analyze_list(body_asts) do
+      case body_exprs do
+        [] -> {:error, {:invalid_form, "let requires at least one body expression"}}
+        [single] -> {:ok, {:let, bindings, single}}
+        multiple -> {:ok, {:let, bindings, {:do, multiple}}}
+      end
     end
   end
 
@@ -295,54 +370,6 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # Special form: if-let and when-let (conditional binding)
-  # ============================================================
-
-  # Desugar (if-let [x cond] then else) to (let [x cond] (if x then else))
-  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast]) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast),
-         {:ok, t} <- do_analyze(then_ast),
-         {:ok, e} <- do_analyze(else_ast) do
-      binding = {:binding, name, c}
-      {:ok, {:let, [binding], {:if, name, t, e}}}
-    end
-  end
-
-  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast]) when length(bindings) != 2 do
-    {:error, {:invalid_form, "if-let requires exactly one binding pair [name expr]"}}
-  end
-
-  defp analyze_if_let(_) do
-    {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
-  end
-
-  # Desugar (when-let [x cond] body) to (let [x cond] (if x body nil))
-  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, body_ast]) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast),
-         {:ok, b} <- do_analyze(body_ast) do
-      binding = {:binding, name, c}
-      {:ok, {:let, [binding], {:if, name, b, nil}}}
-    end
-  end
-
-  defp analyze_when_let([{:vector, bindings}, _body_ast]) when length(bindings) != 2 do
-    {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
-  end
-
-  defp analyze_when_let(_) do
-    {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body)"}}
-  end
-
-  # Helper: only allow simple symbol bindings (no destructuring)
-  defp analyze_simple_binding({:symbol, name}), do: {:ok, {:var, name}}
-
-  defp analyze_simple_binding(_) do
-    {:error, {:invalid_form, "binding must be a simple symbol, not a destructuring pattern"}}
-  end
-
-  # ============================================================
   # Special form: cond → nested if
   # ============================================================
 
@@ -397,10 +424,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: fn (anonymous functions)
   # ============================================================
 
-  defp analyze_fn([params_ast, body_ast]) do
+  defp analyze_fn([params_ast | body_asts]) do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast) do
-      {:ok, {:fn, params, body}}
+         {:ok, body_exprs} <- analyze_list(body_asts) do
+      case body_exprs do
+        [] -> {:error, {:invalid_form, "fn requires at least one body expression"}}
+        [single] -> {:ok, {:fn, params, single}}
+        multiple -> {:ok, {:fn, params, {:do, multiple}}}
+      end
     end
   end
 
@@ -493,6 +524,13 @@ defmodule PtcRunner.Lisp.Analyze do
       [field_ast] ->
         with {:ok, field_path} <- analyze_field_path(field_ast) do
           {:ok, {:where, field_path, :truthy, nil}}
+        end
+
+      [field_ast, value_ast] ->
+        # Handle (where :field value) as (where :field = value)
+        with {:ok, field_path} <- analyze_field_path(field_ast),
+             {:ok, value} <- do_analyze(value_ast) do
+          {:ok, {:where, field_path, :eq, value}}
         end
 
       [field_ast, {:symbol, op}, value_ast] ->
