@@ -2,7 +2,9 @@
 
 A practical guide to building context-efficient agentic workflows with PTC SubAgents.
 
-> **Scope**: This SubAgent feature is demo-only (`demo/` folder), not part of the core PtcRunner library. It uses the PTC-Lisp DSL exclusively.
+> **API Location**: `PtcRunner.SubAgent` (core library)
+> **Specification**: See [specification.md](specification.md) for full API reference
+> **Demo helpers**: `PtcDemo.LLM` and `PtcDemo.ModelRegistry` provide ReqLLM integration
 
 ## What is a SubAgent?
 
@@ -65,34 +67,40 @@ A SubAgent runs an **agentic loop** (`AgenticLoop` module) - it may execute mult
 ### Module Structure
 
 ```
+lib/ptc_runner/
+├── sub_agent.ex              # Main API: delegate/2, as_tool/1
+└── sub_agent/
+    ├── loop.ex               # Multi-turn agentic execution
+    ├── ref_extractor.ex      # Deterministic value extraction
+    └── prompt.ex             # System prompt generation
+
 demo/lib/ptc_demo/
-├── agentic_loop.ex    # Reusable multi-turn execution logic
-├── sub_agent.ex       # SubAgent.delegate/2 and as_tool/1 APIs
-├── ref_extractor.ex   # Deterministic value extraction from results
-└── lisp_agent.ex      # Main agent (uses AgenticLoop)
+├── llm.ex                    # ReqLLM helpers (convenience)
+├── model_registry.ex         # Model aliases and provider selection
+└── lisp_agent.ex             # Example agent using SubAgent
 ```
 
 ### Data Flow
 
 ```
                     ┌─────────────────────────────────────┐
-                    │           SubAgent.delegate/2        │
+                    │     PtcRunner.SubAgent.delegate/2    │
                     └─────────────────────────────────────┘
                                       │
                                       ▼
                     ┌─────────────────────────────────────┐
-                    │           AgenticLoop.run/4          │
+                    │      PtcRunner.SubAgent.Loop.run/2   │
                     │  • Manages conversation context      │
                     │  • Tracks tool calls per turn        │
-                    │  • Accumulates token usage           │
+                    │  • Accumulates usage statistics      │
                     │  • Records execution trace           │
                     └─────────────────────────────────────┘
                                       │
                     ┌─────────────────┴─────────────────┐
                     ▼                                   ▼
             ┌─────────────┐                    ┌─────────────┐
-            │  LLM Call   │                    │PtcRunner.Lisp│
-            │ (ReqLLM)    │                    │   .run/2    │
+            │ LLM Callback │                   │PtcRunner.Lisp│
+            │ (user-provided)│                 │   .run/2    │
             └─────────────┘                    └─────────────┘
                                                       │
                                                       ▼
@@ -103,7 +111,7 @@ demo/lib/ptc_demo/
                                                       │
                                                       ▼
                     ┌─────────────────────────────────────┐
-                    │         RefExtractor.extract/2       │
+                    │  PtcRunner.SubAgent.RefExtractor     │
                     │  • Path-based: [Access.at(0), :id]  │
                     │  • Function-based: &length/1         │
                     └─────────────────────────────────────┘
@@ -116,16 +124,27 @@ demo/lib/ptc_demo/
 Here's the simplest possible example - delegate a task and get a result:
 
 ```elixir
-# Define tools the sub-agent can use
+# 1. Create an LLM callback (you provide the integration)
+llm = fn %{system: system, messages: messages} ->
+  # Call your LLM provider here
+  # Return {:ok, "response"} or {:error, reason}
+  MyLLM.chat(system, messages)
+end
+
+# Or use the demo helper with ReqLLM:
+# llm = PtcDemo.LLM.callback("gemini")
+
+# 2. Define tools the sub-agent can use
 tools = %{
-  "get_products" => fn _ ->
+  "get_products" => fn _args ->
     [%{name: "Widget", price: 100}, %{name: "Gadget", price: 50}]
   end
 }
 
-# Delegate a task
-{:ok, result} = PtcDemo.SubAgent.delegate(
+# 3. Delegate a task
+{:ok, result} = PtcRunner.SubAgent.delegate(
   "What is the most expensive product?",
+  llm: llm,
   tools: tools
 )
 
@@ -134,7 +153,7 @@ result.summary  #=> "The most expensive product is Widget at $100"
 ```
 
 The sub-agent:
-1. Receives your task and available tools
+1. Receives your task, LLM callback, and available tools
 2. Generates a PTC-Lisp program to solve it
 3. Executes the program safely in isolation
 4. Returns the result with a summary
@@ -146,6 +165,9 @@ The sub-agent:
 This example shows a realistic multi-step workflow where sub-agents handle different parts of an email processing task.
 
 ```elixir
+# Setup LLM callback (once)
+llm = PtcDemo.LLM.callback("gemini")  # Or your own callback
+
 # Tools for reading emails
 email_tools = %{
   "list_emails" => fn _args ->
@@ -168,8 +190,9 @@ drafting_tools = %{
 }
 
 # Step 1: Find urgent emails (sub-agent handles the filtering)
-{:ok, step1} = PtcDemo.SubAgent.delegate(
+{:ok, step1} = PtcRunner.SubAgent.delegate(
   "Find all urgent emails",
+  llm: llm,
   tools: email_tools,
   refs: %{
     email_ids: fn result -> Enum.map(result, & &1[:id]) end,
@@ -184,8 +207,9 @@ step1.refs
 #=> %{email_ids: [1, 3], count: 2}
 
 # Step 2: Draft responses using only the IDs (not the full email bodies)
-{:ok, step2} = PtcDemo.SubAgent.delegate(
+{:ok, step2} = PtcRunner.SubAgent.delegate(
   "Draft brief acknowledgment replies for these emails",
+  llm: llm,
   tools: drafting_tools,
   context: %{email_ids: step1.refs.email_ids}
 )
@@ -228,8 +252,9 @@ tools = %{
 Pass small values (IDs, settings) to the sub-agent. These are available in PTC-Lisp as `ctx/key`:
 
 ```elixir
-{:ok, result} = PtcDemo.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.delegate(
   "Get details for this order",
+  llm: llm,
   tools: order_tools,
   context: %{order_id: "ORD-12345", include_history: true}
 )
@@ -253,8 +278,9 @@ This is the primary way agents chain transformations across turns without parent
 Extract specific values from results for passing to the next step:
 
 ```elixir
-{:ok, result} = PtcDemo.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.delegate(
   "Find the top customer by revenue",
+  llm: llm,
   tools: customer_tools,
   refs: %{
     customer_id: [Access.at(0), :id],           # Path-based extraction
@@ -317,10 +343,12 @@ Look up keys in maps using the keyword itself as a function:
 Wrap sub-agents as tools so a main agent can orchestrate them:
 
 ```elixir
+llm = PtcDemo.LLM.callback("gemini")  # Or your own callback
+
 # Create sub-agent tools
 main_tools = %{
-  "customer-finder" => PtcDemo.SubAgent.as_tool(
-    model: "gemini",
+  "customer-finder" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
     tools: %{
       "search_customers" => fn _args ->
         [%{id: 501, name: "Top Client", revenue: 1_000_000}]
@@ -329,8 +357,8 @@ main_tools = %{
     refs: %{customer_id: [Access.at(0), :id]}
   ),
 
-  "order-fetcher" => PtcDemo.SubAgent.as_tool(
-    model: "gemini",
+  "order-fetcher" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
     tools: %{
       "list_orders" => fn args ->
         cid = args[:customer_id] || args["customer_id"]
@@ -342,8 +370,9 @@ main_tools = %{
 }
 
 # Now the main agent can orchestrate these sub-agents
-{:ok, result} = PtcDemo.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.delegate(
   "Find the top customer and get their orders",
+  llm: llm,
   tools: main_tools
 )
 ```
@@ -369,7 +398,7 @@ planning_tools = %{
   end
 }
 
-{:ok, result} = PtcDemo.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.delegate(
   """
   Create a plan to:
   1. Find all urgent emails
@@ -379,6 +408,7 @@ planning_tools = %{
   Use the "create_plan" tool to submit your plan.
   Each step should have: :id, :task, :tools, :needs (dependencies), :output
   """,
+  llm: llm,
   tools: planning_tools,
   context: %{available_tools: ["email-finder", "email-reader", "reply-drafter"]}
 )
@@ -420,7 +450,7 @@ Plan execution is done in Elixir (not PTC-Lisp). A simple executor:
 
 ```elixir
 defmodule PlanExecutor do
-  def run(plan, tool_registry) do
+  def run(plan, tool_registry, llm) do
     Enum.reduce(plan.steps, %{}, fn step, context ->
       # Build context from previous steps
       step_context = Map.take(context, step.needs)
@@ -429,8 +459,9 @@ defmodule PlanExecutor do
       tools = Map.get(tool_registry, step.tools)
 
       # Execute via SubAgent
-      {:ok, result} = PtcDemo.SubAgent.delegate(
+      {:ok, result} = PtcRunner.SubAgent.delegate(
         step.task,
+        llm: llm,
         tools: tools,
         context: step_context
       )
@@ -536,20 +567,44 @@ The registry auto-selects provider based on available API keys (`GOOGLE_API_KEY`
 
 ## API Reference
 
-### SubAgent.delegate/2
+See [specification.md](specification.md) for full type definitions.
+
+### PtcRunner.SubAgent.delegate/2
 
 ```elixir
-{:ok, result} = PtcDemo.SubAgent.delegate(task, opts)
+{:ok, result} = PtcRunner.SubAgent.delegate(task, opts)
 ```
 
-**Options:**
+**Required Options:**
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `tools` | map | Tool functions the sub-agent can call |
-| `context` | map | Values accessible as `ctx/key` in the program |
-| `refs` | map | Paths or functions to extract values from result |
-| `model` | string | LLM model alias or full ID |
+| `llm` | function | LLM callback `fn %{system:, messages:} -> {:ok, text}` |
+
+**Optional:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tools` | map | `%{}` | Tool functions the sub-agent can call |
+| `context` | map | `%{}` | Values accessible as `ctx/key` in the program |
+| `refs` | map | `%{}` | Reference extraction spec (see below) |
+| `max_turns` | integer | `5` | Maximum LLM calls before failing |
+| `timeout` | integer | `5000` | Per-program execution timeout (ms) |
+| `max_ref_retries` | integer | `1` | Retries if required refs are missing |
+
+#### Defining Refs as Contracts
+
+You can mark specific refs as `required`. If extraction returns `nil`, the SubAgent will be given feedback and a "ref retry" to fix its response:
+
+```elixir
+refs: %{
+  # Required contract: will trigger retry if nil
+  email_ids: [path: [Access.at(0), :id], required: true],
+  
+  # Optional: nil is fine
+  count: &length/1
+}
+```
 
 **Return value:**
 
@@ -566,24 +621,24 @@ The registry auto-selects provider based on available API keys (`GOOGLE_API_KEY`
 {:error, %{reason: term(), usage: map(), trace: [map()]}}
 ```
 
-### SubAgent.as_tool/1
+### PtcRunner.SubAgent.as_tool/1
 
 Wrap a SubAgent configuration as a callable tool:
 
 ```elixir
-tool = PtcDemo.SubAgent.as_tool(
-  model: "gemini",
+tool = PtcRunner.SubAgent.as_tool(
+  llm: llm,
   tools: %{"search" => &MyApp.search/1},
   refs: %{id: [Access.at(0), :id]}
 )
 ```
 
-The returned function takes `%{task: "..."}` and returns the SubAgent result.
+The returned function takes `%{"task" => "..."}` and returns the SubAgent result.
 
-### RefExtractor.extract/2
+### PtcRunner.SubAgent.RefExtractor.extract/2
 
 ```elixir
-refs = PtcDemo.RefExtractor.extract(result, %{
+refs = PtcRunner.SubAgent.RefExtractor.extract(result, %{
   first_id: [Access.at(0), :id],  # Path-based
   count: &length/1                 # Function-based
 })
@@ -728,7 +783,7 @@ tasks = [
 results =
   tasks
   |> Task.async_stream(fn {name, task, tools} ->
-    {:ok, result} = PtcDemo.SubAgent.delegate(task, tools: tools)
+    {:ok, result} = PtcRunner.SubAgent.delegate(task, llm: llm, tools: tools)
     {name, result.summary}
   end, max_concurrency: 3)
   |> Enum.map(fn {:ok, result} -> result end)
@@ -740,5 +795,6 @@ results =
 
 ## Further Reading
 
+- [Specification](specification.md) - Full API reference and type definitions
 - [Spike Summary](spike-summary.md) - Validation results and architectural decisions
 - [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation
