@@ -1,10 +1,12 @@
 # PTC SubAgents Tutorial
 
+**Notice:** This API isn’t implemented yet.
+This tutorial describes the planned “SubAgents” API and exists to validate the design early—so it’s ergonomic, consistent, and pleasant to use before we commit to the implementation.
+
 A practical guide to building context-efficient agentic workflows with PTC SubAgents.
 
 > **API Location**: `PtcRunner.SubAgent` (core library)
 > **Specification**: See [specification.md](specification.md) for full API reference
-> **Demo helpers**: `PtcDemo.LLM` and `PtcDemo.ModelRegistry` provide ReqLLM integration
 
 ## What is a SubAgent?
 
@@ -161,15 +163,10 @@ The SubAgent system provides a small set of composable primitives. Everything el
 Here's the simplest possible example - delegate a task and get a result:
 
 ```elixir
-# 1. Create an LLM callback (you provide the integration)
+# 1. Create an LLM callback (see "LLM Integration" below)
 llm = fn %{system: system, messages: messages} ->
-  # Call your LLM provider here
-  # Return {:ok, "response"} or {:error, reason}
-  MyLLM.chat(system, messages)
+  MyLLM.chat(system, messages)  # Return {:ok, text} or {:error, reason}
 end
-
-# Or use the demo helper with ReqLLM:
-# llm = PtcDemo.LLM.callback("gemini")
 
 # 2. Define tools the sub-agent can use
 tools = %{
@@ -197,13 +194,71 @@ The sub-agent:
 
 ---
 
+## LLM Integration
+
+SubAgent is provider-agnostic. You supply a callback function that calls your LLM.
+
+### Callback Interface
+
+```elixir
+# Required fields
+fn %{system: String.t(), messages: [map()]} ->
+  {:ok, String.t()} | {:error, term()}
+end
+
+# Optional fields (callback can ignore these)
+%{
+  system: "...",
+  messages: [...],
+  turn: 2,                    # Current turn number
+  task: "Find urgent emails", # Original task
+  tool_names: ["search"],     # Available tools
+  llm_opts: %{temperature: 0.7}  # User-provided options
+}
+```
+
+### ReqLLM Example
+
+```elixir
+# Add {:req_llm, "~> 0.x"} to your deps
+defmodule MyApp.LLM do
+  def callback(model \\ "google/gemini-2.5-flash") do
+    fn %{system: system, messages: messages} = params ->
+      opts = Map.get(params, :llm_opts, %{})
+
+      case ReqLLM.chat(:openrouter,
+             model: model,
+             system: system,
+             messages: messages,
+             temperature: opts[:temperature] || 0.7) do
+        {:ok, %{choices: [%{message: %{content: text}} | _]}} -> {:ok, text}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+end
+
+# Usage
+llm = MyApp.LLM.callback()
+PtcRunner.SubAgent.delegate(task, llm: llm, tools: tools)
+
+# With options
+PtcRunner.SubAgent.delegate(task,
+  llm: llm,
+  tools: tools,
+  llm_opts: %{temperature: 0.2}
+)
+```
+
+---
+
 ## Example: Email Processing Pipeline
 
 This example shows a realistic multi-step workflow where sub-agents handle different parts of an email processing task.
 
 ```elixir
-# Setup LLM callback (once)
-llm = PtcDemo.LLM.callback("gemini")  # Or your own callback
+# Setup LLM callback
+llm = MyApp.LLM.callback()
 
 # Tools for reading emails
 email_tools = %{
@@ -283,6 +338,260 @@ tools = %{
 ```
 
 **Note:** Tool functions receive a map of arguments. The LLM may pass keys as atoms or strings, so check both.
+
+### Tool Contracts (Types)
+
+Tools can have **contracts** that serve two purposes:
+1. **Declarative schema** → LLM sees what the tool accepts/returns
+2. **Programmatic validation** → Runtime checks with error feedback
+
+#### Auto-Extraction from @spec (Default)
+
+The simplest approach: just pass a function reference. The library auto-extracts type info from `@spec`:
+
+```elixir
+# In your module:
+@spec search(String.t(), integer()) :: [%{id: integer(), title: String.t()}]
+def search(query, limit), do: ...
+
+@spec get_customer(integer()) :: %{id: integer(), name: String.t()}
+def get_customer(id), do: ...
+
+# Tool registration - specs extracted automatically:
+tools = %{
+  "search" => &MyApp.search/2,
+  "get_customer" => &MyApp.get_customer/1
+}
+```
+
+The library uses `Function.info/1` to get module/function/arity, then `Code.Typespec.fetch_specs/1` to extract the spec.
+
+**Supported types:** Auto-extraction handles a pragmatic subset of Elixir types:
+
+| Elixir type | Maps to |
+|-------------|---------|
+| `String.t()` | `:string` |
+| `integer()` | `:int` |
+| `float()` | `:float` |
+| `boolean()` | `:bool` |
+| `atom()` | `:keyword` |
+| `map()` | `:map` |
+| `list(t)` | `[:t]` |
+| `%{key: type}` | `{:key :type}` |
+
+**Unsupported types** require explicit override:
+- `pid()`, `reference()`, `port()` - no JSON equivalent
+- `timeout()` - union of integer and `:infinity`
+- Complex unions - `{:ok, t} | {:error, reason}`
+- Custom `@type` definitions - not recursively expanded
+- Opaque types - `t()` from other modules
+
+```elixir
+# This won't auto-extract cleanly
+@spec start_link(GenServer.options()) :: GenServer.on_start()
+def start_link(opts), do: ...
+
+# Use explicit override instead
+tools = %{
+  "start" => {&start_link/1, :skip}  # or provide manual spec
+}
+```
+
+#### Override with Explicit Spec
+
+Override auto-extraction with a tuple `{function, spec}`:
+
+```elixir
+tools = %{
+  # String schema format
+  "search" => {
+    &MyApp.search/2,
+    "(query :string, limit :int) -> [{:id :int :title :string}]"
+  },
+
+  # ToolSpec struct for full control
+  "complex" => {
+    &MyApp.complex_op/1,
+    ToolSpec.new(
+      params: [
+        query: [type: :string, required: true],
+        limit: [type: :int, default: 10]
+      ],
+      returns: [{:id, :int}, {:title, :string}]
+    )
+  }
+}
+```
+
+#### Skip Validation
+
+For tools where validation isn't needed or possible:
+
+```elixir
+tools = %{
+  # Skip validation for specific tool
+  "dynamic" => {&MyApp.dynamic_fn/1, :skip},
+
+  # Anonymous functions have no @spec to extract
+  "inline" => fn args -> some_operation(args) end
+}
+```
+
+#### Global Validation Options
+
+Control validation behavior at the delegation level:
+
+```elixir
+PtcRunner.SubAgent.delegate(task,
+  tools: tools,
+  tool_validation: :enabled  # default
+)
+```
+
+| Option | Behavior |
+|--------|----------|
+| `:enabled` | Validate, fail on errors (default) |
+| `:warn_only` | Validate, log errors but continue |
+| `:disabled` | Skip all validation |
+| `:strict` | Fail if any tool lacks a spec |
+
+**Behavior matrix:**
+
+| Tool definition | `@spec` exists? | Behavior |
+|-----------------|-----------------|----------|
+| `&fun/n` | Yes | Auto-extract, validate |
+| `&fun/n` | No | Warn, no validation |
+| `{&fun/n, spec}` | — | Use provided spec |
+| `{&fun/n, :skip}` | — | No validation |
+| `fn args -> ... end` | — | No validation (anonymous) |
+
+#### ToolSpec Features
+
+Using `ToolSpec.new/1` provides:
+- **Schema generation** → `"(query :string, limit :int) -> [{:id :int :title :string}]"`
+- **Input validation** → Checks args before calling tool
+- **Output validation** → Checks result after tool returns
+- **Error feedback** → Validation errors feed back to LLM for self-correction
+
+#### Input Coercion
+
+LLMs sometimes quote numbers (`"123"` instead of `123`). Input validation performs gentle coercion:
+
+```
+LLM generates: (call "get_customer" {:id "42"})
+
+Validator:
+  - Coerces "42" → 42
+  - Adds warning: "id: coerced string \"42\" to integer"
+  - Proceeds with call
+
+LLM sees warning in next turn, learns to use unquoted numbers.
+```
+
+Output validation is **strict**—your tools should return correct types.
+
+#### Validation Error Feedback
+
+When validation fails, errors feed back to the LLM with full paths:
+
+```
+Tool validation errors:
+- results[0].customer.id: expected integer, got string "abc"
+- results[2].amount: expected float, got nil
+
+Tool validation warnings:
+- limit: coerced string "10" to integer
+```
+
+The LLM can self-correct based on these messages.
+
+#### Type Syntax Reference
+
+```
+Primitives:
+  :string :int :float :bool :keyword :any
+
+Collections:
+  [:int]                          ; list of ints
+  [{:id :int :name :string}]      ; list of maps
+
+Maps:
+  {:id :int :name :string}        ; map with typed fields
+  :map                            ; any map
+
+Optional/Nullable:
+  {:id :int :email [:string]}     ; email is optional (nil allowed)
+
+Nested:
+  {:customer {:id :int :address {:city :string :zip :string}}}
+```
+
+#### SubAgent-as-Tool Contracts
+
+SubAgents wrapped with `as_tool/1` can also have typed contracts:
+
+```elixir
+tools = %{
+  "email-agent" => SubAgent.as_tool(
+    llm: llm,
+    tools: email_tools,
+    description: "Find, filter, and summarize emails",
+    refs: %{
+      email_ids: [Access.all(), :id],
+      count: &length/1
+    },
+    spec: ToolSpec.new(
+      params: [
+        task: [type: :string, required: true],
+        context: [type: :map, default: %{}]
+      ],
+      returns: {:refs, %{email_ids: [:int], count: :int}}
+    )
+  )
+}
+```
+
+Generated schema for LLM:
+```
+"agent(task :string, context :map) -> {:summary :string :refs {:email_ids [:int] :count :int}}"
+```
+
+The `agent(...)` prefix signals this is a SubAgent delegation, not a direct function call.
+
+#### Dynamic spawn_agent Contract
+
+For dynamic SubAgent creation, the meta-tool has a flexible contract:
+
+```elixir
+tools = %{
+  "spawn_agent" => {
+    &spawn_agent_fn/1,
+    ToolSpec.new(
+      params: [
+        task: [type: :string, required: true],
+        tools: [type: [:string], required: true],
+        context: [type: :map, default: %{}]
+      ],
+      returns: {:summary, :string, :refs, :map}
+    )
+  }
+}
+```
+
+#### Explicit Type Conversion in PTC-Lisp
+
+When the LLM needs to convert types explicitly, use Clojure 1.11+ functions:
+
+```clojure
+;; Parse strings to numbers (returns nil on failure)
+(parse-long "42")        ;; => 42
+(parse-double "3.14")    ;; => 3.14
+
+;; Safe with if-let
+(if-let [n (parse-long user-input)]
+  (call "get_order" {:id n})
+  "Invalid order ID")
+```
 
 ### Context
 
@@ -380,7 +689,7 @@ Look up keys in maps using the keyword itself as a function:
 Wrap sub-agents as tools so a main agent can orchestrate them:
 
 ```elixir
-llm = PtcDemo.LLM.callback("gemini")  # Or your own callback
+llm = MyApp.LLM.callback()
 
 # Create sub-agent tools
 main_tools = %{
@@ -519,46 +828,112 @@ These patterns are built from the primitives. They're examples, not prescription
 
 ### Pattern 1: Dynamic SubAgent Creation (spawn_agent)
 
-Let the LLM create SubAgents on-the-fly by providing a meta-tool:
+Let the LLM create SubAgents on-the-fly by providing a **meta-tool** - a tool that itself creates and runs SubAgents.
+
+#### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Parent SubAgent                                  │
+│                                                                          │
+│  Task: "Find urgent emails, then schedule follow-up meetings"           │
+│                                                                          │
+│  Available tool: spawn_agent(task, tools, context)                      │
+│                                                                          │
+│  LLM decides:                                                            │
+│    1. I need email tools → spawn_agent({task: "Find urgent...",         │
+│                                         tools: ["email"]})              │
+│    2. I need calendar tools → spawn_agent({task: "Schedule...",         │
+│                                            tools: ["calendar"],         │
+│                                            context: {email_ids: ...}})  │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+            ┌─────────────────┴─────────────────┐
+            ▼                                   ▼
+   ┌─────────────────┐                 ┌─────────────────┐
+   │  Child SubAgent │                 │  Child SubAgent │
+   │  tools: email   │                 │  tools: calendar│
+   │                 │                 │                 │
+   │  list_emails    │                 │  find_slots     │
+   │  read_email     │                 │  create_meeting │
+   └─────────────────┘                 └─────────────────┘
+```
+
+The parent LLM **chooses** which tool sets each child needs. It doesn't have direct access to `list_emails` or `find_slots` - it can only spawn specialized agents.
+
+#### Implementation
 
 ```elixir
-# Tool catalog - all available tool sets
-tool_catalog = %{
-  "email" => %{
-    "list_emails" => fn args -> ... end,
-    "read_email" => fn args -> ... end
-  },
-  "calendar" => %{
-    "find_slots" => fn args -> ... end,
-    "create_meeting" => fn args -> ... end
-  },
-  "crm" => %{
-    "get_customer" => fn args -> ... end,
-    "update_customer" => fn args -> ... end
+defmodule MyApp.AgentTools do
+  # Tool catalog - all available tool sets
+  @tool_catalog %{
+    "email" => %{
+      "list_emails" => &MyApp.Email.list/1,
+      "read_email" => &MyApp.Email.read/1
+    },
+    "calendar" => %{
+      "find_slots" => &MyApp.Calendar.find_slots/1,
+      "create_meeting" => &MyApp.Calendar.create/1
+    },
+    "crm" => %{
+      "get_customer" => &MyApp.CRM.get_customer/1,
+      "update_customer" => &MyApp.CRM.update_customer/1
+    }
   }
-}
 
-# Meta-tool: LLM can spawn agents with any tool combination
-tools = %{
-  "spawn_agent" => fn args ->
-    # LLM specifies: task, which tool sets, optional context
+  @type spawn_result :: %{summary: String.t(), refs: map()}
+
+  @spec spawn_agent(map()) :: spawn_result()
+  def spawn_agent(args) do
     tool_names = args["tools"] || []
-    selected_tools = tool_names
-      |> Enum.flat_map(&Map.get(tool_catalog, &1, %{}))
-      |> Map.new()
+    selected_tools =
+      tool_names
+      |> Enum.map(&Map.get(@tool_catalog, &1, %{}))
+      |> Enum.reduce(%{}, &Map.merge/2)
 
     {:ok, result} = PtcRunner.SubAgent.delegate(
       args["task"],
-      llm: llm,
+      llm: llm(),
       tools: selected_tools,
       context: args["context"] || %{}
     )
 
-    # Return summary and refs to parent
     %{summary: result.summary, refs: result.refs}
   end
-}
 
+  defp llm, do: MyApp.LLM.callback()
+end
+
+# Register with auto-extracted @spec
+tools = %{
+  "spawn_agent" => &MyApp.AgentTools.spawn_agent/1
+}
+```
+
+The `@spec` enables auto-extraction. The LLM sees:
+```
+spawn_agent(args :map) -> {:summary :string :refs :map}
+```
+
+**Without @spec**: If you use an anonymous function or a function without `@spec`, the library warns and continues without validation. The LLM won't see type hints in the system prompt, which may lead to incorrect calls.
+
+```elixir
+# Anonymous fn - no @spec possible, LLM gets no type hints
+tools = %{
+  "spawn_agent" => fn args -> ... end
+}
+# Warning: No @spec found for anonymous function, skipping validation
+
+# To provide hints manually:
+tools = %{
+  "spawn_agent" => {
+    fn args -> ... end,
+    "(task :string, tools [:string], context :map) -> {:summary :string :refs :map}"
+  }
+}
+```
+
+```elixir
 # Now the LLM can dynamically create specialized agents:
 {:ok, result} = PtcRunner.SubAgent.delegate(
   "Find urgent emails, then schedule follow-up meetings for each",
@@ -574,6 +949,54 @@ tools = %{
 #                                     :context {:email_ids (:refs emails)}})]
 #   {:emails emails :meetings meetings})
 ```
+
+#### Breaking Down spawn_agent
+
+The `spawn_agent` function is just a regular Elixir function that:
+
+1. **Receives LLM's choices** - task description, tool set names, optional context
+2. **Resolves tool sets** - looks up actual tool functions from the catalog
+3. **Delegates to SubAgent** - creates an isolated SubAgent with those tools
+4. **Returns summary + refs** - parent sees only the distilled result
+
+```elixir
+def spawn_agent(args, tool_catalog, llm) do
+  # 1. LLM specifies which tool sets it needs
+  tool_names = args["tools"] || []
+
+  # 2. Resolve to actual tool functions
+  selected_tools =
+    tool_names
+    |> Enum.map(&Map.get(tool_catalog, &1, %{}))
+    |> Enum.reduce(%{}, &Map.merge/2)
+
+  # 3. Create and run SubAgent with those tools
+  {:ok, result} = PtcRunner.SubAgent.delegate(
+    args["task"],
+    llm: llm,
+    tools: selected_tools,
+    context: args["context"] || %{}
+  )
+
+  # 4. Return only what parent needs
+  %{summary: result.summary, refs: result.refs}
+end
+```
+
+#### spawn_agent vs as_tool
+
+| Aspect | `spawn_agent` (dynamic) | `as_tool` (pre-defined) |
+|--------|-------------------------|-------------------------|
+| Tool selection | LLM chooses at runtime | Fixed at definition |
+| Flexibility | High - any combination | Low - single purpose |
+| Predictability | Lower | Higher |
+| Use case | Exploratory, novel tasks | Production, known domains |
+
+#### Considerations
+
+- **Trust boundary**: The parent LLM controls which tool sets are available via `tool_catalog`. It can't request tools not in the catalog.
+- **Context passing**: Use `:context` to pass refs between spawned agents (as shown with `email_ids`).
+- **Tracing**: Each spawned agent has its own trace, nested in the parent's trace.
 
 **When to use**: Exploratory tasks, user-defined automation, when you can't predict which tool combinations are needed.
 
@@ -727,7 +1150,7 @@ All patterns compose from the same primitives: `delegate/2`, `as_tool/1`, `RefEx
 Every SubAgent delegation returns a trace showing what happened:
 
 ```elixir
-{:ok, result} = PtcDemo.SubAgent.delegate(task, tools: tools)
+{:ok, result} = PtcRunner.SubAgent.delegate(task, llm: llm, tools: tools)
 
 result.trace
 #=> [
@@ -779,34 +1202,6 @@ result.usage
 #     total_runs: 4
 #   }
 ```
-
----
-
-## LLM Provider Configuration
-
-SubAgents use `PtcDemo.ModelRegistry` to resolve model names. Set via environment variable or option:
-
-```bash
-# Environment variable
-export PTC_DEMO_MODEL=gemini
-
-# Or pass directly
-{:ok, result} = PtcDemo.SubAgent.delegate(task,
-  tools: tools,
-  model: "gemini"
-)
-```
-
-**Available aliases:**
-
-| Alias | Model | Provider |
-|-------|-------|----------|
-| `gemini` | Gemini 2.5 Flash | Google / OpenRouter |
-| `haiku` | Claude Haiku 4.5 | Anthropic / OpenRouter |
-| `devstral` | Devstral 2512 | OpenRouter (free) |
-| `deepseek` | DeepSeek V3.2 | OpenRouter |
-
-The registry auto-selects provider based on available API keys (`GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`).
 
 ---
 
@@ -993,8 +1388,9 @@ Interactive SubAgent commands for the demo CLI:
 For large tool registries (50+ tools), let SubAgents discover relevant tools:
 
 ```elixir
-{:ok, result} = PtcDemo.ToolDiscovery.run(
+{:ok, result} = PtcRunner.ToolDiscovery.run(
   "Analyze travel expenses for Q3",
+  llm: llm,
   registry: all_company_tools  # 100+ tools
 )
 
