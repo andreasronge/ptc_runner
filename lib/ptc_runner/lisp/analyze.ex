@@ -203,16 +203,47 @@ defmodule PtcRunner.Lisp.Analyze do
         _ -> false
       end)
 
+    # Extract rename pairs (symbol keys paired with keyword values)
+    rename_pairs =
+      pairs
+      |> Enum.filter(fn
+        {{:symbol, _}, {:keyword, _}} -> true
+        _ -> false
+      end)
+
+    with {:ok, keys} <- extract_keys_opt(keys_pair),
+         {:ok, renames} <- extract_renames(rename_pairs),
+         {:ok, defaults} <- extract_defaults(or_pair) do
+      # Only create a pattern if we have keys, renames, or defaults
+      has_keys = not Enum.empty?(keys)
+      has_renames = not Enum.empty?(renames)
+      has_defaults = not Enum.empty?(defaults)
+
+      if has_keys || has_renames || has_defaults do
+        base_pattern =
+          if has_renames do
+            {:destructure, {:map, keys, renames, defaults}}
+          else
+            {:destructure, {:keys, keys, defaults}}
+          end
+
+        maybe_wrap_as(base_pattern, as_pair)
+      else
+        {:error, {:unsupported_pattern, pairs}}
+      end
+    end
+  end
+
+  defp extract_keys_opt(keys_pair) do
     case keys_pair do
       {{:keyword, :keys}, {:vector, key_asts}} ->
-        with {:ok, keys} <- extract_keys(key_asts),
-             {:ok, defaults} <- extract_defaults(or_pair) do
-          base_pattern = {:destructure, {:keys, keys, defaults}}
-          maybe_wrap_as(base_pattern, as_pair)
-        end
+        extract_keys(key_asts)
+
+      nil ->
+        {:ok, []}
 
       _ ->
-        {:error, {:unsupported_pattern, pairs}}
+        {:error, {:invalid_form, "invalid :keys destructuring form"}}
     end
   end
 
@@ -226,6 +257,20 @@ defmodule PtcRunner.Lisp.Analyze do
 
       _other, _acc ->
         {:halt, {:error, {:invalid_form, "expected keyword or symbol in destructuring key"}}}
+    end)
+    |> case do
+      {:ok, rev} -> {:ok, Enum.reverse(rev)}
+      other -> other
+    end
+  end
+
+  defp extract_renames(rename_pairs) do
+    Enum.reduce_while(rename_pairs, {:ok, []}, fn
+      {{:symbol, bind_name}, {:keyword, source_key}}, {:ok, acc} ->
+        {:cont, {:ok, [{bind_name, source_key} | acc]}}
+
+      _other, _acc ->
+        {:halt, {:error, {:invalid_form, "rename pairs must be {symbol :keyword}"}}}
     end)
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}
@@ -248,8 +293,11 @@ defmodule PtcRunner.Lisp.Analyze do
       {{:keyword, k}, v}, {:ok, acc} ->
         {:cont, {:ok, [{k, v} | acc]}}
 
+      {{:symbol, k}, v}, {:ok, acc} ->
+        {:cont, {:ok, [{k, v} | acc]}}
+
       {_other_key, _v}, _acc ->
-        {:halt, {:error, {:invalid_form, "default keys must be keywords"}}}
+        {:halt, {:error, {:invalid_form, "default keys must be keywords or symbols"}}}
     end)
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}

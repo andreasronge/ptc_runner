@@ -708,7 +708,110 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
          ]}
 
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "default keys must be keywords"
+      assert msg =~ "default keys must be keywords or symbols"
+    end
+
+    test "destructuring with :or defaults using symbol keys" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :a}]}},
+                 {{:keyword, :or}, {:map, [{{:symbol, :a}, 10}]}}
+               ]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :a}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding, {:destructure, {:keys, [:a], [a: 10]}}, {:var, :m}}
+               ], {:var, :a}}} = Analyze.analyze(raw)
+    end
+
+    test "destructuring with renaming bindings" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :id}]}},
+                 {{:symbol, :the_name}, {:keyword, :name}}
+               ]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :the_name}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding, {:destructure, {:map, [:id], [{:the_name, :name}], []}}, {:var, :m}}
+               ], {:var, :the_name}}} = Analyze.analyze(raw)
+    end
+
+    test "destructuring with renaming and :or defaults" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :id}]}},
+                 {{:symbol, :full_name}, {:keyword, :name}},
+                 {{:keyword, :or}, {:map, [{{:symbol, :full_name}, "Unknown"}]}}
+               ]},
+              {:symbol, :m}
+            ]},
+           {:symbol, :full_name}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding,
+                  {:destructure, {:map, [:id], [{:full_name, :name}], [full_name: "Unknown"]}},
+                  {:var, :m}}
+               ], {:var, :full_name}}} = Analyze.analyze(raw)
+    end
+
+    test "destructuring with renaming and :as alias" do
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector,
+            [
+              {:map,
+               [
+                 {{:keyword, :keys}, {:vector, [{:symbol, :id}]}},
+                 {{:symbol, :the_name}, {:keyword, :name}},
+                 {{:keyword, :as}, {:symbol, :m}}
+               ]},
+              {:symbol, :obj}
+            ]},
+           {:symbol, :the_name}
+         ]}
+
+      assert {:ok,
+              {:let,
+               [
+                 {:binding,
+                  {:destructure,
+                   {:as, :m, {:destructure, {:map, [:id], [{:the_name, :name}], []}}}},
+                  {:var, :obj}}
+               ], {:var, :the_name}}} = Analyze.analyze(raw)
     end
   end
 
