@@ -66,92 +66,47 @@ A SubAgent runs an **agentic loop** (`AgenticLoop` module) - it may execute mult
 - **Automatic termination**: Loop ends when the LLM responds without a program
 - **Safety limit**: `max_turns` option prevents infinite loops (default: 5)
 
-### Module Structure
+### How It Works
 
 ```
-lib/ptc_runner/
-├── sub_agent.ex              # Main API: delegate/2, as_tool/1
-└── sub_agent/
-    ├── loop.ex               # Multi-turn agentic execution
-    ├── ref_extractor.ex      # Deterministic value extraction
-    └── prompt.ex             # System prompt generation
-
-demo/lib/ptc_demo/
-├── llm.ex                    # ReqLLM helpers (convenience)
-├── model_registry.ex         # Model aliases and provider selection
-└── lisp_agent.ex             # Example agent using SubAgent
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+│  delegate/2 │ ───> │ Agentic Loop │ ───> │   Result    │
+│  (your task)│      │  (LLM ↔ Lisp)│      │ + refs      │
+└─────────────┘      └──────────────┘      └─────────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+        ┌──────────┐  ┌──────────┐  ┌──────────┐
+        │   LLM    │  │  Tools   │  │  Memory  │
+        │ callback │  │ (yours)  │  │ (scoped) │
+        └──────────┘  └──────────┘  └──────────┘
 ```
 
-### Data Flow
+## Core API
 
-```
-                    ┌─────────────────────────────────────┐
-                    │     PtcRunner.SubAgent.delegate/2    │
-                    └─────────────────────────────────────┘
-                                      │
-                                      ▼
-                    ┌─────────────────────────────────────┐
-                    │      PtcRunner.SubAgent.Loop.run/2   │
-                    │  • Manages conversation context      │
-                    │  • Tracks tool calls per turn        │
-                    │  • Accumulates usage statistics      │
-                    │  • Records execution trace           │
-                    └─────────────────────────────────────┘
-                                      │
-                    ┌─────────────────┴─────────────────┐
-                    ▼                                   ▼
-            ┌─────────────┐                    ┌─────────────┐
-            │ LLM Callback │                   │PtcRunner.Lisp│
-            │ (user-provided)│                 │   .run/2    │
-            └─────────────┘                    └─────────────┘
-                                                      │
-                                                      ▼
-                                            ┌─────────────────┐
-                                            │  Tool Execution │
-                                            │  (user functions)│
-                                            └─────────────────┘
-                                                      │
-                                                      ▼
-                    ┌─────────────────────────────────────┐
-                    │  PtcRunner.SubAgent.RefExtractor     │
-                    │  • Path-based: [Access.at(0), :id]  │
-                    │  • Function-based: &length/1         │
-                    └─────────────────────────────────────┘
-```
+The SubAgent system provides two main functions:
 
----
+| Function | Purpose |
+|----------|---------|
+| `delegate/2` | Run a task with tools in isolation, get back result + refs |
+| `as_tool/1` | Wrap a SubAgent config as a callable tool for orchestration |
 
-## Primitives
-
-The SubAgent system provides a small set of composable primitives. Everything else—orchestration patterns, planning strategies, dynamic agent creation—is built from these.
-
-| Primitive | Purpose | Location |
-|-----------|---------|----------|
-| `delegate/2` | Run a task with tools in isolation | `PtcRunner.SubAgent` |
-| `as_tool/1` | Wrap a SubAgent config as a callable tool | `PtcRunner.SubAgent` |
-| `RefExtractor.extract/2` | Deterministically pull values from results | `PtcRunner.SubAgent.RefExtractor` |
-| `Loop.run/2` | Multi-turn agentic execution engine | `PtcRunner.SubAgent.Loop` |
-| `memory/put`, `memory/get` | Per-agent state (scoped, private) | PTC-Lisp builtins |
-
-**Design philosophy**: The library provides primitives, not patterns. You compose primitives into whatever orchestration pattern fits your use case. The patterns shown later in this tutorial are examples, not prescriptions.
+**Design philosophy**: The library provides primitives, not patterns. You compose these into whatever orchestration pattern fits your use case. The patterns shown later in this tutorial are examples, not prescriptions.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Primitives                               │
+│                       Core Functions                             │
 │                                                                  │
 │   delegate/2 ──── Run task in isolation                         │
 │   as_tool/1  ──── Make SubAgent callable as a tool              │
-│   RefExtractor ── Extract values from results                   │
-│   Loop ───────── Multi-turn execution                           │
-│   memory/* ───── Per-agent state                                │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Patterns (you build)                          │
 │                                                                  │
-│   Hybrid ─────────── Plan then execute (prompt pattern)         │
-│   PlanExecutor ───── Iterate over plan-as-data                  │
-│   spawn_agent ────── Dynamic SubAgent creation                  │
-│   Pre-defined ────── as_tool for known domains                  │
+│   Chained ──────────── Pass refs between steps                  │
+│   Hierarchical ─────── SubAgents calling SubAgents              │
+│   Planning ─────────── Generate plan, then execute              │
+│   Dynamic ──────────── spawn_agent meta-tool                    │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -733,7 +688,7 @@ A **Planning Agent** generates a structured plan before execution. The spike val
 
 ### Plan Generation
 
-Provide a `create_plan` tool and the LLM will generate a structured plan:
+Provide a `create_plan` tool and the domain tools via `tool_catalog`. The LLM sees the tool schemas (with types) but can only call `create_plan`:
 
 ```elixir
 planning_tools = %{
@@ -742,6 +697,25 @@ planning_tools = %{
     IO.inspect(args, label: "Plan Created")
     %{status: "success", plan_id: "plan_123"}
   end
+}
+
+# Domain tools - the planner sees their schemas but can't call them
+domain_tools = %{
+  "email-finder" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
+    tools: email_tools,
+    refs: %{email_ids: [Access.all(), :id], count: &length/1}
+  ),
+  "email-reader" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
+    tools: %{"read_email" => &MyApp.read_email/1},
+    refs: %{bodies: fn r -> Map.new(r, &{&1.id, &1.body}) end}
+  ),
+  "reply-drafter" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
+    tools: %{"draft_reply" => &MyApp.draft_reply/1},
+    refs: %{draft_ids: [Access.all(), :draft_id]}
+  )
 }
 
 {:ok, result} = PtcRunner.SubAgent.delegate(
@@ -756,9 +730,23 @@ planning_tools = %{
   """,
   llm: llm,
   tools: planning_tools,
-  context: %{available_tools: ["email-finder", "email-reader", "reply-drafter"]}
+  tool_catalog: domain_tools  # Schemas visible, not callable
 )
 ```
+
+**What the LLM sees in its system prompt:**
+
+```
+## Tools you can call
+- create_plan(steps [{:id :keyword :task :string :tools [:string] :needs [:keyword] :output :map}]) -> {:status :string :plan_id :string}
+
+## Tools available for planning (do not call directly)
+- email-finder: agent(task :string) -> {:summary :string :refs {:email_ids [:int] :count :int}}
+- email-reader: agent(task :string, context :map) -> {:summary :string :refs {:bodies :map}}
+- reply-drafter: agent(task :string, context :map) -> {:summary :string :refs {:draft_ids [:int]}}
+```
+
+The LLM can see the exact input/output types of each tool, enabling it to plan correct data flow between steps (e.g., knowing that `email-finder` returns `email_ids` as `[:int]` which can be passed to `email-reader`).
 
 **Observed LLM output** (Gemini 2.5 Flash):
 
@@ -1226,6 +1214,7 @@ See [specification.md](specification.md) for full type definitions.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools` | map | `%{}` | Tool functions the sub-agent can call |
+| `tool_catalog` | map | `%{}` | Tools whose schemas are visible in prompt but not callable (for planning) |
 | `context` | map | `%{}` | Values accessible as `ctx/key` in the program |
 | `refs` | map | `%{}` | Reference extraction spec (see below) |
 | `max_turns` | integer | `5` | Maximum LLM calls before failing |
@@ -1283,88 +1272,6 @@ refs = PtcRunner.SubAgent.RefExtractor.extract(result, %{
   count: &length/1                 # Function-based
 })
 ```
-
----
-
-## Test Plan
-
-This section documents the expected behavior and serves as a test specification.
-
-### Unit Tests Required
-
-**RefExtractor:**
-```elixir
-# Path-based extraction
-result = [%{id: 1, name: "Alice"}, %{id: 2, name: "Bob"}]
-refs = RefExtractor.extract(result, %{first_id: [Access.at(0), :id]})
-assert refs == %{first_id: 1}
-
-# Function-based extraction
-refs = RefExtractor.extract(result, %{count: &length/1})
-assert refs == %{count: 2}
-
-# Missing path returns nil
-refs = RefExtractor.extract(result, %{missing: [Access.at(99), :id]})
-assert refs == %{missing: nil}
-```
-
-**AgenticLoop:**
-```elixir
-# Single-turn completion (LLM returns answer without program)
-# Multi-turn completion (LLM generates program, sees result, answers)
-# Error recovery (program fails, error fed back, LLM retries)
-# Max iterations reached
-# Tool call recording in trace
-# Usage accumulation across turns
-```
-
-**SubAgent.delegate/2:**
-```elixir
-# Basic delegation with tools
-# Context passed to PTC-Lisp as ctx/key
-# Refs extracted from result
-# Trace includes tool calls
-# Error returns structured fault map
-```
-
-**SubAgent.as_tool/1:**
-```elixir
-# Wrapped SubAgent callable with {:task "..."}
-# Returns %{summary, refs, result, trace}
-# Nested traces when SubAgent calls SubAgent
-```
-
-### Integration Tests (with LLM)
-
-**Chained delegation** (spike_chained_test.exs):
-- Main agent calls customer-finder SubAgent
-- SubAgent returns customer ID via refs
-- Main agent passes ID to order-fetcher SubAgent
-- Final answer includes data from both
-
-**Plan generation** (spike_planner_test.exs):
-- LLM generates structured plan via create_plan tool
-- Plan has correct step structure with :id, :task, :tools, :needs
-- Dependencies correctly modeled
-
-**Hybrid pattern** (spike_hybrid_test.exs):
-- Planning phase: LLM generates text plan (no tools)
-- Execution phase: LLM follows plan using tools
-- 50-70% turn reduction vs pure ad-hoc
-- See [Orchestration Patterns](#orchestration-patterns) for implementation examples
-
-### Known LLM Behavior Issues
-
-From spike testing with Gemini 2.5 Flash:
-
-1. **Missing functions**: LLM tries `(str ...)` and `(conj ...)` which are currently missing.
-2. **Data Path Confusion**: Uses `[:result :id]` instead of `[:result 0 :id]` for list-wrapped results.
-3. **Invalid comparators**: Uses `(sort-by :total >)` but `>` isn't a valid comparator function in the env (operators are syntax, not first-class functions yet).
-
-These should be addressed by either:
-- Adding `str` and `conj` to `PtcRunner.Lisp.Runtime`
-- Adding numeric safety (handling `nil` in arithmetic)
-- Adding custom comparator support to `sort-by`
 
 ---
 
