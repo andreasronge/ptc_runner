@@ -342,15 +342,33 @@ defmodule PtcRunner.Lisp.SpecValidator do
     end
   end
 
+  # Core helper for parenthesis balance counting
+  # Returns:
+  # - Non-negative integer: balance count (open - close), or 0 if balanced
+  # - :unbalanced if more closing than opening parens detected
+  defp paren_balance(code) do
+    code
+    |> String.graphemes()
+    |> Enum.reduce_while(0, fn char, count ->
+      case char do
+        "(" -> {:cont, count + 1}
+        ")" -> if count > 0, do: {:cont, count - 1}, else: {:halt, :unbalanced}
+        _ -> {:cont, count}
+      end
+    end)
+  end
+
+  # Check if code has more closing parens than opening parens
+  # Uses reduce without halting to count all parens
   defp has_more_closing_than_opening?(code) do
     result =
       code
       |> String.graphemes()
-      |> Enum.reduce_while(0, fn char, count ->
+      |> Enum.reduce(0, fn char, count ->
         case char do
-          "(" -> {:cont, count + 1}
-          ")" -> {:cont, count - 1}
-          _ -> {:cont, count}
+          "(" -> count + 1
+          ")" -> count - 1
+          _ -> count
         end
       end)
 
@@ -446,17 +464,9 @@ defmodule PtcRunner.Lisp.SpecValidator do
     end
   end
 
+  # Check if code has balanced parentheses
   defp balanced_parens?(code) do
-    code
-    |> String.graphemes()
-    |> Enum.reduce_while(0, fn char, count ->
-      case char do
-        "(" -> {:cont, count + 1}
-        ")" -> if count > 0, do: {:cont, count - 1}, else: {:halt, -1}
-        _ -> {:cont, count}
-      end
-    end)
-    |> Kernel.==(0)
+    paren_balance(code) == 0
   end
 
   # Extract section header from line (pattern: ## N. Title)
@@ -527,16 +537,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
   # Check if a code string has unbalanced parentheses
   # Returns true if there are more closing parens than opening parens at any point
   defp has_unbalanced_parens?(code) do
-    code
-    |> String.graphemes()
-    |> Enum.reduce_while(0, fn char, count ->
-      case char do
-        "(" -> {:cont, count + 1}
-        ")" -> if count > 0, do: {:cont, count - 1}, else: {:halt, -1}
-        _ -> {:cont, count}
-      end
-    end)
-    |> Kernel.==(-1)
+    paren_balance(code) == :unbalanced
   end
 
   # Parse expected values from string format
