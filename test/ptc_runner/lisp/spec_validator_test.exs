@@ -4,14 +4,20 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
   alias PtcRunner.Lisp.SpecValidator
 
   describe "extract_examples/0" do
-    test "returns list of examples from spec" do
-      {:ok, examples} = SpecValidator.extract_examples()
+    test "returns map with examples from spec" do
+      {:ok, result} = SpecValidator.extract_examples()
 
-      assert is_list(examples)
-      assert examples != []
+      assert is_map(result)
+      assert Map.has_key?(result, :examples)
+      assert Map.has_key?(result, :todos)
+      assert Map.has_key?(result, :bugs)
+      assert Map.has_key?(result, :skipped)
+
+      assert is_list(result.examples)
+      assert result.examples != []
 
       # Verify we got tuples of code, expected, and section
-      Enum.each(examples, fn item ->
+      Enum.each(result.examples, fn item ->
         assert is_tuple(item)
         assert tuple_size(item) == 3
         {code, _expected, _section} = item
@@ -20,11 +26,11 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     end
 
     test "extracts expected number of examples" do
-      {:ok, examples} = SpecValidator.extract_examples()
+      {:ok, result} = SpecValidator.extract_examples()
 
       # The spec should have ~100+ examples after multi-line extraction
       # Some may be fragments that are filtered, so we allow a range
-      assert length(examples) >= 70
+      assert length(result.examples) >= 70
     end
   end
 
@@ -42,10 +48,63 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
+      result = SpecValidator.extract_examples(content)
 
       # At least one example should be extracted
-      assert examples != []
+      assert is_map(result)
+      assert result.examples != []
+    end
+
+    test "extracts TODO markers" do
+      content = """
+      ## 1. Test Section
+
+      ```clojure
+      (some-fn x)  ; => TODO: not implemented
+      ```
+      """
+
+      result = SpecValidator.extract_examples(content)
+
+      assert length(result.todos) == 1
+      {code, description, section} = hd(result.todos)
+      assert code =~ "some-fn"
+      assert description == "not implemented"
+      assert section == "## 1. Test Section"
+    end
+
+    test "extracts BUG markers" do
+      content = """
+      ## 1. Test Section
+
+      ```clojure
+      (buggy-fn x)  ; => BUG: known issue
+      ```
+      """
+
+      result = SpecValidator.extract_examples(content)
+
+      assert length(result.bugs) == 1
+      {code, description, section} = hd(result.bugs)
+      assert code =~ "buggy-fn"
+      assert description == "known issue"
+      assert section == "## 1. Test Section"
+    end
+
+    test "counts skipped illustrative examples" do
+      content = """
+      ## 1. Test Section
+
+      ```clojure
+      (real-example 1)  ; => 1
+      (illustrative ctx/data)  ; => ...
+      ```
+      """
+
+      result = SpecValidator.extract_examples(content)
+
+      assert length(result.examples) == 1
+      assert result.skipped == 1
     end
   end
 
@@ -102,6 +161,9 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       assert :passed in Map.keys(results)
       assert :failed in Map.keys(results)
       assert :failures in Map.keys(results)
+      assert :todos in Map.keys(results)
+      assert :bugs in Map.keys(results)
+      assert :skipped in Map.keys(results)
     end
 
     test "counts examples correctly" do
@@ -131,6 +193,14 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
           assert is_binary(reason)
         end)
       end
+    end
+
+    test "includes todos and bugs lists" do
+      {:ok, results} = SpecValidator.validate_spec()
+
+      assert is_list(results.todos)
+      assert is_list(results.bugs)
+      assert is_integer(results.skipped)
     end
   end
 
@@ -236,8 +306,8 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     test "empty lines list returns empty" do
       # We test multiline extraction behavior through the integration with extract_examples/1
       content = ""
-      examples = SpecValidator.extract_examples(content)
-      assert examples == []
+      result = SpecValidator.extract_examples(content)
+      assert result.examples == []
     end
 
     test "lines with no multiline examples" do
@@ -251,15 +321,15 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 2
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 2
 
-      {code1, expected1, section1} = Enum.at(examples, 0)
+      {code1, expected1, section1} = Enum.at(result.examples, 0)
       assert code1 =~ "(+ 1 2)"
       assert expected1 == 3
       assert section1 == "## 1. Test Section"
 
-      {code2, expected2, section2} = Enum.at(examples, 1)
+      {code2, expected2, section2} = Enum.at(result.examples, 1)
       assert code2 =~ "(filter even? [1 2 3])"
       assert expected2 == [2]
       assert section2 == "## 1. Test Section"
@@ -278,15 +348,15 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 2
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 2
 
-      {code1, expected1, section1} = Enum.at(examples, 0)
+      {code1, expected1, section1} = Enum.at(result.examples, 0)
       assert code1 =~ "(+ 1 2)"
       assert expected1 == 3
       assert section1 == "## 1. Test Section"
 
-      {code2, expected2, section2} = Enum.at(examples, 1)
+      {code2, expected2, section2} = Enum.at(result.examples, 1)
       assert code2 =~ "(if-let [x 0]"
       assert code2 =~ "\"truthy\""
       assert code2 =~ "\"falsy\")"
@@ -308,10 +378,10 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 1
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 1
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(let [x 1"
       assert code =~ "y 2]"
       assert code =~ "(+ x y))"
@@ -329,10 +399,10 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 1
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 1
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(reduce +"
       assert code =~ "[1 2 3]"
       assert expected == 6
@@ -350,10 +420,10 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 1
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 1
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(filter even?"
       assert code =~ "[1 2 3 4]"
       assert expected == [2, 4]
@@ -371,15 +441,15 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 2
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 2
 
-      {code1, expected1, section1} = Enum.at(examples, 0)
+      {code1, expected1, section1} = Enum.at(result.examples, 0)
       assert code1 =~ "(+ 4 5)"
       assert expected1 == 9
       assert section1 == "## 1. Test Section"
 
-      {code2, expected2, section2} = Enum.at(examples, 1)
+      {code2, expected2, section2} = Enum.at(result.examples, 1)
       assert code2 =~ "(first (list 1"
       assert code2 =~ "2 3))"
       assert expected2 == 1
@@ -398,16 +468,16 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
+      result = SpecValidator.extract_examples(content)
       # Should extract both as separate examples, not assemble them
-      assert length(examples) == 2
+      assert length(result.examples) == 2
 
-      {code1, expected1, section1} = Enum.at(examples, 0)
+      {code1, expected1, section1} = Enum.at(result.examples, 0)
       assert code1 =~ "(+ 1 2)"
       assert expected1 == 3
       assert section1 == "## 1. Test Section"
 
-      {code2, expected2, section2} = Enum.at(examples, 1)
+      {code2, expected2, section2} = Enum.at(result.examples, 1)
       assert code2 =~ "(filter odd? [1 2 3])"
       assert expected2 == [1, 3]
       assert section2 == "## 1. Test Section"
@@ -425,10 +495,10 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 1
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 1
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(let [x 1"
       assert code =~ "y 2]"
       assert code =~ "(+ x y))"
@@ -446,10 +516,10 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
-      assert length(examples) == 1
+      result = SpecValidator.extract_examples(content)
+      assert length(result.examples) == 1
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(map inc"
       assert code =~ "[1 2 3]"
       assert expected == [2, 3, 4]
@@ -466,11 +536,11 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
+      result = SpecValidator.extract_examples(content)
       # Should properly balance parens even when they appear in strings
-      assert length(examples) == 1
+      assert length(result.examples) == 1
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(str \"text with (parens)\""
       assert code =~ "\" more\")"
       assert expected == "text with (parens) more"
@@ -488,11 +558,11 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       ```
       """
 
-      examples = SpecValidator.extract_examples(content)
+      result = SpecValidator.extract_examples(content)
       # Should extract multiline expressions
-      refute Enum.empty?(examples)
+      refute Enum.empty?(result.examples)
 
-      {code, expected, section} = hd(examples)
+      {code, expected, section} = hd(result.examples)
       assert code =~ "(map +"
       assert code =~ "[1 2]"
       assert code =~ "[3 4]"

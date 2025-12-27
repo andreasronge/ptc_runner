@@ -312,11 +312,11 @@ Extract values from maps:
 
 ; With defaults
 (let [{:keys [name age] :or {age 0}} {:name "Bob"}]
-  age)   ; => ...
+  age)   ; => TODO: :or defaults not implemented
 
 ; Renaming
 (let [{the-name :name} {:name "Carol"}]
-  the-name)  ; => ...
+  the-name)  ; => TODO: renaming destructuring not implemented
 
 ; Nested destructuring
 (let [{:keys [user]} {:user {:name "Dan"}}
@@ -2066,3 +2066,59 @@ ctx            ; ERROR - cannot access whole ctx map
 ```
 
 This restriction prevents accidental data leakage and simplifies reasoning about what data a program can access.
+
+---
+
+## Appendix C: Documentation Tests
+
+This specification contains executable examples that are automatically validated against the PTC-Lisp implementation using `PtcRunner.Lisp.SpecValidator`.
+
+### Example Syntax
+
+Examples use the pattern `code  ; => expected` where the expected value is parsed and compared to the actual execution result:
+
+```clojure
+(+ 1 2)                ; => 3
+(filter even? [1 2 3]) ; => [2]
+{:a 1 :b 2}            ; => {:a 1 :b 2}
+```
+
+### Semantic Markers
+
+For examples that cannot be automatically validated, use these markers:
+
+| Marker | Meaning | Example |
+|--------|---------|---------|
+| `; => TODO: description` | Feature not yet implemented | `; => TODO: :or defaults not implemented` |
+| `; => BUG: description` | Known bug | `; => BUG: edge case fails` |
+| `; => ...` | Illustrative example (requires external context) | `; => ...` |
+
+**When to use each:**
+
+- **TODO** — The feature is documented but the implementation is incomplete. Running the example would fail.
+- **BUG** — The example documents expected behavior but currently fails due to a known bug.
+- **...** — The example requires external context (tools, ctx/memory data) that isn't available during automated testing. These are illustrative examples showing usage patterns.
+
+### Running Validation
+
+```elixir
+# Validate all examples
+{:ok, results} = PtcRunner.Lisp.SpecValidator.validate_spec()
+
+# Results include:
+# - passed: count of passing examples
+# - failed: count of failing examples
+# - todos: list of {code, description, section} tuples
+# - bugs: list of {code, description, section} tuples
+# - skipped: count of illustrative examples (using ...)
+```
+
+### Supported Expected Values
+
+The validator can parse these value types:
+
+- **Literals**: `nil`, `true`, `false`, integers (`42`), floats (`3.14`)
+- **Strings**: `"hello"` (with escape sequences)
+- **Keywords**: `:name`, `:user-id`
+- **Collections**: `[1 2 3]`, `(1 2 3)`
+- **Maps**: `{:a 1 :b 2}` (simple keyword/value pairs only)
