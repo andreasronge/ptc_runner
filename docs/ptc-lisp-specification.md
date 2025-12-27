@@ -312,11 +312,11 @@ Extract values from maps:
 
 ; With defaults
 (let [{:keys [name age] :or {age 0}} {:name "Bob"}]
-  age)   ; => TODO: :or defaults not implemented
+  age)   ; => 0
 
 ; Renaming
 (let [{the-name :name} {:name "Carol"}]
-  the-name)  ; => TODO: renaming destructuring not implemented
+  the-name)  ; => "Carol"
 
 ; Nested destructuring
 (let [{:keys [user]} {:user {:name "Dan"}}

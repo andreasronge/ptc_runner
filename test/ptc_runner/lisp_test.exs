@@ -635,18 +635,17 @@ defmodule PtcRunner.LispTest do
       assert delta == %{threshold: 100}
     end
 
-    test "invalid map destructuring in fn returns error instead of crashing" do
-      # This tests the case where an LLM generates invalid map destructuring syntax
-      # like {id :id} (symbol as key) instead of {:keys [id]}
-      # The analyzer should return an error, not crash with FunctionClauseError
+    test "renaming bindings in fn destructuring works" do
+      # This tests that renaming bindings {bind-name :key} now work
+      # This is now a valid feature matching Clojure destructuring conventions
       source = ~S"""
-      (map (fn [{id :id}] id) ctx/items)
+      (map (fn [{item :id}] item) ctx/items)
       """
 
       ctx = %{items: [%{id: 1}, %{id: 2}]}
 
-      # Should return an error tuple, not crash
-      assert {:error, _reason} = Lisp.run(source, context: ctx)
+      # Should work and return the extracted values
+      assert {:ok, [1, 2], %{}, %{}} = Lisp.run(source, context: ctx)
     end
   end
 

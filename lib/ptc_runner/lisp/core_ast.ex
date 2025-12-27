@@ -52,6 +52,7 @@ defmodule PtcRunner.Lisp.CoreAST do
   @type pattern ::
           {:var, atom()}
           | {:destructure, {:keys, [atom()], keyword()}}
+          | {:destructure, {:map, [atom()], [{atom(), atom()}], keyword()}}
           | {:destructure, {:as, atom(), pattern()}}
           | {:destructure, {:seq, [pattern()]}}
 
