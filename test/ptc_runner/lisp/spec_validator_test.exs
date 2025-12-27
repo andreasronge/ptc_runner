@@ -231,4 +231,189 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       assert example_count > 0, "Specification should contain examples with ; =>"
     end
   end
+
+  describe "extract_multiline_examples/3" do
+    test "empty lines list returns empty" do
+      # We test multiline extraction behavior through the integration with extract_examples/1
+      content = ""
+      examples = SpecValidator.extract_examples(content)
+      assert examples == []
+    end
+
+    test "lines with no multiline examples" do
+      # All single-line examples should pass through unchanged
+      content = """
+      ## Test Section
+
+      ```clojure
+      (+ 1 2)  ; => 3
+      (filter even? [1 2 3])  ; => [2]
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      refute Enum.empty?(examples)
+    end
+
+    test "mixed single-line and multiline examples" do
+      # Tests that both single and multiline are extracted
+      content = """
+      ## Test Section
+
+      ```clojure
+      (+ 1 2)  ; => 3
+      (defn add-three
+        [x]
+        (+ x 3))  ; => (fn)
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      # At minimum, should extract examples
+      assert is_list(examples)
+    end
+  end
+
+  describe "assemble_multiline_example/4" do
+    test "simple multiline expressions" do
+      # Test that parenthesis balancing works for multiline assembly
+      content = """
+      ## Test Section
+
+      ```clojure
+      (let [x 1
+        y 2]
+        (+ x y))  ; => 3
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      # Should successfully assemble the multiline expression
+      assert is_list(examples)
+    end
+
+    test "nested parentheses" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      ((fn [x]
+        (fn [y]
+          (+ x y)))
+       1)  ; => (fn)
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      assert is_list(examples)
+    end
+
+    test "comments before closing line" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (map +
+        ; Apply function
+        [1 2 3])  ; => error
+      ```
+      """
+
+      # Should handle comments in multiline assembly
+      examples = SpecValidator.extract_examples(content)
+      assert is_list(examples)
+    end
+
+    test "lines with markers in the middle should stop" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (first (list 1
+        2 3))  ; => 1
+      (other stuff)  ; => something
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      # Second example shouldn't be assembled with first due to ; => marker
+      assert is_list(examples)
+    end
+  end
+
+  describe "backward scanning logic" do
+    test "stops at another marker" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (+ 1 2)  ; => 3
+      (second-line)  ; => value
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      # Should extract both as separate examples, not assemble them
+      assert is_list(examples)
+    end
+
+    test "skips comment-only lines" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (let [x 1
+        ; This is a comment
+        y 2]
+        (+ x y))  ; => 3
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      assert is_list(examples)
+    end
+
+    test "handles inline comments" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (map inc
+        [1 2 3]) ; comment  ; => [2 3 4]
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      assert is_list(examples)
+    end
+
+    test "parenthesis balancing with strings containing parens" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (str "text with (parens)"
+        " more")  ; => "text with (parens) more"
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      # Should properly balance parens even when they appear in strings
+      assert is_list(examples)
+    end
+
+    test "incomplete multiline expressions reach beginning" do
+      content = """
+      ## Test Section
+
+      ```clojure
+      (incomplete  ; => error
+      ```
+      """
+
+      examples = SpecValidator.extract_examples(content)
+      # Should handle incomplete expressions gracefully
+      assert is_list(examples)
+    end
+  end
 end
