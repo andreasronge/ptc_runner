@@ -400,15 +400,20 @@ While the core patterns were validated, the following issues were identified dur
 
 ## Summary
 
-The spike successfully validated **both orchestration patterns**:
+The spike validated the **primitives + patterns** architecture:
 
-| Pattern | Hypothesis | Status |
-|---------|------------|--------|
-| Ad-hoc chaining | SubAgents + refs enable context-efficient workflows | ✅ Proven |
-| Formal planning | LLMs can generate structured, dependency-aware plans | ✅ Proven |
+| Primitive | Purpose | Status |
+|-----------|---------|--------|
+| `delegate/2` | Run task in isolation | ✅ Core API |
+| `as_tool/1` | Wrap SubAgent as tool | ✅ Core API |
+| `RefExtractor` | Deterministic value extraction | ✅ Core API |
+| `Loop` | Multi-turn execution | ✅ Core API |
+| `memory/*` | Per-agent state | ✅ Core API |
 
-The framework is no longer a spike - it's a working implementation with:
-- **Two orchestration patterns**: Ad-hoc chaining for exploratory tasks, formal planning for reliable workflows
+**Design philosophy**: The library provides primitives, not patterns. Orchestration patterns (Hybrid, PlanExecutor, spawn_agent) are examples built from primitives—users compose their own patterns as needed.
+
+The framework is production-ready with:
+- **Composable primitives**: Small set of building blocks for any orchestration pattern
 - **Recursive observability**: Nested traces show exactly what each agent did
 - **Full usage accounting**: Token costs bubble up through the hierarchy
 - **Robust error propagation**: Structured faults with partial traces
