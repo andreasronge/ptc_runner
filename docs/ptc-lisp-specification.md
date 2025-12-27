@@ -312,11 +312,11 @@ Extract values from maps:
 
 ; With defaults
 (let [{:keys [name age] :or {age 0}} {:name "Bob"}]
-  age)   ; => 0
+  age)   ; => ...
 
 ; Renaming
 (let [{the-name :name} {:name "Carol"}]
-  the-name)  ; => "Carol"
+  the-name)  ; => ...
 
 ; Nested destructuring
 (let [{:keys [user]} {:user {:name "Dan"}}
@@ -427,7 +427,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
 ```clojure
 (if-let [user (get-user 123)]
   (str "Hello " user)
-  "User not found")               ; => "Hello Alice" or "User not found"
+  "User not found")               ; => ...
 
 (when-let [result (compute)]
   (process result))               ; => result of process, or nil
@@ -974,7 +974,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ;; Note: Use -> (not ->>) since map is first argument
 (-> orders
     (group-by :status)
-    (update-vals count))           ; => {"pending" 2 "done" 3}
+    (update-vals count))           ; => ...
 ```
 
 ### 8.3 Arithmetic
