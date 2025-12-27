@@ -385,6 +385,8 @@ While the core patterns were validated, the following issues were identified dur
 | **Numeric Safety** | `100 + id` crashes when `id` is nil (Missing nil-safe arithmetic). | 📌 Backlog |
 | **Missing `conj`** | LLM tried `(conj acc item)` which failed. Needed for state updates. | 📌 Backlog |
 | **Missing `str`** | LLM tried `(str "..." id)` for string concatenation. | 📌 Backlog |
+| **Missing `parse-long`** | Clojure 1.11+ `(parse-long "42")` → 42 (nil if unparseable). Needed for type coercion. | 📌 Backlog |
+| **Missing `parse-double`** | Clojure 1.11+ `(parse-double "3.14")` → 3.14 (nil if unparseable). Needed for type coercion. | 📌 Backlog |
 | **Data Path Confusion** | LLM used `[:result :id]` instead of `[:result 0 :id]` for list-wrapped results. | 📌 Backlog |
 | **Comparator Mismatch** | LLM used `(sort-by :total >)`, but `>` is not a valid function name in the env. | 📌 Backlog |
 | **Tool Availability** | Planner test sometimes lacks email tools in the execution phase if not explicitly listed. | 📌 Backlog |
