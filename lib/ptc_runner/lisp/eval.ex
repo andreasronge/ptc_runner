@@ -349,6 +349,42 @@ defmodule PtcRunner.Lisp.Eval do
     {:error, {:destructure_error, "expected map, got #{inspect(value)}"}}
   end
 
+  defp match_pattern({:destructure, {:map, keys, renames, defaults}}, value) when is_map(value) do
+    # First extract keys
+    keys_bindings =
+      Enum.reduce(keys, %{}, fn key, acc ->
+        default = Keyword.get(defaults, key)
+
+        val =
+          case flex_fetch(value, key) do
+            {:ok, v} -> v
+            :error -> default
+          end
+
+        Map.put(acc, key, val)
+      end)
+
+    # Then extract renames
+    renames_bindings =
+      Enum.reduce(renames, %{}, fn {bind_name, source_key}, acc ->
+        default = Keyword.get(defaults, bind_name)
+
+        val =
+          case flex_fetch(value, source_key) do
+            {:ok, v} -> v
+            :error -> default
+          end
+
+        Map.put(acc, bind_name, val)
+      end)
+
+    {:ok, Map.merge(keys_bindings, renames_bindings)}
+  end
+
+  defp match_pattern({:destructure, {:map, _keys, _renames, _defaults}}, value) do
+    {:error, {:destructure_error, "expected map, got #{inspect(value)}"}}
+  end
+
   defp match_pattern({:destructure, {:seq, patterns}}, value) when is_list(value) do
     if length(value) < length(patterns) do
       {:error,

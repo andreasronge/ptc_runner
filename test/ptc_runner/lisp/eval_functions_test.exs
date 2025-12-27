@@ -174,6 +174,51 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
                Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
     end
 
+    test "map destructuring: renaming bindings" do
+      # (fn [{:keys [id] the-name :name} m] the-name) called with {:id 123 :name "Alice"}
+      params = [{:destructure, {:map, [:id], [{:the_name, :name}], []}}]
+      body = {:var, :the_name}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :with_rename}, closure_def}]
+
+      call_ast =
+        {:call, {:var, :with_rename},
+         [{:map, [{{:keyword, :id}, 123}, {{:keyword, :name}, {:string, "Alice"}}]}]}
+
+      assert {:ok, "Alice", %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "map destructuring: renaming with default value" do
+      # (fn [{:keys [id] the-name :name :or {the-name "Unknown"}}] the-name) called with {:id 123}
+      params = [
+        {:destructure, {:map, [:id], [{:the_name, :name}], [the_name: "Unknown"]}}
+      ]
+
+      body = {:var, :the_name}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :with_rename_default}, closure_def}]
+      call_ast = {:call, {:var, :with_rename_default}, [{:map, [{{:keyword, :id}, 123}]}]}
+
+      assert {:ok, "Unknown", %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
+    test "map destructuring: :or with symbol keys" do
+      # (fn [{:keys [x] :or {x 0}}] x) called with {:y 20} using symbol keys in :or
+      params = [{:destructure, {:keys, [:x], [x: 0]}}]
+      body = {:var, :x}
+      closure_def = {:fn, params, body}
+
+      bindings = [{:binding, {:var, :symbol_or_default}, closure_def}]
+      call_ast = {:call, {:var, :symbol_or_default}, [{:map, [{{:keyword, :y}, 20}]}]}
+
+      assert {:ok, 0, %{}} =
+               Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
+    end
+
     test "vector destructuring with nested patterns: vector in vector" do
       # (fn [[[a b] c]] a) called with [[1 2] 3]
       params = [

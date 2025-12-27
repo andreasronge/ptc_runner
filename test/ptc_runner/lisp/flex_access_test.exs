@@ -10,14 +10,14 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "destructuring with :or does not replace nil" do
-      program = ~S"(let [{:keys [a] :or {:a 100}} ctx/data] a)"
+      program = ~S"(let [{:keys [a] :or {a 100}} ctx/data] a)"
       context = %{"data" => %{"a" => nil}}
 
       assert {:ok, nil, _, _} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "destructuring with :or uses default for missing key" do
-      program = ~S"(let [{:keys [a] :or {:a 100}} ctx/data] a)"
+      program = ~S"(let [{:keys [a] :or {a 100}} ctx/data] a)"
       context = %{"data" => %{}}
 
       assert {:ok, 100, _, _} = PtcRunner.Lisp.run(program, context: context)
