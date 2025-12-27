@@ -22,8 +22,58 @@ lib/ptc_runner/
 └── sub_agent/
     ├── loop.ex                  # Agentic loop implementation
     ├── ref_extractor.ex         # Value extraction from results
-    └── prompt.ex                # System prompt generation
+    ├── prompt.ex                # System prompt generation
+    └── schema_extractor.ex      # Tool type extraction from @spec
 ```
+
+---
+
+## Architecture Overview
+
+### Execution Flow
+
+```
+delegate/2
+    │
+    ├─► Prompt.generate/1 ──► Extract schemas from tools + tool_catalog
+    │                         Generate system prompt with tool signatures
+    │
+    └─► Loop.run/2
+            │
+            ├─► LLM callback ──► Returns program or answer
+            │
+            ├─► PtcRunner.Lisp.run/2 ──► Execute PTC-Lisp program
+            │       │
+            │       └─► Tool calls recorded for trace
+            │
+            └─► Loop until answer (no program) or max_turns
+                    │
+                    └─► RefExtractor.extract/2 ──► Extract refs from result
+```
+
+### Tool Schema Extraction
+
+The system automatically extracts type information from tools to include in the LLM prompt:
+
+1. **Function references** (`&MyModule.fun/1`): Extract `@spec` via `Code.Typespec.fetch_specs/1`
+2. **Explicit specs** (`{&fun/1, "..."}`): Use provided schema string
+3. **Skip marker** (`{&fun/1, :skip}`): No schema, no validation
+4. **Anonymous functions**: No schema available (warning logged)
+
+Extracted schemas are formatted for the LLM:
+```
+search(query :string, limit :int) -> [{:id :int :title :string}]
+```
+
+### tools vs tool_catalog
+
+| Aspect | `tools` | `tool_catalog` |
+|--------|---------|----------------|
+| Schema in prompt | ✓ "Tools you can call" | ✓ "Tools for planning (do not call)" |
+| Callable by agent | ✓ Yes | ✗ No |
+| Use case | Execution tools | Planning visibility |
+
+This separation enables planning agents to see what tools exist (with types) without being able to call them prematurely.
 
 ---
 
@@ -140,6 +190,8 @@ defmodule PtcRunner.SubAgent do
   ## Options
 
   - `:tools` - Map of tool name (string) to function (default: `%{}`)
+  - `:tool_catalog` - Map of tools whose schemas are visible in prompt but not callable (default: `%{}`).
+    Useful for planning agents that need to see tool signatures without executing them.
   - `:context` - Values available as `ctx/key` in PTC-Lisp (default: `%{}`)
   - `:refs` - Extraction specs for result values (default: `%{}`)
   - `:max_turns` - Maximum LLM calls before failing (default: `5`)
@@ -402,6 +454,65 @@ end
 
 Based on the spike validation (`spike-subagent` branch).
 
+### System Prompt Generation
+
+The `Prompt` module generates system prompts with tool schemas extracted automatically:
+
+```elixir
+defmodule PtcRunner.SubAgent.Prompt do
+  def generate(opts) do
+    tools = Keyword.get(opts, :tools, %{})
+    tool_catalog = Keyword.get(opts, :tool_catalog, %{})
+
+    """
+    #{base_prompt()}
+
+    #{tools_section(tools)}
+
+    #{tool_catalog_section(tool_catalog)}
+
+    #{context_section(opts)}
+    """
+  end
+
+  defp tools_section(tools) when tools == %{}, do: ""
+  defp tools_section(tools) do
+    schemas = extract_schemas(tools)
+    """
+    ## Tools you can call
+    #{format_schemas(schemas)}
+    """
+  end
+
+  defp tool_catalog_section(catalog) when catalog == %{}, do: ""
+  defp tool_catalog_section(catalog) do
+    schemas = extract_schemas(catalog)
+    """
+    ## Tools available for planning (do not call directly)
+    #{format_schemas(schemas)}
+    """
+  end
+end
+```
+
+When `tool_catalog` is provided, the LLM sees tool schemas in the prompt but cannot call them directly. This is useful for planning agents that need to understand available tools to create execution plans.
+
+**Example generated prompt:**
+
+```
+You are a PTC-Lisp agent...
+
+## Tools you can call
+- create_plan(steps [{:id :keyword :task :string :tools [:string] :needs [:keyword]}]) -> {:status :string}
+
+## Tools available for planning (do not call directly)
+- email-finder: agent(task :string) -> {:summary :string :refs {:email_ids [:int] :count :int}}
+- email-reader: agent(task :string, context :map) -> {:summary :string :refs {:bodies :map}}
+- reply-drafter: agent(task :string, context :map) -> {:summary :string :refs {:draft_ids [:int]}}
+```
+
+---
+
 ### Loop Implementation
 
 ```elixir
@@ -415,7 +526,7 @@ defmodule PtcRunner.SubAgent.Loop do
     # Build initial context
     context = build_context(opts)
     system_prompt = Keyword.get_lazy(opts, :system_prompt, fn ->
-      PtcRunner.SubAgent.Prompt.generate(tools)
+      PtcRunner.SubAgent.Prompt.generate(opts)
     end)
 
     # Initialize state
@@ -665,6 +776,13 @@ test "as_tool returns callable function"
 test "refs extracted after completion"
 test "ref retry on missing required refs"
 test "nested SubAgents (as_tool in tools)"
+
+# Prompt
+test "generates tools section with schemas"
+test "generates tool_catalog section separately"
+test "extracts @spec from function references"
+test "uses explicit spec when provided"
+test "skips schema when :skip marker used"
 ```
 
 ### Integration Tests
@@ -674,7 +792,21 @@ test "nested SubAgents (as_tool in tools)"
 test "end-to-end task delegation"
 test "chained SubAgents pass refs"
 test "plan generation via create_plan tool"
+test "tool_catalog schemas visible but not callable"
 ```
+
+### Known LLM Behavior Issues
+
+From spike testing with Gemini 2.5 Flash:
+
+1. **Missing functions**: LLM tries `(str ...)` and `(conj ...)` which are currently missing
+2. **Data Path Confusion**: Uses `[:result :id]` instead of `[:result 0 :id]` for list-wrapped results
+3. **Invalid comparators**: Uses `(sort-by :total >)` but `>` isn't a valid comparator function
+
+**Mitigations:**
+- Add `str` and `conj` to `PtcRunner.Lisp.Runtime`
+- Add numeric safety (handling `nil` in arithmetic)
+- Add custom comparator support to `sort-by`
 
 ---
 
