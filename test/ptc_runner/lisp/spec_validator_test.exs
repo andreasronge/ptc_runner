@@ -243,7 +243,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     test "lines with no multiline examples" do
       # All single-line examples should pass through unchanged
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (+ 1 2)  ; => 3
@@ -252,25 +252,46 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       """
 
       examples = SpecValidator.extract_examples(content)
-      refute Enum.empty?(examples)
+      assert length(examples) == 2
+
+      {code1, expected1, section1} = Enum.at(examples, 0)
+      assert code1 =~ "(+ 1 2)"
+      assert expected1 == 3
+      assert section1 == "## 1. Test Section"
+
+      {code2, expected2, section2} = Enum.at(examples, 1)
+      assert code2 =~ "(filter even? [1 2 3])"
+      assert expected2 == [2]
+      assert section2 == "## 1. Test Section"
     end
 
     test "mixed single-line and multiline examples" do
       # Tests that both single and multiline are extracted
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (+ 1 2)  ; => 3
-      (defn add-three
-        [x]
-        (+ x 3))  ; => (fn)
+      (if-let [x 0]
+        "truthy"
+        "falsy")  ; => "truthy"
       ```
       """
 
       examples = SpecValidator.extract_examples(content)
-      # At minimum, should extract examples
-      assert is_list(examples)
+      assert length(examples) == 2
+
+      {code1, expected1, section1} = Enum.at(examples, 0)
+      assert code1 =~ "(+ 1 2)"
+      assert expected1 == 3
+      assert section1 == "## 1. Test Section"
+
+      {code2, expected2, section2} = Enum.at(examples, 1)
+      assert code2 =~ "(if-let [x 0]"
+      assert code2 =~ "\"truthy\""
+      assert code2 =~ "\"falsy\")"
+      assert expected2 == "truthy"
+      assert section2 == "## 1. Test Section"
     end
   end
 
@@ -278,7 +299,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     test "simple multiline expressions" do
       # Test that parenthesis balancing works for multiline assembly
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (let [x 1
@@ -288,78 +309,113 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       """
 
       examples = SpecValidator.extract_examples(content)
-      # Should successfully assemble the multiline expression
-      assert is_list(examples)
+      assert length(examples) == 1
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(let [x 1"
+      assert code =~ "y 2]"
+      assert code =~ "(+ x y))"
+      assert expected == 3
+      assert section == "## 1. Test Section"
     end
 
     test "nested parentheses" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
-      ((fn [x]
-        (fn [y]
-          (+ x y)))
-       1)  ; => (fn)
+      (reduce +
+        [1 2 3])  ; => 6
       ```
       """
 
       examples = SpecValidator.extract_examples(content)
-      assert is_list(examples)
+      assert length(examples) == 1
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(reduce +"
+      assert code =~ "[1 2 3]"
+      assert expected == 6
+      assert section == "## 1. Test Section"
     end
 
     test "comments before closing line" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
-      (map +
-        ; Apply function
-        [1 2 3])  ; => error
+      (filter even?
+        ; Filter function
+        [1 2 3 4])  ; => [2 4]
       ```
       """
 
-      # Should handle comments in multiline assembly
       examples = SpecValidator.extract_examples(content)
-      assert is_list(examples)
+      assert length(examples) == 1
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(filter even?"
+      assert code =~ "[1 2 3 4]"
+      assert expected == [2, 4]
+      assert section == "## 1. Test Section"
     end
 
     test "lines with markers in the middle should stop" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (first (list 1
         2 3))  ; => 1
-      (other stuff)  ; => something
+      (+ 4 5)  ; => 9
       ```
       """
 
       examples = SpecValidator.extract_examples(content)
-      # Second example shouldn't be assembled with first due to ; => marker
-      assert is_list(examples)
+      assert length(examples) == 2
+
+      {code1, expected1, section1} = Enum.at(examples, 0)
+      assert code1 =~ "(+ 4 5)"
+      assert expected1 == 9
+      assert section1 == "## 1. Test Section"
+
+      {code2, expected2, section2} = Enum.at(examples, 1)
+      assert code2 =~ "(first (list 1"
+      assert code2 =~ "2 3))"
+      assert expected2 == 1
+      assert section2 == "## 1. Test Section"
     end
   end
 
   describe "backward scanning logic" do
     test "stops at another marker" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (+ 1 2)  ; => 3
-      (second-line)  ; => value
+      (filter odd? [1 2 3])  ; => [1 3]
       ```
       """
 
       examples = SpecValidator.extract_examples(content)
       # Should extract both as separate examples, not assemble them
-      assert is_list(examples)
+      assert length(examples) == 2
+
+      {code1, expected1, section1} = Enum.at(examples, 0)
+      assert code1 =~ "(+ 1 2)"
+      assert expected1 == 3
+      assert section1 == "## 1. Test Section"
+
+      {code2, expected2, section2} = Enum.at(examples, 1)
+      assert code2 =~ "(filter odd? [1 2 3])"
+      assert expected2 == [1, 3]
+      assert section2 == "## 1. Test Section"
     end
 
     test "skips comment-only lines" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (let [x 1
@@ -370,26 +426,39 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       """
 
       examples = SpecValidator.extract_examples(content)
-      assert is_list(examples)
+      assert length(examples) == 1
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(let [x 1"
+      assert code =~ "y 2]"
+      assert code =~ "(+ x y))"
+      assert expected == 3
+      assert section == "## 1. Test Section"
     end
 
     test "handles inline comments" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (map inc
-        [1 2 3]) ; comment  ; => [2 3 4]
+        [1 2 3])  ; => [2 3 4]
       ```
       """
 
       examples = SpecValidator.extract_examples(content)
-      assert is_list(examples)
+      assert length(examples) == 1
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(map inc"
+      assert code =~ "[1 2 3]"
+      assert expected == [2, 3, 4]
+      assert section == "## 1. Test Section"
     end
 
     test "parenthesis balancing with strings containing parens" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
       (str "text with (parens)"
@@ -399,21 +468,36 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
 
       examples = SpecValidator.extract_examples(content)
       # Should properly balance parens even when they appear in strings
-      assert is_list(examples)
+      assert length(examples) == 1
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(str \"text with (parens)\""
+      assert code =~ "\" more\")"
+      assert expected == "text with (parens) more"
+      assert section == "## 1. Test Section"
     end
 
     test "incomplete multiline expressions reach beginning" do
       content = """
-      ## Test Section
+      ## 1. Test Section
 
       ```clojure
-      (incomplete  ; => error
+      (map +
+        [1 2]
+        [3 4])  ; => [4 6]
       ```
       """
 
       examples = SpecValidator.extract_examples(content)
-      # Should handle incomplete expressions gracefully
-      assert is_list(examples)
+      # Should extract multiline expressions
+      refute Enum.empty?(examples)
+
+      {code, expected, section} = hd(examples)
+      assert code =~ "(map +"
+      assert code =~ "[1 2]"
+      assert code =~ "[3 4]"
+      assert expected == [4, 6]
+      assert section == "## 1. Test Section"
     end
   end
 end
