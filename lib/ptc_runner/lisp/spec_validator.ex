@@ -23,14 +23,17 @@ defmodule PtcRunner.Lisp.SpecValidator do
   @doc """
   Validate all examples in the PTC-Lisp specification.
 
-  Returns a summary of results with counts of passed, failed, and skipped examples.
+  Returns a summary of results with counts of passed, failed, skipped examples,
+  as well as TODO and BUG markers found in the spec.
 
   ## Returns
 
       {:ok, %{
         passed: 95,
         failed: 0,
-        skipped: 11,
+        skipped: 2,
+        todos: [{"(code)", "description", "## Section"}, ...],
+        bugs: [],
         failures: [...]
       }}
   """
@@ -38,8 +41,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
   def validate_spec do
     case load_spec() do
       {:ok, content} ->
-        examples = extract_examples(content)
-        validate_examples(examples)
+        extracted = extract_examples(content)
+        validate_examples(extracted)
 
       {:error, _} = err ->
         err
@@ -49,17 +52,22 @@ defmodule PtcRunner.Lisp.SpecValidator do
   @doc """
   Extract all examples from the specification.
 
-  Returns a list of example tuples: `{code, expected_output, section}`.
+  Returns a map with categorized examples:
+  - `examples` - Testable examples as `{code, expected, section}` tuples
+  - `todos` - TODO markers as `{code, description, section}` tuples
+  - `bugs` - BUG markers as `{code, description, section}` tuples
+  - `skipped` - Count of illustrative examples (using `...`)
 
   ## Returns
 
-      [
-        {"(+ 1 2)", 3, "## 1. Overview"},
-        {"(filter even? [1 2 3 4])", [2, 4], "## 3. Data Types"},
-        ...
-      ]
+      {:ok, %{
+        examples: [{"(+ 1 2)", 3, "## Section"}, ...],
+        todos: [{"(code)", "description", "## Section"}, ...],
+        bugs: [],
+        skipped: 2
+      }}
   """
-  @spec extract_examples() :: {:ok, [tuple()]} | {:error, String.t()}
+  @spec extract_examples() :: {:ok, map()} | {:error, String.t()}
   def extract_examples do
     case load_spec() do
       {:ok, content} ->
@@ -73,8 +81,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
   @doc """
   Extract examples from specification content string.
 
-  Parses the markdown content and extracts code examples with expected values.
-  Returns tuples of `{code, expected, section}` with section tracking.
+  Parses the markdown content and extracts code examples with expected values,
+  TODO markers, BUG markers, and counts skipped illustrative examples.
 
   ## Parameters
 
@@ -82,13 +90,14 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
   ## Returns
 
-      [
-        {"(+ 1 2)", 3, "## 1. Overview"},
-        {"(filter even? [1 2 3 4])", [2, 4], "## 3. Data Types"},
-        ...
-      ]
+      %{
+        examples: [{"(+ 1 2)", 3, "## Section"}, ...],
+        todos: [{"(code)", "description", "## Section"}, ...],
+        bugs: [],
+        skipped: 2
+      }
   """
-  @spec extract_examples(String.t()) :: [tuple()]
+  @spec extract_examples(String.t()) :: map()
   def extract_examples(content) when is_binary(content) do
     extract_examples_from_content(content)
   end
@@ -237,24 +246,57 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
   defp extract_examples_from_content(content) do
     lines = String.split(content, "\n")
+    initial_acc = %{examples: [], todos: [], bugs: [], skipped: 0}
 
     # Pass 1: Extract single-line examples
-    single_line_examples = extract_examples_from_lines(lines, [], nil)
+    single_line_result = extract_examples_from_lines(lines, initial_acc, nil)
 
     # Pass 2: Assemble multi-line examples
-    multi_line_examples = extract_multiline_examples(lines, [], nil)
+    multi_line_result = extract_multiline_examples(lines, initial_acc, nil)
 
     # Combine and deduplicate (multiline takes precedence over single-line)
-    multiline_codes = Enum.map(multi_line_examples, fn {code, _, _} -> code end) |> MapSet.new()
+    multiline_codes =
+      Enum.map(multi_line_result.examples, fn {code, _, _} -> code end) |> MapSet.new()
 
-    Enum.filter(single_line_examples, fn {code, _, _} ->
-      not MapSet.member?(multiline_codes, code)
-    end)
-    |> Enum.concat(multi_line_examples)
+    multiline_todo_codes =
+      Enum.map(multi_line_result.todos, fn {code, _, _} -> code end) |> MapSet.new()
+
+    multiline_bug_codes =
+      Enum.map(multi_line_result.bugs, fn {code, _, _} -> code end) |> MapSet.new()
+
+    all_multiline_codes =
+      MapSet.union(multiline_codes, MapSet.union(multiline_todo_codes, multiline_bug_codes))
+
+    filtered_examples =
+      Enum.filter(single_line_result.examples, fn {code, _, _} ->
+        not MapSet.member?(all_multiline_codes, code)
+      end)
+
+    filtered_todos =
+      Enum.filter(single_line_result.todos, fn {code, _, _} ->
+        not MapSet.member?(all_multiline_codes, code)
+      end)
+
+    filtered_bugs =
+      Enum.filter(single_line_result.bugs, fn {code, _, _} ->
+        not MapSet.member?(all_multiline_codes, code)
+      end)
+
+    %{
+      examples: filtered_examples ++ multi_line_result.examples,
+      todos: filtered_todos ++ multi_line_result.todos,
+      bugs: filtered_bugs ++ multi_line_result.bugs,
+      skipped: single_line_result.skipped + multi_line_result.skipped
+    }
   end
 
   defp extract_examples_from_lines([], acc, _current_section) do
-    Enum.reverse(acc)
+    %{
+      acc
+      | examples: Enum.reverse(acc.examples),
+        todos: Enum.reverse(acc.todos),
+        bugs: Enum.reverse(acc.bugs)
+    }
   end
 
   defp extract_examples_from_lines([line | rest], acc, current_section) do
@@ -269,19 +311,33 @@ defmodule PtcRunner.Lisp.SpecValidator do
       case extract_example_from_line(line) do
         {:ok, code, expected} ->
           # Parse the expected value from the comment
-          case parse_expected(expected) do
-            {:ok, value} ->
-              example = {code, value, current_section}
-              extract_examples_from_lines(rest, [example | acc], current_section)
-
-            :error ->
-              # Skip examples we can't parse
-              extract_examples_from_lines(rest, acc, current_section)
-          end
+          new_acc = accumulate_parsed_example(acc, code, expected, current_section)
+          extract_examples_from_lines(rest, new_acc, current_section)
 
         :no_example ->
           extract_examples_from_lines(rest, acc, current_section)
       end
+    end
+  end
+
+  # Accumulate parsed example into appropriate category
+  defp accumulate_parsed_example(acc, code, expected_str, section) do
+    case parse_expected(expected_str) do
+      {:ok, value} ->
+        %{acc | examples: [{code, value, section} | acc.examples]}
+
+      {:todo, description} ->
+        %{acc | todos: [{code, description, section} | acc.todos]}
+
+      {:bug, description} ->
+        %{acc | bugs: [{code, description, section} | acc.bugs]}
+
+      :skip ->
+        %{acc | skipped: acc.skipped + 1}
+
+      :error ->
+        # Unparseable - silently skip
+        acc
     end
   end
 
@@ -291,7 +347,12 @@ defmodule PtcRunner.Lisp.SpecValidator do
   end
 
   defp extract_multiline_from_indexed([], _indexed_lines, acc, _current_section) do
-    Enum.reverse(acc)
+    %{
+      acc
+      | examples: Enum.reverse(acc.examples),
+        todos: Enum.reverse(acc.todos),
+        bugs: Enum.reverse(acc.bugs)
+    }
   end
 
   defp extract_multiline_from_indexed([{line, idx} | rest], indexed_lines, acc, current_section) do
@@ -324,21 +385,50 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
     if String.length(code_only) > 0 and String.length(expected_trimmed) > 0 and
          has_more_closing_than_opening?(code_only) do
-      case parse_expected(expected_trimmed) do
-        {:ok, value} ->
-          case assemble_multiline_example(all_indexed, idx, value, current_section) do
-            {:ok, example} ->
-              extract_multiline_from_indexed(rest, all_indexed, [example | acc], current_section)
+      new_acc =
+        accumulate_multiline_example(acc, all_indexed, idx, expected_trimmed, current_section)
 
-            :not_multiline ->
-              extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
-          end
-
-        :error ->
-          extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
-      end
+      extract_multiline_from_indexed(rest, all_indexed, new_acc, current_section)
     else
       extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+    end
+  end
+
+  # Accumulate multiline example into appropriate category
+  defp accumulate_multiline_example(acc, all_indexed, idx, expected_str, section) do
+    case parse_expected(expected_str) do
+      {:ok, value} ->
+        case assemble_multiline_example(all_indexed, idx, section) do
+          {:ok, code} ->
+            %{acc | examples: [{code, value, section} | acc.examples]}
+
+          :not_multiline ->
+            acc
+        end
+
+      {:todo, description} ->
+        case assemble_multiline_example(all_indexed, idx, section) do
+          {:ok, code} ->
+            %{acc | todos: [{code, description, section} | acc.todos]}
+
+          :not_multiline ->
+            acc
+        end
+
+      {:bug, description} ->
+        case assemble_multiline_example(all_indexed, idx, section) do
+          {:ok, code} ->
+            %{acc | bugs: [{code, description, section} | acc.bugs]}
+
+          :not_multiline ->
+            acc
+        end
+
+      :skip ->
+        %{acc | skipped: acc.skipped + 1}
+
+      :error ->
+        acc
     end
   end
 
@@ -375,7 +465,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
     result < 0
   end
 
-  defp assemble_multiline_example(indexed_lines, end_line_idx, expected_value, section) do
+  defp assemble_multiline_example(indexed_lines, end_line_idx, _section) do
     # Get the line at end_line_idx
     case Enum.find(indexed_lines, fn {idx, _} -> idx == end_line_idx end) do
       {_, end_line} ->
@@ -392,7 +482,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
         if has_more_closing_than_opening?(code_part) do
           case scan_backwards(indexed_lines, end_line_idx - 1, code_part) do
             {:ok, assembled_code} ->
-              {:ok, {assembled_code, expected_value, section}}
+              {:ok, assembled_code}
 
             :not_found ->
               :not_multiline
@@ -541,10 +631,21 @@ defmodule PtcRunner.Lisp.SpecValidator do
   end
 
   # Parse expected values from string format
+  # Returns:
+  #   {:ok, value} - parseable expected value
+  #   {:todo, description} - TODO marker (feature not implemented)
+  #   {:bug, description} - BUG marker (known bug)
+  #   :skip - illustrative example (e.g., "...")
+  #   :error - unparseable value
   defp parse_expected(str) do
     str = String.trim(str)
 
     cond do
+      # Semantic markers for doc tests
+      String.starts_with?(str, "TODO") -> parse_marker(str, :todo)
+      String.starts_with?(str, "BUG") -> parse_marker(str, :bug)
+      str == "..." -> :skip
+      # Regular expected values
       parse_literal(str) != :not_literal -> parse_literal(str)
       String.starts_with?(str, "\"") -> parse_quoted_string(str)
       String.starts_with?(str, ":") -> parse_keyword(str)
@@ -552,6 +653,21 @@ defmodule PtcRunner.Lisp.SpecValidator do
       map?(str) -> parse_map(str)
       true -> :error
     end
+  end
+
+  # Parse TODO or BUG markers with optional description
+  # Formats: "TODO", "TODO: description", "BUG", "BUG: description"
+  defp parse_marker(str, type) do
+    marker = if type == :todo, do: "TODO", else: "BUG"
+
+    description =
+      case String.split(str, ":", parts: 2) do
+        [^marker, desc] -> String.trim(desc)
+        [^marker] -> ""
+        _ -> ""
+      end
+
+    {type, description}
   end
 
   # Parse literal values: nil, true, false, numbers
@@ -664,21 +780,31 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
   defp parse_map_tokens(_, _), do: :error
 
-  defp validate_examples(examples) do
-    validate_examples(examples, %{passed: 0, failed: 0, skipped: 0, failures: [], by_section: %{}})
+  defp validate_examples(%{examples: examples, todos: todos, bugs: bugs, skipped: skipped}) do
+    initial_results = %{
+      passed: 0,
+      failed: 0,
+      skipped: skipped,
+      todos: todos,
+      bugs: bugs,
+      failures: [],
+      by_section: %{}
+    }
+
+    validate_example_list(examples, initial_results)
   end
 
-  defp validate_examples([], results) do
+  defp validate_example_list([], results) do
     {:ok, results}
   end
 
-  defp validate_examples([{code, expected, section} | rest], results) do
+  defp validate_example_list([{code, expected, section} | rest], results) do
     case validate_example(code, expected) do
       :ok ->
         # Update section stats
         by_section = update_section_stats(results.by_section, section, :pass)
 
-        validate_examples(rest, %{
+        validate_example_list(rest, %{
           results
           | passed: results.passed + 1,
             by_section: by_section
@@ -690,7 +816,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
         # Update section stats
         by_section = update_section_stats(results.by_section, section, :fail)
 
-        validate_examples(rest, %{
+        validate_example_list(rest, %{
           results
           | failed: results.failed + 1,
             failures: [failure | results.failures],
