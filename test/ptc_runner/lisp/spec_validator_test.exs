@@ -572,13 +572,12 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     end
   end
 
-  setup_all do
-    require_babashka()
-    :ok
-  end
-
   describe "Clojure conformance" do
     @describetag :clojure
+
+    setup do
+      require_babashka()
+    end
 
     test "all spec examples are valid Clojure syntax" do
       {:ok, result} = SpecValidator.extract_examples()
