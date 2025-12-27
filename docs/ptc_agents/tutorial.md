@@ -352,31 +352,30 @@ tools = %{
 }
 ```
 
-#### Override with Explicit Spec
+#### The Unified Tool Model
 
-Override auto-extraction with a tuple `{function, spec}`:
+Internally, all tool definitions (function refs, strings, structs) are normalized into a single `Tool` structure. This ensures that validation and schema generation are consistent across all patterns.
+
+The string shorthand `"(...) -> ..."` is a convenient way to populate a `ToolSpec` without verbose Elixir syntax:
 
 ```elixir
 tools = %{
-  # String schema format
+  # These are equivalent internally:
   "search" => {
     &MyApp.search/2,
     "(query :string, limit :int) -> [{:id :int :title :string}]"
   },
 
-  # ToolSpec struct for full control
-  "complex" => {
-    &MyApp.complex_op/1,
+  "search" => {
+    &MyApp.search/2,
     ToolSpec.new(
-      params: [
-        query: [type: :string, required: true],
-        limit: [type: :int, default: 10]
-      ],
+      params: [query: :string, limit: [type: :int, default: 10]],
       returns: [{:id, :int}, {:title, :string}]
     )
   }
 }
 ```
+
 
 #### Skip Validation
 
@@ -483,35 +482,27 @@ Nested:
 
 #### SubAgent-as-Tool Contracts
 
-SubAgents wrapped with `as_tool/1` can also have typed contracts:
+The "Context Firewall" relies on a clear bridge between agents: **The `refs` of a SubAgent become the `returns` of its tool representation.**
 
 ```elixir
-tools = %{
-  "email-agent" => SubAgent.as_tool(
-    llm: llm,
-    tools: email_tools,
-    description: "Find, filter, and summarize emails",
-    refs: %{
-      email_ids: [Access.all(), :id],
-      count: &length/1
-    },
-    spec: ToolSpec.new(
-      params: [
-        task: [type: :string, required: true],
-        context: [type: :map, default: %{}]
-      ],
-      returns: {:refs, %{email_ids: [:int], count: :int}}
-    )
-  )
-}
+email_agent = SubAgent.as_tool(
+  llm: llm,
+  tools: email_tools,
+  description: "Find and filter emails",
+  refs: %{
+    email_ids: [Access.all(), :id],
+    count: &length/1
+  }
+)
 ```
 
-Generated schema for LLM:
+The parent agent's LLM sees a generated schema where the `returns` match the `refs` structure:
 ```
-"agent(task :string, context :map) -> {:summary :string :refs {:email_ids [:int] :count :int}}"
+email-agent(task :string) -> {:summary :string :refs {:email_ids [:int] :count :int}}
 ```
 
-The `agent(...)` prefix signals this is a SubAgent delegation, not a direct function call.
+This ensures that the parent can reason about the small reference values the child will produce, without ever seeing the raw 50KB dataset inside the child.
+
 
 #### Dynamic spawn_agent Contract
 
@@ -548,35 +539,114 @@ When the LLM needs to convert types explicitly, use Clojure 1.11+ functions:
   "Invalid order ID")
 ```
 
-### Context
+### Context & State
 
-Pass small values (IDs, settings) to the sub-agent. These are available in PTC-Lisp as `ctx/key`:
+The sub-agent has access to several built-in context variables that help manage state and data flow across multi-turn executions.
+
+#### `ctx/key`
+
+Any values passed to `context:` in the `delegate/2` call are available via the `ctx/` prefix:
 
 ```elixir
 {:ok, result} = PtcRunner.SubAgent.delegate(
   "Get details for this order",
   llm: llm,
   tools: order_tools,
-  context: %{order_id: "ORD-12345", include_history: true}
+  context: %{order_id: "ORD-12345"}
 )
 ```
 
-The sub-agent can access these as `ctx/order_id` in its PTC-Lisp program.
+Usage in PTC-Lisp: `(call "get_order" {:id ctx/order_id})`.
 
 #### `ctx/last-result`
 
-In a multi-turn agentic loop, you can access the result of the *most recent* program's execution using `ctx/last-result`:
+Contains the result of the *most recent successful* program execution. 
 
 ```clojure
-(let [urgent-emails (filter (where :is_urgent) (ctx/last-result))]
-  (mapv (fn [e] (call "read_email" {:id (:id e)})) urgent-emails))
+;; Turn 1 executed (call "search" ...)
+;; Turn 2 can access that result:
+(let [items ctx/last-result]
+  (mapv :id items))
 ```
 
-This is the primary way agents chain transformations across turns without parent intervention.
+**Persistence**: Unlike raw LLM history, `ctx/last-result` is "sticky." If Turn 2 results in a syntax error, `ctx/last-result` in Turn 3 will still contain the data from Turn 1. This prevents data loss during self-correction turns.
+
+#### `ctx/last-error`
+
+If the previous turn failed (syntax error, tool validation error, etc.), the details are available in `ctx/last-error`. 
+
+```clojure
+(if ctx/last-error
+  (call "cleanup" {:failed_op (:op ctx/last-error)})
+  (call "proceed" ctx/last-result))
+```
+
+**Note**: The error is also automatically appended to the LLM's message history as text, but `ctx/last-error` allows the *program* to branch based on failure.
+
+---
+
+### Error Handling & Escalation
+
+SubAgents handle errors at three different levels of the "Context Firewall."
+
+#### 1. Turn Errors (Recoverable)
+
+Errors like Lisp syntax mistakes, tool arity mismatches, or **Tool Validation Errors** (e.g., tool returned a string but contract required an integer) are fed back to the SubAgent's LLM.
+
+The LLM sees the error in its history and can use `ctx/last-error` to adapt.
+
+#### 2. Mission Failures (Escalatable)
+
+Sometimes a SubAgent is "healthy" but realizes it cannot complete the task (e.g., "Database connection refused" or "No user found with that ID"). 
+
+Use the built-in **`fail` tool** to explicitly exit the loop and notify the parent:
+
+```clojure
+(let [user (call "get_user" {:id 123})]
+  (if (nil? user)
+    (call "fail" {:reason :not_found :message "User 123 does not exist"})
+    (call "process" user)))
+```
+
+**Result**:
+- The `AgenticLoop` stops immediately.
+- `delegate/2` returns `{:error, %{reason: :delegated_failure, data: %{reason: :not_found, ...}}}`.
+- If used as a tool (`as_tool`), the **Parent LLM** receives this error map as the tool's result, allowing it to try a different strategy.
+
+#### 3. Ref Self-Correction
+
+If you specify `refs:` that are required for a mission, but the SubAgent's final result is missing those fields, the system will automatically:
+1. Generate an error: "Required ref ':id' was missing from result."
+2. Feed it back to the SubAgent.
+3. Grant the agent a **Ref Retry** (default: 1) to fix its output before the delegation fails.
+
+#### 4. Hard Crashes (Programming Errors)
+
+If your **Elixir code** inside a tool function crashes with a `raise` or a pattern match error, the SubAgent does **not** catch it. This follows the "Let it crash" philosophy—programming bugs in the host application are NOT something the LLM should reason about; they should be fixed by a developer.
+
 
 ### Refs (Extracting Values for Chaining)
 
-Extract specific values from results for passing to the next step:
+Extract specific values from results for passing to the next step. Refs are extracted deterministically by `RefExtractor` (not by the LLM), so they're reliable for chaining.
+
+#### Automatic Extraction (`refs: :auto`)
+
+If your tools have defined `returns:` contracts, you can use `:auto` to generate trivial references based on the top-level keys of the result:
+
+```elixir
+{:ok, result} = PtcRunner.SubAgent.delegate(
+  "Get the top customer",
+  tools: tools,
+  refs: :auto
+)
+
+# If 'get_top_customer' returns %{id: 123, name: "Acme"},
+# result.refs will contain %{id: 123, name: "Acme"}
+```
+
+#### Explicit Extraction
+
+For nested data, lists, or custom transformations, use explicit paths or functions:
 
 ```elixir
 {:ok, result} = PtcRunner.SubAgent.delegate(
@@ -584,8 +654,11 @@ Extract specific values from results for passing to the next step:
   llm: llm,
   tools: customer_tools,
   refs: %{
-    customer_id: [Access.at(0), :id],           # Path-based extraction
-    total_revenue: fn r -> r |> hd() |> Map.get(:revenue) end  # Function
+    # Path-based: find ID of the first item in the list
+    customer_id: [Access.at(0), :id],
+    
+    # Function-based: calculate a sum
+    total_revenue: fn r -> r |> hd() |> Map.get(:revenue) end
   }
 )
 
@@ -593,7 +666,6 @@ result.refs.customer_id   #=> "CUST-789"
 result.refs.total_revenue #=> 125000
 ```
 
-Refs are extracted deterministically by `RefExtractor` (not by the LLM), so they're reliable for chaining.
 
 ### Memory (Scoped Scratchpad)
 
@@ -636,6 +708,280 @@ Look up keys in maps using the keyword itself as a function:
 ```clojure
 (mapv :id urgent-emails) ; Equivalent to (mapv (fn [e] (:id e)) ...)
 ```
+
+---
+
+## Multi-Turn Patterns (ReAct)
+
+The agentic loop naturally supports the **ReAct pattern** (Reason + Act): the agent can execute multiple programs, observe results, and adapt its approach across turns.
+
+### Iterative Exploration
+
+```elixir
+tools = %{
+  "search_emails" => fn args ->
+    query = args["query"]
+    offset = args["offset"] || 0
+    limit = args["limit"] || 10
+    MyApp.Email.search(query, offset: offset, limit: limit)
+  end,
+  "get_email" => fn args ->
+    MyApp.Email.get(args["id"])
+  end,
+  "count_results" => fn args ->
+    MyApp.Email.count(args["query"])
+  end
+}
+
+{:ok, result} = PtcRunner.SubAgent.delegate(
+  "Find all emails from our biggest customer complaining about billing",
+  llm: llm,
+  tools: tools,
+  max_turns: 10  # Allow more iterations for exploration
+)
+```
+
+**Turn 1: Initial search**
+```clojure
+;; LLM: "Let me search for billing complaints first"
+(call "search_emails" {:query "billing issue"})
+```
+*Result: 10 emails returned*
+
+**Turn 2: Check total and assess**
+```clojure
+;; LLM: "Got 10 results. Let me check how many total and remember these"
+(do
+  (memory/put :total (call "count_results" {:query "billing issue"}))
+  (memory/put :first-batch ctx/last-result)
+  {:total memory/total :sample-count (count ctx/last-result)})
+```
+*Result: `{:total 47, :sample-count 10}`*
+
+**Turn 3: Refine search based on discovery**
+```clojure
+;; LLM: "47 results is too many. Let me search specifically for Acme Corp"
+(call "search_emails" {:query "billing issue from:acme-corp.com" :limit 20})
+```
+*Result: 8 emails from Acme*
+
+**Turn 4: Get details of most urgent**
+```clojure
+;; LLM: "Found 8 from Acme. Let me read the urgent one."
+(let [urgent (first (filter #(str/includes? (:subject %) "Urgent") ctx/last-result))]
+  (call "get_email" {:id (:id urgent)}))
+```
+*Result: Full email content*
+
+**Turn 5: Final answer (no code block)**
+```
+Found 8 billing-related emails from Acme Corp (your biggest customer).
+The most urgent is from Jane Smith regarding a $5000 overcharge on invoice #4521.
+```
+
+### Key Patterns
+
+**Pagination:**
+```clojure
+;; Turn N: Get first page
+(memory/put :all-results (call "list_items" {:offset 0 :limit 20}))
+
+;; Turn N+1: Get next page, accumulate
+(memory/put :all-results
+  (concat memory/all-results
+          (call "list_items" {:offset 20 :limit 20})))
+```
+
+**Iterative Refinement:**
+```clojure
+;; Turn N: Broad search
+(call "search" {:query "error"})
+
+;; Turn N+1: Too many results, refine
+(call "search" {:query "error database connection timeout"})
+```
+
+**Conditional Exploration:**
+```clojure
+;; Decide whether to explore more based on results
+(let [results ctx/last-result]
+  (if (< (count results) 5)
+    (call "search" {:query "billing" :include-archived true})
+    results))
+```
+
+---
+
+## LLM-Powered Tools
+
+Sometimes a tool needs LLM judgment—classification, summarization, or evaluation. Use `LLMTool.new/1` to create tools that call an LLM:
+
+```elixir
+tools = %{
+  "list_emails" => &MyApp.Email.list/1,
+
+  # LLM tool - uses the same LLM as the SubAgent by default
+  "evaluate_importance" => LLMTool.new(
+    prompt: """
+    Evaluate if this email requires immediate attention.
+
+    Consider:
+    - Is it from a VIP customer? (Tier: {{customer_tier}})
+    - Is it about billing or money?
+    - Does it express urgency or frustration?
+
+    Email subject: {{email.subject}}
+    Email body: {{email.body}}
+    """,
+    returns: %{important: :bool, priority: :int, reason: :string}
+  )
+}
+```
+
+### Type Signatures
+
+`LLMTool` generates a schema from the template variables and `returns` spec, just like regular tools:
+
+```
+## Tools you can call
+- list_emails(limit :int) -> [{:id :int :subject :string :body :string}]
+- evaluate_importance(email {:subject :string :body :string}, customer_tier :string) -> {:important :bool :priority :int :reason :string}
+```
+
+The main agent sees typed inputs (extracted from `{{var}}` placeholders) and typed outputs (from `returns:`), enabling it to reason about data flow correctly.
+
+### Using LLM Tools in Multi-Turn Flow
+
+```clojure
+;; Turn 1: Get emails
+(call "list_emails" {:limit 20})
+```
+
+```clojure
+;; Turn 2: Evaluate each one using LLM judgment
+(let [emails ctx/last-result]
+  (mapv (fn [e]
+          (assoc e :eval
+            (call "evaluate_importance"
+              {:email e :customer_tier (:tier e)})))
+        emails))
+```
+
+```clojure
+;; Turn 3: Filter to important ones and summarize
+(let [evaluated ctx/last-result
+      important (filter #(:important (:eval %)) evaluated)]
+  {:count (count important)
+   :top-priority (first (sort-by #(- (:priority (:eval %))) important))})
+```
+
+### LLM Selection
+
+By default, LLM tools use the same LLM as the SubAgent. You can specify a different model:
+
+```elixir
+tools = %{
+  # Uses caller's LLM (default)
+  "deep_analysis" => LLMTool.new(
+    prompt: "...",
+    returns: %{...}
+  ),
+
+  # Uses a cheaper/faster model for simple classification
+  "quick_triage" => LLMTool.new(
+    prompt: "Is '{{subject}}' urgent? Answer: urgent/normal/low",
+    returns: %{priority: :string},
+    llm: :haiku
+  ),
+
+  # Uses a specific LLM callback
+  "specialized" => LLMTool.new(
+    prompt: "...",
+    returns: %{...},
+    llm: my_custom_llm_callback
+  )
+}
+```
+
+### Batch Classification
+
+For efficiency, process multiple items in one LLM call:
+
+```elixir
+"classify_batch" => LLMTool.new(
+  prompt: """
+  Classify each email by urgency.
+
+  Emails:
+  {{#emails}}
+  - ID {{id}}: "{{subject}}" from {{from}}
+  {{/emails}}
+
+  Return a JSON array with urgency for each email ID.
+  """,
+  returns: [%{id: :int, urgency: :string, reason: :string}]
+)
+```
+
+```clojure
+;; Single LLM call to classify all emails
+(let [emails (call "list_emails" {:limit 50})
+      classifications (call "classify_batch" {:emails emails})]
+  ;; Merge classifications back
+  (mapv (fn [e c] (assoc e :classification c)) emails classifications))
+```
+
+### Full Example: Smart Email Triage
+
+```elixir
+llm = MyApp.LLM.callback(:sonnet)
+
+tools = %{
+  "list_emails" => &MyApp.Email.list/1,
+  "get_customer" => &MyApp.CRM.get_customer/1,
+  "archive_email" => &MyApp.Email.archive/1,
+
+  # LLM evaluates importance with context
+  "evaluate" => LLMTool.new(
+    prompt: """
+    Should this email be flagged for immediate response?
+
+    Customer: {{customer.name}} ({{customer.tier}} tier, ${{customer.revenue}} ARR)
+    Subject: {{email.subject}}
+    Preview: {{email.preview}}
+
+    Consider: customer value, topic urgency, sentiment
+    """,
+    returns: %{flag: :bool, reason: :string, suggested_action: :string}
+  ),
+
+  # Cheap model for quick spam check
+  "is_spam" => LLMTool.new(
+    prompt: "Is this spam? Subject: {{subject}} From: {{from}}",
+    returns: %{spam: :bool},
+    llm: :haiku
+  )
+}
+
+{:ok, result} = PtcRunner.SubAgent.delegate(
+  "Review my inbox. Archive spam, flag anything urgent from enterprise customers.",
+  llm: llm,
+  tools: tools,
+  max_turns: 15,
+  refs: %{
+    flagged: fn r -> r[:flagged] || [] end,
+    archived: fn r -> r[:archived] || [] end
+  }
+)
+```
+
+The agent can now:
+1. List emails
+2. Quick-filter spam with cheap model
+3. Look up customer data for non-spam
+4. Use expensive model to evaluate importance with context
+5. Take actions (archive, flag)
+6. Iterate until inbox is processed
 
 ---
 

@@ -23,7 +23,8 @@ lib/ptc_runner/
     ├── loop.ex                  # Agentic loop implementation
     ├── ref_extractor.ex         # Value extraction from results
     ├── prompt.ex                # System prompt generation
-    └── schema_extractor.ex      # Tool type extraction from @spec
+    ├── schema_extractor.ex      # Tool type extraction from @spec
+    └── llm_tool.ex              # LLM-powered tool wrapper
 ```
 
 ---
@@ -380,6 +381,106 @@ defmodule PtcRunner.SubAgent.RefExtractor do
   """
   @spec validate(map(), [atom()]) :: {:ok, map()} | {:error, [atom()]}
   def validate(refs, required_keys)
+end
+```
+
+---
+
+### PtcRunner.SubAgent.LLMTool
+
+```elixir
+defmodule PtcRunner.SubAgent.LLMTool do
+  @moduledoc """
+  LLM-powered tool wrapper for classification, evaluation, and judgment.
+
+  Creates tools that call an LLM with a templated prompt and parse
+  structured responses. Useful when a tool needs reasoning rather
+  than deterministic computation.
+
+  ## Example
+
+      tools = %{
+        "evaluate" => LLMTool.new(
+          prompt: "Is this email urgent? Subject: {{subject}}",
+          returns: %{urgent: :bool, reason: :string}
+        )
+      }
+
+  The tool can then be called like any other:
+
+      (call "evaluate" {:subject "Server down!"})
+      ;; => {:urgent true :reason "Production issue"}
+  """
+
+  @type llm_ref :: :caller | atom() | (map() -> {:ok, String.t()} | {:error, term()})
+
+  @type t :: %__MODULE__{
+    prompt: String.t(),
+    returns: map() | [map()],
+    llm: llm_ref(),
+    description: String.t() | nil
+  }
+
+  defstruct [:prompt, :returns, :llm, :description]
+
+  @doc """
+  Create a new LLM-powered tool.
+
+  ## Schema Generation
+
+  LLMTool automatically generates a typed schema from:
+  - **Inputs**: Extracted from `{{var}}` template placeholders
+  - **Outputs**: From the `:returns` specification
+
+  Example:
+      LLMTool.new(
+        prompt: "Is {{email.subject}} urgent for {{customer_tier}} customer?",
+        returns: %{urgent: :bool, reason: :string}
+      )
+
+  Generates schema:
+      evaluate(email {:subject :string}, customer_tier :string) -> {:urgent :bool :reason :string}
+
+  This enables the main agent to reason about data flow with LLM tools
+  just like regular tools.
+
+  ## Options
+
+  - `:prompt` - Required. Template string with `{{var}}` placeholders.
+    Supports Mustache-style iteration: `{{#items}}...{{/items}}`
+    Nested access like `{{email.subject}}` infers nested type structure.
+  - `:returns` - Required. Expected return structure for JSON parsing.
+    Use a map for single object, list for array response.
+  - `:llm` - Optional. LLM to use:
+    - `:caller` (default) - Use the SubAgent's LLM
+    - Atom (e.g., `:haiku`) - Look up from model registry
+    - Function - Use directly as LLM callback
+  - `:description` - Optional. Description for schema generation.
+
+  ## Examples
+
+      # Simple classification (uses caller's LLM)
+      LLMTool.new(
+        prompt: "Is {{text}} positive or negative?",
+        returns: %{sentiment: :string, confidence: :float}
+      )
+
+      # Batch processing with cheaper model
+      LLMTool.new(
+        prompt: "Classify urgency for each: {{#items}}{{subject}}{{/items}}",
+        returns: [%{id: :int, urgency: :string}],
+        llm: :haiku
+      )
+
+      # With explicit LLM callback
+      LLMTool.new(
+        prompt: "...",
+        returns: %{...},
+        llm: fn input -> MyLLM.call(input) end
+      )
+  """
+  @spec new(keyword()) :: t()
+  def new(opts)
 end
 ```
 
@@ -783,6 +884,16 @@ test "generates tool_catalog section separately"
 test "extracts @spec from function references"
 test "uses explicit spec when provided"
 test "skips schema when :skip marker used"
+
+# LLMTool
+test "renders template with args"
+test "extracts input schema from template placeholders"
+test "generates output schema from returns spec"
+test "calls caller LLM by default"
+test "calls specified LLM when provided"
+test "parses JSON response to returns schema"
+test "handles batch returns (list schema)"
+test "infers nested types from {{obj.field}} syntax"
 ```
 
 ### Integration Tests
@@ -793,6 +904,8 @@ test "end-to-end task delegation"
 test "chained SubAgents pass refs"
 test "plan generation via create_plan tool"
 test "tool_catalog schemas visible but not callable"
+test "multi-turn ReAct pattern with memory"
+test "LLMTool classification in agentic loop"
 ```
 
 ### Known LLM Behavior Issues
