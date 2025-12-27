@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
   use ExUnit.Case
 
   alias PtcRunner.Lisp.SpecValidator
+  import PtcRunner.TestSupport.ClojureTestHelpers
 
   describe "extract_examples/0" do
     test "returns map with examples from spec" do
@@ -568,6 +569,129 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       assert code =~ "[3 4]"
       assert expected == [4, 6]
       assert section == "## 1. Test Section"
+    end
+  end
+
+  describe "Clojure conformance" do
+    @describetag :clojure
+
+    setup do
+      require_babashka()
+    end
+
+    test "all spec examples are valid Clojure syntax" do
+      {:ok, result} = SpecValidator.extract_examples()
+
+      failures =
+        result.examples
+        |> Enum.map(fn {code, _expected, section} ->
+          case assert_valid_clojure_syntax_result(code) do
+            :ok -> nil
+            {:error, msg} -> {code, msg, section}
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      if failures != [] do
+        failure_report =
+          Enum.map_join(failures, "\n---\n", fn {code, msg, section} ->
+            """
+            Section: #{section}
+            Code: #{code}
+            Error: #{msg}
+            """
+          end)
+
+        flunk(
+          "#{length(failures)} spec examples have invalid Clojure syntax:\n\n#{failure_report}"
+        )
+      end
+    end
+
+    test "spec examples produce same results in Clojure" do
+      {:ok, result} = SpecValidator.extract_examples()
+
+      # Filter out examples that:
+      # - use ctx/ or memory/ (need special handling)
+      # - reference undefined functions like do-something (Clojure analyzes dead code)
+      testable_examples =
+        result.examples
+        |> Enum.reject(fn {code, _expected, _section} ->
+          String.contains?(code, "ctx/") or
+            String.contains?(code, "memory/") or
+            String.contains?(code, "do-something")
+        end)
+
+      failures =
+        testable_examples
+        |> Enum.map(fn {code, expected, section} ->
+          case assert_clojure_equivalent_result(code) do
+            :ok -> nil
+            {:error, msg} -> {code, expected, msg, section}
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      if failures != [] do
+        failure_report =
+          failures
+          |> Enum.take(10)
+          |> Enum.map_join("\n---\n", fn {code, expected, msg, section} ->
+            """
+            Section: #{section}
+            Code: #{code}
+            Expected: #{inspect(expected)}
+            Error: #{msg}
+            """
+          end)
+
+        flunk(
+          "#{length(failures)} spec examples differ from Clojure (showing first 10):\n\n#{failure_report}"
+        )
+      end
+    end
+  end
+
+  # Helper that returns result instead of asserting
+  defp assert_valid_clojure_syntax_result(source) do
+    alias PtcRunner.Lisp.ClojureValidator
+
+    case ClojureValidator.validate_syntax(source) do
+      :ok -> :ok
+      {:error, msg} -> {:error, msg}
+    end
+  end
+
+  # Helper that returns result instead of asserting
+  defp assert_clojure_equivalent_result(source) do
+    alias PtcRunner.Lisp.ClojureValidator
+
+    # Run in PTC-Lisp
+    ptc_result =
+      case PtcRunner.Lisp.run(source) do
+        {:ok, result, _delta, _memory} -> {:ok, result}
+        {:error, _} = err -> err
+      end
+
+    # Run in Babashka
+    clj_result = ClojureValidator.execute(source)
+
+    case {ptc_result, clj_result} do
+      {{:ok, ptc_val}, {:ok, clj_val}} ->
+        case ClojureValidator.compare_results(ptc_val, clj_val) do
+          :match -> :ok
+          {:mismatch, msg} -> {:error, msg}
+        end
+
+      {{:error, ptc_err}, {:ok, clj_val}} ->
+        {:error, "PTC-Lisp error #{inspect(ptc_err)} but Clojure returned #{inspect(clj_val)}"}
+
+      {{:ok, ptc_val}, {:error, clj_err}} ->
+        {:error, "PTC-Lisp returned #{inspect(ptc_val)} but Clojure error: #{clj_err}"}
+
+      {{:error, _}, {:error, _}} ->
+        # Both errored - consistent behavior
+        :ok
     end
   end
 end

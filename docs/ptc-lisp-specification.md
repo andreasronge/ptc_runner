@@ -31,6 +31,22 @@ This design enables safe execution in **agentic LLM loops** where programs are g
 - Turing completeness
 - Full Clojure compatibility
 
+### Clojure Extensions
+
+PTC-Lisp extends standard Clojure with features designed for data transformation in agentic contexts. These are **not valid Clojure** but provide significant utility for LLM-generated programs:
+
+| Extension | Description |
+|-----------|-------------|
+| `ctx/path` and `memory/path` | Namespace-qualified access to context and memory (§9) |
+| `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
+| `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
+| `pluck` | Extract field values from collections (§8) |
+| `call` | Tool invocation special form (§9) |
+| Keyword/string coercion in `where` | `:status = :active` matches `"active"` (§7.6) |
+| Path-based `where` | `(where [:user :role] = :admin)` for nested access (§7.1) |
+
+All other syntax and functions are valid Clojure and are tested against Babashka for conformance.
+
 ---
 
 ## 2. Lexical Structure
