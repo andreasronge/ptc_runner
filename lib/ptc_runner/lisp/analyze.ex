@@ -290,14 +290,11 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp extract_default_pairs(default_pairs) do
     Enum.reduce_while(default_pairs, {:ok, []}, fn
-      {{:keyword, k}, v}, {:ok, acc} ->
-        {:cont, {:ok, [{k, v} | acc]}}
-
       {{:symbol, k}, v}, {:ok, acc} ->
         {:cont, {:ok, [{k, v} | acc]}}
 
       {_other_key, _v}, _acc ->
-        {:halt, {:error, {:invalid_form, "default keys must be keywords or symbols"}}}
+        {:halt, {:error, {:invalid_form, "default keys must be symbols"}}}
     end)
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}

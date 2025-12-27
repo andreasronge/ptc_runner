@@ -622,7 +622,7 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
               {:map,
                [
                  {{:keyword, :keys}, {:vector, [{:symbol, :a}]}},
-                 {{:keyword, :or}, {:map, [{{:keyword, :a}, 10}]}}
+                 {{:keyword, :or}, {:map, [{{:symbol, :a}, 10}]}}
                ]},
               {:symbol, :m}
             ]},
@@ -708,7 +708,7 @@ defmodule PtcRunner.Lisp.AnalyzeTest do
          ]}
 
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "default keys must be keywords or symbols"
+      assert msg =~ "default keys must be symbols"
     end
 
     test "destructuring with :or defaults using symbol keys" do
