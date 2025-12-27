@@ -237,7 +237,20 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
   defp extract_examples_from_content(content) do
     lines = String.split(content, "\n")
-    extract_examples_from_lines(lines, [], nil)
+
+    # Pass 1: Extract single-line examples
+    single_line_examples = extract_examples_from_lines(lines, [], nil)
+
+    # Pass 2: Assemble multi-line examples
+    multi_line_examples = extract_multiline_examples(lines, [], nil)
+
+    # Combine and deduplicate (multiline takes precedence over single-line)
+    multiline_codes = Enum.map(multi_line_examples, fn {code, _, _} -> code end) |> MapSet.new()
+
+    Enum.filter(single_line_examples, fn {code, _, _} ->
+      not MapSet.member?(multiline_codes, code)
+    end)
+    |> Enum.concat(multi_line_examples)
   end
 
   defp extract_examples_from_lines([], acc, _current_section) do
@@ -270,6 +283,180 @@ defmodule PtcRunner.Lisp.SpecValidator do
           extract_examples_from_lines(rest, acc, current_section)
       end
     end
+  end
+
+  defp extract_multiline_examples(lines, acc, current_section) do
+    indexed_lines = Enum.with_index(lines)
+    extract_multiline_from_indexed(indexed_lines, [], acc, current_section)
+  end
+
+  defp extract_multiline_from_indexed([], _indexed_lines, acc, _current_section) do
+    Enum.reverse(acc)
+  end
+
+  defp extract_multiline_from_indexed([{line, idx} | rest], indexed_lines, acc, current_section) do
+    # Check if this is a section header
+    section = extract_section_header(line)
+
+    if section do
+      extract_multiline_from_indexed(rest, indexed_lines ++ [{idx, line}], acc, section)
+    else
+      all_indexed = indexed_lines ++ [{idx, line}]
+      process_multiline_candidate(line, idx, rest, all_indexed, acc, current_section)
+    end
+  end
+
+  defp process_multiline_candidate(line, idx, rest, all_indexed, acc, current_section) do
+    line_trimmed = String.trim(line)
+
+    case String.split(line_trimmed, "; =>") do
+      [code, expected] ->
+        process_multiline_split(code, expected, idx, rest, all_indexed, acc, current_section)
+
+      _ ->
+        extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+    end
+  end
+
+  defp process_multiline_split(code, expected, idx, rest, all_indexed, acc, current_section) do
+    code_only = String.trim(code)
+    expected_trimmed = String.trim(expected)
+
+    if String.length(code_only) > 0 and String.length(expected_trimmed) > 0 and
+         has_more_closing_than_opening?(code_only) do
+      case parse_expected(expected_trimmed) do
+        {:ok, value} ->
+          case assemble_multiline_example(all_indexed, idx, value, current_section) do
+            {:ok, example} ->
+              extract_multiline_from_indexed(rest, all_indexed, [example | acc], current_section)
+
+            :not_multiline ->
+              extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+          end
+
+        :error ->
+          extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+      end
+    else
+      extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+    end
+  end
+
+  defp has_more_closing_than_opening?(code) do
+    result =
+      code
+      |> String.graphemes()
+      |> Enum.reduce_while(0, fn char, count ->
+        case char do
+          "(" -> {:cont, count + 1}
+          ")" -> {:cont, count - 1}
+          _ -> {:cont, count}
+        end
+      end)
+
+    result < 0
+  end
+
+  defp assemble_multiline_example(indexed_lines, end_line_idx, expected_value, section) do
+    # Get the line at end_line_idx
+    case Enum.find(indexed_lines, fn {idx, _} -> idx == end_line_idx end) do
+      {_, end_line} ->
+        end_line_trimmed = String.trim(end_line)
+
+        # Extract code part (everything before ; =>)
+        code_part =
+          case String.split(end_line_trimmed, "; =>") do
+            [code, _] -> String.trim(code)
+            _ -> end_line_trimmed
+          end
+
+        # Only try to assemble if the code part has unbalanced parens
+        if has_more_closing_than_opening?(code_part) do
+          case scan_backwards(indexed_lines, end_line_idx - 1, code_part) do
+            {:ok, assembled_code} ->
+              {:ok, {assembled_code, expected_value, section}}
+
+            :not_found ->
+              :not_multiline
+          end
+        else
+          :not_multiline
+        end
+
+      nil ->
+        :not_multiline
+    end
+  end
+
+  defp scan_backwards(indexed_lines, current_idx, accumulated_code) do
+    if current_idx < 0 do
+      if balanced_parens?(accumulated_code) do
+        {:ok, accumulated_code}
+      else
+        :not_found
+      end
+    else
+      case Enum.find(indexed_lines, fn {idx, _} -> idx == current_idx end) do
+        {_, line} ->
+          process_backward_line(indexed_lines, current_idx, accumulated_code, line)
+
+        nil ->
+          scan_backwards(indexed_lines, current_idx - 1, accumulated_code)
+      end
+    end
+  end
+
+  defp process_backward_line(indexed_lines, current_idx, accumulated_code, line) do
+    line = String.trim(line)
+
+    if String.length(line) == 0 do
+      scan_backwards(indexed_lines, current_idx - 1, accumulated_code)
+    else
+      check_backward_line_type(indexed_lines, current_idx, accumulated_code, line)
+    end
+  end
+
+  defp check_backward_line_type(indexed_lines, current_idx, accumulated_code, line) do
+    cond do
+      String.contains?(line, "; =>") ->
+        :not_found
+
+      String.starts_with?(line, ";") ->
+        scan_backwards(indexed_lines, current_idx - 1, accumulated_code)
+
+      true ->
+        process_code_line(indexed_lines, current_idx, accumulated_code, line)
+    end
+  end
+
+  defp process_code_line(indexed_lines, current_idx, accumulated_code, line) do
+    # Remove trailing comments
+    line_without_comment =
+      case String.split(line, ";", parts: 2) do
+        [code, _comment] -> String.trim_trailing(code)
+        _ -> line
+      end
+
+    new_accumulated = line_without_comment <> "\n" <> accumulated_code
+
+    if balanced_parens?(new_accumulated) do
+      {:ok, new_accumulated}
+    else
+      scan_backwards(indexed_lines, current_idx - 1, new_accumulated)
+    end
+  end
+
+  defp balanced_parens?(code) do
+    code
+    |> String.graphemes()
+    |> Enum.reduce_while(0, fn char, count ->
+      case char do
+        "(" -> {:cont, count + 1}
+        ")" -> if count > 0, do: {:cont, count - 1}, else: {:halt, -1}
+        _ -> {:cont, count}
+      end
+    end)
+    |> Kernel.==(0)
   end
 
   # Extract section header from line (pattern: ## N. Title)
