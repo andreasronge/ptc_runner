@@ -119,6 +119,43 @@ demo/lib/ptc_demo/
 
 ---
 
+## Primitives
+
+The SubAgent system provides a small set of composable primitives. Everything else—orchestration patterns, planning strategies, dynamic agent creation—is built from these.
+
+| Primitive | Purpose | Location |
+|-----------|---------|----------|
+| `delegate/2` | Run a task with tools in isolation | `PtcRunner.SubAgent` |
+| `as_tool/1` | Wrap a SubAgent config as a callable tool | `PtcRunner.SubAgent` |
+| `RefExtractor.extract/2` | Deterministically pull values from results | `PtcRunner.SubAgent.RefExtractor` |
+| `Loop.run/2` | Multi-turn agentic execution engine | `PtcRunner.SubAgent.Loop` |
+| `memory/put`, `memory/get` | Per-agent state (scoped, private) | PTC-Lisp builtins |
+
+**Design philosophy**: The library provides primitives, not patterns. You compose primitives into whatever orchestration pattern fits your use case. The patterns shown later in this tutorial are examples, not prescriptions.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Primitives                               │
+│                                                                  │
+│   delegate/2 ──── Run task in isolation                         │
+│   as_tool/1  ──── Make SubAgent callable as a tool              │
+│   RefExtractor ── Extract values from results                   │
+│   Loop ───────── Multi-turn execution                           │
+│   memory/* ───── Per-agent state                                │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                    Patterns (you build)                          │
+│                                                                  │
+│   Hybrid ─────────── Plan then execute (prompt pattern)         │
+│   PlanExecutor ───── Iterate over plan-as-data                  │
+│   spawn_agent ────── Dynamic SubAgent creation                  │
+│   Pre-defined ────── as_tool for known domains                  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Quick Start
 
 Here's the simplest possible example - delegate a task and get a result:
@@ -473,6 +510,214 @@ defmodule PlanExecutor do
 end
 ```
 
+
+---
+
+## Orchestration Patterns
+
+These patterns are built from the primitives. They're examples, not prescriptions—compose your own patterns as needed.
+
+### Pattern 1: Dynamic SubAgent Creation (spawn_agent)
+
+Let the LLM create SubAgents on-the-fly by providing a meta-tool:
+
+```elixir
+# Tool catalog - all available tool sets
+tool_catalog = %{
+  "email" => %{
+    "list_emails" => fn args -> ... end,
+    "read_email" => fn args -> ... end
+  },
+  "calendar" => %{
+    "find_slots" => fn args -> ... end,
+    "create_meeting" => fn args -> ... end
+  },
+  "crm" => %{
+    "get_customer" => fn args -> ... end,
+    "update_customer" => fn args -> ... end
+  }
+}
+
+# Meta-tool: LLM can spawn agents with any tool combination
+tools = %{
+  "spawn_agent" => fn args ->
+    # LLM specifies: task, which tool sets, optional context
+    tool_names = args["tools"] || []
+    selected_tools = tool_names
+      |> Enum.flat_map(&Map.get(tool_catalog, &1, %{}))
+      |> Map.new()
+
+    {:ok, result} = PtcRunner.SubAgent.delegate(
+      args["task"],
+      llm: llm,
+      tools: selected_tools,
+      context: args["context"] || %{}
+    )
+
+    # Return summary and refs to parent
+    %{summary: result.summary, refs: result.refs}
+  end
+}
+
+# Now the LLM can dynamically create specialized agents:
+{:ok, result} = PtcRunner.SubAgent.delegate(
+  "Find urgent emails, then schedule follow-up meetings for each",
+  llm: llm,
+  tools: tools
+)
+
+# The LLM might generate:
+# (let [emails (call "spawn_agent" {:task "Find urgent emails"
+#                                   :tools ["email"]})
+#       meetings (call "spawn_agent" {:task "Schedule meetings"
+#                                     :tools ["calendar"]
+#                                     :context {:email_ids (:refs emails)}})]
+#   {:emails emails :meetings meetings})
+```
+
+**When to use**: Exploratory tasks, user-defined automation, when you can't predict which tool combinations are needed.
+
+### Pattern 2: Pre-defined SubAgents
+
+Wrap known SubAgent configurations as tools upfront:
+
+```elixir
+# Pre-defined SubAgents for known domains
+tools = %{
+  "email-agent" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
+    tools: email_tools,
+    refs: %{email_ids: [Access.all(), :id]}
+  ),
+
+  "calendar-agent" => PtcRunner.SubAgent.as_tool(
+    llm: llm,
+    tools: calendar_tools,
+    refs: %{meeting_ids: [Access.all(), :id]}
+  )
+}
+
+# LLM uses pre-defined agents
+{:ok, result} = PtcRunner.SubAgent.delegate(
+  "Find urgent emails and schedule follow-ups",
+  llm: llm,
+  tools: tools
+)
+```
+
+**When to use**: Production systems, well-defined domains, when you want predictable behavior and controlled tool access.
+
+### Pattern 3: Hybrid (Plan → Execute)
+
+A prompt pattern where the agent plans before executing. This is just two `delegate/2` calls:
+
+```elixir
+defmodule MyPatterns do
+  @doc """
+  Hybrid pattern: Plan first, then execute with plan as context.
+
+  This is a prompt engineering pattern, not a library feature.
+  Validated to reduce turn counts by 50-70% for complex tasks.
+  """
+  def hybrid(task, opts) do
+    llm = Keyword.fetch!(opts, :llm)
+    tools = Keyword.fetch!(opts, :tools)
+
+    # Phase 1: Planning (no tools)
+    {:ok, plan} = PtcRunner.SubAgent.delegate(
+      """
+      Task: #{task}
+
+      Think through your approach. What steps are needed?
+      How can you batch operations for efficiency?
+      Output a numbered plan. Do NOT execute yet.
+      """,
+      llm: llm,
+      tools: %{}  # No tools - just thinking
+    )
+
+    # Phase 2: Execute with plan as guidance
+    PtcRunner.SubAgent.delegate(
+      """
+      Execute: #{task}
+
+      Your plan:
+      #{plan.result}
+
+      Follow your plan, adapting as needed. Batch operations with mapv/filter.
+      """,
+      llm: llm,
+      tools: tools,
+      context: Keyword.get(opts, :context, %{})
+    )
+  end
+end
+```
+
+**When to use**: Complex multi-item tasks, when pure ad-hoc execution leads to item-by-item processing.
+
+### Pattern 4: PlanExecutor (Deterministic)
+
+Use LLM to generate a plan, then execute deterministically in Elixir:
+
+```elixir
+defmodule PlanExecutor do
+  @doc """
+  Execute a structured plan generated by an LLM.
+  Each step runs as a SubAgent delegation.
+  """
+  def run(plan, tool_registry, llm) do
+    Enum.reduce(plan.steps, %{}, fn step, context ->
+      # Get tools for this step
+      tools = step.tools
+        |> Enum.flat_map(&Map.get(tool_registry, &1, %{}))
+        |> Map.new()
+
+      # Build context from previous steps
+      step_context = Map.take(context, step.needs || [])
+
+      # Execute step
+      {:ok, result} = PtcRunner.SubAgent.delegate(
+        step.task,
+        llm: llm,
+        tools: tools,
+        context: step_context
+      )
+
+      # Merge refs into context for next step
+      Map.merge(context, result.refs || %{})
+    end)
+  end
+end
+
+# Usage: First, have LLM generate a plan structure
+# Then execute it deterministically
+plan = %{
+  steps: [
+    %{id: :find_emails, task: "Find urgent emails",
+      tools: [:email], needs: []},
+    %{id: :draft_replies, task: "Draft acknowledgments",
+      tools: [:email], needs: [:email_ids]}
+  ]
+}
+
+result = PlanExecutor.run(plan, tool_registry, llm)
+```
+
+**When to use**: Workflows needing retries, parallelism, or checkpointing. Production pipelines where you need deterministic execution order.
+
+### Choosing a Pattern
+
+| Task Type | Pattern | Why |
+|-----------|---------|-----|
+| Simple query | Direct `delegate/2` | One tool call, no orchestration needed |
+| 2-3 step chain | Pre-defined SubAgents | Known flow, predictable behavior |
+| Complex multi-item | Hybrid | LLM plans batching strategy |
+| Novel/exploratory | Dynamic spawn_agent | Flexibility to compose tools |
+| Production pipeline | PlanExecutor | Deterministic, retry-able, auditable |
+
+All patterns compose from the same primitives: `delegate/2`, `as_tool/1`, `RefExtractor`, and `memory/*`.
+
 ---
 
 ## Observability
@@ -710,7 +955,8 @@ assert refs == %{missing: nil}
 **Hybrid pattern** (spike_hybrid_test.exs):
 - Planning phase: LLM generates text plan (no tools)
 - Execution phase: LLM follows plan using tools
-- Reduced turn count vs pure ad-hoc
+- 50-70% turn reduction vs pure ad-hoc
+- See [Orchestration Patterns](#orchestration-patterns) for implementation examples
 
 ### Known LLM Behavior Issues
 
