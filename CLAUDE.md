@@ -2,6 +2,10 @@
 
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC), enabling LLMs to write safe programs that orchestrate tools and transform data inside a sandboxed environment.
 
+## Version 0.x - API Stability
+
+This library is in early development. Breaking changes are expected and encouraged when they simplify the implementation or improve the developer experience. Prefer clean APIs over backwards compatibility.
+
 ## Tech Stack
 
 - **Language**: Elixir 1.19+ / Erlang OTP 28+
