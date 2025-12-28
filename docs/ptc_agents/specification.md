@@ -65,10 +65,10 @@ delegate/2
 
 All tools are normalized into a internal `Tool` representation. This ensures consistency between different registration syntaxes.
 
-1. **Function references** (`&Fun/n`): Extract `@spec` to populate `ToolSpec`.
-2. **String shorthand** (`{fun, "(...) -> ..."}`): Parser converts string to `ToolSpec`.
-3. **Explicit structs**: Pass `ToolSpec` or `LLMTool` directly.
-4. **SubAgent-as-Tool**: Child `refs` schema is used as the tool's `returns` schema.
+1.  **Function references** (`&Fun/n`): Extract `@spec` to populate `ToolSpec`.
+2.  **String shorthand** (`{fun, "(...) -> ..."}`): Parser converts string to `ToolSpec`.
+3.  **Explicit structs**: Pass `ToolSpec` or `LLMTool` directly.
+4.  **SubAgent-as-Tool**: The sub-agent's signature is used as the tool's schema.
 
 Generated schemas follow the `name(params) -> returns` format:
 ```
@@ -139,8 +139,6 @@ defmodule PtcRunner.SubAgent do
   @typedoc "Tool function - receives args map, returns any term"
   @type tool :: (map() -> term())
 
-  @typedoc "Ref extractor - Access path or function"
-  @type ref_spec :: [Access.access_fun(term(), term())] | (term() -> term())
 
   @typedoc "Successful Step result"
   @type result :: %{
@@ -765,7 +763,7 @@ test "extracts @spec from function references"
 ```elixir
 # With real LLM (optional, behind flag)
 test "end-to-end mission delegation"
-test "chained SubAgents pass refs"
+test "chained SubAgents pass data"
 test "plan generation via create_plan tool"
 test "tool_catalog schemas visible but not callable"
 test "multi-turn ReAct pattern with memory"
@@ -808,6 +806,75 @@ The spike code in `demo/lib/ptc_demo/` should be:
    - Probably out of scope for v1
 
 3. **System prompt customization:** Full override or composable parts?
+
+---
+
+## Future Work
+
+### CLI Commands
+
+Interactive SubAgent commands for the demo CLI:
+
+```
+> /subagent "Find the employee with highest expenses"
+[SubAgent] Executing: (-> (call "get_expenses") ...)
+[SubAgent] Result: "John Smith - $12,450"
+
+> /subagent:verbose "Find top 3 products"
+[SubAgent] Shows full trace with programs and tool calls
+```
+
+### Tool Discovery
+
+For large tool registries (50+ tools), let SubAgents discover relevant tools:
+
+```elixir
+{:ok, result} = PtcRunner.ToolDiscovery.run(
+  "Analyze travel expenses for Q3",
+  llm: llm,
+  registry: all_company_tools  # 100+ tools
+)
+
+# Discovery agent finds and uses only: get_expenses, get_categories, sum_by
+```
+
+### Plan Persistence
+
+Save and resume plans:
+
+```elixir
+# File-based
+Plan.save(plan, "plans/workflow-001.json")
+{:ok, plan} = Plan.load("plans/workflow-001.json")
+
+# GitHub Issues (collaborative, auditable)
+{:ok, plan} = Plan.from_github_issue("owner/repo", 275)
+Plan.sync_to_github(plan)  # Updates issue with execution history
+```
+
+### Parallel SubAgents
+
+Run multiple SubAgents concurrently:
+
+```elixir
+prompts = [
+  {"Jira", "Summarize sprint status", jira_tools},
+  {"Slack", "Check urgent mentions", slack_tools},
+  {"GitHub", "List PRs needing review", github_tools}
+]
+
+results =
+  prompts
+  |> Task.async_stream(fn {name, prompt, tools} ->
+    {:ok, step} = PtcRunner.SubAgent.delegate(prompt, llm: llm, tools: tools)
+    {name, step.summary}
+  end, max_concurrency: 3)
+  |> Enum.map(fn {:ok, result} -> result end)
+```
+
+**Note:** Memory isolation (scoped scratchpad) enables safe parallel execution.
+
+---
 
 ---
 

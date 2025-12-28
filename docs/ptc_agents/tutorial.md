@@ -122,6 +122,7 @@ prompt = "What is the most expensive product?"
 signature = "() -> {name :string, price :float}"
 
 # 2. Delegate
+# (Note: product_tools here must provide @specs or explicit signatures)
 {:ok, step} = PtcRunner.SubAgent.delegate(prompt,
   signature: signature,
   tools: my_tools,
@@ -149,20 +150,24 @@ SubAgent is provider-agnostic. You supply a callback function that calls your LL
 ### Callback Interface
 
 ```elixir
-# Required fields
-fn %{system: String.t(), messages: [map()]} ->
-  {:ok, String.t()} | {:error, term()}
-end
+# Type signature
+@type llm_callback :: (%{
+  system: String.t(),
+  messages: [map()],
+  turn: integer(),
+  prompt: String.t(),
+  tool_names: [String.t()],
+  llm_opts: map()
+} -> {:ok, String.t()} | {:error, term()})
 
-# Optional fields (callback can ignore these)
-%{
-  system: "...",
-  messages: [...],
-  turn: 2,                    # Current turn number
-  prompt: "Find urgent emails", # Original prompt
-  tool_names: ["search"],     # Available tools
-  llm_opts: %{temperature: 0.7}  # User-provided options
-}
+# Example implementation structure
+fn %{system: system, messages: messages} = params ->
+  # Optional fields available in params:
+  # :turn, :prompt, :tool_names, :llm_opts
+  
+  # Call your LLM provider
+  {:ok, response_text}
+end
 ```
 
 ### ReqLLM Example
@@ -234,6 +239,17 @@ IO.puts(step1.return.summary)
 IO.puts(step2.return.summary)
 #=> "Created 2 draft replies ready for review"
 ```
+ 
+### The Firewall Convention (`_` prefix)
+ 
+Fields prefixed with `_` in a signature are "firewalled." They follow these visibility rules:
+ 
+- **✓ Available in Lisp context**: Fully accessible via `ctx/_field_name`.
+- **✓ Transferred between steps**: Preserved when passing `context` between SubAgents.
+- **✗ Hidden from LLM prompt text**: Shown as `<Firewalled>` in conversation history.
+- **✗ Hidden from parent schema**: If a SubAgent is used as a tool, its firewalled fields are omitted from the parent's view of the tool's return shape.
+ 
+This ensures that "heavy" or "private" data stays in the execution layer (Lisp) and doesn't pollute the reasoning layer (LLM conversation).
 
 **The Firewall at work:**
 - In Step 2, the LLM **knows** there are 2 emails (public data).
@@ -242,16 +258,13 @@ IO.puts(step2.return.summary)
 
 **What the Step 2 LLM sees in its prompt:**
  
-When `context_signature` is provided, the system extracts the return specification and injects it into the **Data Inventory**. This tells the LLM exactly what type of data is available in `ctx/`:
+When `context_signature` is provided, the system:
  
-```
-## Data Inventory (Available in 'ctx/')
-- count :int
-- summary :string
-- _email_ids [:int]
-```
+1. **Parses the return portion** of the provided signature.
+2. **Generates a "Data Inventory"** section in the prompt.
+3. **Enables the LLM to reason about types** and keys without seeing the actual values.
  
-Notice that Step 2's LLM knows `email_ids` is a list of integers, even though it can't see the actual values in the text prompt. This allows it to confidently generate code like `(call "draft_reply" {:id (first ctx/email_ids)})`.
+Notice that Step 2's LLM knows `_email_ids` is a list of integers, even though it can't see the actual values in the text prompt. This allows it to confidently generate code like `(call "draft_reply" {:id (first ctx/_email_ids)})`.
  
 **What happened here:**
 - Step 1 processed potentially large email bodies but returned only IDs and a summary.
@@ -280,9 +293,28 @@ tools = %{
 }
 ```
 
-**Note:** Tool functions receive a map of arguments. The LLM may pass keys as atoms or strings, so check both.
-
-### Tool Contracts (Types)
+#### Template Syntax
+ 
+ The `prompt` and `LLMTool` prompts use a Mustache-style template syntax for context interpolation:
+ 
+ | Syntax | Description | Example |
+ | :--- | :--- | :--- |
+ | `{{var}}` | Simple interpolation | `Find emails for {{user_name}}` |
+ | `{{a.b}}` | Dot notation for nested access | `Hello {{user.first_name}}` |
+ | `{{#list}}` | Start iteration over a collection | `{{#emails}} - {{subject}} {{/emails}}` |
+ | `{{/list}}` | End iteration | |
+ 
+Every `{{key}}` in the `prompt` MUST have a matching parameter in the `signature`. This contract ensures that the LLM is always provided with the necessary context to fulfill its mission.
+ 
+```elixir
+prompt: "Find emails for {{user.name}} about {{topic}}"
+signature: "(user {name :string}, topic :string) -> {summary :string}"
+#           ^^^^                  ^^^^^
+#           Every placeholder MUST match a signature input parameter.
+```
+ 
+The orchestrator (or parent agent) must provide these arguments in the tool call:
+`(call "my-agent" {:user {:name "Alice"} :topic "billing"})`
 
 Tools can have **contracts** that serve two purposes:
 1. **Declarative schema** → LLM sees what the tool accepts/returns
@@ -340,6 +372,17 @@ tools = %{
 }
 ```
 
+### Tool Definition Comparison
+ 
+Depending on your use case, you can define tools in several ways:
+ 
+| Syntax | When to Use |
+| :--- | :--- |
+| `&Module.fun/n` | Existing Elixir functions with `@spec`. |
+| `{&fun/n, "..."}` | When you need to override or simplify the auto-extracted spec. |
+| `%{prompt:, signature:}` | Single-turn "Judgment" tools or "SubAgents" as tools. |
+| `SubAgent.as_tool(...)` | Pre-defined, complex SubAgents used for hierarchical delegation. |
+ 
 #### The Unified Tool Model
 
 Internally, all tool definitions (function refs, strings, structs) are normalized into a single `Tool` structure. This ensures that validation and schema generation are consistent across all patterns.
@@ -352,14 +395,6 @@ tools = %{
   "search" => {
     &MyApp.search/2,
     "(query :string, limit :int) -> [{:id :int :title :string}]"
-  },
-
-  "search" => {
-    &MyApp.search/2,
-    ToolSpec.new(
-      params: [query: :string, limit: [type: :int, default: 10]],
-      returns: [{:id, :int}, {:title, :string}]
-    )
   }
 }
 ```
@@ -541,7 +576,7 @@ Usage in PTC-Lisp: `(call "get_order" {:id ctx/order_id})`.
 
 #### `ctx/fail`
  
-If the previous turn failed (syntax error, tool validation error, etc.), the details are available in `ctx/fail`. 
+If the previous turn failed (syntax error, tool arity mismatches, or **Tool Validation Errors**), the details are available in `ctx/fail`. 
  
 ```clojure
 (if ctx/fail
@@ -550,6 +585,16 @@ If the previous turn failed (syntax error, tool validation error, etc.), the det
 ```
  
 **Note**: The error is also automatically appended to the LLM's message history as text, but `ctx/fail` allows the *program* to branch based on failure.
+
+#### `ctx/fail` structure when a turn fails:
+```elixir
+%{
+  reason: :syntax_error | :tool_error | :validation_error,
+  message: "Human-readable error description",
+  op: "tool_name" | nil,  # If tool-related
+  details: %{}            # Additional context (e.g., validation paths)
+}
+```
 
 ---
 
@@ -578,9 +623,18 @@ Use the built-in **`fail` tool** to explicitly exit the loop:
 - The `AgenticLoop` stops immediately.
 - `delegate/2` returns `{:error, step}` where `step.fail` contains the error data.
  
-#### 3. Signature Validation Failures
+#### 3. Built-in Tools: `return` and `fail`
  
-If the agent calls `return` with data that doesn't match its `signature`, the system generates a validation error and feeds it back to the agent. The agent can then try to fix its output in the next turn (up to `max_ref_retries`).
+These tools are the only way for the agent to terminate its mission.
+ 
+- **`return`**: Fulfills the mission contract.
+  - **Signature**: `(data :map) -> :void`
+  - **Validation**: The `data` map MUST match the output portion of the agent's `signature`.
+  - **Result**: `{:ok, %PtcRunner.Step{return: data}}`
+ 
+- **`fail`**: Terminates the mission with an error.
+  - **Signature**: `(error {reason :keyword, message :string}) -> :void`
+  - **Result**: `{:error, %PtcRunner.Step{fail: {reason, message}}}`
  
 #### 4. Hard Crashes
  
@@ -611,7 +665,7 @@ The spike implemented several features to support common LLM patterns:
 Group multiple expressions for side effects. Only the last expression's result is returned.
 ```clojure
 (do
-  (memory/put :step1 result)
+  (mem/put :step1 result)
   (call "cleanup" {}))
 ```
 
@@ -635,86 +689,69 @@ Look up keys in maps using the keyword itself as a function:
 ---
 
 ## Multi-Turn Patterns (ReAct)
-
-The agentic loop naturally supports the **ReAct pattern** (Reason + Act): the agent can execute multiple programs, observe results, and adapt its approach across turns.
-
-### Iterative Exploration
-
-```elixir
-tools = %{
-  "search_emails" => fn args ->
-    query = args["query"]
-    offset = args["offset"] || 0
-    limit = args["limit"] || 10
-    MyApp.Email.search(query, offset: offset, limit: limit)
-  end,
-  "get_email" => fn args ->
-    MyApp.Email.get(args["id"])
-  end,
-  "count_results" => fn args ->
-    MyApp.Email.count(args["query"])
-  end
-}
-
-```
  
-## Multi-Turn Patterns: The Step-wise Loop
+ The SubAgent loop naturally supports the **ReAct pattern** (Reason + Act). The agent can execute multiple programs, observe results, and adapt its approach across turns.
  
-The `AgenticLoop` treats every turn as a **Step**. The key to its power is **Implicit Chaining**: the result of Turn N is automatically merged into the context (`ctx/`) of Turn N+1.
+ ### The Step-wise loop
  
-### How Merging Works
- 
-1. **Lisp Execute**: LLM provides a program, it runs and returns data.
-2. **Context Merge**: That data is added to the `ctx/` namespace.
-3. **Data Inventory**: The system updates the "Data Inventory" in the next prompt so the LLM knows which new keys are available.
- 
-### Example: Exploration with Implicit Chaining
- 
-In this example, we use a search tool defined with a **Context Firewall** on the email body.
- 
-**Tool Signature**:
-`search_emails(query :string) -> [{id :int, subject :string, _body :string}]`
- 
-```elixir
-# Agent Signature: () -> {summary :string, _ids [:int]}
-{:ok, step} = PtcRunner.SubAgent.delegate(
-  "Find urgent emails from Acme",
-  signature: "() -> {summary :string, _ids [:int]}",
-  llm: llm,
-  tools: tools
-)
-```
- 
-**Turn 1: Discovery**
- 
-```clojure
-;; Turn 1: Discovery
-;; Return a map to merge results into ctx/results
-{:results (call "search_emails" {:query "Acme Corp"})}
-```
- 
-**What the LLM sees in the prompt:**
-> **Program Result:**
-> `{:results [{id: 101, subject: "Urgent...", _body: <Firewalled>}, {id: 102, ...}]}`
-> _(8 more items omitted. Full dataset available to your next program in `ctx/results`)_
- 
-**Turn 2: Reasoning & Refinement**
-Notice that even though the **LLM prompt** was trimmed, the **Lisp context** (`ctx/results`) contains all 10 items, including the full `body` text.
- 
-```clojure
-;; The LLM can process all results directly from ctx/results
-(let [urgent (filter (fn [e] (str/includes? (:subject e) "Urgent")) ctx/results)]
-  (if (empty? urgent)
-     "I found emails but none are urgent. Let me try a broader search..."
-     (do
-       ;; Store the full urgent set in memory
-       (mem/put :urgent_emails urgent)
-       ;; Return public summary + firewalled IDs
-       (call "return" {
-         :summary (str "Found " (count urgent) " urgent emails")
-         :_ids (mapv :id urgent)
-       })))
-```
+ The `AgenticLoop` treats every turn as a **Step**. The key to its power is **Implicit Chaining**: the result of Turn N is automatically merged into the context (`ctx/`) of Turn N+1.
+  
+ #### How Merging Works
+  
+ 1. **Lisp Execute**: LLM provides a program, it runs and returns data.
+ 2. **Context Merge**: That data is added to the `ctx/` namespace.
+ 3. **Data Inventory**: The system updates the "Data Inventory" in the next prompt so the LLM knows which new keys are available.
+  
+ ### Example: Discovery & Reasoning
+  
+ In this example, we use a search tool and the agent iterates until it finds what it needs.
+  
+ **Tool Signature**:
+ `search_emails(query :string) -> [{id :int, subject :string, _body :string}]`
+  
+ ```elixir
+ # Agent Signature: () -> {summary :string, _ids [:int]}
+ {:ok, step} = PtcRunner.SubAgent.delegate(
+   "Find urgent emails from Acme",
+   signature: "() -> {summary :string, _ids [:int]}",
+   llm: llm,
+   tools: %{
+     "search_emails" => &MyApp.Email.search/1,
+     "count_results" => &MyApp.Email.count/1
+   }
+ )
+ ```
+  
+ **Turn 1: Discovery**
+  
+ ```clojure
+ ;; Turn 1: Discovery
+ ;; Return a map to merge results into ctx/results
+ {:results (call "search_emails" {:query "Acme Corp"})}
+ ```
+  
+ **What the LLM sees in the prompt:**
+ > **Program Result:**
+ > `{:results [{id: 101, subject: "Urgent...", _body: <Firewalled>}, {id: 102, ...}]}`
+ > _(8 more items omitted. Full dataset available to your next program in `ctx/results`)_
+  
+ **Turn 2: Reasoning & Refinement**
+ Notice that even though the **LLM prompt** was trimmed, the **Lisp context** (`ctx/results`) contains all 10 items, including the full `body` text.
+  
+ ```clojure
+ ;; The LLM can process all results directly from ctx/results
+ (let [urgent (filter (fn [e] (str/includes? (:subject e) "Urgent")) ctx/results)]
+   (if (empty? urgent)
+      "I found emails but none are urgent. Let me try a broader search..."
+      (do
+        ;; Store the full urgent set in memory
+        (mem/put :urgent_emails urgent)
+        ;; Return public summary + firewalled IDs
+        (call "return" {
+          :summary (str "Found " (count urgent) " urgent emails")
+          :_ids (mapv :id urgent)
+        })))
+ ```
  
 ### Public vs Private Visibility
  
@@ -724,14 +761,14 @@ To protect your context window and ensure data privacy, the loop maintains two d
 2.  **LLM Prompt (Public View)**: The conversation history only shows a **Context-Safe Preview**. This view is filtered by the signature and automatically **Omitted** (trimmed) if it exceeds safety limits.
  
 #### Visibility Rules
- 
-| Feature | Lisp Context (`ctx/`) | LLM Text History |
-| :--- | :--- | :--- |
-| **Normal Fields** | Full Value | Visible |
-| **Firewalled (`_`)** | Full Value | **Hidden** (Shown as `<Firewalled>`) |
-| **Large Lists** | Full List | **Omitted Sample** (e.g., first 2 items) |
-| **Large Strings** | Full String | **Omitted Snippet** (Trimmed after N bytes) |
-| **Memory (`mem/`)** | Full Value | **Hidden** |
+  
+ | Feature | Lisp Context (`ctx/`) | LLM Text History |
+ | :--- | :--- | :--- |
+ | **Normal Fields** | Full Value | Visible |
+ | **Firewalled (`_`)** | Full Value | *Hidden* (Shown as `<Firewalled>`) |
+ | **Large Lists** | Full List | *Omitted Sample* (e.g., first 2 items) |
+ | **Large Strings** | Full String | *Omitted Snippet* (Trimmed after N bytes) |
+ | **Memory (`mem/`)** | Full Value | *Hidden* |
  
  When data is omitted, the loop automatically appends a system notification to the LLM:
  *" ... [98 more items omitted. Full data available in ctx/results]"*
@@ -762,16 +799,16 @@ tools = %{
   "evaluate_importance" => LLMTool.new(
     prompt: """
     Evaluate if this email requires immediate attention.
-
+ 
     Consider:
     - Is it from a VIP customer? (Tier: {{customer_tier}})
     - Is it about billing or money?
     - Does it express urgency or frustration?
-
+ 
     Email subject: {{email.subject}}
     Email body: {{email.body}}
     """,
-    returns: %{important: :bool, priority: :int, reason: :string}
+    signature: "(email {subject :string, body :string}, customer_tier :string) -> {important :bool, priority :int, reason :string}"
   )
 }
 ```
@@ -786,7 +823,7 @@ tools = %{
 - evaluate_importance(email {:subject :string :body :string}, customer_tier :string) -> {:important :bool :priority :int :reason :string}
 ```
 
-The main agent sees typed inputs (extracted from `{{var}}` placeholders) and typed outputs (from `returns:`), enabling it to reason about data flow correctly.
+The main agent sees typed inputs (extracted from `{{var}}` placeholders) and typed outputs (from the `signature`), enabling it to reason about data flow correctly.
 
 ### Using LLM Tools in Multi-Turn Flow
  
@@ -802,7 +839,7 @@ The main agent sees typed inputs (extracted from `{{var}}` placeholders) and typ
     (mapv (fn [e]
             (assoc e :eval
               (call "evaluate_importance"
-                {:email e :customer_tier (:tier e)})))
+                {:email e :customer_tier "Silver"})))
           emails)})
 ```
  
@@ -815,7 +852,6 @@ The main agent sees typed inputs (extracted from `{{var}}` placeholders) and typ
     :top_priority (first (sort-by #(- (:priority (:eval %))) important))
   }))
 ```
-```
 
 ### LLM Selection
 
@@ -826,20 +862,20 @@ tools = %{
   # Uses caller's LLM (default)
   "deep_analysis" => LLMTool.new(
     prompt: "...",
-    returns: %{...}
+    signature: "() -> {result :string}"
   ),
 
   # Uses a cheaper/faster model for simple classification
   "quick_triage" => LLMTool.new(
     prompt: "Is '{{subject}}' urgent? Answer: urgent/normal/low",
-    returns: %{priority: :string},
+    signature: "(subject :string) -> {priority :string}",
     llm: :haiku
   ),
 
   # Uses a specific LLM callback
   "specialized" => LLMTool.new(
     prompt: "...",
-    returns: %{...},
+    signature: "() -> {result :map}",
     llm: my_custom_llm_callback
   )
 }
@@ -850,19 +886,19 @@ tools = %{
 For efficiency, process multiple items in one LLM call:
 
 ```elixir
-"classify_batch" => LLMTool.new(
-  prompt: """
-  Classify each email by urgency.
-
-  Emails:
-  {{#emails}}
-  - ID {{id}}: "{{subject}}" from {{from}}
-  {{/emails}}
-
-  Return a JSON array with urgency for each email ID.
-  """,
-  returns: [%{id: :int, urgency: :string, reason: :string}]
-)
+  "classify_batch" => LLMTool.new(
+    prompt: """
+    Classify each email by urgency.
+ 
+    Emails:
+    {{#emails}}
+    - ID {{id}}: "{{subject}}" from {{from}}
+    {{/emails}}
+ 
+    Return a list with urgency for each email ID.
+    """,
+    signature: "(emails [{id :int, subject :string, from :string}]) -> [{id :int, urgency :string, reason :string}]"
+  )
 ```
 
 ```clojure
@@ -922,12 +958,14 @@ llm = MyApp.LLM.callback()
 # Create sub-agent tools
 main_tools = %{
   "customer-finder" => PtcRunner.SubAgent.as_tool(
-    signature: "() -> {customer_id :int}",
+    prompt: "Find the customer ID for the person described as: {{description}}",
+    signature: "(description :string) -> {customer_id :int}",
     llm: llm,
     tools: %{"search_customers" => &MyApp.CRM.search/1}
   ),
  
   "order-fetcher" => PtcRunner.SubAgent.as_tool(
+    prompt: "Get all recent orders for customer {{customer_id}}",
     signature: "(customer_id :int) -> {orders [:map]}",
     llm: llm,
     tools: %{"list_orders" => &MyApp.Orders.list/1}
@@ -941,6 +979,7 @@ main_tools = %{
   llm: llm,
   tools: main_tools
 )
+```
 
 ---
 
@@ -964,16 +1003,19 @@ planning_tools = %{
 # Domain tools - the planner sees their schemas but can't call them
 domain_tools = %{
   "email-finder" => PtcRunner.SubAgent.as_tool(
+    prompt: "Find all urgent emails that need attention",
     signature: "() -> {count :int, _email_ids [:int]}",
     llm: llm,
     tools: email_tools
   ),
   "email-reader" => PtcRunner.SubAgent.as_tool(
+    prompt: "Read the full body content for emails: {{email_ids}}",
     signature: "(email_ids [:int]) -> {bodies :map}",
     llm: llm,
     tools: %{"read_email" => &MyApp.read_email/1}
   ),
   "reply-drafter" => PtcRunner.SubAgent.as_tool(
+    prompt: "Draft acknowledgment replies for the email bodies: {{bodies}}",
     signature: "(bodies :map) -> {draft_ids [:int]}",
     llm: llm,
     tools: %{"draft_reply" => &MyApp.draft_reply/1}
@@ -1131,32 +1173,37 @@ defmodule MyApp.AgentTools do
     }
   }
 
-  @type spawn_result :: %{summary: String.t(), return: map()}
+  @type spawn_result :: %{return: map()}
 
-  @spec spawn_agent(map()) :: spawn_result()
-  def spawn_agent(args) do
+  @spec spawn_agent(map(), map(), llm()) :: spawn_result()
+  def spawn_agent(args, tool_catalog, llm_callback) do
     tool_names = args["tools"] || []
+    
+    # 1. Resolve selected tool sets from catalog
     selected_tools =
       tool_names
-      |> Enum.map(&Map.get(@tool_catalog, &1, %{}))
+      |> Enum.map(&Map.get(tool_catalog, &1, %{}))
       |> Enum.reduce(%{}, &Map.merge/2)
 
+    # 2. Delegate to an isolated SubAgent
     {:ok, step} = PtcRunner.SubAgent.delegate(
       args["prompt"],
-      llm: llm(),
+      llm: llm_callback,
       tools: selected_tools,
       context: args["context"] || %{}
     )
  
-    %{summary: step.return.summary, return: step.return}
+    # 3. Return only the distilled mission results
+    step.return
   end
-
-  defp llm, do: MyApp.LLM.callback()
 end
 
-# Register with auto-extracted @spec
+# Register the meta-tool
+# Note: we pass the catalog and llm into the tool via closure
 tools = %{
-  "spawn_agent" => &MyApp.AgentTools.spawn_agent/1
+  "spawn_agent" => fn args -> 
+    MyApp.AgentTools.spawn_agent(args, @tool_catalog, MyApp.LLM.callback())
+  end
 }
 ```
 
@@ -1194,43 +1241,10 @@ tools = %{
 #   {:emails (:email_ids search) :meetings meetings})
 ```
  
-#### Breaking Down spawn_agent
- 
-The `spawn_agent` function is just a regular Elixir function that:
- 
-1.  **Receives LLM's choices** - prompt description, tool set names, optional context
-2.  **Resolves tool sets** - looks up actual tool functions from the catalog
-3.  **Delegates to SubAgent** - creates an isolated SubAgent with those tools
-4.  **Returns summary + data** - parent sees only the distilled result
-
-```elixir
-def spawn_agent(args, tool_catalog, llm) do
-  # 1. LLM specifies which tool sets it needs
-  tool_names = args["tools"] || []
-
-  # 2. Resolve to actual tool functions
-  selected_tools =
-    tool_names
-    |> Enum.map(&Map.get(tool_catalog, &1, %{}))
-    |> Enum.reduce(%{}, &Map.merge/2)
-
-  # 3. Create and run SubAgent with those tools
-  {:ok, step} = PtcRunner.SubAgent.delegate(
-    args["prompt"],
-    llm: llm,
-    tools: selected_tools,
-    context: args["context"] || %{}
-  )
- 
-  # 4. Return the distilled result
-  step.return
-end
-```
-
-#### spawn_agent vs as_tool
+#### as_tool vs spawn_agent
 
 | Aspect | `spawn_agent` (dynamic) | `as_tool` (pre-defined) |
-|--------|-------------------------|-------------------------|
+|--------|-------------------------|-------------------------
 | Tool selection | LLM chooses at runtime | Fixed at definition |
 | Flexibility | High - any combination | Low - single purpose |
 | Predictability | Lower | Higher |
@@ -1252,12 +1266,14 @@ Wrap known SubAgent configurations as tools upfront:
 # Pre-defined SubAgents for known domains
 tools = %{
   "email-agent" => PtcRunner.SubAgent.as_tool(
+    prompt: "Find all urgent emails that need follow-up",
     signature: "() -> {_email_ids [:int]}",
     llm: llm,
     tools: email_tools
   ),
- 
+
   "calendar-agent" => PtcRunner.SubAgent.as_tool(
+    prompt: "Schedule follow-up meetings for emails: {{email_ids}}",
     signature: "(email_ids [:int]) -> {_meeting_ids [:int]}",
     llm: llm,
     tools: calendar_tools
@@ -1496,6 +1512,7 @@ Wrap a SubAgent configuration as a callable tool:
 
 ```elixir
 tool = PtcRunner.SubAgent.as_tool(
+  prompt: "Find the best matching item",
   signature: "() -> {id :int}",
   llm: llm,
   tools: %{"search" => &MyApp.search/1}
@@ -1504,73 +1521,15 @@ tool = PtcRunner.SubAgent.as_tool(
 
 The returned function takes a map of parameters defined in its signature and returns the `PtcRunner.Step` result.
 
-
 ---
 
-## Future Ideas
+## Glossary
 
-### CLI Commands
-
-Interactive SubAgent commands for the demo CLI:
-
-```
-> /subagent "Find the employee with highest expenses"
-[SubAgent] Executing: (-> (call "get_expenses") ...)
-[SubAgent] Result: "John Smith - $12,450"
-
-> /subagent:verbose "Find top 3 products"
-[SubAgent] Shows full trace with programs and tool calls
-```
-
-### Tool Discovery
-
-For large tool registries (50+ tools), let SubAgents discover relevant tools:
-
-```elixir
-{:ok, result} = PtcRunner.ToolDiscovery.run(
-  "Analyze travel expenses for Q3",
-  llm: llm,
-  registry: all_company_tools  # 100+ tools
-)
-
-# Discovery agent finds and uses only: get_expenses, get_categories, sum_by
-```
-
-### Plan Persistence
-
-Save and resume plans:
-
-```elixir
-# File-based
-Plan.save(plan, "plans/workflow-001.json")
-{:ok, plan} = Plan.load("plans/workflow-001.json")
-
-# GitHub Issues (collaborative, auditable)
-{:ok, plan} = Plan.from_github_issue("owner/repo", 275)
-Plan.sync_to_github(plan)  # Updates issue with execution history
-```
-
-### Parallel SubAgents
-
-Run multiple SubAgents concurrently:
-
-```elixir
-prompts = [
-  {"Jira", "Summarize sprint status", jira_tools},
-  {"Slack", "Check urgent mentions", slack_tools},
-  {"GitHub", "List PRs needing review", github_tools}
-]
-
-results =
-  prompts
-  |> Task.async_stream(fn {name, prompt, tools} ->
-    {:ok, step} = PtcRunner.SubAgent.delegate(prompt, llm: llm, tools: tools)
-    {name, step.summary}
-  end, max_concurrency: 3)
-  |> Enum.map(fn {:ok, result} -> result end)
-```
-
-**Note:** Memory isolation (scoped scratchpad) enables safe parallel execution.
+- **Mission**: A task delegated to a SubAgent.
+- **Signature**: A functional contract defining inputs (`params`) and outputs (`returns`).
+- **Step**: The result of a mission (a `PtcRunner.Step` struct containing `return`, `fail`, `mem`, and `trace`).
+- **Firewall**: The `_` prefix convention that hides data from LLM prompts while keeping it available for Lisp programs.
+- **Data Inventory**: The type information section in the prompt that tells the LLM what data is available in `ctx/`.
 
 ---
 
