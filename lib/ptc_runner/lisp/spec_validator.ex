@@ -397,28 +397,10 @@ defmodule PtcRunner.Lisp.SpecValidator do
   # Accumulate multiline example into appropriate category
   defp accumulate_multiline_example(acc, all_indexed, idx, expected_str, section) do
     case parse_expected(expected_str) do
-      {:ok, value} ->
+      {category, value} when category in [:ok, :todo, :bug] ->
         case assemble_multiline_example(all_indexed, idx, section) do
           {:ok, code} ->
-            %{acc | examples: [{code, value, section} | acc.examples]}
-
-          :not_multiline ->
-            acc
-        end
-
-      {:todo, description} ->
-        case assemble_multiline_example(all_indexed, idx, section) do
-          {:ok, code} ->
-            %{acc | todos: [{code, description, section} | acc.todos]}
-
-          :not_multiline ->
-            acc
-        end
-
-      {:bug, description} ->
-        case assemble_multiline_example(all_indexed, idx, section) do
-          {:ok, code} ->
-            %{acc | bugs: [{code, description, section} | acc.bugs]}
+            add_to_category(acc, category, code, value, section)
 
           :not_multiline ->
             acc
@@ -430,6 +412,19 @@ defmodule PtcRunner.Lisp.SpecValidator do
       :error ->
         acc
     end
+  end
+
+  # Add code to the appropriate category field
+  defp add_to_category(acc, :ok, code, value, section) do
+    %{acc | examples: [{code, value, section} | acc.examples]}
+  end
+
+  defp add_to_category(acc, :todo, code, description, section) do
+    %{acc | todos: [{code, description, section} | acc.todos]}
+  end
+
+  defp add_to_category(acc, :bug, code, description, section) do
+    %{acc | bugs: [{code, description, section} | acc.bugs]}
   end
 
   # Core helper for parenthesis balance counting
