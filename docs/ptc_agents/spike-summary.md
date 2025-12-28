@@ -1,8 +1,16 @@
 # SubAgent Architecture: Spike Summary
 
-This document summarizes the validation work done on the SubAgent and Planning Agent architecture, what has been proven, and areas for future investigation.
+> **Historical Document**: This document captures the original spike validation work. The API has evolved significantly since then. For current API design, see:
+> - [tutorial.md](tutorial.md) - Planned SubAgent API and usage examples
+> - [specification.md](specification.md) - Formal API specification
+> - [api-unification.md](api-unification.md) - Planned changes to unify Lisp and SubAgent APIs
+> - [malli-schema.md](malli-schema.md) - Malli-lite schema validation system
+>
+> The learnings below remain valid, but specific API details (function names, struct fields, options) may differ from the current plan.
 
-> **Related**: See [tutorial.md](tutorial.md) for the full SubAgent API reference and usage examples.
+---
+
+This document summarizes the validation work done on the SubAgent and Planning Agent architecture, what has been proven, and areas for future investigation.
 
 ---
 
