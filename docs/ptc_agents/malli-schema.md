@@ -484,7 +484,8 @@ signature: "{summary :string}"  # Shorthand for () -> {...}
 ## Related Documents
 
 - [specification.md](specification.md) - Full SubAgent API specification
-- [api-unification.md](api-unification.md) - Unified Lisp/SubAgent schema validation
+- [step.md](step.md) - Shared Step struct specification
+- [lisp-api-updates.md](lisp-api-updates.md) - Changes to Lisp API
 - [tutorial.md](tutorial.md) - SubAgent usage examples
 
 ---

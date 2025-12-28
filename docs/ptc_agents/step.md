@@ -1,0 +1,277 @@
+# PtcRunner.Step Specification
+
+> **Status:** Planned
+> **Scope:** Shared result struct for `PtcRunner.Lisp` and `PtcRunner.SubAgent`
+
+This document specifies the `PtcRunner.Step` struct returned by both APIs.
+
+---
+
+## Overview
+
+`Step` is the unified result type for all PTC executions. It captures:
+- **Success data** (`return`) or **failure info** (`fail`)
+- **Execution metrics** (`usage`)
+- **State changes** (`memory`, `memory_delta`)
+- **Debug info** (`trace`, `signature`)
+
+---
+
+## Struct Definition
+
+```elixir
+defmodule PtcRunner.Step do
+  @moduledoc """
+  Result of executing a PTC program or SubAgent mission.
+
+  Returned by both `PtcRunner.Lisp.run/2` and `PtcRunner.SubAgent.delegate/2`.
+  """
+
+  defstruct [
+    :return,
+    :fail,
+    :memory,
+    :memory_delta,
+    :signature,
+    :usage,
+    :trace
+  ]
+
+  @type t :: %__MODULE__{
+    return: term() | nil,
+    fail: fail() | nil,
+    memory: map(),
+    memory_delta: map() | nil,
+    signature: String.t() | nil,
+    usage: usage() | nil,
+    trace: [trace_entry()] | nil
+  }
+end
+```
+
+---
+
+## Fields
+
+### `return`
+
+The computed result value on success.
+
+- **Type:** `term() | nil`
+- **Set when:** Mission/program completed successfully
+- **Nil when:** Execution failed (check `fail` field)
+
+```elixir
+{:ok, step} = SubAgent.delegate("Find top customer", ...)
+step.return  #=> %{name: "Acme Corp", revenue: 1_200_000}
+```
+
+### `fail`
+
+Error information on failure.
+
+- **Type:** `fail() | nil`
+- **Set when:** Execution failed
+- **Nil when:** Execution succeeded
+
+```elixir
+@type fail :: %{
+  required(:reason) => atom(),
+  required(:message) => String.t(),
+  optional(:op) => String.t(),
+  optional(:details) => map()
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reason` | `atom()` | Machine-readable error code (e.g., `:timeout`, `:validation_error`) |
+| `message` | `String.t()` | Human-readable description |
+| `op` | `String.t()` | Operation/tool that failed (optional) |
+| `details` | `map()` | Additional context (optional) |
+
+```elixir
+{:error, step} = SubAgent.delegate("Invalid mission", ...)
+step.fail  #=> %{reason: :validation_error, message: "count: expected int, got string"}
+```
+
+### `memory`
+
+Final memory state after execution.
+
+- **Type:** `map()`
+- **Always set:** Contains accumulated memory from all operations
+- **Access in PTC-Lisp:** `memory/key` prefix
+
+```elixir
+step.memory  #=> %{processed_ids: [1, 2, 3], cache: %{...}}
+```
+
+### `memory_delta`
+
+Keys that changed during execution (Lisp only).
+
+- **Type:** `map() | nil`
+- **Set when:** Lisp execution modifies memory
+- **Nil when:** SubAgent execution (use `trace` instead)
+
+```elixir
+step.memory_delta  #=> %{processed_ids: [1, 2, 3]}  # Only changed keys
+```
+
+### `signature`
+
+The contract used for validation.
+
+- **Type:** `String.t() | nil`
+- **Set when:** Signature was provided to `delegate/2` or `run/2`
+- **Used for:** Type propagation when chaining steps
+
+```elixir
+step.signature  #=> "() -> {count :int, _email_ids [:int]}"
+```
+
+### `usage`
+
+Execution metrics.
+
+- **Type:** `usage() | nil`
+- **Set when:** Execution completed (success or failure after running)
+- **Nil when:** Early validation failure (before execution)
+
+```elixir
+@type usage :: %{
+  required(:duration_ms) => non_neg_integer(),
+  required(:memory_bytes) => non_neg_integer(),
+  optional(:turns) => pos_integer(),
+  optional(:input_tokens) => non_neg_integer(),
+  optional(:output_tokens) => non_neg_integer(),
+  optional(:total_tokens) => non_neg_integer(),
+  optional(:llm_requests) => non_neg_integer()
+}
+```
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| `duration_ms` | Both | Total execution time |
+| `memory_bytes` | Both | Peak memory usage |
+| `turns` | SubAgent | Number of LLM turns used |
+| `input_tokens` | SubAgent | Total input tokens (if LLM reports) |
+| `output_tokens` | SubAgent | Total output tokens (if LLM reports) |
+| `total_tokens` | SubAgent | `input_tokens + output_tokens` |
+| `llm_requests` | SubAgent | Number of LLM API calls |
+
+### `trace`
+
+Execution trace for debugging (SubAgent only).
+
+- **Type:** `[trace_entry()] | nil`
+- **Set when:** SubAgent execution
+- **Nil when:** Lisp execution
+
+```elixir
+@type trace_entry :: %{
+  turn: pos_integer(),
+  program: String.t(),
+  result: term(),
+  tool_calls: [%{name: String.t(), args: map(), result: term()}]
+}
+```
+
+```elixir
+step.trace
+#=> [
+#=>   %{turn: 1, program: "(call \"search\" {:q \"urgent\"})", result: [...], tool_calls: [...]},
+#=>   %{turn: 2, program: "(call \"return\" {:count 5})", result: %{count: 5}, tool_calls: []}
+#=> ]
+```
+
+---
+
+## Error Reasons
+
+Complete list of error reasons in `step.fail.reason`:
+
+| Reason | Source | Description |
+|--------|--------|-------------|
+| `:parse_error` | Lisp | Invalid PTC-Lisp syntax |
+| `:analysis_error` | Lisp | Semantic error (undefined variable, etc.) |
+| `:eval_error` | Lisp | Runtime error (division by zero, etc.) |
+| `:timeout` | Both | Execution exceeded time limit |
+| `:memory_exceeded` | Both | Process exceeded heap limit |
+| `:validation_error` | Both | Input or output doesn't match signature |
+| `:tool_error` | SubAgent | Tool raised an exception |
+| `:tool_not_found` | SubAgent | Called non-existent tool |
+| `:reserved_tool_name` | SubAgent | Attempted to register `return` or `fail` |
+| `:max_turns_exceeded` | SubAgent | Turn limit reached without termination |
+| `:max_depth_exceeded` | SubAgent | Nested agent depth limit exceeded |
+| `:turn_budget_exhausted` | SubAgent | Total turn budget exhausted |
+| `:mission_timeout` | SubAgent | Total mission duration exceeded |
+| `:llm_error` | SubAgent | LLM callback failed after retries |
+| `:model_not_found` | SubAgent | LLM registry lookup failed |
+| `:chained_failure` | SubAgent | Chained onto a failed step |
+| `:template_error` | SubAgent | Template placeholder missing |
+| Custom atoms | SubAgent | From `(call "fail" {:reason :custom ...})` |
+
+---
+
+## Usage Patterns
+
+### Success Check
+
+```elixir
+case SubAgent.delegate(prompt, opts) do
+  {:ok, step} ->
+    IO.puts("Result: #{inspect(step.return)}")
+    IO.puts("Took #{step.usage.duration_ms}ms")
+
+  {:error, step} ->
+    IO.puts("Failed: #{step.fail.reason} - #{step.fail.message}")
+end
+```
+
+### Chaining Steps
+
+Pass a successful step's return and signature to the next step:
+
+```elixir
+{:ok, step1} = SubAgent.delegate("Find emails",
+  signature: "() -> {count :int, _ids [:int]}",
+  ...
+)
+
+# Option 1: Explicit
+{:ok, step2} = SubAgent.delegate("Process emails",
+  context: step1.return,
+  context_signature: step1.signature,
+  ...
+)
+
+# Option 2: Auto-extraction (SubAgent only)
+{:ok, step2} = SubAgent.delegate("Process emails",
+  context: step1,  # Extracts return and signature automatically
+  ...
+)
+```
+
+### Accessing Firewalled Data
+
+Fields prefixed with `_` are hidden from LLM history but available in `return`:
+
+```elixir
+{:ok, step} = SubAgent.delegate("Find emails",
+  signature: "() -> {count :int, _email_ids [:int]}",
+  ...
+)
+
+step.return.count      #=> 5 (visible to LLM)
+step.return._email_ids #=> [101, 102, 103, 104, 105] (hidden from LLM)
+```
+
+---
+
+## Related Documents
+
+- [specification.md](specification.md) - SubAgent API specification
+- [lisp-api-updates.md](lisp-api-updates.md) - Changes to existing Lisp API
+- [malli-schema.md](malli-schema.md) - Schema validation system
