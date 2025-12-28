@@ -38,7 +38,7 @@ A **SubAgent** is an isolated worker that handles a specific **mission** using a
 
 ### The Agentic Loop & The "Return" Tool
 
-A SubAgent runs an **agentic loop** (`AgenticLoop` module). Unlike simple chat, a SubAgent is successful only if it fulfills its contract by calling the built-in `return` tool.
+A SubAgent runs an **agentic loop** (`PtcRunner.SubAgent.Loop` module). Unlike simple chat, a SubAgent is successful only if it fulfills its contract by calling the built-in `return` tool.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -109,6 +109,51 @@ The SubAgent system provides two main functions:
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Execution Modes: Judgment vs. Agent
+
+SubAgents operate in two primary modes depending on the task complexity.
+
+### 1. Judgment Mode (Mappings & Classification)
+Used for single-turn tasks like classifying text or mapping a context object to a specific signature.
+- **Trigger**: No `tools` provided and `max_turns` is 1 or 2.
+- **Behavior**: The LLM provides a single PTC-Lisp expression (a map).
+- **Self-Correction**: If `max_turns: 2` (default), the agent gets one extra turn to fix its output if validation fails.
+- **Simplicity**: No need to call `(call "return" ...)`; the expression result is returned directly.
+
+### 2. Agent Mode (Investigation & Tool Use)
+Used for multi-turn tasks, using tools, or exploring large datasets in the context.
+- **Trigger**: `tools` provided OR `max_turns > 2`.
+- **Behavior**: A full **Agentic Loop**. The mission ends ONLY when the agent explicitly calls `(call "return" ...)` or `(call "fail" ...)`.
+- **Investigation Agent**: Even without tools, an agent can use multiple turns to investigate context data (e.g., searching a list) before returning a result.
+
+| Mode | Purpose | Stop Signal |
+|------|---------|-------------|
+| **Judgment** | Quick mapping | Expression result |
+| **Agent** | Tool use / Analysis | `(call "return" ...)` |
+
+### Example: Investigation Agent (Zero Tools)
+Sometimes you have all the data you need in the `context`, but it's too large for the LLM to process in one go. An investigation agent can "walk" the data over multiple turns.
+
+```elixir
+data = %{
+  reports: [ # thousands of items ... ]
+}
+
+# max_turns > 1 triggers Agent Mode, requiring an explicit 'return'
+{:ok, step} = PtcRunner.SubAgent.delegate(
+  "Find the report with the highest anomaly score and explain why",
+  signature: "{report_id :int, reasoning :string}",
+  context: data,
+  max_turns: 5,
+  llm: llm
+)
+```
+
+**LLM Strategy**:
+- **Turn 1**: `(mapv (fn [r] {:id (:id r) :score (:score r)}) ctx/reports)` (Extracts only IDs and scores to find the max).
+- **Turn 2**: `(first (filter #(= (:id %) 123) ctx/reports))` (Fetch the full detail for the identified report).
+- **Turn 3**: `(call "return" {:report_id 123 :reasoning "..."})` (Final answer).
 
 ---
 
@@ -263,15 +308,16 @@ delegate(prompt, context: step1)
 ```
  
 ### The Firewall Convention (`_` prefix)
- 
+
 Fields prefixed with `_` in a signature are "firewalled." They follow these visibility rules:
- 
+
 - **✓ Available in Lisp context**: Fully accessible via `ctx/_field_name`.
 - **✓ Transferred between steps**: Preserved when passing `context` between SubAgents.
+- **✓ Available to Elixir code**: When calling `delegate/2` directly from Elixir, firewalled fields are included in `step.return`.
 - **✗ Hidden from LLM prompt text**: Shown as `<Firewalled>` in conversation history.
-- **✗ Hidden from parent schema**: If a SubAgent is used as a tool, its firewalled fields are omitted from the parent's view of the tool's return shape.
- 
-This ensures that "heavy" or "private" data stays in the execution layer (Lisp) and doesn't pollute the reasoning layer (LLM conversation).
+- **✗ Hidden from parent LLM schema**: If a SubAgent is used as a tool by another LLM, its firewalled fields are omitted from the parent LLM's view of the tool's return shape.
+
+**Key insight:** Firewalls protect LLM context windows, not Elixir code. Your application can always access firewalled data; the firewall only prevents LLMs from seeing the raw values in their conversation history.
 
 **The Firewall at work:**
 - In Step 2, the LLM **knows** there are 2 emails (public data).
@@ -309,7 +355,7 @@ To understand exactly what the LLM receives, here is the structure of the system
     AVAILABLE TOOLS:
     - search(query :string) -> [:map]
     - return(data :any) -> stops loop
-    - fail(params {reason :keyword, message :string, op [:string], details [:map]}) -> stops loop
+    - fail(params {reason :keyword, message :string, op :string?, details :map?}) -> stops loop
     ```
 5.  **PTC-Lisp Language Instructions**: A technical reference explaining the syntax (Clojure-subset), built-in functions (`call`, `ctx/`, `memory/`), and control flow (`if`, `let`, `do`, `fn`).
 6.  **Output Format**: Strict instructions to provide thought reasoning followed by a single ` ```clojure ` block containing the program.
@@ -676,7 +722,7 @@ If the previous turn failed (syntax error, tool arity mismatches, or **Tool Vali
 #### `ctx/fail` structure when a turn fails:
 ```elixir
 %{
-  reason: :syntax_error | :tool_error | :validation_error,
+  reason: :parse_error | :tool_error | :validation_error,
   message: "Human-readable error description",
   op: "tool_name" | nil,  # If tool-related
   details: %{}            # Additional context (e.g., validation paths)
@@ -707,7 +753,7 @@ Use the built-in **`fail` tool** to explicitly exit the loop:
 ```
  
 **Result**:
-- The `AgenticLoop` stops immediately.
+- The `Loop` stops immediately.
 - `delegate/2` returns `{:error, step}` where `step.fail` contains the error data.
  
 #### 3. Built-in Tools: `return` and `fail`
@@ -720,7 +766,7 @@ These tools are the only way for the agent to terminate its mission.
   - **Result**: `{:ok, %PtcRunner.Step{return: data}}`
  
 - **`fail`**: Terminates the mission with an error.
-  - **Signature**: `fail(params {reason :keyword, message :string, op [:string], details [:map]})`
+  - **Signature**: `fail(params {reason :keyword, message :string, op :string?, details :map?})`
   - **Result**: `{:error, %PtcRunner.Step{fail: %{reason: atom, message: string, op: string | nil, details: map}}}`
  
 #### 4. Hard Crashes
@@ -836,7 +882,7 @@ Look up keys in maps using the keyword itself as a function:
  
  ### The Step-wise loop
  
- The `AgenticLoop` treats every turn as a **Step**. The key to its power is **Implicit Chaining**: the result of Turn N is automatically merged into the context (`ctx/`) of Turn N+1.
+ The `Loop` treats every turn as a **Step**. The key to its power is **Implicit Chaining**: the result of Turn N is automatically merged into the context (`ctx/`) of Turn N+1.
   
  #### How Merging Works
   
@@ -959,7 +1005,7 @@ tools = %{
 
 ### Type Signatures
 
-`LLMTool` generates a schema from the template variables and `returns` spec, just like regular tools:
+The `:signature` is the **single source of truth** for both inputs and outputs. `LLMTool` validates that template placeholders match the signature:
 
 ```
 ## Tools you can call
@@ -967,7 +1013,64 @@ tools = %{
 - evaluate_importance(email {:subject :string :body :string}, customer_tier :string) -> {:important :bool :priority :int :reason :string}
 ```
 
-The main agent sees typed inputs (extracted from `{{var}}` placeholders) and typed outputs (from the `signature`), enabling it to reason about data flow correctly.
+The main agent sees typed inputs (from the signature) and typed outputs (from the signature), enabling it to reason about data flow correctly.
+
+### Template Validation
+
+Template placeholders are validated against the signature at registration time:
+
+```elixir
+# ✓ Valid: placeholders match signature
+LLMTool.new(
+  prompt: "Analyze {{user.name}} (tier: {{tier}})",
+  signature: "(user {name :string}, tier :string) -> {analysis :string}"
+)
+
+# ✗ Invalid: placeholder not in signature
+LLMTool.new(
+  prompt: "Analyze {{user.email}}",  # 'email' not in signature!
+  signature: "(user {name :string}) -> {analysis :string}"
+)
+# => {:error, {:template_error, "placeholder {{user.email}} not found in signature; user has fields: name"}}
+
+# ✓ Valid: unused signature params are allowed (e.g., for hidden context)
+LLMTool.new(
+  prompt: "Hello {{name}}",  # 'debug_id' not used in prompt, but that's OK
+  signature: "(name :string, debug_id :int) -> {greeting :string}"
+)
+```
+
+### Compile-Time Validation with `~PROMPT`
+
+For compile-time placeholder extraction, use the `~PROMPT` sigil:
+
+```elixir
+import PtcRunner.SubAgent.Sigils
+
+# Compile error if {{...}} syntax is malformed
+@importance_prompt ~PROMPT"""
+Evaluate if this email requires immediate attention.
+
+Consider:
+- Is it from a VIP customer? (Tier: {{customer_tier}})
+- Does it express urgency?
+
+Email subject: {{email.subject}}
+Email body: {{email.body}}
+"""
+
+tools = %{
+  "evaluate_importance" => LLMTool.new(
+    prompt: @importance_prompt,
+    signature: "(email {subject :string, body :string}, customer_tier :string) -> {important :bool, reason :string}"
+  )
+}
+```
+
+The sigil extracts placeholders at compile time, providing:
+- Compile-time syntax validation of `{{...}}` patterns
+- Faster runtime validation (placeholders pre-extracted)
+- IDE support through struct-based introspection
 
 ### Using LLM Tools in Multi-Turn Flow
  
@@ -1072,7 +1175,7 @@ tools = %{
     Customer: {{customer.name}}
     Subject: {{email.subject}}
     """,
-    signature: "() -> {flag :bool, reason :string}"
+    signature: "(customer {name :string}, email {subject :string}) -> {flag :bool, reason :string}"
   )
 }
  
@@ -1596,12 +1699,14 @@ When SubAgents call other SubAgents (via `as_tool`), traces nest:
 ```
 
 ### Usage Accounting
- 
-Token usage is tracked and aggregated:
- 
+
+Token usage and execution metrics are tracked and aggregated:
+
 ```elixir
 step.usage
 #=> %{
+#     duration_ms: 2340,
+#     memory_bytes: 102400,
 #     input_tokens: 15442,
 #     output_tokens: 1108,
 #     total_tokens: 16550,
@@ -1680,6 +1785,68 @@ The returned function takes a map of parameters defined in its signature and ret
 
 ---
 
+## Derive & Apply Pattern (Planned)
+
+For highly repetitive tasks (batch processing), you can separate the **cognitive step** (writing the logic) from the **execution step** (running it at scale).
+
+### 1. Derive Phase
+The LLM analyzes a sample of your data and generates a pure PTC-Lisp function that fulfills a signature.
+
+```elixir
+# derive a reusable tool once
+{:ok, compiled} = PtcRunner.SubAgent.compile(
+  mission: "Extract anomaly score and reasoning from report",
+  signature: "(report :map) -> {score :float, reason :string}",
+  llm: llm,
+  sample: sample_reports  # helps LLM see the actual data structure
+)
+
+# Inspect the generated logic
+IO.puts(compiled.source)
+#=> (fn [report] (let [...] {...}))
+```
+
+### 2. Validation (Optional)
+Before scaling, you can validate the derived function against a set of test cases to ensure it behaves correctly across edge cases.
+
+```elixir
+# Returns :ok or {:error, failed_cases}
+case PtcRunner.SubAgent.validate_compiled(compiled, test_reports) do
+  :ok -> 
+    IO.puts("Agent verified!")
+  {:error, failures} ->
+    Logger.warning("Agent failed on #{length(failures)} test cases")
+end
+```
+
+### 3. Apply Phase
+You now have a plain, pre-bound Elixir function (`compiled.execute`) that you can run 1,000 times without ever calling an LLM again.
+
+```elixir
+# zero LLM tokens/cost per execution
+results = Enum.map(all_reports, &compiled.execute/1)
+
+# For multiple parameters, pass a map:
+# Signature: (report :map, threshold :float) -> ...
+# compiled.execute(%{report: report, threshold: 0.5})
+```
+
+### Persistence (Planned)
+Since the derived agent is just code, you can save it for version control or reuse:
+
+```elixir
+# Save the inspectable Lisp source
+File.write!("agents/anomaly_scorer.lisp", compiled.source)
+
+# Load and rebuild later
+{:ok, compiled} = PtcRunner.SubAgent.load(
+  File.read!("agents/anomaly_scorer.lisp"),
+  signature: "(report :map) -> {score :float, reason :string}"
+)
+```
+
+---
+
 ## Glossary
 
 - **Mission**: A task delegated to a SubAgent.
@@ -1692,8 +1859,9 @@ The returned function takes a map of parameters defined in its signature and ret
 
 ## Further Reading
 
-- [Specification](specification.md) - Full API reference and type definitions
+- [Specification](specification.md) - Full SubAgent API reference
+- [Step Struct](step.md) - Shared result struct specification
+- [Lisp API Updates](lisp-api-updates.md) - Changes to existing Lisp API
 - [Malli Schema](malli-schema.md) - Schema validation system based on Malli
 - [Spike Summary](spike-summary.md) - Validation results and architectural decisions
-- [API Unification](api-unification.md) - Unified Lisp and SubAgent APIs
 - [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation
