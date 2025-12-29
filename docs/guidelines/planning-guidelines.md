@@ -142,3 +142,9 @@ When reviewing an issue, structure your response as:
 
 **Verdict**: [Ready / Needs revision / Should be split]
 ```
+
+## References
+
+- [Issue Creation Guidelines](issue-creation-guidelines.md) - How to write well-specified issues
+- [Roadmap Guidelines](roadmap-guidelines.md) - Planning multi-issue features
+- [Testing Guidelines](testing-guidelines.md) - Test quality and patterns
