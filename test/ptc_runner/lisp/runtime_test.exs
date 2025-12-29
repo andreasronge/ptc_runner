@@ -1315,4 +1315,122 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       assert Runtime.parse_double(3.14) == nil
     end
   end
+
+  describe "str2" do
+    test "concatenates two strings" do
+      assert Runtime.str2("hello", " world") == "hello world"
+    end
+
+    test "converts non-string values to string" do
+      assert Runtime.str2("count: ", 42) == "count: 42"
+      assert Runtime.str2("value: ", true) == "value: true"
+    end
+
+    test "handles nil by converting to empty string" do
+      assert Runtime.str2("x", nil) == "x"
+      assert Runtime.str2(nil, "y") == "y"
+      assert Runtime.str2(nil, nil) == ""
+    end
+
+    test "converts keyword atoms to :keyword format" do
+      assert Runtime.str2("keyword: ", :my_key) == "keyword: :my_key"
+    end
+  end
+
+  describe "subs" do
+    test "returns substring from start index" do
+      assert Runtime.subs("hello", 1) == "ello"
+      assert Runtime.subs("hello", 0) == "hello"
+    end
+
+    test "returns substring from start to end index" do
+      assert Runtime.subs("hello", 1, 3) == "el"
+      assert Runtime.subs("hello", 0, 5) == "hello"
+      assert Runtime.subs("hello", 0, 0) == ""
+    end
+
+    test "clamps negative indices to 0" do
+      assert Runtime.subs("hello", -1) == "hello"
+      assert Runtime.subs("hello", -10, 2) == "he"
+    end
+
+    test "handles out of bounds indices" do
+      assert Runtime.subs("hello", 10) == ""
+      assert Runtime.subs("hello", 3, 10) == "lo"
+    end
+  end
+
+  describe "join" do
+    test "joins collection without separator" do
+      assert Runtime.join(["a", "b", "c"]) == "abc"
+      assert Runtime.join([]) == ""
+    end
+
+    test "joins collection with separator" do
+      assert Runtime.join(", ", ["a", "b", "c"]) == "a, b, c"
+      assert Runtime.join("-", [1, 2, 3]) == "1-2-3"
+    end
+
+    test "converts elements to strings" do
+      assert Runtime.join(", ", [1, "two", true]) == "1, two, true"
+    end
+
+    test "handles empty collection" do
+      assert Runtime.join(", ", []) == ""
+    end
+
+    test "handles nil in collection" do
+      assert Runtime.join(", ", [1, nil, 3]) == "1, , 3"
+    end
+  end
+
+  describe "split" do
+    test "splits string by separator" do
+      assert Runtime.split("a,b,c", ",") == ["a", "b", "c"]
+      assert Runtime.split("hello world", " ") == ["hello", "world"]
+    end
+
+    test "splits string into graphemes when separator is empty" do
+      assert Runtime.split("hello", "") == ["h", "e", "l", "l", "o"]
+    end
+
+    test "preserves empty strings in split" do
+      assert Runtime.split("a,,b", ",") == ["a", "", "b"]
+    end
+  end
+
+  describe "trim" do
+    test "removes leading and trailing whitespace" do
+      assert Runtime.trim("  hello  ") == "hello"
+      assert Runtime.trim("\n\t text \r\n") == "text"
+    end
+
+    test "removes only leading and trailing, not middle" do
+      assert Runtime.trim("  hello   world  ") == "hello   world"
+    end
+
+    test "handles no whitespace" do
+      assert Runtime.trim("hello") == "hello"
+    end
+  end
+
+  describe "replace" do
+    test "replaces all occurrences of pattern" do
+      assert Runtime.replace("hello", "l", "L") == "heLLo"
+      assert Runtime.replace("aaa", "a", "b") == "bbb"
+    end
+
+    test "replaces multiple patterns sequentially" do
+      result = Runtime.replace("hello", "l", "1")
+      assert result == "he11o"
+    end
+
+    test "handles no match" do
+      assert Runtime.replace("hello", "x", "y") == "hello"
+    end
+
+    test "handles empty replacement" do
+      assert Runtime.replace("hello", "l", "") == "heo"
+    end
+  end
 end

@@ -554,6 +554,94 @@ defmodule PtcRunner.Lisp.Runtime do
   defp truthy?(_), do: true
 
   # ============================================================
+  # String Manipulation
+  # ============================================================
+
+  @doc """
+  Convert one or more values to string and concatenate.
+  - (str) returns ""
+  - (str "hello") returns "hello"
+  - (str "a" "b") returns "ab"
+  - (str 42) returns "42"
+  - (str nil) returns "" (not "nil")
+  - (str :keyword) returns ":keyword"
+  - (str true) returns "true"
+
+  Binary reducer used with :variadic binding type.
+  """
+  def str2(a, b), do: to_str(a) <> to_str(b)
+
+  defp to_str(nil), do: ""
+  defp to_str(s) when is_binary(s), do: s
+  defp to_str(atom) when is_atom(atom), do: inspect(atom)
+  defp to_str(x), do: inspect(x)
+
+  @doc """
+  Return substring starting at index (2-arity) or from start to end (3-arity).
+  - (subs "hello" 1) returns "ello"
+  - (subs "hello" 1 3) returns "el"
+  - (subs "hello" 0 0) returns ""
+  - Out of bounds returns truncated result
+  - Negative indices are clamped to 0
+  """
+  def subs(s, start) when is_binary(s) and is_integer(start) do
+    start = max(0, start)
+    String.slice(s, start..-1//1)
+  end
+
+  def subs(s, start, end_idx) when is_binary(s) and is_integer(start) and is_integer(end_idx) do
+    start = max(0, start)
+    len = max(0, end_idx - start)
+    String.slice(s, start, len)
+  end
+
+  @doc """
+  Join a collection into a string with optional separator.
+  - (join ["a" "b" "c"]) returns "abc"
+  - (join ", " ["a" "b" "c"]) returns "a, b, c"
+  - (join "-" [1 2 3]) returns "1-2-3"
+  - (join ", " []) returns ""
+  """
+  def join(coll) when is_list(coll) do
+    Enum.map_join(coll, &to_str/1)
+  end
+
+  def join(separator, coll) when is_binary(separator) and is_list(coll) do
+    Enum.map_join(coll, separator, &to_str/1)
+  end
+
+  @doc """
+  Split a string by separator.
+  - (split "a,b,c" ",") returns ["a" "b" "c"]
+  - (split "hello" "") returns ["h" "e" "l" "l" "o"]
+  - (split "a,,b" ",") returns ["a" "" "b"]
+  """
+  def split(s, "") when is_binary(s), do: String.graphemes(s)
+
+  def split(s, separator) when is_binary(s) and is_binary(separator) do
+    String.split(s, separator)
+  end
+
+  @doc """
+  Trim leading and trailing whitespace.
+  - (trim "  hello  ") returns "hello"
+  - (trim "\n\t text \r\n") returns "text"
+  """
+  def trim(s) when is_binary(s) do
+    String.trim(s)
+  end
+
+  @doc """
+  Replace all occurrences of a pattern in a string.
+  - (replace "hello" "l" "L") returns "heLLo"
+  - (replace "aaa" "a" "b") returns "bbb"
+  """
+  def replace(s, pattern, replacement)
+      when is_binary(s) and is_binary(pattern) and is_binary(replacement) do
+    String.replace(s, pattern, replacement)
+  end
+
+  # ============================================================
   # String Parsing
   # ============================================================
 

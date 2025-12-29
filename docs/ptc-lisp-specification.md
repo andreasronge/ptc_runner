@@ -167,7 +167,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Not supported:** Multi-line strings, regex literals
 
-**String operations:** Strings support `count`, `empty?`, and `seq`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. Other string operations like substring extraction and string manipulation are not supported—use tools for complex string processing. See Section 8.1 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, and `replace`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.4 for details.
 
 ### 3.5 Keywords
 
@@ -1021,7 +1021,51 @@ The `seq` function converts a collection to a sequence:
     (update-vals count))           ; => ...
 ```
 
-### 8.3 Arithmetic
+### 8.3 String Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `str` | `(str ...)` | Convert and concatenate to string |
+| `subs` | `(subs s start)` | Substring from index to end |
+| `subs` | `(subs s start end)` | Substring from start to end |
+| `split` | `(split s separator)` | Split string by separator |
+| `join` | `(join separator coll)` | Join collection elements with separator |
+| `join` | `(join coll)` | Join collection elements (no separator) |
+| `trim` | `(trim s)` | Remove leading/trailing whitespace |
+| `replace` | `(replace s pattern replacement)` | Replace all occurrences |
+
+**Type coercion:** `str` converts values to strings using these rules:
+- `nil` → `""`
+- `true` / `false` → `"true"` / `"false"`
+- Numbers → decimal representation (e.g., `42` → `"42"`, `3.14` → `"3.14"`)
+- Strings → unchanged
+- Keywords → `:keyword` (with leading colon)
+- Collections → string representation
+
+```clojure
+(str "hello")                  ; => "hello"
+(str "Hello" " " "World")      ; => "Hello World"
+
+(subs "hello" 1)               ; => "ello"
+(subs "hello" 1 4)             ; => "ell"
+```
+
+**PTC-Lisp specific string examples:**
+- `(str)` → `""` (empty call)
+- `(str 42)` → `"42"` (number conversion)
+- `(str true)` → `"true"` (boolean conversion)
+- `(str :user)` → `":user"` (keyword with colon)
+- `(str nil "x")` → `"x"` (nil coerced to empty string)
+- `(split "a,b,c" ",")` → `["a" "b" "c"]` (split by separator)
+- `(split "hello" "")` → `["h" "e" "l" "l" "o"]` (split into characters)
+- `(split "a,,b" ",")` → `["a" "" "b"]` (preserves empty elements)
+- `(join ", " ["a" "b" "c"])` → `"a, b, c"` (join with separator)
+- `(join "-" [1 2 3])` → `"1-2-3"` (numeric types converted)
+- `(trim "\n\tworld\r\n")` → `"world"` (remove all whitespace)
+- `(replace "hello" "l" "L")` → `"heLLo"` (replace all occurrences)
+- `(replace "aaa" "a" "b")` → `"bbb"` (replace pattern)
+
+### 8.4 Arithmetic
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1052,7 +1096,7 @@ The `seq` function converts a collection to a sequence:
 (min 1 5 3)     ; => 1
 ```
 
-### 8.4 Comparison
+### 8.5 Comparison
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1075,7 +1119,7 @@ The `seq` function converts a collection to a sequence:
 (>= 3 2)        ; => true
 ```
 
-### 8.5 Logic
+### 8.6 Logic
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1097,7 +1141,7 @@ The `seq` function converts a collection to a sequence:
 
 **`identity` function:** Returns its argument unchanged. Useful as a default function argument, for passing to higher-order functions, or in pipelines where no transformation is needed.
 
-### 8.6 Type Predicates
+### 8.7 Type Predicates
 
 | Function | Description |
 |----------|-------------|
@@ -1147,7 +1191,7 @@ To iterate over just keys or values, extract them first:
      (map (fn [k] {:key k :val (get my-map k)})))
 ```
 
-### 8.7 Numeric Predicates
+### 8.8 Numeric Predicates
 
 | Function | Description |
 |----------|-------------|
@@ -1173,7 +1217,7 @@ Since division always returns floats (see Section 8.3), avoid using `even?`/`odd
 (zero? (mod x 2))    ; works for integers
 ```
 
-### 8.8 String Parsing
+### 8.9 String Parsing
 
 | Function | Description |
 |----------|-------------|
@@ -1704,7 +1748,7 @@ Anonymous functions are supported via `fn` with restrictions:
 
 ### 13.3 Functions Excluded from Core
 
-- String manipulation: `str`, `subs`, `split`, `join`, `upper-case`, etc.
+- String manipulation: `upper-case`, `lower-case`, etc. (case conversion)
 - Regex: `re-find`, `re-matches`, `re-seq`
 - `range` (infinite sequences)
 - `iterate`, `repeat`, `cycle` (infinite sequences)
