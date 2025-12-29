@@ -144,6 +144,13 @@ defmodule PtcRunner.Lisp.Env do
       {:split, {:normal, &Runtime.split/2}},
       {:trim, {:normal, &Runtime.trim/1}},
       {:replace, {:normal, &Runtime.replace/3}},
+      {:upcase, {:normal, &Runtime.upcase/1}},
+      {:"upper-case", {:normal, &Runtime.upcase/1}},
+      {:downcase, {:normal, &Runtime.downcase/1}},
+      {:"lower-case", {:normal, &Runtime.downcase/1}},
+      {:"starts-with?", {:normal, &Runtime.starts_with?/2}},
+      {:"ends-with?", {:normal, &Runtime.ends_with?/2}},
+      {:includes?, {:normal, &Runtime.includes?/2}},
 
       # ============================================================
       # String parsing
