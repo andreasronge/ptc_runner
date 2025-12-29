@@ -79,24 +79,6 @@ defmodule PtcRunner.StepTest do
       assert step.return == [1, 2, 3]
       assert step.fail == nil
     end
-
-    test "creates successful step preserving original return type" do
-      # String return
-      step = PtcRunner.Step.ok("result", %{})
-      assert step.return == "result"
-
-      # Integer return
-      step = PtcRunner.Step.ok(42, %{})
-      assert step.return == 42
-
-      # Float return
-      step = PtcRunner.Step.ok(3.14, %{})
-      assert step.return == 3.14
-
-      # Boolean return
-      step = PtcRunner.Step.ok(true, %{})
-      assert step.return == true
-    end
   end
 
   describe "Step.error/3" do
@@ -170,6 +152,16 @@ defmodule PtcRunner.StepTest do
   end
 
   describe "fail field structure" do
+    setup do
+      base_step = %PtcRunner.Step{
+        return: nil,
+        fail: nil,
+        memory: %{}
+      }
+
+      %{base_step: base_step}
+    end
+
     test "fail field contains required fields only by default" do
       step = PtcRunner.Step.error(:timeout, "Message", %{})
 
@@ -181,35 +173,26 @@ defmodule PtcRunner.StepTest do
       assert fail.message == "Message"
     end
 
-    test "fail field can include optional op field" do
+    test "fail field can include optional op field", %{base_step: base_step} do
       fail = %{reason: :tool_error, message: "Tool failed", op: "search"}
-
-      step = %PtcRunner.Step{
-        return: nil,
-        fail: fail,
-        memory: %{}
-      }
+      step = %{base_step | fail: fail}
 
       assert step.fail.op == "search"
     end
 
-    test "fail field can include optional details field" do
+    test "fail field can include optional details field", %{base_step: base_step} do
       fail = %{
         reason: :validation_error,
         message: "Type mismatch",
         details: %{"expected" => "int", "got" => "string"}
       }
 
-      step = %PtcRunner.Step{
-        return: nil,
-        fail: fail,
-        memory: %{}
-      }
+      step = %{base_step | fail: fail}
 
       assert step.fail.details == %{"expected" => "int", "got" => "string"}
     end
 
-    test "fail field can include all optional fields" do
+    test "fail field can include all optional fields", %{base_step: base_step} do
       fail = %{
         reason: :tool_error,
         message: "Tool execution failed",
@@ -217,11 +200,7 @@ defmodule PtcRunner.StepTest do
         details: %{"query" => "SELECT * FROM users", "error" => "Connection timeout"}
       }
 
-      step = %PtcRunner.Step{
-        return: nil,
-        fail: fail,
-        memory: %{}
-      }
+      step = %{base_step | fail: fail}
 
       assert step.fail.reason == :tool_error
       assert step.fail.op == "database_query"
@@ -234,21 +213,25 @@ defmodule PtcRunner.StepTest do
   end
 
   describe "usage field structure" do
-    test "usage field contains required fields" do
-      usage = %{duration_ms: 245, memory_bytes: 1024}
-
-      step = %PtcRunner.Step{
+    setup do
+      base_step = %PtcRunner.Step{
         return: %{},
         fail: nil,
-        memory: %{},
-        usage: usage
+        memory: %{}
       }
+
+      %{base_step: base_step}
+    end
+
+    test "usage field contains required fields", %{base_step: base_step} do
+      usage = %{duration_ms: 245, memory_bytes: 1024}
+      step = %{base_step | usage: usage}
 
       assert step.usage.duration_ms == 245
       assert step.usage.memory_bytes == 1024
     end
 
-    test "usage field can include optional SubAgent metrics" do
+    test "usage field can include optional SubAgent metrics", %{base_step: base_step} do
       usage = %{
         duration_ms: 1000,
         memory_bytes: 4096,
@@ -259,12 +242,7 @@ defmodule PtcRunner.StepTest do
         llm_requests: 2
       }
 
-      step = %PtcRunner.Step{
-        return: %{},
-        fail: nil,
-        memory: %{},
-        usage: usage
-      }
+      step = %{base_step | usage: usage}
 
       assert step.usage.turns == 3
       assert step.usage.input_tokens == 150
@@ -273,15 +251,9 @@ defmodule PtcRunner.StepTest do
       assert step.usage.llm_requests == 2
     end
 
-    test "usage field with only required metrics" do
+    test "usage field with only required metrics", %{base_step: base_step} do
       usage = %{duration_ms: 500, memory_bytes: 2048}
-
-      step = %PtcRunner.Step{
-        return: %{},
-        fail: nil,
-        memory: %{},
-        usage: usage
-      }
+      step = %{base_step | usage: usage}
 
       assert step.usage == usage
       assert !Map.has_key?(step.usage, :turns)
@@ -290,7 +262,17 @@ defmodule PtcRunner.StepTest do
   end
 
   describe "trace field structure" do
-    test "trace field contains list of trace entries" do
+    setup do
+      base_step = %PtcRunner.Step{
+        return: %{count: 1},
+        fail: nil,
+        memory: %{}
+      }
+
+      %{base_step: base_step}
+    end
+
+    test "trace field contains list of trace entries", %{base_step: base_step} do
       tool_call = %{
         name: "search",
         args: %{"q" => "urgent"},
@@ -307,19 +289,14 @@ defmodule PtcRunner.StepTest do
         tool_calls: [tool_call]
       }
 
-      step = %PtcRunner.Step{
-        return: %{count: 1},
-        fail: nil,
-        memory: %{},
-        trace: [trace_entry]
-      }
+      step = %{base_step | trace: [trace_entry]}
 
       assert length(step.trace) == 1
       assert hd(step.trace).turn == 1
       assert hd(step.trace).program == "(call \"search\" {:q \"urgent\"})"
     end
 
-    test "trace field can contain multiple entries" do
+    test "trace field can contain multiple entries", %{base_step: base_step} do
       trace_entry_1 = %{
         turn: 1,
         program: "(call \"search\" {:q \"urgent\"})",
@@ -334,12 +311,7 @@ defmodule PtcRunner.StepTest do
         tool_calls: []
       }
 
-      step = %PtcRunner.Step{
-        return: %{count: 1},
-        fail: nil,
-        memory: %{},
-        trace: [trace_entry_1, trace_entry_2]
-      }
+      step = %{base_step | trace: [trace_entry_1, trace_entry_2]}
 
       assert length(step.trace) == 2
       assert Enum.map(step.trace, & &1.turn) == [1, 2]
