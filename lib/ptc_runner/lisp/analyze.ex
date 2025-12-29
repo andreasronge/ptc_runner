@@ -732,7 +732,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # Check if a symbol name is a placeholder (%, %1, %2, etc.)
-  defp placeholder?(name) do
+  @doc false
+  def placeholder?(name) do
     case to_string(name) do
       "%" -> true
       "%" <> rest -> String.match?(rest, ~r/^\d+$/)
