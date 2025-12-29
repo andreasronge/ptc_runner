@@ -212,6 +212,7 @@ memory/results        ; read from persistent memory
 (if cond then else)                ; conditional (else is REQUIRED)
 (when cond body)                   ; single-branch returns nil if false
 (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
+(do expr1 expr2 ... exprN)         ; sequential eval, returns last
 (fn [x] body)                      ; anonymous function with simple param
 (fn [[a b]] body)                  ; vector destructuring in params
 (fn [{:keys [x]}] body)            ; map destructuring in params
