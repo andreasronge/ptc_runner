@@ -41,6 +41,8 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 - **[Guide](docs/guide.md)** - System design and API reference
 - **[Testing Guidelines](docs/guidelines/testing-guidelines.md)** - Test quality and patterns
 - **[Planning Guidelines](docs/guidelines/planning-guidelines.md)** - Issue review and feature planning
+- **[Roadmap Guidelines](docs/guidelines/roadmap-guidelines.md)** - Multi-issue feature planning
+- **[GitHub Workflows](docs/guidelines/github-workflows.md)** - PM workflow, epics, and automation
 
 ## Architecture Overview
 
