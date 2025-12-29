@@ -270,7 +270,8 @@ def compile(agent, opts)
 ```
 
 **Options:**
-- `llm` - Required. Used once during compilation.
+- `llm` - Required. Used once during compilation. Can be a function or atom.
+- `llm_registry` - Required if `llm` is an atom. Maps atoms to callbacks.
 - `sample` - Sample data to help LLM understand structure.
 
 **What can be compiled:**
@@ -290,8 +291,15 @@ scorer = SubAgent.new(
   tools: %{"lookup_threshold" => &MyApp.lookup_threshold/1}
 )
 
-# Compile - LLM derives the logic once
-{:ok, compiled} = SubAgent.compile(scorer, llm: llm, sample: sample_reports)
+# Compile with function - LLM derives the logic once
+{:ok, compiled} = SubAgent.compile(scorer, llm: my_llm_fn, sample: sample_reports)
+
+# Or compile with atom + registry
+{:ok, compiled} = SubAgent.compile(scorer,
+  llm: :sonnet,
+  llm_registry: registry,
+  sample: sample_reports
+)
 
 # Execute many times - no LLM calls, but tools still run
 results = Enum.map(all_reports, fn r -> compiled.execute(%{report: r}) end)
@@ -650,6 +658,17 @@ end
 - `:llm` - `:caller` (default), atom (registry lookup), or function
 - `:description` - For schema generation
 - `:tools` - If provided, runs as multi-turn agent
+
+**LLM inheritance - `:caller` vs `nil`:**
+
+| Context | Value | Meaning |
+|---------|-------|---------|
+| `LLMTool.new(llm: :caller)` | `:caller` | Explicitly inherit from calling agent (default) |
+| `LLMTool.new(llm: :haiku)` | atom | Use specific model via registry |
+| `SubAgent.new(llm: nil)` | `nil` | Implicitly inherit from parent |
+| `SubAgent.new(llm: :haiku)` | atom | Use specific model via registry |
+
+The `:caller` atom is **only valid for LLMTool** and explicitly signals "use whatever LLM the calling agent is using." For SubAgent, omitting `llm` (or setting `nil`) achieves the same inheritance behavior.
 
 **Example:**
 
@@ -1299,6 +1318,20 @@ registry = %{
   context: %{text: article}
 )
 ```
+
+**Gotchas & Edge Cases:**
+
+1. **Struct overrides binding:** If an agent has `llm: :haiku` in its struct definition, `SubAgent.as_tool(agent, llm: :sonnet)` will **not** override it. The struct setting always wins. This is intentional - struct-level `llm` means "this agent always uses this model." To make an agent re-parameterizable, leave `llm: nil` in the struct and use `as_tool(..., llm: x)` or inheritance.
+
+2. **Mission-global registry:** The registry is passed once at the top-level `run/2` and flows to all children. There is no per-agent registry override. If two agents both use `:haiku` but need different implementations, use different atom names:
+   ```elixir
+   registry = %{
+     haiku: &MyApp.LLM.haiku/1,
+     haiku_custom: &MyApp.LLM.haiku_with_logging/1
+   }
+   ```
+
+3. **Missing registry error:** If an agent uses an atom (e.g., `llm: :gpt4`) but no `llm_registry` is provided, the error will be `{:error, :llm_not_found}`. This can be confusing if a deeply nested child agent uses an atom while the top-level call used a function. Always provide `llm_registry` when any agent in the tree might use atoms.
 
 ### Retry Configuration
 

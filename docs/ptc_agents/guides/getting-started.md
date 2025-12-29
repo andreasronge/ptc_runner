@@ -160,6 +160,23 @@ PtcRunner.SubAgent.run(prompt,
 
 The registry is inherited by child SubAgents, so you only pass it once at the top level. See [Configuration](../specification.md#llm-registry) for more details.
 
+### App-Level Default Registry
+
+For applications that want to avoid passing the registry on every call:
+
+```elixir
+# In your application.ex start/2
+def start(_type, _args) do
+  Application.put_env(:ptc_runner, :default_llm_registry, MyApp.llm_registry())
+  # ... rest of supervision tree
+end
+
+# Now llm_registry is optional - falls back to default
+PtcRunner.SubAgent.run(prompt, llm: :sonnet, signature: "...")
+```
+
+This is useful for production apps but not available in Livebook (use explicit registry there).
+
 ### Example with ReqLLM
 
 ```elixir
