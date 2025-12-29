@@ -255,5 +255,39 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == 5
     end
+
+    test "string manipulation with str, split, and join" do
+      task = "Build a CSV row from values, then split and join with different separator"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (str + split + join) ===\n#{program}\n")
+
+      context = %{
+        "values" => ["apple", "banana", "cherry"]
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Result should be a string
+      assert is_binary(result)
+    end
+
+    test "string case transformations with trim and replace" do
+      task = "Clean up a string by trimming whitespace and removing dashes"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (trim + replace) ===\n#{program}\n")
+
+      context = %{
+        "text" => "  hello-world  "
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Result should be trimmed and dashes replaced
+      assert is_binary(result)
+      assert not String.starts_with?(result, " ")
+      assert not String.ends_with?(result, " ")
+    end
   end
 end

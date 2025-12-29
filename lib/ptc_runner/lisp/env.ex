@@ -136,6 +136,16 @@ defmodule PtcRunner.Lisp.Env do
       {:coll?, {:normal, &is_list/1}},
 
       # ============================================================
+      # String manipulation
+      # ============================================================
+      {:str, {:variadic, &Runtime.str2/2, ""}},
+      {:subs, {:multi_arity, {&Runtime.subs/2, &Runtime.subs/3}}},
+      {:join, {:multi_arity, {&Runtime.join/1, &Runtime.join/2}}},
+      {:split, {:normal, &Runtime.split/2}},
+      {:trim, {:normal, &Runtime.trim/1}},
+      {:replace, {:normal, &Runtime.replace/3}},
+
+      # ============================================================
       # String parsing
       # ============================================================
       {:"parse-long", {:normal, &Runtime.parse_long/1}},
