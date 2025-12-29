@@ -1,0 +1,48 @@
+name: 'Setup Claude Code'
+description: 'Install Claude Code CLI with caching to avoid installation conflicts'
+
+inputs:
+  version:
+    description: 'Claude Code version to install'
+    required: false
+    default: '2.0.74'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache Claude Code
+      id: cache-claude
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/bin/claude
+          ~/.claude
+        key: claude-code-${{ runner.os }}-v${{ inputs.version }}
+
+    - name: Install Claude Code
+      if: steps.cache-claude.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "Installing Claude Code v${{ inputs.version }}..."
+        for attempt in 1 2 3; do
+          echo "Installation attempt $attempt..."
+          if curl -fsSL https://claude.ai/install.sh | bash -s -- ${{ inputs.version }}; then
+            echo "Claude Code installed successfully"
+            break
+          fi
+          if [ $attempt -eq 3 ]; then
+            echo "Failed to install Claude Code after 3 attempts"
+            exit 1
+          fi
+          echo "Installation failed, retrying in 5s..."
+          sleep 5
+        done
+
+    - name: Add Claude Code to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        claude --version || echo "Warning: claude command not found in PATH"
