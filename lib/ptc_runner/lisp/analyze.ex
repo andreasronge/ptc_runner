@@ -624,6 +624,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # Transform body by replacing placeholders with parameter variables
+  # credo:disable-for-next-line Credo.Check.Warning.UnusedVariable
   defp transform_body(asts, placeholders) when is_list(asts) do
     Enum.map(asts, &transform_body(&1, placeholders))
   end
@@ -641,14 +642,17 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
+  # credo:disable-for-next-line Credo.Check.Warning.UnusedVariable
   defp transform_body({:vector, elems}, placeholders) do
     {:vector, transform_body(elems, placeholders)}
   end
 
+  # credo:disable-for-next-line Credo.Check.Warning.UnusedVariable
   defp transform_body({:list, elems}, placeholders) do
     {:list, transform_body(elems, placeholders)}
   end
 
+  # credo:disable-for-next-line Credo.Check.Warning.UnusedVariable
   defp transform_body({:map, pairs}, placeholders) do
     {:map,
      Enum.map(pairs, fn {k, v} ->
@@ -656,6 +660,7 @@ defmodule PtcRunner.Lisp.Analyze do
      end)}
   end
 
+  # credo:disable-for-next-line Credo.Check.Warning.UnusedVariable
   defp transform_body({:set, elems}, placeholders) do
     {:set, transform_body(elems, placeholders)}
   end
