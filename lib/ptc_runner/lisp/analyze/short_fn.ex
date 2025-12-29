@@ -41,7 +41,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
          {:ok, placeholders} <- validate_placeholder_result(placeholders_result),
          # 2. Determine arity
          arity <- determine_arity(placeholders),
-         # 3. Generate parameter list [{:var, :p1}, {:var, :p2}, ...]
+         # 3. Generate parameter list [{:symbol, :p1}, {:symbol, :p2}, ...]
          params <- generate_params(arity),
          # 4. Replace placeholders in body
          transformed_body <- transform_body(body_expr, placeholders) do
