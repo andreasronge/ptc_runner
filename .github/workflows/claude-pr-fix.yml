@@ -12,12 +12,13 @@ jobs:
   claude:
     # Only trigger for PR contexts, trusted actors, and @claude mentions
     # Allow claude[bot] to trigger fixes (from auto-triage workflow)
+    # Note: Using toJSON() because labels.*.name doesn't work with contains()
     if: |
       (
         github.actor == 'andreasronge' ||
         github.actor == 'claude[bot]' ||
-        contains(github.event.issue.labels.*.name, 'claude-approved') ||
-        contains(github.event.pull_request.labels.*.name, 'claude-approved')
+        contains(toJSON(github.event.issue.labels), 'claude-approved') ||
+        contains(toJSON(github.event.pull_request.labels), 'claude-approved')
       ) && (
         (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude') && (github.event.comment.user.type != 'Bot' || github.event.comment.user.login == 'claude[bot]')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && (github.event.comment.user.type != 'Bot' || github.event.comment.user.login == 'claude[bot]')) ||

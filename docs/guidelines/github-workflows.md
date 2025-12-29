@@ -140,7 +140,7 @@ Most workflows require explicit maintainer approval before Claude can act:
 
 ### Loop Prevention
 
-- **Bot check**: claude.yml ignores bot-authored comments/reviews to prevent self-triggering
+- **Label gate**: `claude-approved` label required for non-maintainer triggers (prevents unauthorized automation)
 - **Cycle limit**: auto-triage.yml tracks cycles with labels, stops after 3 cycles
 - **Human intervention**: Adds `needs-human-review` label when max cycles reached
 

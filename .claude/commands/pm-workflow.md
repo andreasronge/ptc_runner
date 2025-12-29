@@ -174,8 +174,34 @@ Report current state: active epic (if any), next task, blockers. Don't create or
 ### Triggering Implementation
 
 When an issue is ready and unblocked:
-- Post a comment: `@claude Please implement this issue`
-- Include guidance to read relevant spec documents
+
+1. **Check for running implementation workflows**: Before triggering, verify no implementation is already in progress:
+   ```bash
+   # Check for in-progress claude-issue workflow runs
+   gh run list --workflow=claude-issue.yml --status=in_progress --json databaseId --jq 'length'
+   ```
+   - If result is `> 0`, an implementation is already running - **wait**, don't trigger another
+   - If result is `0`, no implementation running - proceed with checks
+
+2. **Check for existing trigger**: Before posting, verify no `@claude` trigger already exists:
+   ```bash
+   # Check if issue already has a @claude trigger comment
+   gh issue view ISSUE_NUMBER --json comments --jq '
+     [.comments[] | select(.body | startswith("@claude"))] | length
+   '
+   ```
+   - If result is `> 0`, a trigger already exists - **skip**, don't post a duplicate
+   - If result is `0`, no trigger exists - proceed with posting
+
+3. **Post trigger comment**: `@claude Please implement this issue`
+   - Include guidance to read relevant spec documents
+
+**Why this matters**:
+- Multiple issues can be labeled `ready-for-implementation` at once, triggering multiple PM workflow runs
+- Without the running workflow check, PM could trigger parallel implementations that cause merge conflicts
+- Without the existing trigger check, each PM run would post duplicate comments
+
+**Note**: If an existing trigger exists but implementation failed, human intervention is needed to diagnose and retry.
 
 ### Creating Issues
 
@@ -219,6 +245,8 @@ When an issue shouldn't be implemented:
 ## Safety Rules
 
 - **One issue at a time**: Never create multiple issues in one run
+- **No parallel implementations**: Before triggering, check for running `claude-issue` workflows - wait if any are in progress
+- **No duplicate triggers**: Before posting `@claude` trigger, check if one already exists on the issue - skip if so
 - **Wait for merge**: Don't create/trigger when PRs are open (checked by workflow before running)
 - **Require review**: Only trigger on issues with `ready-for-implementation` label
 - **Max 3 failures**: Add `pm-stuck` label and stop after 3 consecutive failures

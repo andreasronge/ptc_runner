@@ -1275,4 +1275,263 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       assert result == %{"a" => 30, "b" => 5}
     end
   end
+
+  describe "parse_long" do
+    test "parses valid integers" do
+      assert Runtime.parse_long("42") == 42
+      assert Runtime.parse_long("-17") == -17
+      assert Runtime.parse_long("0") == 0
+    end
+
+    test "returns nil for invalid input" do
+      assert Runtime.parse_long("abc") == nil
+      assert Runtime.parse_long("3.14") == nil
+      assert Runtime.parse_long(" 42") == nil
+      assert Runtime.parse_long("42abc") == nil
+    end
+
+    test "handles nil and non-strings" do
+      assert Runtime.parse_long(nil) == nil
+      assert Runtime.parse_long(42) == nil
+    end
+  end
+
+  describe "parse_double" do
+    test "parses valid floats" do
+      assert Runtime.parse_double("3.14") == 3.14
+      assert Runtime.parse_double("-0.5") == -0.5
+      assert Runtime.parse_double("42") == 42.0
+      assert Runtime.parse_double("1e10") == 1.0e10
+    end
+
+    test "returns nil for invalid input" do
+      assert Runtime.parse_double("abc") == nil
+      assert Runtime.parse_double(" 3.14") == nil
+      assert Runtime.parse_double("3.14abc") == nil
+    end
+
+    test "handles nil and non-strings" do
+      assert Runtime.parse_double(nil) == nil
+      assert Runtime.parse_double(3.14) == nil
+    end
+  end
+
+  describe "str2" do
+    test "concatenates two strings" do
+      assert Runtime.str2("hello", " world") == "hello world"
+    end
+
+    test "converts non-string values to string" do
+      assert Runtime.str2("count: ", 42) == "count: 42"
+      assert Runtime.str2("value: ", true) == "value: true"
+    end
+
+    test "handles nil by converting to empty string" do
+      assert Runtime.str2("x", nil) == "x"
+      assert Runtime.str2(nil, "y") == "y"
+      assert Runtime.str2(nil, nil) == ""
+    end
+
+    test "converts keyword atoms to :keyword format" do
+      assert Runtime.str2("keyword: ", :my_key) == "keyword: :my_key"
+    end
+  end
+
+  describe "subs" do
+    test "returns substring from start index" do
+      assert Runtime.subs("hello", 1) == "ello"
+      assert Runtime.subs("hello", 0) == "hello"
+    end
+
+    test "returns substring from start to end index" do
+      assert Runtime.subs("hello", 1, 3) == "el"
+      assert Runtime.subs("hello", 0, 5) == "hello"
+      assert Runtime.subs("hello", 0, 0) == ""
+    end
+
+    test "clamps negative indices to 0" do
+      assert Runtime.subs("hello", -1) == "hello"
+      assert Runtime.subs("hello", -10, 2) == "he"
+    end
+
+    test "handles out of bounds indices" do
+      assert Runtime.subs("hello", 10) == ""
+      assert Runtime.subs("hello", 3, 10) == "lo"
+    end
+  end
+
+  describe "join" do
+    test "joins collection without separator" do
+      assert Runtime.join(["a", "b", "c"]) == "abc"
+      assert Runtime.join([]) == ""
+    end
+
+    test "joins collection with separator" do
+      assert Runtime.join(", ", ["a", "b", "c"]) == "a, b, c"
+      assert Runtime.join("-", [1, 2, 3]) == "1-2-3"
+    end
+
+    test "converts elements to strings" do
+      assert Runtime.join(", ", [1, "two", true]) == "1, two, true"
+    end
+
+    test "handles empty collection" do
+      assert Runtime.join(", ", []) == ""
+    end
+
+    test "handles nil in collection" do
+      assert Runtime.join(", ", [1, nil, 3]) == "1, , 3"
+    end
+  end
+
+  describe "split" do
+    test "splits string by separator" do
+      assert Runtime.split("a,b,c", ",") == ["a", "b", "c"]
+      assert Runtime.split("hello world", " ") == ["hello", "world"]
+    end
+
+    test "splits string into graphemes when separator is empty" do
+      assert Runtime.split("hello", "") == ["h", "e", "l", "l", "o"]
+    end
+
+    test "preserves empty strings in split" do
+      assert Runtime.split("a,,b", ",") == ["a", "", "b"]
+    end
+  end
+
+  describe "trim" do
+    test "removes leading and trailing whitespace" do
+      assert Runtime.trim("  hello  ") == "hello"
+      assert Runtime.trim("\n\t text \r\n") == "text"
+    end
+
+    test "removes only leading and trailing, not middle" do
+      assert Runtime.trim("  hello   world  ") == "hello   world"
+    end
+
+    test "handles no whitespace" do
+      assert Runtime.trim("hello") == "hello"
+    end
+  end
+
+  describe "replace" do
+    test "replaces all occurrences of pattern" do
+      assert Runtime.replace("hello", "l", "L") == "heLLo"
+      assert Runtime.replace("aaa", "a", "b") == "bbb"
+    end
+
+    test "replaces multiple patterns sequentially" do
+      result = Runtime.replace("hello", "l", "1")
+      assert result == "he11o"
+    end
+
+    test "handles no match" do
+      assert Runtime.replace("hello", "x", "y") == "hello"
+    end
+
+    test "handles empty replacement" do
+      assert Runtime.replace("hello", "l", "") == "heo"
+    end
+  end
+
+  describe "upcase" do
+    test "converts string to uppercase" do
+      assert Runtime.upcase("hello") == "HELLO"
+      assert Runtime.upcase("Hello World") == "HELLO WORLD"
+    end
+
+    test "handles empty string" do
+      assert Runtime.upcase("") == ""
+    end
+
+    test "handles already uppercase string" do
+      assert Runtime.upcase("HELLO") == "HELLO"
+    end
+
+    test "handles mixed case" do
+      assert Runtime.upcase("HeLLo") == "HELLO"
+    end
+  end
+
+  describe "downcase" do
+    test "converts string to lowercase" do
+      assert Runtime.downcase("HELLO") == "hello"
+      assert Runtime.downcase("Hello World") == "hello world"
+    end
+
+    test "handles empty string" do
+      assert Runtime.downcase("") == ""
+    end
+
+    test "handles already lowercase string" do
+      assert Runtime.downcase("hello") == "hello"
+    end
+
+    test "handles mixed case" do
+      assert Runtime.downcase("HeLLo") == "hello"
+    end
+  end
+
+  describe "starts_with?" do
+    test "returns true when string starts with prefix" do
+      assert Runtime.starts_with?("hello", "he") == true
+      assert Runtime.starts_with?("hello world", "hello") == true
+    end
+
+    test "returns false when string does not start with prefix" do
+      assert Runtime.starts_with?("hello", "x") == false
+      assert Runtime.starts_with?("hello", "ello") == false
+    end
+
+    test "returns true for empty prefix" do
+      assert Runtime.starts_with?("hello", "") == true
+    end
+
+    test "handles case sensitivity" do
+      assert Runtime.starts_with?("Hello", "hello") == false
+      assert Runtime.starts_with?("Hello", "He") == true
+    end
+  end
+
+  describe "ends_with?" do
+    test "returns true when string ends with suffix" do
+      assert Runtime.ends_with?("hello", "lo") == true
+      assert Runtime.ends_with?("hello world", "world") == true
+    end
+
+    test "returns false when string does not end with suffix" do
+      assert Runtime.ends_with?("hello", "x") == false
+      assert Runtime.ends_with?("hello", "hell") == false
+    end
+
+    test "returns true for empty suffix" do
+      assert Runtime.ends_with?("hello", "") == true
+    end
+
+    test "handles case sensitivity" do
+      assert Runtime.ends_with?("Hello", "hello") == false
+      assert Runtime.ends_with?("Hello", "lo") == true
+    end
+  end
+
+  describe "includes?" do
+    test "returns true when string contains substring" do
+      assert Runtime.includes?("hello", "ll") == true
+      assert Runtime.includes?("hello world", "o w") == true
+    end
+
+    test "returns false when string does not contain substring" do
+      assert Runtime.includes?("hello", "x") == false
+      assert Runtime.includes?("hello", "xyz") == false
+    end
+
+    test "returns true for empty substring" do
+      assert Runtime.includes?("hello", "") == true
+    end
+
+    test "handles case sensitivity" do
+      assert Runtime.includes?("Hello", "hello") == false
+      assert Runtime.includes?("hello", "ell") == true
+    end
+  end
 end

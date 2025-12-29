@@ -224,5 +224,138 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == 3
     end
+
+    test "build collections with conj" do
+      task = "Build up a vector using conj, then build a map from key-value pairs"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (conj) ===\n#{program}\n")
+
+      context = %{
+        "numbers" => [1, 2, 3],
+        "pairs" => [["a", 1], ["b", 2]]
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Result should show multiple operations with conj
+      assert is_list(result) or is_map(result)
+    end
+
+    test "seq for character iteration" do
+      task = "Convert a string to characters using seq, then count them"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (seq + characters) ===\n#{program}\n")
+
+      context = %{
+        "text" => "hello"
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert result == 5
+    end
+
+    test "string manipulation with str, split, and join" do
+      task = "Build a CSV row from values, then split and join with different separator"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (str + split + join) ===\n#{program}\n")
+
+      context = %{
+        "values" => ["apple", "banana", "cherry"]
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Result should be a string
+      assert is_binary(result)
+    end
+
+    test "string case transformations with trim and replace" do
+      task = "Clean up a string by trimming whitespace and removing dashes"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (trim + replace) ===\n#{program}\n")
+
+      context = %{
+        "text" => "  hello-world  "
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Result should be trimmed and dashes replaced
+      assert is_binary(result)
+      assert not String.starts_with?(result, " ")
+      assert not String.ends_with?(result, " ")
+    end
+
+    test "string case conversion and predicates" do
+      task =
+        "Filter users with 'user_' prefix and check if any username contains 'admin' (case-insensitive)"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (string case/predicates) ===\n#{program}\n")
+
+      context = %{
+        "usernames" => ["user_1", "ADMIN", "user_2", "guest"]
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Should demonstrate case conversion and predicate usage
+      assert is_map(result) or is_list(result) or is_boolean(result)
+    end
+  end
+
+  describe "Short function syntax #()" do
+    test "filter with #(> % 10)" do
+      program = "(filter #(> % 10) [5 15 8 20])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [15, 20]
+    end
+
+    test "map with #(str \"id-\" %)" do
+      program = "(map #(str \"id-\" %) [1 2 3])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == ["id-1", "id-2", "id-3"]
+    end
+
+    test "reduce with #(+ %1 %2)" do
+      program = "(reduce #(+ %1 %2) 0 [1 2 3])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == 6
+    end
+
+    test "map with #(* % %)" do
+      program = "(map #(* % %) [1 2 3 4])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [1, 4, 9, 16]
+    end
+
+    test "identity function #(%)" do
+      program = "((fn [coll] (map #(%) coll)) [10 20 30])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [10, 20, 30]
+    end
+
+    test "zero-arity thunk #(42)" do
+      program = "((fn [] #(42)))"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == 42
+    end
+
+    test "chained operations with short functions" do
+      program = "(-> [1 2 3 4 5] (filter #(> % 2)) (map #(* % 2)))"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [6, 8, 10]
+    end
   end
 end

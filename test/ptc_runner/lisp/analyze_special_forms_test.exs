@@ -609,4 +609,69 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
       assert {:destructure, {:seq, []}} = pattern
     end
   end
+
+  describe "short function syntax #()" do
+    test "simple identity function #(%)" do
+      raw = {:short_fn, [{:symbol, :%}]}
+      assert {:ok, {:fn, [{:var, :p1}], {:var, :p1}}} = Analyze.analyze(raw)
+    end
+
+    test "#(+ % 1) desugars to fn with arithmetic" do
+      raw = {:short_fn, [{:symbol, :+}, {:symbol, :%}, 1]}
+
+      assert {:ok, {:fn, [{:var, :p1}], {:call, {:var, :+}, [{:var, :p1}, 1]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "#(+ %1 %2) creates binary function" do
+      raw = {:short_fn, [{:symbol, :+}, {:symbol, :"%1"}, {:symbol, :"%2"}]}
+
+      assert {:ok,
+              {:fn, [{:var, :p1}, {:var, :p2}], {:call, {:var, :+}, [{:var, :p1}, {:var, :p2}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "#(* % %) uses same param twice" do
+      raw = {:short_fn, [{:symbol, :*}, {:symbol, :%}, {:symbol, :%}]}
+
+      assert {:ok, {:fn, [{:var, :p1}], {:call, {:var, :*}, [{:var, :p1}, {:var, :p1}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "#(+ %3 %1) creates arity 3 with unused %2" do
+      raw = {:short_fn, [{:symbol, :+}, {:symbol, :"%3"}, {:symbol, :"%1"}]}
+
+      assert {:ok,
+              {:fn, [{:var, :p1}, {:var, :p2}, {:var, :p3}],
+               {:call, {:var, :+}, [{:var, :p3}, {:var, :p1}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "#(42) creates zero-arity thunk" do
+      raw = {:short_fn, [42]}
+      assert {:ok, {:fn, [], 42}} = Analyze.analyze(raw)
+    end
+
+    test "#(%) is identity function" do
+      raw = {:short_fn, [{:symbol, :%}]}
+      assert {:ok, {:fn, [{:var, :p1}], {:var, :p1}}} = Analyze.analyze(raw)
+    end
+
+    test "#(str \"id-\" %) with multiple args" do
+      raw = {:short_fn, [{:symbol, :str}, {:string, "id-"}, {:symbol, :%}]}
+
+      assert {:ok, {:fn, [{:var, :p1}], {:call, {:var, :str}, [{:string, "id-"}, {:var, :p1}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "nested #() raises error" do
+      raw = {:short_fn, [{:short_fn, [{:symbol, :%}]}]}
+      assert {:error, _} = Analyze.analyze(raw)
+    end
+
+    test "% outside #() is treated as regular symbol" do
+      raw = {:symbol, :%}
+      assert {:ok, {:var, :%}} = Analyze.analyze(raw)
+    end
+  end
 end

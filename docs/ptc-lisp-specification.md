@@ -167,7 +167,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Not supported:** Multi-line strings, regex literals
 
-**String operations:** Strings support `count` and `empty?` but are otherwise opaque. Character access (`nth`, `first`), substring extraction, and string manipulation are not supported—use tools for complex string processing. See Section 8.6 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, and `replace`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.4 for details.
 
 ### 3.5 Keywords
 
@@ -891,6 +891,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `conj` | `(conj coll x ...)` | Add elements to collection |
 | `concat` | `(concat coll1 coll2 ...)` | Join collections |
 | `into` | `(into to from)` | Pour from into to |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
@@ -898,11 +899,38 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `zip` | `(zip c1 c2)` | Combine into pairs |
 
 ```clojure
+(conj [1 2] 3)             ; => [1 2 3]
+(conj #{1 2} 3)            ; => #{1 2 3}
+(conj {:a 1} [:b 2])       ; => {:a 1 :b 2}
 (concat [1 2] [3 4])       ; => [1 2 3 4]
 (into [] [1 2 3])          ; => [1 2 3]
 (into [] {:a 1 :b 2})       ; => [[:a 1] [:b 2]]
 (flatten [[1 2] [3 [4]]])  ; => [1 2 3 4]
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
+```
+
+#### Conversion
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `seq` | `(seq coll)` | Convert to sequence (nil if empty) |
+
+The `seq` function converts a collection to a sequence:
+- **Lists**: Returns the list unchanged, or nil if empty
+- **Strings**: Returns a list of characters (graphemes), or nil if empty
+- **Sets**: Returns a list of elements, or nil if empty
+- **Maps**: Returns a list of `[key value]` pairs, or nil if empty
+- **nil**: Returns nil
+
+```clojure
+(seq [1 2 3])              ; => [1 2 3]
+(seq [])                   ; => nil
+(seq "hello")              ; => ["h" "e" "l" "l" "o"]
+(seq "")                   ; => nil
+(seq #{1 2 3})             ; => [1 2 3] or another order (sets are unordered)
+(seq {})                   ; => nil
+(seq {:a 1 :b 2})          ; => [[:a 1] [:b 2]]
+(count (seq "abc"))        ; => 3 (iterate over characters)
 ```
 
 #### Aggregation
@@ -993,7 +1021,51 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
     (update-vals count))           ; => ...
 ```
 
-### 8.3 Arithmetic
+### 8.3 String Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `str` | `(str ...)` | Convert and concatenate to string |
+| `subs` | `(subs s start)` | Substring from index to end |
+| `subs` | `(subs s start end)` | Substring from start to end |
+| `split` | `(split s separator)` | Split string by separator |
+| `join` | `(join separator coll)` | Join collection elements with separator |
+| `join` | `(join coll)` | Join collection elements (no separator) |
+| `trim` | `(trim s)` | Remove leading/trailing whitespace |
+| `replace` | `(replace s pattern replacement)` | Replace all occurrences |
+
+**Type coercion:** `str` converts values to strings using these rules:
+- `nil` → `""`
+- `true` / `false` → `"true"` / `"false"`
+- Numbers → decimal representation (e.g., `42` → `"42"`, `3.14` → `"3.14"`)
+- Strings → unchanged
+- Keywords → `:keyword` (with leading colon)
+- Collections → string representation
+
+```clojure
+(str "hello")                  ; => "hello"
+(str "Hello" " " "World")      ; => "Hello World"
+
+(subs "hello" 1)               ; => "ello"
+(subs "hello" 1 4)             ; => "ell"
+```
+
+**PTC-Lisp specific string examples:**
+- `(str)` → `""` (empty call)
+- `(str 42)` → `"42"` (number conversion)
+- `(str true)` → `"true"` (boolean conversion)
+- `(str :user)` → `":user"` (keyword with colon)
+- `(str nil "x")` → `"x"` (nil coerced to empty string)
+- `(split "a,b,c" ",")` → `["a" "b" "c"]` (split by separator)
+- `(split "hello" "")` → `["h" "e" "l" "l" "o"]` (split into characters)
+- `(split "a,,b" ",")` → `["a" "" "b"]` (preserves empty elements)
+- `(join ", " ["a" "b" "c"])` → `"a, b, c"` (join with separator)
+- `(join "-" [1 2 3])` → `"1-2-3"` (numeric types converted)
+- `(trim "\n\tworld\r\n")` → `"world"` (remove all whitespace)
+- `(replace "hello" "l" "L")` → `"heLLo"` (replace all occurrences)
+- `(replace "aaa" "a" "b")` → `"bbb"` (replace pattern)
+
+### 8.4 Arithmetic
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1024,7 +1096,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (min 1 5 3)     ; => 1
 ```
 
-### 8.4 Comparison
+### 8.5 Comparison
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1047,7 +1119,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (>= 3 2)        ; => true
 ```
 
-### 8.5 Logic
+### 8.6 Logic
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -1069,7 +1141,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 **`identity` function:** Returns its argument unchanged. Useful as a default function argument, for passing to higher-order functions, or in pipelines where no transformation is needed.
 
-### 8.6 Type Predicates
+### 8.7 Type Predicates
 
 | Function | Description |
 |----------|-------------|
@@ -1119,7 +1191,7 @@ To iterate over just keys or values, extract them first:
      (map (fn [k] {:key k :val (get my-map k)})))
 ```
 
-### 8.7 Numeric Predicates
+### 8.8 Numeric Predicates
 
 | Function | Description |
 |----------|-------------|
@@ -1143,6 +1215,56 @@ Since division always returns floats (see Section 8.3), avoid using `even?`/`odd
 ```clojure
 ;; Check if x is divisible by 2
 (zero? (mod x 2))    ; works for integers
+```
+
+### 8.9 String Parsing
+
+| Function | Description |
+|----------|-------------|
+| `parse-long` | Parse string to integer, returns nil on failure |
+| `parse-double` | Parse string to double, returns nil on failure |
+
+String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
+
+**Parsing behavior:**
+- Both functions require the entire string to be consumed by the parse. Partial parses are rejected.
+- Leading/trailing whitespace is not stripped—the string must be in exact numeric form.
+- Invalid input returns `nil` rather than an error.
+
+```clojure
+;; Successful parses
+(parse-long "42")          ; => 42
+(parse-long "-17")         ; => -17
+(parse-double "3.14")      ; => 3.14
+(parse-double "-0.5")      ; => -0.5
+(parse-double "1.23e-4")   ; => 1.23e-4
+
+;; Failed parses
+(parse-long "abc")         ; => nil
+(parse-double "invalid")   ; => nil
+(parse-long "42abc")       ; => nil (partial parse rejected - must consume entire string)
+(parse-double "3.14 ")     ; => nil (trailing whitespace not allowed)
+```
+
+**Type checking:**
+Both functions accept strings and return `nil` for non-string input. **Note: This diverges from Clojure 1.11+, which raises `IllegalArgumentException` for non-string input. PTC-Lisp returns `nil` for safety in agentic contexts.**
+
+```clojure
+(parse-long 42)            ; => ...
+(parse-long nil)           ; => ...
+(parse-double nil)         ; => ...
+(parse-double 3.14)        ; => ...
+```
+
+**Use cases:**
+Typical usage involves filtering valid parses from potentially invalid input:
+
+```clojure
+;; Extract valid integers from mixed data
+(->> ["1" "2" "not-a-number" "4"]
+     (map parse-long)
+     (filter some?)
+     (reduce + 0))  ; => 7
 ```
 
 ---
@@ -1575,7 +1697,6 @@ type-error at line 5:
 | Feature | Reason |
 |---------|--------|
 | `def`, `defn` | No global definitions |
-| `#()` | Short fn syntax excluded (see 13.2 for `fn`) |
 | `loop`, `recur` | No unbounded recursion |
 | `lazy-seq` | All operations are eager |
 | Macros | No metaprogramming |
@@ -1589,7 +1710,9 @@ type-error at line 5:
 
 ### 13.2 Anonymous Functions
 
-Anonymous functions are supported via `fn` with restrictions:
+Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
+
+#### Full `fn` Syntax
 
 ```clojure
 (fn [x] body)           ; single argument
@@ -1598,35 +1721,58 @@ Anonymous functions are supported via `fn` with restrictions:
 (fn [{:keys [x]}] body) ; map destructuring in params
 ```
 
+#### Short `#()` Syntax
+
+The `#()` shorthand syntax provides concise lambdas (like Clojure):
+
+```clojure
+#(+ % 1)           ; % is the first parameter (p1)
+#(+ %1 %2)         ; explicit numbered parameters
+#(* % %)           ; same parameter used multiple times
+#(42)              ; zero-arity thunk (no parameters)
+```
+
+The `#()` syntax desugars to the equivalent `fn`:
+- `#(+ % 1)` → `(fn [p1] (+ p1 1))`
+- `#(+ %1 %2)` → `(fn [p1 p2] (+ p1 p2))`
+- `#()` with no placeholders → `(fn [] ...)`
+- Arity is determined by the highest numbered placeholder, or 1 if only `%` is used
+
 **Restrictions:**
-- No recursion within `fn` (no self-reference)
-- No `#()` short syntax (simplifies parsing)
+- `#()` accepts a single expression as the body
+- `%` and `%1`, `%2`, etc. are parameter placeholders (not regular symbols within `#()`)
+- Nested `#()` is not allowed
+- No recursion within `fn` or `#()` (no self-reference)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
 
 **Examples:**
 ```clojure
-;; Transform each item
+;; Filter with #() shorthand
+(filter #(> % 10) items)
+
+;; Map with string construction
+(map #(str "id-" %) items)
+
+;; Transform each item with fn (more complex)
 (mapv (fn [u] (select-keys u [:name :email])) users)
 
 ;; Access outer let bindings (closure)
 (let [threshold 100]
-  (filter (fn [x] (> (:price x) threshold)) products))
+  (filter #(> (:price %) threshold) products))
 
-;; Multiple arguments with reduce
-(reduce (fn [acc x] (+ acc (:amount x))) 0 items)
-
-;; Destructuring in fn params (now supported)
+;; Destructuring in fn params
 (mapv (fn [{:keys [name age]}] {:name name :years age}) users)
 ```
 
-**When to use `fn` vs `where`:**
+**When to use `#()` vs `fn` vs `where`:**
+- Use `#()` for simple, single-argument lambdas (most common LLM use case)
+- Use `fn` for complex logic, destructuring, or multiple parameters
 - Use `where` for simple field comparisons in `filter`/`remove`/`find`
-- Use `fn` when you need complex transformations or access to multiple fields
 
 ### 13.3 Functions Excluded from Core
 
-- String manipulation: `str`, `subs`, `split`, `join`, `upper-case`, etc.
+- String manipulation: case conversion (beyond basic `upcase`/`downcase`)
 - Regex: `re-find`, `re-matches`, `re-seq`
 - `range` (infinite sequences)
 - `iterate`, `repeat`, `cycle` (infinite sequences)

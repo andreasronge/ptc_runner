@@ -50,12 +50,14 @@ defmodule PtcRunner.Lisp.Env do
       {:"drop-while", {:normal, &Runtime.drop_while/2}},
       {:distinct, {:normal, &Runtime.distinct/1}},
       {:concat, {:variadic, &Runtime.concat2/2, []}},
+      {:conj, {:variadic_nonempty, &Runtime.conj/2}},
       {:into, {:normal, &Runtime.into/2}},
       {:flatten, {:normal, &Runtime.flatten/1}},
       {:zip, {:normal, &Runtime.zip/2}},
       {:interleave, {:normal, &Runtime.interleave/2}},
       {:count, {:normal, &Runtime.count/1}},
       {:empty?, {:normal, &Runtime.empty?/1}},
+      {:seq, {:normal, &Runtime.seq/1}},
       {:reduce, {:multi_arity, {&Runtime.reduce/2, &Runtime.reduce/3}}},
       {:"sum-by", {:normal, &Runtime.sum_by/2}},
       {:"avg-by", {:normal, &Runtime.avg_by/2}},
@@ -139,6 +141,29 @@ defmodule PtcRunner.Lisp.Env do
       {:set, {:normal, &Runtime.set/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &is_list/1}},
+
+      # ============================================================
+      # String manipulation
+      # ============================================================
+      {:str, {:variadic, &Runtime.str2/2, ""}},
+      {:subs, {:multi_arity, {&Runtime.subs/2, &Runtime.subs/3}}},
+      {:join, {:multi_arity, {&Runtime.join/1, &Runtime.join/2}}},
+      {:split, {:normal, &Runtime.split/2}},
+      {:trim, {:normal, &Runtime.trim/1}},
+      {:replace, {:normal, &Runtime.replace/3}},
+      {:upcase, {:normal, &Runtime.upcase/1}},
+      {:"upper-case", {:normal, &Runtime.upcase/1}},
+      {:downcase, {:normal, &Runtime.downcase/1}},
+      {:"lower-case", {:normal, &Runtime.downcase/1}},
+      {:"starts-with?", {:normal, &Runtime.starts_with?/2}},
+      {:"ends-with?", {:normal, &Runtime.ends_with?/2}},
+      {:includes?, {:normal, &Runtime.includes?/2}},
+
+      # ============================================================
+      # String parsing
+      # ============================================================
+      {:"parse-long", {:normal, &Runtime.parse_long/1}},
+      {:"parse-double", {:normal, &Runtime.parse_double/1}},
 
       # ============================================================
       # Numeric predicates
