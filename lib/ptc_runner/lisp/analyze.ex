@@ -99,6 +99,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :cond}, rest, _list), do: analyze_cond(rest)
   defp dispatch_list_form({:symbol, :->}, rest, _list), do: analyze_thread(:->, rest)
   defp dispatch_list_form({:symbol, :"->>"}, rest, _list), do: analyze_thread(:"->>", rest)
+  defp dispatch_list_form({:symbol, :do}, rest, _list), do: analyze_do(rest)
   defp dispatch_list_form({:symbol, :and}, rest, _list), do: analyze_and(rest)
   defp dispatch_list_form({:symbol, :or}, rest, _list), do: analyze_or(rest)
   defp dispatch_list_form({:symbol, :where}, rest, _list), do: analyze_where(rest)
@@ -674,6 +675,16 @@ defmodule PtcRunner.Lisp.Analyze do
     case name_str do
       "%" -> :p1
       "%" <> num_str -> String.to_atom("p#{num_str}")
+    end
+  end
+
+  # ============================================================
+  # Sequential evaluation: do
+  # ============================================================
+
+  defp analyze_do(args) do
+    with {:ok, exprs} <- analyze_list(args) do
+      {:ok, {:do, exprs}}
     end
   end
 
