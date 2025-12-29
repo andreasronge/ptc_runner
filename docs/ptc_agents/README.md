@@ -29,7 +29,7 @@ PTC Agents extends PtcRunner with **SubAgents** - isolated workers that execute 
 | [specification.md](specification.md) | SubAgent API specification - core contracts and behavior |
 | [step.md](step.md) | Shared `Step` struct returned by both Lisp and SubAgent APIs |
 | [lisp-api-updates.md](lisp-api-updates.md) | Breaking changes to existing `PtcRunner.Lisp` API |
-| [malli-schema.md](malli-schema.md) | Schema validation system (Malli-based) |
+| [signature-syntax.md](signature-syntax.md) | Signature string syntax specification |
 | [tutorial.md](tutorial.md) | Usage examples and patterns |
 | [spike-summary.md](spike-summary.md) | Historical - spike validation results |
 
@@ -45,4 +45,4 @@ PTC Agents extends PtcRunner with **SubAgents** - isolated workers that execute 
 **For users:**
 1. `tutorial.md` - Examples and patterns
 2. `specification.md` - API reference
-3. `malli-schema.md` - Schema syntax details
+3. `signature-syntax.md` - Signature syntax details

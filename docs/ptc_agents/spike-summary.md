@@ -5,7 +5,7 @@
 > - [specification.md](specification.md) - Formal API specification
 > - [step.md](step.md) - Shared Step struct specification
 > - [lisp-api-updates.md](lisp-api-updates.md) - Planned changes to Lisp API
-> - [malli-schema.md](malli-schema.md) - Malli-lite schema validation system
+> - [signature-syntax.md](signature-syntax.md) - Signature syntax specification
 >
 > The learnings below remain valid, but specific API details (function names, struct fields, options) may differ from the current plan.
 
