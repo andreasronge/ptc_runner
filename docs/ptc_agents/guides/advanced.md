@@ -99,20 +99,20 @@ The LLM can "walk" the data across turns:
 
 ## Debugging & Observability
 
-Every `Step` includes a `trace` field with per-turn execution history:
+Every `Step` includes a `trace` field with per-turn execution history (a list of entries). Aggregated metrics are in `step.usage`.
 
 ```elixir
 {:ok, step} = SubAgent.run(agent, llm: llm)
 
 # Inspect turns
-for turn <- step.trace.turns do
-  IO.puts("Turn #{turn.turn}: #{turn.program.source}")
-  IO.puts("  Tools: #{inspect(Enum.map(turn.execution.tool_calls, & &1.name))}")
+for entry <- step.trace do
+  IO.puts("Turn #{entry.turn}: #{entry.program}")
+  IO.puts("  Tools: #{inspect(Enum.map(entry.tool_calls, & &1.name))}")
 end
 
-# Aggregated metrics
-step.trace.total_duration_ms
-step.trace.total_tokens
+# Aggregated metrics are in step.usage, not trace
+step.usage.duration_ms
+step.usage.total_tokens
 ```
 
 ### Debug Mode

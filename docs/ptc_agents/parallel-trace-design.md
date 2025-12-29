@@ -5,6 +5,8 @@
 
 This document specifies the trace structure and aggregation strategy for parallel SubAgent execution.
 
+> **Note:** This extends the base trace structure from `step.md`. For single-agent execution, `step.trace` is a simple list `[trace_entry()]`. The enhanced map structure in this document (`%{entries: [...], metadata: ...}`) is used only when aggregating multiple parallel traces via `Tracer.merge_parallel/2`.
+
 ---
 
 ## Problem Statement
