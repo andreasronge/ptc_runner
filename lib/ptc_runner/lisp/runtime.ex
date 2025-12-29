@@ -524,6 +524,40 @@ defmodule PtcRunner.Lisp.Runtime do
   defp truthy?(_), do: true
 
   # ============================================================
+  # String Parsing
+  # ============================================================
+
+  @doc """
+  Parse string to integer. Returns nil on failure.
+  Matches Clojure 1.11+ parse-long behavior.
+  """
+  def parse_long(nil), do: nil
+
+  def parse_long(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  def parse_long(_), do: nil
+
+  @doc """
+  Parse string to float. Returns nil on failure.
+  Matches Clojure 1.11+ parse-double behavior.
+  """
+  def parse_double(nil), do: nil
+
+  def parse_double(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, ""} -> f
+      _ -> nil
+    end
+  end
+
+  def parse_double(_), do: nil
+
+  # ============================================================
   # Type Predicates
   # ============================================================
 

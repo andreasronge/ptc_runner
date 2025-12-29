@@ -1275,4 +1275,44 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       assert result == %{"a" => 30, "b" => 5}
     end
   end
+
+  describe "parse_long" do
+    test "parses valid integers" do
+      assert Runtime.parse_long("42") == 42
+      assert Runtime.parse_long("-17") == -17
+      assert Runtime.parse_long("0") == 0
+    end
+
+    test "returns nil for invalid input" do
+      assert Runtime.parse_long("abc") == nil
+      assert Runtime.parse_long("3.14") == nil
+      assert Runtime.parse_long(" 42") == nil
+      assert Runtime.parse_long("42abc") == nil
+    end
+
+    test "handles nil and non-strings" do
+      assert Runtime.parse_long(nil) == nil
+      assert Runtime.parse_long(42) == nil
+    end
+  end
+
+  describe "parse_double" do
+    test "parses valid floats" do
+      assert Runtime.parse_double("3.14") == 3.14
+      assert Runtime.parse_double("-0.5") == -0.5
+      assert Runtime.parse_double("42") == 42.0
+      assert Runtime.parse_double("1e10") == 1.0e10
+    end
+
+    test "returns nil for invalid input" do
+      assert Runtime.parse_double("abc") == nil
+      assert Runtime.parse_double(" 3.14") == nil
+      assert Runtime.parse_double("3.14abc") == nil
+    end
+
+    test "handles nil and non-strings" do
+      assert Runtime.parse_double(nil) == nil
+      assert Runtime.parse_double(3.14) == nil
+    end
+  end
 end

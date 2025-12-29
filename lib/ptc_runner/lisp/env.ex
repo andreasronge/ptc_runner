@@ -135,6 +135,12 @@ defmodule PtcRunner.Lisp.Env do
       {:coll?, {:normal, &is_list/1}},
 
       # ============================================================
+      # String parsing
+      # ============================================================
+      {:"parse-long", {:normal, &Runtime.parse_long/1}},
+      {:"parse-double", {:normal, &Runtime.parse_double/1}},
+
+      # ============================================================
       # Numeric predicates
       # ============================================================
       {:zero?, {:normal, fn x -> x == 0 end}},

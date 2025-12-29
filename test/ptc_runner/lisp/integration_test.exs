@@ -910,4 +910,40 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert result == 4
     end
   end
+
+  describe "String parsing" do
+    test "parse-long and parse-double for string to number conversion" do
+      # Parse and sum numeric strings, filtering invalid
+      {:ok, result, _, _} =
+        Lisp.run("""
+          (reduce + 0 (filter some? (map parse-long ["1" "2" "three" "4"])))
+        """)
+
+      assert result == 7
+    end
+
+    test "safe parsing with default" do
+      {:ok, result, _, _} =
+        Lisp.run("""
+          (let [val (parse-double "invalid")]
+            (if (some? val) val 0.0))
+        """)
+
+      assert result == 0.0
+    end
+
+    test "parse API response data" do
+      {:ok, result, _, _} =
+        Lisp.run(
+          """
+          (let [response ctx/response]
+            (* (parse-double (:price response))
+               (parse-long (:quantity response))))
+          """,
+          context: %{"response" => %{"price" => "19.99", "quantity" => "3"}}
+        )
+
+      assert_in_delta result, 59.97, 0.001
+    end
+  end
 end
