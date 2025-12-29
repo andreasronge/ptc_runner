@@ -241,5 +241,19 @@ defmodule PtcRunner.Lisp.E2ETest do
       # Result should show multiple operations with conj
       assert is_list(result) or is_map(result)
     end
+
+    test "seq for character iteration" do
+      task = "Convert a string to characters using seq, then count them"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (seq + characters) ===\n#{program}\n")
+
+      context = %{
+        "text" => "hello"
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert result == 5
+    end
   end
 end
