@@ -327,4 +327,4 @@ These extensions should be added only when genuine use cases emerge.
 
 - [specification.md](specification.md) - Full SubAgent API specification
 - [step.md](step.md) - Shared Step struct specification
-- [tutorial.md](tutorial.md) - SubAgent usage examples
+- [guides/](guides/) - SubAgent usage guides

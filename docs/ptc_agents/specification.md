@@ -29,8 +29,13 @@ This document specifies the SubAgent API for the PtcRunner library.
 9. [Templates](#templates)
 10. [LLM Callback](#llm-callback)
 11. [Memory Operations](#memory-operations)
-12. [Configuration](#configuration)
-13. [Design Decisions](#design-decisions)
+12. [Debugging & Introspection](#debugging--introspection)
+   - [Step.trace Structure](#steptrace-structure)
+   - [Debug Mode](#debug-mode)
+   - [Prompt Preview](#prompt-preview)
+   - [Telemetry Hooks](#telemetry-hooks)
+13. [Configuration](#configuration)
+14. [Design Decisions](#design-decisions)
 
 ---
 
@@ -852,6 +857,314 @@ Exceeding limits returns `{:error, step}` with appropriate reason.
 
 ---
 
+## Debugging & Introspection
+
+SubAgents provide comprehensive debugging capabilities for inspecting prompts, generated programs, and execution flow.
+
+---
+
+### Step.trace Structure
+
+Every `Step` includes a `trace` field containing detailed per-turn execution history:
+
+```elixir
+@type trace :: %{
+  turns: [turn_trace()],
+  total_duration_ms: non_neg_integer(),
+  total_tokens: token_counts()
+}
+
+@type turn_trace :: %{
+  turn: pos_integer(),
+  timestamp: DateTime.t(),
+  duration_ms: non_neg_integer(),
+
+  # LLM interaction
+  prompt: %{
+    system: String.t(),           # Full system prompt sent
+    messages: [message()],        # Conversation history
+    expanded_template: String.t() # User prompt with {{placeholders}} resolved
+  },
+  llm_response: String.t(),       # Raw LLM response
+
+  # Parsed program
+  program: %{
+    source: String.t(),           # Extracted PTC-Lisp code
+    ast: term(),                  # Parsed AST (optional, when debug: true)
+    parse_error: String.t() | nil # If parsing failed
+  },
+
+  # Execution results
+  execution: %{
+    result: term(),               # Expression result or tool return
+    tool_calls: [tool_call()],    # Tools invoked this turn
+    error: error() | nil,         # Runtime error if any
+    context_snapshot: map()       # ctx/ state after turn (when debug: true)
+  },
+
+  # Token usage
+  tokens: token_counts()
+}
+
+@type tool_call :: %{
+  name: String.t(),
+  args: term(),
+  result: term(),
+  duration_ms: non_neg_integer(),
+  error: error() | nil
+}
+
+@type token_counts :: %{
+  input: non_neg_integer(),
+  output: non_neg_integer()
+}
+```
+
+**Accessing trace data:**
+
+```elixir
+{:ok, step} = SubAgent.run(agent, llm: llm)
+
+# Inspect all turns
+for turn <- step.trace.turns do
+  IO.puts("Turn #{turn.turn}:")
+  IO.puts("  Program: #{turn.program.source}")
+  IO.puts("  Tools called: #{Enum.map(turn.execution.tool_calls, & &1.name)}")
+end
+
+# Find which turn called a specific tool
+step.trace.turns
+|> Enum.filter(fn t ->
+  Enum.any?(t.execution.tool_calls, & &1.name == "search")
+end)
+```
+
+---
+
+### Debug Mode
+
+Enable verbose tracing with the `:debug` option:
+
+```elixir
+{:ok, step} = SubAgent.run(agent,
+  llm: llm,
+  debug: true
+)
+```
+
+**Debug mode enables:**
+
+| Feature | Normal | Debug |
+|---------|--------|-------|
+| Turn traces | ✓ | ✓ |
+| Full system prompt in trace | ✓ | ✓ |
+| Parsed AST in trace | ✗ | ✓ |
+| Context snapshots per turn | ✗ | ✓ |
+| Tool argument/result logging | Summary | Full |
+| Memory state per turn | ✗ | ✓ |
+
+**Debug output helper:**
+
+```elixir
+# Pretty-print execution trace
+SubAgent.Debug.print_trace(step)
+
+# Output:
+# ┌─ Turn 1 ─────────────────────────────────────
+# │ Prompt: Find urgent emails for alice@example.com
+# │ Program:
+# │   (let [emails (call "list_emails" {:user ctx/user})]
+# │     (call "return" {:count (count emails) :ids (map :id emails)}))
+# │ Tools:
+# │   → list_emails({user: "alice@example.com"})
+# │     ← [{id: 1, subject: "Urgent"}, {id: 2, subject: "Hello"}]
+# │ Result: {:count 2, :ids [1, 2]}
+# │ Duration: 245ms | Tokens: 150 in / 89 out
+# └──────────────────────────────────────────────
+```
+
+**Filtering traces:**
+
+```elixir
+# Only keep traces for failed runs (reduce memory in production)
+SubAgent.run(agent, llm: llm, trace: :on_error)
+
+# Disable tracing entirely
+SubAgent.run(agent, llm: llm, trace: false)
+```
+
+| Trace Option | Behavior |
+|--------------|----------|
+| `true` (default) | Always capture traces |
+| `:on_error` | Only keep trace if run fails |
+| `false` | No trace (minimal memory) |
+
+---
+
+### Prompt Preview
+
+Inspect the expanded prompt without executing:
+
+```elixir
+@spec preview_prompt(SubAgent.t(), keyword()) :: %{
+  system: String.t(),
+  user: String.t(),
+  tool_schemas: [map()]
+}
+def preview_prompt(agent, opts \\ [])
+```
+
+**Example:**
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Find emails for {{user}} from {{sender}}",
+  signature: "(user :string, sender :string) -> {count :int}",
+  tools: %{"list_emails" => &MyApp.list_emails/1}
+)
+
+preview = SubAgent.preview_prompt(agent,
+  context: %{user: "alice", sender: "bob@example.com"}
+)
+
+IO.puts(preview.system)
+# Outputs the full system prompt with:
+# - PTC-Lisp instructions
+# - Tool schemas
+# - Data inventory showing ctx/user and ctx/sender
+
+IO.puts(preview.user)
+# "Find emails for alice from bob@example.com"
+
+IO.inspect(preview.tool_schemas)
+# [%{name: "list_emails", signature: "...", description: "..."}]
+```
+
+**Use cases:**
+
+- Verify template expansion before running
+- Debug system prompt generation
+- Test prompt changes without LLM calls
+- Export prompts for external review
+
+---
+
+### Telemetry Hooks
+
+SubAgent emits telemetry events for observability integration.
+
+**Events:**
+
+| Event | Measurements | Metadata |
+|-------|--------------|----------|
+| `[:ptc_runner, :sub_agent, :run, :start]` | - | agent, context |
+| `[:ptc_runner, :sub_agent, :run, :stop]` | duration | agent, step, status |
+| `[:ptc_runner, :sub_agent, :run, :exception]` | duration | agent, error |
+| `[:ptc_runner, :sub_agent, :turn, :start]` | - | agent, turn |
+| `[:ptc_runner, :sub_agent, :turn, :stop]` | duration, tokens | agent, turn, program |
+| `[:ptc_runner, :sub_agent, :llm, :start]` | - | agent, turn, messages |
+| `[:ptc_runner, :sub_agent, :llm, :stop]` | duration, tokens | agent, turn, response |
+| `[:ptc_runner, :sub_agent, :tool, :start]` | - | agent, tool_name, args |
+| `[:ptc_runner, :sub_agent, :tool, :stop]` | duration | agent, tool_name, result |
+| `[:ptc_runner, :sub_agent, :tool, :exception]` | duration | agent, tool_name, error |
+
+**Attaching handlers:**
+
+```elixir
+:telemetry.attach_many(
+  "sub-agent-logger",
+  [
+    [:ptc_runner, :sub_agent, :run, :stop],
+    [:ptc_runner, :sub_agent, :tool, :stop]
+  ],
+  &MyApp.Telemetry.handle_event/4,
+  nil
+)
+
+defmodule MyApp.Telemetry do
+  def handle_event([:ptc_runner, :sub_agent, :run, :stop], measurements, metadata, _config) do
+    Logger.info("SubAgent completed",
+      duration_ms: measurements.duration,
+      status: metadata.status,
+      turns: length(metadata.step.trace.turns)
+    )
+  end
+
+  def handle_event([:ptc_runner, :sub_agent, :tool, :stop], measurements, metadata, _config) do
+    Logger.debug("Tool called",
+      tool: metadata.tool_name,
+      duration_ms: measurements.duration
+    )
+  end
+end
+```
+
+**Integration with common observability tools:**
+
+```elixir
+# OpenTelemetry integration
+{:ok, _} = OpentelemetryTelemetry.attach_handlers(:ptc_runner)
+
+# Prometheus metrics
+PtcRunner.Telemetry.Prometheus.setup()
+```
+
+---
+
+### Debugging Chained Agents
+
+When debugging multi-agent chains, each Step contains its own trace:
+
+```elixir
+with {:ok, step1} <- SubAgent.run(finder, llm: llm),
+     {:ok, step2} <- SubAgent.run(processor, llm: llm, context: step1),
+     {:ok, step3} <- SubAgent.run(sender, llm: llm, context: step2) do
+
+  # Each step has independent trace
+  SubAgent.Debug.print_trace(step1)
+  SubAgent.Debug.print_trace(step2)
+  SubAgent.Debug.print_trace(step3)
+
+  # Or combine for full pipeline view
+  SubAgent.Debug.print_chain([step1, step2, step3])
+end
+```
+
+**Debugging nested SubAgents (as_tool):**
+
+When a SubAgent calls another SubAgent as a tool, the child's trace is captured in the tool call:
+
+```elixir
+parent_step.trace.turns
+|> Enum.flat_map(& &1.execution.tool_calls)
+|> Enum.filter(& &1.name == "child_agent")
+|> Enum.map(fn call ->
+  # Child's full Step is available
+  call.result.trace
+end)
+```
+
+---
+
+### Debug Struct Options
+
+For struct inspection during development:
+
+```elixir
+# Inspect agent definition
+agent = SubAgent.new(prompt: "...", signature: "...", tools: tools)
+IO.inspect(agent, label: "Agent config")
+
+# Inspect with custom options
+IO.inspect(step, limit: :infinity, printable_limit: :infinity)
+
+# Derive Inspect protocol excludes sensitive fields by default
+# Override with:
+IO.inspect(step, custom_options: [show_llm_responses: true])
+```
+
+---
+
 ## Configuration
 
 ### LLM Registry
@@ -941,6 +1254,24 @@ The `execute` function always takes a map of named arguments, regardless of para
 - Adding parameters doesn't break existing callers
 - Clear, self-documenting invocations
 
+### DD-11: Tracing Always On by Default
+
+Traces are captured by default (`trace: true`) because:
+- Debugging agent behavior is inherently difficult without execution history
+- Memory overhead is acceptable for typical agent runs (< 100 turns)
+- Production optimization via `trace: :on_error` or `trace: false` is opt-in
+- Failed runs are nearly impossible to debug without trace data
+
+The `debug: true` option enables additional expensive captures (AST, context snapshots) that are off by default.
+
+### DD-12: Telemetry for Observability, Not Control Flow
+
+Telemetry events are fire-and-forget notifications, not callbacks that can modify execution. This ensures:
+- Observability handlers cannot break agent execution
+- No hidden control flow through telemetry
+- Production monitoring doesn't affect behavior
+- Clear separation between execution and observation
+
 ---
 
 ## Appendix: CompiledAgent Struct
@@ -1022,4 +1353,4 @@ end
 - [step.md](step.md) - Step struct specification
 - [signature-syntax.md](signature-syntax.md) - Signature syntax specification
 - [lisp-api-updates.md](lisp-api-updates.md) - Changes to Lisp API
-- [tutorial.md](tutorial.md) - Usage examples
+- [guides/](guides/) - Tutorial and usage guides
