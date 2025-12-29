@@ -1697,7 +1697,6 @@ type-error at line 5:
 | Feature | Reason |
 |---------|--------|
 | `def`, `defn` | No global definitions |
-| `#()` | Short fn syntax excluded (see 13.2 for `fn`) |
 | `loop`, `recur` | No unbounded recursion |
 | `lazy-seq` | All operations are eager |
 | Macros | No metaprogramming |
@@ -1711,7 +1710,9 @@ type-error at line 5:
 
 ### 13.2 Anonymous Functions
 
-Anonymous functions are supported via `fn` with restrictions:
+Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
+
+#### Full `fn` Syntax
 
 ```clojure
 (fn [x] body)           ; single argument
@@ -1720,31 +1721,54 @@ Anonymous functions are supported via `fn` with restrictions:
 (fn [{:keys [x]}] body) ; map destructuring in params
 ```
 
+#### Short `#()` Syntax
+
+The `#()` shorthand syntax provides concise lambdas (like Clojure):
+
+```clojure
+#(+ % 1)           ; % is the first parameter (p1)
+#(+ %1 %2)         ; explicit numbered parameters
+#(* % %)           ; same parameter used multiple times
+#(42)              ; zero-arity thunk (no parameters)
+```
+
+The `#()` syntax desugars to the equivalent `fn`:
+- `#(+ % 1)` → `(fn [p1] (+ p1 1))`
+- `#(+ %1 %2)` → `(fn [p1 p2] (+ p1 p2))`
+- `#()` with no placeholders → `(fn [] ...)`
+- Arity is determined by the highest numbered placeholder, or 1 if only `%` is used
+
 **Restrictions:**
-- No recursion within `fn` (no self-reference)
-- No `#()` short syntax (simplifies parsing)
+- `#()` accepts a single expression as the body
+- `%` and `%1`, `%2`, etc. are parameter placeholders (not regular symbols within `#()`)
+- Nested `#()` is not allowed
+- No recursion within `fn` or `#()` (no self-reference)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
 
 **Examples:**
 ```clojure
-;; Transform each item
+;; Filter with #() shorthand
+(filter #(> % 10) items)
+
+;; Map with string construction
+(map #(str "id-" %) items)
+
+;; Transform each item with fn (more complex)
 (mapv (fn [u] (select-keys u [:name :email])) users)
 
 ;; Access outer let bindings (closure)
 (let [threshold 100]
-  (filter (fn [x] (> (:price x) threshold)) products))
+  (filter #(> (:price %) threshold) products))
 
-;; Multiple arguments with reduce
-(reduce (fn [acc x] (+ acc (:amount x))) 0 items)
-
-;; Destructuring in fn params (now supported)
+;; Destructuring in fn params
 (mapv (fn [{:keys [name age]}] {:name name :years age}) users)
 ```
 
-**When to use `fn` vs `where`:**
+**When to use `#()` vs `fn` vs `where`:**
+- Use `#()` for simple, single-argument lambdas (most common LLM use case)
+- Use `fn` for complex logic, destructuring, or multiple parameters
 - Use `where` for simple field comparisons in `filter`/`remove`/`find`
-- Use `fn` when you need complex transformations or access to multiple fields
 
 ### 13.3 Functions Excluded from Core
 
