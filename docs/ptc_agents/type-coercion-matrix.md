@@ -318,4 +318,4 @@ end
 
 - [signature-syntax.md](signature-syntax.md) - Signature string syntax
 - [specification.md](specification.md) - SubAgent API specification
-- [tutorial.md](tutorial.md) - Usage examples
+- [guides/](guides/) - Usage guides

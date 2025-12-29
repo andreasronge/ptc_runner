@@ -33,7 +33,7 @@ PTC Agents extends PtcRunner with **SubAgents** - isolated workers that execute 
 | [type-coercion-matrix.md](type-coercion-matrix.md) | Type mapping and coercion rules |
 | [system-prompt-template.md](system-prompt-template.md) | System prompt structure for LLM calls |
 | [parallel-trace-design.md](parallel-trace-design.md) | Trace aggregation for concurrent execution |
-| [tutorial.md](tutorial.md) | Usage examples and patterns |
+| [guides/](guides/) | Usage guides and patterns |
 | [spike-summary.md](spike-summary.md) | Historical - spike validation results |
 
 ---
@@ -46,6 +46,6 @@ PTC Agents extends PtcRunner with **SubAgents** - isolated workers that execute 
 3. `lisp-api-updates.md` - Changes to existing code
 
 **For users:**
-1. `tutorial.md` - Examples and patterns
-2. `specification.md` - API reference
-3. `signature-syntax.md` - Signature syntax details
+1. `guides/getting-started.md` - First steps
+2. `guides/` - Full usage guides
+3. `specification.md` - API reference

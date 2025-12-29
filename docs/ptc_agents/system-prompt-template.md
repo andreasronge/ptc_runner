@@ -386,5 +386,5 @@ Please fix the issue and try again.
 ## Related Documents
 
 - [specification.md](specification.md) - SubAgent API specification
-- [tutorial.md](tutorial.md) - Usage examples
+- [guides/](guides/) - Usage guides
 - [signature-syntax.md](signature-syntax.md) - Signature syntax
