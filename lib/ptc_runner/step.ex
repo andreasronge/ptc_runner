@@ -14,7 +14,7 @@ defmodule PtcRunner.Step do
   - `usage`: Execution metrics
   - `trace`: Execution trace for debugging (SubAgent only, nil for Lisp)
 
-  See [step.md](step.md) for detailed field documentation.
+  See the [Step Specification](ptc_agents/step.md) for detailed field documentation.
   """
 
   defstruct [
