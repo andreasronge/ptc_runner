@@ -293,6 +293,58 @@ end
 
 ---
 
+## Edge Cases
+
+### Valid Edge Cases
+
+| Signature | Valid? | Meaning |
+|-----------|--------|---------|
+| `":any"` | ✓ | Any output, no validation |
+| `"() -> :any"` | ✓ | Same as above |
+| `"{}"` | ✓ | Empty map (must be a map, but no required fields) |
+| `"[]"` | ✗ | Invalid - list of what? Use `[:any]` |
+| `"[:any]"` | ✓ | List of anything |
+| `"[{}]"` | ✓ | List of empty maps |
+| `""` | ✗ | Invalid - empty string is not a valid signature |
+
+### Nesting Depth
+
+There is no hard limit on nesting depth, but deeply nested types should be avoided for readability:
+
+```
+# Valid but not recommended
+{user {profile {settings {theme {colors {primary :string}}}}}}
+
+# Prefer flatter structures or use :map for deep nesting
+{user {profile :map}}
+```
+
+### Placeholder Syntax
+
+| Placeholder | Valid? | Notes |
+|-------------|--------|-------|
+| `{{name}}` | ✓ | Simple variable |
+| `{{user.name}}` | ✓ | Nested access |
+| `{{user.address.city}}` | ✓ | Deep nesting allowed |
+| `{{user-name}}` | ✓ | Hyphens allowed in names |
+| `{{user_name}}` | ✓ | Underscores allowed |
+| `{{123}}` | ✗ | Names must start with letter |
+| `{{}}` | ✗ | Empty placeholder invalid |
+| `{{ name }}` | ✓ | Whitespace trimmed |
+| `\{\{name\}\}` | N/A | No escape syntax - use different delimiter if needed |
+
+### Type Coercion in Nested Structures
+
+Coercion applies recursively to nested types:
+
+```elixir
+# Signature: [{id :int, name :string}]
+# Input: [%{"id" => "42", "name" => "Alice"}]
+# Result: [%{id: 42, name: "Alice"}] (with coercion warning for id)
+```
+
+---
+
 ## Future Considerations
 
 ### Enums (v2+)

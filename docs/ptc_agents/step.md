@@ -174,9 +174,20 @@ Execution trace for debugging (SubAgent only).
   turn: pos_integer(),
   program: String.t(),
   result: term(),
-  tool_calls: [%{name: String.t(), args: map(), result: term()}]
+  tool_calls: [tool_call()]
+}
+
+@type tool_call :: %{
+  name: String.t(),
+  args: map(),
+  result: term(),
+  error: String.t() | nil,        # Error message if tool failed
+  timestamp: DateTime.t(),         # When tool was called
+  duration_ms: non_neg_integer()   # How long tool took
 }
 ```
+
+> **Note:** See [parallel-trace-design.md](parallel-trace-design.md) for enhanced trace structures used in parallel execution scenarios.
 
 ```elixir
 step.trace
@@ -209,7 +220,9 @@ Complete list of error reasons in `step.fail.reason`:
 | `:turn_budget_exhausted` | SubAgent | Total turn budget exhausted |
 | `:mission_timeout` | SubAgent | Total mission duration exceeded |
 | `:llm_error` | SubAgent | LLM callback failed after retries |
-| `:model_not_found` | SubAgent | LLM registry lookup failed |
+| `:llm_not_found` | SubAgent | LLM atom not in registry |
+| `:llm_registry_required` | SubAgent | Atom LLM used without registry |
+| `:invalid_llm` | SubAgent | Registry value not a function |
 | `:chained_failure` | SubAgent | Chained onto a failed step |
 | `:template_error` | SubAgent | Template placeholder missing |
 | Custom atoms | SubAgent | From `(call "fail" {:reason :custom ...})` |

@@ -245,7 +245,7 @@ For multi-turn investigation with tools:
 
 Full agentic loop requiring explicit `return` or `fail`.
 
-**Note:** `max_turns > 1` without tools is an error.
+**Note:** `max_turns > 1` without tools enables multi-turn exploration where map results merge into memory for iterative analysis.
 
 ## Defaults
 
