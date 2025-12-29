@@ -645,7 +645,7 @@ Tools in the `:tools` map can be:
 |--------|-----------|-------------|----------|
 | `fun` | Auto (@spec) | Auto (@doc) | Quick prototyping |
 | `{fun, "sig"}` | Explicit | None | Validation without docs |
-| `{fun, sig: "...", desc: "..."}` | Explicit | Explicit | Production tools |
+| `{fun, signature: "...", description: "..."}` | Explicit | Explicit | Production tools |
 | `{fun, :skip}` | Skipped | None | Dynamic/untyped tools |
 | `LLMTool.new(...)` | Explicit | Explicit | LLM-powered tools |
 | `SubAgent.as_tool(...)` | From agent | From prompt | Nested agents |

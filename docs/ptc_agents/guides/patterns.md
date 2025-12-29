@@ -160,7 +160,8 @@ tools = %{
     Email body: {{email.body}}
     """,
     signature: "(email {subject :string, body :string}, customer_tier :string) ->
-                {important :bool, priority :int, reason :string}"
+                {important :bool, priority :int, reason :string}",
+    description: "Evaluate if an email requires immediate attention based on VIP status and content"
   )
 }
 ```
@@ -191,7 +192,8 @@ Process multiple items in one LLM call:
   {{/emails}}
   """,
   signature: "(emails [{id :int, subject :string, from :string}]) ->
-              [{id :int, urgency :string, reason :string}]"
+              [{id :int, urgency :string, reason :string}]",
+  description: "Classify a batch of emails by urgency"
 )
 ```
 
