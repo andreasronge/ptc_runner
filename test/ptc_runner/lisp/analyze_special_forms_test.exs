@@ -672,9 +672,19 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
       assert {:error, _} = Analyze.analyze(raw)
     end
 
-    test "% outside #() is treated as regular symbol" do
+    test "% outside #() returns error" do
       raw = {:symbol, :%}
-      assert {:ok, {:var, :%}} = Analyze.analyze(raw)
+      assert {:error, {:invalid_placeholder, :%}} = Analyze.analyze(raw)
+    end
+
+    test "%1 outside #() returns error" do
+      raw = {:symbol, :"%1"}
+      assert {:error, {:invalid_placeholder, :"%1"}} = Analyze.analyze(raw)
+    end
+
+    test "% in expression returns error" do
+      raw = {:list, [{:symbol, :+}, {:symbol, :%}, 1]}
+      assert {:error, {:invalid_placeholder, :%}} = Analyze.analyze(raw)
     end
   end
 end
