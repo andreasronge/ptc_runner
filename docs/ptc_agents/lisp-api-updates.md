@@ -209,7 +209,7 @@ PtcRunner.Lisp.run(source,
 
 ### Signature Syntax
 
-Same syntax as SubAgent. See [malli-schema.md](malli-schema.md).
+Same syntax as SubAgent. See [signature-syntax.md](signature-syntax.md).
 
 **Shorthand:**
 ```
@@ -367,4 +367,4 @@ end
 
 - [step.md](step.md) - Step struct specification
 - [specification.md](specification.md) - SubAgent API
-- [malli-schema.md](malli-schema.md) - Schema system
+- [signature-syntax.md](signature-syntax.md) - Signature syntax specification

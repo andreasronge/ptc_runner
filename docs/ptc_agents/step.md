@@ -274,4 +274,4 @@ step.return._email_ids #=> [101, 102, 103, 104, 105] (hidden from LLM)
 
 - [specification.md](specification.md) - SubAgent API specification
 - [lisp-api-updates.md](lisp-api-updates.md) - Changes to existing Lisp API
-- [malli-schema.md](malli-schema.md) - Schema validation system
+- [signature-syntax.md](signature-syntax.md) - Signature syntax specification

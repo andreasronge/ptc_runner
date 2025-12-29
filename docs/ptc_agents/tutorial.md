@@ -10,7 +10,7 @@ A practical guide to building context-efficient agentic workflows with PTC SubAg
 
 ## What is a SubAgent?
 
-A **SubAgent** is an isolated worker that handles a specific **mission** using a strict **Functional Contract** (Signature). Think of it as a "context firewall" - the sub-agent does the heavy lifting with large datasets, then returns only what was promised in its signature.
+A **SubAgent** is an isolated worker that handles a specific task using a strict **Functional Contract** (Signature). Think of it as a "context firewall" - the sub-agent does the heavy lifting with large datasets, then returns only what was promised in its signature.
 
 ```
 ┌─────────────┐                      ┌─────────────┐
@@ -64,13 +64,13 @@ A SubAgent runs an **agentic loop** (`PtcRunner.SubAgent.Loop` module). Unlike s
 
 - **Termination**: The loop ends **only** when `return` (success) or `fail` (failure) is called.
 - **Validation**: If the `return` data doesn't match the `signature`, the LLM is given the error and a chance to retry.
-- **Universal Step**: Every delegation returns a `PtcRunner.Step` struct. Intermediate turns also produce "internal" steps that chain together.
+- **Universal Step**: Every mission execution returns a `PtcRunner.Step` struct. Intermediate turns also produce "internal" steps that chain together.
 
 ### How It Works
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  delegate/2 │ ───> │ Agentic Loop │ ───> │   Step      │
+│    run/2    │ ───> │ Agentic Loop │ ───> │   Step      │
 │  (mission)  │      │  (LLM ↔ Lisp)│      │ (+ result)  │
 └─────────────┘      └──────────────┘      └─────────────┘
                             │
@@ -84,12 +84,15 @@ A SubAgent runs an **agentic loop** (`PtcRunner.SubAgent.Loop` module). Unlike s
 
 ## Core API
 
-The SubAgent system provides two main functions:
+The SubAgent system provides two main primitives:
 
 | Function | Purpose |
 |----------|---------|
-| `delegate/2` | Run a mission with tools in isolation fulfilling a signature contract |
-| `as_tool/1` | Wrap a SubAgent config as a callable tool for orchestration |
+| `new/1` | Create a SubAgent struct (agent as data) |
+| `run/2` | Execute a SubAgent |
+| `run!/2`, `then!/2` | Execute with crash-on-error (for pipes) |
+| `compile/2` | Derive a reusable Lisp function |
+| `as_tool/2` | Wrap a SubAgent as a callable tool |
 
 **Design philosophy**: The library provides primitives, not patterns. You compose these into whatever orchestration pattern fits your use case.
 
@@ -97,15 +100,20 @@ The SubAgent system provides two main functions:
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Core Functions                             │
 │                                                                  │
-│   delegate/2 ──── Run mission in isolation                      │
-│   as_tool/1  ──── Make SubAgent callable as a tool              │
+│   new/1      ──── Create SubAgent struct (agent as data)        │
+│   run/2      ──── Execute SubAgent                               │
+│   run!/2     ──── Execute, crash on error (for pipes)           │
+│   then!/2    ──── Chain steps with auto-context                 │
+│   compile/2  ──── Generate reusable function                    │
+│   as_tool/2  ──── Wrap SubAgent as callable tool                │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Patterns (you build)                          │
 │                                                                  │
-│   Chained ──────────── Pass results between steps                │
-│   Hierarchical ─────── SubAgents calling SubAgents              │
-│   Planning ─────────── Generate plan, then execute              │
+│   with       ──────────── Chain with error handling (Elixir)    │
+│   |> then!   ──────────── Chain with pipes (crash on error)     │
+│   Hierarchical ─────────  Agents calling Agents                 │
+│   Planning ─────────────  Generate plan, then execute           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -116,20 +124,19 @@ SubAgents operate in two primary modes depending on the task complexity.
 
 ### 1. Judgment Mode (Mappings & Classification)
 Used for single-turn tasks like classifying text or mapping a context object to a specific signature.
-- **Trigger**: No `tools` provided and `max_turns` is 1 or 2.
-- **Behavior**: The LLM provides a single PTC-Lisp expression (a map).
-- **Self-Correction**: If `max_turns: 2` (default), the agent gets one extra turn to fix its output if validation fails.
-- **Simplicity**: No need to call `(call "return" ...)`; the expression result is returned directly.
+- **Trigger**: `max_turns: 1` (default) and no `tools`.
+- **Behavior**: The LLM provides a single PTC-Lisp expression.
+- **Simplicity**: No need to call `(call "return" ...)`; the expression result is returned directly as `step.return`.
 
 ### 2. Agent Mode (Investigation & Tool Use)
 Used for multi-turn tasks, using tools, or exploring large datasets in the context.
-- **Trigger**: `tools` provided OR `max_turns > 2`.
+- **Trigger**: `tools` provided OR `max_turns > 1`.
 - **Behavior**: A full **Agentic Loop**. The mission ends ONLY when the agent explicitly calls `(call "return" ...)` or `(call "fail" ...)`.
 - **Investigation Agent**: Even without tools, an agent can use multiple turns to investigate context data (e.g., searching a list) before returning a result.
 
 | Mode | Purpose | Stop Signal |
 |------|---------|-------------|
-| **Judgment** | Quick mapping | Expression result |
+| **Judgment** | Quick mapping / Eval | Expression result |
 | **Agent** | Tool use / Analysis | `(call "return" ...)` |
 
 ### Example: Investigation Agent (Zero Tools)
@@ -141,7 +148,7 @@ data = %{
 }
 
 # max_turns > 1 triggers Agent Mode, requiring an explicit 'return'
-{:ok, step} = PtcRunner.SubAgent.delegate(
+{:ok, step} = PtcRunner.SubAgent.run(
   "Find the report with the highest anomaly score and explain why",
   signature: "{report_id :int, reasoning :string}",
   context: data,
@@ -159,26 +166,46 @@ data = %{
 
 ## Quick Start
 
-Here's how to delegate a prompt with a functional contract:
+### Option 1: Convenience (One-Liner)
+
+For simple cases, pass the prompt directly:
 
 ```elixir
-# 1. Define the mission and its contract
-prompt = "What is the most expensive product?"
-signature = "() -> {name :string, price :float}"
-
-# 2. Delegate
-# (Note: product_tools here must provide @specs or explicit signatures)
-{:ok, step} = PtcRunner.SubAgent.delegate(prompt,
-  signature: signature,
-  tools: my_tools,
-  llm: my_llm
+{:ok, step} = PtcRunner.SubAgent.run(
+  "What is the most expensive product?",
+  signature: "() -> {name :string, price :float}",
+  tools: product_tools,
+  llm: my_llm,
+  max_turns: 5
 )
 
+IO.puts "Top product: #{step.return.name}"  #=> "Widget"
+```
+
+### Option 2: Agent as Data (Recommended for Reuse)
+
+Define the agent separately, then execute:
+
+```elixir
+# 1. Define the agent (no LLM called yet)
+product_finder = SubAgent.new(
+  prompt: "What is the most expensive product?",
+  signature: "() -> {name :string, price :float}",
+  tools: product_tools,
+  max_turns: 5
+)
+
+# 2. Execute with runtime params
+{:ok, step} = SubAgent.run(product_finder, llm: my_llm)
+
 # 3. Access type-safe results
-IO.puts "Top product: #{step.return.name}"
-   #=> "Widget"
+step.return.name   #=> "Widget"
 step.return.price  #=> 100.0
 ```
+
+This separation enables reuse, testing, and composition.
+
+### What Happens
 
 The sub-agent:
 1. Receives the prompt and expands any `{{templates}}` from context.
@@ -238,12 +265,13 @@ end
 
 # Usage
 llm = MyApp.LLM.callback()
-PtcRunner.SubAgent.delegate(prompt, llm: llm, tools: tools)
+PtcRunner.SubAgent.run(prompt, llm: llm, tools: tools, max_turns: 5)
 
 # With options
-PtcRunner.SubAgent.delegate(prompt,
+PtcRunner.SubAgent.run(prompt,
   llm: llm,
   tools: tools,
+  max_turns: 5,
   llm_opts: %{temperature: 0.2}
 )
 ```
@@ -259,11 +287,12 @@ This example shows how the **Context Firewall** works via signatures. We pass ID
 # Use '_' to hide heavy email content from the prompt
 signature = "() -> {summary :string, count :int, _email_ids [:int]}"
 
-{:ok, step1} = PtcRunner.SubAgent.delegate(
+{:ok, step1} = PtcRunner.SubAgent.run(
   "Find all urgent emails",
   signature: signature,
   tools: email_tools,
-  llm: llm
+  llm: llm,
+  max_turns: 5
 )
 
 IO.puts(step1.return.summary)
@@ -273,12 +302,13 @@ IO.puts(step1.return.summary)
 # We pass Step 1's return data AND its signature. 
 # The system automatically extracts the 'return' part of Step 1's signature 
 # to populate the Data Inventory for Step 2.
-{:ok, step2} = PtcRunner.SubAgent.delegate(
+{:ok, step2} = PtcRunner.SubAgent.run(
   "Draft brief acknowledgment replies for these {{count}} emails",
   context: step1.return,
   context_signature: step1.signature,
   tools: drafting_tools,
-  llm: llm
+  llm: llm,
+  max_turns: 5
 )
 
 IO.puts(step2.return.summary)
@@ -287,7 +317,7 @@ IO.puts(step2.return.summary)
 
 ### Usability: Shorthand Signatures
 
-If your mission has no input parameters (common for top-level delegations), you can omit the `() -> ` prefix:
+If your mission has no input parameters (common for top-level executions), you can omit the `() -> ` prefix:
 
 ```elixir
 # These are equivalent:
@@ -301,10 +331,10 @@ Passing a previous `Step` struct directly to the `context:` option automatically
 
 ```elixir
 # Instead of this:
-delegate(prompt, context: step1.return, context_signature: step1.signature)
+run(prompt, context: step1.return, context_signature: step1.signature)
 
 # You can do this:
-delegate(prompt, context: step1)
+run(prompt, context: step1)
 ```
  
 ### The Firewall Convention (`_` prefix)
@@ -313,7 +343,7 @@ Fields prefixed with `_` in a signature are "firewalled." They follow these visi
 
 - **✓ Available in Lisp context**: Fully accessible via `ctx/_field_name`.
 - **✓ Transferred between steps**: Preserved when passing `context` between SubAgents.
-- **✓ Available to Elixir code**: When calling `delegate/2` directly from Elixir, firewalled fields are included in `step.return`.
+- **✓ Available to Elixir code**: When calling `run/2` directly from Elixir, firewalled fields are included in `step.return`.
 - **✗ Hidden from LLM prompt text**: Shown as `<Firewalled>` in conversation history.
 - **✗ Hidden from parent LLM schema**: If a SubAgent is used as a tool by another LLM, its firewalled fields are omitted from the parent LLM's view of the tool's return shape.
 
@@ -335,6 +365,97 @@ When `context_signature` is provided, the system:
 Notice that Step 2's LLM knows `_email_ids` is a list of integers, even though it can't see the actual values in the text prompt. This allows it to confidently generate code like `(call "draft_reply" {:id (first ctx/_email_ids)})`.
  
 - By passing `context_signature`, Step 2 also received the **type metadata**, enabling it to reason about the data it was processing.
+
+---
+
+## Chaining Patterns
+
+### Using `with` (Recommended)
+
+The idiomatic Elixir pattern for sequential agent chains:
+
+```elixir
+with {:ok, step1} <- SubAgent.run(finder, llm: llm),
+     {:ok, step2} <- SubAgent.run(drafter, llm: llm, context: step1),
+     {:ok, step3} <- SubAgent.run(sender, llm: llm, context: step2) do
+  {:ok, step3}
+else
+  {:error, %{fail: %{reason: :not_found}}} -> {:error, :no_data}
+  {:error, step} -> {:error, step.fail}
+end
+```
+
+**Why `with` works well:**
+- Pattern matches on happy path (`{:ok, step}`)
+- Short-circuits on first `{:error, _}`
+- Explicit error handling via `else` clause
+- Auto-chaining: `context: step` extracts both `return` and `signature`
+
+### Using Pipes (`run!` and `then!`)
+
+When you want to crash on failure, use bang variants:
+
+```elixir
+SubAgent.run!(finder, llm: llm)
+|> SubAgent.then!(drafter, llm: llm)
+|> SubAgent.then!(sender, llm: llm)
+```
+
+`then!/2` automatically sets `context:` to the previous step.
+
+### Parallel Execution
+
+For concurrent agent execution, use standard Elixir patterns:
+
+```elixir
+agents = [email_agent, calendar_agent, crm_agent]
+
+results =
+  agents
+  |> Task.async_stream(fn agent -> SubAgent.run(agent, llm: llm) end)
+  |> Enum.map(fn {:ok, result} -> result end)
+```
+
+---
+
+## LLM Inheritance
+
+SubAgents can inherit their LLM from the parent, enabling flexible model selection.
+
+**Resolution order (first non-nil wins):**
+
+1. `agent.llm` - Struct override: "this agent always uses haiku"
+2. `as_tool(..., llm: x)` - Bound at tool creation
+3. Parent's llm - Inherited at call time
+4. `run(..., llm: x)` - Required at top level
+
+**Example:**
+```elixir
+# Agent that always uses haiku
+classifier = SubAgent.new(
+  prompt: "Classify {{text}}",
+  signature: "(text :string) -> {category :string}",
+  llm: :haiku  # Always uses haiku, regardless of parent
+)
+
+# Agent that inherits LLM
+finder = SubAgent.new(
+  prompt: "Find {{item}}",
+  signature: "(item :string) -> {id :int}",
+  tools: search_tools
+  # No llm - will inherit from parent
+)
+
+# Different inheritance strategies
+parent_tools = %{
+  "classify" => SubAgent.as_tool(classifier),              # Uses haiku (struct)
+  "find" => SubAgent.as_tool(finder),                      # Inherits parent's llm
+  "summarize" => SubAgent.as_tool(summarizer, llm: :haiku) # Bound to haiku
+}
+
+# Parent uses sonnet; children inherit or override
+{:ok, step} = SubAgent.run(orchestrator, llm: :sonnet, tools: parent_tools)
+```
 
 ---
 
@@ -392,7 +513,7 @@ LLMTool.new(
 
 The `prompt` and `LLMTool` prompts use a Mustache-style template syntax for context interpolation.
 
-**Critical Rule**: Every `{{placeholder}}` in the prompt MUST have a matching parameter in the `signature`. The system validates this **immediately** when `delegate/2` or `as_tool/1` is called. If a placeholder is missing from the provided context or signature, it will return an error or raise before any LLM call is made.
+**Critical Rule**: Every `{{placeholder}}` in the prompt MUST have a matching parameter in the `signature`. The system validates this **immediately** when `run/2` or `as_tool/1` is called. If a placeholder is missing from the provided context or signature, it will return an error or raise before any LLM call is made.
 
 ```elixir
 tools = %{
@@ -488,6 +609,7 @@ tools = %{
   "start" => {&start_link/1, :skip}  # or provide manual spec
 }
 ```
+```
 
 ### Tool Definition Comparison
  
@@ -497,8 +619,8 @@ Depending on your use case, you can define tools in several ways:
 | :--- | :--- |
 | `&Module.fun/n` | Existing Elixir functions with `@spec`. |
 | `{&fun/n, "..."}` | When you need to override or simplify the auto-extracted spec. |
-| `%{prompt:, signature:}` | Single-turn "Judgment" tools or "SubAgents" as tools. |
-| `SubAgent.as_tool(...)` | Pre-defined, complex SubAgents used for hierarchical delegation. |
+| `LLMTool.new(...)` | Single-turn LLM-powered tools for classification/evaluation. |
+| `SubAgent.as_tool(agent)` | SubAgents used for hierarchical delegation. |
  
 #### The Unified Tool Model
 
@@ -533,11 +655,12 @@ tools = %{
 
 #### Global Validation Options
 
-Control validation behavior at the delegation level:
+Control validation behavior at the execution level:
 
 ```elixir
-PtcRunner.SubAgent.delegate(prompt,
+PtcRunner.SubAgent.run(mission,
   tools: tools,
+  max_turns: 5,
   signature_validation: :enabled  # default
 )
 ```
@@ -601,7 +724,7 @@ The LLM can self-correct based on these messages.
 
 #### Type Syntax Reference
 
-PtcRunner uses a **hybrid schema system** based on Malli. See [malli-schema.md](malli-schema.md) for the full specification.
+See [signature-syntax.md](signature-syntax.md) for the full specification.
 
 **Shorthand Syntax (recommended):**
 
@@ -622,18 +745,6 @@ Optional (use ? suffix):
 
 Nested:
   {:customer {:id :int :address {:city :string :zip :string}}}
-```
-
-**Malli Data (advanced):**
-
-For schemas that shorthand can't express (enums, unions, refinements):
-
-```elixir
-# Enum types
-signature: [:=> [:cat :string] [:map [:status [:enum "low" "medium" "high"]]]]
-
-# Constrained values
-signature: [:=> [:cat] [:map [:score [:and :int [:> 0] [:< 100]]]]]
 ```
 
 #### SubAgent-as-Tool Contracts
@@ -659,16 +770,16 @@ email_agent(user {name :string}) -> {summary :string, count :int}
 ```
 Notice that `email_ids` is hidden from the parent's text inventory because of the `_` marker, but it remains available for Lisp-level chaining.
  
-#### Dynamic `delegate` and Planning
+#### Dynamic `run` and Planning
  
-For dynamic agent creation, the orchestrator can provide tools that wrap `delegate/2` with specific signatures, or a generic meta-tool:
+For dynamic agent creation, the orchestrator can provide tools that wrap `run/2` with specific signatures, or a generic meta-tool:
  
 ```elixir
 # A generic meta-tool with a standard return structure
 tools = %{
   "run_sub_agent" => %{
-      prompt: "Handle the following mission: {{prompt}}",
-      signature: "(prompt :string, tools [:string], context :map) -> {return :map}",
+      prompt: "Handle the following task: {{task_prompt}}",
+      signature: "(task_prompt :string, tools [:string], context :map) -> {return :map}",
   }
 }
 ```
@@ -694,13 +805,14 @@ The sub-agent has access to several built-in context variables that help manage 
 
 #### `ctx/key`
 
-Any values passed to `context:` in the `delegate/2` call are available via the `ctx/` prefix:
+Any values passed to `context:` in the `run/2` call are available via the `ctx/` prefix:
 
 ```elixir
-{:ok, result} = PtcRunner.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.run(
   "Get details for this order",
   llm: llm,
   tools: order_tools,
+  max_turns: 5,
   context: %{order_id: "ORD-12345"}
 )
 ```
@@ -754,7 +866,7 @@ Use the built-in **`fail` tool** to explicitly exit the loop:
  
 **Result**:
 - The `Loop` stops immediately.
-- `delegate/2` returns `{:error, step}` where `step.fail` contains the error data.
+- `run/2` returns `{:error, step}` where `step.fail` contains the error data.
  
 #### 3. Built-in Tools: `return` and `fail`
  
@@ -779,7 +891,7 @@ Programming bugs in your Elixir tool functions (crashes) follow the "Let it cras
 
 ### Memory (Scoped Scratchpad)
  
-Each agent has private memory that persists across turns within a single `delegate` call. This is accessible via the `memory/` prefix.
+Each agent has private memory that persists across turns within a single `run` call. This is accessible via the `memory/` prefix.
  
 ```elixir
 # In PTC-Lisp, the agent can:
@@ -899,10 +1011,11 @@ Look up keys in maps using the keyword itself as a function:
   
  ```elixir
  # Agent Signature: () -> {summary :string, _ids [:int]}
- {:ok, step} = PtcRunner.SubAgent.delegate(
+ {:ok, step} = PtcRunner.SubAgent.run(
    "Find urgent emails from Acme",
    signature: "() -> {summary :string, _ids [:int]}",
    llm: llm,
+   max_turns: 5,
    tools: %{
      "search_emails" => &MyApp.Email.search/1,
      "count_results" => &MyApp.Email.count/1
@@ -1179,10 +1292,11 @@ tools = %{
   )
 }
  
-{:ok, step} = PtcRunner.SubAgent.delegate(
+{:ok, step} = PtcRunner.SubAgent.run(
   "Review my inbox. Archive spam, flag anything urgent from enterprise customers.",
   signature: "() -> {summary :string}",
   llm: llm,
+  max_turns: 5,
   tools: tools
 )
 ```
@@ -1223,10 +1337,11 @@ main_tools = %{
 }
 
 # Now the main agent can orchestrate these sub-agents
-{:ok, step} = PtcRunner.SubAgent.delegate(
+{:ok, step} = PtcRunner.SubAgent.run(
   "Find the top customer and get their orders",
   signature: "() -> {summary :string}",
   llm: llm,
+  max_turns: 5,
   tools: main_tools
 )
 ```
@@ -1272,7 +1387,7 @@ domain_tools = %{
   )
 }
 
-{:ok, result} = PtcRunner.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.run(
   """
   Create a plan to:
   1. Find all urgent emails
@@ -1283,6 +1398,7 @@ domain_tools = %{
   Each step should have: :id, :prompt, :tools, :needs (dependencies), :output
   """,
   llm: llm,
+  max_turns: 5,
   tools: planning_tools,
   tool_catalog: domain_tools  # Schemas visible, not callable
 )
@@ -1347,10 +1463,11 @@ defmodule PlanExecutor do
       tools = Map.get(tool_registry, step.tools)
 
       # Execute via SubAgent
-      {:ok, step} = PtcRunner.SubAgent.delegate(
+      {:ok, step} = PtcRunner.SubAgent.run(
         step.prompt,
         llm: llm,
         tools: tools,
+        max_turns: 5,
         context: step_context
       )
  
@@ -1435,10 +1552,11 @@ defmodule MyApp.AgentTools do
       |> Enum.map(&Map.get(tool_catalog, &1, %{}))
       |> Enum.reduce(%{}, &Map.merge/2)
 
-    # 2. Delegate to an isolated SubAgent
-    {:ok, step} = PtcRunner.SubAgent.delegate(
+    # 2. Run an isolated SubAgent
+    {:ok, step} = PtcRunner.SubAgent.run(
       args["prompt"],
       llm: llm_callback,
+      max_turns: 5,
       tools: selected_tools,
       context: args["context"] || %{}
     )
@@ -1476,9 +1594,10 @@ tools = %{
 
 ```elixir
 # Now the LLM can dynamically create specialized agents:
-{:ok, result} = PtcRunner.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.run(
   "Find urgent emails, then schedule follow-up meetings for each",
   llm: llm,
+  max_turns: 5,
   tools: tools
 )
 
@@ -1531,9 +1650,10 @@ tools = %{
 }
 
 # LLM uses pre-defined agents
-{:ok, result} = PtcRunner.SubAgent.delegate(
+{:ok, result} = PtcRunner.SubAgent.run(
   "Find urgent emails and schedule follow-ups",
   llm: llm,
+  max_turns: 5,
   tools: tools
 )
 ```
@@ -1542,7 +1662,7 @@ tools = %{
 
 ### Pattern 3: Hybrid (Plan → Execute)
 
-A prompt pattern where the agent plans before executing. This is just two `delegate/2` calls:
+A prompt pattern where the agent plans before executing. This is just two `run/2` calls:
 
 ```elixir
 defmodule MyPatterns do
@@ -1557,7 +1677,7 @@ defmodule MyPatterns do
     tools = Keyword.fetch!(opts, :tools)
  
     # Phase 1: Planning (no tools)
-    {:ok, plan} = PtcRunner.SubAgent.delegate(
+    {:ok, plan} = PtcRunner.SubAgent.run(
       """
       Prompt: #{prompt}
  
@@ -1566,11 +1686,12 @@ defmodule MyPatterns do
       Output a numbered plan. Do NOT execute yet.
       """,
       llm: llm,
+      max_turns: 5,
       tools: %{}  # No tools - just thinking
     )
  
     # Phase 2: Execute with plan as guidance
-    PtcRunner.SubAgent.delegate(
+    PtcRunner.SubAgent.run(
       """
       Execute: #{prompt}
  
@@ -1580,6 +1701,7 @@ defmodule MyPatterns do
       Follow your plan, adapting as needed. Batch operations with mapv/filter.
       """,
       llm: llm,
+      max_turns: 5,
       tools: tools,
       context: Keyword.get(opts, :context, %{})
     )
@@ -1597,7 +1719,7 @@ Use LLM to generate a plan, then execute deterministically in Elixir:
 defmodule PlanExecutor do
   @doc """
   Execute a structured plan generated by an LLM.
-  Each step runs as a SubAgent delegation.
+  Each step runs as a SubAgent execution.
   """
   def run(plan, tool_registry, llm) do
     Enum.reduce(plan.steps, %{}, fn step, context ->
@@ -1610,10 +1732,11 @@ defmodule PlanExecutor do
       step_context = Map.take(context, step.needs || [])
 
       # Execute step
-      {:ok, step} = PtcRunner.SubAgent.delegate(
+      {:ok, step} = PtcRunner.SubAgent.run(
         step.prompt,
         llm: llm,
         tools: tools,
+        max_turns: 5,
         context: step_context
       )
  
@@ -1643,13 +1766,13 @@ result = PlanExecutor.run(plan, tool_registry, llm)
 
 | Task Type | Pattern | Why |
 |-----------|---------|-----|
-| Simple query | Direct `delegate/2` | One tool call, no orchestration needed |
+| Simple query | Direct `run/2` | One tool call, no orchestration needed |
 | 2-3 step chain | Pre-defined SubAgents | Known flow, predictable behavior |
 | Complex multi-item | Hybrid | LLM plans batching strategy |
 | Novel/exploratory | Dynamic spawn_agent | Flexibility to compose tools |
 | Production pipeline | PlanExecutor | Deterministic, retry-able, auditable |
 
-All patterns compose from the same primitives: `delegate/2`, `LLMTool` (implicit), and `memory/*`.
+All patterns compose from the same primitives: `run/2`, `LLMTool` (implicit), and `memory/*`.
 
 ---
 
@@ -1657,10 +1780,10 @@ All patterns compose from the same primitives: `delegate/2`, `LLMTool` (implicit
 
 ### Execution Trace
 
-Every SubAgent delegation returns a trace showing what happened:
+Every SubAgent execution returns a trace showing what happened:
 
 ```elixir
-{:ok, result} = PtcRunner.SubAgent.delegate(task, llm: llm, tools: tools)
+{:ok, result} = PtcRunner.SubAgent.run(mission, llm: llm, tools: tools, max_turns: 5)
 
 result.trace
 #=> [
@@ -1720,32 +1843,36 @@ step.usage
 
 See [specification.md](specification.md) for full type definitions.
 
-### PtcRunner.SubAgent.delegate/2
+### PtcRunner.SubAgent.new/1
+
+Creates a SubAgent struct (agent as data):
 
 ```elixir
-{:ok, step} = PtcRunner.SubAgent.delegate(prompt, opts)
+agent = SubAgent.new(
+  prompt: "Find urgent emails for {{user}}",
+  signature: "(user :string) -> {count :int, _ids [:int]}",
+  tools: email_tools,
+  max_turns: 5
+)
 ```
 
-**Required Options:**
+**Struct fields:** `prompt`, `signature`, `tools`, `max_turns`, `tool_catalog`, `prompt_limit`, `mission_timeout`, `llm_retry`, `llm` (optional override).
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `llm` | function | LLM callback `fn %{system:, messages:} -> {:ok, text}` |
+### PtcRunner.SubAgent.run/2
 
-**Optional:**
+Executes a SubAgent:
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `signature` | string | Desired return structure |
-| `tools` | map | Callable tools |
-| `tool_catalog`| map | Schemas for planning |
-| `context` | map | Input available as `ctx/` |
-| `context_signature` | string | Type info for `context` |
-| `mission_timeout`| integer | Max ms for total mission |
-| `llm_retry` | map | LLM callback retry config |
-| `prompt_limit` | map | Truncation limits for conversation view |
+```elixir
+# With struct
+{:ok, step} = SubAgent.run(agent, llm: llm, context: %{user: "alice"})
 
-**Quick Reference: Option Defaults**
+# Convenience form (creates struct inline)
+{:ok, step} = SubAgent.run("Find {{x}}", signature: "...", llm: llm, context: %{x: 1})
+```
+
+**Runtime options:** `llm` (required unless in struct), `context`, `llm_opts`, `context_signature`.
+
+**Quick Reference: Defaults**
 
 | Option | Default |
 | :--- | :--- |
@@ -1755,8 +1882,18 @@ See [specification.md](specification.md) for full type definitions.
 | `prompt_limit` | `%{list: 5, string: 1000}` |
 | `llm_retry` | `%{max_attempts: 3, backoff: :exponential}` |
 
-**Return value (`{:ok, step}` or `{:error, step}`):**
- 
+### PtcRunner.SubAgent.run!/2 and then!/2
+
+Bang variants for pipe-style chaining:
+
+```elixir
+SubAgent.run!(finder, llm: llm)
+|> SubAgent.then!(drafter, llm: llm)
+|> SubAgent.then!(sender, llm: llm)
+```
+
+**Return value:**
+
 ```elixir
 %PtcRunner.Step{
   return: map(),       # Data matching signature
@@ -1768,35 +1905,59 @@ See [specification.md](specification.md) for full type definitions.
 }
 ```
 
-### PtcRunner.SubAgent.as_tool/1
+### PtcRunner.SubAgent.as_tool/2
 
-Wrap a SubAgent configuration as a callable tool:
+Wrap a SubAgent as a callable tool for use by other agents:
 
 ```elixir
-tool = PtcRunner.SubAgent.as_tool(
+# Define the agent
+finder = SubAgent.new(
   prompt: "Find the best matching item",
   signature: "() -> {id :int}",
-  llm: llm,
   tools: %{"search" => &MyApp.search/1}
 )
+
+# Wrap as tool (llm can be bound or inherited from parent)
+tool = SubAgent.as_tool(finder)
+# or with bound llm:
+tool = SubAgent.as_tool(finder, llm: :haiku)
 ```
 
-The returned function takes a map of parameters defined in its signature and returns the `return` value from the mission. It **raises** if the mission fails.
+Returns a `SubAgentTool` struct that the execution loop recognizes. When called:
+- Resolves LLM (agent.llm → bound llm → parent's llm)
+- Executes `run(agent, llm: resolved_llm, context: args)`
+- Returns `step.return` on success, raises on failure
 
 ---
 
-## Derive & Apply Pattern (Planned)
+## Compile Pattern (Derive & Apply)
 
 For highly repetitive tasks (batch processing), you can separate the **cognitive step** (writing the logic) from the **execution step** (running it at scale).
 
+### What Can Be Compiled
+
+`compile` eliminates LLM reasoning, not tool calls. Pure Elixir tools still execute at runtime.
+
+| Tool Type | Compilable? | Why |
+|-----------|-------------|-----|
+| Pure Elixir functions | ✓ | Deterministic, just functions |
+| LLMTool | ✗ | Needs LLM at execution |
+| SubAgent as tool | ✗ | Needs LLM at execution |
+
 ### 1. Derive Phase
-The LLM analyzes a sample of your data and generates a pure PTC-Lisp function that fulfills a signature.
+
+The LLM analyzes your data and generates a pure PTC-Lisp function:
 
 ```elixir
-# derive a reusable tool once
-{:ok, compiled} = PtcRunner.SubAgent.compile(
-  mission: "Extract anomaly score and reasoning from report",
+# Define agent with pure tools only
+scorer = SubAgent.new(
+  prompt: "Extract anomaly score and reasoning from report",
   signature: "(report :map) -> {score :float, reason :string}",
+  tools: %{"lookup_threshold" => &MyApp.lookup_threshold/1}  # pure function
+)
+
+# Compile - LLM derives the logic once
+{:ok, compiled} = SubAgent.compile(scorer,
   llm: llm,
   sample: sample_reports  # helps LLM see the actual data structure
 )
@@ -1807,12 +1968,12 @@ IO.puts(compiled.source)
 ```
 
 ### 2. Validation (Optional)
-Before scaling, you can validate the derived function against a set of test cases to ensure it behaves correctly across edge cases.
+
+Before scaling, validate the derived function against test cases:
 
 ```elixir
-# Returns :ok or {:error, failed_cases}
 case PtcRunner.SubAgent.validate_compiled(compiled, test_reports) do
-  :ok -> 
+  :ok ->
     IO.puts("Agent verified!")
   {:error, failures} ->
     Logger.warning("Agent failed on #{length(failures)} test cases")
@@ -1820,19 +1981,17 @@ end
 ```
 
 ### 3. Apply Phase
-You now have a plain, pre-bound Elixir function (`compiled.execute`) that you can run 1,000 times without ever calling an LLM again.
+
+Execute the derived function at scale with zero LLM cost:
 
 ```elixir
-# zero LLM tokens/cost per execution
-results = Enum.map(all_reports, &compiled.execute/1)
-
-# For multiple parameters, pass a map:
-# Signature: (report :map, threshold :float) -> ...
-# compiled.execute(%{report: report, threshold: 0.5})
+# No LLM calls - but pure tools still execute
+results = Enum.map(all_reports, fn r -> compiled.execute(%{report: r}) end)
 ```
 
 ### Persistence (Planned)
-Since the derived agent is just code, you can save it for version control or reuse:
+
+Since the derived agent is just code, you can save it:
 
 ```elixir
 # Save the inspectable Lisp source
@@ -1849,11 +2008,11 @@ File.write!("agents/anomaly_scorer.lisp", compiled.source)
 
 ## Glossary
 
-- **Mission**: A task delegated to a SubAgent.
+- **Prompt**: A template describing what the SubAgent should accomplish (supports `{{placeholder}}` expansion).
 - **Signature**: A functional contract defining inputs (`params`) and outputs (`returns`).
-- **Step**: The result of a mission (a `PtcRunner.Step` struct containing `return`, `fail`, `mem`, and `trace`).
+- **Step**: The result of execution (a `PtcRunner.Step` struct containing `return`, `fail`, `memory`, and `trace`).
 - **Firewall**: The `_` prefix convention that hides data from LLM prompts while keeping it available for Lisp programs.
-- **Data Inventory**: The type information section in the prompt that tells the LLM what data is available in `ctx/`.
+- **Data Inventory**: The type information section in the system prompt that tells the LLM what data is available in `ctx/`.
 
 ---
 
@@ -1862,6 +2021,6 @@ File.write!("agents/anomaly_scorer.lisp", compiled.source)
 - [Specification](specification.md) - Full SubAgent API reference
 - [Step Struct](step.md) - Shared result struct specification
 - [Lisp API Updates](lisp-api-updates.md) - Changes to existing Lisp API
-- [Malli Schema](malli-schema.md) - Schema validation system based on Malli
+- [Signature Syntax](signature-syntax.md) - Signature string syntax specification
 - [Spike Summary](spike-summary.md) - Validation results and architectural decisions
 - [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation
