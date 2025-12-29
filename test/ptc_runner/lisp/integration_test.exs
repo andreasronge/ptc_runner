@@ -946,4 +946,47 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert_in_delta result, 59.97, 0.001
     end
   end
+
+  # ==========================================================================
+  # Sequential Evaluation with do
+  # ==========================================================================
+
+  describe "sequential evaluation: do" do
+    test "do evaluates expressions sequentially without short-circuiting" do
+      source = ~S"""
+      (do
+        (let [x 1] x)
+        (let [y 2] y)
+        (let [z 3] z))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+      assert result == 3
+    end
+
+    test "do enables sequential tool call patterns" do
+      source = ~S"""
+      (do
+        (+ 1 1)
+        (+ 2 2)
+        (+ 3 3))
+      """
+
+      {:ok, result, _, _} = Lisp.run(source)
+
+      # All three additions evaluate in sequence, returning the last result
+      assert result == 6
+    end
+
+    test "do propagates errors without evaluating remaining expressions" do
+      source = ~S"""
+      (do
+        (+ 1 1)
+        (+ "string" 42)
+        (+ 3 3))
+      """
+
+      assert {:error, {:execution_error, _}} = Lisp.run(source)
+    end
+  end
 end
