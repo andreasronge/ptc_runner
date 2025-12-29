@@ -181,41 +181,10 @@ When a linked issue doesn't have `ready-for-implementation`:
 This ensures issues flow through the review pipeline automatically without manual intervention.
 
 3. **If no epic**:
-   - Process `from-pr-review` issues
-   - Trigger any `ready-for-implementation` issues
+   - Process `from-pr-review` issues by queueing them for review
    - Report status
 
-### Triggering Implementation
-
-When an issue is ready and unblocked:
-
-1. **Check for running implementation workflows**: Before triggering, verify no implementation is already in progress:
-   ```bash
-   # Check for in-progress claude-issue workflow runs
-   gh run list --workflow=claude-issue.yml --status=in_progress --json databaseId --jq 'length'
-   ```
-   - If result is `> 0`, an implementation is already running - **wait**, don't trigger another
-   - If result is `0`, no implementation running - proceed with checks
-
-2. **Check for existing trigger**: Before posting, verify no `@claude` trigger already exists:
-   ```bash
-   # Check if issue already has a @claude trigger comment
-   gh issue view ISSUE_NUMBER --json comments --jq '
-     [.comments[] | select(.body | startswith("@claude"))] | length
-   '
-   ```
-   - If result is `> 0`, a trigger already exists - **skip**, don't post a duplicate
-   - If result is `0`, no trigger exists - proceed with posting
-
-3. **Post trigger comment**: `@claude Please implement this issue`
-   - Include guidance to read relevant spec documents
-
-**Why this matters**:
-- Multiple issues can be labeled `ready-for-implementation` at once, triggering multiple PM workflow runs
-- Without the running workflow check, PM could trigger parallel implementations that cause merge conflicts
-- Without the existing trigger check, each PM run would post duplicate comments
-
-**Note**: If an existing trigger exists but implementation failed, human intervention is needed to diagnose and retry.
+**Note**: PM no longer triggers implementation directly. The review workflow (`claude-issue-review.yml`) posts the `@claude` trigger after approving an issue.
 
 ### Creating Issues
 
@@ -259,10 +228,7 @@ When an issue shouldn't be implemented:
 ## Safety Rules
 
 - **One issue at a time**: Never create multiple issues in one run
-- **No parallel implementations**: Before triggering, check for running `claude-issue` workflows - wait if any are in progress
-- **No duplicate triggers**: Before posting `@claude` trigger, check if one already exists on the issue - skip if so
-- **Wait for merge**: Don't create/trigger when PRs are open (checked by workflow before running)
-- **Require review**: Only trigger on issues with `ready-for-implementation` label
+- **Wait for merge**: Don't create issues when PRs are open (checked by workflow before running)
 - **Max 3 failures**: Add `pm-stuck` label and stop after 3 consecutive failures
 - **Don't modify other epics**: Only work with the single active epic
 
@@ -271,6 +237,6 @@ When an issue shouldn't be implemented:
 Summarize:
 - Active epic (number, title) or "No active epic"
 - Current phase (section name from epic)
-- Action taken (issue created/triggered, epic updated)
+- Action taken (issue created, queued for review, epic updated)
 - Progress updates made
 - Blockers or next steps

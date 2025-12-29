@@ -1,7 +1,7 @@
 # SubAgent Implementation Plan
 
 > **Status:** Planning
-> **Epic:** (to be created)
+> **Epic:** #350
 > **Spec documents:** specification.md, step.md, lisp-api-updates.md, signature-syntax.md, type-coercion-matrix.md, system-prompt-template.md, parallel-trace-design.md
 
 ## Overview
