@@ -118,11 +118,13 @@ defmodule PtcRunner.Tracer do
   @doc """
   Generate a new trace ID.
 
-  Uses UUID v4 for uniqueness across distributed systems.
+  Uses cryptographically secure random bytes encoded as hex.
+  No external dependencies required.
   """
   @spec generate_trace_id() :: String.t()
   def generate_trace_id do
-    UUID.uuid4()
+    :crypto.strong_rand_bytes(16)
+    |> Base.encode16(case: :lower)
   end
 
   @doc """
