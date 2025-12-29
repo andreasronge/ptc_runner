@@ -167,7 +167,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Not supported:** Multi-line strings, regex literals
 
-**String operations:** Strings support `count` and `empty?` but are otherwise opaque. Character access (`nth`, `first`), substring extraction, and string manipulation are not supported—use tools for complex string processing. See Section 8.6 for details.
+**String operations:** Strings support `count`, `empty?`, and `seq`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. Other string operations like substring extraction and string manipulation are not supported—use tools for complex string processing. See Section 8.1 for details.
 
 ### 3.5 Keywords
 
@@ -907,6 +907,30 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (into [] {:a 1 :b 2})       ; => [[:a 1] [:b 2]]
 (flatten [[1 2] [3 [4]]])  ; => [1 2 3 4]
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
+```
+
+#### Conversion
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `seq` | `(seq coll)` | Convert to sequence (nil if empty) |
+
+The `seq` function converts a collection to a sequence:
+- **Lists**: Returns the list unchanged, or nil if empty
+- **Strings**: Returns a list of characters (graphemes), or nil if empty
+- **Sets**: Returns a list of elements, or nil if empty
+- **Maps**: Returns a list of `[key value]` pairs, or nil if empty
+- **nil**: Returns nil
+
+```clojure
+(seq [1 2 3])              ; => [1 2 3]
+(seq [])                   ; => nil
+(seq "hello")              ; => ["h" "e" "l" "l" "o"]
+(seq "")                   ; => nil
+(seq #{1 2 3})             ; => [1 2 3] or another order (sets are unordered)
+(seq {})                   ; => nil
+(seq {:a 1 :b 2})          ; => [[:a 1] [:b 2]]
+(count (seq "abc"))        ; => 3 (iterate over characters)
 ```
 
 #### Aggregation

@@ -297,6 +297,36 @@ defmodule PtcRunner.Lisp.Runtime do
     Enum.empty?(coll)
   end
 
+  def seq(coll) when is_list(coll) do
+    case coll do
+      [] -> nil
+      _ -> coll
+    end
+  end
+
+  def seq(s) when is_binary(s) do
+    case s do
+      "" -> nil
+      _ -> String.graphemes(s)
+    end
+  end
+
+  def seq(%MapSet{} = set) do
+    case MapSet.size(set) == 0 do
+      true -> nil
+      false -> MapSet.to_list(set)
+    end
+  end
+
+  def seq(m) when is_map(m) do
+    case Enum.empty?(m) do
+      true -> nil
+      false -> Enum.map(m, fn {k, v} -> [k, v] end)
+    end
+  end
+
+  def seq(nil), do: nil
+
   # reduce with 2 args: (reduce f coll) - uses first element as initial value
   def reduce(f, coll) when is_list(coll) do
     case coll do
