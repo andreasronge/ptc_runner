@@ -256,4 +256,53 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:symbol, :nilly}} = Parser.parse("nilly")
     end
   end
+
+  describe "short function syntax #()" do
+    test "empty short function" do
+      assert {:ok, {:short_fn, []}} = Parser.parse("#()")
+    end
+
+    test "short function with single placeholder" do
+      assert {:ok, {:short_fn, [{:symbol, :%}]}} = Parser.parse("#(%)")
+    end
+
+    test "short function with arithmetic" do
+      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, :%}, 1]}} = Parser.parse("#(+ % 1)")
+    end
+
+    test "short function with numeric placeholders" do
+      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, :"%1"}, {:symbol, :"%2"}]}} =
+               Parser.parse("#(+ %1 %2)")
+    end
+
+    test "short function with multiple uses of same placeholder" do
+      assert {:ok, {:short_fn, [{:symbol, :*}, {:symbol, :%}, {:symbol, :%}]}} =
+               Parser.parse("#(* % %)")
+    end
+
+    test "short function with whitespace and formatting" do
+      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, :%}, 1]}} =
+               Parser.parse("#(  +  %  1  )")
+    end
+
+    test "short function can be nested in lists" do
+      assert {:ok,
+              {:list,
+               [
+                 {:symbol, :filter},
+                 {:short_fn, [{:symbol, :>}, {:symbol, :%}, 10]},
+                 {:vector, [5, 15]}
+               ]}} = Parser.parse("(filter #(> % 10) [5 15])")
+    end
+
+    test "set literal still parses correctly" do
+      assert {:ok, {:set, [1, 2, 3]}} = Parser.parse("#" <> "{1 2 3}")
+    end
+
+    test "placeholder symbols parse outside #()" do
+      assert {:ok, {:symbol, :%}} = Parser.parse("%")
+      assert {:ok, {:symbol, :"%1"}} = Parser.parse("%1")
+      assert {:ok, {:symbol, :"%2"}} = Parser.parse("%2")
+    end
+  end
 end

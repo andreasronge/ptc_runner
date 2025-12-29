@@ -30,7 +30,7 @@ defmodule PtcRunner.Lisp.Parser do
   # ============================================================
 
   # Character classes for lookahead
-  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_]
+  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%]
 
   nil_literal =
     string("nil")
@@ -98,8 +98,8 @@ defmodule PtcRunner.Lisp.Parser do
     |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ??, ?!], min: 1)
     |> reduce({ParserHelpers, :build_keyword, []})
 
-  # Symbols (/ allowed for namespacing, _ for ignored bindings)
-  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_]
+  # Symbols (/ allowed for namespacing, _ for ignored bindings, % for param placeholders in #())
+  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%]
 
   symbol =
     ascii_string(symbol_first, 1)
@@ -141,6 +141,16 @@ defmodule PtcRunner.Lisp.Parser do
   )
 
   defcombinatorp(
+    :short_fn,
+    ignore(string("#("))
+    |> concat(parsec(:ws))
+    |> repeat(parsec(:expr) |> concat(parsec(:ws)))
+    |> ignore(string(")"))
+    |> tag(:short_fn)
+    |> map({ParserHelpers, :build_short_fn, []})
+  )
+
+  defcombinatorp(
     :list,
     ignore(string("("))
     |> concat(parsec(:ws))
@@ -167,6 +177,7 @@ defmodule PtcRunner.Lisp.Parser do
       symbol,
       parsec(:vector),
       parsec(:set),
+      parsec(:short_fn),
       parsec(:map_literal),
       parsec(:list)
     ])

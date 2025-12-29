@@ -307,4 +307,55 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert is_map(result) or is_list(result) or is_boolean(result)
     end
   end
+
+  describe "Short function syntax #()" do
+    test "filter with #(> % 10)" do
+      program = "(filter #(> % 10) [5 15 8 20])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [15, 20]
+    end
+
+    test "map with #(str \"id-\" %)" do
+      program = "(map #(str \"id-\" %) [1 2 3])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == ["id-1", "id-2", "id-3"]
+    end
+
+    test "reduce with #(+ %1 %2)" do
+      program = "(reduce #(+ %1 %2) 0 [1 2 3])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == 6
+    end
+
+    test "map with #(* % %)" do
+      program = "(map #(* % %) [1 2 3 4])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [1, 4, 9, 16]
+    end
+
+    test "identity function #(%)" do
+      program = "((fn [coll] (map #(%) coll)) [10 20 30])"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [10, 20, 30]
+    end
+
+    test "zero-arity thunk #(42)" do
+      program = "((fn [] #(42)))"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == 42
+    end
+
+    test "chained operations with short functions" do
+      program = "(-> [1 2 3 4 5] (filter #(> % 2)) (map #(* % 2)))"
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert result == [6, 8, 10]
+    end
+  end
 end
