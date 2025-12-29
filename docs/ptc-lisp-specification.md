@@ -1149,6 +1149,56 @@ Since division always returns floats (see Section 8.3), avoid using `even?`/`odd
 (zero? (mod x 2))    ; works for integers
 ```
 
+### 8.8 String Parsing
+
+| Function | Description |
+|----------|-------------|
+| `parse-long` | Parse string to integer, returns nil on failure |
+| `parse-double` | Parse string to double, returns nil on failure |
+
+String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
+
+**Parsing behavior:**
+- Both functions require the entire string to be consumed by the parse. Partial parses are rejected.
+- Leading/trailing whitespace is not stripped—the string must be in exact numeric form.
+- Invalid input returns `nil` rather than an error.
+
+```clojure
+;; Successful parses
+(parse-long "42")          ; => 42
+(parse-long "-17")         ; => -17
+(parse-double "3.14")      ; => 3.14
+(parse-double "-0.5")      ; => -0.5
+(parse-double "1.23e-4")   ; => 1.23e-4
+
+;; Failed parses
+(parse-long "abc")         ; => nil
+(parse-double "invalid")   ; => nil
+(parse-long "42abc")       ; => nil (partial parse rejected - must consume entire string)
+(parse-double "3.14 ")     ; => nil (trailing whitespace not allowed)
+```
+
+**Type checking:**
+Both functions accept strings and return `nil` for non-string input. **Note: This diverges from Clojure 1.11+, which raises `IllegalArgumentException` for non-string input. PTC-Lisp returns `nil` for safety in agentic contexts.**
+
+```clojure
+(parse-long 42)            ; => ...
+(parse-long nil)           ; => ...
+(parse-double nil)         ; => ...
+(parse-double 3.14)        ; => ...
+```
+
+**Use cases:**
+Typical usage involves filtering valid parses from potentially invalid input:
+
+```clojure
+;; Extract valid integers from mixed data
+(->> ["1" "2" "not-a-number" "4"]
+     (map parse-long)
+     (filter some?)
+     (reduce + 0))  ; => 7
+```
+
 ---
 
 ## 9. Namespaces, Context, and Tools
