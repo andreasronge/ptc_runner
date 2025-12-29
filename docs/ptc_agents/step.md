@@ -24,7 +24,7 @@ defmodule PtcRunner.Step do
   @moduledoc """
   Result of executing a PTC program or SubAgent mission.
 
-  Returned by both `PtcRunner.Lisp.run/2` and `PtcRunner.SubAgent.delegate/2`.
+  Returned by both `PtcRunner.Lisp.run/2` and `PtcRunner.SubAgent.run/2`.
   """
 
   defstruct [
@@ -62,7 +62,7 @@ The computed result value on success.
 - **Nil when:** Execution failed (check `fail` field)
 
 ```elixir
-{:ok, step} = SubAgent.delegate("Find top customer", ...)
+{:ok, step} = SubAgent.run("Find top customer", ...)
 step.return  #=> %{name: "Acme Corp", revenue: 1_200_000}
 ```
 
@@ -91,7 +91,7 @@ Error information on failure.
 | `details` | `map()` | Additional context (optional) |
 
 ```elixir
-{:error, step} = SubAgent.delegate("Invalid mission", ...)
+{:error, step} = SubAgent.run("Invalid mission", ...)
 step.fail  #=> %{reason: :validation_error, message: "count: expected int, got string"}
 ```
 
@@ -124,7 +124,7 @@ step.memory_delta  #=> %{processed_ids: [1, 2, 3]}  # Only changed keys
 The contract used for validation.
 
 - **Type:** `String.t() | nil`
-- **Set when:** Signature was provided to `delegate/2` or `run/2`
+- **Set when:** Signature was provided to `run/2`
 - **Used for:** Type propagation when chaining steps
 
 ```elixir
@@ -220,7 +220,7 @@ Complete list of error reasons in `step.fail.reason`:
 ### Success Check
 
 ```elixir
-case SubAgent.delegate(prompt, opts) do
+case SubAgent.run(prompt, opts) do
   {:ok, step} ->
     IO.puts("Result: #{inspect(step.return)}")
     IO.puts("Took #{step.usage.duration_ms}ms")
@@ -235,20 +235,20 @@ end
 Pass a successful step's return and signature to the next step:
 
 ```elixir
-{:ok, step1} = SubAgent.delegate("Find emails",
+{:ok, step1} = SubAgent.run("Find emails",
   signature: "() -> {count :int, _ids [:int]}",
   ...
 )
 
 # Option 1: Explicit
-{:ok, step2} = SubAgent.delegate("Process emails",
+{:ok, step2} = SubAgent.run("Process emails",
   context: step1.return,
   context_signature: step1.signature,
   ...
 )
 
 # Option 2: Auto-extraction (SubAgent only)
-{:ok, step2} = SubAgent.delegate("Process emails",
+{:ok, step2} = SubAgent.run("Process emails",
   context: step1,  # Extracts return and signature automatically
   ...
 )
@@ -259,7 +259,7 @@ Pass a successful step's return and signature to the next step:
 Fields prefixed with `_` are hidden from LLM history but available in `return`:
 
 ```elixir
-{:ok, step} = SubAgent.delegate("Find emails",
+{:ok, step} = SubAgent.run("Find emails",
   signature: "() -> {count :int, _email_ids [:int]}",
   ...
 )

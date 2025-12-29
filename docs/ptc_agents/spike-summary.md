@@ -1,6 +1,6 @@
 # SubAgent Architecture: Spike Summary
 
-> **Historical Document**: This document captures the original spike validation work. The API has evolved significantly since then. For current API design, see:
+> **Historical Document**: This document captures the original spike validation work. The API has evolved significantly since then. **Note:** `SubAgent.delegate/2` is now `SubAgent.run/2`, and `as_tool/1` is now `as_tool/2`. For current API design, see:
 > - [tutorial.md](tutorial.md) - Planned SubAgent API and usage examples
 > - [specification.md](specification.md) - Formal API specification
 > - [step.md](step.md) - Shared Step struct specification
@@ -415,8 +415,8 @@ The spike validated the **primitives + patterns** architecture:
 
 | Primitive | Purpose | Status |
 |-----------|---------|--------|
-| `delegate/2` | Run task in isolation | ✅ Core API |
-| `as_tool/1` | Wrap SubAgent as tool | ✅ Core API |
+| `run/2` | Run task in isolation | ✅ Core API |
+| `as_tool/2` | Wrap SubAgent as tool | ✅ Core API |
 | `RefExtractor` | Deterministic value extraction | ✅ Core API |
 | `Loop` | Multi-turn execution | ✅ Core API |
 | `memory/*` | Per-agent state | ✅ Core API |
