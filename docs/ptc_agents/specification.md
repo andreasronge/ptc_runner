@@ -140,6 +140,70 @@ SubAgent.run("Find {{x}}", signature: "...", llm: llm)
 | **Judgment** | `max_turns: 1`, no tools | Single turn, expression result returned directly |
 | **Agent** | `max_turns > 1` or `tools` | Multi-turn, requires explicit `(call "return" ...)` |
 
+**Mode State Machine:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    MODE DETERMINATION                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  run/2 called                                                    │
+│       │                                                          │
+│       ▼                                                          │
+│  ┌─────────────────┐                                            │
+│  │ Check: tools    │                                            │
+│  │ provided?       │                                            │
+│  └────────┬────────┘                                            │
+│           │                                                      │
+│     ┌─────┴─────┐                                               │
+│     │           │                                               │
+│    YES         NO                                                │
+│     │           │                                                │
+│     ▼           ▼                                                │
+│  ┌──────┐  ┌─────────────────┐                                  │
+│  │AGENT │  │ Check: max_turns│                                  │
+│  │ MODE │  │ > 1?            │                                  │
+│  └──────┘  └────────┬────────┘                                  │
+│                     │                                            │
+│               ┌─────┴─────┐                                     │
+│               │           │                                     │
+│              YES         NO                                      │
+│               │           │                                     │
+│               ▼           ▼                                      │
+│            ┌──────┐  ┌─────────┐                                │
+│            │AGENT │  │JUDGMENT │                                │
+│            │ MODE │  │  MODE   │                                │
+│            └──────┘  └─────────┘                                │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Mode Determination Logic:**
+```elixir
+mode = cond do
+  map_size(tools) > 0 -> :agent
+  max_turns > 1 -> :agent
+  true -> :judgment
+end
+```
+
+**Key Behavioral Differences:**
+
+| Aspect | Judgment Mode | Agent Mode |
+|--------|---------------|------------|
+| **Termination** | Expression result returned | Must call `return` or `fail` |
+| **Turn count** | Exactly 1 | 1 to `max_turns` |
+| **Tool access** | None (error if attempted) | Full tool registry |
+| **Error recovery** | No retry | LLM can retry in next turn |
+| **ctx/ access** | Yes | Yes |
+| **memory/ access** | Yes | Yes |
+
+**Edge Cases:**
+
+1. **`max_turns: 1` with tools** → Agent Mode (tools take precedence)
+2. **Judgment Mode calls tool** → Error: "Unknown tool" (no mode transition)
+3. **Agent Mode without explicit return** → Loop continues until timeout or max_turns
+
 **Example: Simple Eval (Judgment Mode)**
 ```elixir
 {:ok, step} = SubAgent.run("{{x}} + {{y}}", context: %{x: 10, y: 5}, llm: llm)
@@ -365,9 +429,85 @@ parent_tools = %{
 {:ok, step} = SubAgent.run(orchestrator, llm: :sonnet, tools: parent_tools)
 ```
 
+**3+ Level Deep Inheritance Example:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   LLM INHERITANCE (3 LEVELS)                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Level 1: Orchestrator                                          │
+│  └── run(..., llm: :sonnet)  ← Top-level LLM                    │
+│       │                                                          │
+│       ├── Tool: "analyzer"                                      │
+│       │   └── SubAgent.as_tool(analyzer)                        │
+│       │       └── agent.llm: nil → inherits :sonnet             │
+│       │           │                                              │
+│       │           ├── Level 2: Analyzer calls tools              │
+│       │           │   │                                          │
+│       │           │   ├── Tool: "classifier"                    │
+│       │           │   │   └── as_tool(classifier, llm: :haiku)  │
+│       │           │   │       └── bound_llm: :haiku → uses :haiku│
+│       │           │   │           │                              │
+│       │           │   │           └── Level 3: Classifier        │
+│       │           │   │               └── Uses :haiku (bound)    │
+│       │           │   │                                          │
+│       │           │   └── Tool: "scorer"                        │
+│       │           │       └── as_tool(scorer)                   │
+│       │           │           └── agent.llm: nil, bound: nil    │
+│       │           │               → inherits :sonnet from L1    │
+│       │           │               │                              │
+│       │           │               └── Level 3: Scorer            │
+│       │           │                   └── Uses :sonnet (inherited)│
+│       │           │                                              │
+│       │           └── Tool: "expert"                            │
+│       │               └── as_tool(expert)                       │
+│       │                   └── agent.llm: :opus                  │
+│       │                       → Uses :opus (struct override)     │
+│       │                       │                                  │
+│       │                       └── Level 3: Expert                │
+│       │                           └── Uses :opus (struct)        │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+```elixir
+# Level 3 agents
+classifier = SubAgent.new(prompt: "Classify", signature: "...")  # No llm
+scorer = SubAgent.new(prompt: "Score", signature: "...")         # No llm
+expert = SubAgent.new(prompt: "Expert analysis", signature: "...", llm: :opus)
+
+# Level 2 analyzer with nested tools
+analyzer = SubAgent.new(
+  prompt: "Analyze {{data}}",
+  signature: "(data :map) -> {analysis :map}",
+  tools: %{
+    "classifier" => SubAgent.as_tool(classifier, llm: :haiku),  # Bound
+    "scorer" => SubAgent.as_tool(scorer),                       # Inherits
+    "expert" => SubAgent.as_tool(expert)                        # Struct override
+  }
+)
+
+# Level 1 orchestrator
+{:ok, step} = SubAgent.run(
+  "Analyze the data",
+  llm: :sonnet,
+  tools: %{
+    "analyzer" => SubAgent.as_tool(analyzer)  # Inherits :sonnet
+  }
+)
+
+# Resolution results:
+# - Analyzer: uses :sonnet (inherited from run call)
+# - Classifier: uses :haiku (bound at as_tool)
+# - Scorer: uses :sonnet (inherited through analyzer)
+# - Expert: uses :opus (struct override, ignores inheritance)
+```
+
 **Implementation in loop:**
 ```elixir
 def execute_tool(%SubAgentTool{agent: agent, bound_llm: bound}, args, %{llm: parent_llm}) do
+  # Resolution order: struct > bound > parent > error
   llm = agent.llm || bound || parent_llm || raise "llm required"
 
   case SubAgent.run(agent, llm: llm, context: args) do
@@ -407,19 +547,25 @@ def run(prompt, opts)
 
 ### System Tools
 
-Injected into every SubAgent loop:
+System tools are **implicitly injected** into every SubAgent's tool registry. They appear in the tool schema shown to the LLM and are called via the standard `(call ...)` syntax.
+
+**Design Decision (DD-9):** System tools are real tools, not keywords. This ensures:
+- Consistent `(call ...)` invocation pattern for everything
+- LLM sees them in the tool schema alongside user tools
+- Unified handling in the interpreter
 
 #### `return`
 
 Complete the mission successfully.
 
 ```
-return(data :any) -> !
+return(data :any) -> :exit-success
 ```
 
 - **Argument:** Value matching the signature's output type
 - **Effect:** Terminates loop, returns `{:ok, step}`
 - **Validation:** If data doesn't match signature, error fed back for self-correction
+- **Note:** The `:exit-success` return type indicates this tool terminates the loop
 
 ```clojure
 (call "return" {:count 5 :items ["a" "b"]})
@@ -430,13 +576,36 @@ return(data :any) -> !
 Terminate with an error.
 
 ```
-fail(error {:reason :keyword, :message :string, :op :string?, :details :map?}) -> !
+fail(error {:reason :keyword, :message :string, :op :string?, :details :map?}) -> :exit-error
 ```
 
 - **Effect:** Terminates loop, returns `{:error, step}`
+- **Note:** The `:exit-error` return type indicates this tool terminates the loop with failure
+
+**Fail signature fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `reason` | `:keyword` | Yes | Machine-readable error code |
+| `message` | `:string` | Yes | Human-readable description |
+| `op` | `:string` | No | Operation/tool that failed |
+| `details` | `:map` | No | Additional context |
 
 ```clojure
 (call "fail" {:reason :not_found :message "User does not exist"})
+```
+
+#### System Tool Implementation
+
+```elixir
+# System tools are injected before user tools
+defp inject_system_tools(user_tools) do
+  system_tools = %{
+    "return" => {:system, :return},
+    "fail" => {:system, :fail}
+  }
+  Map.merge(system_tools, user_tools)
+end
 ```
 
 ---
@@ -761,6 +930,17 @@ Child SubAgents can inherit the parent's LLM. Resolution order:
 
 `SubAgent.compile/2` generates deterministic PTC-Lisp functions. It can include calls to pure Elixir tools (which execute at runtime), but cannot include LLMTool or SubAgent tools (which would require LLM at execution time).
 
+### DD-9: System Tools Are Real Tools
+
+`return` and `fail` are implemented as real tools injected into the tool registry, not special keywords. This ensures consistent `(call ...)` syntax and LLM visibility.
+
+### DD-10: CompiledAgent.execute Always Uses Maps
+
+The `execute` function always takes a map of named arguments, regardless of parameter count. This ensures:
+- Consistent API across all compiled agents
+- Adding parameters doesn't break existing callers
+- Clear, self-documenting invocations
+
 ---
 
 ## Appendix: CompiledAgent Struct
@@ -777,18 +957,63 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   defstruct [
     :source,      # Inspectable PTC-Lisp source code
     :signature,   # Functional contract (String)
-    :execute,     # Pre-bound (fn(args) -> result) executor
+    :execute,     # Pre-bound (fn(map()) -> result) executor
     :metadata     # t:metadata()
   ]
 end
 ```
 
-The `execute` function handles arguments based on the signature's input count:
+**Execute Contract (DD-10):**
 
-- **Single parameter** (e.g., `(item :map) -> ...`):
-  `compiled.execute(item_data)` calls the function with the item directly.
-- **Multiple parameters** (e.g., `(item :map, threshold :float) -> ...`):
-  `compiled.execute(%{item: ..., threshold: ...})` uses a map of named arguments.
+The `execute` function **always** takes a map of named arguments:
+
+```elixir
+# Single parameter signature: (item :map) -> {score :float}
+compiled.execute(%{item: item_data})
+
+# Multiple parameters: (item :map, threshold :float) -> {score :float}
+compiled.execute(%{item: item_data, threshold: 0.5})
+
+# No parameters: () -> {result :map}
+compiled.execute(%{})
+```
+
+**CompiledAgent as Tool:**
+
+Unlike `SubAgent.as_tool/2`, a compiled agent can be wrapped as a tool **without LLM**:
+
+```elixir
+# Compile once
+{:ok, compiled} = SubAgent.compile(scorer, llm: llm, sample: data)
+
+# Use as tool (no LLM needed at execution)
+parent_tools = %{
+  "score_item" => CompiledAgent.as_tool(compiled)
+}
+
+# Parent calls score_item → runs compiled.execute directly
+```
+
+**Implementation:**
+
+```elixir
+defmodule PtcRunner.SubAgent.CompiledAgent do
+  @doc """
+  Wrap a compiled agent as a callable tool.
+
+  Unlike SubAgent.as_tool/2, this does NOT require an LLM at execution time.
+  The compiled logic runs deterministically with only pure tool calls.
+  """
+  @spec as_tool(t()) :: tool()
+  def as_tool(%__MODULE__{execute: execute, signature: signature}) do
+    %{
+      type: :compiled,
+      execute: execute,
+      signature: signature
+    }
+  end
+end
+```
 
 ---
 

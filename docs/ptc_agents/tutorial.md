@@ -513,7 +513,7 @@ LLMTool.new(
 
 The `prompt` and `LLMTool` prompts use a Mustache-style template syntax for context interpolation.
 
-**Critical Rule**: Every `{{placeholder}}` in the prompt MUST have a matching parameter in the `signature`. The system validates this **immediately** when `run/2` or `as_tool/1` is called. If a placeholder is missing from the provided context or signature, it will return an error or raise before any LLM call is made.
+**Critical Rule**: Every `{{placeholder}}` in the prompt MUST have a matching parameter in the `signature`. The system validates this **immediately** when `run/2` or `as_tool/2` is called. If a placeholder is missing from the provided context or signature, it will return an error or raise before any LLM call is made.
 
 ```elixir
 tools = %{

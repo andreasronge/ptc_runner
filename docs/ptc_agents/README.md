@@ -12,7 +12,7 @@ PTC Agents extends PtcRunner with **SubAgents** - isolated workers that execute 
 - **Composability** - Agents can be nested as tools within other agents
 
 ```elixir
-{:ok, step} = SubAgent.delegate(
+{:ok, step} = SubAgent.run(
   "Find top 3 customers by revenue",
   llm: my_llm,
   signature: "() -> {customers [{name :string, revenue :int}]}",
@@ -30,6 +30,9 @@ PTC Agents extends PtcRunner with **SubAgents** - isolated workers that execute 
 | [step.md](step.md) | Shared `Step` struct returned by both Lisp and SubAgent APIs |
 | [lisp-api-updates.md](lisp-api-updates.md) | Breaking changes to existing `PtcRunner.Lisp` API |
 | [signature-syntax.md](signature-syntax.md) | Signature string syntax specification |
+| [type-coercion-matrix.md](type-coercion-matrix.md) | Type mapping and coercion rules |
+| [system-prompt-template.md](system-prompt-template.md) | System prompt structure for LLM calls |
+| [parallel-trace-design.md](parallel-trace-design.md) | Trace aggregation for concurrent execution |
 | [tutorial.md](tutorial.md) | Usage examples and patterns |
 | [spike-summary.md](spike-summary.md) | Historical - spike validation results |
 
