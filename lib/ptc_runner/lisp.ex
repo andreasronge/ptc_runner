@@ -149,6 +149,11 @@ defmodule PtcRunner.Lisp do
   def format_error({:parse_error, msg}), do: "Parse error: #{msg}"
   def format_error({:analysis_error, msg}), do: "Analysis error: #{msg}"
   def format_error({:eval_error, msg}), do: "Eval error: #{msg}"
+
+  def format_error({:invalid_placeholder, name}),
+    do:
+      "Analysis error: placeholder '#{name}' can only be used inside #() anonymous function syntax"
+
   def format_error({:timeout, ms}), do: "Timeout: execution exceeded #{ms}ms limit"
   def format_error({:memory_exceeded, bytes}), do: "Memory exceeded: #{bytes} byte limit"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
