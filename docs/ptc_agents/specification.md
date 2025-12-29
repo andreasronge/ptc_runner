@@ -138,84 +138,37 @@ SubAgent.run(SubAgent.new(prompt: "Find {{x}}", signature: "..."), llm: llm)
 SubAgent.run("Find {{x}}", signature: "...", llm: llm)
 ```
 
-**Execution Modes:**
+**Execution Behavior:**
 
-| Mode | Trigger | Behavior |
-|------|---------|----------|
-| **Judgment** | `max_turns: 1`, no tools | Single turn, expression result returned directly |
-| **Agent** | `max_turns > 1` or `tools` | Multi-turn, requires explicit `(call "return" ...)` |
+Behavior is determined explicitly by `max_turns` and `tools` parameters. No implicit mode switching.
 
-**Mode State Machine:**
+| `max_turns` | `tools` | Behavior | Termination |
+|-------------|---------|----------|-------------|
+| `1` | none | Single-turn: one LLM call, expression result returned | Expression value |
+| `1` | provided | Single-turn with tools: one turn to use tools | Must call `return`/`fail` |
+| `>1` | none | **Error**: multi-turn requires tools | N/A |
+| `>1` | provided | Agentic loop: multiple turns until done | Must call `return`/`fail` |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MODE DETERMINATION                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  run/2 called                                                    │
-│       │                                                          │
-│       ▼                                                          │
-│  ┌─────────────────┐                                            │
-│  │ Check: tools    │                                            │
-│  │ provided?       │                                            │
-│  └────────┬────────┘                                            │
-│           │                                                      │
-│     ┌─────┴─────┐                                               │
-│     │           │                                               │
-│    YES         NO                                                │
-│     │           │                                                │
-│     ▼           ▼                                                │
-│  ┌──────┐  ┌─────────────────┐                                  │
-│  │AGENT │  │ Check: max_turns│                                  │
-│  │ MODE │  │ > 1?            │                                  │
-│  └──────┘  └────────┬────────┘                                  │
-│                     │                                            │
-│               ┌─────┴─────┐                                     │
-│               │           │                                     │
-│              YES         NO                                      │
-│               │           │                                     │
-│               ▼           ▼                                      │
-│            ┌──────┐  ┌─────────┐                                │
-│            │AGENT │  │JUDGMENT │                                │
-│            │ MODE │  │  MODE   │                                │
-│            └──────┘  └─────────┘                                │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Mode Determination Logic:**
-```elixir
-mode = cond do
-  map_size(tools) > 0 -> :agent
-  max_turns > 1 -> :agent
-  true -> :judgment
-end
-```
+**Validation:** `max_turns > 1` without tools raises `{:error, step}` with `reason: :invalid_config`.
 
 **Key Behavioral Differences:**
 
-| Aspect | Judgment Mode | Agent Mode |
-|--------|---------------|------------|
+| Aspect | Single-turn (`max_turns: 1`, no tools) | Agentic loop (`max_turns > 1` with tools) |
+|--------|----------------------------------------|-------------------------------------------|
 | **Termination** | Expression result returned | Must call `return` or `fail` |
 | **Turn count** | Exactly 1 | 1 to `max_turns` |
-| **Tool access** | None (error if attempted) | Full tool registry |
+| **Tool access** | None | Full tool registry |
 | **Error recovery** | No retry | LLM can retry in next turn |
 | **ctx/ access** | Yes | Yes |
 | **memory/ access** | Yes | Yes |
 
-**Edge Cases:**
-
-1. **`max_turns: 1` with tools** → Agent Mode (tools take precedence)
-2. **Judgment Mode calls tool** → Error: "Unknown tool" (no mode transition)
-3. **Agent Mode without explicit return** → Loop continues until timeout or max_turns
-
-**Example: Simple Eval (Judgment Mode)**
+**Example: Single-turn execution**
 ```elixir
 {:ok, step} = SubAgent.run("{{x}} + {{y}}", context: %{x: 10, y: 5}, llm: llm)
 step.return #=> 15
 ```
 
-**Example: Multi-turn Agent**
+**Example: Agentic loop**
 ```elixir
 {:ok, step} = SubAgent.run(email_finder,
   llm: :sonnet,
@@ -865,60 +818,26 @@ SubAgents provide comprehensive debugging capabilities for inspecting prompts, g
 
 ### Step.trace Structure
 
-Every `Step` includes a `trace` field containing detailed per-turn execution history:
+Every `Step` includes a `trace` field containing per-turn execution history. Aggregated metrics are in `step.usage`, not duplicated in trace.
 
 ```elixir
-@type trace :: %{
-  turns: [turn_trace()],
-  total_duration_ms: non_neg_integer(),
-  total_tokens: token_counts()
-}
+@type trace :: [trace_entry()]
 
-@type turn_trace :: %{
+@type trace_entry :: %{
   turn: pos_integer(),
-  timestamp: DateTime.t(),
-  duration_ms: non_neg_integer(),
-
-  # LLM interaction
-  prompt: %{
-    system: String.t(),           # Full system prompt sent
-    messages: [message()],        # Conversation history
-    expanded_template: String.t() # User prompt with {{placeholders}} resolved
-  },
-  llm_response: String.t(),       # Raw LLM response
-
-  # Parsed program
-  program: %{
-    source: String.t(),           # Extracted PTC-Lisp code
-    ast: term(),                  # Parsed AST (optional, when debug: true)
-    parse_error: String.t() | nil # If parsing failed
-  },
-
-  # Execution results
-  execution: %{
-    result: term(),               # Expression result or tool return
-    tool_calls: [tool_call()],    # Tools invoked this turn
-    error: error() | nil,         # Runtime error if any
-    context_snapshot: map()       # ctx/ state after turn (when debug: true)
-  },
-
-  # Token usage
-  tokens: token_counts()
+  program: String.t(),
+  result: term(),
+  tool_calls: [tool_call()]
 }
 
 @type tool_call :: %{
   name: String.t(),
-  args: term(),
-  result: term(),
-  duration_ms: non_neg_integer(),
-  error: error() | nil
-}
-
-@type token_counts :: %{
-  input: non_neg_integer(),
-  output: non_neg_integer()
+  args: map(),
+  result: term()
 }
 ```
+
+**Note:** Debug mode (`debug: true`) captures additional fields per turn (AST, context snapshots, full prompts). See Debug Mode section.
 
 **Accessing trace data:**
 
@@ -926,16 +845,16 @@ Every `Step` includes a `trace` field containing detailed per-turn execution his
 {:ok, step} = SubAgent.run(agent, llm: llm)
 
 # Inspect all turns
-for turn <- step.trace.turns do
-  IO.puts("Turn #{turn.turn}:")
-  IO.puts("  Program: #{turn.program.source}")
-  IO.puts("  Tools called: #{Enum.map(turn.execution.tool_calls, & &1.name)}")
+for entry <- step.trace do
+  IO.puts("Turn #{entry.turn}:")
+  IO.puts("  Program: #{entry.program}")
+  IO.puts("  Tools called: #{Enum.map(entry.tool_calls, & &1.name)}")
 end
 
 # Find which turn called a specific tool
-step.trace.turns
-|> Enum.filter(fn t ->
-  Enum.any?(t.execution.tool_calls, & &1.name == "search")
+step.trace
+|> Enum.filter(fn entry ->
+  Enum.any?(entry.tool_calls, & &1.name == "search")
 end)
 ```
 
@@ -1086,7 +1005,7 @@ defmodule MyApp.Telemetry do
     Logger.info("SubAgent completed",
       duration_ms: measurements.duration,
       status: metadata.status,
-      turns: length(metadata.step.trace.turns)
+      turns: length(metadata.step.trace)
     )
   end
 

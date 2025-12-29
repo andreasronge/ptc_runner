@@ -74,7 +74,7 @@ data = %{
   reports: [...]  # thousands of items
 }
 
-# max_turns > 1 triggers Agent Mode
+# max_turns > 1 with tools enables agentic loop
 {:ok, step} = SubAgent.run(
   "Find the report with highest anomaly score",
   signature: "{report_id :int, reasoning :string}",

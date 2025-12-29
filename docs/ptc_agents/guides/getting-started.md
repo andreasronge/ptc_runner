@@ -78,16 +78,18 @@ step.return.name   #=> "Widget Pro"
 step.return.price  #=> 299.99
 ```
 
-With tools, the SubAgent enters **agent mode** - it runs an agentic loop, calling tools and reasoning until it has enough information to return.
+With tools, the SubAgent enters an **agentic loop** - it calls tools and reasons until it has enough information to return.
 
-## Two Execution Modes
+## Execution Behavior
 
-| Mode | Trigger | Behavior |
-|------|---------|----------|
-| **Judgment** | No tools, `max_turns: 1` | Single LLM call, returns expression result |
-| **Agent** | Tools provided or `max_turns > 1` | Multi-turn loop until explicit `return` |
+| `max_turns` | `tools` | Behavior |
+|-------------|---------|----------|
+| `1` | none | Single-turn: one LLM call, expression returned directly |
+| `1` | provided | Single-turn with tools: one turn to use them |
+| `>1` | provided | Agentic loop: multiple turns until `return`/`fail` |
+| `>1` | none | **Error**: multi-turn requires tools |
 
-In judgment mode, the LLM evaluates and returns directly. In agent mode, it must explicitly call the `return` tool to complete.
+With `max_turns: 1` and no tools, the LLM evaluates and returns directly. With tools or `max_turns > 1`, the agent must explicitly call `return` to complete.
 
 ## Signatures (Optional)
 
@@ -210,6 +212,28 @@ product_finder = PtcRunner.SubAgent.new(
 ```
 
 This separation enables testing, composition, and reuse.
+
+## The Firewall Convention
+
+Fields prefixed with `_` are **firewalled** - available to your Elixir code and the agent's programs, but hidden from LLM prompt history:
+
+```elixir
+signature: "{summary :string, count :int, _email_ids [:int]}"
+```
+
+This keeps parent agent context lean while preserving full data access. See [Core Concepts](core-concepts.md) for details.
+
+## Memory
+
+Each agent has private memory persisting across turns within a single `run`:
+
+```clojure
+(memory/put :cache result)   ; store
+(memory/get :cache)          ; retrieve
+memory/cache                 ; shorthand
+```
+
+Memory is scoped per-agent and hidden from prompts. See [Core Concepts](core-concepts.md) for details.
 
 ## What's Next
 

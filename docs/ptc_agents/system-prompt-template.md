@@ -73,7 +73,7 @@ The program will be executed, and you may see results in subsequent turns.
 Your mission ends ONLY when you call the `return` or `fail` tool.
 ```
 
-**Judgment Mode variant:**
+**Single-turn variant (max_turns: 1, no tools):**
 ```markdown
 # Role
 

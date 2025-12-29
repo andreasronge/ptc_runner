@@ -207,16 +207,16 @@ Every SubAgent has two built-in tools:
 - Terminates the loop immediately
 - `run/2` returns `{:error, step}` with `step.fail` populated
 
-## Execution Modes
+## Execution Behavior
 
-SubAgents operate in two modes based on configuration:
+SubAgent behavior is determined explicitly by `max_turns` and `tools`:
 
-### Judgment Mode
+### Single-turn Execution
 
-For single-turn classification or mapping tasks:
+For classification or mapping tasks with one LLM call:
 
 ```elixir
-# Triggered by: max_turns: 1 AND no tools
+# max_turns: 1, no tools
 {:ok, step} = PtcRunner.SubAgent.run(
   "Classify this text: {{text}}",
   signature: "{category :string, confidence :float}",
@@ -228,12 +228,12 @@ For single-turn classification or mapping tasks:
 
 The LLM provides a single expression; no `return` call needed.
 
-### Agent Mode
+### Agentic Loop
 
 For multi-turn investigation with tools:
 
 ```elixir
-# Triggered by: tools provided OR max_turns > 1
+# max_turns > 1, with tools
 {:ok, step} = PtcRunner.SubAgent.run(
   "Find the report with highest anomaly score",
   signature: "{report_id :int, reasoning :string}",
@@ -244,6 +244,8 @@ For multi-turn investigation with tools:
 ```
 
 Full agentic loop requiring explicit `return` or `fail`.
+
+**Note:** `max_turns > 1` without tools is an error.
 
 ## Defaults
 
