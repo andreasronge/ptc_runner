@@ -500,6 +500,8 @@ end
 
 ## Related Documents
 
-- [specification.md](specification.md) - SubAgent API specification
+- [specification.md](specification.md) - SubAgent API reference
+- [guides/](guides/) - Usage guides and patterns
 - [step.md](step.md) - Step struct specification
-- [spike-summary.md](spike-summary.md) - Spike validation results
+- [signature-syntax.md](signature-syntax.md) - Signature syntax reference
+- [spike-summary.md](spike-summary.md) - Historical spike validation results

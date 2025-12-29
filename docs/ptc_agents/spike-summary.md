@@ -1,11 +1,11 @@
 # SubAgent Architecture: Spike Summary
 
 > **Historical Document**: This document captures the original spike validation work. The API has evolved significantly since then. **Note:** `SubAgent.delegate/2` is now `SubAgent.run/2`, and `as_tool/1` is now `as_tool/2`. For current API design, see:
-> - [guides/](guides/) - SubAgent usage guides
-> - [specification.md](specification.md) - Formal API specification
+> - [guides/](guides/) - Usage guides and patterns
+> - [specification.md](specification.md) - Formal API reference
 > - [step.md](step.md) - Shared Step struct specification
-> - [lisp-api-updates.md](lisp-api-updates.md) - Planned changes to Lisp API
-> - [signature-syntax.md](signature-syntax.md) - Signature syntax specification
+> - [lisp-api-updates.md](lisp-api-updates.md) - Changes to Lisp API
+> - [signature-syntax.md](signature-syntax.md) - Signature syntax reference
 >
 > The learnings below remain valid, but specific API details (function names, struct fields, options) may differ from the current plan.
 

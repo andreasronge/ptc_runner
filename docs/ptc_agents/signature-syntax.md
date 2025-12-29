@@ -325,6 +325,7 @@ These extensions should be added only when genuine use cases emerge.
 
 ## Related Documents
 
-- [specification.md](specification.md) - Full SubAgent API specification
-- [step.md](step.md) - Shared Step struct specification
-- [guides/](guides/) - SubAgent usage guides
+- [specification.md](specification.md) - SubAgent API reference
+- [guides/](guides/) - Usage guides and patterns
+- [step.md](step.md) - Step struct specification
+- [type-coercion-matrix.md](type-coercion-matrix.md) - Type mapping and coercion rules

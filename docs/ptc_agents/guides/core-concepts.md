@@ -258,5 +258,8 @@ Full agentic loop requiring explicit `return` or `fail`.
 
 ## What's Next
 
+- [Getting Started](getting-started.md) - Build your first SubAgent
 - [Patterns](patterns.md) - Chaining, orchestration, and composition
 - [Signatures](signatures.md) - Full signature syntax reference
+- [Advanced Topics](advanced.md) - Observability and the compile pattern
+- [Specification](../specification.md) - SubAgent API reference

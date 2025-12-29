@@ -419,3 +419,5 @@ The LLM sees tool schemas in `tool_catalog` for planning but can only call tools
 
 - [Advanced Topics](advanced.md) - Multi-turn ReAct, compile pattern, observability
 - [Signatures](signatures.md) - Full signature syntax reference
+- [Core Concepts](core-concepts.md) - Context, memory, and the firewall
+- [Specification](../specification.md) - SubAgent API reference

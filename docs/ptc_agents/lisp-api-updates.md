@@ -405,6 +405,7 @@ end
 
 ## Related Documents
 
+- [specification.md](specification.md) - SubAgent API reference
+- [guides/](guides/) - Usage guides and patterns
 - [step.md](step.md) - Step struct specification
-- [specification.md](specification.md) - SubAgent API
-- [signature-syntax.md](signature-syntax.md) - Signature syntax specification
+- [signature-syntax.md](signature-syntax.md) - Signature syntax reference

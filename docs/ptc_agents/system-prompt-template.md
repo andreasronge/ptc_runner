@@ -391,6 +391,7 @@ Please fix the issue and try again.
 
 ## Related Documents
 
-- [specification.md](specification.md) - SubAgent API specification
-- [guides/](guides/) - Usage guides
-- [signature-syntax.md](signature-syntax.md) - Signature syntax
+- [specification.md](specification.md) - SubAgent API reference
+- [guides/](guides/) - Usage guides and patterns
+- [signature-syntax.md](signature-syntax.md) - Signature syntax reference
+- [step.md](step.md) - Step struct specification
