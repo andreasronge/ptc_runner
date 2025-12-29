@@ -25,9 +25,57 @@ This document specifies planned changes to the existing `PtcRunner.Lisp` API.
 |--------|--------|-------------|
 | Return `Step` struct | **Breaking** | Replace 4-tuple with struct |
 | Error `Step` struct | **Breaking** | Replace 2-tuple with struct |
+| Memory Result Contract key | **Breaking** | Rename `:result` to `:return` |
 | Tool format expansion | Non-breaking | Accept function refs and signatures |
 | Optional `:signature` | Non-breaking | Opt-in input/output validation |
 | Expose metrics | Non-breaking | New `usage` field in Step |
+
+---
+
+## Memory Result Contract Key Change
+
+### Current
+
+The `:result` key separates "what to return" from "what to persist":
+
+```elixir
+# Program returns: %{result: "done", users: [...]}
+# → Memory merged with %{users: [...]}, result = "done"
+```
+
+### Planned
+
+Rename `:result` to `:return`:
+
+```elixir
+# Program returns: %{return: "done", users: [...]}
+# → Memory merged with %{users: [...]}, result = "done"
+```
+
+### Rationale
+
+The `:return` key name clearly indicates "what this turn returns to the caller/LLM". This creates a clean parallel with the `return` system tool in SubAgent:
+
+| Mechanism | Scope | Purpose |
+|-----------|-------|---------|
+| `:return` key in map | Per-turn | Separate LLM-visible result from persisted memory |
+| `(call "return" ...)` tool | Per-mission | Terminate agentic loop with final answer |
+
+Both are about "giving back a value" but at different granularity. The parallel naming reinforces the concept.
+
+### Example
+
+```clojure
+; Turn 1 - :return controls what LLM sees vs what persists
+{:return "fetched 50 users"
+ :users (call "get-users" {:limit 50})}
+; LLM history: "fetched 50 users"
+; Memory: {:users [...]}
+
+; Turn 2 - return TOOL terminates the loop
+(call "return" {:total (count memory/users)})
+; Mission complete
+```
 
 ---
 

@@ -194,6 +194,7 @@ Complete list of error reasons in `step.fail.reason`:
 
 | Reason | Source | Description |
 |--------|--------|-------------|
+| `:invalid_config` | SubAgent | Invalid combination of `max_turns` and `tools` |
 | `:parse_error` | Lisp | Invalid PTC-Lisp syntax |
 | `:analysis_error` | Lisp | Semantic error (undefined variable, etc.) |
 | `:eval_error` | Lisp | Runtime error (division by zero, etc.) |
