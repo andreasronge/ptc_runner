@@ -91,9 +91,15 @@ The main agent sees typed tool signatures and can compose them:
 
 ### LLM Inheritance
 
-SubAgents can inherit their LLM from the parent:
+SubAgents can inherit their LLM from the parent. Atoms like `:haiku` or `:sonnet` are resolved via the `:llm_registry` option - a map from atoms to callback functions that you provide:
 
 ```elixir
+# Define your LLM callbacks
+registry = %{
+  haiku: &MyApp.LLM.haiku/1,
+  sonnet: &MyApp.LLM.sonnet/1
+}
+
 # Resolution order (first non-nil wins):
 # 1. agent.llm - Struct override
 # 2. as_tool(..., llm: x) - Bound at tool creation
@@ -121,8 +127,15 @@ tools = %{
 }
 
 # Parent uses sonnet; finder inherits it, others use haiku
-{:ok, step} = SubAgent.run(orchestrator, llm: :sonnet, tools: tools)
+# Registry passed once at top level, inherited by all children
+{:ok, step} = SubAgent.run(orchestrator,
+  llm: :sonnet,
+  llm_registry: registry,
+  tools: tools
+)
 ```
+
+See [Configuration](../specification.md#llm-registry) for details on setting up the registry.
 
 ## LLM-Powered Tools
 
@@ -184,11 +197,13 @@ Process multiple items in one LLM call:
 
 ### LLM Selection for Tools
 
+Atoms like `:haiku` resolve via the `llm_registry` passed at the top-level `run/2` call:
+
 ```elixir
 # Uses caller's LLM (default)
 "deep_analysis" => LLMTool.new(prompt: "...", signature: "...")
 
-# Uses cheaper model for simple tasks
+# Uses cheaper model for simple tasks (resolved via registry)
 "quick_triage" => LLMTool.new(
   prompt: "Is '{{subject}}' urgent?",
   signature: "(subject :string) -> {priority :string}",

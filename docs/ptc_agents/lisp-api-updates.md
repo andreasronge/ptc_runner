@@ -15,7 +15,8 @@ This document specifies planned changes to the existing `PtcRunner.Lisp` API.
 4. [Tool Registration](#tool-registration)
 5. [Signature Validation](#signature-validation)
 6. [Usage Metrics](#usage-metrics)
-7. [Migration Guide](#migration-guide)
+7. [Language Extensions](#language-extensions)
+8. [Migration Guide](#migration-guide)
 
 ---
 
@@ -28,6 +29,7 @@ This document specifies planned changes to the existing `PtcRunner.Lisp` API.
 | Tool format expansion | Non-breaking | Accept function refs and signatures |
 | Optional `:signature` | Non-breaking | Opt-in input/output validation |
 | Expose metrics | Non-breaking | New `usage` field in Step |
+| Language extensions | Non-breaking | New functions: `seq`, `#()`, string ops, `conj` |
 
 ---
 
@@ -255,6 +257,279 @@ Metrics included in Step:
 
 ---
 
+## Language Extensions
+
+New functions and syntax to align with LLM expectations and common Clojure patterns.
+
+### Summary
+
+| Category | Functions | Rationale |
+|----------|-----------|-----------|
+| Sequence | `seq` | Convert strings/collections to sequences |
+| Syntax | `#()` | Anonymous function shorthand (LLMs generate this) |
+| String | `str`, `subs`, `join`, `split`, `trim`, etc. | Basic string manipulation |
+| Collection | `conj` | Add elements to collections |
+| Parsing | `parse-long`, `parse-double` | Type coercion from strings |
+
+---
+
+### `seq` — Sequence Conversion
+
+Convert strings and collections to sequences.
+
+```clojure
+(seq "hello")           ; => ["h" "e" "l" "l" "o"]
+(seq [1 2 3])           ; => [1 2 3]
+(seq #{:a :b})          ; => [:a :b] (order not guaranteed)
+(seq {:a 1 :b 2})       ; => [[:a 1] [:b 2]]
+(seq [])                ; => nil
+(seq "")                ; => nil
+(seq nil)               ; => nil
+```
+
+**Semantics:**
+- Strings return list of single-character strings (graphemes)
+- Empty collections and empty strings return `nil`
+- `nil` returns `nil`
+- Maps return list of `[key value]` pairs
+
+**Use case:** Character iteration, emptiness checks via `(if (seq coll) ...)`.
+
+---
+
+### `#()` — Anonymous Function Shorthand
+
+Clojure's compact syntax for anonymous functions.
+
+```clojure
+#(+ % 1)                ; => (fn [p1] (+ p1 1))
+#(+ %1 %2)              ; => (fn [p1 p2] (+ p1 p2))
+#(* % %)                ; => (fn [p1] (* p1 p1))
+```
+
+**Placeholder symbols:**
+
+| Symbol | Meaning |
+|--------|---------|
+| `%` | First argument (same as `%1`) |
+| `%1` | First argument |
+| `%2` | Second argument |
+| `%3` | Third argument |
+| ... | Up to `%9` |
+
+**Examples:**
+
+```clojure
+(filter #(> % 10) [5 15 8 20])           ; => [15 20]
+(map #(str "id-" %) [1 2 3])             ; => ["id-1" "id-2" "id-3"]
+(reduce #(+ %1 %2) 0 [1 2 3])            ; => 6
+(count (filter #(= % "r") (seq "raspberry")))  ; => 3
+```
+
+**Implementation notes:**
+- Parser recognizes `#(` as distinct from `#{` (set literal)
+- `%` symbols are only valid inside `#()` body
+- Desugars to `fn` at analysis time
+- Max arity determined by highest `%n` in body
+
+---
+
+### String Functions
+
+Basic string operations. Previously excluded ("use tools"), now included due to LLM demand.
+
+#### `str` — String Concatenation
+
+```clojure
+(str)                   ; => ""
+(str "hello")           ; => "hello"
+(str "a" "b" "c")       ; => "abc"
+(str "count: " 42)      ; => "count: 42"
+(str nil)               ; => ""
+(str "x" nil "y")       ; => "xy"
+```
+
+**Semantics:**
+- Variadic: accepts 0 or more arguments
+- Converts all arguments to strings
+- `nil` converts to empty string (not `"nil"`)
+- Numbers, keywords, booleans converted to their string representation
+
+#### `subs` — Substring
+
+```clojure
+(subs "hello" 1)        ; => "ello"
+(subs "hello" 1 3)      ; => "el"
+(subs "hello" 0 0)      ; => ""
+```
+
+**Semantics:**
+- `(subs s start)` — from start to end
+- `(subs s start end)` — from start to end (exclusive)
+- Zero-indexed
+- Out of bounds returns truncated result (no error)
+
+#### `join` — Join Collection
+
+```clojure
+(join ["a" "b" "c"])           ; => "abc"
+(join ", " ["a" "b" "c"])      ; => "a, b, c"
+(join "-" [1 2 3])             ; => "1-2-3"
+(join ", " [])                 ; => ""
+```
+
+**Semantics:**
+- `(join coll)` — concatenate without separator
+- `(join sep coll)` — concatenate with separator
+- Elements converted to strings
+
+#### `split` — Split String
+
+```clojure
+(split "a,b,c" ",")            ; => ["a" "b" "c"]
+(split "hello" "")             ; => ["h" "e" "l" "l" "o"]
+(split "a,,b" ",")             ; => ["a" "" "b"]
+```
+
+**Semantics:**
+- Simple string delimiter (no regex)
+- Empty delimiter splits into characters
+- Empty segments preserved
+
+#### `trim` — Trim Whitespace
+
+```clojure
+(trim "  hello  ")      ; => "hello"
+(trim "\n\t text \r\n") ; => "text"
+(trim "no-space")       ; => "no-space"
+```
+
+#### `upper-case` / `lower-case` — Case Conversion
+
+```clojure
+(upper-case "Hello")    ; => "HELLO"
+(lower-case "Hello")    ; => "hello"
+```
+
+#### `starts-with?` / `ends-with?` — Prefix/Suffix Check
+
+```clojure
+(starts-with? "hello" "he")    ; => true
+(starts-with? "hello" "lo")    ; => false
+(ends-with? "hello" "lo")      ; => true
+(ends-with? "hello" "he")      ; => false
+```
+
+#### `includes?` — Substring Check
+
+```clojure
+(includes? "hello world" "wor")  ; => true
+(includes? "hello" "xyz")        ; => false
+```
+
+**Note:** This is also available via `(where :field includes value)` in predicates.
+
+#### `replace` — String Replace
+
+```clojure
+(replace "hello" "l" "L")        ; => "heLLo" (all occurrences)
+(replace "aaa" "a" "b")          ; => "bbb"
+```
+
+**Semantics:**
+- Replaces all occurrences (not just first)
+- Simple string matching (no regex)
+
+---
+
+### `conj` — Add to Collection
+
+Add elements to collections.
+
+```clojure
+(conj [1 2] 3)          ; => [1 2 3]
+(conj [1 2] 3 4)        ; => [1 2 3 4]
+(conj #{1 2} 3)         ; => #{1 2 3}
+(conj {:a 1} [:b 2])    ; => {:a 1 :b 2}
+(conj nil 1)            ; => [1]
+```
+
+**Semantics:**
+- Vectors: adds to end
+- Sets: adds element
+- Maps: adds `[key value]` pair
+- `nil`: creates new vector
+
+---
+
+### `parse-long` / `parse-double` — String to Number
+
+Parse strings to numbers (Clojure 1.11+ functions).
+
+```clojure
+(parse-long "42")       ; => 42
+(parse-long "-17")      ; => -17
+(parse-long "abc")      ; => nil
+(parse-long nil)        ; => nil
+(parse-long "3.14")     ; => nil (not an integer)
+
+(parse-double "3.14")   ; => 3.14
+(parse-double "-0.5")   ; => -0.5
+(parse-double "42")     ; => 42.0
+(parse-double "abc")    ; => nil
+```
+
+**Semantics:**
+- Returns `nil` on parse failure (not an error)
+- `parse-long` requires integer format
+- `parse-double` accepts integer or float format
+- Leading/trailing whitespace NOT trimmed (returns `nil`)
+
+---
+
+### Implementation Order
+
+1. **`seq`** — Runtime function only
+2. **`#()` syntax** — Parser + analyzer changes
+3. **String functions** — Runtime functions
+4. **`conj`** — Runtime function
+5. **`parse-long`, `parse-double`** — Runtime functions
+
+### Complexity Estimates
+
+| Function | Parser | Analyzer | Runtime | Est. Time |
+|----------|--------|----------|---------|-----------|
+| `seq` | - | - | ✓ | 30 min |
+| `#()` | ✓ | ✓ | - | 2-4 hours |
+| `str` | - | - | ✓ | 20 min |
+| `subs` | - | - | ✓ | 15 min |
+| `join` | - | - | ✓ | 15 min |
+| `split` | - | - | ✓ | 15 min |
+| `trim` | - | - | ✓ | 10 min |
+| `upper/lower-case` | - | - | ✓ | 10 min |
+| `starts/ends-with?` | - | - | ✓ | 10 min |
+| `includes?` | - | - | ✓ | 10 min |
+| `replace` | - | - | ✓ | 15 min |
+| `conj` | - | - | ✓ | 20 min |
+| `parse-long/double` | - | - | ✓ | 20 min |
+
+**Total: ~5-7 hours**
+
+---
+
+### Spec Updates Required
+
+After implementation, update `docs/ptc-lisp-specification.md`:
+
+1. **Section 3.4** — Remove "strings are opaque" language
+2. **Section 8** — Add new String Functions subsection
+3. **Section 13.3** — Remove string functions from "excluded" list
+4. **Add `seq`** to Section 8.1 (Collection Operations)
+5. **Add `conj`** to Section 8.1
+6. **Add `#()`** to Section 13.2 as now supported
+
+---
+
 ## Migration Guide
 
 ### Basic Usage
@@ -343,11 +618,22 @@ end
 
 ## Implementation Order
 
+### Phase 1: API Changes
+
 1. **Create `PtcRunner.Step` struct** - Foundation
 2. **Create `PtcRunner.Tool` struct** - Normalize tool definitions
 3. **Update `PtcRunner.Lisp.run/2`** - Return Step, expose metrics
 4. **Add signature parser** - Shared with SubAgent
 5. **Add `:signature` option** - Input/output validation
+
+### Phase 2: Language Extensions
+
+6. **Add `seq`** - Runtime function
+7. **Add `#()` syntax** - Parser and analyzer
+8. **Add string functions** - `str`, `subs`, `join`, `split`, `trim`, `upper/lower-case`, `starts/ends-with?`, `includes?`, `replace`
+9. **Add `conj`** - Runtime function
+10. **Add `parse-long`, `parse-double`** - Runtime functions
+11. **Update `ptc-lisp-specification.md`** - Document new functions
 
 ---
 

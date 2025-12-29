@@ -133,6 +133,33 @@ The callback receives:
 | `tool_names` | `[String.t()]` | Available tool names |
 | `llm_opts` | `map()` | Custom options passed through |
 
+### Using Atoms with a Registry
+
+For convenience, you can use atoms like `:haiku` or `:sonnet` by providing an `llm_registry`:
+
+```elixir
+# Define your callbacks
+defmodule MyApp.LLM do
+  def haiku(input), do: call_anthropic("claude-3-haiku-20240307", input)
+  def sonnet(input), do: call_anthropic("claude-3-5-sonnet-20241022", input)
+end
+
+# Create registry
+registry = %{
+  haiku: &MyApp.LLM.haiku/1,
+  sonnet: &MyApp.LLM.sonnet/1
+}
+
+# Use atoms - resolved via registry
+PtcRunner.SubAgent.run(prompt,
+  llm: :sonnet,
+  llm_registry: registry,
+  signature: "..."
+)
+```
+
+The registry is inherited by child SubAgents, so you only pass it once at the top level. See [Configuration](../specification.md#llm-registry) for more details.
+
 ### Example with ReqLLM
 
 ```elixir
