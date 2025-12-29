@@ -1030,6 +1030,7 @@ The `seq` function converts a collection to a sequence:
 | `subs` | `(subs s start end)` | Substring from start to end |
 | `split` | `(split s separator)` | Split string by separator |
 | `join` | `(join separator coll)` | Join collection elements with separator |
+| `join` | `(join coll)` | Join collection elements (no separator) |
 | `trim` | `(trim s)` | Remove leading/trailing whitespace |
 | `replace` | `(replace s pattern replacement)` | Replace all occurrences |
 
@@ -1055,8 +1056,6 @@ The `seq` function converts a collection to a sequence:
 - `(str true)` → `"true"` (boolean conversion)
 - `(str :user)` → `":user"` (keyword with colon)
 - `(str nil "x")` → `"x"` (nil coerced to empty string)
-- `(subs "hello" -2)` → `"lo"` (negative indices count from end)
-- `(subs "hello" 0 -1)` → `"hell"` (negative end index)
 - `(split "a,b,c" ",")` → `["a" "b" "c"]` (split by separator)
 - `(split "hello" "")` → `["h" "e" "l" "l" "o"]` (split into characters)
 - `(split "a,,b" ",")` → `["a" "" "b"]` (preserves empty elements)
