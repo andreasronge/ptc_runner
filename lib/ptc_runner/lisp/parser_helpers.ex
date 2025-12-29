@@ -64,4 +64,12 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   end
 
   def build_list({:list, elements}), do: {:list, elements}
+
+  # ============================================================
+  # Short function syntax
+  # ============================================================
+
+  def build_short_fn({:short_fn, body_asts}) do
+    {:short_fn, body_asts}
+  end
 end
