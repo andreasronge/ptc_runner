@@ -466,6 +466,28 @@ Binds a value from an expression and evaluates the body only if the value is tru
 
 ---
 
+### 5.6 `do` — Sequential Evaluation
+
+Evaluates expressions in order, returning the value of the last expression:
+
+```clojure
+(do expr1 expr2 ... exprN)
+```
+
+**Semantics:**
+- All expressions are evaluated left-to-right
+- The value of the last expression is returned
+- `(do)` with no expressions returns `nil`
+- Unlike `and`/`or`, there is no short-circuiting
+
+```clojure
+(do 1 2 3)                        ; => 3
+(do (call "log" {:msg "hi"}))     ; => result of log call
+(do)                              ; => nil
+```
+
+---
+
 ## 6. Threading Macros
 
 Threading macros transform nested function calls into linear pipelines.

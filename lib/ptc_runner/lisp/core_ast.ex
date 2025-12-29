@@ -38,6 +38,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:if, t(), t(), t()}
           # Anonymous function
           | {:fn, [pattern()], t()}
+          # Sequential evaluation (special forms, not calls)
+          | {:do, [t()]}
           # Short-circuit logic (special forms, not calls)
           | {:and, [t()]}
           | {:or, [t()]}

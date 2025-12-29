@@ -124,6 +124,11 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, flex_get(memory, key), memory}
   end
 
+  # Sequential evaluation: do
+  defp do_eval({:do, exprs}, ctx, memory, env, tool_exec) do
+    do_eval_do(exprs, ctx, memory, env, tool_exec)
+  end
+
   # Short-circuit logic: and
   defp do_eval({:and, exprs}, ctx, memory, env, tool_exec) do
     do_eval_and(exprs, ctx, memory, env, tool_exec)
@@ -293,6 +298,22 @@ defmodule PtcRunner.Lisp.Eval do
       {:cont, {:ok, [{k, v} | acc], mem3}}
     else
       {:error, _} = err -> {:halt, err}
+    end
+  end
+
+  # ============================================================
+  # Sequential evaluation helpers
+  # ============================================================
+
+  defp do_eval_do([], _ctx, memory, _env, _tool_exec), do: {:ok, nil, memory}
+
+  defp do_eval_do([e], ctx, memory, env, tool_exec) do
+    do_eval(e, ctx, memory, env, tool_exec)
+  end
+
+  defp do_eval_do([e | rest], ctx, memory, env, tool_exec) do
+    with {:ok, _value, memory2} <- do_eval(e, ctx, memory, env, tool_exec) do
+      do_eval_do(rest, ctx, memory2, env, tool_exec)
     end
   end
 

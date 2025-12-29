@@ -76,6 +76,39 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
     end
   end
 
+  describe "sequential evaluation: do" do
+    test "empty do returns nil" do
+      assert {:ok, nil, %{}} = Eval.eval({:do, []}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "single expression returns its value" do
+      assert {:ok, 42, %{}} = Eval.eval({:do, [42]}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "multiple expressions evaluates all and returns last value" do
+      exprs = [1, 2, 3]
+      assert {:ok, 3, %{}} = Eval.eval({:do, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "do evaluates all expressions without short-circuiting" do
+      env = Env.initial()
+
+      exprs = [
+        {:call, {:var, :+}, [1, 1]},
+        {:call, {:var, :+}, [2, 2]},
+        {:call, {:var, :+}, [3, 3]}
+      ]
+
+      assert {:ok, 6, %{}} = Eval.eval({:do, exprs}, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "nested do works" do
+      inner_do = {:do, [1, 2]}
+      outer_do = {:do, [inner_do, 3]}
+      assert {:ok, 3, %{}} = Eval.eval(outer_do, %{}, %{}, %{}, &dummy_tool/2)
+    end
+  end
+
   describe "conditionals: if" do
     test "if with truthy condition evaluates then branch" do
       then_ast = 42
