@@ -6,6 +6,8 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   by extracting placeholders (%, %1, %2, etc.) and generating parameters.
   """
 
+  alias PtcRunner.Lisp.Analyze
+
   @doc """
   Desugars short function syntax into a transformed AST.
 
@@ -80,7 +82,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
 
   # Recursively find all placeholder symbols in an AST node
   defp find_all_placeholders({:symbol, name}) do
-    if placeholder?(name) do
+    if Analyze.placeholder?(name) do
       [name]
     else
       []
@@ -111,15 +113,6 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   end
 
   defp find_all_placeholders(_), do: []
-
-  # Check if a symbol name is a placeholder (%, %1, %2, etc.)
-  defp placeholder?(name) do
-    case to_string(name) do
-      "%" -> true
-      "%" <> rest -> String.match?(rest, ~r/^\d+$/)
-      _ -> false
-    end
-  end
 
   # ============================================================
   # Arity and parameter generation
@@ -174,7 +167,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   defp transform_body({:symbol, name}, _placeholders) when is_atom(name) do
     name_str = to_string(name)
 
-    case placeholder?(name) do
+    case Analyze.placeholder?(name) do
       true ->
         param_name = placeholder_to_param(name_str)
         {:symbol, param_name}

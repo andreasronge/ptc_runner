@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Analyze do
           | {:invalid_cond_form, String.t()}
           | {:invalid_thread_form, atom(), String.t()}
           | {:unsupported_pattern, term()}
+          | {:invalid_placeholder, atom()}
 
   @spec analyze(term()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
   def analyze(raw_ast) do
@@ -76,7 +77,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # Symbols and variables
   # ============================================================
 
-  defp do_analyze({:symbol, name}), do: {:ok, {:var, name}}
+  defp do_analyze({:symbol, name}) do
+    if placeholder?(name) do
+      {:error, {:invalid_placeholder, name}}
+    else
+      {:ok, {:var, name}}
+    end
+  end
+
   defp do_analyze({:ns_symbol, :ctx, key}), do: {:ok, {:ctx, key}}
   defp do_analyze({:ns_symbol, :memory, key}), do: {:ok, {:memory, key}}
 
@@ -716,6 +724,20 @@ defmodule PtcRunner.Lisp.Analyze do
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}
       other -> other
+    end
+  end
+
+  # ============================================================
+  # Placeholder detection
+  # ============================================================
+
+  # Check if a symbol name is a placeholder (%, %1, %2, etc.)
+  @doc false
+  def placeholder?(name) do
+    case to_string(name) do
+      "%" -> true
+      "%" <> rest -> String.match?(rest, ~r/^\d+$/)
+      _ -> false
     end
   end
 end
