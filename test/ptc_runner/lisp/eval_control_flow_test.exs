@@ -101,6 +101,12 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
 
       assert {:ok, 6, %{}} = Eval.eval({:do, exprs}, %{}, %{}, env, &dummy_tool/2)
     end
+
+    test "nested do works" do
+      inner_do = {:do, [1, 2]}
+      outer_do = {:do, [inner_do, 3]}
+      assert {:ok, 3, %{}} = Eval.eval(outer_do, %{}, %{}, %{}, &dummy_tool/2)
+    end
   end
 
   describe "conditionals: if" do
