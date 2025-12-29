@@ -606,7 +606,7 @@ end
 
 Tools in the `:tools` map can be:
 
-**1. Function reference (extracts `@spec`):**
+**1. Function reference (extracts `@spec` and `@doc`):**
 ```elixir
 "get_user" => &MyApp.get_user/1
 ```
@@ -616,20 +616,41 @@ Tools in the `:tools` map can be:
 "search" => {&MyApp.search/2, "(query :string, limit :int) -> [{id :int}]"}
 ```
 
-**3. Anonymous function:**
+**3. Function with signature and description (keyword list):**
+```elixir
+"analyze" => {&MyApp.analyze/1,
+  signature: "(data :map) -> {score :float}",
+  description: "Analyze data and return anomaly score"
+}
+```
+
+**4. Anonymous function:**
 ```elixir
 "get_time" => fn _args -> DateTime.utc_now() end
 ```
 
-**4. LLMTool struct:**
+**5. LLMTool struct:**
 ```elixir
-"classify" => LLMTool.new(prompt: "...", signature: "...")
+"classify" => LLMTool.new(prompt: "...", signature: "...", description: "...")
 ```
 
-**5. SubAgent-as-tool:**
+**6. SubAgent-as-tool:**
 ```elixir
 "researcher" => SubAgent.as_tool(prompt: "...", signature: "...", tools: ...)
 ```
+
+### Tool Format Summary
+
+| Format | Signature | Description | Use Case |
+|--------|-----------|-------------|----------|
+| `fun` | Auto (@spec) | Auto (@doc) | Quick prototyping |
+| `{fun, "sig"}` | Explicit | None | Validation without docs |
+| `{fun, sig: "...", desc: "..."}` | Explicit | Explicit | Production tools |
+| `{fun, :skip}` | Skipped | None | Dynamic/untyped tools |
+| `LLMTool.new(...)` | Explicit | Explicit | LLM-powered tools |
+| `SubAgent.as_tool(...)` | From agent | From prompt | Nested agents |
+
+Descriptions are shown to the LLM in the system prompt's tool schema section, helping it understand when and how to use each tool.
 
 ### tools vs tool_catalog
 

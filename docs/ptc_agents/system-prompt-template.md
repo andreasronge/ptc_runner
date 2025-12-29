@@ -136,7 +136,13 @@ end
 
 ## Section 4: Tool Schemas
 
-Generated from `tools` and `tool_catalog`:
+Generated from `tools` and `tool_catalog`. Each tool's signature and description are displayed to help the LLM understand available capabilities.
+
+**Description sources (in priority order):**
+1. Explicit `description:` in keyword list format
+2. Auto-extracted `@doc` from function reference
+3. For LLMTool: the `:description` field
+4. For SubAgent-as-tool: derived from the agent's prompt
 
 ```markdown
 # Available Tools

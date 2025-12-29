@@ -167,7 +167,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Not supported:** Multi-line strings, regex literals
 
-**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, and `replace`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.4 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `upper-case`, `lower-case`, `starts-with?`, `ends-with?`, and `includes?`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 for details.
 
 ### 3.5 Keywords
 
@@ -1023,8 +1023,6 @@ The `seq` function converts a collection to a sequence:
 
 ### 8.3 String Functions
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
 | `str` | `(str ...)` | Convert and concatenate to string |
 | `subs` | `(subs s start)` | Substring from index to end |
 | `subs` | `(subs s start end)` | Substring from start to end |
@@ -1033,6 +1031,11 @@ The `seq` function converts a collection to a sequence:
 | `join` | `(join coll)` | Join collection elements (no separator) |
 | `trim` | `(trim s)` | Remove leading/trailing whitespace |
 | `replace` | `(replace s pattern replacement)` | Replace all occurrences |
+| `upper-case` | `(upper-case s)` | Convert to upper case |
+| `lower-case` | `(lower-case s)` | Convert to lower case |
+| `starts-with?` | `(starts-with? s prefix)` | True if string starts with prefix |
+| `ends-with?` | `(ends-with? s suffix)` | True if string ends with suffix |
+| `includes?` | `(includes? s substr)` | True if string contains substring |
 
 **Type coercion:** `str` converts values to strings using these rules:
 - `nil` → `""`

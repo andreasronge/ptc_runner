@@ -216,27 +216,58 @@ tools = %{
 }
 ```
 
-Tool signatures are auto-extracted from `@spec` when available:
+### Auto-Extraction from @spec and @doc
+
+Tool signatures and descriptions are auto-extracted when available:
 
 ```elixir
 # In your module
+@doc "Search for items matching the query string"
 @spec search(String.t(), integer()) :: [map()]
 def search(query, limit), do: ...
 
-# Auto-extracted as: search(query :string, limit :int) -> [:map]
+# Auto-extracted:
+#   signature: "(query :string, limit :int) -> [:map]"
+#   description: "Search for items matching the query string"
 tools = %{"search" => &MyApp.search/2}
 ```
 
-For functions without specs, provide one explicitly:
+### Explicit Signatures
+
+For functions without specs, provide a signature explicitly:
 
 ```elixir
 tools = %{
-  "search" => {
-    &MyApp.search/2,
-    "(query :string, limit :int) -> [{id :int, title :string}]"
+  "search" => {&MyApp.search/2, "(query :string, limit :int) -> [{id :int}]"}
+}
+```
+
+### Adding Descriptions
+
+Descriptions help the LLM understand when and how to use each tool. Use keyword list format:
+
+```elixir
+tools = %{
+  "search" => {&MyApp.search/2,
+    signature: "(query :string, limit :int?) -> [{id :int, title :string}]",
+    description: "Search for items matching query. Returns up to limit results (default 10)."
+  },
+
+  "get_user" => {&MyApp.get_user/1,
+    signature: "(id :int) -> {name :string, email :string?}",
+    description: "Fetch user by ID. Returns nil if not found."
   }
 }
 ```
+
+### Tool Format Summary
+
+| Format | When to Use |
+|--------|-------------|
+| `&Mod.fun/n` | Functions with @spec and @doc |
+| `{fun, "signature"}` | Explicit signature, no description needed |
+| `{fun, signature: "...", description: "..."}` | Production tools with full documentation |
+| `fn args -> ... end` | Quick inline functions |
 
 ## Agent as Data
 

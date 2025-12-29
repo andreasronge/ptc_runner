@@ -117,16 +117,31 @@ tools = %{
   # Simple function (existing, still works)
   "get-time" => fn _args -> DateTime.utc_now() end,
 
-  # Function reference (auto-extract @spec if available)
+  # Function reference (auto-extract @spec/@doc if available)
   "get-user" => &MyApp.get_user/1,
 
   # Function with explicit signature (for validation)
   "search" => {&MyApp.search/2, "(query :string, limit :int) -> [{id :int}]"},
 
+  # Function with signature and description (keyword list)
+  "analyze" => {&MyApp.analyze/1,
+    signature: "(data :map) -> {score :float}",
+    description: "Analyze data and return anomaly score"
+  },
+
   # Skip validation explicitly
   "dynamic" => {&MyApp.dynamic/1, :skip}
 }
 ```
+
+### Format Summary
+
+| Format | When to Use |
+|--------|-------------|
+| `fun` | Quick prototyping, relies on @spec/@doc extraction |
+| `{fun, "sig"}` | Common case, validation needed, no description |
+| `{fun, signature: "...", description: "..."}` | Production tools with LLM-visible docs |
+| `{fun, :skip}` | Dynamic tools, skip validation |
 
 ### Internal Normalization
 
@@ -134,18 +149,43 @@ All formats normalize to `PtcRunner.Tool`:
 
 ```elixir
 defmodule PtcRunner.Tool do
-  defstruct [:name, :function, :signature, :type]
+  defstruct [:name, :function, :signature, :description, :type]
 
   @type t :: %__MODULE__{
     name: String.t(),
     function: (map() -> term()),
     signature: String.t() | nil,
+    description: String.t() | nil,
     type: :native | :llm | :subagent
   }
 end
 ```
 
 For Lisp, only `:native` type is supported.
+
+### Description Extraction
+
+When a bare function reference is provided (e.g., `&MyApp.search/2`), the system attempts to extract documentation:
+
+1. **@doc** - Extracts the function's `@doc` attribute as description
+2. **@spec** - Converts `@spec` to PTC signature format (best effort)
+
+```elixir
+# In your module
+@doc "Search for items matching query"
+@spec search(String.t(), integer()) :: [map()]
+def search(query, limit), do: ...
+
+# Auto-extracted:
+# signature: "(query :string, limit :int) -> [:map]"
+# description: "Search for items matching query"
+tools = %{"search" => &MyApp.search/2}
+```
+
+**Limitations:**
+- Requires docs to be compiled (not available in releases without `--docs`)
+- Only works for named functions (not anonymous)
+- @spec conversion is best-effort; explicit signatures are more precise
 
 ---
 

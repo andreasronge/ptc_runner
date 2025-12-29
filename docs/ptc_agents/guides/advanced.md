@@ -45,7 +45,7 @@ Program Result:
 **Turn 2: Filter and Return**
 ```clojure
 ;; Process all results from ctx/results
-(let [urgent (filter (fn [e] (str/includes? (:subject e) "Urgent")) ctx/results)]
+(let [urgent (filter (fn [e] (includes? (:subject e) "Urgent")) ctx/results)]
   (call "return" {
     :summary (str "Found " (count urgent) " urgent emails")
     :_ids (mapv :id urgent)
@@ -250,10 +250,11 @@ Understanding what the LLM receives helps debug unexpected behavior.
    - _token ([:string]): Firewalled access tokens
    ```
 
-3. **Tools** - Generated from the `tools` map:
+3. **Tools** - Generated from the `tools` map (signatures + descriptions):
    ```
    AVAILABLE TOOLS:
    - search(query :string) -> [:map]
+     Search for items matching query.
    - return(data :any) -> stops loop
    - fail(params {...}) -> stops loop
    ```
