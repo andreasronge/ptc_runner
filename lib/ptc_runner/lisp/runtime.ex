@@ -258,6 +258,11 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
 
+  def conj(nil, x), do: [x]
+  def conj(list, x) when is_list(list), do: list ++ [x]
+  def conj(%MapSet{} = set, x), do: MapSet.put(set, x)
+  def conj(map, [k, v]) when is_map(map) and not is_struct(map), do: Map.put(map, k, v)
+
   def into(to, from) when is_list(to) and is_map(from) do
     # When collecting from a map, each entry is converted to [key, value] pair
     # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists

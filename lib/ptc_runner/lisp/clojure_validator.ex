@@ -200,7 +200,16 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   end
 
   defp parse_edn_output(output) do
-    # Use Babashka to convert EDN to JSON for easier parsing
+    # Special handling for sets to preserve type
+    if String.match?(output, ~r/^\#\{.*\}$/s) do
+      parse_edn_set(output)
+    else
+      parse_edn_via_json(output)
+    end
+  end
+
+  # Parse EDN by converting through JSON
+  defp parse_edn_via_json(output) do
     case bb_path() do
       nil ->
         {:error, "Babashka not available"}
@@ -227,6 +236,26 @@ defmodule PtcRunner.Lisp.ClojureValidator do
             # Fallback to simple parsing
             {:ok, parse_simple_edn(output)}
         end
+    end
+  end
+
+  # Parse Clojure set notation #{...} and return as MapSet
+  defp parse_edn_set(output) do
+    # Extract content between #{ and }
+    case Regex.run(~r/^\#\{(.*)\}$/s, output, capture: :all_but_first) do
+      [content] ->
+        # Split by whitespace and parse each element
+        elements =
+          content
+          |> String.trim()
+          |> String.split(~r/\s+/, trim: true)
+          |> Enum.map(&parse_simple_edn/1)
+
+        {:ok, MapSet.new(elements)}
+
+      _ ->
+        # Fallback: parse as simple EDN
+        {:ok, parse_simple_edn(output)}
     end
   end
 
@@ -319,6 +348,10 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   defp normalize_from_json(value), do: value
 
   # Normalize values for comparison
+  defp normalize_value(%MapSet{} = set) do
+    set |> MapSet.to_list() |> Enum.sort() |> Enum.map(&normalize_value/1)
+  end
+
   defp normalize_value(value) when is_map(value) do
     Map.new(value, fn {k, v} ->
       # Convert atom keys to strings for comparison
