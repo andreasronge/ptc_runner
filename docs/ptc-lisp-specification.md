@@ -1748,7 +1748,7 @@ Anonymous functions are supported via `fn` with restrictions:
 
 ### 13.3 Functions Excluded from Core
 
-- String manipulation: `upper-case`, `lower-case`, etc. (case conversion)
+- String manipulation: case conversion (beyond basic `upcase`/`downcase`)
 - Regex: `re-find`, `re-matches`, `re-seq`
 - `range` (infinite sequences)
 - `iterate`, `repeat`, `cycle` (infinite sequences)

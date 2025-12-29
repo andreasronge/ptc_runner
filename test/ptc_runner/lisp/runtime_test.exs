@@ -1433,4 +1433,105 @@ defmodule PtcRunner.Lisp.RuntimeTest do
       assert Runtime.replace("hello", "l", "") == "heo"
     end
   end
+
+  describe "upcase" do
+    test "converts string to uppercase" do
+      assert Runtime.upcase("hello") == "HELLO"
+      assert Runtime.upcase("Hello World") == "HELLO WORLD"
+    end
+
+    test "handles empty string" do
+      assert Runtime.upcase("") == ""
+    end
+
+    test "handles already uppercase string" do
+      assert Runtime.upcase("HELLO") == "HELLO"
+    end
+
+    test "handles mixed case" do
+      assert Runtime.upcase("HeLLo") == "HELLO"
+    end
+  end
+
+  describe "downcase" do
+    test "converts string to lowercase" do
+      assert Runtime.downcase("HELLO") == "hello"
+      assert Runtime.downcase("Hello World") == "hello world"
+    end
+
+    test "handles empty string" do
+      assert Runtime.downcase("") == ""
+    end
+
+    test "handles already lowercase string" do
+      assert Runtime.downcase("hello") == "hello"
+    end
+
+    test "handles mixed case" do
+      assert Runtime.downcase("HeLLo") == "hello"
+    end
+  end
+
+  describe "starts_with?" do
+    test "returns true when string starts with prefix" do
+      assert Runtime.starts_with?("hello", "he") == true
+      assert Runtime.starts_with?("hello world", "hello") == true
+    end
+
+    test "returns false when string does not start with prefix" do
+      assert Runtime.starts_with?("hello", "x") == false
+      assert Runtime.starts_with?("hello", "ello") == false
+    end
+
+    test "returns true for empty prefix" do
+      assert Runtime.starts_with?("hello", "") == true
+    end
+
+    test "handles case sensitivity" do
+      assert Runtime.starts_with?("Hello", "hello") == false
+      assert Runtime.starts_with?("Hello", "He") == true
+    end
+  end
+
+  describe "ends_with?" do
+    test "returns true when string ends with suffix" do
+      assert Runtime.ends_with?("hello", "lo") == true
+      assert Runtime.ends_with?("hello world", "world") == true
+    end
+
+    test "returns false when string does not end with suffix" do
+      assert Runtime.ends_with?("hello", "x") == false
+      assert Runtime.ends_with?("hello", "hell") == false
+    end
+
+    test "returns true for empty suffix" do
+      assert Runtime.ends_with?("hello", "") == true
+    end
+
+    test "handles case sensitivity" do
+      assert Runtime.ends_with?("Hello", "hello") == false
+      assert Runtime.ends_with?("Hello", "lo") == true
+    end
+  end
+
+  describe "includes?" do
+    test "returns true when string contains substring" do
+      assert Runtime.includes?("hello", "ll") == true
+      assert Runtime.includes?("hello world", "o w") == true
+    end
+
+    test "returns false when string does not contain substring" do
+      assert Runtime.includes?("hello", "x") == false
+      assert Runtime.includes?("hello", "xyz") == false
+    end
+
+    test "returns true for empty substring" do
+      assert Runtime.includes?("hello", "") == true
+    end
+
+    test "handles case sensitivity" do
+      assert Runtime.includes?("Hello", "hello") == false
+      assert Runtime.includes?("hello", "ell") == true
+    end
+  end
 end

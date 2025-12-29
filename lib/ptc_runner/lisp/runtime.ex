@@ -641,6 +641,54 @@ defmodule PtcRunner.Lisp.Runtime do
     String.replace(s, pattern, replacement)
   end
 
+  @doc """
+  Convert string to uppercase.
+  - (upcase "hello") returns "HELLO"
+  - (upcase "") returns ""
+  """
+  def upcase(s) when is_binary(s) do
+    String.upcase(s)
+  end
+
+  @doc """
+  Convert string to lowercase.
+  - (downcase "HELLO") returns "hello"
+  - (downcase "") returns ""
+  """
+  def downcase(s) when is_binary(s) do
+    String.downcase(s)
+  end
+
+  @doc """
+  Check if string starts with prefix.
+  - (starts-with? "hello" "he") returns true
+  - (starts-with? "hello" "x") returns false
+  - (starts-with? "hello" "") returns true
+  """
+  def starts_with?(s, prefix) when is_binary(s) and is_binary(prefix) do
+    String.starts_with?(s, prefix)
+  end
+
+  @doc """
+  Check if string ends with suffix.
+  - (ends-with? "hello" "lo") returns true
+  - (ends-with? "hello" "x") returns false
+  - (ends-with? "hello" "") returns true
+  """
+  def ends_with?(s, suffix) when is_binary(s) and is_binary(suffix) do
+    String.ends_with?(s, suffix)
+  end
+
+  @doc """
+  Check if string contains substring.
+  - (includes? "hello" "ll") returns true
+  - (includes? "hello" "x") returns false
+  - (includes? "hello" "") returns true
+  """
+  def includes?(s, substring) when is_binary(s) and is_binary(substring) do
+    String.contains?(s, substring)
+  end
+
   # ============================================================
   # String Parsing
   # ============================================================
