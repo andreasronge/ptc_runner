@@ -252,6 +252,30 @@ Run property tests: `mix test test/support/lisp_generators_test.exs`
 
 See `test/support/lisp_generators.ex` for existing generators.
 
+## Quiet Test Output
+
+Tests must run without noisy log output. Expected errors (like sandbox process crashes during property tests) should not pollute the test output.
+
+The `test_helper.exs` sets the OTP logger level to `:critical` to suppress process crash reports:
+
+```elixir
+Logger.configure(level: :warning)
+:logger.set_primary_config(:level, :critical)
+```
+
+This suppresses error-level logs (including spawned process exceptions) while still allowing critical/emergency logs through. This is preferred over `:none` because truly critical issues would still be logged.
+
+For tests that need to verify log output, use `@tag :capture_log`:
+
+```elixir
+@tag :capture_log
+test "logs warning for deprecated usage" do
+  assert ExUnit.CaptureLog.capture_log(fn ->
+    MyModule.deprecated_function()
+  end) =~ "deprecated"
+end
+```
+
 ## Checklist
 
 - [ ] Tests are in the correct location
@@ -260,3 +284,4 @@ See `test/support/lisp_generators.ex` for existing generators.
 - [ ] No `Process.sleep` for timing (use monitors/helpers)
 - [ ] Edge cases covered (empty, invalid, boundary)
 - [ ] Test actually fails when implementation is broken
+- [ ] No noisy log output (use `@tag :capture_log` for expected errors)
