@@ -164,8 +164,22 @@ Report current state: active epic (if any), next task, blockers. Don't create or
 2. **If epic exists**:
    - Find first unchecked item in current phase
    - If linked issue with `ready-for-implementation`: trigger implementation
-   - If linked issue without that label: skip (waiting for review)
+   - If linked issue without that label: queue for review (see below)
    - If text task (no issue link): create issue, update epic with link
+
+### Queueing Issues for Review
+
+When a linked issue doesn't have `ready-for-implementation`:
+
+1. **Check if already queued**: `gh issue view ISSUE_NUMBER --json labels --jq '[.labels[].name] | any(. == "needs-review")'`
+2. **If not queued**: Add the label to trigger review:
+   ```bash
+   gh issue edit ISSUE_NUMBER --add-label "needs-review"
+   ```
+3. **Report**: Note that the issue was queued for review and PM will pick it up after review completes
+
+This ensures issues flow through the review pipeline automatically without manual intervention.
+
 3. **If no epic**:
    - Process `from-pr-review` issues
    - Trigger any `ready-for-implementation` issues
