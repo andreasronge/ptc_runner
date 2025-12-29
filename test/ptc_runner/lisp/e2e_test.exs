@@ -289,5 +289,22 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert not String.starts_with?(result, " ")
       assert not String.ends_with?(result, " ")
     end
+
+    test "string case conversion and predicates" do
+      task =
+        "Filter users with 'user_' prefix and check if any username contains 'admin' (case-insensitive)"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (string case/predicates) ===\n#{program}\n")
+
+      context = %{
+        "usernames" => ["user_1", "ADMIN", "user_2", "guest"]
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Should demonstrate case conversion and predicate usage
+      assert is_map(result) or is_list(result) or is_boolean(result)
+    end
   end
 end
