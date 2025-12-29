@@ -1055,6 +1055,11 @@ The `seq` function converts a collection to a sequence:
 | `join` | `(join coll)` | Join collection elements (no separator) |
 | `trim` | `(trim s)` | Remove leading/trailing whitespace |
 | `replace` | `(replace s pattern replacement)` | Replace all occurrences |
+| `upcase` / `upper-case` | `(upcase s)` | Convert to uppercase |
+| `downcase` / `lower-case` | `(downcase s)` | Convert to lowercase |
+| `starts-with?` | `(starts-with? s prefix)` | Check if string starts with prefix |
+| `ends-with?` | `(ends-with? s suffix)` | Check if string ends with suffix |
+| `includes?` | `(includes? s substring)` | Check if string contains substring |
 
 **Type coercion:** `str` converts values to strings using these rules:
 - `nil` → `""`
@@ -1086,6 +1091,19 @@ The `seq` function converts a collection to a sequence:
 - `(trim "\n\tworld\r\n")` → `"world"` (remove all whitespace)
 - `(replace "hello" "l" "L")` → `"heLLo"` (replace all occurrences)
 - `(replace "aaa" "a" "b")` → `"bbb"` (replace pattern)
+- `(upcase "hello")` → `"HELLO"` (uppercase conversion)
+- `(upper-case "world")` → `"WORLD"` (alias for upcase)
+- `(downcase "HELLO")` → `"hello"` (lowercase conversion)
+- `(lower-case "WORLD")` → `"world"` (alias for downcase)
+- `(starts-with? "hello" "he")` → `true` (prefix check)
+- `(starts-with? "hello" "lo")` → `false` (does not start with)
+- `(starts-with? "hello" "")` → `true` (empty prefix always matches)
+- `(ends-with? "hello" "lo")` → `true` (suffix check)
+- `(ends-with? "hello" "he")` → `false` (does not end with)
+- `(ends-with? "hello" "")` → `true` (empty suffix always matches)
+- `(includes? "hello" "ll")` → `true` (substring check)
+- `(includes? "hello" "x")` → `false` (does not contain)
+- `(includes? "hello" "")` → `true` (empty substring always matches)
 
 ### 8.4 Arithmetic
 
@@ -1794,7 +1812,6 @@ The `#()` syntax desugars to the equivalent `fn`:
 
 ### 13.3 Functions Excluded from Core
 
-- String manipulation: case conversion (beyond basic `upcase`/`downcase`)
 - Regex: `re-find`, `re-matches`, `re-seq`
 - `range` (infinite sequences)
 - `iterate`, `repeat`, `cycle` (infinite sequences)
