@@ -27,7 +27,7 @@ jobs:
       - name: Check PAT availability
         run: |
           if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
-            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - ready-for-implementation label won't trigger PM workflow"
+            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - @claude trigger won't work"
           fi
 
       - name: Checkout repository
@@ -79,9 +79,15 @@ jobs:
                - Your recommendation (ready, needs-clarification, or needs-breakdown)
 
             3. **Add appropriate labels** using `gh issue edit --add-label`:
-               - `ready-for-implementation` AND `claude-approved` if issue is well-defined and ready
+               - `ready-for-implementation` if issue is well-defined and ready
                - `needs-clarification` if important details are missing (and you couldn't fill them in)
                - `needs-breakdown` if issue should be split into smaller issues
                - `bug` / `enhancement` / `documentation` based on issue type
+
+            4. **If approved (added `ready-for-implementation`)**, trigger implementation:
+               - First check no implementation is running:
+                 `gh run list --workflow=claude-issue.yml --status=in_progress --json databaseId --jq 'length'`
+               - If result is 0, post trigger: `gh issue comment ${{ github.event.issue.number }} --body "@claude Please implement this issue. Read the linked spec documents for context."`
+               - If result is > 0, skip trigger (another implementation is running)
 
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'

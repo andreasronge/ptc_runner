@@ -9,12 +9,12 @@ on:
 jobs:
   claude:
     # Only trigger for issue contexts (not PR comments), trusted actors, and @claude mentions
-    # Note: Bot check removed - claude-approved label is the security gate, allowing PM workflow to trigger implementation
+    # Note: ready-for-implementation label is the security gate, added by claude-issue-review.yml
     # Note: Using toJSON() because github.event.issue.labels.*.name doesn't work with contains()
     if: |
       (
         github.actor == 'andreasronge' ||
-        contains(toJSON(github.event.issue.labels), 'claude-approved')
+        contains(toJSON(github.event.issue.labels), 'ready-for-implementation')
       ) && (
         (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.comment.body, '@claude')) ||
         (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))

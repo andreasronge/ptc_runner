@@ -8,9 +8,10 @@ This document describes the Claude-powered GitHub workflows and their security g
 |----------|---------|------|---------|
 | `claude-code-review.yml` | PR opened/labeled/synchronized | `claude/*` branch or `claude-review` label | Automated PR review |
 | `claude-auto-triage.yml` | After code-review completes | Inherits from code-review | Triage review findings |
-| `claude.yml` | `@claude` mention | Actor or `claude-approved` label | Execute requested work |
-| `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue specifications |
-| `claude-pm.yml` | PR merged, issue labeled, manual | `ready-for-implementation` label | Create issues from epic, orchestrate implementation |
+| `claude-issue.yml` | `@claude` mention in issue | Actor or `ready-for-implementation` label | Implement issues |
+| `claude-pr-fix.yml` | `@claude` mention in PR | Actor or `claude-approved` label | Fix PRs |
+| `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue, trigger implementation |
+| `claude-pm.yml` | PR merged, manual | Epic management | Queue issues for review, update epic progress |
 
 ## Workflow Interactions
 
@@ -30,7 +31,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 │                     (posts @claude)        (creates issue)      │
 │                              │                                  │
 │                              ▼                                  │
-│                         claude.yml ──► pushes fix                │
+│                     claude-pr-fix.yml ──► pushes fix            │
 │                              │                                  │
 │                              ▼                                  │
 │                    (loop max 3 cycles)                          │
@@ -45,18 +46,14 @@ This document describes the Claude-powered GitHub workflows and their security g
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Issue Created ──► Maintainer adds ──► issue-review.yml         │
-│                    `needs-review`            │                  │
-│                                              ▼                  │
+│       or              `needs-review`         │                  │
+│  PM queues it                                ▼                  │
 │                                   Adds `ready-for-implementation`
-│                                   + `claude-approved` (both)    │
+│                                   + posts @claude trigger       │
 │                                              │                  │
 │                                              ▼                  │
-│                                         pm.yml                  │
-│                                     (posts @claude)             │
-│                                              │                  │
-│                                              ▼                  │
-│                                        claude.yml               │
-│                                      (creates PR)               │
+│                                      claude-issue.yml           │
+│                                        (creates PR)             │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -99,10 +96,12 @@ The PM workflow reads from a human-created "epic issue" to understand what work 
 
 - **Epic as source of truth**: PM reads epic body to find spec docs, tasks, and progress
 - **Creates ONE issue at a time**: From unchecked text items in the epic
+- **Queues issues for review**: Adds `needs-review` label to linked issues without `ready-for-implementation`
 - **Updates epic on progress**: Links new issues, marks checkboxes when closed
 - **Monitors tech debt**: Handles `from-pr-review` issues regardless of epic
-- **Triggers implementation**: When issue has `ready-for-implementation` label
 - **Skips if PR open**: Prevents concurrent work
+
+**Note**: PM no longer triggers implementation. The review workflow posts `@claude` directly after approval.
 
 **GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
 
@@ -135,12 +134,12 @@ gh issue comment ISSUE_NUMBER --body "Closing: [explanation of why this won't be
 Most workflows require explicit maintainer approval before Claude can act:
 
 1. **PRs**: Maintainer must add `claude-review` label
-2. **Issues/PRs with @claude**: Requires `claude-approved` label (or be the maintainer)
-3. **Implementation**: Issue review adds both `ready-for-implementation` AND `claude-approved` when approving
+2. **PR fixes with @claude**: Requires `claude-approved` label (or be the maintainer)
+3. **Issue implementation**: Requires `ready-for-implementation` label (added by review workflow)
 
 ### Loop Prevention
 
-- **Label gate**: `claude-approved` label required for non-maintainer triggers (prevents unauthorized automation)
+- **Label gates**: `ready-for-implementation` for issues, `claude-approved` for PRs (prevents unauthorized automation)
 - **Cycle limit**: auto-triage.yml tracks cycles with labels, stops after 3 cycles
 - **Human intervention**: Adds `needs-human-review` label when max cycles reached
 
@@ -178,9 +177,10 @@ gh workflow run claude-pm.yml -f action=reset-stuck
 | Workflow | Concurrency Group | Cancel In-Progress |
 |----------|-------------------|-------------------|
 | code-review | `claude-pr-{number}` | Yes |
-| claude | `claude-pr-{number}` | No |
+| claude-pr-fix | `claude-pr-{number}` | No |
 | auto-triage | `claude-triage-{branch}` | Yes |
-| issue-review | `claude-issue-review-{number}` | Yes |
+| claude-issue | `claude-issue-{number}` | No |
+| issue-review | `claude-issue-{number}` | No |
 | pm | `claude-pm` | No |
 
 ## Labels Reference
@@ -188,8 +188,8 @@ gh workflow run claude-pm.yml -f action=reset-stuck
 ### Trigger Labels
 - `claude-review` - Triggers PR review
 - `needs-review` - Triggers issue review
-- `ready-for-implementation` - Marks issue as ready for PM
-- `claude-approved` - Maintainer approval for Claude automation
+- `ready-for-implementation` - Security gate for issue implementation (added by review)
+- `claude-approved` - Security gate for PR fixes (for non-maintainer triggers)
 
 ### Epic Labels
 - `type:epic` - Issue is an epic (contains task list for PM to follow)
@@ -233,7 +233,7 @@ Fork PRs have limited automation:
 
 1. **code-review.yml** - Works normally (read-only)
 2. **auto-triage.yml** - Creates issues instead of @claude fix comments
-3. **claude.yml** - Posts explanation and skips (cannot push to forks)
+3. **claude-pr-fix.yml** - Posts explanation and skips (cannot push to forks)
 
 Contributors must apply fixes manually based on created issues.
 
