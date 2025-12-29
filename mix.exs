@@ -64,6 +64,7 @@ defmodule PtcRunner.MixProject do
         "credo --strict",
         "dialyzer",
         "schema.gen",
+        "ptc.validate_spec",
         "test --warnings-as-errors"
       ],
       "schema.gen": [
