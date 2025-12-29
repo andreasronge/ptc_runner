@@ -891,6 +891,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `conj` | `(conj coll x ...)` | Add elements to collection |
 | `concat` | `(concat coll1 coll2 ...)` | Join collections |
 | `into` | `(into to from)` | Pour from into to |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
@@ -898,6 +899,9 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `zip` | `(zip c1 c2)` | Combine into pairs |
 
 ```clojure
+(conj [1 2] 3)             ; => [1 2 3]
+(conj #{1 2} 3)            ; => #{1 2 3}
+(conj {:a 1} [:b 2])       ; => {:a 1 :b 2}
 (concat [1 2] [3 4])       ; => [1 2 3 4]
 (into [] [1 2 3])          ; => [1 2 3]
 (into [] {:a 1 :b 2})       ; => [[:a 1] [:b 2]]
