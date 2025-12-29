@@ -265,7 +265,22 @@ Wraps a SubAgent as a tool callable by other agents.
 def as_tool(agent, opts \\ [])
 ```
 
-Returns a `SubAgentTool` struct that the execution loop recognizes. When called:
+Returns a `SubAgentTool` struct that the execution loop recognizes:
+
+```elixir
+defmodule PtcRunner.SubAgent.SubAgentTool do
+  defstruct [:agent, :bound_llm, :signature, :description]
+
+  @type t :: %__MODULE__{
+    agent: SubAgent.t(),
+    bound_llm: atom() | function() | nil,
+    signature: String.t(),
+    description: String.t() | nil
+  }
+end
+```
+
+When called:
 1. Resolves LLM (agent.llm → bound llm → parent's llm)
 2. Executes `run(agent, llm: resolved_llm, context: args)`
 3. Returns `step.return` on success, raises on failure
@@ -1028,7 +1043,10 @@ Every `Step` includes a `trace` field containing per-turn execution history. Agg
 @type tool_call :: %{
   name: String.t(),
   args: map(),
-  result: term()
+  result: term(),
+  error: String.t() | nil,        # Error message if tool failed
+  timestamp: DateTime.t(),         # When tool was called
+  duration_ms: non_neg_integer()   # How long tool took
 }
 ```
 
@@ -1429,6 +1447,16 @@ Logic errors (bad syntax, validation) use turn budget. Infrastructure errors (ti
 
 Passing `Step` to `:context` auto-extracts `return` and `signature`.
 
+**Chaining with failed steps:** If you pass a failed `Step` (where `step.fail` is set) to `:context`, the agent immediately returns `{:error, step}` with `fail.reason: :chained_failure`. This prevents cascading errors and makes failure handling explicit.
+
+```elixir
+{:error, failed_step} = SubAgent.run(failing_agent, llm: llm)
+{:error, chained_step} = SubAgent.run(next_agent, llm: llm, context: failed_step)
+
+chained_step.fail.reason  #=> :chained_failure
+chained_step.fail.details #=> %{upstream_reason: failed_step.fail.reason}
+```
+
 ### DD-6: Agents as Data
 
 SubAgents are defined as structs via `new/1`, separating definition from execution. This enables:
@@ -1493,6 +1521,127 @@ This design:
 - Fails gracefully when internals change (map users get updates, string users don't)
 
 The assembly order places `:prefix` first and `:suffix` last, ensuring custom instructions wrap the core functionality rather than being buried within it.
+
+---
+
+## Edge Cases & Clarifications
+
+This section documents behavior for edge cases and common points of confusion.
+
+### Context Handling
+
+| Input | Equivalent To | Notes |
+|-------|---------------|-------|
+| `context: %{}` | Empty context | No variables in `ctx/` |
+| `context: nil` | Empty context | Same as `%{}` |
+| Omitting `context` | Empty context | Same as `%{}` |
+| `context: step` (success) | `context: step.return` | Also extracts `context_signature` |
+| `context: step` (failure) | Immediate `:chained_failure` | See DD-5 |
+
+### Tool Registration Edge Cases
+
+**Duplicate tool names:** Last registration wins. No error is raised.
+
+```elixir
+tools = %{
+  "search" => &MyApp.search_v1/1,
+  "search" => &MyApp.search_v2/1   # This one is used
+}
+```
+
+**Empty tools map:** Valid for all execution modes.
+- `max_turns: 1, tools: %{}` - Single-turn, expression returned directly
+- `max_turns: > 1, tools: %{}` - Multi-turn exploration (memory feedback only)
+
+**Tool function behavior:**
+
+| Tool Returns | Result |
+|--------------|--------|
+| Value | Passed to Lisp as result |
+| `{:ok, value}` | Unwrapped, `value` passed to Lisp |
+| `{:error, reason}` | Tool error, fed back to LLM for recovery |
+| Raises exception | Tool error with `:tool_error` reason |
+
+### LLM Registry Error Handling
+
+| Scenario | Error |
+|----------|-------|
+| `llm: :unknown` (atom not in registry) | `{:error, %{fail: %{reason: :llm_not_found, message: "LLM :unknown not found in registry"}}}` |
+| Registry value not a function | `{:error, %{fail: %{reason: :invalid_llm, message: "Registry value for :name is not a function"}}}` |
+| No registry, atom used | `{:error, %{fail: %{reason: :llm_registry_required, message: "llm_registry required when using atom :name"}}}` |
+
+**Registry inheritance:** The `llm_registry` passed to the top-level `run/2` is automatically inherited by all child SubAgents and LLMTools. You never need to pass it again.
+
+### Timeout Behavior
+
+**Turn timeout** (per-turn limit, default 5s):
+- Fires during LLM call → LLM request aborted, counts as infrastructure error (retry budget)
+- Fires during tool execution → Tool killed, `:timeout` error fed back to LLM
+- Fires during Lisp evaluation → Sandbox killed, `:timeout` error
+
+**Mission timeout** (total limit, default 60s):
+- Fires between turns → Immediate termination, returns `{:error, step}` with `:mission_timeout`
+- Fires during turn → Current turn aborted, same as turn timeout then mission ends
+
+### Validation Mode Inheritance
+
+Validation modes do **not** inherit to child agents. Each agent uses its own mode (default: `:enabled`).
+
+```elixir
+# Parent uses strict, child uses default
+SubAgent.run(parent,
+  llm: llm,
+  signature_validation: :strict,
+  tools: %{
+    "child" => SubAgent.as_tool(child_agent)  # Uses :enabled (default)
+  }
+)
+```
+
+To enforce strict validation on children, set it in the child's struct or pass explicitly.
+
+### Memory Result Contract vs Return Tool
+
+The `:return` key in a map result controls **LLM visibility** within a turn:
+
+```clojure
+;; :return key = what LLM sees in history, rest merges to memory
+{:return "Found 5 items" :items [...]}
+```
+
+The `return` **tool** terminates the mission:
+
+```clojure
+;; return tool = mission complete, validate against signature
+(call "return" {:count 5})
+```
+
+These are different mechanisms at different scopes. The LLM is instructed on both in the system prompt.
+
+### Nesting Limits
+
+| Limit | Default | Description |
+|-------|---------|-------------|
+| Max nesting depth | 3 | SubAgent → as_tool → SubAgent → as_tool → SubAgent |
+| Turn budget (global) | 20 | Total turns across all nested agents |
+
+Exceeding nesting depth returns `{:error, step}` with `:max_depth_exceeded`.
+
+**Recursive calls:** An agent calling itself (directly or indirectly) is allowed up to the nesting limit. Each recursive call counts as a new nesting level.
+
+### Firewalled Fields in Tools
+
+Firewalled fields (`_` prefix) in tool **output** signatures work as expected - hidden from LLM history but available in `ctx/`.
+
+Firewalled fields in tool **input** signatures are not meaningful since inputs come from the LLM's generated code. Use regular field names for inputs.
+
+```elixir
+# Output firewall - useful
+"(id :int) -> {summary :string, _raw_data :map}"
+
+# Input firewall - not useful, avoid
+"(_secret :string) -> :bool"  # LLM still has to provide _secret
+```
 
 ---
 
