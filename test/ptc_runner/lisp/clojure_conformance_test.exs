@@ -114,6 +114,14 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(concat [1] [2] [3])")
     end
 
+    test "conj" do
+      assert_clojure_equivalent("(conj [1 2] 3)")
+      assert_clojure_equivalent("(conj [1] 2 3)")
+      assert_clojure_equivalent("(conj {:a 1} [:b 2])")
+      assert_clojure_equivalent("(conj nil 1)")
+      assert_clojure_equivalent("(conj [1] nil)")
+    end
+
     test "flatten" do
       assert_clojure_equivalent("(flatten [[1 2] [3 4]])")
       assert_clojure_equivalent("(flatten [1 [2 [3 4]]])")

@@ -224,5 +224,22 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
       assert result == 3
     end
+
+    test "build collections with conj" do
+      task = "Build up a vector using conj, then build a map from key-value pairs"
+
+      program = LispLLMClient.generate_program!(task)
+      IO.puts("\n=== LLM Generated (conj) ===\n#{program}\n")
+
+      context = %{
+        "numbers" => [1, 2, 3],
+        "pairs" => [["a", 1], ["b", 2]]
+      }
+
+      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+
+      # Result should show multiple operations with conj
+      assert is_list(result) or is_map(result)
+    end
   end
 end
