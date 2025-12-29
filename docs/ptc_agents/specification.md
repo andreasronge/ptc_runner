@@ -96,7 +96,7 @@ def new(opts)
 | `tool_catalog` | `map()` | Schemas for planning (not callable) |
 | `prompt_limit` | `map()` | Truncation config for LLM view |
 | `mission_timeout` | `pos_integer()` | Max ms for entire execution |
-| `llm_retry` | `map()` | Retry config for LLM failures |
+| `llm_retry` | `map()` | Infrastructure retries (network, 5xx) - does NOT use turns |
 | `llm` | `atom() \| function()` | Optional LLM override (for inheritance) |
 | `system_prompt` | `system_prompt_opts()` | System prompt customization (see below) |
 
@@ -150,21 +150,22 @@ Behavior is determined explicitly by `max_turns` and `tools` parameters. No impl
 |-------------|---------|----------|-------------|
 | `1` | none | Single-turn: one LLM call, expression result returned | Expression value |
 | `1` | provided | Single-turn with tools: one turn to use tools | Must call `return`/`fail` |
-| `>1` | none | **Error**: multi-turn requires tools | N/A |
+| `>1` | none | Multi-turn exploration: pure computation with memory feedback | Must call `return`/`fail` |
 | `>1` | provided | Agentic loop: multiple turns until done | Must call `return`/`fail` |
-
-**Validation:** `max_turns > 1` without tools raises `{:error, step}` with `reason: :invalid_config`.
 
 **Key Behavioral Differences:**
 
-| Aspect | Single-turn (`max_turns: 1`, no tools) | Agentic loop (`max_turns > 1` with tools) |
-|--------|----------------------------------------|-------------------------------------------|
+| Aspect | Single-turn (`max_turns: 1`, no tools) | Multi-turn (`max_turns > 1`) |
+|--------|----------------------------------------|------------------------------|
 | **Termination** | Expression result returned | Must call `return` or `fail` |
 | **Turn count** | Exactly 1 | 1 to `max_turns` |
-| **Tool access** | None | Full tool registry |
-| **Error recovery** | No retry | LLM can retry in next turn |
+| **Tool access** | None | User tools (if provided) + system tools |
+| **Error recovery** | Fatal (no turns left for feedback) | LLM can self-correct in next turn |
+| **Memory feedback** | N/A | Map results merge into `memory/` via Memory Result Contract |
 | **ctx/ access** | Yes | Yes |
 | **memory/ access** | Yes | Yes |
+
+**Multi-turn without user tools:** Enables iterative data exploration where each turn's expression result (if a map) merges into memory, and the LLM uses accumulated state to refine its analysis before calling `return`.
 
 **Example: Single-turn execution**
 ```elixir
@@ -178,6 +179,39 @@ step.return #=> 15
   llm: :sonnet,
   context: %{user: "alice@example.com"}
 )
+```
+
+**Example: Multi-turn exploration (no user tools)**
+```elixir
+# Agent explores data iteratively, accumulating findings in memory
+explorer = SubAgent.new(
+  prompt: "Analyze the dataset in ctx/data. Explore its structure, find patterns, and return a summary.",
+  signature: "() -> {row_count :int, columns [:string], insights [:string]}",
+  max_turns: 5
+  # No tools - just pure PTC-Lisp computation
+)
+
+{:ok, step} = SubAgent.run(explorer, llm: llm, context: %{data: large_dataset})
+```
+
+The LLM might generate:
+```clojure
+; Turn 1 - explore structure, results merge into memory
+{:row-count (count ctx/data)
+ :sample (take 3 ctx/data)}
+; Memory now has: {:row-count 1000, :sample [...]}
+
+; Turn 2 - based on sample, explore columns
+{:columns (keys (first ctx/data))
+ :return "found columns"}  ; :return controls what LLM sees, rest persists
+; LLM sees: "found columns"
+; Memory now has: {:row-count 1000, :sample [...], :columns [...]}
+
+; Turn 3 - satisfied with exploration, call return TOOL to terminate
+(call "return" {:row_count memory/row-count
+                :columns memory/columns
+                :insights ["Dataset has 1000 rows" "All numeric values"]})
+; Loop terminates, validated against signature
 ```
 
 ---
