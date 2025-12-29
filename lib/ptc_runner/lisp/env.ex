@@ -50,6 +50,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"drop-while", {:normal, &Runtime.drop_while/2}},
       {:distinct, {:normal, &Runtime.distinct/1}},
       {:concat, {:variadic, &Runtime.concat2/2, []}},
+      {:conj, {:variadic_nonempty, &Runtime.conj/2}},
       {:into, {:normal, &Runtime.into/2}},
       {:flatten, {:normal, &Runtime.flatten/1}},
       {:zip, {:normal, &Runtime.zip/2}},
