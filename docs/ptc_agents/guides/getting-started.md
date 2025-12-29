@@ -315,3 +315,5 @@ Memory is scoped per-agent and hidden from prompts. See [Core Concepts](core-con
 - [Core Concepts](core-concepts.md) - Context, memory, and the firewall convention
 - [Patterns](patterns.md) - Chaining, orchestration, and composition
 - [Signatures](signatures.md) - Full signature syntax reference
+- [Advanced Topics](advanced.md) - Observability and the compile pattern
+- [Specification](../specification.md) - SubAgent API reference

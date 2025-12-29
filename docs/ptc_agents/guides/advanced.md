@@ -346,6 +346,8 @@ memory/key                     ; Memory shorthand
 
 ## Further Reading
 
+- [Core Concepts](core-concepts.md) - Context, memory, and the firewall
+- [Patterns](patterns.md) - Chaining, orchestration, and composition
+- [Signatures](signatures.md) - Type system details
 - [Specification](../specification.md) - Full API reference
-- [Signature Syntax](signatures.md) - Type system details
 - [PtcRunner Guide](../../guide.md) - Core PTC-Lisp documentation

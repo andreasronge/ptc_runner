@@ -316,6 +316,7 @@ end
 
 ## Related Documents
 
-- [signature-syntax.md](signature-syntax.md) - Signature string syntax
-- [specification.md](specification.md) - SubAgent API specification
-- [guides/](guides/) - Usage guides
+- [specification.md](specification.md) - SubAgent API reference
+- [guides/](guides/) - Usage guides and patterns
+- [signature-syntax.md](signature-syntax.md) - Signature syntax reference
+- [step.md](step.md) - Step struct specification

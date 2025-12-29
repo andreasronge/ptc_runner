@@ -195,4 +195,7 @@ Validation happens at registration time, not runtime.
 ## Further Reading
 
 - [Core Concepts](core-concepts.md) - How signatures interact with context
-- [Specification](../specification.md) - Full API reference
+- [Getting Started](getting-started.md) - Using signatures in your first agent
+- [Patterns](patterns.md) - Chaining agents using signatures
+- [Signatures Reference](../signature-syntax.md) - Full syntax specification
+- [Specification](../specification.md) - SubAgent API reference
