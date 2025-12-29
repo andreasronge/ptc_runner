@@ -1179,11 +1179,13 @@ String parsing functions provide safe conversion from strings to numbers, compat
 ```
 
 **Type checking:**
-Both functions accept only strings. Non-string input raises a type error:
+Both functions accept strings and return `nil` for non-string input. **Note: This diverges from Clojure 1.11+, which raises `IllegalArgumentException` for non-string input. PTC-Lisp returns `nil` for safety in agentic contexts.**
 
 ```clojure
-(parse-long 42)            ; => TYPE ERROR (expected string, got number)
-(parse-double nil)         ; => TYPE ERROR (expected string, got nil)
+(parse-long 42)            ; => ...
+(parse-long nil)           ; => ...
+(parse-double nil)         ; => ...
+(parse-double 3.14)        ; => ...
 ```
 
 **Use cases:**
