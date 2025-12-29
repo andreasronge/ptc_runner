@@ -616,12 +616,10 @@ defmodule PtcRunner.Lisp.Runtime do
   - (split "hello" "") returns ["h" "e" "l" "l" "o"]
   - (split "a,,b" ",") returns ["a" "" "b"]
   """
+  def split(s, "") when is_binary(s), do: String.graphemes(s)
+
   def split(s, separator) when is_binary(s) and is_binary(separator) do
-    if separator == "" do
-      s |> String.graphemes()
-    else
-      String.split(s, separator)
-    end
+    String.split(s, separator)
   end
 
   @doc """
