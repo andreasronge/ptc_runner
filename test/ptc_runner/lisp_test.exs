@@ -5,33 +5,36 @@ defmodule PtcRunner.LispTest do
 
   describe "basic execution" do
     test "evaluates simple expression" do
-      assert {:ok, 3, %{}, %{}} = Lisp.run("(+ 1 2)")
+      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 1 2)")
     end
 
     test "propagates parser errors" do
-      assert {:error, {:parse_error, _}} = Lisp.run("(invalid syntax!")
+      assert {:error, %{fail: %{reason: :parse_error}}} = Lisp.run("(invalid syntax!")
     end
   end
 
   describe "memory contract - non-map results" do
     test "non-map result leaves memory unchanged" do
-      assert {:ok, 3, %{}, %{}} = Lisp.run("(+ 1 2)")
+      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 1 2)")
     end
 
     test "non-map result with context" do
-      assert {:ok, 10, %{}, %{}} = Lisp.run("ctx/x", context: %{x: 10})
+      assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("ctx/x", context: %{x: 10})
     end
 
     test "non-map result with initial memory" do
       initial_mem = %{stored: 42}
-      assert {:ok, 5, %{}, ^initial_mem} = Lisp.run("(+ 2 3)", memory: initial_mem)
+
+      assert {:ok, %{return: 5, memory_delta: %{}, memory: ^initial_mem}} =
+               Lisp.run("(+ 2 3)", memory: initial_mem)
     end
   end
 
-  describe "memory contract - map without :result key" do
-    test "map without :result merges into memory and returns map" do
+  describe "memory contract - map without :return key" do
+    test "map without :return merges into memory and returns map" do
       source = "{:cached-count 3}"
-      {:ok, result, delta, new_memory} = Lisp.run(source)
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == %{:"cached-count" => 3}
       assert delta == %{:"cached-count" => 3}
@@ -41,7 +44,9 @@ defmodule PtcRunner.LispTest do
     test "map merge preserves existing memory keys" do
       initial_memory = %{x: 10}
       source = "{:y 20}"
-      {:ok, result, delta, new_memory} = Lisp.run(source, memory: initial_memory)
+
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, memory: initial_memory)
 
       assert result == %{y: 20}
       assert delta == %{y: 20}
@@ -51,7 +56,9 @@ defmodule PtcRunner.LispTest do
     test "map update overwrites memory keys" do
       initial_memory = %{counter: 5}
       source = "{:counter 10}"
-      {:ok, result, delta, new_memory} = Lisp.run(source, memory: initial_memory)
+
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, memory: initial_memory)
 
       assert result == %{counter: 10}
       assert delta == %{counter: 10}
@@ -61,7 +68,9 @@ defmodule PtcRunner.LispTest do
     test "empty map merges with memory but returns empty map" do
       initial_memory = %{x: 10}
       source = "{}"
-      {:ok, result, delta, new_memory} = Lisp.run(source, memory: initial_memory)
+
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, memory: initial_memory)
 
       assert result == %{}
       assert delta == %{}
@@ -69,47 +78,49 @@ defmodule PtcRunner.LispTest do
     end
   end
 
-  describe "memory contract - map with :result key" do
-    test "map with :result extracts return value" do
-      source = "{:result 42, :stored 100}"
-      {:ok, result, delta, new_memory} = Lisp.run(source)
+  describe "memory contract - map with :return key" do
+    test "map with :return extracts return value" do
+      source = "{:return 42, :stored 100}"
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == 42
       assert delta == %{stored: 100}
       assert new_memory == %{stored: 100}
     end
 
-    test "map with :result key and multiple updates" do
-      source = "{:result \"done\", :count 5, :status \"ok\"}"
-      {:ok, result, delta, new_memory} = Lisp.run(source)
+    test "map with :return key and multiple updates" do
+      source = "{:return \"done\", :count 5, :status \"ok\"}"
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == "done"
       assert delta == %{count: 5, status: "ok"}
       assert new_memory == %{count: 5, status: "ok"}
     end
 
-    test "map with only :result key" do
-      source = "{:result \"return-value\"}"
-      {:ok, result, delta, new_memory} = Lisp.run(source)
+    test "map with only :return key" do
+      source = "{:return \"return-value\"}"
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == "return-value"
       assert delta == %{}
       assert new_memory == %{}
     end
 
-    test "map with :result merges with initial memory" do
+    test "map with :return merges with initial memory" do
       initial_memory = %{x: 10}
-      source = "{:result \"ok\", :y 20}"
-      {:ok, result, delta, new_memory} = Lisp.run(source, memory: initial_memory)
+      source = "{:return \"ok\", :y 20}"
+
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, memory: initial_memory)
 
       assert result == "ok"
       assert delta == %{y: 20}
       assert new_memory == %{x: 10, y: 20}
     end
 
-    test "map with :result key set to nil returns nil" do
-      source = "{:result nil, :stored 100}"
-      {:ok, result, delta, new_memory} = Lisp.run(source)
+    test "map with :return key set to nil returns nil" do
+      source = "{:return nil, :stored 100}"
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == nil
       assert delta == %{stored: 100}
@@ -119,150 +130,158 @@ defmodule PtcRunner.LispTest do
 
   describe "context and memory access" do
     test "accesses context variables" do
-      assert {:ok, 10, %{}, %{}} = Lisp.run("ctx/x", context: %{x: 10})
+      assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("ctx/x", context: %{x: 10})
     end
 
     test "accesses memory variables" do
-      assert {:ok, 5, %{}, %{}} = Lisp.run("memory/value", memory: %{value: 5})
+      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("memory/value", memory: %{value: 5})
     end
 
     test "memory access returns nil for missing keys" do
-      assert {:ok, nil, %{}, %{}} = Lisp.run("memory/missing")
+      assert {:ok, %{return: nil, memory_delta: %{}, memory: %{}}} = Lisp.run("memory/missing")
     end
 
     test "context access returns nil for missing keys" do
-      assert {:ok, nil, %{}, %{}} = Lisp.run("ctx/missing")
+      assert {:ok, %{return: nil, memory_delta: %{}, memory: %{}}} = Lisp.run("ctx/missing")
     end
   end
 
   describe "basic arithmetic" do
     test "addition" do
-      assert {:ok, 10, %{}, %{}} = Lisp.run("(+ 3 7)")
+      assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 3 7)")
     end
 
     test "multiplication" do
-      assert {:ok, 20, %{}, %{}} = Lisp.run("(* 4 5)")
+      assert {:ok, %{return: 20, memory_delta: %{}, memory: %{}}} = Lisp.run("(* 4 5)")
     end
 
     test "division" do
-      {:ok, result, %{}, %{}} = Lisp.run("(/ 10 2)")
+      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} = Lisp.run("(/ 10 2)")
       assert result == 5.0
     end
   end
 
   describe "if conditionals" do
     test "if with true condition" do
-      assert {:ok, 1, %{}, %{}} = Lisp.run("(if true 1 2)")
+      assert {:ok, %{return: 1, memory_delta: %{}, memory: %{}}} = Lisp.run("(if true 1 2)")
     end
 
     test "if with false condition" do
-      assert {:ok, 2, %{}, %{}} = Lisp.run("(if false 1 2)")
+      assert {:ok, %{return: 2, memory_delta: %{}, memory: %{}}} = Lisp.run("(if false 1 2)")
     end
 
     test "if with truthy value" do
-      assert {:ok, 1, %{}, %{}} = Lisp.run("(if 42 1 2)")
+      assert {:ok, %{return: 1, memory_delta: %{}, memory: %{}}} = Lisp.run("(if 42 1 2)")
     end
 
     test "if with nil (falsy)" do
-      assert {:ok, 2, %{}, %{}} = Lisp.run("(if nil 1 2)")
+      assert {:ok, %{return: 2, memory_delta: %{}, memory: %{}}} = Lisp.run("(if nil 1 2)")
     end
   end
 
   describe "logical operators" do
     test "or returns first truthy" do
-      assert {:ok, 5, %{}, %{}} = Lisp.run("(or false nil 5)")
+      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} = Lisp.run("(or false nil 5)")
     end
 
     test "or with no truthy values" do
-      assert {:ok, nil, %{}, %{}} = Lisp.run("(or false nil)")
+      assert {:ok, %{return: nil, memory_delta: %{}, memory: %{}}} = Lisp.run("(or false nil)")
     end
 
     test "and returns first falsy" do
-      assert {:ok, false, %{}, %{}} = Lisp.run("(and true false)")
+      assert {:ok, %{return: false, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(and true false)")
     end
 
     test "and with all truthy" do
-      assert {:ok, true, %{}, %{}} = Lisp.run("(and true 2 3)")
+      assert {:ok, %{return: true, memory_delta: %{}, memory: %{}}} = Lisp.run("(and true 2 3)")
     end
   end
 
   describe "let bindings" do
     test "simple let binding" do
-      assert {:ok, 15, %{}, %{}} = Lisp.run("(let [x 10] (+ x 5))")
+      assert {:ok, %{return: 15, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(let [x 10] (+ x 5))")
     end
 
     test "multiple let bindings" do
-      assert {:ok, 30, %{}, %{}} = Lisp.run("(let [x 10 y 20] (+ x y))")
+      assert {:ok, %{return: 30, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(let [x 10 y 20] (+ x y))")
     end
   end
 
   describe "literals and types" do
     test "integer" do
-      assert {:ok, 42, %{}, %{}} = Lisp.run("42")
+      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} = Lisp.run("42")
     end
 
     test "string" do
-      assert {:ok, "hello", %{}, %{}} = Lisp.run(~S/"hello"/)
+      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} = Lisp.run(~S/"hello"/)
     end
 
     test "keyword" do
-      assert {:ok, :name, %{}, %{}} = Lisp.run(":name")
+      assert {:ok, %{return: :name, memory_delta: %{}, memory: %{}}} = Lisp.run(":name")
     end
 
     test "boolean true" do
-      assert {:ok, true, %{}, %{}} = Lisp.run("true")
+      assert {:ok, %{return: true, memory_delta: %{}, memory: %{}}} = Lisp.run("true")
     end
 
     test "boolean false" do
-      assert {:ok, false, %{}, %{}} = Lisp.run("false")
+      assert {:ok, %{return: false, memory_delta: %{}, memory: %{}}} = Lisp.run("false")
     end
 
     test "nil" do
-      assert {:ok, nil, %{}, %{}} = Lisp.run("nil")
+      assert {:ok, %{return: nil, memory_delta: %{}, memory: %{}}} = Lisp.run("nil")
     end
   end
 
   describe "vectors" do
     test "empty vector" do
-      assert {:ok, [], %{}, %{}} = Lisp.run("[]")
+      assert {:ok, %{return: [], memory_delta: %{}, memory: %{}}} = Lisp.run("[]")
     end
 
     test "vector with numbers" do
-      assert {:ok, [1, 2, 3], %{}, %{}} = Lisp.run("[1 2 3]")
+      assert {:ok, %{return: [1, 2, 3], memory_delta: %{}, memory: %{}}} = Lisp.run("[1 2 3]")
     end
 
     test "vector with context access" do
-      assert {:ok, [10, 20], %{}, %{}} = Lisp.run("[ctx/x ctx/y]", context: %{x: 10, y: 20})
+      assert {:ok, %{return: [10, 20], memory_delta: %{}, memory: %{}}} =
+               Lisp.run("[ctx/x ctx/y]", context: %{x: 10, y: 20})
     end
   end
 
   describe "maps" do
     test "empty map" do
-      assert {:ok, %{}, %{}, %{}} = Lisp.run("{}")
+      assert {:ok, %{return: %{}, memory_delta: %{}, memory: %{}}} = Lisp.run("{}")
     end
 
     test "map with keywords and numbers" do
-      assert {:ok, %{a: 1, b: 2}, %{}, %{}} = Lisp.run("{:a 1 :b 2}")
+      assert {:ok, %{return: %{a: 1, b: 2}, memory_delta: %{a: 1, b: 2}, memory: %{a: 1, b: 2}}} =
+               Lisp.run("{:a 1 :b 2}")
     end
 
     test "map with context values" do
-      assert {:ok, %{x: 10}, %{}, %{}} = Lisp.run("{:x ctx/x}", context: %{x: 10})
+      assert {:ok, %{return: %{x: 10}, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("{:x ctx/x}", context: %{x: 10})
     end
   end
 
   describe "keyword as function" do
     test "extract key from map" do
-      assert {:ok, "Alice", %{}, %{}} =
+      assert {:ok, %{return: "Alice", memory_delta: %{}, memory: %{}}} =
                Lisp.run("(:name ctx/user)", context: %{user: %{name: "Alice"}})
     end
 
     test "extract with default" do
-      assert {:ok, "default", %{}, %{}} =
+      assert {:ok, %{return: "default", memory_delta: %{}, memory: %{}}} =
                Lisp.run("(:missing ctx/user \"default\")", context: %{user: %{}})
     end
 
     test "extract from nil" do
-      assert {:ok, nil, %{}, %{}} = Lisp.run("(:key nil)")
+      assert {:ok, %{return: nil, memory_delta: %{}, memory: %{}}} = Lisp.run("(:key nil)")
     end
   end
 
@@ -270,19 +289,25 @@ defmodule PtcRunner.LispTest do
     test "equality predicate" do
       source = "(filter (where :status = \"active\") ctx/items)"
       ctx = %{items: [%{status: "active"}, %{status: "inactive"}]}
-      assert {:ok, [%{status: "active"}], %{}, %{}} = Lisp.run(source, context: ctx)
+
+      assert {:ok, %{return: [%{status: "active"}], memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx)
     end
 
     test "greater than predicate" do
       source = "(filter (where :age > 18) ctx/items)"
       ctx = %{items: [%{age: 20}, %{age: 15}]}
-      assert {:ok, [%{age: 20}], %{}, %{}} = Lisp.run(source, context: ctx)
+
+      assert {:ok, %{return: [%{age: 20}], memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx)
     end
 
     test "truthy predicate" do
       source = "(filter (where :active) ctx/items)"
       ctx = %{items: [%{active: true}, %{active: false}, %{active: nil}]}
-      assert {:ok, [%{active: true}], %{}, %{}} = Lisp.run(source, context: ctx)
+
+      assert {:ok, %{return: [%{active: true}], memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx)
     end
   end
 
@@ -290,126 +315,143 @@ defmodule PtcRunner.LispTest do
     test "all-of combines predicates" do
       source = "(filter (all-of (where :a = 1) (where :b = 2)) ctx/items)"
       ctx = %{items: [%{a: 1, b: 2}, %{a: 1, b: 3}, %{a: 2, b: 2}]}
-      assert {:ok, [%{a: 1, b: 2}], %{}, %{}} = Lisp.run(source, context: ctx)
+
+      assert {:ok, %{return: [%{a: 1, b: 2}], memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx)
     end
 
     test "empty all-of is true" do
       source = "(filter (all-of) ctx/items)"
       ctx = %{items: [%{a: 1}, %{a: 2}]}
-      assert {:ok, [%{a: 1}, %{a: 2}], %{}, %{}} = Lisp.run(source, context: ctx)
+
+      assert {:ok, %{return: [%{a: 1}, %{a: 2}], memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx)
     end
 
     test "empty any-of is false" do
       source = "(filter (any-of) ctx/items)"
       ctx = %{items: [%{a: 1}, %{a: 2}]}
-      assert {:ok, [], %{}, %{}} = Lisp.run(source, context: ctx)
+      assert {:ok, %{return: [], memory_delta: %{}, memory: %{}}} = Lisp.run(source, context: ctx)
     end
   end
 
   describe "collection operations" do
     test "count" do
-      assert {:ok, 3, %{}, %{}} = Lisp.run("(count [1 2 3])")
+      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} = Lisp.run("(count [1 2 3])")
     end
 
     test "first" do
-      assert {:ok, 1, %{}, %{}} = Lisp.run("(first [1 2 3])")
+      assert {:ok, %{return: 1, memory_delta: %{}, memory: %{}}} = Lisp.run("(first [1 2 3])")
     end
 
     test "second" do
-      assert {:ok, 2, %{}, %{}} = Lisp.run("(second [1 2 3])")
+      assert {:ok, %{return: 2, memory_delta: %{}, memory: %{}}} = Lisp.run("(second [1 2 3])")
     end
 
     test "last" do
-      assert {:ok, 3, %{}, %{}} = Lisp.run("(last [1 2 3])")
+      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} = Lisp.run("(last [1 2 3])")
     end
 
     test "sort" do
-      assert {:ok, [1, 2, 3], %{}, %{}} = Lisp.run("(sort [3 1 2])")
+      assert {:ok, %{return: [1, 2, 3], memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(sort [3 1 2])")
     end
   end
 
   describe "comparison operators" do
     test "equals" do
-      assert {:ok, true, %{}, %{}} = Lisp.run("(= 5 5)")
-      assert {:ok, false, %{}, %{}} = Lisp.run("(= 5 6)")
+      assert {:ok, %{return: true, memory_delta: %{}, memory: %{}}} = Lisp.run("(= 5 5)")
+      assert {:ok, %{return: false, memory_delta: %{}, memory: %{}}} = Lisp.run("(= 5 6)")
     end
 
     test "greater than" do
-      assert {:ok, true, %{}, %{}} = Lisp.run("(> 10 5)")
-      assert {:ok, false, %{}, %{}} = Lisp.run("(> 5 10)")
+      assert {:ok, %{return: true, memory_delta: %{}, memory: %{}}} = Lisp.run("(> 10 5)")
+      assert {:ok, %{return: false, memory_delta: %{}, memory: %{}}} = Lisp.run("(> 5 10)")
     end
 
     test "less than" do
-      assert {:ok, true, %{}, %{}} = Lisp.run("(< 5 10)")
-      assert {:ok, false, %{}, %{}} = Lisp.run("(< 10 5)")
+      assert {:ok, %{return: true, memory_delta: %{}, memory: %{}}} = Lisp.run("(< 5 10)")
+      assert {:ok, %{return: false, memory_delta: %{}, memory: %{}}} = Lisp.run("(< 10 5)")
     end
   end
 
   describe "tool execution" do
     test "executes provided tools" do
       tools = %{"greet" => fn _args -> "hello" end}
-      assert {:ok, "hello", %{}, %{}} = Lisp.run("(call \"greet\" {})", tools: tools)
+
+      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(call \"greet\" {})", tools: tools)
     end
 
     @tag :capture_log
     test "returns error for unknown tool during execution" do
       # Unknown tool raises error in the sandbox process
-      assert {:error, _} = Lisp.run("(call \"unknown\" {})")
+      assert {:error, %{fail: _}} = Lisp.run("(call \"unknown\" {})")
     end
   end
 
   describe "closure creation" do
     test "creates and evaluates closure" do
       source = "((fn [x] (+ x 1)) 5)"
-      assert {:ok, 6, %{}, %{}} = Lisp.run(source)
+      assert {:ok, %{return: 6, memory_delta: %{}, memory: %{}}} = Lisp.run(source)
     end
   end
 
   describe "error propagation" do
     test "parser error is propagated" do
-      assert {:error, {:parse_error, _}} = Lisp.run("(missing closing paren")
+      assert {:error, %{fail: %{reason: :parse_error}}} = Lisp.run("(missing closing paren")
     end
 
     test "unbound variable error" do
-      assert {:error, {:unbound_var, :"undefined-var"}} = Lisp.run("undefined-var")
+      assert {:error, %{fail: %{reason: :unbound_var}}} = Lisp.run("undefined-var")
     end
 
     test "not callable error" do
-      assert {:error, {:not_callable, 42}} = Lisp.run("(42)")
+      assert {:error, %{fail: %{reason: :not_callable}}} = Lisp.run("(42)")
     end
   end
 
   describe "float_precision option" do
     test "rounds floats in result to specified precision" do
-      assert {:ok, 3.33, %{}, %{}} = Lisp.run("(/ 10 3)", float_precision: 2)
+      assert {:ok, %{return: 3.33, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(/ 10 3)", float_precision: 2)
     end
 
     test "full precision when not specified" do
-      {:ok, result, %{}, %{}} = Lisp.run("(/ 10 3)")
+      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} = Lisp.run("(/ 10 3)")
       assert result == 10 / 3
     end
 
     test "rounds floats in nested structures" do
-      {:ok, result, %{}, %{}} = Lisp.run("[1.12345 2.67891]", float_precision: 2)
+      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} =
+        Lisp.run("[1.12345 2.67891]", float_precision: 2)
+
       assert result == [1.12, 2.68]
     end
 
     test "rounds floats in map values" do
-      {:ok, result, _, _} = Lisp.run("{:value (/ 10 3)}", float_precision: 1)
+      {:ok, %{return: result, memory_delta: _, memory: _}} =
+        Lisp.run("{:value (/ 10 3)}", float_precision: 1)
+
       assert result == %{value: 3.3}
     end
 
     test "precision 0 rounds to integers" do
-      {:ok, result, %{}, %{}} = Lisp.run("(/ 10 3)", float_precision: 0)
+      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} =
+        Lisp.run("(/ 10 3)", float_precision: 0)
+
       assert result == 3.0
     end
 
     test "does not affect integers" do
-      assert {:ok, 42, %{}, %{}} = Lisp.run("42", float_precision: 2)
+      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("42", float_precision: 2)
     end
 
     test "only rounds result, not memory delta" do
-      {:ok, result, delta, _} = Lisp.run("{:result (/ 10 3), :pi 3.14159}", float_precision: 2)
+      {:ok, %{return: result, memory_delta: delta, memory: _}} =
+        Lisp.run("{:return (/ 10 3), :pi 3.14159}", float_precision: 2)
+
       assert result == 3.33
       # Memory delta retains full precision (intentional - memory stores original values)
       assert delta == %{pi: 3.14159}
@@ -418,16 +460,16 @@ defmodule PtcRunner.LispTest do
 
   describe "integration - chained memory updates" do
     test "first call stores in memory" do
-      source = "{:result 42, :step1 100}"
-      {:ok, result1, _, mem1} = Lisp.run(source)
+      source = "{:return 42, :step1 100}"
+      {:ok, %{return: result1, memory_delta: _, memory: mem1}} = Lisp.run(source)
       assert result1 == 42
       assert mem1 == %{step1: 100}
     end
 
     test "second call uses persisted memory" do
       mem = %{previous: 50}
-      source = "{:result memory/previous}"
-      {:ok, result, _, _} = Lisp.run(source, memory: mem)
+      source = "{:return memory/previous}"
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, memory: mem)
       assert result == 50
     end
   end
@@ -439,7 +481,7 @@ defmodule PtcRunner.LispTest do
       source = ~S"""
       (let [high-paid (->> (call "find-employees" {})
                            (filter (where :salary > 100000)))]
-        {:result (pluck :email high-paid)
+        {:return (pluck :email high-paid)
          :high-paid high-paid
          :count (count high-paid)})
       """
@@ -453,9 +495,10 @@ defmodule PtcRunner.LispTest do
         end
       }
 
-      {:ok, result, delta, new_memory} = Lisp.run(source, tools: tools)
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, tools: tools)
 
-      # Memory contract: :result is extracted, rest goes to delta
+      # Memory contract: :return is extracted, rest goes to delta
       assert result == ["alice@ex.com"]
 
       assert delta == %{
@@ -474,7 +517,7 @@ defmodule PtcRunner.LispTest do
       source = ~S"""
       (let [results (->> (call "search" {})
                          (filter (where :active = true)))]
-        {:result (count results)
+        {:return (count results)
          :items results})
       """
 
@@ -487,7 +530,8 @@ defmodule PtcRunner.LispTest do
         end
       }
 
-      {:ok, result, delta, new_memory} = Lisp.run(source, tools: tools)
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, tools: tools)
 
       assert result == 0
       assert delta == %{items: []}
@@ -500,12 +544,12 @@ defmodule PtcRunner.LispTest do
       (let [x 10
             y 20
             z (+ x y)]
-        {:result z
+        {:return z
          :cached-x x
          :cached-y y})
       """
 
-      {:ok, result, delta, new_memory} = Lisp.run(source)
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == 30
       assert delta == %{:"cached-x" => 10, :"cached-y" => 20}
@@ -517,7 +561,7 @@ defmodule PtcRunner.LispTest do
       source = ~S"""
       (let [filtered (->> ctx/items
                          (filter (where :age > 18)))]
-        {:result (count filtered)
+        {:return (count filtered)
          :matches filtered})
       """
 
@@ -529,7 +573,8 @@ defmodule PtcRunner.LispTest do
         ]
       }
 
-      {:ok, result, delta, new_memory} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, context: ctx)
 
       # Only Alice and Carol match (age > 18), Bob's nil is safely filtered
       assert result == 2
@@ -547,7 +592,7 @@ defmodule PtcRunner.LispTest do
     test "thread-first with assoc chains" do
       # Thread-first: value goes as first argument
       source = "(-> {:a 1} (assoc :b 2) (assoc :c 3))"
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
       assert result == %{a: 1, b: 2, c: 3}
     end
 
@@ -570,7 +615,7 @@ defmodule PtcRunner.LispTest do
         end
       }
 
-      {:ok, result, _, _} = Lisp.run(source, tools: tools)
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, tools: tools)
       assert result == "two"
     end
 
@@ -583,13 +628,13 @@ defmodule PtcRunner.LispTest do
           :else "small"))
       """
 
-      {:ok, result1, _, _} = Lisp.run(source, context: %{x: 15})
+      {:ok, %{return: result1, memory_delta: _, memory: _}} = Lisp.run(source, context: %{x: 15})
       assert result1 == "big"
 
-      {:ok, result2, _, _} = Lisp.run(source, context: %{x: 7})
+      {:ok, %{return: result2, memory_delta: _, memory: _}} = Lisp.run(source, context: %{x: 7})
       assert result2 == "medium"
 
-      {:ok, result3, _, _} = Lisp.run(source, context: %{x: 3})
+      {:ok, %{return: result3, memory_delta: _, memory: _}} = Lisp.run(source, context: %{x: 3})
       assert result3 == "small"
     end
 
@@ -601,19 +646,21 @@ defmodule PtcRunner.LispTest do
       """
 
       ctx = %{user: %{name: "Alice", age: 30}}
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, context: ctx)
       assert result == %{name: "Alice", age: 30}
     end
 
     test "underscore in vector destructuring skips positions" do
-      assert {:ok, 2, _, _} = Lisp.run("(let [[_ b] [1 2]] b)")
-      assert {:ok, 3, _, _} = Lisp.run("(let [[_ _ c] [1 2 3]] c)")
+      assert {:ok, %{return: 2, memory_delta: _, memory: _}} = Lisp.run("(let [[_ b] [1 2]] b)")
+
+      assert {:ok, %{return: 3, memory_delta: _, memory: _}} =
+               Lisp.run("(let [[_ _ c] [1 2 3]] c)")
     end
 
     test "closure captures let-bound variable in filter" do
       source = ~S"""
       (let [threshold 100]
-        {:result (filter (fn [x] (> (:price x) threshold)) ctx/products)
+        {:return (filter (fn [x] (> (:price x) threshold)) ctx/products)
          :threshold threshold})
       """
 
@@ -625,7 +672,7 @@ defmodule PtcRunner.LispTest do
         ]
       }
 
-      {:ok, result, delta, _} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory_delta: delta, memory: _}} = Lisp.run(source, context: ctx)
 
       assert result == [
                %{name: "laptop", price: 1200},
@@ -645,54 +692,58 @@ defmodule PtcRunner.LispTest do
       ctx = %{items: [%{id: 1}, %{id: 2}]}
 
       # Should work and return the extracted values
-      assert {:ok, [1, 2], %{}, %{}} = Lisp.run(source, context: ctx)
+      assert {:ok, %{return: [1, 2], memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx)
     end
   end
 
   describe "sandbox - timeout" do
     test "simple expression completes within default timeout" do
-      assert {:ok, 6, %{}, %{}} = Lisp.run("(+ 1 2 3)")
+      assert {:ok, %{return: 6, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 1 2 3)")
     end
 
     test "respects custom timeout option" do
       # Simple fast operation should complete within generous timeout
-      assert {:ok, 5, %{}, %{}} = Lisp.run("(+ 2 3)", timeout: 5000)
+      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(+ 2 3)", timeout: 5000)
     end
 
     test "timeout option is accepted without error" do
       # Just verify that timeout option doesn't cause errors
       # Actual timeout behavior is hard to test without expensive computations
-      assert {:ok, 3, %{}, %{}} = Lisp.run("(+ 1 2)", timeout: 100)
+      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(+ 1 2)", timeout: 100)
     end
   end
 
   describe "sandbox - memory limits" do
     test "simple expression stays within memory limit" do
-      assert {:ok, 42, %{}, %{}} = Lisp.run("42")
+      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} = Lisp.run("42")
     end
 
     test "respects custom max_heap option" do
       # Small computation should complete with larger heap
-      assert {:ok, _result, %{}, %{}} =
+      assert {:ok, %{return: _result, memory_delta: %{}, memory: %{}}} =
                Lisp.run("[1 2 3 4 5]", max_heap: 5_000_000)
     end
 
     test "max_heap option is accepted without error" do
       # Just verify that max_heap option doesn't cause errors
-      assert {:ok, 5, %{}, %{}} = Lisp.run("(+ 2 3)", max_heap: 100_000)
+      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(+ 2 3)", max_heap: 100_000)
     end
   end
 
   describe "sandbox - integration with existing features" do
     test "float_precision still works with sandbox" do
-      assert {:ok, 3.33, %{}, %{}} =
+      assert {:ok, %{return: 3.33, memory_delta: %{}, memory: %{}}} =
                Lisp.run("(/ 10 3)", float_precision: 2, timeout: 1000)
     end
 
     test "memory contract works with sandbox execution" do
-      source = "{:result 42, :stored 100}"
+      source = "{:return 42, :stored 100}"
 
-      {:ok, result, delta, new_memory} =
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
         Lisp.run(source, timeout: 1000)
 
       assert result == 42
@@ -712,7 +763,8 @@ defmodule PtcRunner.LispTest do
       ctx = %{value: 5}
       source = "(call \"double\" {:x ctx/value})"
 
-      assert {:ok, 10, %{}, %{}} = Lisp.run(source, context: ctx, tools: tools)
+      assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
+               Lisp.run(source, context: ctx, tools: tools)
     end
 
     test "tool results work with memory updates" do
@@ -720,8 +772,10 @@ defmodule PtcRunner.LispTest do
         "get-data" => fn _args -> "success" end
       }
 
-      source = "{:result (call \"get-data\" {}), :status \"done\"}"
-      {:ok, result, delta, new_memory} = Lisp.run(source, tools: tools)
+      source = "{:return (call \"get-data\" {}), :status \"done\"}"
+
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, tools: tools)
 
       assert result == "success"
       assert delta == %{status: "done"}

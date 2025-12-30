@@ -669,7 +669,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     # Run in PTC-Lisp
     ptc_result =
       case PtcRunner.Lisp.run(source) do
-        {:ok, result, _delta, _memory} -> {:ok, result}
+        {:ok, %{return: result}} -> {:ok, result}
         {:error, _} = err -> err
       end
 
