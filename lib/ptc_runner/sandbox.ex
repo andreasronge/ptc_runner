@@ -39,7 +39,9 @@ defmodule PtcRunner.Sandbox do
   @typedoc """
   Evaluator function that takes AST and context and returns result with memory.
   """
-  @type eval_fn :: (any(), Context.t() -> {:ok, any(), map()} | {:error, {atom(), String.t()}})
+  @type eval_fn :: (any(), Context.t() ->
+                      {:ok, any(), map()}
+                      | {:error, {atom(), String.t()} | {atom(), String.t(), any()}})
 
   @doc """
   Executes an AST in an isolated sandbox process.
@@ -58,7 +60,8 @@ defmodule PtcRunner.Sandbox do
   """
   @spec execute(any(), Context.t(), keyword()) ::
           {:ok, any(), metrics(), map()}
-          | {:error, {atom(), non_neg_integer()} | {atom(), String.t()}}
+          | {:error,
+             {atom(), non_neg_integer()} | {atom(), String.t()} | {atom(), String.t(), any()}}
 
   def execute(ast, context, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 1000)
