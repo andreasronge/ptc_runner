@@ -4,15 +4,15 @@ This document describes the Claude-powered GitHub workflows and their security g
 
 ## Workflow Summary
 
-| Workflow | Trigger | Gate | Purpose |
-|----------|---------|------|---------|
-| `claude-code-review.yml` | PR opened/labeled/synchronized | `claude/*` branch or `claude-review` label | Automated PR review |
-| `claude-auto-triage.yml` | After code-review completes | Inherits from code-review | Triage review findings |
-| `claude-issue.yml` | `@claude` mention in issue | Actor or `ready-for-implementation` label | Implement issues |
-| `claude-pr-fix.yml` | `@claude` mention in PR | Actor or `claude-approved` label | Fix PRs |
-| `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue, trigger implementation |
-| `claude-implementation-feedback.yml` | Issue labeled | Feedback labels | Handle implementation feedback |
-| `claude-pm.yml` | PR merged, manual | Epic management | Queue issues for review, update epic progress |
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `claude-code-review.yml` | PR by `claude[bot]`, `claude/*` branch, or `claude-review` label | Automated PR review |
+| `claude-auto-triage.yml` | After code-review completes | Triage review findings |
+| `claude-issue.yml` | `@claude` in issue + `ready-for-implementation` label | Implement issues |
+| `claude-pr-fix.yml` | `@claude` in PR + `claude-approved` label | Fix PRs |
+| `claude-issue-review.yml` | `needs-review` label | Review issue, trigger implementation |
+| `claude-implementation-feedback.yml` | Feedback labels | Handle implementation feedback |
+| `claude-pm.yml` | Schedule (6h), PR merged, issue events | Keep project moving |
 
 ## Workflow Interactions
 
@@ -80,11 +80,13 @@ This document describes the Claude-powered GitHub workflows and their security g
 
 ## PM Workflow
 
-The PM workflow (`claude-pm.yml`) orchestrates issue creation and implementation using an **Epic Issue** as the source of truth.
+The PM workflow (`claude-pm.yml`) keeps the project moving by handling tech debt, stuck reviews, and epic progress.
 
-**Full details**: See `.claude/commands/pm-workflow.md` for:
-- Epic-based workflow instructions
-- Decision framework and safety rules
+**Triggers**: Schedule (every 6h), PR merged, issue closed, labels (`from-pr-review`, `needs-clarification`, `needs-breakdown`, `ready-for-implementation`)
+
+**Priorities**: Tech debt (`from-pr-review`) → stuck reviews → next epic task
+
+**Details**: See `.claude/commands/pm-workflow.md`
 
 ### Epic Issue Pattern
 
@@ -210,37 +212,16 @@ Most workflows require explicit maintainer approval before Claude can act:
 4. System is effectively **paused** until human intervenes
 
 **When PM workflow gets stuck:**
-1. PM adds `pm-stuck` label to the issue
-2. Subsequent PM runs detect stuck state and fail fast
-3. Use `reset-stuck` action to clear and resume
+1. PM adds `needs-human-review` label after 3 failed attempts
+2. Remove label manually to resume
 
-**Recovery options:**
-
-| Situation | Resolution |
-|-----------|------------|
-| PR stuck at cycle 3 | Remove `needs-human-review` label (re-enables automation), OR manually fix and merge, OR close PR |
-| PM stuck | Run PM workflow manually with `reset-stuck` action, OR remove `pm-stuck`/`pm-failed-attempt` labels manually |
-
-**Manual workflow dispatch:**
-```bash
-# Check PM status without taking action
-gh workflow run claude-pm.yml -f action=status-only
-
-# Reset stuck state and resume
-gh workflow run claude-pm.yml -f action=reset-stuck
-```
+**Recovery**: Remove `needs-human-review` label to re-enable automation, or manually fix/close the issue/PR.
 
 ### Concurrency Control
 
-| Workflow | Concurrency Group | Cancel In-Progress |
-|----------|-------------------|-------------------|
-| code-review | `claude-pr-{number}` | Yes |
-| claude-pr-fix | `claude-pr-{number}` | No |
-| auto-triage | `claude-triage-{branch}` | Yes |
-| claude-issue | `claude-issue-{number}` | No |
-| issue-review | `claude-issue-{number}` | No |
-| implementation-feedback | `claude-issue-{number}` | No |
-| pm | `claude-pm` | No |
+All Claude workflows share one concurrency group: `claude-automation` (queue, no cancel).
+
+This ensures only one Claude workflow runs at a time, preventing parallel Claude Code installations and race conditions.
 
 ## Labels Reference
 

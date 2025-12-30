@@ -7,13 +7,15 @@ on:
 jobs:
   claude-review:
     # Run when:
-    # - PR opened/synced from claude/* branch (auto-review Claude's PRs)
+    # - PR opened/synced by claude[bot]
+    # - PR opened/synced from claude/* branch
     # - claude-review label is added
     # - PR synced and has claude-review label
-    # Note: Using toJSON() because labels.*.name doesn't work with contains()
     if: |
       github.event.pull_request.changed_files > 0 &&
       (
+        (github.event.action == 'opened' && github.event.pull_request.user.login == 'claude[bot]') ||
+        (github.event.action == 'synchronize' && github.event.pull_request.user.login == 'claude[bot]') ||
         (github.event.action == 'opened' && startsWith(github.event.pull_request.head.ref, 'claude/')) ||
         (github.event.action == 'synchronize' && startsWith(github.event.pull_request.head.ref, 'claude/')) ||
         (github.event.action == 'labeled' && github.event.label.name == 'claude-review') ||
@@ -22,11 +24,9 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    # Prevent concurrent Claude operations on the same PR
-    # All claude-* workflows use the same group naming: claude-pr-{number}
     concurrency:
-      group: claude-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      group: claude-automation
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write  # Need write to add labels
