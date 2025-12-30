@@ -148,10 +148,14 @@ jobs:
           show_full_output: true
 
       # Safety net: ensure any commits Claude made are pushed
-      # Uses credentials from checkout step (token already configured via persist-credentials)
       - name: Push unpushed commits
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
+          # Configure git credentials
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+
           # Get current branch name
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
