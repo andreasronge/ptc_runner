@@ -734,6 +734,142 @@ defmodule PtcRunner.LispTest do
     end
   end
 
+  describe "tool normalization (LISP-04)" do
+    test "accepts bare function" do
+      tools = %{"greet" => fn _args -> "hello" end}
+
+      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(call \"greet\" {})", tools: tools)
+    end
+
+    test "accepts function with explicit signature" do
+      tools = %{"greet" => {fn _args -> "hello" end, "() -> :string"}}
+
+      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(call \"greet\" {})", tools: tools)
+    end
+
+    test "accepts function with signature and description" do
+      tools = %{
+        "greet" =>
+          {fn _args -> "hello" end, signature: "() -> :string", description: "Returns a greeting"}
+      }
+
+      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(call \"greet\" {})", tools: tools)
+    end
+
+    test "accepts function with :skip validation" do
+      tools = %{"greet" => {fn _args -> "hello" end, :skip}}
+
+      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+               Lisp.run("(call \"greet\" {})", tools: tools)
+    end
+
+    test "returns error for invalid tool format" do
+      tools = %{"bad" => :not_a_function}
+
+      assert {:error, %{fail: %{reason: :invalid_tool, message: message}}} =
+               Lisp.run("(call \"bad\" {})", tools: tools)
+
+      assert message =~ "Tool 'bad'"
+    end
+
+    test "empty tools map works correctly" do
+      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} =
+               Lisp.run("42", tools: %{})
+    end
+  end
+
+  describe "signature validation (LISP-05)" do
+    test "validates return value against signature" do
+      source = "{:count 5}"
+
+      assert {:ok, %{return: %{count: 5}, signature: signature}} =
+               Lisp.run(source, signature: "{count :int}")
+
+      assert signature == "{count :int}"
+    end
+
+    test "returns error when validation fails" do
+      source = "{:count \"not an int\"}"
+
+      assert {:error, %{fail: %{reason: :validation_error, message: message}}} =
+               Lisp.run(source, signature: "{count :int}")
+
+      assert message =~ "count"
+      assert message =~ "expected int"
+    end
+
+    test "signature stored in step on success" do
+      source = "42"
+
+      assert {:ok, %{signature: signature}} = Lisp.run(source, signature: ":int")
+
+      assert signature == ":int"
+    end
+
+    test "skip signature validation when option not provided" do
+      source = "42"
+      assert {:ok, %{signature: nil}} = Lisp.run(source)
+    end
+
+    test "validates nested structure" do
+      source = "{:items [{:id 1} {:id 2}]}"
+
+      assert {:ok, %{return: %{items: _}}} =
+               Lisp.run(source, signature: "{items [{id :int}]}")
+    end
+
+    test "validates with optional fields" do
+      source = "{:name \"Alice\"}"
+
+      assert {:ok, %{return: %{name: "Alice"}}} =
+               Lisp.run(source, signature: "{name :string, age :int?}")
+    end
+
+    test "validation error includes path to failed field" do
+      source = "{:user {:id \"not an int\"}}"
+
+      assert {:error, %{fail: %{reason: :validation_error, message: message}}} =
+               Lisp.run(source, signature: "{user {id :int}}")
+
+      assert message =~ "user"
+      assert message =~ "id"
+    end
+
+    test "returns parse error for invalid signature" do
+      assert {:error, %{fail: %{reason: :parse_error, message: message}}} =
+               Lisp.run("42", signature: "invalid syntax")
+
+      assert message =~ "Invalid signature"
+    end
+
+    test "validates list return values" do
+      source = "[1 2 3]"
+
+      assert {:ok, %{return: [1, 2, 3]}} = Lisp.run(source, signature: "[:int]")
+    end
+
+    test "validates primitive return values" do
+      source = "42"
+      assert {:ok, %{return: 42}} = Lisp.run(source, signature: ":int")
+
+      source = "\"hello\""
+      assert {:ok, %{return: "hello"}} = Lisp.run(source, signature: ":string")
+
+      source = "true"
+      assert {:ok, %{return: true}} = Lisp.run(source, signature: ":bool")
+    end
+
+    test "validation works with memory contract" do
+      source = "{:return 42, :stored 100}"
+
+      assert {:ok, %{return: 42, memory_delta: %{stored: 100}, signature: _}} =
+               Lisp.run(source, signature: ":int")
+    end
+  end
+
   describe "sandbox - integration with existing features" do
     test "float_precision still works with sandbox" do
       assert {:ok, %{return: 3.33, memory_delta: %{}, memory: %{}}} =
