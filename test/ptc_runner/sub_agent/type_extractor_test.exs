@@ -1,5 +1,6 @@
 defmodule PtcRunner.SubAgent.TypeExtractorTest do
   use ExUnit.Case, async: true
+  doctest PtcRunner.SubAgent.TypeExtractor
 
   alias PtcRunner.SubAgent.TypeExtractor
   alias PtcRunner.TypeExtractorFixtures, as: TestFunctions
@@ -15,14 +16,14 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
     test "extracts signature with multiple parameters" do
       {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.add/2)
 
-      assert signature == "(arg0 :int, arg1 :int) -> :int"
+      assert signature == "(a :int, b :int) -> :int"
       assert description == "Add two integers"
     end
 
     test "extracts signature with String.t() and list return" do
       {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.search/2)
 
-      assert signature == "(arg0 :string, arg1 :int) -> [:map]"
+      assert signature == "(query :string, limit :int) -> [:map]"
       assert description == "Search for items matching query"
     end
 
@@ -30,20 +31,20 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
       {:ok, {signature, _description}} = TypeExtractor.extract(&TestFunctions.get_user/1)
 
       # Structured maps are currently converted to :map
-      assert signature == "(arg0 :int) -> :map"
+      assert signature == "(id :int) -> :map"
     end
 
     test "extracts signature with boolean return" do
       {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.positive?/1)
 
-      assert signature == "(arg0 :float) -> :bool"
+      assert signature == "(n :float) -> :bool"
       assert description == "Check if value is positive"
     end
 
     test "extracts signature with float parameters and return" do
       {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.calculate/2)
 
-      assert signature == "(arg0 :int, arg1 :float) -> :float"
+      assert signature == "(a :int, b :float) -> :float"
       assert description == "Function with float return"
     end
 
@@ -56,7 +57,7 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
     test "extracts signature with any type" do
       {:ok, {signature, _description}} = TypeExtractor.extract(&TestFunctions.dynamic/1)
 
-      assert signature == "(arg0 :any) -> :any"
+      assert signature == "(x :any) -> :any"
     end
 
     test "extracts signature with DateTime converted to string" do
@@ -80,7 +81,7 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
     test "returns signature but nil description when @doc is missing" do
       {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.no_doc_function/1)
 
-      assert signature == "(arg0 :string) -> :keyword"
+      assert signature == "(_ :string) -> :keyword"
       assert description == nil
     end
 
@@ -132,7 +133,7 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
       # Should use the highest arity (2)
       {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.filter_items/2)
 
-      assert signature == "(arg0 :string, arg1 :int) -> [:map]"
+      assert signature == "(query :string, limit :int) -> [:map]"
       assert description == "Function with multiple specs"
     end
   end
@@ -151,7 +152,7 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
       {:ok, tool} = PtcRunner.Tool.new("add", &TestFunctions.add/2)
 
       assert tool.name == "add"
-      assert tool.signature == "(arg0 :int, arg1 :int) -> :int"
+      assert tool.signature == "(a :int, b :int) -> :int"
       assert tool.description == "Add two integers"
       assert tool.type == :native
     end
