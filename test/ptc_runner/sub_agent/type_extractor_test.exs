@@ -194,6 +194,40 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
 
       assert description == "Function with self-referential type"
     end
+
+    test "converts {:ok, map()} | {:error, atom()} union to result/error format" do
+      {:ok, {signature, description}} =
+        TypeExtractor.extract(&TestFunctions.get_user_result/1)
+
+      # {:ok, map()} | {:error, atom()} -> {result :map, error :keyword?}
+      assert signature == "(id :int) -> {result :map, error :keyword?}"
+      assert description == "Function with {:ok, map()} | {:error, atom()} union"
+    end
+
+    test "converts {:ok, user()} | {:error, atom()} union with custom type expansion" do
+      {:ok, {signature, description}} =
+        TypeExtractor.extract(&TestFunctions.get_custom_user_result/1)
+
+      # {:ok, user()} | {:error, atom()} -> {result {id :int, name :string}, error :keyword?}
+      assert signature == "(id :int) -> {result {id :int, name :string}, error :keyword?}"
+      assert description == "Function with {:ok, user()} | {:error, atom()} union"
+    end
+
+    test "converts {:ok, String.t()} | {:error, binary()} union" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.fetch_data/1)
+
+      # {:ok, String.t()} | {:error, binary()} -> {result :string, error :string?}
+      assert signature == "(key :string) -> {result :string, error :string?}"
+      assert description == "Function with {:ok, String.t()} | {:error, binary()} union"
+    end
+
+    test "falls back to :any for non-ok/error union types" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_status/0)
+
+      # :active | :inactive is not a {:ok, t} | {:error, e} pattern
+      assert signature == "() -> :any"
+      assert description == "Function with non-ok/error union"
+    end
   end
 
   describe "integration with Tool.new/2" do
