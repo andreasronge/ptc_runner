@@ -74,7 +74,11 @@ jobs:
 
             **NEVER modify .credo.exs** - if credo complains, fix the code or use inline `# credo:disable-for-next-line` comments.
 
-            **NEVER commit changes to `.github/workflows/` files** - GitHub App tokens cannot push workflow changes. If workflow files are modified, use `git checkout -- .github/workflows/` before committing.
+            ## ⚠️ CRITICAL: Protected Files (Read Before Any Git Operations)
+
+            1. **NEVER commit `.github/workflows/` files** - GitHub App tokens cannot push these
+            2. **Before ANY commit**, run: `git checkout -- .github/workflows/` to discard workflow changes
+            3. **If push fails**, do NOT run `git reset --hard` - you will lose all work. Instead, discard only workflow files and retry.
 
             ## Phase 1: Scope Assessment (REQUIRED)
 
