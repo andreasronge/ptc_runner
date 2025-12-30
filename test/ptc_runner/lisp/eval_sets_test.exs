@@ -77,7 +77,7 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
   defp run(source) do
     case PtcRunner.Lisp.run(source) do
       {:ok, %Step{return: result}} -> {:ok, result, %{}}
-      {:error, reason} -> {:error, reason}
+      {:error, %Step{}} = err -> err
     end
   end
 end
