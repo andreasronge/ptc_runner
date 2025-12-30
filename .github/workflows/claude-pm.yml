@@ -59,14 +59,40 @@ jobs:
         run: |
           # Check if there are any open PRs (excluding the just-merged one)
           OPEN_PR_COUNT=$(gh pr list --repo "${{ github.repository }}" --state open --json number | jq length)
-          echo "open_pr_count=$OPEN_PR_COUNT" >> $GITHUB_OUTPUT
+          echo "count=$OPEN_PR_COUNT" >> $GITHUB_OUTPUT
+
+          # Get detailed PR info for Claude context
+          gh pr list --repo "${{ github.repository }}" --state open \
+            --json number,title,headRefName,labels,updatedAt \
+            --jq '.[] | "- #\(.number): \(.title) (branch: \(.headRefName), labels: \([.labels[].name] | join(", ")), updated: \(.updatedAt))"' \
+            > /tmp/open-prs.txt
 
           if [ "$OPEN_PR_COUNT" -gt 0 ]; then
             echo "::notice::Found $OPEN_PR_COUNT open PR(s) - will skip creating new work"
-            OPEN_PRS=$(gh pr list --repo "${{ github.repository }}" --state open --json number,title --jq '.[] | "#\(.number): \(.title)"')
             echo "Open PRs:"
-            echo "$OPEN_PRS"
+            cat /tmp/open-prs.txt
+          else
+            echo "No open PRs" > /tmp/open-prs.txt
           fi
+
+      - name: Check running workflows
+        id: workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check for running Claude workflows
+          IMPL_RUNNING=$(gh run list --repo "${{ github.repository }}" --workflow=claude-issue.yml --status=in_progress --json databaseId --jq 'length')
+          REVIEW_RUNNING=$(gh run list --repo "${{ github.repository }}" --workflow=claude-issue-review.yml --status=in_progress --json databaseId --jq 'length')
+          PR_FIX_RUNNING=$(gh run list --repo "${{ github.repository }}" --workflow=claude-pr-fix.yml --status=in_progress --json databaseId --jq 'length')
+
+          echo "implementation=$IMPL_RUNNING" >> $GITHUB_OUTPUT
+          echo "review=$REVIEW_RUNNING" >> $GITHUB_OUTPUT
+          echo "pr_fix=$PR_FIX_RUNNING" >> $GITHUB_OUTPUT
+
+          echo "Running workflows:"
+          echo "- Implementation: $IMPL_RUNNING"
+          echo "- Review: $REVIEW_RUNNING"
+          echo "- PR Fix: $PR_FIX_RUNNING"
 
       - name: Check current PM status
         id: status
@@ -182,7 +208,7 @@ jobs:
 
       - name: Run Claude PM
         id: claude-pm
-        if: steps.open-prs.outputs.open_pr_count == '0'
+        if: steps.open-prs.outputs.count == '0'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
@@ -197,12 +223,17 @@ jobs:
             **Epic**: #${{ steps.epic.outputs.number || 'None' }} ${{ steps.epic.outputs.title || '' }}
             **Tech debt**: ${{ steps.epic.outputs.tech_debt }} | **Ready**: ${{ steps.epic.outputs.ready_issues }} | **Needs review**: ${{ steps.epic.outputs.needs_review }}
 
+            **Running workflows**: Implementation: ${{ steps.workflows.outputs.implementation }} | Review: ${{ steps.workflows.outputs.review }} | PR Fix: ${{ steps.workflows.outputs.pr_fix }}
+
+            **Open PRs** (${{ steps.open-prs.outputs.count }}):
+            $(cat /tmp/open-prs.txt)
+
             **Gather context:**
             - `gh issue list --state open --json number,title,labels --limit 30`
             - `gh issue list --label from-pr-review --state open` (priority)
             - `gh issue list --label needs-clarification,needs-breakdown --state open` (stuck)
 
-            **Priorities:** tech debt (`from-pr-review`) > stuck reviews > next epic task
+            **Priorities:** tech debt (`from-pr-review`) > stuck reviews > stuck implementations > next epic task
 
             **Your job:** Find the highest-priority item and take ONE action to move it forward.
 
@@ -210,9 +241,13 @@ jobs:
             - ONE action per run
             - After 3 failed attempts on same issue, add `needs-human-review` and move on
             - If nothing needs attention, report status and exit
-            - Never trigger implementation directly (review workflow handles that)
 
-            **Guidelines:** `docs/guidelines/planning-guidelines.md`, `docs/guidelines/issue-creation-guidelines.md`
+            **Unsticking issues:**
+            - If issue has `ready-for-implementation` but no running implementation workflow and no recent `@claude` comment, re-trigger: `gh issue comment ISSUE --body "@claude Please implement this issue."`
+            - If issue has `needs-review` but review workflow not running and no `ready-for-implementation`, remove and re-add label to trigger review
+            - Check branch names in open PRs to see which issues have work in progress (e.g., `claude/issue-123-...`)
+
+            **Guidelines:** `docs/guidelines/planning-guidelines.md`, `docs/guidelines/issue-creation-guidelines.md`, `docs/guidelines/github-workflows.md`
 
           claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 50 --allowed-tools "Read,Write,Edit,Glob,Grep,Bash,Task,TodoWrite,TodoRead"'
           show_full_output: true
