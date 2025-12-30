@@ -105,4 +105,21 @@ defmodule PtcRunner.TypeExtractorFixtures do
   @doc "Function with self-referential type"
   @spec get_tree() :: tree()
   def get_tree, do: %{value: 1, children: []}
+
+  # Union type for testing {:ok, t} | {:error, e} pattern
+  @doc "Function with {:ok, map()} | {:error, atom()} union"
+  @spec get_user_result(integer()) :: {:ok, map()} | {:error, atom()}
+  def get_user_result(_id), do: {:ok, %{id: 1, name: "Alice"}}
+
+  @doc "Function with {:ok, user()} | {:error, atom()} union"
+  @spec get_custom_user_result(integer()) :: {:ok, user()} | {:error, atom()}
+  def get_custom_user_result(_id), do: {:ok, %{id: 1, name: "Alice"}}
+
+  @doc "Function with {:ok, String.t()} | {:error, binary()} union"
+  @spec fetch_data(String.t()) :: {:ok, String.t()} | {:error, binary()}
+  def fetch_data(_key), do: {:ok, "data"}
+
+  @doc "Function with non-ok/error union"
+  @spec get_status() :: :active | :inactive
+  def get_status, do: :active
 end
