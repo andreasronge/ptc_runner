@@ -93,7 +93,7 @@ defmodule PtcRunner.SubAgent.Signature do
   ## Examples
 
       iex> {:ok, sig} = Signature.parse("() -> {count :int, items [:string]}")
-      iex> Signature.validate(sig, {:count => 5, :items => ["a", "b"]})
+      iex> Signature.validate(sig, %{count: 5, items: ["a", "b"]})
       :ok
 
       iex> {:ok, sig} = Signature.parse("() -> :int")
