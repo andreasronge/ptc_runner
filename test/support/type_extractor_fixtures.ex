@@ -64,4 +64,45 @@ defmodule PtcRunner.TypeExtractorFixtures do
   @spec filter_items(String.t()) :: [map()]
   @spec filter_items(String.t(), integer()) :: [map()]
   def filter_items(_query, _limit \\ 10), do: []
+
+  # Custom type definitions for testing type expansion
+  @type user :: %{id: integer(), name: String.t()}
+  @type user_list :: [user()]
+  @type nested_type :: %{user: user(), created_at: String.t()}
+
+  @doc "Function using custom type"
+  @spec get_custom_user(integer()) :: user()
+  def get_custom_user(_id), do: %{id: 1, name: "Alice"}
+
+  @doc "Function with nested custom type"
+  @spec get_nested(integer()) :: nested_type()
+  def get_nested(_id), do: %{user: %{id: 1, name: "Alice"}, created_at: "2025-12-30"}
+
+  @doc "Function with list of custom types"
+  @spec list_users() :: user_list()
+  def list_users, do: []
+
+  # Opaque type for testing
+  @opaque secret :: binary()
+
+  @doc "Function with opaque type"
+  @spec get_secret() :: secret()
+  def get_secret, do: "secret"
+
+  # Deeply nested type for testing depth limit
+  @type level1 :: %{data: level2()}
+  @type level2 :: %{data: level3()}
+  @type level3 :: %{data: level4()}
+  @type level4 :: %{value: String.t()}
+
+  @doc "Function with deeply nested type"
+  @spec get_deep() :: level1()
+  def get_deep, do: %{data: %{data: %{data: %{value: "deep"}}}}
+
+  # Self-referential type for testing recursive fallback
+  @type tree :: %{value: integer(), children: [tree()]}
+
+  @doc "Function with self-referential type"
+  @spec get_tree() :: tree()
+  def get_tree, do: %{value: 1, children: []}
 end

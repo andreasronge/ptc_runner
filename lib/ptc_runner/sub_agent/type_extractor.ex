@@ -138,7 +138,7 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   defp extract_signature(module, name, arity, signature_string) do
     case Code.Typespec.fetch_specs(module) do
       {:ok, specs} ->
-        find_and_convert_spec(specs, name, arity, signature_string)
+        find_and_convert_spec(specs, name, arity, signature_string, module)
 
       :error ->
         nil
@@ -146,7 +146,7 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   end
 
   # Find the matching spec and convert it
-  defp find_and_convert_spec(specs, name, arity, signature_string) do
+  defp find_and_convert_spec(specs, name, arity, signature_string, module) do
     # Find all specs for this function name (any arity)
     matching_specs =
       Enum.filter(specs, fn
@@ -165,22 +165,22 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
           |> Enum.sort_by(fn {{_name, spec_arity}, _} -> spec_arity end, :desc)
           |> Enum.fetch!(0)
 
-        convert_spec_to_signature(spec_list, name, arity, signature_string)
+        convert_spec_to_signature(spec_list, name, arity, signature_string, module)
     end
   end
 
   # Convert Elixir typespec to PTC signature format
-  defp convert_spec_to_signature([spec | _rest], _name, _arity, signature_string) do
+  defp convert_spec_to_signature([spec | _rest], _name, _arity, signature_string, module) do
     case spec do
       {:type, _line, :fun, [{:type, _line2, :product, params}, return_type]} ->
         # Standard function spec: (params) -> return
-        param_sig = convert_params(params, signature_string)
-        return_sig = convert_type(return_type)
+        param_sig = convert_params(params, signature_string, module)
+        return_sig = convert_type(return_type, _depth = 0, module)
         "(#{param_sig}) -> #{return_sig}"
 
       {:type, _line, :fun, [return_type]} ->
         # No-arg function: () -> return
-        return_sig = convert_type(return_type)
+        return_sig = convert_type(return_type, _depth = 0, module)
         "() -> #{return_sig}"
 
       _ ->
@@ -191,13 +191,13 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   end
 
   # Convert parameter list to signature format
-  defp convert_params(params, signature_string) when is_list(params) do
+  defp convert_params(params, signature_string, module) when is_list(params) do
     param_names = parse_signature_params(signature_string)
 
     params
     |> Enum.with_index()
     |> Enum.map_join(", ", fn {param, idx} ->
-      type = convert_type(param)
+      type = convert_type(param, _depth = 0, module)
       name = Enum.at(param_names, idx) || "arg#{idx}"
       "#{name} #{type}"
     end)
@@ -230,106 +230,207 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   # Convert Elixir type to Signature type
   # Based on type-coercion-matrix.md mapping
-  defp convert_type({:type, _line, :binary, []}) do
+  # depth: current recursion depth for custom type expansion (max 3)
+  # module: module context for resolving user types
+  defp convert_type(type_ast, depth, module)
+
+  defp convert_type({:type, _line, :binary, []}, _depth, _module) do
     ":string"
   end
 
-  defp convert_type({:user_type, _line, :t, []}) do
+  defp convert_type({:user_type, _line, :t, []}, _depth, _module) do
     # String.t() is represented as {:user_type, _, :t, []} in the local module context
     ":string"
   end
 
-  defp convert_type({:remote_type, _line, [{:atom, _, String}, {:atom, _, :t}, []]}) do
+  defp convert_type(
+         {:remote_type, _line, [{:atom, _, String}, {:atom, _, :t}, []]},
+         _depth,
+         _module
+       ) do
     ":string"
   end
 
-  defp convert_type({:type, _line, :integer, []}) do
+  defp convert_type({:type, _line, :integer, []}, _depth, _module) do
     ":int"
   end
 
-  defp convert_type({:type, _line, :non_neg_integer, []}) do
+  defp convert_type({:type, _line, :non_neg_integer, []}, _depth, _module) do
     ":int"
   end
 
-  defp convert_type({:type, _line, :pos_integer, []}) do
+  defp convert_type({:type, _line, :pos_integer, []}, _depth, _module) do
     ":int"
   end
 
-  defp convert_type({:type, _line, :float, []}) do
+  defp convert_type({:type, _line, :float, []}, _depth, _module) do
     ":float"
   end
 
-  defp convert_type({:type, _line, :number, []}) do
+  defp convert_type({:type, _line, :number, []}, _depth, _module) do
     ":float"
   end
 
-  defp convert_type({:type, _line, :boolean, []}) do
+  defp convert_type({:type, _line, :boolean, []}, _depth, _module) do
     ":bool"
   end
 
-  defp convert_type({:type, _line, :atom, []}) do
+  defp convert_type({:type, _line, :atom, []}, _depth, _module) do
     ":keyword"
   end
 
-  defp convert_type({:type, _line, :map, :any}) do
+  defp convert_type({:type, _line, :map, :any}, _depth, _module) do
     ":map"
   end
 
-  defp convert_type({:type, _line, :map, _fields}) do
-    # For now, treat structured maps as :map
-    # TODO: Could expand to {field :type} format
-    ":map"
+  defp convert_type({:type, _line, :map, fields}, depth, module) when is_list(fields) do
+    # Handle structured maps: %{field: type} -> {field :type}
+    expand_map_fields(fields, depth, module)
   end
 
-  defp convert_type({:type, _line, :list, [element_type]}) do
-    type = convert_type(element_type)
+  defp convert_type({:type, _line, :list, [element_type]}, depth, module) do
+    type = convert_type(element_type, depth, module)
     "[#{type}]"
   end
 
-  defp convert_type({:type, _line, :list, []}) do
+  defp convert_type({:type, _line, :list, []}, _depth, _module) do
     "[:any]"
   end
 
-  defp convert_type({:type, _line, :any, []}) do
+  defp convert_type({:type, _line, :any, []}, _depth, _module) do
     ":any"
   end
 
-  defp convert_type({:type, _line, :term, []}) do
+  defp convert_type({:type, _line, :term, []}, _depth, _module) do
     ":any"
   end
 
   # Handle union types - for now, fall back to :any with warning
-  defp convert_type({:type, _line, :union, _types}) do
+  defp convert_type({:type, _line, :union, _types}, _depth, _module) do
     Logger.debug("TypeExtractor: union types not yet supported, falling back to :any")
     ":any"
   end
 
   # Handle tuple types - convert to list for now
-  defp convert_type({:type, _line, :tuple, _elements}) do
+  defp convert_type({:type, _line, :tuple, _elements}, _depth, _module) do
     Logger.debug("TypeExtractor: tuple types converted to :any")
     ":any"
   end
 
   # Handle DateTime and other special types
-  defp convert_type({:remote_type, _line, [{:atom, _, DateTime}, {:atom, _, :t}, []]}) do
+  defp convert_type(
+         {:remote_type, _line, [{:atom, _, DateTime}, {:atom, _, :t}, []]},
+         _depth,
+         _module
+       ) do
     ":string"
   end
 
-  defp convert_type({:remote_type, _line, [{:atom, _, Date}, {:atom, _, :t}, []]}) do
+  defp convert_type(
+         {:remote_type, _line, [{:atom, _, Date}, {:atom, _, :t}, []]},
+         _depth,
+         _module
+       ) do
     ":string"
   end
 
-  defp convert_type({:remote_type, _line, [{:atom, _, Time}, {:atom, _, :t}, []]}) do
+  defp convert_type(
+         {:remote_type, _line, [{:atom, _, Time}, {:atom, _, :t}, []]},
+         _depth,
+         _module
+       ) do
     ":string"
   end
 
-  defp convert_type({:remote_type, _line, [{:atom, _, NaiveDateTime}, {:atom, _, :t}, []]}) do
+  defp convert_type(
+         {:remote_type, _line, [{:atom, _, NaiveDateTime}, {:atom, _, :t}, []]},
+         _depth,
+         _module
+       ) do
     ":string"
+  end
+
+  # Handle custom user types - expand up to depth 3
+  defp convert_type({:user_type, _line, type_name, []}, depth, module)
+       when depth < 3 and not is_nil(module) do
+    expand_user_type(module, type_name, depth)
+  end
+
+  defp convert_type({:user_type, _line, type_name, []}, depth, _module) when depth >= 3 do
+    Logger.warning(
+      "TypeExtractor: max depth reached for custom type #{type_name}, falling back to :any"
+    )
+
+    ":any"
+  end
+
+  # User type without module context - fall back to :any
+  defp convert_type({:user_type, _line, _type_name, []}, _depth, nil) do
+    ":any"
   end
 
   # Unsupported types - fall back to :any
-  defp convert_type(_other) do
+  defp convert_type(_other, _depth, _module) do
     Logger.debug("TypeExtractor: unsupported type, falling back to :any")
     ":any"
+  end
+
+  # Expand structured map fields: %{id: integer(), name: String.t()} -> {id :int, name :string}
+  defp expand_map_fields(fields, depth, module) do
+    field_strings =
+      Enum.map(fields, fn
+        {:type, _line, :map_field_exact, [{:atom, _, field_name}, field_type]} ->
+          # Don't increment depth here - depth only increments when expanding user types
+          type_str = convert_type(field_type, depth, module)
+          "#{field_name} #{type_str}"
+
+        _ ->
+          nil
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    if Enum.empty?(field_strings) do
+      ":map"
+    else
+      "{#{Enum.join(field_strings, ", ")}}"
+    end
+  end
+
+  # Expand custom @type definition from module
+  defp expand_user_type(module, type_name, depth) do
+    case Code.Typespec.fetch_types(module) do
+      {:ok, types} ->
+        find_and_expand_type(types, type_name, module, depth)
+
+      :error ->
+        Logger.debug(
+          "TypeExtractor: could not fetch types from #{inspect(module)}, falling back to :any"
+        )
+
+        ":any"
+    end
+  end
+
+  # Find and expand a specific type definition
+  defp find_and_expand_type(types, type_name, module, depth) do
+    case Enum.find(types, fn
+           {:type, {^type_name, _type_def, _args}} -> true
+           {:opaque, {^type_name, _type_def, _args}} -> true
+           _ -> false
+         end) do
+      {:type, {^type_name, type_def, _args}} ->
+        convert_type(type_def, depth + 1, module)
+
+      {:opaque, {^type_name, _type_def, _args}} ->
+        Logger.warning(
+          "TypeExtractor: opaque type #{type_name} cannot be expanded, falling back to :any"
+        )
+
+        ":any"
+
+      nil ->
+        Logger.debug("TypeExtractor: custom type #{type_name} not found, falling back to :any")
+        ":any"
+    end
   end
 end
