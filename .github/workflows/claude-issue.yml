@@ -72,10 +72,10 @@ jobs:
             - Create PR with "Closes #${{ github.event.issue.number }}" in body
 
             **When tests fail for non-trivial out-of-scope issues:**
-            - Create a GH issue first, then skip the test with `@tag :skip` and a comment referencing the issue
+            - Create a GH issue with `from-pr-review` and `needs-review` labels, then skip the test with `@tag :skip` and a comment referencing the issue
             - Never bypass tests without tracking - each skipped test must reference an issue
 
-            **Escape hatch:** If you discover unexpected complexity or blockers clearly not belonging to the issue, close this issue with a comment explaining why. Create new issues for the blockers and the original work - add `needs-review` label to ONE issue (the next actionable one). If you created a branch, reference it in the new issue.
+            **Escape hatch:** If you discover unexpected complexity or blockers clearly not belonging to the issue, close this issue with a comment explaining why. Create new issues for the blockers and the original work - add `from-pr-review` and `needs-review` labels to ONE issue (the next actionable one). If you created a branch, reference it in the new issue.
 
             NEVER include "@claude" in comments.
 
