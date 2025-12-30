@@ -9,9 +9,10 @@ if System.get_env("CI") do
 end
 
 # Build exclusion list based on tags
+# - :skip tests are temporarily disabled (must reference a GH issue)
 # - :e2e tests require API keys and are excluded by default
 # - :clojure tests run if Babashka is installed, can be excluded with --exclude clojure
-exclusions = [:e2e]
+exclusions = [:skip, :e2e]
 
 # Check if user explicitly wants to skip clojure tests
 # This allows: mix test --exclude clojure
