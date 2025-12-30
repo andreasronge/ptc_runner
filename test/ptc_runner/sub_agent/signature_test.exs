@@ -1,0 +1,206 @@
+defmodule PtcRunner.SubAgent.SignatureTest do
+  use ExUnit.Case
+
+  alias PtcRunner.SubAgent.Signature
+
+  describe "parse/1" do
+    test "parses simple signature" do
+      assert {:ok, sig} = Signature.parse("(id :int) -> :string")
+      assert sig == {:signature, [{"id", :int}], :string}
+    end
+
+    test "parses shorthand signature" do
+      assert {:ok, sig} = Signature.parse("{count :int}")
+      assert sig == {:signature, [], {:map, [{"count", :int}]}}
+    end
+
+    test "handles invalid input" do
+      assert {:error, _} = Signature.parse("invalid")
+    end
+
+    test "rejects non-string input" do
+      assert {:error, _} = Signature.parse(123)
+    end
+  end
+
+  describe "validate/2" do
+    test "validates correct output" do
+      {:ok, sig} = Signature.parse("() -> {count :int, items [:string]}")
+
+      assert :ok = Signature.validate(sig, %{count: 5, items: ["a", "b"]})
+    end
+
+    test "rejects invalid output" do
+      {:ok, sig} = Signature.parse("() -> :int")
+
+      assert {:error, _} = Signature.validate(sig, "not an int")
+    end
+
+    test "validates complex nested structure" do
+      {:ok, sig} =
+        Signature.parse("(query :string) -> {results [{id :int, title :string, tags [:string]}]}")
+
+      assert :ok =
+               Signature.validate(sig, %{
+                 results: [
+                   %{id: 1, title: "Result 1", tags: ["tag1", "tag2"]},
+                   %{id: 2, title: "Result 2", tags: []}
+                 ]
+               })
+    end
+  end
+
+  describe "validate_input/2" do
+    test "validates input parameters" do
+      {:ok, sig} = Signature.parse("(id :int, name :string) -> :bool")
+
+      assert :ok = Signature.validate_input(sig, %{id: 42, name: "Alice"})
+    end
+
+    test "rejects missing parameter" do
+      {:ok, sig} = Signature.parse("(id :int, name :string) -> :bool")
+
+      assert {:error, _} = Signature.validate_input(sig, %{id: 42})
+    end
+
+    test "rejects wrong parameter type" do
+      {:ok, sig} = Signature.parse("(id :int) -> :bool")
+
+      assert {:error, _} = Signature.validate_input(sig, %{id: "not an int"})
+    end
+  end
+
+  describe "render/1" do
+    test "renders simple signature" do
+      sig = {:signature, [{"id", :int}], :string}
+      assert "(id :int) -> :string" = Signature.render(sig)
+    end
+
+    test "renders signature with no parameters" do
+      sig = {:signature, [], :string}
+      assert "-> :string" = Signature.render(sig)
+    end
+
+    test "renders signature with optional field" do
+      sig = {:signature, [], {:map, [{"email", {:optional, :string}}]}}
+      assert "-> {email :string?}" = Signature.render(sig)
+    end
+
+    test "renders signature with list" do
+      sig = {:signature, [], {:list, :int}}
+      assert "-> [:int]" = Signature.render(sig)
+    end
+
+    test "renders complex signature" do
+      sig =
+        {:signature, [{"query", :string}, {"limit", :int}],
+         {:map, [{"count", :int}, {"items", {:list, {:map, [{"id", :int}]}}}]}}
+
+      rendered = Signature.render(sig)
+      assert rendered =~ "query :string"
+      assert rendered =~ "limit :int"
+      assert rendered =~ "count :int"
+      assert rendered =~ "items"
+      assert rendered =~ "[{id :int}]"
+    end
+  end
+
+  describe "round-trip - parse then render" do
+    test "simple signature" do
+      original = "(id :int) -> :string"
+      {:ok, parsed} = Signature.parse(original)
+      rendered = Signature.render(parsed)
+      assert original == rendered
+    end
+
+    test "complex signature" do
+      original = "(query :string, limit :int) -> {count :int, items [:string]}"
+      {:ok, parsed} = Signature.parse(original)
+      rendered = Signature.render(parsed)
+      assert original == rendered
+    end
+
+    test "shorthand signature" do
+      original = "{count :int}"
+      {:ok, parsed} = Signature.parse(original)
+      rendered = Signature.render(parsed)
+
+      # Shorthand is rendered as "-> {...}" since no params
+      assert "-> {count :int}" == rendered
+    end
+  end
+
+  describe "spec examples" do
+    test "search example" do
+      {:ok, sig} = Signature.parse("(query :string, limit :int) -> [{id :int, title :string}]")
+
+      assert :ok =
+               Signature.validate(sig, [
+                 %{id: 1, title: "Result 1"},
+                 %{id: 2, title: "Result 2"}
+               ])
+    end
+
+    test "get_user example" do
+      {:ok, sig} = Signature.parse("(id :int) -> {name :string, email :string?}")
+
+      assert :ok = Signature.validate(sig, %{name: "Alice", email: "alice@example.com"})
+      assert :ok = Signature.validate(sig, %{name: "Bob", email: nil})
+    end
+
+    test "empty map example" do
+      {:ok, sig} = Signature.parse("{}")
+      assert :ok = Signature.validate(sig, %{})
+    end
+
+    test "any type example" do
+      {:ok, sig} = Signature.parse(":any")
+      assert :ok = Signature.validate(sig, "anything")
+      assert :ok = Signature.validate(sig, 42)
+      assert :ok = Signature.validate(sig, %{})
+    end
+
+    test "firewalled field example" do
+      {:ok, sig} = Signature.parse("() -> {summary :string, count :int, _email_ids [:int]}")
+
+      assert :ok =
+               Signature.validate(sig, %{summary: "Found items", count: 5, _email_ids: [1, 2, 3]})
+    end
+
+    test "nested structure example" do
+      {:ok, sig} =
+        Signature.parse("() -> {user {id :int, profile {bio :string, avatar :string?}}}")
+
+      assert :ok =
+               Signature.validate(sig, %{
+                 user: %{
+                   id: 1,
+                   profile: %{bio: "Developer", avatar: "http://example.com/avatar.jpg"}
+                 }
+               })
+
+      assert :ok =
+               Signature.validate(sig, %{
+                 user: %{
+                   id: 1,
+                   profile: %{bio: "Developer", avatar: nil}
+                 }
+               })
+    end
+  end
+
+  describe "error messages are helpful" do
+    test "shows path for nested error" do
+      {:ok, sig} =
+        Signature.parse("() -> {results [{id :int}]}")
+
+      {:error, errors} = Signature.validate(sig, %{results: [%{id: "not int"}]})
+
+      assert errors != []
+
+      assert Enum.any?(errors, fn err ->
+               Enum.at(err.path, 0) == "results" and Enum.at(err.path, 1) == 0
+             end)
+    end
+  end
+end
