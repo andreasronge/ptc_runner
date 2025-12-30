@@ -180,6 +180,20 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
       assert signature == "() -> {data {data {data :any}}}"
       assert description == "Function with deeply nested type"
     end
+
+    test "falls back to :any for self-referential types" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_tree/0)
+
+      # Self-referential tree type expands to depth 3, then falls back to :any
+      # tree -> {value :int, children [tree]} (depth 0 -> 1)
+      # tree -> {value :int, children [tree]} (depth 1 -> 2)
+      # tree -> {value :int, children [tree]} (depth 2 -> 3)
+      # tree -> :any (depth 3, max reached)
+      assert signature ==
+               "() -> {value :int, children [{value :int, children [{value :int, children [:any]}]}]}"
+
+      assert description == "Function with self-referential type"
+    end
   end
 
   describe "integration with Tool.new/2" do

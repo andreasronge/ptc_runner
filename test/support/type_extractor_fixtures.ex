@@ -98,4 +98,11 @@ defmodule PtcRunner.TypeExtractorFixtures do
   @doc "Function with deeply nested type"
   @spec get_deep() :: level1()
   def get_deep, do: %{data: %{data: %{data: %{value: "deep"}}}}
+
+  # Self-referential type for testing recursive fallback
+  @type tree :: %{value: integer(), children: [tree()]}
+
+  @doc "Function with self-referential type"
+  @spec get_tree() :: tree()
+  def get_tree, do: %{value: 1, children: []}
 end
