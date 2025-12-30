@@ -1,0 +1,149 @@
+name: Claude Implementation Feedback
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  handle-feedback:
+    # Only run when implementation feedback labels are added
+    if: |
+      github.event.label.name == 'needs-breakdown' ||
+      github.event.label.name == 'implementation-blocked' ||
+      github.event.label.name == 'edge-case-found'
+    runs-on: ubuntu-latest
+
+    # Use same concurrency group as issue implementation to prevent conflicts
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Handle Needs Breakdown
+        if: github.event.label.name == 'needs-breakdown'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+            FEEDBACK TYPE: needs-breakdown
+
+            The implementation workflow determined this issue is too large and needs to be broken down.
+
+            Your task:
+            1. Read the issue and all comments: `gh issue view ${{ github.event.issue.number }} --comments`
+            2. Find the "Implementation Feedback" comment with suggested sub-issues
+            3. Read any linked specification documents mentioned in the issue
+            4. Create well-structured sub-issues for each suggested breakdown item
+
+            For each sub-issue:
+            1. Write clear acceptance criteria based on the parent issue's spec
+            2. Reference the parent issue: "Part of #${{ github.event.issue.number }}"
+            3. Add appropriate labels (enhancement, bug, etc.)
+            4. Add `needs-review` label so it goes through the review process
+
+            Create sub-issues using:
+            ```bash
+            gh issue create --title "..." --body "..." --label "enhancement,needs-review"
+            ```
+
+            After creating all sub-issues:
+            1. Update the parent issue body to link the sub-issues:
+               - Add a "## Sub-Issues" section listing all created issues
+               - Mark the parent as a tracking issue
+            2. Add `tracking-issue` label to the parent
+            3. Post a summary comment listing all created sub-issues
+
+            NEVER include "@claude" in comments or issue bodies.
+
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Read,Glob,Grep,Bash,Write,WebFetch"'
+          max_turns: 30
+
+      - name: Handle Implementation Blocked
+        if: github.event.label.name == 'implementation-blocked'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+            FEEDBACK TYPE: implementation-blocked
+
+            The implementation workflow encountered a blocker that prevents implementation.
+
+            Your task:
+            1. Read the issue and all comments: `gh issue view ${{ github.event.issue.number }} --comments`
+            2. Find the "Implementation Feedback" comment explaining the blocker
+            3. Analyze the blocker and determine what information is needed
+
+            Actions:
+            1. Update the issue body to clearly highlight the blocker:
+               - Add a "## Blocker" section at the top explaining what's blocking
+               - Add specific questions that need to be answered
+            2. Add `needs-maintainer-input` label
+            3. Post a concise comment summarizing:
+               - What was attempted
+               - What specific information/decision is needed
+               - Suggested next steps for the maintainer
+
+            NEVER include "@claude" in comments or issue bodies.
+
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Read,Glob,Grep,Bash,Write"'
+          max_turns: 20
+
+      - name: Handle Edge Case Found
+        if: github.event.label.name == 'edge-case-found'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+            FEEDBACK TYPE: edge-case-found
+
+            The implementation workflow discovered edge cases not covered in the original issue.
+
+            Your task:
+            1. Read the issue and all comments: `gh issue view ${{ github.event.issue.number }} --comments`
+            2. Find the "Implementation Feedback" comment with edge case details
+            3. Analyze each edge case for impact and complexity
+
+            Actions:
+            1. Update the issue body:
+               - Add an "## Edge Cases" section documenting each discovered case
+               - For each edge case, add:
+                 - Description of the scenario
+                 - Potential impact
+                 - Suggested handling approach (if obvious)
+               - Update acceptance criteria to include edge case handling
+            2. If edge cases are complex, consider:
+               - Adding `needs-maintainer-input` label for decisions
+               - OR adding `needs-review` to re-run the review process
+            3. Post a comment summarizing:
+               - Edge cases found
+               - How the issue was updated
+               - Whether maintainer input is needed
+
+            After updating the issue, if all edge cases have clear resolutions:
+            1. Add back `ready-for-implementation` label
+            2. Remove `edge-case-found` label
+            3. Trigger re-implementation: post comment "Edge cases addressed, ready for implementation."
+
+            NEVER include "@claude" in comments or issue bodies.
+
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Read,Glob,Grep,Bash,Write"'
+          max_turns: 25

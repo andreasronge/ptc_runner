@@ -76,19 +76,72 @@ jobs:
 
             **NEVER commit changes to `.github/workflows/` files** - GitHub App tokens cannot push workflow changes. If workflow files are modified, use `git checkout -- .github/workflows/` before committing.
 
-            Workflow:
+            ## Phase 1: Scope Assessment (REQUIRED)
+
+            Before implementing, assess the scope:
             1. Read issue AND comments: `gh issue view ${{ github.event.issue.number }} --comments`
-            2. Branch: `git checkout -b claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)`
-            3. Make minimal changes
-            4. Run `mix precommit` - only proceed if it passes
-            5. `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
-            6. Verify push succeeded: `git status` should show "Your branch is up to date with 'origin/...'"
-            7. `gh pr create --title "feat: [desc] (#${{ github.event.issue.number }})" --body "...summary...\n\nCloses #${{ github.event.issue.number }}"` (MUST include "Closes #N" to auto-close issue)
-            8. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
+            2. Count affected files and estimate test changes
+            3. Check for edge cases or blockers not mentioned in the issue
+
+            **If any of these apply, use the Feedback Protocol instead of implementing:**
+            - More than ~30 test assertion changes needed
+            - More than ~5 files need modification
+            - Missing dependencies or unclear requirements discovered
+            - Edge cases found that aren't addressed in acceptance criteria
+            - Implementation would take significantly longer than expected
+
+            ## Phase 2A: Implementation (if scope is acceptable)
+
+            1. Branch: `git checkout -b claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)`
+            2. Make minimal changes
+            3. Run `mix precommit` - only proceed if it passes
+            4. `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
+            5. Verify push succeeded: `git status` should show "Your branch is up to date with 'origin/...'"
+            6. `gh pr create --title "feat: [desc] (#${{ github.event.issue.number }})" --body "...summary...\n\nCloses #${{ github.event.issue.number }}"` (MUST include "Closes #N" to auto-close issue)
+            7. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
+
+            ## Phase 2B: Feedback Protocol (if scope is too large or blockers found)
+
+            If you cannot complete the implementation, DO NOT create a partial PR. Instead:
+
+            1. **Determine the feedback type**:
+               - `needs-breakdown`: Issue is too large, should be split
+               - `implementation-blocked`: Missing info, unclear requirements, or blocking dependency
+               - `edge-case-found`: Discovered scenarios not covered in acceptance criteria
+
+            2. **Update labels**:
+               ```bash
+               gh issue edit ${{ github.event.issue.number }} --remove-label "ready-for-implementation"
+               gh issue edit ${{ github.event.issue.number }} --add-label "<feedback-type>"
+               ```
+
+            3. **Post structured feedback comment**:
+               ```markdown
+               ## 🔄 Implementation Feedback: <Type>
+
+               ### Summary
+               <Brief explanation of why implementation cannot proceed>
+
+               ### Scope Analysis
+               - **Files affected**: <count>
+               - **Test changes needed**: <count>
+               - **Estimated complexity**: Low/Medium/High
+
+               ### Details
+               <Specific issues found, edge cases, missing requirements, etc.>
+
+               ### Suggested Resolution
+               <For needs-breakdown: list suggested sub-issues>
+               <For implementation-blocked: what needs to be clarified>
+               <For edge-case-found: the edge cases and questions about them>
+               ```
+
+            4. **Exit without creating PR or branch**
 
             NEVER include "@claude" in comments.
 
           claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
+          max_turns: 50
           show_full_output: true
 
       # Safety net: ensure any commits Claude made are pushed
