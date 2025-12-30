@@ -3,16 +3,16 @@ description: 'Install Claude Code CLI with caching to avoid installation conflic
 
 inputs:
   version:
-    description: 'Claude Code version to install'
+    description: 'Claude Code version to install (use "latest" for latest)'
     required: false
-    default: '2.0.76'
+    default: 'latest'
 
 outputs:
   cache-hit:
     description: 'Whether Claude Code was restored from cache'
     value: ${{ steps.cache-claude.outputs.cache-hit }}
   executable-path:
-    description: 'Path to Claude Code executable (only set on cache hit)'
+    description: 'Path to Claude Code executable'
     value: ${{ steps.set-output.outputs.executable-path }}
 
 runs:
@@ -29,24 +29,42 @@ runs:
       id: cache-claude
       uses: actions/cache@v4
       with:
-        # Use absolute paths - tilde doesn't expand properly in actions/cache
         path: |
           /home/runner/.local/bin/claude
           /home/runner/.claude
-        key: claude-code-${{ runner.os }}-v${{ inputs.version }}
+        # Include week number to bust cache weekly and pick up new versions
+        key: claude-code-${{ runner.os }}-v${{ inputs.version }}-week${{ github.run_id }}
+        restore-keys: |
+          claude-code-${{ runner.os }}-v${{ inputs.version }}-
 
-    - name: Install Claude Code
-      if: steps.cache-claude.outputs.cache-hit != 'true'
+    - name: Verify cache or install
+      id: install
       shell: bash
       run: |
-        echo "Installing Claude Code v${{ inputs.version }}..."
+        # Check if binary exists and works (handles stale cache)
+        if [ -f /home/runner/.local/bin/claude ] && /home/runner/.local/bin/claude --version >/dev/null 2>&1; then
+          echo "Cache valid - Claude Code is working"
+          echo "needs_install=false" >> "$GITHUB_OUTPUT"
+          /home/runner/.local/bin/claude --version
+        else
+          echo "Cache invalid or empty - need to install"
+          echo "needs_install=true" >> "$GITHUB_OUTPUT"
+          # Clean up any partial/corrupted installation
+          rm -rf /home/runner/.local/bin/claude /home/runner/.claude 2>/dev/null || true
+        fi
+
+    - name: Install Claude Code
+      if: steps.install.outputs.needs_install == 'true'
+      shell: bash
+      run: |
+        echo "Installing Claude Code..."
         for attempt in 1 2 3; do
           echo "Installation attempt $attempt..."
-          # Clean lock files before each attempt
           rm -f /tmp/claude-install.lock 2>/dev/null || true
           rm -f ~/.claude/.installing 2>/dev/null || true
-          if curl -fsSL https://claude.ai/install.sh | bash -s -- ${{ inputs.version }}; then
+          if curl -fsSL https://claude.ai/install.sh | bash; then
             echo "Claude Code installed successfully"
+            /home/runner/.local/bin/claude --version
             break
           fi
           if [ $attempt -eq 3 ]; then
@@ -65,20 +83,4 @@ runs:
       id: set-output
       shell: bash
       run: |
-        # Always output the path since we always install (from cache or fresh)
         echo "executable-path=/home/runner/.local/bin/claude" >> "$GITHUB_OUTPUT"
-        if [ "${{ steps.cache-claude.outputs.cache-hit }}" == "true" ]; then
-          echo "Cache hit - using cached executable"
-        else
-          echo "Fresh install completed"
-        fi
-
-    - name: Verify installation
-      shell: bash
-      run: |
-        if [ -f /home/runner/.local/bin/claude ]; then
-          /home/runner/.local/bin/claude --version
-        else
-          echo "Warning: claude binary not found at expected path"
-          exit 1
-        fi
