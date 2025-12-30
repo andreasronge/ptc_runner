@@ -69,10 +69,14 @@ jobs:
             **Guidelines:**
             - Keep it simple - only implement what's requested
             - Run `mix precommit` before committing - NEVER use `--no-verify`
-            - If tests fail, fix them or use the escape hatch - don't bypass
             - Create PR with "Closes #${{ github.event.issue.number }}" in body
 
-            **Escape hatch:** If you discover unexpected complexity, required refactoring, bugs, or other work that should be handled separately - create a new issue for it. Then either continue with reduced scope, or if it's a blocker: remove the `ready-for-implementation` label, post a comment explaining why, and stop.
+            **When tests fail:**
+            - Trivial blocking issues (<20 lines): fix them inline
+            - Non-trivial out-of-scope issues: create a GH issue first, then skip the test with `@tag :skip` and a comment referencing the issue
+            - Never bypass tests without tracking - each skipped test must reference an issue
+
+            **Escape hatch:** If you discover unexpected complexity or blockers that can't be handled with the above - create a new issue, remove `ready-for-implementation` label, post a comment explaining why, and stop.
 
             NEVER include "@claude" in comments.
 
