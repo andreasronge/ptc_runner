@@ -140,17 +140,25 @@ defmodule PtcRunner.Lisp do
         {:error, {:memory_exceeded, bytes}} ->
           {:error, Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory)}
 
+        {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
+          # Handle 3-tuple error format: {:error, {:type_error, message, data}}
+          {:error, Step.error(reason_atom, format_error(reason), memory)}
+
         {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
-          # Preserve the specific error atom (e.g., :unbound_var, :not_callable)
+          # Handle 2-tuple error format: {:error, {:type_error, message}}
           {:error, Step.error(reason_atom, format_error(reason), memory)}
       end
     else
       {:error, {:parse_error, msg}} ->
         {:error, Step.error(:parse_error, msg, %{})}
 
-      {:error, reason} ->
-        # reason could be from Analyze (invalid_form, etc.) or Parser
-        {:error, Step.error(:analysis_error, format_error(reason), %{})}
+      {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
+        # Preserve specific error atoms from Analyze phase (e.g., {:invalid_arity, :if, "msg"})
+        {:error, Step.error(reason_atom, format_error(reason), %{})}
+
+      {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
+        # Handle other 2-tuple errors from Analyze phase
+        {:error, Step.error(reason_atom, format_error(reason), %{})}
     end
   end
 
@@ -178,6 +186,10 @@ defmodule PtcRunner.Lisp do
 
   def format_error({:timeout, ms}), do: "Timeout: execution exceeded #{ms}ms limit"
   def format_error({:memory_exceeded, bytes}), do: "Memory exceeded: #{bytes} byte limit"
+  # Handle Analyze errors: {:invalid_arity, atom, message}
+  def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
+  # Handle other 3-tuple error formats from Eval: {type, message, data}
+  def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
 

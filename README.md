@@ -33,7 +33,7 @@ iex> program = ~S|{"program": {"op": "pipe", "steps": [
 ...>   {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
 ...>   {"op": "sum", "field": "amount"}
 ...> ]}}|
-iex> {:ok, %{return: result}} = PtcRunner.Json.run(program, tools: tools)
+iex> {:ok, result, _delta, _memory} = PtcRunner.Json.run(program, tools: tools)
 iex> result
 700
 ```

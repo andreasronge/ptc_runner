@@ -8,6 +8,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Step
 
   # ==========================================================================
   # Level 1: Simple Operations
@@ -28,7 +29,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert length(result) == 2
       assert Enum.all?(result, fn p -> p.price > 100 end)
@@ -51,7 +52,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
       assert result == 2
     end
   end
@@ -81,7 +82,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert length(result) == 5
       assert Enum.all?(result, fn e -> e.salary > 50_000 end)
@@ -108,7 +109,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
       assert result == 250
     end
   end
@@ -137,7 +138,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       names = Enum.map(result, & &1.name) |> Enum.sort()
       assert names == ["Laptop", "Phone", "Sofa"]
@@ -164,7 +165,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert Enum.find(result, &(&1.id == 1)).size == "small"
       assert Enum.find(result, &(&1.id == 2)).size == "medium"
@@ -194,7 +195,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         end
       }
 
-      {:ok, result, _, _} = Lisp.run(source, tools: tools)
+      {:ok, %Step{return: result}} = Lisp.run(source, tools: tools)
 
       assert result == ["alice@example.com", "carol@example.com"]
     end
@@ -205,7 +206,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       source = ~S"""
       (let [high-value (->> (call "get-orders" {})
                             (filter (where :amount > 1000)))]
-        {:result (count high-value)
+        {:return (count high-value)
          :high_value_orders high-value})
       """
 
@@ -220,7 +221,8 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         end
       }
 
-      {:ok, result, delta, new_memory} = Lisp.run(source, tools: tools)
+      {:ok, %Step{return: result, memory_delta: delta, memory: new_memory}} =
+        Lisp.run(source, tools: tools)
 
       assert result == 2
       assert length(delta.high_value_orders) == 2
@@ -248,7 +250,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       # Only Alice matches (explicit true, not truthy values)
       assert length(result) == 1
@@ -270,7 +272,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       # All truthy values match
       names = Enum.map(result, & &1.name) |> Enum.sort()
@@ -296,7 +298,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       names = Enum.map(result, & &1.name) |> Enum.sort()
       assert names == ["B", "C", "D"]
@@ -317,7 +319,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert result == [
                %{id: 1, name: "Order A"},
@@ -340,7 +342,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert result == [
                %{id: 1, name: "Order A"},
@@ -357,7 +359,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     test "missing closing paren" do
       source = "(filter (where :active ctx/users"
 
-      assert {:error, {:parse_error, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "expected"
       assert message =~ ")"
     end
@@ -365,14 +367,14 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     test "unbalanced brackets" do
       source = "[1 2 3"
 
-      assert {:error, {:parse_error, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "expected"
     end
 
     test "invalid token" do
       source = "(+ 1 @invalid)"
 
-      assert {:error, {:parse_error, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "@invalid"
     end
   end
@@ -382,14 +384,14 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Referencing undefined variable returns specific error with variable name
       source = "(+ x 1)"
 
-      assert {:error, {:unbound_var, :x}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :unbound_var}}} = Lisp.run(source)
     end
 
     test "calling non-function" do
       # Attempting to call a literal value returns error with the value
       source = "(42 1 2)"
 
-      assert {:error, {:not_callable, 42}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :not_callable}}} = Lisp.run(source)
     end
 
     @tag :capture_log
@@ -397,7 +399,9 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Tool calls to unregistered tools return error tuple
       source = ~S|(call "unknown-tool" {})|
 
-      assert {:error, {:execution_error, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :execution_error, message: message}}} =
+               Lisp.run(source)
+
       assert message =~ "Unknown tool"
       assert message =~ "unknown-tool"
     end
@@ -408,7 +412,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Passing non-list to filter returns error tuple
       source = "(filter (where :x) 42)"
 
-      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
       assert message =~ "invalid argument types"
     end
 
@@ -416,7 +420,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Passing non-list to count returns error tuple
       source = "(count 42)"
 
-      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
       assert message =~ "invalid argument types"
     end
 
@@ -424,7 +428,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Sets are unordered, so take doesn't make sense
       source = "(take 2 \#{1 2 3})"
 
-      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
       assert message =~ "take does not support sets"
     end
 
@@ -432,7 +436,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Sets are unordered, so first doesn't make sense
       source = "(first \#{1 2 3})"
 
-      assert {:error, {:type_error, message, _}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
       assert message =~ "first does not support sets"
     end
   end
@@ -444,7 +448,9 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       source = ~S|(filter (where :status "active") ctx/items)|
       ctx = %{items: [%{status: "active"}]}
 
-      assert {:error, {:invalid_where_form, message}} = Lisp.run(source, context: ctx)
+      assert {:error, %Step{fail: %{reason: :invalid_where_form, message: message}}} =
+               Lisp.run(source, context: ctx)
+
       assert message =~ "expected (where field) or (where field op value)"
     end
 
@@ -452,7 +458,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # PTC-Lisp uses vectors [1 2 3], not quoted lists '(1 2 3)
       source = "'(1 2 3)"
 
-      assert {:error, {:parse_error, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "expected"
     end
 
@@ -461,7 +467,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Use (when cond then) for single-branch conditionals
       source = "(if true 1)"
 
-      assert {:error, {:invalid_arity, :if, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :invalid_arity, message: message}}} = Lisp.run(source)
       assert message =~ "expected (if cond then else)"
     end
 
@@ -470,7 +476,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Use (and (>= x 1) (<= x 10)) instead
       source = "(<= 1 5 10)"
 
-      assert {:error, {:invalid_arity, :<=, message}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :invalid_arity, message: message}}} = Lisp.run(source)
       assert message =~ "comparison operators require exactly 2 arguments"
       assert message =~ "got 3"
     end
@@ -482,30 +488,33 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       source = "((fn [{:keys [a]}] a) :not-a-map)"
 
       # The error should be from destructuring error at runtime
-      assert {:error, _reason} = Lisp.run(source)
+      assert {:error, %Step{}} = Lisp.run(source)
     end
 
     test "destructuring in fn params - vector pattern success" do
       source = "((fn [[a b]] a) [1 2])"
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
       assert result == 1
     end
 
     test "destructuring in fn params - map pattern success" do
       source = "((fn [{:keys [x]}] x) {:x 10})"
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
       assert result == 10
     end
 
     test "destructuring in fn params - vector pattern ignores extra elements" do
       source = "((fn [[a]] a) [1 2 3])"
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
       assert result == 1
     end
 
     test "destructuring in fn params - vector pattern insufficient elements error" do
       source = "((fn [[a b c]] a) [1 2])"
-      assert {:error, {:destructure_error, message}} = Lisp.run(source)
+
+      assert {:error, %Step{fail: %{reason: :destructure_error, message: message}}} =
+               Lisp.run(source)
+
       assert message =~ "expected at least 3 elements, got 2"
     end
   end
@@ -527,7 +536,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
            (sort-by :category))
       """
 
-      {:ok, result, _, _} = Lisp.run(program, context: %{expenses: expenses})
+      {:ok, %Step{return: result}} = Lisp.run(program, context: %{expenses: expenses})
 
       assert [
                %{category: "food", average: 75.0},
@@ -557,7 +566,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert result["pending"] == 2
       assert result["delivered"] == 2
@@ -578,7 +587,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert result["food"] == 80
       assert result["transport"] == 20
@@ -589,7 +598,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update-vals {:a 1 :b 2 :c 3} inc)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{a: 2, b: 3, c: 4}
     end
@@ -599,7 +608,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update-vals {} count)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{}
     end
@@ -615,7 +624,9 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       ctx = %{orders: [%{id: 1, status: "pending"}]}
 
-      assert {:error, {:type_error, message, _}} = Lisp.run(source, context: ctx)
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run(source, context: ctx)
+
       assert message =~ "update-vals expects (map, function)"
       assert message =~ "Use -> (thread-first)"
     end
@@ -631,7 +642,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update {:n 1} :n inc)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{n: 2}
     end
@@ -641,7 +652,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update {} :missing (fn [v] (if v (inc v) 0)))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{missing: 0}
     end
@@ -651,7 +662,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update {:a 1 :b 2 :c 3} :b inc)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{a: 1, b: 3, c: 3}
     end
@@ -663,7 +674,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update-in {:a {:b 1}} [:a :b] inc)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{a: %{b: 2}}
     end
@@ -673,7 +684,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update-in {:x {:y {:z 5}}} [:x :y :z] (fn [v] (* v 2)))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{x: %{y: %{z: 10}}}
     end
@@ -683,7 +694,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update-in {:a {}} [:a :b] (fn [v] (if v (inc v) 0)))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{a: %{b: 0}}
     end
@@ -693,7 +704,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (update-in {:n 1} [:n] inc)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{n: 2}
     end
@@ -717,7 +728,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert Enum.map(result, & &1.name) == ["Laptop", "Phone", "Book"]
     end
@@ -735,7 +746,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, result, _, _} = Lisp.run(source, context: ctx)
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert Enum.map(result, & &1.name) == ["Alice", "Bob", "Charlie"]
     end
@@ -746,7 +757,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (sort-by first pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == [["a", 1], ["b", 2], ["c", 3]]
     end
@@ -757,7 +768,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (sort-by (fn [x] (nth x 1)) > pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == [["Entertainment", 800], ["Food", 500], ["Transport", 300]]
     end
@@ -768,7 +779,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (group-by first pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == %{"a" => [["a", 1], ["a", 2]], "b" => [["b", 3]]}
     end
@@ -779,7 +790,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (min-by (fn [x] (nth x 1)) pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == ["b", 5]
     end
@@ -790,7 +801,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (max-by (fn [x] (nth x 1)) pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == ["c", 30]
     end
@@ -801,7 +812,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (sum-by (fn [x] (nth x 1)) pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == 60
     end
@@ -812,7 +823,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (avg-by (fn [x] (nth x 1)) pairs))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == 20.0
     end
@@ -822,7 +833,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (reduce + 0 [1 2 3 4 5])
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == 15
     end
@@ -832,7 +843,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (reduce * 1 [1 2 3 4 5])
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == 120
     end
@@ -843,7 +854,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (or false nil)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == nil
     end
@@ -853,7 +864,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (or nil false)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == false
     end
@@ -864,7 +875,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (some nil? [1 nil 3])
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == true
     end
@@ -874,7 +885,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (some nil? [1 2 3])
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == nil
     end
@@ -885,7 +896,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (- 10)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == -10
     end
@@ -895,7 +906,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (- 10 3)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == 7
     end
@@ -905,7 +916,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       (- 10 3 2 1)
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       assert result == 4
     end
@@ -914,7 +925,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "String parsing" do
     test "parse-long and parse-double for string to number conversion" do
       # Parse and sum numeric strings, filtering invalid
-      {:ok, result, _, _} =
+      {:ok, %Step{return: result}} =
         Lisp.run("""
           (reduce + 0 (filter some? (map parse-long ["1" "2" "three" "4"])))
         """)
@@ -923,7 +934,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
 
     test "safe parsing with default" do
-      {:ok, result, _, _} =
+      {:ok, %Step{return: result}} =
         Lisp.run("""
           (let [val (parse-double "invalid")]
             (if (some? val) val 0.0))
@@ -933,7 +944,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
 
     test "parse API response data" do
-      {:ok, result, _, _} =
+      {:ok, %Step{return: result}} =
         Lisp.run(
           """
           (let [response ctx/response]
@@ -960,7 +971,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (let [z 3] z))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
       assert result == 3
     end
 
@@ -972,7 +983,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (+ 3 3))
       """
 
-      {:ok, result, _, _} = Lisp.run(source)
+      {:ok, %Step{return: result}} = Lisp.run(source)
 
       # All three additions evaluate in sequence, returning the last result
       assert result == 6
@@ -986,7 +997,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         (+ 3 3))
       """
 
-      assert {:error, {:execution_error, _}} = Lisp.run(source)
+      assert {:error, %Step{fail: %{reason: :execution_error}}} = Lisp.run(source)
     end
   end
 end
