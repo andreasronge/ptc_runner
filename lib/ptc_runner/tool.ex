@@ -81,6 +81,8 @@ defmodule PtcRunner.Tool do
 
   defstruct [:name, :function, :signature, :description, :type]
 
+  alias PtcRunner.SubAgent.TypeExtractor
+
   @doc """
   Creates a normalized Tool struct from a name and format.
 
@@ -135,12 +137,14 @@ defmodule PtcRunner.Tool do
   # Normalize different input formats
   defp normalize_format(name, function) when is_function(function) do
     # Bare function - try to extract @doc and @spec
+    {signature, description} = extract_metadata(function)
+
     {:ok,
      %__MODULE__{
        name: name,
        function: function,
-       signature: nil,
-       description: nil,
+       signature: signature,
+       description: description,
        type: :native
      }}
   end
@@ -188,5 +192,11 @@ defmodule PtcRunner.Tool do
 
   defp normalize_format(_name, _format) do
     {:error, :invalid_tool_format}
+  end
+
+  # Extract signature and description from function metadata
+  defp extract_metadata(function) when is_function(function) do
+    {:ok, {signature, description}} = TypeExtractor.extract(function)
+    {signature, description}
   end
 end
