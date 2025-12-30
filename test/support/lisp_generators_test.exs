@@ -3,6 +3,7 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
   use ExUnitProperties
 
   alias PtcRunner.Lisp.{Formatter, Parser}
+  alias PtcRunner.Step
   alias PtcRunner.TestSupport.LispGenerators, as: Gen
 
   describe "roundtrip parsing" do
@@ -48,8 +49,8 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
         tools = build_tools_for_source(source)
         result = safe_run(source, context: ctx, tools: tools)
 
-        # Should return {:ok, _, _, _} or {:error, _}, never crash the interpreter
-        assert match?({:ok, _, _, _}, result) or match?({:error, _}, result),
+        # Should return {:ok, %Step{}} or {:error, %Step{}}, never crash the interpreter
+        assert match?({:ok, %Step{}}, result) or match?({:error, %Step{}}, result),
                "Unexpected result for source: #{source}\nResult: #{inspect(result)}"
       end
     end

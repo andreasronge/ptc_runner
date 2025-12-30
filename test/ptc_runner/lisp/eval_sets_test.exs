@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.EvalSetsTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Step
+
   describe "set predicates" do
     test "set? returns true for sets" do
       {:ok, result, _} = run(~S"(set? #{1 2})")
@@ -74,7 +76,7 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
 
   defp run(source) do
     case PtcRunner.Lisp.run(source) do
-      {:ok, result, _, _} -> {:ok, result, %{}}
+      {:ok, %Step{return: result}} -> {:ok, result, %{}}
       {:error, reason} -> {:error, reason}
     end
   end

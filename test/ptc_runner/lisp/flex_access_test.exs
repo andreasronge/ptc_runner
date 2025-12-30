@@ -1,40 +1,42 @@
 defmodule PtcRunner.Lisp.FlexAccessTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Step
+
   describe "flex_fetch preserves nil values" do
     test "select-keys includes nil values" do
       program = ~S"(select-keys ctx/data [:a :b])"
       context = %{"data" => %{"a" => nil, "b" => 2}}
 
-      assert {:ok, %{a: nil, b: 2}, _, _} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: %{a: nil, b: 2}}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "destructuring with :or does not replace nil" do
       program = ~S"(let [{:keys [a] :or {a 100}} ctx/data] a)"
       context = %{"data" => %{"a" => nil}}
 
-      assert {:ok, nil, _, _} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: nil}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "destructuring with :or uses default for missing key" do
       program = ~S"(let [{:keys [a] :or {a 100}} ctx/data] a)"
       context = %{"data" => %{}}
 
-      assert {:ok, 100, _, _} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: 100}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "keyword-as-function with default returns nil value" do
       program = ~s'(:a ctx/data "default")'
       context = %{"data" => %{"a" => nil}}
 
-      assert {:ok, nil, _, _} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: nil}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "keyword-as-function with default uses default for missing" do
       program = ~s'(:a ctx/data "default")'
       context = %{"data" => %{}}
 
-      assert {:ok, "default", _, _} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: "default"}} = PtcRunner.Lisp.run(program, context: context)
     end
   end
 
@@ -43,7 +45,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       program = ~S"(get-in ctx/data [:user :name])"
       context = %{"data" => %{"user" => %{"name" => "Alice"}}}
 
-      assert {:ok, "Alice", _, _} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: "Alice"}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "where clause path works with string keys" do
@@ -56,7 +58,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
         ]
       }
 
-      assert {:ok, [%{"meta" => %{"active" => true}, "name" => "A"}], _, _} =
+      assert {:ok, %Step{return: [%{"meta" => %{"active" => true}, "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
   end
@@ -72,7 +74,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
         ]
       }
 
-      assert {:ok, [%{"status" => "active", "name" => "A"}], _, _} =
+      assert {:ok, %Step{return: [%{"status" => "active", "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
 
@@ -86,7 +88,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
         ]
       }
 
-      assert {:ok, [%{"status" => "inactive", "name" => "B"}], _, _} =
+      assert {:ok, %Step{return: [%{"status" => "inactive", "name" => "B"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
 
@@ -102,9 +104,12 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       }
 
       assert {:ok,
-              [%{"status" => "active", "name" => "A"}, %{"status" => "pending", "name" => "C"}],
-              _, _} =
-               PtcRunner.Lisp.run(program, context: context)
+              %Step{
+                return: [
+                  %{"status" => "active", "name" => "A"},
+                  %{"status" => "pending", "name" => "C"}
+                ]
+              }} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "where includes with list membership using keyword/string coercion" do
@@ -117,7 +122,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
         ]
       }
 
-      assert {:ok, [%{"tags" => ["urgent", "bug"], "name" => "A"}], _, _} =
+      assert {:ok, %Step{return: [%{"tags" => ["urgent", "bug"], "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
 
@@ -132,7 +137,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       }
 
       # Only the boolean true should match, not the string "true"
-      assert {:ok, [%{"active" => true, "name" => "A"}], _, _} =
+      assert {:ok, %Step{return: [%{"active" => true, "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
 
@@ -147,7 +152,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       }
 
       # Only the boolean false should match, not the string "false"
-      assert {:ok, [%{"active" => false, "name" => "A"}], _, _} =
+      assert {:ok, %Step{return: [%{"active" => false, "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
 
@@ -161,7 +166,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
         ]
       }
 
-      assert {:ok, [%{"value" => "", "name" => "A"}], _, _} =
+      assert {:ok, %Step{return: [%{"value" => "", "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
   end

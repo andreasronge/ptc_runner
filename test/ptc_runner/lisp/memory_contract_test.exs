@@ -1,11 +1,13 @@
 defmodule PtcRunner.Lisp.MemoryContractTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Step
+
   describe "memory contract" do
     test "scalar result does not update memory" do
       initial_memory = %{"existing_key" => "preserved"}
 
-      {:ok, result, memory_delta, new_memory} =
+      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
         PtcRunner.Lisp.run("42", memory: initial_memory)
 
       assert result == 42
@@ -16,7 +18,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
     test "map result without :result merges entire map to memory" do
       initial_memory = %{}
 
-      {:ok, result, memory_delta, new_memory} =
+      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
         PtcRunner.Lisp.run(~S|{:foo "bar" :baz "qux"}|, memory: initial_memory)
 
       assert result == %{foo: "bar", baz: "qux"}
@@ -24,11 +26,11 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       assert new_memory == %{foo: "bar", baz: "qux"}
     end
 
-    test "map result with :result returns result value and merges rest" do
+    test "map result with :return returns return value and merges rest" do
       initial_memory = %{existing: "value"}
 
-      {:ok, result, memory_delta, new_memory} =
-        PtcRunner.Lisp.run(~S|{:result 42 :computed "data"}|, memory: initial_memory)
+      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
+        PtcRunner.Lisp.run(~S|{:return 42 :computed "data"}|, memory: initial_memory)
 
       assert result == 42
       assert memory_delta == %{computed: "data"}
@@ -38,7 +40,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
     test "memory merge overwrites existing keys" do
       initial_memory = %{foo: 1, baz: 3}
 
-      {:ok, result, memory_delta, new_memory} =
+      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
         PtcRunner.Lisp.run(~S|{:foo 2 :new_key "added"}|, memory: initial_memory)
 
       assert result == %{foo: 2, new_key: "added"}
