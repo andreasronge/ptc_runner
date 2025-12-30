@@ -81,6 +81,7 @@ See [Testing Guidelines](docs/guidelines/testing-guidelines.md) for full details
 ## Documentation Rules
 
 - **@doc**: Required for public functions. Use doctests (`iex>`) over prose.
+- **Doctests**: Use full module paths (e.g., `PtcRunner.Module.func()` not `Module.func()`). Ensure test files include `doctest ModuleName` to validate examples.
 - **@moduledoc**: Explain module responsibility, link to relevant guides.
 - **docs/*.md**: Concepts, workflows, architecture. Not API reference.
 - **README.md**: Onboarding only (<200 lines). Link to HexDocs.
