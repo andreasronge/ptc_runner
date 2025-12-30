@@ -3,21 +3,17 @@ name: Claude Issue Implementation
 on:
   issue_comment:
     types: [created]
-  issues:
-    types: [opened, assigned]
 
 jobs:
   claude:
-    # Only trigger for issue contexts (not PR comments), trusted actors, and @claude mentions
-    # Note: ready-for-implementation label is the security gate, added by claude-issue-review.yml
-    # Note: Using toJSON() because github.event.issue.labels.*.name doesn't work with contains()
+    # Trigger on @claude mentions in issue comments (not PRs)
+    # Security: requires ready-for-implementation label OR repo owner
     if: |
+      !github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
       (
         github.actor == 'andreasronge' ||
         contains(toJSON(github.event.issue.labels), 'ready-for-implementation')
-      ) && (
-        (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
       )
     runs-on: ubuntu-latest
 
@@ -51,7 +47,6 @@ jobs:
         run: |
           cp scripts/pre-commit .git/hooks/pre-commit
           chmod +x .git/hooks/pre-commit
-          echo "Installed pre-commit hook"
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -61,6 +56,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+          # Used by E2E tests that call LLM APIs
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -68,135 +64,45 @@ jobs:
           prompt: |
             Implement issue #${{ github.event.issue.number }}.
 
-            Request: ${{ github.event.comment.body || github.event.issue.body }}
+            Read the issue and comments: `gh issue view ${{ github.event.issue.number }} --comments`
 
-            **Keep it simple**: Only implement what was requested. No extras, no refactoring beyond scope.
+            **Guidelines:**
+            - Keep it simple - only implement what's requested
+            - Run `mix precommit` before committing
+            - Create PR with "Closes #${{ github.event.issue.number }}" in body
 
-            **NEVER modify .credo.exs** - if credo complains, fix the code or use inline `# credo:disable-for-next-line` comments.
-
-            ## ⚠️ CRITICAL: Protected Files (Read Before Any Git Operations)
-
-            1. **NEVER commit `.github/workflows/` files** - GitHub App tokens cannot push these
-            2. **Before ANY commit**, run: `git checkout -- .github/workflows/` to discard workflow changes
-            3. **If push fails**, do NOT run `git reset --hard` - you will lose all work. Instead, discard only workflow files and retry.
-
-            ## Phase 1: Scope Assessment (REQUIRED)
-
-            Before implementing, assess the scope:
-            1. Read issue AND comments: `gh issue view ${{ github.event.issue.number }} --comments`
-            2. Count affected files and estimate test changes
-            3. Check for edge cases or blockers not mentioned in the issue
-
-            **If any of these apply, use the Feedback Protocol instead of implementing:**
-            - More than ~30 test assertion changes needed
-            - More than ~5 files need modification
-            - Missing dependencies or unclear requirements discovered
-            - Edge cases found that aren't addressed in acceptance criteria
-            - Implementation would take significantly longer than expected
-
-            ## Phase 2A: Implementation (if scope is acceptable)
-
-            1. Branch: `git checkout -b claude/issue-${{ github.event.issue.number }}-$(date +%Y%m%d-%H%M%S)`
-            2. Make minimal changes
-            3. Run `mix precommit` - only proceed if it passes
-            4. `git add -A && git commit -m "fix: ..." && git push -u origin HEAD`
-            5. Verify push succeeded: `git status` should show "Your branch is up to date with 'origin/...'"
-            6. `gh pr create --title "feat: [desc] (#${{ github.event.issue.number }})" --body "...summary...\n\nCloses #${{ github.event.issue.number }}"` (MUST include "Closes #N" to auto-close issue)
-            7. Post summary: `gh issue comment ${{ github.event.issue.number }} --body "..."`
-
-            ## Phase 2B: Feedback Protocol (if scope is too large or blockers found)
-
-            If you cannot complete the implementation, DO NOT create a partial PR. Instead:
-
-            1. **Determine the feedback type**:
-               - `needs-breakdown`: Issue is too large, should be split
-               - `implementation-blocked`: Missing info, unclear requirements, or blocking dependency
-               - `edge-case-found`: Discovered scenarios not covered in acceptance criteria
-
-            2. **Update labels**:
-               ```bash
-               gh issue edit ${{ github.event.issue.number }} --remove-label "ready-for-implementation"
-               gh issue edit ${{ github.event.issue.number }} --add-label "<feedback-type>"
-               ```
-
-            3. **Post structured feedback comment**:
-               ```markdown
-               ## 🔄 Implementation Feedback: <Type>
-
-               ### Summary
-               <Brief explanation of why implementation cannot proceed>
-
-               ### Scope Analysis
-               - **Files affected**: <count>
-               - **Test changes needed**: <count>
-               - **Estimated complexity**: Low/Medium/High
-
-               ### Details
-               <Specific issues found, edge cases, missing requirements, etc.>
-
-               ### Suggested Resolution
-               <For needs-breakdown: list suggested sub-issues>
-               <For implementation-blocked: what needs to be clarified>
-               <For edge-case-found: the edge cases and questions about them>
-               ```
-
-            4. **Exit without creating PR or branch**
+            **Escape hatch:** If you discover feature creep, unexpected complexity, or blockers that warrant a separate issue - stop, post a comment explaining what you found, and exit without creating a PR. Use your judgment.
 
             NEVER include "@claude" in comments.
 
           claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 100 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
           show_full_output: true
 
-      # Safety net: ensure any commits Claude made are pushed
+      # Safety net: push any unpushed commits and remove workflow files
       - name: Push unpushed commits
         if: always()
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
-          # Configure git credentials
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-          # CRITICAL: Remove workflow files from commits (GitHub App tokens can't push these)
-          # Check if any unpushed commits contain workflow files
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          [ "$CURRENT_BRANCH" = "main" ] && exit 0
+
+          # Remove workflow files from any unpushed commits (GitHub App tokens can't push these)
           if git log origin/main..HEAD --name-only --pretty=format: 2>/dev/null | grep -q "^\.github/workflows/"; then
-            echo "Found workflow files in commits - removing them..."
-            # Get the commit message
+            echo "Removing workflow files from commit..."
             COMMIT_MSG=$(git log -1 --format=%s)
-            # Reset to before the commit, restore workflow files from main
             git reset HEAD~1 --soft
             git checkout origin/main -- .github/workflows/ 2>/dev/null || true
-            # Recommit without workflow files
             git add -A
             git reset HEAD -- .github/workflows/ 2>/dev/null || true
-            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "No changes to commit after removing workflow files"
+            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "No changes after removing workflow files"
           fi
 
-          # Get current branch name
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-
-          # Check if branch exists on remote
-          if git ls-remote --exit-code --heads origin "$CURRENT_BRANCH" > /dev/null 2>&1; then
-            # Branch exists on remote, check for unpushed commits
-            UNPUSHED=$(git log origin/$CURRENT_BRANCH..HEAD --oneline 2>/dev/null || echo "")
-            if [ -n "$UNPUSHED" ]; then
-              echo "Found unpushed commits on existing branch:"
-              echo "$UNPUSHED"
-              echo "Pushing to origin..."
-              git push origin HEAD:$CURRENT_BRANCH
-              echo "::notice::Pushed commits that Claude forgot to push"
-            else
-              echo "No unpushed commits found"
-            fi
-          else
-            # Branch doesn't exist on remote, check if we have local commits
-            LOCAL_COMMITS=$(git log main..HEAD --oneline 2>/dev/null || git log --oneline -1 2>/dev/null || echo "")
-            if [ -n "$LOCAL_COMMITS" ] && [ "$CURRENT_BRANCH" != "main" ]; then
-              echo "Found unpushed branch with commits:"
-              echo "$LOCAL_COMMITS"
-              echo "Pushing new branch to origin..."
-              git push -u origin HEAD
-              echo "::notice::Pushed new branch that Claude forgot to push"
-            else
-              echo "No unpushed commits found (or still on main branch)"
-            fi
+          # Push if there are unpushed commits
+          if git log origin/main..HEAD --oneline 2>/dev/null | grep -q .; then
+            echo "Pushing unpushed commits..."
+            git push -u origin HEAD
+            echo "::notice::Pushed commits"
           fi
