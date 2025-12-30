@@ -60,6 +60,10 @@ defmodule PtcRunner.TestSupport.LispGenerators do
     |> map(&{:keyword, String.to_atom(&1)})
   end
 
+  # Reserved words that cannot be used as identifiers (they have special
+  # string interpolation behavior that breaks formatting)
+  @reserved_words ~w(nil true false)
+
   @doc "Generate a valid identifier string"
   def gen_identifier do
     bind(string(?a..?z, length: 1), fn first ->
@@ -67,6 +71,7 @@ defmodule PtcRunner.TestSupport.LispGenerators do
         constant(first <> rest)
       end)
     end)
+    |> filter(&(&1 not in @reserved_words))
   end
 
   # ============================================================
