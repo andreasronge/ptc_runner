@@ -27,6 +27,7 @@ defmodule PtcRunner.Lisp do
   """
 
   alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser}
+  alias PtcRunner.Step
 
   @doc """
   Run a PTC-Lisp program.
@@ -44,21 +45,25 @@ defmodule PtcRunner.Lisp do
 
   ## Return Value
 
-  On success, returns a 4-tuple:
-  - `{:ok, result, memory_delta, new_memory}`
-    - `result`: The value returned to the caller
-    - `memory_delta`: Map of keys that changed
-    - `new_memory`: Complete memory state after merge
+  On success, returns:
+  - `{:ok, Step.t()}` with:
+    - `step.return`: The value returned to the caller
+    - `step.memory_delta`: Map of keys that changed
+    - `step.memory`: Complete memory state after merge
+    - `step.usage`: Execution metrics (duration_ms, memory_bytes)
 
   On error, returns:
-  - `{:error, reason}` from parser, analyzer, evaluator, or resource limits
+  - `{:error, Step.t()}` with:
+    - `step.fail.reason`: Error reason atom
+    - `step.fail.message`: Human-readable error description
+    - `step.memory`: Memory state at time of error
 
   ## Memory Contract
 
   The memory contract is applied only at the top level:
-  - If result is not a map: `{:ok, value, %{}, memory}` (no memory update)
-  - If result is a map without `:result`: merges map into memory, returns map as result
-  - If result is a map with `:result`: merges remaining keys into memory, returns value from `:result`
+  - If result is not a map: `step.return` = value, no memory update
+  - If result is a map without `:return`: merges map into memory, returns map as `step.return`
+  - If result is a map with `:return`: merges remaining keys into memory, returns `:return` value as `step.return`
 
   ## Float Precision
 
@@ -66,12 +71,14 @@ defmodule PtcRunner.Lisp do
   This is useful for LLM-facing applications where excessive precision wastes tokens.
 
       # Full precision (default)
-      PtcRunner.Lisp.run("(/ 10 3)")
-      #=> {:ok, 3.3333333333333335, %{}, %{}}
+      {:ok, step} = PtcRunner.Lisp.run("(/ 10 3)")
+      step.return
+      #=> 3.3333333333333335
 
       # Rounded to 2 decimals
-      PtcRunner.Lisp.run("(/ 10 3)", float_precision: 2)
-      #=> {:ok, 3.33, %{}, %{}}
+      {:ok, step} = PtcRunner.Lisp.run("(/ 10 3)", float_precision: 2)
+      step.return
+      #=> 3.33
 
   ## Resource Limits
 
@@ -84,7 +91,7 @@ defmodule PtcRunner.Lisp do
   - `{:error, {:memory_exceeded, bytes}}` - heap limit exceeded
   """
   @spec run(String.t(), keyword()) ::
-          {:ok, term(), map(), map()} | {:error, term()}
+          {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
     ctx = Keyword.get(opts, :context, %{})
     memory = Keyword.get(opts, :memory, %{})
@@ -123,12 +130,27 @@ defmodule PtcRunner.Lisp do
       ]
 
       case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
-        {:ok, value, _metrics, eval_memory} ->
-          apply_memory_contract(value, eval_memory, float_precision)
+        {:ok, value, metrics, eval_memory} ->
+          step = apply_memory_contract(value, eval_memory, float_precision)
+          {:ok, %{step | usage: metrics}}
 
-        {:error, _} = err ->
-          err
+        {:error, {:timeout, ms}} ->
+          {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory)}
+
+        {:error, {:memory_exceeded, bytes}} ->
+          {:error, Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory)}
+
+        {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
+          # Preserve the specific error atom (e.g., :unbound_var, :not_callable)
+          {:error, Step.error(reason_atom, format_error(reason), memory)}
       end
+    else
+      {:error, {:parse_error, msg}} ->
+        {:error, Step.error(:parse_error, msg, %{})}
+
+      {:error, reason} ->
+        # reason could be from Analyze (invalid_form, etc.) or Parser
+        {:error, Step.error(:analysis_error, format_error(reason), %{})}
     end
   end
 
@@ -161,22 +183,48 @@ defmodule PtcRunner.Lisp do
 
   # Non-map result: no memory update
   defp apply_memory_contract(value, memory, precision) when not is_map(value) do
-    {:ok, round_floats(value, precision), %{}, memory}
+    %Step{
+      return: round_floats(value, precision),
+      fail: nil,
+      memory: memory,
+      memory_delta: %{},
+      signature: nil,
+      usage: nil,
+      trace: nil
+    }
   end
 
-  # Map result: check for :result key
+  # Map result: check for :return key
   defp apply_memory_contract(value, memory, precision) when is_map(value) do
-    if Map.has_key?(value, :result) do
-      # Map with :result → merge rest into memory, :result value returned
-      result_value = Map.fetch!(value, :result)
-      rest = Map.delete(value, :result)
+    if Map.has_key?(value, :return) do
+      # Map with :return → merge rest into memory, :return value returned
+      return_value = Map.fetch!(value, :return)
+      rest = Map.delete(value, :return)
       new_memory = Map.merge(memory, rest)
-      {:ok, round_floats(result_value, precision), rest, new_memory}
+
+      %Step{
+        return: round_floats(return_value, precision),
+        fail: nil,
+        memory: new_memory,
+        memory_delta: rest,
+        signature: nil,
+        usage: nil,
+        trace: nil
+      }
     else
-      # Map without :result → merge into memory, map is returned
+      # Map without :return → merge into memory, map is returned
       new_memory = Map.merge(memory, value)
       rounded_value = round_floats(value, precision)
-      {:ok, rounded_value, value, new_memory}
+
+      %Step{
+        return: rounded_value,
+        fail: nil,
+        memory: new_memory,
+        memory_delta: value,
+        signature: nil,
+        usage: nil,
+        trace: nil
+      }
     end
   end
 
