@@ -12,11 +12,11 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
   ## Examples
 
       iex> sig = {:signature, [{"id", :int}], :string}
-      iex> Renderer.render(sig)
+      iex> PtcRunner.SubAgent.Signature.Renderer.render(sig)
       "(id :int) -> :string"
 
       iex> sig = {:signature, [], {:map, [{"count", :int}]}}
-      iex> Renderer.render(sig)
+      iex> PtcRunner.SubAgent.Signature.Renderer.render(sig)
       "-> {count :int}"
   """
   @spec render({:signature, list(), term()}) :: String.t()
@@ -35,7 +35,6 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
   # Type Rendering
   # ============================================================
 
-  @doc false
   @spec render_type(term()) :: String.t()
   defp render_type(:string), do: ":string"
   defp render_type(:int), do: ":int"
