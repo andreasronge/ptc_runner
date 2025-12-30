@@ -68,7 +68,7 @@ defmodule PtcRunner.TestSupport.ClojureTestHelpers do
     # Run in PTC-Lisp
     ptc_result =
       case PtcRunner.Lisp.run(source, context: context, memory: memory) do
-        {:ok, result, _delta, _memory} -> {:ok, result}
+        {:ok, %{return: result}} -> {:ok, result}
         {:error, _} = err -> err
       end
 
@@ -153,7 +153,7 @@ defmodule PtcRunner.TestSupport.ClojureTestHelpers do
 
     # Check PTC-Lisp
     case PtcRunner.Lisp.run(source, context: context, memory: memory) do
-      {:ok, result, _delta, _memory} ->
+      {:ok, %{return: result}} ->
         assert result == expected,
                "PTC-Lisp: expected #{inspect(expected)}, got #{inspect(result)}"
 

@@ -118,15 +118,15 @@ defmodule PtcRunner.Lisp.SpecValidator do
   @spec validate_example(String.t(), any()) :: :ok | {:error, String.t()}
   def validate_example(code, expected) do
     case PtcRunner.Lisp.run(code) do
-      {:ok, result, _delta, _memory} ->
+      {:ok, %{return: result}} ->
         if result == expected do
           :ok
         else
           {:error, "Expected #{inspect(expected)} but got #{inspect(result)}"}
         end
 
-      {:error, reason} ->
-        {:error, "Execution failed: #{inspect(reason)}"}
+      {:error, %{fail: fail}} ->
+        {:error, "Execution failed: #{inspect(fail)}"}
     end
   end
 
@@ -214,11 +214,11 @@ defmodule PtcRunner.Lisp.SpecValidator do
   @spec validate_negative_test(String.t(), atom()) :: :ok | {:error, String.t()}
   def validate_negative_test(code, expected_error_type) do
     case PtcRunner.Lisp.run(code) do
-      {:ok, _result, _delta, _memory} ->
+      {:ok, _step} ->
         {:error, "Expected #{expected_error_type} but code executed successfully"}
 
-      {:error, reason} ->
-        validate_error_type(reason, expected_error_type)
+      {:error, %{fail: fail}} ->
+        validate_error_type(fail.reason, expected_error_type)
     end
   end
 
@@ -848,13 +848,9 @@ defmodule PtcRunner.Lisp.SpecValidator do
     |> Enum.into(%{})
   end
 
-  defp error_matches_type?(error, expected)
-       when is_tuple(error) and tuple_size(error) >= 1 and is_atom(elem(error, 0)) do
-    check_error_type(elem(error, 0), expected)
-  end
-
-  defp error_matches_type?(_error, _expected) do
-    false
+  # New format: error reason is an atom from Step.fail.reason
+  defp error_matches_type?(error, expected) when is_atom(error) do
+    check_error_type(error, expected)
   end
 
   defp check_error_type(error_type, expected) do
