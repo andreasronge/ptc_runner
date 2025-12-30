@@ -11,6 +11,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 | `claude-issue.yml` | `@claude` mention in issue | Actor or `ready-for-implementation` label | Implement issues |
 | `claude-pr-fix.yml` | `@claude` mention in PR | Actor or `claude-approved` label | Fix PRs |
 | `claude-issue-review.yml` | Issue labeled | `needs-review` label | Review issue, trigger implementation |
+| `claude-implementation-feedback.yml` | Issue labeled | Feedback labels | Handle implementation feedback |
 | `claude-pm.yml` | PR merged, manual | Epic management | Queue issues for review, update epic progress |
 
 ## Workflow Interactions
@@ -53,7 +54,26 @@ This document describes the Claude-powered GitHub workflows and their security g
 │                                              │                  │
 │                                              ▼                  │
 │                                      claude-issue.yml           │
-│                                        (creates PR)             │
+│                                              │                  │
+│                              ┌───────────────┴───────────────┐  │
+│                              ▼                               ▼  │
+│                         SUCCESS                          FEEDBACK│
+│                       (creates PR)                    (too big, │
+│                                                      edge case, │
+│                                                       blocked)  │
+│                                                          │      │
+│                                                          ▼      │
+│                                         implementation-feedback.yml
+│                                                          │      │
+│                              ┌───────────────────────────┴──┐   │
+│                              ▼                              ▼   │
+│                       needs-breakdown              edge-case or │
+│                      (creates sub-issues)           blocked     │
+│                              │                     (updates issue)
+│                              ▼                              │   │
+│                      Sub-issues get                         ▼   │
+│                      `needs-review`              Back to review │
+│                                                  or maintainer  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -104,6 +124,44 @@ The PM workflow reads from a human-created "epic issue" to understand what work 
 **Note**: PM no longer triggers implementation. The review workflow posts `@claude` directly after approval.
 
 **GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
+
+## Implementation Feedback Workflow
+
+The implementation workflow (`claude-issue.yml`) includes a **feedback protocol** for handling issues that are too large or have unexpected complications.
+
+### Feedback Types
+
+| Label | Meaning | Feedback Workflow Action |
+|-------|---------|--------------------------|
+| `needs-breakdown` | Issue scope too large (>30 test changes, >5 files) | Creates sub-issues, marks parent as tracking issue |
+| `implementation-blocked` | Missing info, unclear requirements, blocking dependency | Updates issue with blocker details, adds `needs-maintainer-input` |
+| `edge-case-found` | Discovered scenarios not in acceptance criteria | Updates issue with edge cases, may re-trigger implementation |
+
+### How It Works
+
+1. **Scope Assessment**: Before implementing, Claude assesses scope and complexity
+2. **Feedback Decision**: If thresholds exceeded or blockers found, uses feedback protocol instead of implementing
+3. **Label Update**: Removes `ready-for-implementation`, adds appropriate feedback label
+4. **Structured Comment**: Posts detailed feedback comment with analysis
+5. **Feedback Workflow**: `claude-implementation-feedback.yml` triggers and handles the feedback:
+   - **needs-breakdown**: Creates sub-issues from suggested breakdown, updates parent
+   - **implementation-blocked**: Documents blocker, requests maintainer input
+   - **edge-case-found**: Documents edge cases, may auto-resolve and re-trigger
+
+### Thresholds
+
+The implementation workflow uses these thresholds to trigger feedback:
+- More than ~30 test assertion changes
+- More than ~5 files need modification
+- Missing dependencies or unclear requirements
+- Edge cases not addressed in acceptance criteria
+
+### Recovery
+
+After feedback is handled:
+- **Sub-issues**: Each gets `needs-review` label, goes through normal review process
+- **Blocked issues**: Wait for maintainer to provide info, then manually add `needs-review`
+- **Edge cases resolved**: Workflow may automatically re-trigger implementation
 
 ## Closing Issues
 
@@ -181,6 +239,7 @@ gh workflow run claude-pm.yml -f action=reset-stuck
 | auto-triage | `claude-triage-{branch}` | Yes |
 | claude-issue | `claude-issue-{number}` | No |
 | issue-review | `claude-issue-{number}` | No |
+| implementation-feedback | `claude-issue-{number}` | No |
 | pm | `claude-pm` | No |
 
 ## Labels Reference
@@ -213,6 +272,13 @@ Phase labels can be used to categorize issues, but are not required for the PM w
 - `needs-human-review` - Max cycles reached, human must intervene
 - `do-not-auto-merge` - Prevents auto-merge
 - `ready-to-merge` - Triage approved, ready for auto-merge
+
+### Implementation Feedback Labels
+- `needs-breakdown` - Issue too large, needs to be split into sub-issues
+- `implementation-blocked` - Blocker found during implementation attempt
+- `edge-case-found` - Edge cases discovered not in acceptance criteria
+- `needs-maintainer-input` - Waiting for maintainer decision/info
+- `tracking-issue` - Parent issue with linked sub-issues
 
 ### Classification Labels
 - `from-pr-review` - Issue created from PR review findings
