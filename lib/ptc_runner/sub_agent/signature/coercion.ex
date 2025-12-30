@@ -17,7 +17,6 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   ## Special Types
 
-  - DateTime, Date, Time, NaiveDateTime: Accept ISO 8601 strings
   - Atoms: Coerce atoms to strings, strings to atoms (using `String.to_existing_atom/1`)
 
   ## Examples
@@ -53,7 +52,7 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
       iex> Coercion.coerce("hello", :int)
       {:error, "cannot coerce string \\"hello\\" to integer"}
 
-      iex> Coercion.coerce_input(%{"id" => "42", "name" => "Alice"}, {:map, [{"id", :int}, {"name", :string}]})
+      iex> Coercion.coerce(%{"id" => "42", "name" => "Alice"}, {:map, [{"id", :int}, {"name", :string}]})
       {:ok, %{"id" => 42, "name" => "Alice"}, ["coerced string \\"42\\" to integer"]}
   """
   @spec coerce(term(), atom() | tuple()) :: coercion_result()
