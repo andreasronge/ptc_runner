@@ -27,11 +27,11 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
       assert description == "Search for items matching query"
     end
 
-    test "extracts signature with map return" do
+    test "extracts signature with structured map return" do
       {:ok, {signature, _description}} = TypeExtractor.extract(&TestFunctions.get_user/1)
 
-      # Structured maps are currently converted to :map
-      assert signature == "(id :int) -> :map"
+      # Structured maps are now expanded to {field :type} format
+      assert signature == "(id :int) -> {id :int, name :string}"
     end
 
     test "extracts signature with boolean return" do
@@ -135,6 +135,50 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
 
       assert signature == "(query :string, limit :int) -> [:map]"
       assert description == "Function with multiple specs"
+    end
+
+    test "expands custom @type definitions" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_custom_user/1)
+
+      # user() type should be expanded to {id :int, name :string}
+      assert signature == "(id :int) -> {id :int, name :string}"
+      assert description == "Function using custom type"
+    end
+
+    test "expands nested custom types" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_nested/1)
+
+      # nested_type() should expand user() within it
+      assert signature == "(id :int) -> {user {id :int, name :string}, created_at :string}"
+      assert description == "Function with nested custom type"
+    end
+
+    test "expands list of custom types" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.list_users/0)
+
+      # user_list() -> [user()] -> [{id :int, name :string}]
+      assert signature == "() -> [{id :int, name :string}]"
+      assert description == "Function with list of custom types"
+    end
+
+    test "falls back to :any for opaque types" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_secret/0)
+
+      # Opaque types cannot be expanded
+      assert signature == "() -> :any"
+      assert description == "Function with opaque type"
+    end
+
+    test "respects max depth limit of 3" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_deep/0)
+
+      # Should expand to depth 3, then fall back to :any for level4
+      # level1 -> {data level2} (depth 0 -> 1)
+      # level2 -> {data level3} (depth 1 -> 2)
+      # level3 -> {data level4} (depth 2 -> 3)
+      # level4 -> :any (depth 3, max reached)
+      assert signature == "() -> {data {data {data :any}}}"
+      assert description == "Function with deeply nested type"
     end
   end
 
