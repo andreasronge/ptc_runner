@@ -39,46 +39,20 @@ jobs:
       MIX_ENV: test
 
     steps:
-      - name: Check for running Claude workflows
-        id: check-busy
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          RUNNING=$(gh run list --repo ${{ github.repository }} --status=in_progress --json workflowName \
-            --jq '[.[] | select(.workflowName | test("Claude")) | select(.workflowName != "Claude PM")] | length')
-          echo "Running Claude workflows: $RUNNING"
-          if [ "$RUNNING" -gt 0 ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "::notice::Skipping - other Claude workflows are running"
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Check PAT availability
-        if: steps.check-busy.outputs.skip != 'true'
-        run: |
-          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
-            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - implementation triggers won't work"
-          fi
-
       - name: Checkout repository
-        if: steps.check-busy.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Setup Elixir environment
-        if: steps.check-busy.outputs.skip != 'true'
         uses: ./.github/actions/setup-elixir
 
       - name: Setup Claude Code
-        if: steps.check-busy.outputs.skip != 'true'
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
       - name: Check for open PRs
-        if: steps.check-busy.outputs.skip != 'true'
         id: open-prs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,7 +69,6 @@ jobs:
           fi
 
       - name: Check current PM status
-        if: steps.check-busy.outputs.skip != 'true'
         id: status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -120,14 +93,14 @@ jobs:
           fi
 
       - name: Handle stuck state
-        if: steps.check-busy.outputs.skip != 'true' && steps.status.outputs.is_stuck == 'true'
+        if: steps.status.outputs.is_stuck == 'true'
         run: |
           echo "::error::PM workflow is stuck. Use workflow_dispatch with 'reset-stuck' action to resume."
           echo "Check issues with 'pm-stuck' label for details on what went wrong."
           exit 1
 
       - name: Reset stuck state
-        if: steps.check-busy.outputs.skip != 'true' && github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -145,7 +118,6 @@ jobs:
           echo "Stuck state reset complete"
 
       - name: Find active epic
-        if: steps.check-busy.outputs.skip != 'true'
         id: epic
         env:
           GH_TOKEN: ${{ github.token }}
@@ -200,7 +172,7 @@ jobs:
 
       - name: Read epic body
         id: epic-body
-        if: steps.check-busy.outputs.skip != 'true' && steps.epic.outputs.has_epic == 'true'
+        if: steps.epic.outputs.has_epic == 'true'
         run: |
           # Use delimiter to handle multi-line content
           echo "body<<EPIC_BODY_EOF" >> $GITHUB_OUTPUT
@@ -210,7 +182,7 @@ jobs:
 
       - name: Run Claude PM
         id: claude-pm
-        if: steps.check-busy.outputs.skip != 'true' && steps.open-prs.outputs.open_pr_count == '0'
+        if: steps.open-prs.outputs.open_pr_count == '0'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
