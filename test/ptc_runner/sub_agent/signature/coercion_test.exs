@@ -1,5 +1,6 @@
 defmodule PtcRunner.SubAgent.Signature.CoercionTest do
   use ExUnit.Case
+  doctest PtcRunner.SubAgent.Signature.Coercion
 
   alias PtcRunner.SubAgent.Signature.Coercion
 

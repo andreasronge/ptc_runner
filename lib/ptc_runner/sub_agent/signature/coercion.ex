@@ -21,16 +21,16 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   ## Examples
 
-      iex> Coercion.coerce("42", :int)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("42", :int)
       {:ok, 42, ["coerced string \\"42\\" to integer"]}
 
-      iex> Coercion.coerce(42, :float)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce(42, :float)
       {:ok, 42.0, []}
 
-      iex> Coercion.coerce("hello", :int)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("hello", :int)
       {:error, "cannot coerce string \\"hello\\" to integer"}
 
-      iex> Coercion.coerce("hello", :keyword)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("hello", :keyword)
       {:ok, :hello, ["coerced string \\"hello\\" to keyword"]}
   """
 
@@ -43,16 +43,16 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   ## Examples
 
-      iex> Coercion.coerce("42", :int)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("42", :int)
       {:ok, 42, ["coerced string \\"42\\" to integer"]}
 
-      iex> Coercion.coerce(42, :float)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce(42, :float)
       {:ok, 42.0, []}
 
-      iex> Coercion.coerce("hello", :int)
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("hello", :int)
       {:error, "cannot coerce string \\"hello\\" to integer"}
 
-      iex> Coercion.coerce(%{"id" => "42", "name" => "Alice"}, {:map, [{"id", :int}, {"name", :string}]})
+      iex> PtcRunner.SubAgent.Signature.Coercion.coerce(%{"id" => "42", "name" => "Alice"}, {:map, [{"id", :int}, {"name", :string}]})
       {:ok, %{"id" => 42, "name" => "Alice"}, ["coerced string \\"42\\" to integer"]}
   """
   @spec coerce(term(), atom() | tuple()) :: coercion_result()
