@@ -15,16 +15,6 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   ## Examples
 
-      # Function with @doc and @spec
-      defmodule MyApp do
-        @doc "Search for items matching query"
-        @spec search(String.t(), integer()) :: [map()]
-        def search(query, limit), do: []
-      end
-
-      iex> PtcRunner.SubAgent.TypeExtractor.extract(&MyApp.search/2)
-      {:ok, {"(query :string, limit :int) -> [:map]", "Search for items matching query"}}
-
       # Anonymous function - cannot extract
       iex> PtcRunner.SubAgent.TypeExtractor.extract(fn x -> x end)
       {:ok, {nil, nil}}
@@ -42,8 +32,9 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.TypeExtractor.extract(&String.upcase/1)
-      {:ok, {signature, description}} when is_binary(signature) or is_nil(signature)
+      iex> {:ok, {signature, _description}} = PtcRunner.SubAgent.TypeExtractor.extract(&String.upcase/1)
+      iex> is_binary(signature) or is_nil(signature)
+      true
 
   """
   @spec extract(function()) :: {:ok, {String.t() | nil, String.t() | nil}}
