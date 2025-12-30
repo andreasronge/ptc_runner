@@ -28,6 +28,8 @@ defmodule PtcRunner.Lisp do
 
   alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser}
   alias PtcRunner.Step
+  alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.Tool
 
   @doc """
   Run a PTC-Lisp program.
@@ -39,6 +41,7 @@ defmodule PtcRunner.Lisp do
     - `:context` - Initial context map (default: %{})
     - `:memory` - Initial memory map (default: %{})
     - `:tools` - Map of tool names to functions (default: %{})
+    - `:signature` - Optional signature string for return value validation
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds (default: 1000)
     - `:max_heap` - Max heap size in words (default: 1_250_000)
@@ -95,22 +98,61 @@ defmodule PtcRunner.Lisp do
   def run(source, opts \\ []) do
     ctx = Keyword.get(opts, :context, %{})
     memory = Keyword.get(opts, :memory, %{})
-    tools = Keyword.get(opts, :tools, %{})
+    raw_tools = Keyword.get(opts, :tools, %{})
+    signature_str = Keyword.get(opts, :signature)
     float_precision = Keyword.get(opts, :float_precision)
     timeout = Keyword.get(opts, :timeout, 1000)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
 
-    tool_executor = fn name, args ->
-      case Map.fetch(tools, name) do
-        {:ok, fun} -> fun.(args)
-        :error -> raise "Unknown tool: #{name}"
+    # Normalize tools to Tool structs
+    with {:ok, normalized_tools} <- normalize_tools(raw_tools),
+         {:ok, parsed_signature} <- parse_signature(signature_str) do
+      tool_executor = fn name, args ->
+        case Map.fetch(normalized_tools, name) do
+          {:ok, %Tool{function: fun}} -> fun.(args)
+          :error -> raise "Unknown tool: #{name}"
+        end
       end
+
+      opts = %{
+        ctx: ctx,
+        memory: memory,
+        normalized_tools: normalized_tools,
+        tool_executor: tool_executor,
+        parsed_signature: parsed_signature,
+        signature_str: signature_str,
+        float_precision: float_precision,
+        timeout: timeout,
+        max_heap: max_heap
+      }
+
+      execute_program(source, opts)
+    else
+      {:error, {:invalid_tool, tool_name, reason}} ->
+        {:error, Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory)}
+
+      {:error, {:invalid_signature, msg}} ->
+        {:error, Step.error(:parse_error, "Invalid signature: #{msg}", memory)}
     end
+  end
+
+  defp execute_program(source, opts) do
+    %{
+      ctx: ctx,
+      memory: memory,
+      normalized_tools: normalized_tools,
+      tool_executor: tool_executor,
+      parsed_signature: parsed_signature,
+      signature_str: signature_str,
+      float_precision: float_precision,
+      timeout: timeout,
+      max_heap: max_heap
+    } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
          {:ok, core_ast} <- Analyze.analyze(raw_ast) do
       # Build Context for sandbox
-      context = PtcRunner.Context.new(ctx, memory, tools)
+      context = PtcRunner.Context.new(ctx, memory, normalized_tools)
 
       # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
       eval_fn = fn _ast, sandbox_context ->
@@ -132,7 +174,13 @@ defmodule PtcRunner.Lisp do
       case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
         {:ok, value, metrics, eval_memory} ->
           step = apply_memory_contract(value, eval_memory, float_precision)
-          {:ok, %{step | usage: metrics}}
+          step_with_usage = %{step | usage: metrics}
+
+          # Validate signature if provided
+          case validate_return_value(parsed_signature, signature_str, step_with_usage) do
+            {:ok, validated_step} -> {:ok, validated_step}
+            {:error, reason} -> {:error, reason}
+          end
 
         {:error, {:timeout, ms}} ->
           {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory)}
@@ -256,4 +304,50 @@ defmodule PtcRunner.Lisp do
   end
 
   defp round_floats(value, _precision), do: value
+
+  # Normalize tools from various formats to Tool structs
+  defp normalize_tools(raw_tools) do
+    Enum.reduce_while(raw_tools, {:ok, %{}}, fn {name, format}, {:ok, acc} ->
+      case Tool.new(name, format) do
+        {:ok, tool} -> {:cont, {:ok, Map.put(acc, name, tool)}}
+        {:error, reason} -> {:halt, {:error, {:invalid_tool, name, reason}}}
+      end
+    end)
+  end
+
+  # Parse signature if provided
+  defp parse_signature(nil), do: {:ok, nil}
+
+  defp parse_signature(signature_str) when is_binary(signature_str) do
+    case Signature.parse(signature_str) do
+      {:ok, sig} -> {:ok, sig}
+      {:error, msg} -> {:error, {:invalid_signature, msg}}
+    end
+  end
+
+  # Validate return value against signature
+  defp validate_return_value(nil, _signature_str, step), do: {:ok, step}
+
+  defp validate_return_value(parsed_signature, signature_str, step) do
+    case Signature.validate(parsed_signature, step.return) do
+      :ok ->
+        # Store the original signature string in the step
+        {:ok, %{step | signature: signature_str}}
+
+      {:error, errors} ->
+        msg = format_validation_errors(errors)
+        {:error, Step.error(:validation_error, msg, step.memory)}
+    end
+  end
+
+  # Format validation errors into a readable message
+  defp format_validation_errors(errors) do
+    Enum.map_join(errors, "; ", fn %{path: path, message: message} ->
+      path_str = format_path(path)
+      "#{path_str}: #{message}"
+    end)
+  end
+
+  defp format_path([]), do: "return"
+  defp format_path(path), do: "return." <> Enum.join(path, ".")
 end
