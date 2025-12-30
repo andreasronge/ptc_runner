@@ -38,9 +38,6 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
-      - name: Setup Claude Code
-        uses: ./.github/actions/setup-claude-code
-
       - name: Run Claude Issue Review
         uses: anthropics/claude-code-action@v1
         env:
@@ -48,7 +45,6 @@ jobs:
           # Falls back to github.token if PAT not available (but PM trigger won't work)
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
-          path_to_claude_code_executable: /home/runner/.local/bin/claude
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
