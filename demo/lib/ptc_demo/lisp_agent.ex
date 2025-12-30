@@ -338,7 +338,9 @@ defmodule PtcDemo.LispAgent do
                        timeout: 5000,
                        float_precision: 2
                      ) do
-                  {:ok, result, _delta, new_memory} ->
+                  {:ok, step} ->
+                    result = step.return
+                    new_memory = step.memory
                     result_str = format_result(result)
                     IO.puts("   [Result] #{truncate(result_str, 80)}")
 
@@ -373,11 +375,11 @@ defmodule PtcDemo.LispAgent do
                       )
                     end
 
-                  {:error, reason} ->
-                    error_msg = format_lisp_error(reason)
+                  {:error, step} ->
+                    error_msg = format_lisp_error(step.fail)
                     IO.puts("   [Error] #{error_msg}")
 
-                    # Add error as tool result and continue (preserve memory)
+                    # Add error as tool result and continue (preserve memory from error step)
                     new_context =
                       context
                       |> ReqLLM.Context.append(assistant(text))
@@ -390,7 +392,7 @@ defmodule PtcDemo.LispAgent do
                       run_tracked_usage,
                       remaining - 1,
                       last_exec,
-                      memory,
+                      step.memory,
                       stop_on_success
                     )
                 end
@@ -678,11 +680,17 @@ defmodule PtcDemo.LispAgent do
 
   # --- Error Formatting ---
 
-  defp format_lisp_error({:parse_error, msg}), do: "ParseError: #{msg}"
-  defp format_lisp_error({:analyze_error, msg}), do: "AnalyzeError: #{msg}"
-  defp format_lisp_error({:eval_error, msg}), do: "EvalError: #{msg}"
-  defp format_lisp_error({:timeout, ms}), do: "TimeoutError: exceeded #{ms}ms"
-  defp format_lisp_error({:memory_exceeded, bytes}), do: "MemoryError: exceeded #{bytes} bytes"
+  defp format_lisp_error(%{reason: reason, message: message}) do
+    reason_str =
+      reason
+      |> Atom.to_string()
+      |> String.split("_")
+      |> Enum.map(&String.capitalize/1)
+      |> Enum.join("")
+
+    "#{reason_str}: #{message}"
+  end
+
   defp format_lisp_error(other), do: "Error: #{inspect(other, limit: 5)}"
 
   # --- Usage Tracking Helpers ---
