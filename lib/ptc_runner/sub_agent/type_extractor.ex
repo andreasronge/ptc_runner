@@ -305,10 +305,19 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
     ":any"
   end
 
-  # Handle union types - for now, fall back to :any with warning
-  defp convert_type({:type, _line, :union, _types}, _depth, _module) do
-    Logger.debug("TypeExtractor: union types not yet supported, falling back to :any")
-    ":any"
+  # Handle union types - detect {:ok, t} | {:error, e} pattern
+  defp convert_type({:type, _line, :union, types}, depth, module) do
+    case detect_ok_error_pattern(types) do
+      {:ok, ok_type, error_type} ->
+        # Convert {:ok, t} | {:error, e} to {result :t, error :e?}
+        result_sig = convert_type(ok_type, depth, module)
+        error_sig = convert_type(error_type, depth, module)
+        "{result #{result_sig}, error #{error_sig}?}"
+
+      :error ->
+        Logger.debug("TypeExtractor: union types not yet supported, falling back to :any")
+        ":any"
+    end
   end
 
   # Handle tuple types - convert to list for now
@@ -431,6 +440,27 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
       nil ->
         Logger.debug("TypeExtractor: custom type #{type_name} not found, falling back to :any")
         ":any"
+    end
+  end
+
+  # Detect {:ok, t} | {:error, e} pattern in union types
+  defp detect_ok_error_pattern(types) when is_list(types) do
+    # Union types are represented as a list of two types
+    case types do
+      [
+        {:type, _line1, :tuple, [{:atom, _, :ok}, ok_type]},
+        {:type, _line2, :tuple, [{:atom, _, :error}, error_type]}
+      ] ->
+        {:ok, ok_type, error_type}
+
+      [
+        {:type, _line1, :tuple, [{:atom, _, :error}, error_type]},
+        {:type, _line2, :tuple, [{:atom, _, :ok}, ok_type]}
+      ] ->
+        {:ok, ok_type, error_type}
+
+      _ ->
+        :error
     end
   end
 end
