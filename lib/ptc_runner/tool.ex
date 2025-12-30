@@ -106,12 +106,12 @@ defmodule PtcRunner.Tool do
       :native
 
   Function with explicit signature:
-      iex> {:ok, tool} = PtcRunner.Tool.new("search", {&MyApp.search/2, "(query :string, limit :int) -> [{id :int}]"})
+      iex> {:ok, tool} = PtcRunner.Tool.new("search", {fn _args -> [] end, "(query :string, limit :int) -> [{id :int}]"})
       iex> tool.signature
       "(query :string, limit :int) -> [{id :int}]"
 
   Function with signature and description:
-      iex> {:ok, tool} = PtcRunner.Tool.new("analyze", {&MyApp.analyze/1,
+      iex> {:ok, tool} = PtcRunner.Tool.new("analyze", {fn _args -> %{} end,
       ...>   signature: "(data :map) -> {score :float}",
       ...>   description: "Analyze data and return anomaly score"
       ...> })
@@ -119,7 +119,7 @@ defmodule PtcRunner.Tool do
       "Analyze data and return anomaly score"
 
   Skip validation:
-      iex> {:ok, tool} = PtcRunner.Tool.new("dynamic", {&MyApp.dynamic/1, :skip})
+      iex> {:ok, tool} = PtcRunner.Tool.new("dynamic", {fn _args -> nil end, :skip})
       iex> tool.signature
       nil
 
