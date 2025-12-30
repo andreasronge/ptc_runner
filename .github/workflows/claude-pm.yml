@@ -207,6 +207,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
+          path_to_claude_code_executable: ~/.local/bin/claude
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             /pm-workflow **Repository**: ${{ github.repository }}
