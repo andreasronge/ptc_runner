@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
 
     concurrency:
-      group: claude-pr-${{ github.event.issue.number || github.event.pull_request.number }}
+      group: claude-automation
       cancel-in-progress: false
 
     permissions:

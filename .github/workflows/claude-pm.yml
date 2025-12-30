@@ -1,44 +1,32 @@
 name: Claude PM
 
 on:
-  # Run when PR is merged to main
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours as fallback
+
   pull_request:
     types: [closed]
     branches: [main]
 
-  # Run when an issue becomes ready for implementation
   issues:
-    types: [labeled]
+    types: [closed, labeled]
 
-  # Manual trigger for testing or recovery
   workflow_dispatch:
-    inputs:
-      action:
-        description: 'Action to perform'
-        required: true
-        default: 'next-issue'
-        type: choice
-        options:
-          - next-issue      # Normal: find/create next issue to work on
-          - status-only     # Just report status, don't create/trigger issues
-          - reset-stuck     # Reset stuck state and resume
 
 jobs:
   pm:
-    # Run on:
-    # - Merged PRs (not closed without merge)
-    # - Issues labeled 'ready-for-implementation'
-    # - Manual trigger
+    # Run on: schedule, manual, merged PRs, closed issues, or relevant labels
     if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
-      (github.event_name == 'issues' && github.event.label.name == 'ready-for-implementation') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'issues' && github.event.action == 'closed') ||
+      (github.event_name == 'issues' && github.event.action == 'labeled' && contains(fromJSON('["ready-for-implementation", "needs-clarification", "needs-breakdown", "from-pr-review"]'), github.event.label.name))
 
     runs-on: ubuntu-latest
 
-    # Prevent concurrent PM operations
     concurrency:
-      group: claude-pm
+      group: claude-automation
       cancel-in-progress: false
 
     permissions:
@@ -51,27 +39,46 @@ jobs:
       MIX_ENV: test
 
     steps:
+      - name: Check for running Claude workflows
+        id: check-busy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUNNING=$(gh run list --repo ${{ github.repository }} --status=in_progress --json workflowName \
+            --jq '[.[] | select(.workflowName | test("Claude")) | select(.workflowName != "Claude PM")] | length')
+          echo "Running Claude workflows: $RUNNING"
+          if [ "$RUNNING" -gt 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::Skipping - other Claude workflows are running"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Check PAT availability
+        if: steps.check-busy.outputs.skip != 'true'
         run: |
           if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
             echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - implementation triggers won't work"
-            echo "::warning::@claude comments posted by PM won't trigger the claude.yml workflow"
           fi
 
       - name: Checkout repository
+        if: steps.check-busy.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Setup Elixir environment
+        if: steps.check-busy.outputs.skip != 'true'
         uses: ./.github/actions/setup-elixir
 
       - name: Setup Claude Code
+        if: steps.check-busy.outputs.skip != 'true'
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
       - name: Check for open PRs
+        if: steps.check-busy.outputs.skip != 'true'
         id: open-prs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,6 +95,7 @@ jobs:
           fi
 
       - name: Check current PM status
+        if: steps.check-busy.outputs.skip != 'true'
         id: status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,14 +120,14 @@ jobs:
           fi
 
       - name: Handle stuck state
-        if: steps.status.outputs.is_stuck == 'true' && github.event.inputs.action != 'reset-stuck' && github.event.inputs.action != 'status-only'
+        if: steps.check-busy.outputs.skip != 'true' && steps.status.outputs.is_stuck == 'true'
         run: |
           echo "::error::PM workflow is stuck. Use workflow_dispatch with 'reset-stuck' action to resume."
           echo "Check issues with 'pm-stuck' label for details on what went wrong."
           exit 1
 
       - name: Reset stuck state
-        if: github.event.inputs.action == 'reset-stuck'
+        if: steps.check-busy.outputs.skip != 'true' && github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -137,6 +145,7 @@ jobs:
           echo "Stuck state reset complete"
 
       - name: Find active epic
+        if: steps.check-busy.outputs.skip != 'true'
         id: epic
         env:
           GH_TOKEN: ${{ github.token }}
@@ -191,7 +200,7 @@ jobs:
 
       - name: Read epic body
         id: epic-body
-        if: steps.epic.outputs.has_epic == 'true'
+        if: steps.check-busy.outputs.skip != 'true' && steps.epic.outputs.has_epic == 'true'
         run: |
           # Use delimiter to handle multi-line content
           echo "body<<EPIC_BODY_EOF" >> $GITHUB_OUTPUT
@@ -201,37 +210,39 @@ jobs:
 
       - name: Run Claude PM
         id: claude-pm
-        # Skip if there are open PRs (unless status-only which is read-only)
-        if: steps.open-prs.outputs.open_pr_count == '0' || github.event.inputs.action == 'status-only'
+        if: steps.check-busy.outputs.skip != 'true' && steps.open-prs.outputs.open_pr_count == '0'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
-          # Use cached executable if available to skip installation
           path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            /pm-workflow **Repository**: ${{ github.repository }}
+            You are the PM agent. Keep this project moving forward.
+
             **Trigger**: ${{ github.event_name }}
-            **Action**: ${{ github.event.inputs.action || 'next-issue' }}
+            **Epic**: #${{ steps.epic.outputs.number || 'None' }} ${{ steps.epic.outputs.title || '' }}
+            **Tech debt**: ${{ steps.epic.outputs.tech_debt }} | **Ready**: ${{ steps.epic.outputs.ready_issues }} | **Needs review**: ${{ steps.epic.outputs.needs_review }}
 
-            ## Epic Status
-            - **Has active epic**: ${{ steps.epic.outputs.has_epic }}
-            - **Epic number**: #${{ steps.epic.outputs.number || 'N/A' }}
-            - **Epic title**: ${{ steps.epic.outputs.title || 'N/A' }}
+            **Gather context:**
+            - `gh issue list --state open --json number,title,labels --limit 30`
+            - `gh issue list --label from-pr-review --state open` (priority)
+            - `gh issue list --label needs-clarification,needs-breakdown --state open` (stuck)
 
-            ## Epic Body
-            ${{ steps.epic-body.outputs.body || '*No active epic - handle tech debt and ready issues*' }}
+            **Priorities:** tech debt (`from-pr-review`) > stuck reviews > next epic task
 
-            ## Other Work
-            - **Ready for implementation**: ${{ steps.epic.outputs.ready_issues }}
-            - **Pending review**: ${{ steps.epic.outputs.needs_review }}
-            - **Tech debt (from-pr-review)**: ${{ steps.epic.outputs.tech_debt }}
-            - **Failure count**: ${{ steps.status.outputs.failure_count }}
+            **Your job:** Find the highest-priority item and take ONE action to move it forward.
 
-          claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
+            **Rules:**
+            - ONE action per run
+            - After 3 failed attempts on same issue, add `needs-human-review` and move on
+            - If nothing needs attention, report status and exit
+            - Never trigger implementation directly (review workflow handles that)
 
+            **Guidelines:** `docs/guidelines/planning-guidelines.md`, `docs/guidelines/issue-creation-guidelines.md`
+
+          claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 50 --allowed-tools "Read,Write,Edit,Glob,Grep,Bash,Task,TodoWrite,TodoRead"'
           show_full_output: true
 
       - name: Check PM result

@@ -10,10 +10,8 @@ jobs:
     if: github.event.label.name == 'needs-review'
     runs-on: ubuntu-latest
 
-    # Prevent concurrent Claude operations on the same issue
-    # Uses same group as claude-issue.yml to prevent duplicate work
     concurrency:
-      group: claude-issue-${{ github.event.issue.number }}
+      group: claude-automation
       cancel-in-progress: false
 
     permissions:
