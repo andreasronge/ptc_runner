@@ -85,10 +85,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
-          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           [ "$CURRENT_BRANCH" = "main" ] && exit 0
+
+          # Re-configure git auth (Claude may have changed it)
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
 
           # Remove workflow files from any unpushed commits (GitHub App tokens can't push these)
           if git log origin/main..HEAD --name-only --pretty=format: 2>/dev/null | grep -q "^\.github/workflows/"; then

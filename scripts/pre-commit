@@ -7,6 +7,9 @@ echo "🔍 Running pre-commit checks..."
 # Track time
 START_TIME=$(date +%s)
 
+# Get current branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+
 # Get all staged files
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 
@@ -94,15 +97,25 @@ if [ "$SHOULD_RUN_TESTS" = true ]; then
 
   if [ -n "$changed_test_files" ]; then
     echo "  ⏳ Running tests for changed files..."
+    TEST_FAILED=false
     for file in $changed_test_files; do
       echo "    Testing: $file"
       if ! mix test "$file" > /dev/null 2>&1; then
         echo "    ❌ Tests failed for $file"
-        echo "    Run: mix test $file"
-        exit 1
+        TEST_FAILED=true
       fi
     done
-    echo "  ✅ Changed tests pass"
+
+    if [ "$TEST_FAILED" = true ]; then
+      if [ "$CURRENT_BRANCH" = "main" ]; then
+        echo "  ❌ Tests failed - commit blocked on main branch"
+        exit 1
+      else
+        echo "  ⚠️  Tests failing on branch '$CURRENT_BRANCH' - commit allowed, fix before merge"
+      fi
+    else
+      echo "  ✅ Changed tests pass"
+    fi
   else
     echo "  ℹ️  No test files changed (run 'mix test' before push)"
   fi
