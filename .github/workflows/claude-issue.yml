@@ -156,6 +156,21 @@ jobs:
           # Configure git credentials
           git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
 
+          # CRITICAL: Remove workflow files from commits (GitHub App tokens can't push these)
+          # Check if any unpushed commits contain workflow files
+          if git log origin/main..HEAD --name-only --pretty=format: 2>/dev/null | grep -q "^\.github/workflows/"; then
+            echo "Found workflow files in commits - removing them..."
+            # Get the commit message
+            COMMIT_MSG=$(git log -1 --format=%s)
+            # Reset to before the commit, restore workflow files from main
+            git reset HEAD~1 --soft
+            git checkout origin/main -- .github/workflows/ 2>/dev/null || true
+            # Recommit without workflow files
+            git add -A
+            git reset HEAD -- .github/workflows/ 2>/dev/null || true
+            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "No changes to commit after removing workflow files"
+          fi
+
           # Get current branch name
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
