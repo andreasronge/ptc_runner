@@ -133,10 +133,8 @@ jobs:
             - Commit and push, then post a summary comment
 
             **When tests fail for non-trivial out-of-scope issues:**
-            - Create a GH issue first, then skip the test with `@tag :skip` and a comment referencing the issue
+            - Create a GH issue with `from-pr-review` and `needs-review` labels, then skip the test with `@tag :skip` and a comment referencing the issue
             - Never bypass tests without tracking - each skipped test must reference an issue
-
-            **If the fix is out of scope:** Post a comment explaining why and what would be needed instead.
 
             NEVER include "@claude" in comments.
 
