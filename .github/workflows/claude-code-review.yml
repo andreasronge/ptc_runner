@@ -95,10 +95,6 @@ jobs:
         if: steps.merge-check.outputs.merge_ok == 'true'
         uses: ./.github/actions/setup-elixir
 
-      - name: Setup Claude Code
-        if: steps.merge-check.outputs.merge_ok == 'true'
-        uses: ./.github/actions/setup-claude-code
-
       - name: Check file sizes
         if: steps.merge-check.outputs.merge_ok == 'true'
         id: file-sizes
@@ -154,7 +150,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
-          path_to_claude_code_executable: /home/runner/.local/bin/claude
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             # PR Review Task
