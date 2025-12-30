@@ -71,12 +71,11 @@ jobs:
             - Run `mix precommit` before committing - NEVER use `--no-verify`
             - Create PR with "Closes #${{ github.event.issue.number }}" in body
 
-            **When tests fail:**
-            - Trivial blocking issues (<20 lines): fix them inline
-            - Non-trivial out-of-scope issues: create a GH issue first, then skip the test with `@tag :skip` and a comment referencing the issue
+            **When tests fail for non-trivial out-of-scope issues:**
+            - Create a GH issue first, then skip the test with `@tag :skip` and a comment referencing the issue
             - Never bypass tests without tracking - each skipped test must reference an issue
 
-            **Escape hatch:** If you discover unexpected complexity or blockers that can't be handled with the above - create a new issue, remove `ready-for-implementation` label, post a comment explaining why, and stop.
+            **Escape hatch:** If you discover unexpected complexity or blockers clearly not belonging to the issue, close this issue with a comment explaining why. Create new issues for the blockers and the original work - add `needs-review` label to ONE issue (the next actionable one). If you created a branch, reference it in the new issue.
 
             NEVER include "@claude" in comments.
 
