@@ -69,7 +69,7 @@ defmodule PtcRunner.Tool do
           (map() -> term())
           | {(map() -> term()), String.t()}
           | {(map() -> term()), keyword()}
-          | :skip
+          | {(map() -> term()), :skip}
 
   @type t :: %__MODULE__{
           name: String.t(),
