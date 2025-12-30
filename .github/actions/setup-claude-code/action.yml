@@ -5,18 +5,34 @@ inputs:
   version:
     description: 'Claude Code version to install'
     required: false
-    default: '2.0.74'
+    default: '2.0.76'
+
+outputs:
+  cache-hit:
+    description: 'Whether Claude Code was restored from cache'
+    value: ${{ steps.cache-claude.outputs.cache-hit }}
+  executable-path:
+    description: 'Path to Claude Code executable (only set on cache hit)'
+    value: ${{ steps.set-output.outputs.executable-path }}
 
 runs:
   using: 'composite'
   steps:
+    # Clean up any stale lock files from previous failed installations
+    - name: Clean stale lock files
+      shell: bash
+      run: |
+        rm -f /tmp/claude-install.lock 2>/dev/null || true
+        rm -f ~/.claude/.installing 2>/dev/null || true
+
     - name: Cache Claude Code
       id: cache-claude
       uses: actions/cache@v4
       with:
+        # Use absolute paths - tilde doesn't expand properly in actions/cache
         path: |
-          ~/.local/bin/claude
-          ~/.claude
+          /home/runner/.local/bin/claude
+          /home/runner/.claude
         key: claude-code-${{ runner.os }}-v${{ inputs.version }}
 
     - name: Install Claude Code
@@ -26,6 +42,9 @@ runs:
         echo "Installing Claude Code v${{ inputs.version }}..."
         for attempt in 1 2 3; do
           echo "Installation attempt $attempt..."
+          # Clean lock files before each attempt
+          rm -f /tmp/claude-install.lock 2>/dev/null || true
+          rm -f ~/.claude/.installing 2>/dev/null || true
           if curl -fsSL https://claude.ai/install.sh | bash -s -- ${{ inputs.version }}; then
             echo "Claude Code installed successfully"
             break
@@ -40,9 +59,26 @@ runs:
 
     - name: Add Claude Code to PATH
       shell: bash
-      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      run: echo "/home/runner/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Set outputs
+      id: set-output
+      shell: bash
+      run: |
+        # Always output the path since we always install (from cache or fresh)
+        echo "executable-path=/home/runner/.local/bin/claude" >> "$GITHUB_OUTPUT"
+        if [ "${{ steps.cache-claude.outputs.cache-hit }}" == "true" ]; then
+          echo "Cache hit - using cached executable"
+        else
+          echo "Fresh install completed"
+        fi
 
     - name: Verify installation
       shell: bash
       run: |
-        claude --version || echo "Warning: claude command not found in PATH"
+        if [ -f /home/runner/.local/bin/claude ]; then
+          /home/runner/.local/bin/claude --version
+        else
+          echo "Warning: claude binary not found at expected path"
+          exit 1
+        fi
