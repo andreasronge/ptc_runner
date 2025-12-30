@@ -126,6 +126,15 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
                (is_binary(signature) and is_nil(description)) or
                (is_nil(signature) and is_binary(description))
     end
+
+    test "uses highest arity spec when multiple specs exist" do
+      # filter_items has @spec with arity 1 and arity 2
+      # Should use the highest arity (2)
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.filter_items/2)
+
+      assert signature == "(arg0 :string, arg1 :int) -> [:map]"
+      assert description == "Function with multiple specs"
+    end
   end
 
   describe "integration with Tool.new/2" do

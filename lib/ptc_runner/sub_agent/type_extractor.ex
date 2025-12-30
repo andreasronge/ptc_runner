@@ -130,24 +130,25 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   # Find the matching spec and convert it
   defp find_and_convert_spec(specs, name, arity) do
-    # Find all specs for this function
+    # Find all specs for this function name (any arity)
     matching_specs =
       Enum.filter(specs, fn
-        {{^name, ^arity}, _spec_list} -> true
+        {{^name, _}, _spec_list} -> true
         _ -> false
       end)
 
     case matching_specs do
-      [{{^name, ^arity}, spec_list}] ->
-        # Use the first spec (or highest arity if multiple)
-        convert_spec_to_signature(spec_list, name, arity)
-
       [] ->
         nil
 
-      _ ->
-        # Multiple spec clauses - use highest arity or first one
-        nil
+      matches ->
+        # Sort by arity (descending) and pick the highest arity spec
+        {_name_arity, spec_list} =
+          matches
+          |> Enum.sort_by(fn {{_name, spec_arity}, _} -> spec_arity end, :desc)
+          |> Enum.fetch!(0)
+
+        convert_spec_to_signature(spec_list, name, arity)
     end
   end
 

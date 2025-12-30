@@ -59,4 +59,9 @@ defmodule PtcRunner.TypeExtractorFixtures do
   """
   @spec multi_line_doc(String.t()) :: :ok
   def multi_line_doc(_), do: :ok
+
+  @doc "Function with multiple specs"
+  @spec filter_items(String.t()) :: [map()]
+  @spec filter_items(String.t(), integer()) :: [map()]
+  def filter_items(_query, _limit \\ 10), do: []
 end
