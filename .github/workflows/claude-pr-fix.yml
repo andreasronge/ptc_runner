@@ -123,43 +123,49 @@ jobs:
 
             Request: ${{ github.event.comment.body || github.event.review.body }}
 
-            **Fix only what was asked**: No refactoring, no unrelated fixes, minimal changes only.
+            Read PR and review comments:
+            - `gh pr view ${{ steps.pr-branch.outputs.pr_number }} --comments`
+            - `gh api repos/${{ github.repository }}/pulls/${{ steps.pr-branch.outputs.pr_number }}/comments --jq '.[] | {path: .path, line: .line, body: .body}'`
 
-            **NEVER modify .credo.exs** - if credo complains, fix the code or use inline `# credo:disable-for-next-line` comments.
+            **Guidelines:**
+            - Fix only what was asked - no refactoring, no unrelated fixes
+            - Run `mix precommit` before committing - NEVER use `--no-verify`
+            - Commit and push, then post a summary comment
 
-            ## ⚠️ CRITICAL: Protected Files (Read Before Any Git Operations)
+            **When tests fail for non-trivial out-of-scope issues:**
+            - Create a GH issue first, then skip the test with `@tag :skip` and a comment referencing the issue
+            - Never bypass tests without tracking - each skipped test must reference an issue
 
-            1. **NEVER commit `.github/workflows/` files** - GitHub App tokens cannot push these
-            2. **Before ANY commit**, run: `git checkout -- .github/workflows/` to discard workflow changes
-            3. **If push fails**, do NOT run `git reset --hard` - you will lose all work. Instead, discard only workflow files and retry.
-
-            Workflow:
-            1. Read PR: `gh pr view ${{ steps.pr-branch.outputs.pr_number }} --comments`
-            2. Read review comments: `gh api repos/${{ github.repository }}/pulls/${{ steps.pr-branch.outputs.pr_number }}/comments --jq '.[] | {path: .path, line: .line, body: .body}'`
-            3. Make minimal changes
-            4. Run `mix precommit` - only proceed if it passes
-            5. `git add -A && git commit -m "fix: ..." && git push`
-            6. Verify push succeeded: `git status` should show "Your branch is up to date with 'origin/...'"
-            7. Post summary: `gh pr comment ${{ steps.pr-branch.outputs.pr_number }} --body "..."`
+            **If the fix is out of scope:** Post a comment explaining why and what would be needed instead.
 
             NEVER include "@claude" in comments.
 
           claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
           show_full_output: true
 
-      # Safety net: ensure any commits Claude made are pushed
-      # Uses credentials from checkout step (token already configured via persist-credentials)
+      # Safety net: push any unpushed commits and remove workflow files
       - name: Push unpushed commits
-        if: steps.pr-branch.outputs.is_fork != 'true'
+        if: always() && steps.pr-branch.outputs.is_fork != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
-          # Check if there are unpushed commits
-          UNPUSHED=$(git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --oneline 2>/dev/null || echo "")
-          if [ -n "$UNPUSHED" ]; then
-            echo "Found unpushed commits:"
-            echo "$UNPUSHED"
-            echo "Pushing to origin..."
+          # Re-configure git auth (Claude may have changed it)
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          # Remove workflow files from any unpushed commits (GitHub App tokens can't push these)
+          if git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --name-only --pretty=format: 2>/dev/null | grep -q "^\.github/workflows/"; then
+            echo "Removing workflow files from commit..."
+            COMMIT_MSG=$(git log -1 --format=%s)
+            git reset HEAD~1 --soft
+            git checkout origin/${{ steps.pr-branch.outputs.head_ref }} -- .github/workflows/ 2>/dev/null || true
+            git add -A
+            git reset HEAD -- .github/workflows/ 2>/dev/null || true
+            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "No changes after removing workflow files"
+          fi
+
+          # Push if there are unpushed commits
+          if git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --oneline 2>/dev/null | grep -q .; then
+            echo "Pushing unpushed commits..."
             git push origin HEAD:${{ steps.pr-branch.outputs.head_ref }}
-            echo "::notice::Pushed commits that Claude forgot to push"
-          else
-            echo "No unpushed commits found"
+            echo "::notice::Pushed commits"
           fi
