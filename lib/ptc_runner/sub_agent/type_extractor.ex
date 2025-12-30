@@ -15,18 +15,8 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   ## Examples
 
-      # Function with @doc and @spec
-      defmodule MyApp do
-        @doc "Search for items matching query"
-        @spec search(String.t(), integer()) :: [map()]
-        def search(query, limit), do: []
-      end
-
-      iex> TypeExtractor.extract(&MyApp.search/2)
-      {:ok, {"(query :string, limit :int) -> [:map]", "Search for items matching query"}}
-
       # Anonymous function - cannot extract
-      iex> TypeExtractor.extract(fn x -> x end)
+      iex> PtcRunner.SubAgent.TypeExtractor.extract(fn x -> x end)
       {:ok, {nil, nil}}
 
   """
@@ -42,8 +32,9 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   ## Examples
 
-      iex> TypeExtractor.extract(&String.upcase/1)
-      {:ok, {signature, description}} when is_binary(signature) or is_nil(signature)
+      iex> {:ok, {signature, _description}} = PtcRunner.SubAgent.TypeExtractor.extract(&String.upcase/1)
+      iex> is_binary(signature) or is_nil(signature)
+      true
 
   """
   @spec extract(function()) :: {:ok, {String.t() | nil, String.t() | nil}}
@@ -62,7 +53,8 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   # Extract @doc and @spec from a module/function/arity triple
   defp extract_from_module(module, name, arity) do
-    signature = extract_signature(module, name, arity)
+    signature_string = extract_signature_string(module, name, arity)
+    signature = extract_signature(module, name, arity, signature_string)
     description = extract_description(module, name, arity)
     {:ok, {signature, description}}
   rescue
@@ -73,6 +65,31 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
       )
 
       {:ok, {nil, nil}}
+  end
+
+  # Extract signature string from docs (e.g., "add(a, b)")
+  defp extract_signature_string(module, name, arity) do
+    case Code.fetch_docs(module) do
+      {:docs_v1, _anno, _beam_lang, _format, _module_doc, _metadata, docs} ->
+        find_signature_string(docs, name, arity)
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  # Find the signature string for a specific function
+  defp find_signature_string(docs, name, arity) do
+    case Enum.find(docs, fn
+           {{:function, ^name, ^arity}, _anno, _signature, _doc, _metadata} -> true
+           _ -> false
+         end) do
+      {{:function, ^name, ^arity}, _anno, [signature_string | _], _doc, _metadata} ->
+        signature_string
+
+      _ ->
+        nil
+    end
   end
 
   # Extract @doc attribute
@@ -118,10 +135,10 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   end
 
   # Extract @spec and convert to signature format
-  defp extract_signature(module, name, arity) do
+  defp extract_signature(module, name, arity, signature_string) do
     case Code.Typespec.fetch_specs(module) do
       {:ok, specs} ->
-        find_and_convert_spec(specs, name, arity)
+        find_and_convert_spec(specs, name, arity, signature_string)
 
       :error ->
         nil
@@ -129,7 +146,7 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   end
 
   # Find the matching spec and convert it
-  defp find_and_convert_spec(specs, name, arity) do
+  defp find_and_convert_spec(specs, name, arity, signature_string) do
     # Find all specs for this function name (any arity)
     matching_specs =
       Enum.filter(specs, fn
@@ -148,16 +165,16 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
           |> Enum.sort_by(fn {{_name, spec_arity}, _} -> spec_arity end, :desc)
           |> Enum.fetch!(0)
 
-        convert_spec_to_signature(spec_list, name, arity)
+        convert_spec_to_signature(spec_list, name, arity, signature_string)
     end
   end
 
   # Convert Elixir typespec to PTC signature format
-  defp convert_spec_to_signature([spec | _rest], _name, _arity) do
+  defp convert_spec_to_signature([spec | _rest], _name, _arity, signature_string) do
     case spec do
       {:type, _line, :fun, [{:type, _line2, :product, params}, return_type]} ->
         # Standard function spec: (params) -> return
-        param_sig = convert_params(params)
+        param_sig = convert_params(params, signature_string)
         return_sig = convert_type(return_type)
         "(#{param_sig}) -> #{return_sig}"
 
@@ -174,13 +191,41 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   end
 
   # Convert parameter list to signature format
-  defp convert_params(params) when is_list(params) do
+  defp convert_params(params, signature_string) when is_list(params) do
+    param_names = parse_signature_params(signature_string)
+
     params
     |> Enum.with_index()
     |> Enum.map_join(", ", fn {param, idx} ->
       type = convert_type(param)
-      "arg#{idx} #{type}"
+      name = Enum.at(param_names, idx) || "arg#{idx}"
+      "#{name} #{type}"
     end)
+  end
+
+  # Parse parameter names from signature string like "add(a, b)" or "search(query, limit)"
+  defp parse_signature_params(nil), do: []
+
+  defp parse_signature_params(signature_string) do
+    # Extract content between parentheses
+    case Regex.run(~r/\(([^)]*)\)/, signature_string) do
+      [_, params_str] ->
+        # Split by comma and extract parameter names
+        params_str
+        |> String.split(",")
+        |> Enum.map(fn param ->
+          param
+          |> String.trim()
+          # Remove default values like "limit \\ 10"
+          |> String.split("\\")
+          |> List.first()
+          |> String.trim()
+        end)
+        |> Enum.reject(&(&1 == ""))
+
+      _ ->
+        []
+    end
   end
 
   # Convert Elixir type to Signature type
