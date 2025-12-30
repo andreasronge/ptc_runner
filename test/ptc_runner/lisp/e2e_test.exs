@@ -3,6 +3,7 @@ defmodule PtcRunner.Lisp.E2ETest do
 
   @moduletag :e2e
 
+  alias PtcRunner.Step
   alias PtcRunner.TestSupport.LispLLMClient
 
   setup_all do
@@ -26,7 +27,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       assert is_list(result)
       assert length(result) == 2
@@ -47,7 +48,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
       assert result == 60
     end
 
@@ -65,7 +66,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
       assert result == 2
     end
   end
@@ -85,7 +86,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
       assert result == "Laptop"
     end
 
@@ -105,7 +106,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       # Result should be a map or list with counts per status
       assert is_map(result) or is_list(result)
@@ -141,7 +142,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       assert is_list(result)
       assert length(result) == 2
@@ -168,7 +169,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       assert is_list(result)
       assert length(result) == 3
@@ -197,7 +198,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       # Average of 1000 + 500 + 200 = 1700 / 3 ≈ 566.67
       assert is_number(result)
@@ -221,7 +222,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         ]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
       assert result == 3
     end
 
@@ -236,7 +237,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         "pairs" => [["a", 1], ["b", 2]]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       # Result should show multiple operations with conj
       assert is_list(result) or is_map(result)
@@ -252,7 +253,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         "text" => "hello"
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
       assert result == 5
     end
 
@@ -266,7 +267,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         "values" => ["apple", "banana", "cherry"]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       # Result should be a string
       assert is_binary(result)
@@ -282,7 +283,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         "text" => "  hello-world  "
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       # Result should be trimmed and dashes replaced
       assert is_binary(result)
@@ -301,7 +302,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         "usernames" => ["user_1", "ADMIN", "user_2", "guest"]
       }
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
 
       # Should demonstrate case conversion and predicate usage
       assert is_map(result) or is_list(result) or is_boolean(result)
@@ -312,49 +313,49 @@ defmodule PtcRunner.Lisp.E2ETest do
     test "filter with #(> % 10)" do
       program = "(filter #(> % 10) [5 15 8 20])"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == [15, 20]
     end
 
     test "map with #(str \"id-\" %)" do
       program = "(map #(str \"id-\" %) [1 2 3])"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == ["id-1", "id-2", "id-3"]
     end
 
     test "reduce with #(+ %1 %2)" do
       program = "(reduce #(+ %1 %2) 0 [1 2 3])"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == 6
     end
 
     test "map with #(* % %)" do
       program = "(map #(* % %) [1 2 3 4])"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == [1, 4, 9, 16]
     end
 
     test "identity function #(%)" do
       program = "((fn [coll] (map #(%) coll)) [10 20 30])"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == [10, 20, 30]
     end
 
     test "zero-arity thunk #(42)" do
       program = "((fn [] #(42)))"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == 42
     end
 
     test "chained operations with short functions" do
       program = "(-> [1 2 3 4 5] (filter #(> % 2)) (map #(* % 2)))"
 
-      assert {:ok, result, _memory_delta, _memory} = PtcRunner.Lisp.run(program)
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == [6, 8, 10]
     end
   end
