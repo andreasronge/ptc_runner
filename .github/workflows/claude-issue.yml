@@ -71,7 +71,7 @@ jobs:
             - Run `mix precommit` before committing
             - Create PR with "Closes #${{ github.event.issue.number }}" in body
 
-            **Escape hatch:** If you discover unexpected complexity, required refactoring, bugs, or other work that should be handled separately - create a new issue for it. Then either continue with reduced scope or stop if it's a blocker. Use your judgment.
+            **Escape hatch:** If you discover unexpected complexity, required refactoring, bugs, or other work that should be handled separately - create a new issue for it. Then either continue with reduced scope, or if it's a blocker: remove the `ready-for-implementation` label, post a comment explaining why, and stop.
 
             NEVER include "@claude" in comments.
 
