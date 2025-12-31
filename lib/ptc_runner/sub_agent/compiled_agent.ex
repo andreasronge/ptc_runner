@@ -102,14 +102,22 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       iex> mock_llm = fn _ -> {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|} end
       iex> {:ok, compiled} = PtcRunner.SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
       iex> tool = PtcRunner.SubAgent.CompiledAgent.as_tool(compiled)
-      iex> is_function(tool)
-      true
-      iex> result = tool.(%{n: 5})
+      iex> tool.type
+      :compiled
+      iex> result = tool.execute.(%{n: 5})
       iex> result.return.result
       10
   """
-  @spec as_tool(t()) :: (map() -> PtcRunner.Step.t())
-  def as_tool(%__MODULE__{execute: execute}) do
-    execute
+  @spec as_tool(t()) :: %{
+          type: :compiled,
+          execute: (map() -> PtcRunner.Step.t()),
+          signature: String.t() | nil
+        }
+  def as_tool(%__MODULE__{execute: execute, signature: signature}) do
+    %{
+      type: :compiled,
+      execute: execute,
+      signature: signature
+    }
   end
 end

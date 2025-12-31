@@ -267,9 +267,10 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       tool = CompiledAgent.as_tool(compiled)
 
-      assert is_function(tool, 1)
+      assert tool.type == :compiled
+      assert is_function(tool.execute, 1)
 
-      result = tool.(%{n: 5})
+      result = tool.execute.(%{n: 5})
       assert result.return.result == 10
     end
 
@@ -293,9 +294,9 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       tool = CompiledAgent.as_tool(compiled)
 
       # Execute tool multiple times - no LLM needed
-      assert tool.(%{a: 1, b: 2}).return.sum == 3
-      assert tool.(%{a: 10, b: 20}).return.sum == 30
-      assert tool.(%{a: 100, b: 200}).return.sum == 300
+      assert tool.execute.(%{a: 1, b: 2}).return.sum == 3
+      assert tool.execute.(%{a: 10, b: 20}).return.sum == 30
+      assert tool.execute.(%{a: 100, b: 200}).return.sum == 300
     end
   end
 
