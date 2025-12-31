@@ -160,23 +160,23 @@ defmodule PtcRunner.SubAgentTest do
     end
 
     test "raises when mission_timeout is negative" do
-      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+      assert_raise ArgumentError, "mission_timeout must be a positive integer or nil", fn ->
         SubAgent.new(prompt: "Test", mission_timeout: -1)
       end
     end
 
     test "raises when mission_timeout is zero" do
-      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+      assert_raise ArgumentError, "mission_timeout must be a positive integer or nil", fn ->
         SubAgent.new(prompt: "Test", mission_timeout: 0)
       end
     end
 
     test "raises when mission_timeout is not an integer" do
-      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+      assert_raise ArgumentError, "mission_timeout must be a positive integer or nil", fn ->
         SubAgent.new(prompt: "Test", mission_timeout: "invalid")
       end
 
-      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+      assert_raise ArgumentError, "mission_timeout must be a positive integer or nil", fn ->
         SubAgent.new(prompt: "Test", mission_timeout: 5.5)
       end
     end
