@@ -860,7 +860,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _mission_deadline: past_deadline)
 
-      assert step.fail.reason == :timeout
+      assert step.fail.reason == :mission_timeout
       assert step.fail.message =~ "Mission timeout exceeded"
     end
 
@@ -883,7 +883,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _mission_deadline: past_deadline)
 
-      assert step.fail.reason == :timeout
+      assert step.fail.reason == :mission_timeout
       assert step.fail.message =~ "Mission timeout exceeded"
     end
   end

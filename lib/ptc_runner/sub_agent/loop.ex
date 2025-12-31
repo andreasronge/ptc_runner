@@ -155,7 +155,7 @@ defmodule PtcRunner.SubAgent.Loop do
     # Check mission timeout before each turn
     if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
       duration_ms = System.monotonic_time(:millisecond) - state.start_time
-      step = Step.error(:timeout, "Mission timeout exceeded", state.memory)
+      step = Step.error(:mission_timeout, "Mission timeout exceeded", state.memory)
 
       step_with_metrics = %{
         step
