@@ -100,6 +100,19 @@ defmodule PtcRunner.SubAgent.DebugTest do
       # Should not contain debug output
       refute output =~ "[Turn"
     end
+
+    test "debug: true captures extra trace fields" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 2)
+      llm = fn _ -> {:ok, ~S|(call "return" {:done true})|} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
+
+      [turn1] = step.trace
+      assert Map.has_key?(turn1, :context_snapshot)
+      assert Map.has_key?(turn1, :memory_snapshot)
+      assert Map.has_key?(turn1, :full_prompt)
+      assert turn1.context_snapshot == %{foo: 1}
+    end
   end
 
   describe "trace filtering" do

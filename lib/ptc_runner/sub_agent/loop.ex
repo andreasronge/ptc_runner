@@ -329,6 +329,18 @@ defmodule PtcRunner.SubAgent.Loop do
           tool_calls: []
         }
 
+        # Add debug fields if debug mode enabled
+        trace_entry =
+          if state.debug do
+            Map.merge(trace_entry, %{
+              context_snapshot: state.context,
+              memory_snapshot: state.memory,
+              full_prompt: List.last(state.messages)
+            })
+          else
+            trace_entry
+          end
+
         # Feed error back to LLM for next turn
         error_message = format_error_for_llm(lisp_step.fail)
 
@@ -361,6 +373,18 @@ defmodule PtcRunner.SubAgent.Loop do
       # TODO: Tool calls tracking in Stage 4
       tool_calls: []
     }
+
+    # Add debug fields if debug mode enabled
+    trace_entry =
+      if state.debug do
+        Map.merge(trace_entry, %{
+          context_snapshot: state.context,
+          memory_snapshot: state.memory,
+          full_prompt: List.last(state.messages)
+        })
+      else
+        trace_entry
+      end
 
     # Log turn execution if debug mode is enabled
     maybe_log_turn(state, response, lisp_step.return, state.debug)
