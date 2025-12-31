@@ -27,6 +27,7 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.SubAgent.Signature.Renderer
   alias PtcRunner.SubAgent.Template
 
   @language_reference """
@@ -343,10 +344,10 @@ defmodule PtcRunner.SubAgent.Prompt do
       nil ->
         # Infer type from value
         infer_type(value)
-        |> render_type()
+        |> Renderer.render_type()
 
       type ->
-        render_type(type)
+        Renderer.render_type(type)
     end
   end
 
@@ -379,30 +380,6 @@ defmodule PtcRunner.SubAgent.Prompt do
   end
 
   defp infer_type(_value), do: :any
-
-  # Render type to string (same as Signature.Renderer but public)
-  defp render_type(:string), do: ":string"
-  defp render_type(:int), do: ":int"
-  defp render_type(:float), do: ":float"
-  defp render_type(:bool), do: ":bool"
-  defp render_type(:keyword), do: ":keyword"
-  defp render_type(:any), do: ":any"
-  defp render_type(:map), do: ":map"
-
-  defp render_type({:optional, type}) do
-    render_type(type) <> "?"
-  end
-
-  defp render_type({:list, element_type}) do
-    "[" <> render_type(element_type) <> "]"
-  end
-
-  defp render_type({:map, fields}) do
-    fields_str =
-      Enum.map_join(fields, ", ", fn {name, type} -> "#{name} #{render_type(type)}" end)
-
-    "{#{fields_str}}"
-  end
 
   defp format_sample(value) when is_binary(value) do
     if String.length(value) > 50 do
