@@ -358,23 +358,29 @@ defmodule PtcRunner.SubAgentTest do
       assert step.fail.message == "No PTC-Lisp code found in LLM response"
     end
 
-    test "returns error for loop mode (not yet implemented)" do
+    test "executes loop mode with max_turns > 1" do
       agent = SubAgent.new(prompt: "Test", max_turns: 5)
-      llm = fn _input -> {:ok, "42"} end
+      llm = fn _input -> {:ok, ~S|```clojure
+(call "return" {:value 42})
+```|} end
 
-      {:error, step} = SubAgent.run(agent, llm: llm)
+      {:ok, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.fail.reason == :not_implemented
-      assert step.fail.message == "Loop mode not yet implemented"
+      assert step.return == %{value: 42}
+      assert step.fail == nil
+      assert step.usage.turns == 1
     end
 
-    test "returns error for loop mode with tools (not yet implemented)" do
+    test "executes loop mode with tools" do
       agent = SubAgent.new(prompt: "Test", tools: %{"test" => fn _ -> :ok end})
-      llm = fn _input -> {:ok, "42"} end
+      llm = fn _input -> {:ok, ~S|```clojure
+(call "return" {:value 42})
+```|} end
 
-      {:error, step} = SubAgent.run(agent, llm: llm)
+      {:ok, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.fail.reason == :not_implemented
+      assert step.return == %{value: 42}
+      assert step.fail == nil
     end
   end
 
@@ -517,21 +523,25 @@ defmodule PtcRunner.SubAgentTest do
 
     test "accepts tools in opts for string form (triggers loop mode)" do
       tools = %{"test" => fn _ -> :ok end}
-      llm = fn _input -> {:ok, "42"} end
+      llm = fn _input -> {:ok, ~S|```clojure
+(call "return" {:value 42})
+```|} end
 
-      # This should trigger loop mode which is not implemented
-      {:error, step} = SubAgent.run("Test", tools: tools, llm: llm)
+      # This triggers loop mode
+      {:ok, step} = SubAgent.run("Test", tools: tools, llm: llm)
 
-      assert step.fail.reason == :not_implemented
+      assert step.return == %{value: 42}
     end
 
     test "accepts max_turns in opts for string form" do
-      llm = fn _input -> {:ok, "42"} end
+      llm = fn _input -> {:ok, ~S|```clojure
+(call "return" {:value 42})
+```|} end
 
       # max_turns: 2 triggers loop mode
-      {:error, step} = SubAgent.run("Test", max_turns: 2, llm: llm)
+      {:ok, step} = SubAgent.run("Test", max_turns: 2, llm: llm)
 
-      assert step.fail.reason == :not_implemented
+      assert step.return == %{value: 42}
     end
 
     test "string form with context" do
