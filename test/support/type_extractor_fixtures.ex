@@ -122,4 +122,12 @@ defmodule PtcRunner.TypeExtractorFixtures do
   @doc "Function with non-ok/error union"
   @spec get_status() :: :active | :inactive
   def get_status, do: :active
+
+  @doc "Function with String.t() | nil return"
+  @spec get_optional_name() :: String.t() | nil
+  def get_optional_name, do: nil
+
+  @doc "Function with nil | integer() return"
+  @spec get_optional_count() :: nil | integer()
+  def get_optional_count, do: nil
 end

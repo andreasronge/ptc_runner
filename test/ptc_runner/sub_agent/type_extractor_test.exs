@@ -228,6 +228,21 @@ defmodule PtcRunner.SubAgent.TypeExtractorTest do
       assert signature == "() -> :any"
       assert description == "Function with non-ok/error union"
     end
+
+    test "converts String.t() | nil to :string?" do
+      {:ok, {signature, description}} = TypeExtractor.extract(&TestFunctions.get_optional_name/0)
+
+      assert signature == "() -> :string?"
+      assert description == "Function with String.t() | nil return"
+    end
+
+    test "converts nil | integer() to :int?" do
+      {:ok, {signature, description}} =
+        TypeExtractor.extract(&TestFunctions.get_optional_count/0)
+
+      assert signature == "() -> :int?"
+      assert description == "Function with nil | integer() return"
+    end
   end
 
   describe "integration with Tool.new/2" do

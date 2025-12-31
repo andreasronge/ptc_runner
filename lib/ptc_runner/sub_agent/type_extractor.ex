@@ -305,7 +305,7 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
     ":any"
   end
 
-  # Handle union types - detect {:ok, t} | {:error, e} pattern
+  # Handle union types - detect {:ok, t} | {:error, e} or t | nil patterns
   defp convert_type({:type, _line, :union, types}, depth, module) do
     case detect_ok_error_pattern(types) do
       {:ok, ok_type, error_type} ->
@@ -315,8 +315,17 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
         "{result #{result_sig}, error #{error_sig}?}"
 
       :error ->
-        Logger.debug("TypeExtractor: union types not yet supported, falling back to :any")
-        ":any"
+        # Check for t | nil pattern
+        case detect_nil_pattern(types) do
+          {:ok, base_type} ->
+            # Convert t | nil to :t?
+            base_sig = convert_type(base_type, depth, module)
+            "#{base_sig}?"
+
+          :error ->
+            Logger.debug("TypeExtractor: union types not yet supported, falling back to :any")
+            ":any"
+        end
     end
   end
 
@@ -458,6 +467,21 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
         {:type, _line2, :tuple, [{:atom, _, :ok}, ok_type]}
       ] ->
         {:ok, ok_type, error_type}
+
+      _ ->
+        :error
+    end
+  end
+
+  # Detect t | nil pattern in union types
+  defp detect_nil_pattern(types) when is_list(types) do
+    # Union types are represented as a list of two types
+    case types do
+      [type, {:atom, _, nil}] ->
+        {:ok, type}
+
+      [{:atom, _, nil}, type] ->
+        {:ok, type}
 
       _ ->
         :error
