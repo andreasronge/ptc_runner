@@ -50,4 +50,79 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
 ```|}
     end
   end
+
+  @doc """
+  Creates a parent-child agent pair with the child wrapped as a tool.
+
+  ## Options
+  - `:child` - Options for the child agent (merged with `[max_turns: 1]`)
+  - `:parent` - Options for the parent agent (merged with `[max_turns: 2]`)
+  - `:tool` - Options passed to `SubAgent.as_tool/2`
+  - `:tool_name` - Name of the child tool in parent's tool map (default: "child")
+
+  ## Examples
+
+      iex> %{parent: parent, child: child} = PtcRunner.TestSupport.SubAgentTestHelpers.parent_child_agents()
+      iex> parent.max_turns
+      2
+      iex> child.max_turns
+      1
+  """
+  def parent_child_agents(opts \\ []) do
+    child_opts = Keyword.get(opts, :child, [])
+    parent_opts = Keyword.get(opts, :parent, [])
+    tool_opts = Keyword.get(opts, :tool, [])
+    tool_name = Keyword.get(opts, :tool_name, "child")
+
+    child = test_agent(Keyword.merge([max_turns: 1], child_opts))
+    child_tool = SubAgent.as_tool(child, tool_opts)
+
+    parent =
+      test_agent(Keyword.merge([max_turns: 2, tools: %{tool_name => child_tool}], parent_opts))
+
+    %{parent: parent, child: child, child_tool: child_tool}
+  end
+
+  @doc """
+  Creates an LLM function that routes responses based on message content patterns.
+
+  Routes are evaluated in order and the first matching pattern's response is returned.
+  If no pattern matches, returns a default clojure program that calls return with nil.
+
+  ## Arguments
+  - `routes` - List of tuples defining patterns and responses:
+    - `{pattern, response}` - Match when message content contains `pattern` string
+    - `{{:turn, n}, response}` - Match when turn equals `n`
+
+  ## Examples
+
+      iex> llm = PtcRunner.TestSupport.SubAgentTestHelpers.routing_llm([
+      ...>   {"Double", "```clojure\\n(* 2 ctx/n)\\n```"},
+      ...>   {{:turn, 1}, "```clojure\\n(call \\"double\\" {:n 5})\\n```"}
+      ...> ])
+      iex> {:ok, response} = llm.(%{messages: [%{content: "Double 5"}], turn: 1})
+      iex> response
+      "```clojure\\n(* 2 ctx/n)\\n```"
+  """
+  def routing_llm(routes) do
+    fn %{messages: msgs, turn: turn} ->
+      content = msgs |> List.last() |> Map.get(:content)
+
+      response =
+        Enum.find_value(routes, fn
+          {pattern, response} when is_binary(pattern) ->
+            if content =~ pattern, do: response
+
+          {{:turn, n}, response} when is_integer(n) ->
+            if turn == n, do: response
+
+          _ ->
+            nil
+        end)
+
+      {:ok, response || ~S|```clojure
+(call "return" {:value nil})
+```|}
+    end
+  end
 end
