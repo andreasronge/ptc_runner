@@ -128,10 +128,16 @@ defmodule PtcRunner.SubAgent.Template do
   Expand a template by replacing placeholders with values from the context.
 
   Returns `{:ok, expanded_string}` on success, or `{:error, {:missing_keys, keys}}`
-  if any placeholders cannot be resolved.
+  if any placeholders cannot be resolved (when `on_missing: :error`).
 
   The context map can use either atom or string keys. Values are converted to
   strings using `to_string/1`.
+
+  ## Options
+
+  - `on_missing`: Controls behavior when a placeholder key is missing from the context.
+    - `:error` (default) - Returns `{:error, {:missing_keys, [...]}}` if any keys are missing
+    - `:keep` - Leaves missing placeholders unchanged in the output (e.g., `"{{name}}"`)
 
   ## Examples
 
@@ -156,21 +162,36 @@ defmodule PtcRunner.SubAgent.Template do
       iex> PtcRunner.SubAgent.Template.expand("{{a}} and {{b}}", %{a: "1"})
       {:error, {:missing_keys, ["b"]}}
 
+      iex> PtcRunner.SubAgent.Template.expand("{{missing}}", %{}, on_missing: :keep)
+      {:ok, "{{missing}}"}
+
+      iex> PtcRunner.SubAgent.Template.expand("{{a}} and {{b}}", %{a: "1"}, on_missing: :keep)
+      {:ok, "1 and {{b}}"}
+
   """
-  @spec expand(String.t(), map()) :: {:ok, String.t()} | {:error, {:missing_keys, [String.t()]}}
-  def expand(template, context) when is_binary(template) and is_map(context) do
+  @spec expand(String.t(), map(), keyword()) ::
+          {:ok, String.t()} | {:error, {:missing_keys, [String.t()]}}
+  def expand(template, context, opts \\ [])
+      when is_binary(template) and is_map(context) and is_list(opts) do
+    on_missing = Keyword.get(opts, :on_missing, :error)
     placeholders = extract_placeholders(template)
 
     # Check all keys exist first
     missing = find_missing_keys(placeholders, context)
 
-    if missing != [] do
+    if missing != [] and on_missing == :error do
       {:error, {:missing_keys, missing}}
     else
       result =
-        Regex.replace(@placeholder_regex, template, fn _, path_str ->
-          get_nested_value(context, String.split(path_str, "."))
-          |> to_string()
+        Regex.replace(@placeholder_regex, template, fn full_match, path_str ->
+          path = String.split(path_str, ".")
+
+          if has_nested_value?(context, path) do
+            get_nested_value(context, path) |> to_string()
+          else
+            # When on_missing: :keep, return the original placeholder
+            full_match
+          end
         end)
 
       {:ok, result}
