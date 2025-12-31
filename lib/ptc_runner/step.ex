@@ -157,9 +157,31 @@ defmodule PtcRunner.Step do
   """
   @spec error(atom(), String.t(), map()) :: t()
   def error(reason, message, memory) do
+    error(reason, message, memory, %{})
+  end
+
+  @doc """
+  Creates a failed Step with additional details.
+
+  ## Examples
+
+      iex> PtcRunner.Step.error(:validation_failed, "Invalid input", %{}, %{field: "name"})
+      %PtcRunner.Step{
+        return: nil,
+        fail: %{reason: :validation_failed, message: "Invalid input", details: %{field: "name"}},
+        memory: %{},
+        memory_delta: nil,
+        signature: nil,
+        usage: nil,
+        trace: nil
+      }
+
+  """
+  @spec error(atom(), String.t(), map(), map()) :: t()
+  def error(reason, message, memory, details) do
     %__MODULE__{
       return: nil,
-      fail: %{reason: reason, message: message},
+      fail: %{reason: reason, message: message, details: details},
       memory: memory,
       memory_delta: nil,
       signature: nil,
