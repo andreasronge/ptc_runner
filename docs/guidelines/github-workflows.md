@@ -121,7 +121,7 @@ The PM workflow reads from a human-created "epic issue" to understand what work 
 - **Queues issues for review**: Adds `needs-review` label to linked issues without `ready-for-implementation`
 - **Updates epic on progress**: Links new issues, marks checkboxes when closed
 - **Monitors tech debt**: Handles `from-pr-review` issues regardless of epic
-- **Skips if PR open**: Prevents concurrent work
+- **Bookkeeping when PRs open**: Updates epic checkboxes and handles tech debt, but doesn't create new issues
 
 **Note**: PM no longer triggers implementation. The review workflow posts `@claude` directly after approval.
 

@@ -208,7 +208,6 @@ jobs:
 
       - name: Run Claude PM
         id: claude-pm
-        if: steps.open-prs.outputs.count == '0'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
@@ -241,6 +240,7 @@ jobs:
             - ONE action per run
             - After 3 failed attempts on same issue, add `needs-human-review` and move on
             - If nothing needs attention, report status and exit
+            - **Open PRs (${{ steps.open-prs.outputs.count }})**: If >0, do bookkeeping only (update epic checkboxes, handle tech debt) but do NOT create new issues or queue new work
 
             **Unsticking issues:**
             - If issue has `ready-for-implementation` but no running implementation workflow and no recent `@claude` comment, re-trigger: `gh issue comment ISSUE --body "@claude Please implement this issue."`
