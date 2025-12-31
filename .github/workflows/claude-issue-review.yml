@@ -7,7 +7,10 @@ on:
 jobs:
   claude-issue-review:
     # Only run when 'needs-review' label is added
-    if: github.event.label.name == 'needs-review'
+    # Skip quick-fix issues - they're handled by batch-fix workflow
+    if: |
+      github.event.label.name == 'needs-review' &&
+      !contains(github.event.issue.labels.*.name, 'quick-fix')
     runs-on: ubuntu-latest
 
     concurrency:
