@@ -40,8 +40,8 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
       iex> {:ok, response} = llm.(%{})
       iex> response
       ~S|```clojure
-      (call "return" {:value 42})
-      ```|
+  (call "return" {:value 42})
+  ```|
   """
   def simple_return_llm do
     fn _ ->
