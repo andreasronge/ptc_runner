@@ -30,6 +30,9 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:var, atom()}
           | {:ctx, atom()}
           | {:memory, atom()}
+          # Memory operations
+          | {:memory_put, atom(), t()}
+          | {:memory_get, atom()}
           # Function call: f(args...)
           | {:call, t(), [t()]}
           # Let bindings: (let [p1 v1 p2 v2 ...] body)

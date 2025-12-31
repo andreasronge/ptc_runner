@@ -20,6 +20,7 @@ defmodule PtcRunner.SubAgent do
   - `llm_retry` - map() | nil, infrastructure retry config
   - `llm` - atom() | function() | nil, optional LLM override
   - `system_prompt` - system_prompt_opts() | nil, system prompt customization
+  - `memory_limit` - pos_integer() | nil, max bytes for memory map (default: 1MB)
 
   ## Examples
 
@@ -66,7 +67,8 @@ defmodule PtcRunner.SubAgent do
           mission_timeout: pos_integer() | nil,
           llm_retry: map() | nil,
           llm: atom() | (map() -> {:ok, String.t()} | {:error, term()}) | nil,
-          system_prompt: system_prompt_opts() | nil
+          system_prompt: system_prompt_opts() | nil,
+          memory_limit: pos_integer() | nil
         }
 
   defstruct [
@@ -79,7 +81,8 @@ defmodule PtcRunner.SubAgent do
     :llm,
     :system_prompt,
     tools: %{},
-    max_turns: 5
+    max_turns: 5,
+    memory_limit: 1_048_576
   ]
 
   @doc """
@@ -106,6 +109,7 @@ defmodule PtcRunner.SubAgent do
   - `llm_retry` - Map with infrastructure retry config
   - `llm` - Atom or function for optional LLM override
   - `system_prompt` - System prompt customization (map, function, or string)
+  - `memory_limit` - Positive integer for max bytes for memory map (default: 1MB = 1,048,576 bytes)
 
   ## Returns
 
@@ -156,6 +160,7 @@ defmodule PtcRunner.SubAgent do
     validate_llm_retry!(opts)
     validate_tool_catalog!(opts)
     validate_prompt_limit!(opts)
+    validate_memory_limit!(opts)
     validate_prompt_placeholders!(opts)
   end
 
@@ -219,6 +224,15 @@ defmodule PtcRunner.SubAgent do
     case Keyword.fetch(opts, :prompt_limit) do
       {:ok, limit} when is_map(limit) -> :ok
       {:ok, _} -> raise ArgumentError, "prompt_limit must be a map"
+      :error -> :ok
+    end
+  end
+
+  defp validate_memory_limit!(opts) do
+    case Keyword.fetch(opts, :memory_limit) do
+      {:ok, limit} when is_integer(limit) and limit > 0 -> :ok
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "memory_limit must be a positive integer or nil"
       :error -> :ok
     end
   end
