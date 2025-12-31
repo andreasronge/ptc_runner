@@ -230,7 +230,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Explicit fail - complete with error
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-        error_step = Step.error(:failed, "Explicit fail called", lisp_step.memory)
+        error_step = Step.error(:failed, inspect(lisp_step.return), lisp_step.memory)
 
         final_step = %{
           error_step
@@ -310,7 +310,8 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
   end
 
-  # Build system prompt
+  # System prompt generation - intentionally minimal for now.
+  # See issue #374 for future enhancements (context-aware prompts, tool documentation, etc.)
   defp build_system_prompt do
     """
     You are an AI that solves tasks by writing PTC-Lisp programs.
