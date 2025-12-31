@@ -108,14 +108,14 @@ Generated from `context` and `context_signature`:
 
 Available in `ctx/`:
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `ctx/user_id` | `:int` | The user's ID |
-| `ctx/emails` | `[{id :int, subject :string}]` | List of email objects |
-| `ctx/_token` | `:string` | [Firewalled] Auth token |
+| Key | Type | Sample |
+|-----|------|--------|
+| `ctx/user_id` | `:int` | `123` |
+| `ctx/emails` | `[{id :int, subject :string}]` | `[{id: 1, subject: "Hello"}, ...]` (5 items) |
+| `ctx/_token` | `:string` | [Hidden] |
 
-Note: Firewalled fields (prefixed with `_`) are available in your program
-but hidden from conversation history.
+Note: Firewalled fields (prefixed with `_`) show `[Hidden]` in the Sample column
+but are available in your program at runtime.
 ```
 
 **Generation Logic:**
