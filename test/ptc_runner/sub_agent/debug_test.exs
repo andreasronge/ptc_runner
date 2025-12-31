@@ -19,7 +19,8 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert is_binary(preview.system)
       assert preview.system =~ "PTC-Lisp"
       assert preview.user == "Find emails for alice"
-      assert is_list(preview.tool_schemas)
+      assert length(preview.tool_schemas) == 1
+      assert hd(preview.tool_schemas).name == "list_emails"
     end
 
     test "expands template placeholders correctly" do

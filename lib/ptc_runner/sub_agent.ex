@@ -763,9 +763,29 @@ defmodule PtcRunner.SubAgent do
     # Expand user message template
     {:ok, user_message} = Template.expand(agent.prompt, context, on_missing: :keep)
 
-    # Tool schemas - for now return empty list
-    # In the future, this could extract actual tool schema information
-    tool_schemas = []
+    # Tool schemas - extract from agent.tools
+    tool_schemas =
+      agent.tools
+      |> Enum.map(fn {name, format} ->
+        case PtcRunner.Tool.new(name, format) do
+          {:ok, tool} ->
+            schema = %{name: tool.name}
+
+            schema =
+              if tool.signature, do: Map.put(schema, :signature, tool.signature), else: schema
+
+            schema =
+              if tool.description,
+                do: Map.put(schema, :description, tool.description),
+                else: schema
+
+            schema
+
+          {:error, _} ->
+            # Fallback for tools that fail normalization
+            %{name: name}
+        end
+      end)
 
     %{
       system: system_prompt,
