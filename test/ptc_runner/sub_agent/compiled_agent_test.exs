@@ -8,10 +8,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
   doctest CompiledAgent
 
   describe "compile/2" do
-    # Skipped due to #454 - loop mode not detecting return call during compilation
-    @tag :skip
     test "compiles and executes agent" do
-      tools = %{"double" => fn %{"n" => n} -> n * 2 end}
+      tools = %{"double" => fn %{n: n} -> n * 2 end}
       agent = SubAgent.new(prompt: "Test {{n}}", tools: tools)
       llm = fn _input -> {:ok, ~S|```clojure
 (call "return" {:result (call "double" {:n ctx/n})})
