@@ -24,7 +24,7 @@ defmodule PtcRunner.SubAgent do
   ## Examples
 
   Minimal SubAgent with just a prompt:
-      iex> {:ok, agent} = PtcRunner.SubAgent.new(prompt: "Analyze the data")
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Analyze the data")
       iex> agent.prompt
       "Analyze the data"
       iex> agent.max_turns
@@ -34,7 +34,7 @@ defmodule PtcRunner.SubAgent do
 
   SubAgent with all options:
       iex> email_tools = %{"list_emails" => fn _args -> [] end}
-      iex> {:ok, agent} = PtcRunner.SubAgent.new(
+      iex> agent = PtcRunner.SubAgent.new(
       ...>   prompt: "Find urgent emails for {{user}}",
       ...>   signature: "(user :string) -> {count :int, _ids [:int]}",
       ...>   tools: email_tools,
@@ -44,22 +44,6 @@ defmodule PtcRunner.SubAgent do
       "Find urgent emails for {{user}}"
       iex> agent.max_turns
       10
-
-  Error when prompt is missing:
-      iex> PtcRunner.SubAgent.new(tools: %{})
-      {:error, :missing_required_field}
-
-  Error when prompt is not a string:
-      iex> PtcRunner.SubAgent.new(prompt: 123)
-      {:error, {:invalid_type, :prompt, :string}}
-
-  Error when max_turns is not positive:
-      iex> PtcRunner.SubAgent.new(prompt: "Test", max_turns: 0)
-      {:error, {:invalid_value, :max_turns, "must be positive integer"}}
-
-  Error when tools is not a map:
-      iex> PtcRunner.SubAgent.new(prompt: "Test", tools: [])
-      {:error, {:invalid_type, :tools, :map}}
   """
 
   @type system_prompt_opts ::
@@ -101,6 +85,8 @@ defmodule PtcRunner.SubAgent do
   @doc """
   Creates a SubAgent struct from keyword options.
 
+  Raises `ArgumentError` if validation fails (missing required fields or invalid types).
+
   ## Parameters
 
   - `opts` - Keyword list of options
@@ -123,18 +109,20 @@ defmodule PtcRunner.SubAgent do
 
   ## Returns
 
-  `{:ok, t()}` on success, `{:error, reason}` on validation failure.
+  A `%SubAgent{}` struct.
+
+  ## Raises
+
+  - `ArgumentError` - if prompt is missing, not a string, max_turns is not positive, or tools is not a map
 
   ## Examples
 
-  Valid - minimal:
-      iex> {:ok, agent} = PtcRunner.SubAgent.new(prompt: "Analyze the data")
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Analyze the data")
       iex> agent.prompt
       "Analyze the data"
 
-  Valid - with options:
       iex> email_tools = %{"list_emails" => fn _args -> [] end}
-      iex> {:ok, agent} = PtcRunner.SubAgent.new(
+      iex> agent = PtcRunner.SubAgent.new(
       ...>   prompt: "Find urgent emails for {{user}}",
       ...>   signature: "(user :string) -> {count :int, _ids [:int]}",
       ...>   tools: email_tools,
@@ -142,60 +130,49 @@ defmodule PtcRunner.SubAgent do
       ...> )
       iex> agent.max_turns
       10
-
-  Invalid - missing prompt:
-      iex> PtcRunner.SubAgent.new(tools: %{})
-      {:error, :missing_required_field}
-
-  Invalid - wrong type:
-      iex> PtcRunner.SubAgent.new(prompt: 123)
-      {:error, {:invalid_type, :prompt, :string}}
   """
-  @spec new(keyword()) :: {:ok, t()} | {:error, term()}
+  @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
-    with :ok <- validate_required_fields(opts),
-         :ok <- validate_types(opts) do
-      agent = struct(__MODULE__, opts)
-      {:ok, agent}
-    end
+    validate_required_fields!(opts)
+    validate_types!(opts)
+    struct(__MODULE__, opts)
   end
 
   # Validate that required fields are present
-  defp validate_required_fields(opts) do
+  defp validate_required_fields!(opts) do
     case Keyword.fetch(opts, :prompt) do
       {:ok, _} -> :ok
-      :error -> {:error, :missing_required_field}
+      :error -> raise ArgumentError, "prompt is required"
     end
   end
 
   # Validate types of provided fields
-  defp validate_types(opts) do
-    with :ok <- validate_prompt(opts),
-         :ok <- validate_tools(opts) do
-      validate_max_turns(opts)
-    end
+  defp validate_types!(opts) do
+    validate_prompt!(opts)
+    validate_tools!(opts)
+    validate_max_turns!(opts)
   end
 
-  defp validate_prompt(opts) do
+  defp validate_prompt!(opts) do
     case Keyword.fetch(opts, :prompt) do
       {:ok, prompt} when is_binary(prompt) -> :ok
-      {:ok, _} -> {:error, {:invalid_type, :prompt, :string}}
+      {:ok, _} -> raise ArgumentError, "prompt must be a string"
       :error -> :ok
     end
   end
 
-  defp validate_tools(opts) do
+  defp validate_tools!(opts) do
     case Keyword.fetch(opts, :tools) do
       {:ok, tools} when is_map(tools) -> :ok
-      {:ok, _} -> {:error, {:invalid_type, :tools, :map}}
+      {:ok, _} -> raise ArgumentError, "tools must be a map"
       :error -> :ok
     end
   end
 
-  defp validate_max_turns(opts) do
+  defp validate_max_turns!(opts) do
     case Keyword.fetch(opts, :max_turns) do
       {:ok, max_turns} when is_integer(max_turns) and max_turns > 0 -> :ok
-      {:ok, _} -> {:error, {:invalid_value, :max_turns, "must be positive integer"}}
+      {:ok, _} -> raise ArgumentError, "max_turns must be a positive integer"
       :error -> :ok
     end
   end
