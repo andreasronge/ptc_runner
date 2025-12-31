@@ -21,6 +21,8 @@ defmodule PtcRunner.SubAgent do
   - `llm` - atom() | function() | nil, optional LLM override
   - `system_prompt` - system_prompt_opts() | nil, system prompt customization
   - `memory_limit` - pos_integer() | nil, max bytes for memory map (default: 1MB)
+  - `max_depth` - pos_integer(), max nesting depth for SubAgents (default: 3)
+  - `turn_budget` - pos_integer(), total turns across all nested agents (default: 20)
 
   ## Examples
 
@@ -68,7 +70,9 @@ defmodule PtcRunner.SubAgent do
           llm_retry: map() | nil,
           llm: atom() | (map() -> {:ok, String.t()} | {:error, term()}) | nil,
           system_prompt: system_prompt_opts() | nil,
-          memory_limit: pos_integer() | nil
+          memory_limit: pos_integer() | nil,
+          max_depth: pos_integer(),
+          turn_budget: pos_integer()
         }
 
   defstruct [
@@ -82,7 +86,9 @@ defmodule PtcRunner.SubAgent do
     :system_prompt,
     tools: %{},
     max_turns: 5,
-    memory_limit: 1_048_576
+    memory_limit: 1_048_576,
+    max_depth: 3,
+    turn_budget: 20
   ]
 
   @doc """
@@ -161,6 +167,8 @@ defmodule PtcRunner.SubAgent do
     validate_tool_catalog!(opts)
     validate_prompt_limit!(opts)
     validate_memory_limit!(opts)
+    validate_max_depth!(opts)
+    validate_turn_budget!(opts)
     validate_prompt_placeholders!(opts)
   end
 
@@ -191,7 +199,8 @@ defmodule PtcRunner.SubAgent do
   defp validate_mission_timeout!(opts) do
     case Keyword.fetch(opts, :mission_timeout) do
       {:ok, timeout} when is_integer(timeout) and timeout > 0 -> :ok
-      {:ok, _} -> raise ArgumentError, "mission_timeout must be a positive integer"
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "mission_timeout must be a positive integer or nil"
       :error -> :ok
     end
   end
@@ -233,6 +242,22 @@ defmodule PtcRunner.SubAgent do
       {:ok, limit} when is_integer(limit) and limit > 0 -> :ok
       {:ok, nil} -> :ok
       {:ok, _} -> raise ArgumentError, "memory_limit must be a positive integer or nil"
+      :error -> :ok
+    end
+  end
+
+  defp validate_max_depth!(opts) do
+    case Keyword.fetch(opts, :max_depth) do
+      {:ok, depth} when is_integer(depth) and depth > 0 -> :ok
+      {:ok, _} -> raise ArgumentError, "max_depth must be a positive integer"
+      :error -> :ok
+    end
+  end
+
+  defp validate_turn_budget!(opts) do
+    case Keyword.fetch(opts, :turn_budget) do
+      {:ok, budget} when is_integer(budget) and budget > 0 -> :ok
+      {:ok, _} -> raise ArgumentError, "turn_budget must be a positive integer"
       :error -> :ok
     end
   end
