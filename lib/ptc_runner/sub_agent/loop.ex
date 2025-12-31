@@ -246,25 +246,50 @@ defmodule PtcRunner.SubAgent.Loop do
 
       true ->
         # Normal execution - continue loop
-        # Merge result into context and memory for next turn
-        execution_result = format_execution_result(lisp_step.return)
+        # Check memory limit before continuing
+        case check_memory_limit(lisp_step.memory, agent.memory_limit) do
+          {:ok, _size} ->
+            # Merge result into context and memory for next turn
+            execution_result = format_execution_result(lisp_step.return)
 
-        new_state = %{
-          state
-          | turn: state.turn + 1,
-            messages:
-              state.messages ++
-                [
-                  %{role: :assistant, content: response},
-                  %{role: :user, content: execution_result}
-                ],
-            trace: [trace_entry | state.trace],
-            memory: lisp_step.memory,
-            context: Map.merge(state.context, lisp_step.memory_delta),
-            last_fail: nil
-        }
+            new_state = %{
+              state
+              | turn: state.turn + 1,
+                messages:
+                  state.messages ++
+                    [
+                      %{role: :assistant, content: response},
+                      %{role: :user, content: execution_result}
+                    ],
+                trace: [trace_entry | state.trace],
+                memory: lisp_step.memory,
+                context: Map.merge(state.context, lisp_step.memory_delta),
+                last_fail: nil
+            }
 
-        loop(agent, llm, new_state)
+            loop(agent, llm, new_state)
+
+          {:error, :memory_limit_exceeded, actual_size} ->
+            # Memory limit exceeded - return error
+            duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+            error_msg =
+              "Memory limit exceeded: #{actual_size} bytes > #{agent.memory_limit} bytes"
+
+            error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
+
+            final_step = %{
+              error_step
+              | usage: %{
+                  duration_ms: duration_ms,
+                  memory_bytes: actual_size,
+                  turns: state.turn
+                },
+                trace: Enum.reverse([trace_entry | state.trace])
+            }
+
+            {:error, final_step}
+        end
     end
   end
 
@@ -344,4 +369,22 @@ defmodule PtcRunner.SubAgent.Loop do
     # Simple regex to detect (call "tool-name" ...)
     Regex.match?(~r/\(call\s+"#{tool_name}"/, code)
   end
+
+  # Calculate approximate memory size in bytes
+  defp memory_size(memory) when is_map(memory) do
+    :erlang.external_size(memory)
+  end
+
+  # Check if memory exceeds the limit
+  defp check_memory_limit(memory, limit) when is_integer(limit) do
+    size = memory_size(memory)
+
+    if size > limit do
+      {:error, :memory_limit_exceeded, size}
+    else
+      {:ok, size}
+    end
+  end
+
+  defp check_memory_limit(_memory, nil), do: {:ok, 0}
 end
