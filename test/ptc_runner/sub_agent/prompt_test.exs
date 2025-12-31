@@ -403,6 +403,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert result == short_prompt
     end
 
+    @tag :capture_log
     test "truncates when over limit" do
       long_prompt = String.duplicate("x", 1000)
 
@@ -413,6 +414,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert result =~ "truncated"
     end
 
+    @tag :capture_log
     test "truncation preserves beginning of prompt" do
       prompt = "# Role\n\nImportant content" <> String.duplicate("x", 1000)
 
@@ -422,6 +424,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert result =~ "Important content"
     end
 
+    @tag :capture_log
     test "truncation with agent applies to final prompt" do
       # Create an agent with lots of tools and data
       tools =

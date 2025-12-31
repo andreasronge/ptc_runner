@@ -140,13 +140,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     truncate_if_needed(customized_prompt, agent.prompt_limit)
   end
 
-  @doc """
-  Generate the base system prompt without customization.
-
-  This is the core generated content before any prefix/suffix/replacements are applied.
-  """
-  @spec generate_base_prompt(SubAgent.t(), map()) :: String.t()
-  def generate_base_prompt(%SubAgent{} = agent, context) do
+  defp generate_base_prompt(%SubAgent{} = agent, context) do
     # Parse signature if present
     context_signature =
       case agent.signature do
