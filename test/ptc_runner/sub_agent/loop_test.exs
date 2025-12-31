@@ -4,21 +4,9 @@ defmodule PtcRunner.SubAgent.LoopTest do
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
 
+  import PtcRunner.TestSupport.SubAgentTestHelpers
+
   doctest Loop
-
-  # Test helpers
-  defp test_agent(opts \\ []) do
-    defaults = [prompt: "Test", tools: %{}, max_turns: 2]
-    SubAgent.new(Keyword.merge(defaults, opts))
-  end
-
-  defp simple_return_llm do
-    fn _ ->
-      {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-    end
-  end
 
   describe "run/2 with successful execution" do
     test "single turn with explicit return" do

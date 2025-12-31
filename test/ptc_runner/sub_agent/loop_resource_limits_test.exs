@@ -1,22 +1,9 @@
 defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
 
-  # Test helpers
-  defp test_agent(opts \\ []) do
-    defaults = [prompt: "Test", tools: %{}, max_turns: 2]
-    SubAgent.new(Keyword.merge(defaults, opts))
-  end
-
-  defp simple_return_llm do
-    fn _ ->
-      {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-    end
-  end
+  import PtcRunner.TestSupport.SubAgentTestHelpers
 
   describe "nesting depth limit (SYS-07)" do
     test "accepts execution at depth 0 (root level)" do
