@@ -4,21 +4,24 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
 
-  describe "nesting depth limit (SYS-07)" do
-    test "accepts execution at depth 0 (root level)" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          max_depth: 3
-        )
+  # Test helpers
+  defp test_agent(opts \\ []) do
+    defaults = [prompt: "Test", tools: %{}, max_turns: 2]
+    SubAgent.new(Keyword.merge(defaults, opts))
+  end
 
-      llm = fn _ ->
-        {:ok, ~S|```clojure
+  defp simple_return_llm do
+    fn _ ->
+      {:ok, ~S|```clojure
 (call "return" {:value 42})
 ```|}
-      end
+    end
+  end
+
+  describe "nesting depth limit (SYS-07)" do
+    test "accepts execution at depth 0 (root level)" do
+      agent = test_agent(max_depth: 3)
+      llm = simple_return_llm()
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 0)
 
@@ -26,19 +29,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "accepts execution just under max_depth" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          max_depth: 3
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_depth: 3)
+      llm = simple_return_llm()
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 2)
 
@@ -46,19 +38,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "rejects execution at max_depth" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          max_depth: 3
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_depth: 3)
+      llm = simple_return_llm()
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 3)
 
@@ -68,19 +49,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "rejects execution beyond max_depth" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          max_depth: 3
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_depth: 3)
+      llm = simple_return_llm()
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 5)
 
@@ -89,19 +59,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "uses custom max_depth" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          max_depth: 1
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_depth: 1)
+      llm = simple_return_llm()
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 1)
 
@@ -111,13 +70,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
   describe "global turn budget (SYS-08)" do
     test "decrements turn budget on each turn" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 5,
-          turn_budget: 20
-        )
+      agent = test_agent(max_turns: 5, turn_budget: 20)
 
       llm = fn %{turn: turn} ->
         case turn do
@@ -135,19 +88,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "rejects when turn budget exhausted before start" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 5,
-          turn_budget: 20
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_turns: 5, turn_budget: 20)
+      llm = simple_return_llm()
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _remaining_turns: 0)
 
@@ -157,13 +99,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "stops when turn budget exhausted during execution" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 5,
-          turn_budget: 20
-        )
+      agent = test_agent(max_turns: 5, turn_budget: 20)
 
       llm = fn %{turn: turn} ->
         case turn do
@@ -183,22 +119,13 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "uses default turn_budget of 20" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{}
-        )
+      agent = test_agent()
 
       assert agent.turn_budget == 20
     end
 
     test "allows custom turn_budget" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          turn_budget: 50
-        )
+      agent = test_agent(turn_budget: 50)
 
       assert agent.turn_budget == 50
     end
@@ -206,19 +133,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
   describe "mission timeout (SYS-09)" do
     test "accepts execution when mission timeout not set" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          mission_timeout: nil
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(mission_timeout: nil)
+      llm = simple_return_llm()
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
@@ -226,19 +142,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
     end
 
     test "accepts execution when mission deadline is in future" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2,
-          mission_timeout: 5000
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(mission_timeout: 5000)
+      llm = simple_return_llm()
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
@@ -249,18 +154,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
       # Deadline in the past
       past_deadline = DateTime.utc_now() |> DateTime.add(-100, :millisecond)
 
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 5
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_turns: 5)
+      llm = simple_return_llm()
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _mission_deadline: past_deadline)
 
@@ -272,18 +167,8 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
       # Deadline in the past
       past_deadline = DateTime.utc_now() |> DateTime.add(-100, :millisecond)
 
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent()
+      llm = simple_return_llm()
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _mission_deadline: past_deadline)
 
