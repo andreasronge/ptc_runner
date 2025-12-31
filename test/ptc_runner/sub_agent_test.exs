@@ -628,7 +628,7 @@ defmodule PtcRunner.SubAgentTest do
         )
 
       # Track LLM calls
-      call_log = :ets.new(:call_log, [:public])
+      {:ok, call_log} = Agent.start_link(fn -> [] end)
 
       mock_llm =
         routing_llm([
@@ -641,7 +641,7 @@ defmodule PtcRunner.SubAgentTest do
       # Wrap to track calls
       tracking_llm = fn input ->
         content = input.messages |> List.last() |> Map.get(:content)
-        :ets.insert(call_log, {System.unique_integer(), content})
+        Agent.update(call_log, fn log -> [content | log] end)
         mock_llm.(input)
       end
 
@@ -649,8 +649,7 @@ defmodule PtcRunner.SubAgentTest do
 
       assert step.return == %{result: 42}
       # Verify both agents used the same LLM
-      assert :ets.info(call_log, :size) >= 2
-      :ets.delete(call_log)
+      assert Agent.get(call_log, &length/1) >= 2
     end
 
     test "tool execution - child uses bound LLM over parent LLM" do
