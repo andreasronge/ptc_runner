@@ -521,4 +521,38 @@ defmodule PtcRunner.SubAgent.LoopTest do
       {:ok, _step} = Loop.run(agent, llm: llm, context: %{})
     end
   end
+
+  describe "memory limit configuration" do
+    test "memory_limit field can be set" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          memory_limit: 1000
+        )
+
+      assert agent.memory_limit == 1000
+    end
+
+    test "memory_limit defaults to 1MB" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{}
+        )
+
+      assert agent.memory_limit == 1_048_576
+    end
+
+    test "memory_limit can be nil" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          memory_limit: nil
+        )
+
+      assert agent.memory_limit == nil
+    end
+  end
 end

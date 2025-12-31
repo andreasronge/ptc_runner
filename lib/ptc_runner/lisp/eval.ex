@@ -124,6 +124,18 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, flex_get(memory, key), memory}
   end
 
+  # Memory put: (memory/put :key value)
+  defp do_eval({:memory_put, key, value_ast}, ctx, memory, env, tool_exec) do
+    with {:ok, value, memory2} <- do_eval(value_ast, ctx, memory, env, tool_exec) do
+      {:ok, value, Map.put(memory2, key, value)}
+    end
+  end
+
+  # Memory get: (memory/get :key)
+  defp do_eval({:memory_get, key}, _ctx, memory, _env, _tool_exec) do
+    {:ok, flex_get(memory, key), memory}
+  end
+
   # Sequential evaluation: do
   defp do_eval({:do, exprs}, ctx, memory, env, tool_exec) do
     do_eval_do(exprs, ctx, memory, env, tool_exec)

@@ -122,6 +122,10 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
 
+  # Memory operations
+  defp dispatch_list_form({:symbol, :"memory/put"}, rest, _list), do: analyze_memory_put(rest)
+  defp dispatch_list_form({:symbol, :"memory/get"}, rest, _list), do: analyze_memory_get(rest)
+
   # Comparison operators (strict 2-arity per spec section 8.4)
   defp dispatch_list_form({:symbol, op}, rest, _list)
        when op in [:=, :"not=", :>, :<, :>=, :<=],
@@ -691,6 +695,37 @@ defmodule PtcRunner.Lisp.Analyze do
          {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:call, f, args}}
     end
+  end
+
+  # ============================================================
+  # Memory operations: memory/put and memory/get
+  # ============================================================
+
+  defp analyze_memory_put([key_ast, value_ast]) do
+    with {:ok, key} <- extract_keyword(key_ast),
+         {:ok, value} <- do_analyze(value_ast) do
+      {:ok, {:memory_put, key, value}}
+    end
+  end
+
+  defp analyze_memory_put(_) do
+    {:error, {:invalid_arity, :"memory/put", "expected (memory/put :key value)"}}
+  end
+
+  defp analyze_memory_get([key_ast]) do
+    with {:ok, key} <- extract_keyword(key_ast) do
+      {:ok, {:memory_get, key}}
+    end
+  end
+
+  defp analyze_memory_get(_) do
+    {:error, {:invalid_arity, :"memory/get", "expected (memory/get :key)"}}
+  end
+
+  defp extract_keyword({:keyword, key}), do: {:ok, key}
+
+  defp extract_keyword(_) do
+    {:error, {:invalid_form, "memory operations require a keyword as key"}}
   end
 
   # ============================================================

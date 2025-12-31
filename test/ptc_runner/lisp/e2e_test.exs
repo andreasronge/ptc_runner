@@ -359,4 +359,47 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert result == [6, 8, 10]
     end
   end
+
+  describe "memory operations" do
+    test "memory/put and memory/get work correctly" do
+      program = """
+      (do
+        (memory/put :count 42)
+        (memory/get :count))
+      """
+
+      assert {:ok, %Step{return: result, memory: memory}} = PtcRunner.Lisp.run(program)
+      assert result == 42
+      assert memory[:count] == 42
+    end
+
+    test "memory/put returns the stored value" do
+      program = "(memory/put :value 123)"
+
+      assert {:ok, %Step{return: result, memory: memory}} = PtcRunner.Lisp.run(program)
+      assert result == 123
+      assert memory[:value] == 123
+    end
+
+    test "memory/get returns nil for missing key" do
+      program = "(memory/get :missing)"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == nil
+    end
+
+    test "multiple memory operations maintain state" do
+      program = """
+      (do
+        (memory/put :x 10)
+        (memory/put :y 20)
+        (+ (memory/get :x) (memory/get :y)))
+      """
+
+      assert {:ok, %Step{return: result, memory: memory}} = PtcRunner.Lisp.run(program)
+      assert result == 30
+      assert memory[:x] == 10
+      assert memory[:y] == 20
+    end
+  end
 end
