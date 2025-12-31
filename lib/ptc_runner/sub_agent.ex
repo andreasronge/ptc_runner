@@ -730,7 +730,7 @@ defmodule PtcRunner.SubAgent do
   A map with:
   - `:system` - The complete system prompt string
   - `:user` - The expanded user message (mission prompt)
-  - `:tool_schemas` - List of tool schema maps (empty for now, will be enhanced in future)
+  - `:tool_schemas` - List of tool schema maps with name, signature, and description fields
 
   ## Examples
 
