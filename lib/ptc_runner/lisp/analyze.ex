@@ -125,6 +125,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # Memory operations
   defp dispatch_list_form({:symbol, :"memory/put"}, rest, _list), do: analyze_memory_put(rest)
   defp dispatch_list_form({:symbol, :"memory/get"}, rest, _list), do: analyze_memory_get(rest)
+  defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
+  defp dispatch_list_form({:ns_symbol, :memory, :get}, rest, _list), do: analyze_memory_get(rest)
 
   # Comparison operators (strict 2-arity per spec section 8.4)
   defp dispatch_list_form({:symbol, op}, rest, _list)
