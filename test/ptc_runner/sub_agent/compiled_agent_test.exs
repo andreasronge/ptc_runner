@@ -5,6 +5,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
   alias PtcRunner.SubAgent.{CompiledAgent, LLMTool}
 
   doctest CompiledAgent
+  doctest PtcRunner.SubAgent.Compiler
 
   describe "SubAgent.compile/2" do
     test "returns {:ok, CompiledAgent} on successful compilation" do
