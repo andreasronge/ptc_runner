@@ -251,6 +251,13 @@ jobs:
             - If nothing needs attention, report status and exit
             - **Open PRs (${{ steps.open-prs.outputs.count }})**: If >0, do bookkeeping only (update epic checkboxes, handle tech debt) but do NOT create new issues or queue new work
 
+            **Issue workflow (MUST follow this order):**
+            1. New issue without `needs-review` or `ready-for-implementation` → add `needs-review` label
+            2. Issue with `needs-review` → wait for review workflow (do nothing)
+            3. Issue with `ready-for-implementation` → trigger implementation with `@claude` comment
+
+            **NEVER skip review**: Do NOT post `@claude` on issues that don't have `ready-for-implementation` label.
+
             **Unsticking issues:**
             - If issue has `ready-for-implementation` but no running implementation workflow and no recent `@claude` comment, re-trigger: `gh issue comment ISSUE --body "@claude Please implement this issue."`
             - If issue has `needs-review` but review workflow not running and no `ready-for-implementation`, remove and re-add label to trigger review
