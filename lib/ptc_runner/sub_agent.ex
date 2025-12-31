@@ -400,21 +400,107 @@ defmodule PtcRunner.SubAgent do
 
     with :ok <- validate_llm_presence(llm, start_time),
          :ok <- validate_llm_registry(llm_registry, start_time) do
-      # Get context
-      context = Keyword.get(opts, :context, %{})
+      # Get and prepare context (handles Step auto-chaining)
+      raw_context = Keyword.get(opts, :context, %{})
 
-      # Determine execution mode
-      if agent.max_turns == 1 and map_size(agent.tools) == 0 do
-        # Single-shot mode
-        run_single_shot(agent, llm, context, start_time, llm_registry)
-      else
-        # Loop mode - delegate to Loop.run/2
-        alias PtcRunner.SubAgent.Loop
-        Loop.run(agent, opts)
+      case prepare_context(raw_context) do
+        {:chained_failure, upstream_fail} ->
+          # Short-circuit: upstream agent failed
+          duration_ms = System.monotonic_time(:millisecond) - start_time
+
+          step =
+            PtcRunner.Step.error(
+              :chained_failure,
+              "Upstream agent failed: #{upstream_fail.reason}",
+              %{},
+              %{upstream: upstream_fail}
+            )
+
+          updated_step = %{step | usage: %{duration_ms: duration_ms, memory_bytes: 0}}
+          {:error, updated_step}
+
+        context ->
+          # Determine execution mode
+          if agent.max_turns == 1 and map_size(agent.tools) == 0 do
+            # Single-shot mode
+            run_single_shot(agent, llm, context, start_time, llm_registry)
+          else
+            # Loop mode - delegate to Loop.run/2
+            # Update opts with prepared context
+            updated_opts = Keyword.put(opts, :context, context)
+            alias PtcRunner.SubAgent.Loop
+            Loop.run(agent, updated_opts)
+          end
       end
     else
       error -> error
     end
+  end
+
+  @doc """
+  Bang variant of `run/2` that raises on failure.
+
+  Returns the `Step` struct directly instead of `{:ok, step}`. Raises
+  `SubAgentError` if execution fails.
+
+  ## Examples
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Say hello", max_turns: 1)
+      iex> mock_llm = fn _ -> {:ok, "```clojure\\n\\\"Hello!\\\"\\n```"} end
+      iex> step = PtcRunner.SubAgent.run!(agent, llm: mock_llm)
+      iex> step.return
+      "Hello!"
+
+      # Failure case (using loop mode)
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Fail", max_turns: 2)
+      iex> mock_llm = fn _ -> {:ok, ~S|(call "fail" {:reason :test :message "Error"})|} end
+      iex> PtcRunner.SubAgent.run!(agent, llm: mock_llm)
+      ** (PtcRunner.SubAgentError) SubAgent failed: failed - %{message: "Error", reason: :test}
+
+  """
+  @spec run!(t() | String.t(), keyword()) :: PtcRunner.Step.t()
+  def run!(agent, opts \\ []) do
+    case run(agent, opts) do
+      {:ok, step} -> step
+      {:error, step} -> raise PtcRunner.SubAgentError, %{step: step}
+    end
+  end
+
+  @doc """
+  Chains agents in a pipeline, passing the previous step as context.
+
+  Equivalent to `run!(agent, Keyword.put(opts, :context, step))`. Enables
+  pipeline-style composition where each agent receives the previous agent's
+  `return` value as input.
+
+  ## Examples
+
+      iex> doubler = PtcRunner.SubAgent.new(
+      ...>   prompt: "Double {{n}}",
+      ...>   signature: "(n :int) -> {result :int}",
+      ...>   max_turns: 1
+      ...> )
+      iex> adder = PtcRunner.SubAgent.new(
+      ...>   prompt: "Add 10 to {{result}}",
+      ...>   signature: "(result :int) -> {final :int}",
+      ...>   max_turns: 1
+      ...> )
+      iex> mock_llm = fn %{messages: msgs} ->
+      ...>   content = msgs |> List.last() |> Map.get(:content)
+      ...>   cond do
+      ...>     content =~ "Double" -> {:ok, "```clojure\\n{:result (* 2 ctx/n)}\\n```"}
+      ...>     content =~ "Add 10" -> {:ok, "```clojure\\n{:final (+ ctx/result 10)}\\n```"}
+      ...>   end
+      ...> end
+      iex> result = PtcRunner.SubAgent.run!(doubler, llm: mock_llm, context: %{n: 5})
+      ...> |> PtcRunner.SubAgent.then!(adder, llm: mock_llm)
+      iex> result.return.final
+      20
+
+  """
+  @spec then!(PtcRunner.Step.t(), t() | String.t(), keyword()) :: PtcRunner.Step.t()
+  def then!(step, agent, opts \\ []) do
+    run!(agent, Keyword.put(opts, :context, step))
   end
 
   defp validate_llm_presence(nil, start_time) do
@@ -445,6 +531,28 @@ defmodule PtcRunner.SubAgent do
   defp validate_llm_registry(_registry, start_time) do
     return_error(:invalid_llm_registry, "llm_registry must be a map", %{}, start_time)
   end
+
+  # Prepares context for execution, handling Step auto-chaining
+  defp prepare_context(%PtcRunner.Step{fail: fail} = _step) when fail != nil do
+    {:chained_failure, fail}
+  end
+
+  defp prepare_context(%PtcRunner.Step{fail: nil, return: return} = _step) when is_map(return) do
+    return
+  end
+
+  defp prepare_context(%PtcRunner.Step{fail: nil, return: nil} = _step) do
+    %{}
+  end
+
+  defp prepare_context(%PtcRunner.Step{fail: nil} = _step) do
+    # Non-map return value - can't use as context directly
+    # This will be caught by template expansion or signature validation
+    %{}
+  end
+
+  defp prepare_context(context) when is_map(context), do: context
+  defp prepare_context(nil), do: %{}
 
   # Single-shot execution: one LLM call, no tools, expression result returned
   defp run_single_shot(agent, llm, context, start_time, llm_registry) do
