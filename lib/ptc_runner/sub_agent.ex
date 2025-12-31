@@ -59,6 +59,10 @@ defmodule PtcRunner.SubAgent do
           | (String.t() -> String.t())
           | String.t()
 
+  @type llm_callback :: (map() -> {:ok, String.t()} | {:error, term()})
+
+  @type llm_registry :: %{atom() => llm_callback()}
+
   @type t :: %__MODULE__{
           prompt: String.t(),
           signature: String.t() | nil,
@@ -454,7 +458,9 @@ defmodule PtcRunner.SubAgent do
     }
 
     # Call LLM
-    case call_llm(llm, llm_input, llm_registry) do
+    alias PtcRunner.SubAgent.LLMResolver
+
+    case LLMResolver.resolve(llm, llm_input, llm_registry) do
       {:ok, response} ->
         # Extract code from response
         case extract_code(response) do
@@ -522,33 +528,6 @@ defmodule PtcRunner.SubAgent do
     You are an AI that solves tasks by writing PTC-Lisp programs.
     Output your program in a ```clojure code block.
     """
-  end
-
-  # Call the LLM (function or atom)
-  defp call_llm(llm, input, _registry) when is_function(llm, 1) do
-    llm.(input)
-  end
-
-  defp call_llm(llm, input, registry) when is_atom(llm) do
-    case Map.fetch(registry, llm) do
-      {:ok, callback} when is_function(callback, 1) ->
-        callback.(input)
-
-      {:ok, _other} ->
-        {:error,
-         {:invalid_llm,
-          "Registry value for #{inspect(llm)} is not a function/1. Check llm_registry values."}}
-
-      :error when map_size(registry) == 0 ->
-        {:error,
-         {:llm_registry_required,
-          "LLM atom #{inspect(llm)} requires llm_registry option. Pass llm_registry: %{#{llm}: &callback/1} to SubAgent.run/2."}}
-
-      :error ->
-        {:error,
-         {:llm_not_found,
-          "LLM #{inspect(llm)} not found in registry. Available: #{inspect(Map.keys(registry))}"}}
-    end
   end
 
   # Helper to create error Step

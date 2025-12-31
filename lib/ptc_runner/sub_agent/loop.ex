@@ -202,7 +202,9 @@ defmodule PtcRunner.SubAgent.Loop do
       }
 
       # Call LLM
-      case call_llm(llm, llm_input, state.llm_registry) do
+      alias PtcRunner.SubAgent.LLMResolver
+
+      case LLMResolver.resolve(llm, llm_input, state.llm_registry) do
         {:ok, response} ->
           handle_llm_response(response, agent, llm, state)
 
@@ -471,33 +473,6 @@ defmodule PtcRunner.SubAgent.Loop do
   # System prompt generation
   defp build_system_prompt(agent, context) do
     Prompt.generate(agent, context: context)
-  end
-
-  # Call the LLM (function or atom)
-  defp call_llm(llm, input, _registry) when is_function(llm, 1) do
-    llm.(input)
-  end
-
-  defp call_llm(llm, input, registry) when is_atom(llm) do
-    case Map.fetch(registry, llm) do
-      {:ok, callback} when is_function(callback, 1) ->
-        callback.(input)
-
-      {:ok, _other} ->
-        {:error,
-         {:invalid_llm,
-          "Registry value for #{inspect(llm)} is not a function/1. Check llm_registry values."}}
-
-      :error when map_size(registry) == 0 ->
-        {:error,
-         {:llm_registry_required,
-          "LLM atom #{inspect(llm)} requires llm_registry option. Pass llm_registry: %{#{llm}: &callback/1} to SubAgent.run/2."}}
-
-      :error ->
-        {:error,
-         {:llm_not_found,
-          "LLM #{inspect(llm)} not found in registry. Available: #{inspect(Map.keys(registry))}"}}
-    end
   end
 
   # Check if code calls a catalog-only tool (not in executable tools)
