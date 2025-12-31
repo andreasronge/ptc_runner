@@ -103,12 +103,14 @@ runs:
 
         chmod +x "$binary_path"
 
-        # Run install with --force to bypass any stale locks
-        echo "Setting up Claude Code with --force..."
-        rm -rf ~/.local/state/claude/locks 2>/dev/null || true
-        "$binary_path" install --force
+        # Copy binary directly to avoid interactive prompts from 'claude install'
+        # The install command can hang waiting for user input in CI environments
+        echo "Copying Claude Code binary to ~/.local/bin..."
+        mkdir -p /home/runner/.local/bin
+        cp "$binary_path" /home/runner/.local/bin/claude
+        chmod +x /home/runner/.local/bin/claude
 
-        # Clean up
+        # Clean up download
         rm -f "$binary_path"
 
         # Verify installation
