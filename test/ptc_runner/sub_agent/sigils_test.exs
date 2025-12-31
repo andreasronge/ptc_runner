@@ -61,7 +61,7 @@ defmodule PtcRunner.SubAgent.SigilsTest do
              ]
     end
 
-    test "template expansion with sigil (E2E)" do
+    test "template expansion with sigil" do
       prompt = ~PROMPT"Find emails for {{user}} from {{sender.name}}"
 
       assert prompt.template == "Find emails for {{user}} from {{sender.name}}"
