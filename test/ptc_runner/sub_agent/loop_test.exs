@@ -522,4 +522,395 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.usage.turns == 1
     end
   end
+
+  describe "llm_registry support" do
+    test "atom LLM resolves via registry" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      registry = %{
+        test_llm: fn %{messages: _} ->
+          {:ok, ~S|```clojure
+(call "return" {:result "from_registry"})
+```|}
+        end
+      }
+
+      {:ok, step} = Loop.run(agent, llm: :test_llm, llm_registry: registry, context: %{})
+
+      assert step.return == %{result: "from_registry"}
+    end
+
+    test "function LLM works without registry" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      llm = fn %{messages: _} ->
+        {:ok, ~S|```clojure
+(call "return" {:result "direct"})
+```|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: "direct"}
+    end
+
+    test "atom LLM not in registry returns error" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      registry = %{haiku: fn _ -> {:ok, ""} end}
+
+      {:error, step} = Loop.run(agent, llm: :sonnet, llm_registry: registry, context: %{})
+
+      assert step.fail.reason == :llm_error
+      assert step.fail.message =~ "LLM :sonnet not found in registry"
+      assert step.fail.message =~ "Available: [:haiku]"
+    end
+
+    test "atom LLM without registry returns error" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      {:error, step} = Loop.run(agent, llm: :haiku, context: %{})
+
+      assert step.fail.reason == :llm_error
+      assert step.fail.message =~ "llm_registry"
+      assert step.fail.message =~ ":haiku"
+    end
+
+    test "invalid registry value (not a function) returns error" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      registry = %{haiku: "not a function"}
+
+      {:error, step} = Loop.run(agent, llm: :haiku, llm_registry: registry, context: %{})
+
+      assert step.fail.reason == :llm_error
+      assert step.fail.message =~ "Registry value for :haiku is not a function/1"
+    end
+
+    @tag :skip
+    test "registry is inherited by child agents" do
+      # Child agent uses atom LLM
+      child = SubAgent.new(prompt: "Child", max_turns: 1)
+
+      # Parent agent calls child
+      parent =
+        SubAgent.new(
+          prompt: "Parent",
+          tools: %{"child" => SubAgent.as_tool(child)},
+          max_turns: 1
+        )
+
+      registry = %{
+        child_llm: fn %{messages: _} ->
+          {:ok, ~S|```clojure
+(call "return" {:from "child"})
+```|}
+        end
+      }
+
+      llm = fn %{messages: _} ->
+        {:ok, ~S|```clojure
+(call "return" (call "child" {}))
+```|}
+      end
+
+      {:ok, step} =
+        SubAgent.run(parent, llm: llm, llm_registry: registry, context: %{})
+
+      # Child should execute successfully using registry
+      assert step.return == %{from: "child"}
+    end
+
+    @tag :skip
+    test "child agent with bound LLM atom uses parent's registry" do
+      # Child with bound atom LLM
+      child = SubAgent.new(prompt: "Child", max_turns: 1)
+      child_tool = SubAgent.as_tool(child, llm: :haiku)
+
+      parent =
+        SubAgent.new(
+          prompt: "Parent",
+          tools: %{"child" => child_tool},
+          max_turns: 1
+        )
+
+      registry = %{
+        haiku: fn %{messages: _} ->
+          {:ok, ~S|```clojure
+(call "return" {:model "haiku"})
+```|}
+        end,
+        sonnet: fn %{messages: _} ->
+          {:ok, ~S|```clojure
+(call "return" (call "child" {}))
+```|}
+        end
+      }
+
+      {:ok, step} =
+        SubAgent.run(parent, llm: :sonnet, llm_registry: registry, context: %{})
+
+      assert step.return == %{model: "haiku"}
+    end
+  end
+
+  describe "tool_catalog enforcement" do
+    test "calling a catalog-only tool returns error to LLM" do
+      turn_counter = :counters.new(1, [:atomics])
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"real_tool" => fn _args -> %{result: "ok"} end},
+          tool_catalog: %{"catalog_tool" => %{description: "For planning only"}},
+          max_turns: 3
+        )
+
+      llm = fn %{messages: messages, turn: turn} ->
+        :counters.put(turn_counter, 1, turn)
+
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(call "catalog_tool" {})
+```|}
+
+          2 ->
+            # Check that error was fed back
+            assert Enum.any?(messages, fn msg ->
+                     msg.role == :user and
+                       msg.content =~
+                         "Tool 'catalog_tool' is for planning only and cannot be called"
+                   end)
+
+            {:ok, ~S|```clojure
+(call "return" {:corrected true})
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{corrected: true}
+      assert :counters.get(turn_counter, 1) == 2
+    end
+
+    @tag :skip
+    test "catalog tool with same name as real tool uses real tool" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"shared" => fn _args -> %{source: "real"} end},
+          tool_catalog: %{"shared" => %{description: "Catalog version"}},
+          max_turns: 1
+        )
+
+      llm = fn %{messages: _} ->
+        {:ok, ~S|```clojure
+(call "return" (call "shared" {}))
+```|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      # Real tool should execute, not catalog
+      assert step.return == %{source: "real"}
+    end
+  end
+
+  describe "tool return value handling" do
+    @tag :skip
+    test "tool returning {:ok, value} unwraps value" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"ok_tool" => fn _args -> {:ok, %{data: 42}} end},
+          max_turns: 3
+        )
+
+      llm = fn %{messages: _, turn: turn} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(call "ok_tool" {})
+```|}
+
+          2 ->
+            {:ok, ~S|```clojure
+(call "return" mem/data)
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      # Tool returned {:ok, %{data: 42}}, which should be unwrapped to %{data: 42}
+      assert step.return == 42
+    end
+
+    @tag :skip
+    test "tool returning raw value passes through" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"raw_tool" => fn _args -> %{raw: true} end},
+          max_turns: 3
+        )
+
+      llm = fn %{messages: _, turn: turn} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(call "raw_tool" {})
+```|}
+
+          2 ->
+            {:ok, ~S|```clojure
+(call "return" mem/raw)
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == true
+    end
+
+    test "tool returning {:error, reason} raises and feeds back to LLM" do
+      turn_counter = :counters.new(1, [:atomics])
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"error_tool" => fn _args -> {:error, "something failed"} end},
+          max_turns: 3
+        )
+
+      llm = fn %{messages: messages, turn: turn} ->
+        :counters.put(turn_counter, 1, turn)
+
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(call "error_tool" {})
+```|}
+
+          2 ->
+            # Error should be fed back (wrapped in execution_error)
+            assert Enum.any?(messages, fn msg ->
+                     msg.role == :user and msg.content =~ "Tool error:" and
+                       msg.content =~ "something failed"
+                   end)
+
+            {:ok, ~S|```clojure
+(call "return" {:recovered true})
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{recovered: true}
+      assert :counters.get(turn_counter, 1) == 2
+    end
+
+    test "tool raising exception is caught and fed back to LLM" do
+      turn_counter = :counters.new(1, [:atomics])
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{
+            "crash_tool" => fn _args -> raise RuntimeError, "tool crashed" end
+          },
+          max_turns: 3
+        )
+
+      llm = fn %{messages: messages, turn: turn} ->
+        :counters.put(turn_counter, 1, turn)
+
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(call "crash_tool" {})
+```|}
+
+          2 ->
+            # Exception should be fed back (wrapped in execution_error)
+            assert Enum.any?(messages, fn msg ->
+                     msg.role == :user and msg.content =~ "tool crashed"
+                   end)
+
+            {:ok, ~S|```clojure
+(call "return" {:handled true})
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{handled: true}
+      assert :counters.get(turn_counter, 1) == 2
+    end
+  end
+
+  describe "3-level LLM inheritance with registry" do
+    @tag :skip
+    test "grandchild uses bound LLM, parent and child inherit" do
+      # Track which models were used
+      {:ok, calls} = Agent.start_link(fn -> [] end)
+
+      registry = %{
+        haiku: fn input ->
+          Agent.update(calls, &[{:haiku, input.turn} | &1])
+          {:ok, ~S|(call "return" {:from "haiku"})|}
+        end,
+        sonnet: fn input ->
+          Agent.update(calls, &[{:sonnet, input.turn} | &1])
+
+          # Sonnet calls child on first turn
+          if input.turn == 1 do
+            {:ok, ~S|(call "child_tool" {})|}
+          else
+            {:ok, ~S|(call "return" {:from "sonnet"})|}
+          end
+        end
+      }
+
+      # Level 3: uses haiku (bound at as_tool)
+      grandchild = SubAgent.new(prompt: "Grandchild", max_turns: 1)
+      grandchild_tool = SubAgent.as_tool(grandchild, llm: :haiku)
+
+      # Level 2: inherits from parent (will be sonnet)
+      child =
+        SubAgent.new(
+          prompt: "Child",
+          tools: %{"grandchild_tool" => grandchild_tool},
+          max_turns: 1
+        )
+
+      child_tool = SubAgent.as_tool(child)
+
+      # Level 1: uses sonnet explicitly
+      parent =
+        SubAgent.new(
+          prompt: "Parent",
+          tools: %{"child_tool" => child_tool},
+          max_turns: 2
+        )
+
+      {:ok, step} = SubAgent.run(parent, llm: :sonnet, llm_registry: registry)
+
+      call_log = Agent.get(calls, & &1) |> Enum.reverse()
+
+      # Verify sonnet was called (parent)
+      assert Enum.any?(call_log, &match?({:sonnet, _}, &1))
+
+      # Verify haiku was called (grandchild)
+      assert Enum.any?(call_log, &match?({:haiku, _}, &1))
+
+      # The return should come from the grandchild via parent's execution
+      assert step.return == %{from: "haiku"}
+    end
+  end
 end

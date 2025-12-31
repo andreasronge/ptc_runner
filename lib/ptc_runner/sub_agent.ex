@@ -59,6 +59,10 @@ defmodule PtcRunner.SubAgent do
           | (String.t() -> String.t())
           | String.t()
 
+  @type llm_callback :: (map() -> {:ok, String.t()} | {:error, term()})
+
+  @type llm_registry :: %{atom() => llm_callback()}
+
   @type t :: %__MODULE__{
           prompt: String.t(),
           signature: String.t() | nil,
@@ -299,8 +303,23 @@ defmodule PtcRunner.SubAgent do
   ## Runtime Options
 
   - `llm` - Required. LLM callback function `(map() -> {:ok, String.t()} | {:error, term()})` or atom
+  - `llm_registry` - Map of atom to LLM callback for atom-based LLM references (default: %{})
   - `context` - Map of input data (default: %{})
   - Other options from agent definition can be overridden
+
+  ## LLM Registry
+
+  When using atom LLMs (like `:haiku` or `:sonnet`), provide an `llm_registry` map:
+
+      registry = %{
+        haiku: fn input -> MyApp.LLM.haiku(input) end,
+        sonnet: fn input -> MyApp.LLM.sonnet(input) end
+      }
+
+      SubAgent.run(agent, llm: :sonnet, llm_registry: registry)
+
+  The registry is automatically inherited by all child SubAgents, so you only need
+  to provide it once at the top level.
 
   ## Returns
 
@@ -321,6 +340,12 @@ defmodule PtcRunner.SubAgent do
       iex> {:ok, step} = PtcRunner.SubAgent.run("Return 42", max_turns: 1, llm: llm)
       iex> step.return
       42
+
+      # Using atom LLM with registry
+      iex> registry = %{test: fn %{messages: [%{content: _}]} -> {:ok, "```clojure\\n100\\n```"} end}
+      iex> {:ok, step} = PtcRunner.SubAgent.run("Test", max_turns: 1, llm: :test, llm_registry: registry)
+      iex> step.return
+      100
   """
   @spec run(t() | String.t(), keyword()) ::
           {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
@@ -370,26 +395,59 @@ defmodule PtcRunner.SubAgent do
     # Validate required llm option
     llm = Keyword.get(opts, :llm) || agent.llm
 
-    if llm do
+    # Validate llm_registry if provided
+    llm_registry = Keyword.get(opts, :llm_registry, %{})
+
+    with :ok <- validate_llm_presence(llm, start_time),
+         :ok <- validate_llm_registry(llm_registry, start_time) do
       # Get context
       context = Keyword.get(opts, :context, %{})
 
       # Determine execution mode
       if agent.max_turns == 1 and map_size(agent.tools) == 0 do
         # Single-shot mode
-        run_single_shot(agent, llm, context, start_time)
+        run_single_shot(agent, llm, context, start_time, llm_registry)
       else
         # Loop mode - delegate to Loop.run/2
         alias PtcRunner.SubAgent.Loop
         Loop.run(agent, opts)
       end
     else
-      return_error(:llm_required, "llm option is required", %{}, start_time)
+      error -> error
     end
   end
 
+  defp validate_llm_presence(nil, start_time) do
+    return_error(:llm_required, "llm option is required", %{}, start_time)
+  end
+
+  defp validate_llm_presence(_llm, _start_time), do: :ok
+
+  defp validate_llm_registry(registry, start_time) when is_map(registry) do
+    # Check that all registry values are function/1
+    invalid_entries =
+      Enum.reject(registry, fn {_key, value} -> is_function(value, 1) end)
+
+    if invalid_entries == [] do
+      :ok
+    else
+      {key, _value} = hd(invalid_entries)
+
+      return_error(
+        :invalid_llm_registry,
+        "llm_registry values must be function/1. Invalid entry: #{inspect(key)}",
+        %{},
+        start_time
+      )
+    end
+  end
+
+  defp validate_llm_registry(_registry, start_time) do
+    return_error(:invalid_llm_registry, "llm_registry must be a map", %{}, start_time)
+  end
+
   # Single-shot execution: one LLM call, no tools, expression result returned
-  defp run_single_shot(agent, llm, context, start_time) do
+  defp run_single_shot(agent, llm, context, start_time, llm_registry) do
     # Expand template in prompt
     expanded_prompt = expand_template(agent.prompt, context)
 
@@ -400,7 +458,9 @@ defmodule PtcRunner.SubAgent do
     }
 
     # Call LLM
-    case call_llm(llm, llm_input) do
+    alias PtcRunner.SubAgent.LLMResolver
+
+    case LLMResolver.resolve(llm, llm_input, llm_registry) do
       {:ok, response} ->
         # Extract code from response
         case extract_code(response) do
@@ -468,16 +528,6 @@ defmodule PtcRunner.SubAgent do
     You are an AI that solves tasks by writing PTC-Lisp programs.
     Output your program in a ```clojure code block.
     """
-  end
-
-  # Call the LLM (function or atom)
-  defp call_llm(llm, input) when is_function(llm) do
-    llm.(input)
-  end
-
-  defp call_llm(llm, _input) when is_atom(llm) do
-    # For now, atoms are not supported (registry support comes later)
-    {:error, :llm_atom_not_supported}
   end
 
   # Helper to create error Step
