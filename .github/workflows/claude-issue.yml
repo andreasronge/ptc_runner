@@ -51,6 +51,10 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
+      - name: Setup Claude Code
+        id: setup-claude
+        uses: ./.github/actions/setup-claude-code
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -60,6 +64,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
 
           prompt: |
             Implement issue #${{ github.event.issue.number }}.
