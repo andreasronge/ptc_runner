@@ -4,6 +4,7 @@ defmodule PtcRunner.SubAgentTest do
   doctest PtcRunner.SubAgent
 
   alias PtcRunner.SubAgent
+  import PtcRunner.TestSupport.SubAgentTestHelpers
 
   describe "new/1" do
     test "creates agent with minimal valid input (just prompt)" do
@@ -612,51 +613,39 @@ defmodule PtcRunner.SubAgentTest do
     end
 
     test "tool execution via parent agent - child inherits parent LLM" do
-      # Create a child agent that doubles a number
-      child =
-        SubAgent.new(
-          prompt: "Double {{n}}",
-          signature: "(n :int) -> {result :int}",
-          max_turns: 1
-        )
-
-      child_tool = SubAgent.as_tool(child)
-
-      # Create parent that uses the child tool
-      parent =
-        SubAgent.new(
-          prompt: "Use double tool on {{value}}",
-          tools: %{"double" => child_tool},
-          max_turns: 3
+      # Create a child agent that doubles a number and parent that uses it
+      %{parent: parent} =
+        parent_child_agents(
+          child: [
+            prompt: "Double {{n}}",
+            signature: "(n :int) -> {result :int}"
+          ],
+          parent: [
+            prompt: "Use double tool on {{value}}",
+            max_turns: 3
+          ],
+          tool_name: "double"
         )
 
       # Track LLM calls
       call_log = :ets.new(:call_log, [:public])
 
-      mock_llm = fn %{messages: msgs, turn: turn} ->
-        content = msgs |> List.last() |> Map.get(:content)
+      mock_llm =
+        routing_llm([
+          {"Double", "```clojure\n{:result (* 2 ctx/n)}\n```"},
+          {{:turn, 1}, "```clojure\n(call \"double\" {:n ctx/value})\n```"},
+          {{:turn, 2}, "```clojure\n(call \"return\" {:result 42})\n```"},
+          {{:turn, 3}, "```clojure\n(call \"return\" {:result 42})\n```"}
+        ])
+
+      # Wrap to track calls
+      tracking_llm = fn input ->
+        content = input.messages |> List.last() |> Map.get(:content)
         :ets.insert(call_log, {System.unique_integer(), content})
-
-        cond do
-          content =~ "Double" ->
-            # Child agent
-            {:ok, "```clojure\n{:result (* 2 ctx/n)}\n```"}
-
-          turn == 1 ->
-            # Parent agent first turn - call child
-            {:ok, "```clojure\n(call \"double\" {:n ctx/value})\n```"}
-
-          turn == 2 ->
-            # Parent agent second turn - return result
-            {:ok, "```clojure\n(call \"return\" {:result 42})\n```"}
-
-          turn == 3 ->
-            # Parent agent third turn - return result
-            {:ok, "```clojure\n(call \"return\" {:result 42})\n```"}
-        end
+        mock_llm.(input)
       end
 
-      {:ok, step} = SubAgent.run(parent, llm: mock_llm, context: %{value: 21})
+      {:ok, step} = SubAgent.run(parent, llm: tracking_llm, context: %{value: 21})
 
       assert step.return == %{result: 42}
       # Verify both agents used the same LLM
@@ -665,27 +654,22 @@ defmodule PtcRunner.SubAgentTest do
     end
 
     test "tool execution - child uses bound LLM over parent LLM" do
-      # Create child with no LLM in struct
-      child = SubAgent.new(prompt: "Return {{x}}", max_turns: 1)
-
       # Bind a specific LLM to the tool
       child_llm = fn _input -> {:ok, "```clojure\nctx/x\n```"} end
-      child_tool = SubAgent.as_tool(child, llm: child_llm)
 
-      parent =
-        SubAgent.new(
-          prompt: "Call child",
-          tools: %{"child" => child_tool},
-          max_turns: 2
+      %{parent: parent} =
+        parent_child_agents(
+          child: [prompt: "Return {{x}}"],
+          parent: [prompt: "Call child"],
+          tool: [llm: child_llm]
         )
 
       # Different parent LLM - on first turn call child, on second turn return result
-      parent_llm = fn %{turn: turn} ->
-        case turn do
-          1 -> {:ok, "```clojure\n(call \"child\" {:x 99})\n```"}
-          2 -> {:ok, "```clojure\n(call \"return\" {:value 99})\n```"}
-        end
-      end
+      parent_llm =
+        routing_llm([
+          {{:turn, 1}, "```clojure\n(call \"child\" {:x 99})\n```"},
+          {{:turn, 2}, "```clojure\n(call \"return\" {:value 99})\n```"}
+        ])
 
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
 
@@ -697,30 +681,21 @@ defmodule PtcRunner.SubAgentTest do
       # Child has its own LLM (highest priority)
       child_own_llm = fn _input -> {:ok, "```clojure\n100\n```"} end
 
-      child =
-        SubAgent.new(
-          prompt: "Return something",
-          max_turns: 1,
-          llm: child_own_llm
-        )
-
       # Try to bind a different LLM (should be ignored)
       bound_llm = fn _input -> {:ok, "```clojure\n200\n```"} end
-      child_tool = SubAgent.as_tool(child, llm: bound_llm)
 
-      parent =
-        SubAgent.new(
-          prompt: "Call child",
-          tools: %{"child" => child_tool},
-          max_turns: 2
+      %{parent: parent} =
+        parent_child_agents(
+          child: [prompt: "Return something", llm: child_own_llm],
+          parent: [prompt: "Call child"],
+          tool: [llm: bound_llm]
         )
 
-      parent_llm = fn %{turn: turn} ->
-        case turn do
-          1 -> {:ok, "```clojure\n(call \"child\" {})\n```"}
-          2 -> {:ok, "```clojure\n(call \"return\" {:value 100})\n```"}
-        end
-      end
+      parent_llm =
+        routing_llm([
+          {{:turn, 1}, "```clojure\n(call \"child\" {})\n```"},
+          {{:turn, 2}, "```clojure\n(call \"return\" {:value 100})\n```"}
+        ])
 
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
 
@@ -729,37 +704,20 @@ defmodule PtcRunner.SubAgentTest do
     end
 
     test "child inherits parent LLM successfully" do
-      # Child with no LLM
-      child = SubAgent.new(prompt: "Return 42", max_turns: 1)
-
-      # Tool with no bound LLM
-      child_tool = SubAgent.as_tool(child)
-
-      parent =
-        SubAgent.new(
-          prompt: "Call child",
-          tools: %{"child" => child_tool},
-          max_turns: 3
+      %{parent: parent} =
+        parent_child_agents(
+          child: [prompt: "Return 42"],
+          parent: [prompt: "Call child", max_turns: 3]
         )
 
       # Parent LLM that calls the child
-      parent_llm = fn %{messages: msgs, turn: turn} ->
-        content = msgs |> List.last() |> Map.get(:content)
-
-        cond do
-          content =~ "Return 42" ->
-            {:ok, "```clojure\n42\n```"}
-
-          turn == 1 ->
-            {:ok, "```clojure\n(call \"child\" {})\n```"}
-
-          turn == 2 ->
-            {:ok, "```clojure\n(call \"return\" {:value 42})\n```"}
-
-          turn == 3 ->
-            {:ok, "```clojure\n(call \"return\" {:value 42})\n```"}
-        end
-      end
+      parent_llm =
+        routing_llm([
+          {"Return 42", "```clojure\n42\n```"},
+          {{:turn, 1}, "```clojure\n(call \"child\" {})\n```"},
+          {{:turn, 2}, "```clojure\n(call \"return\" {:value 42})\n```"},
+          {{:turn, 3}, "```clojure\n(call \"return\" {:value 42})\n```"}
+        ])
 
       # This should work because parent has LLM which child inherits
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
@@ -767,44 +725,20 @@ defmodule PtcRunner.SubAgentTest do
     end
 
     test "child agent error is caught and parent can recover" do
-      # Child that will max out turns
-      child =
-        SubAgent.new(
-          prompt: "Always return nothing",
-          max_turns: 1
-        )
-
-      child_tool = SubAgent.as_tool(child)
-
-      parent =
-        SubAgent.new(
-          prompt: "Call child",
-          tools: %{"child" => child_tool},
-          max_turns: 3
+      %{parent: parent} =
+        parent_child_agents(
+          child: [prompt: "Always return nothing"],
+          parent: [prompt: "Call child", max_turns: 3]
         )
 
       # Child LLM returns code that doesn't call return, so it will exceed max_turns
-      llm = fn %{messages: msgs, turn: turn} ->
-        content = msgs |> List.last() |> Map.get(:content)
-
-        cond do
-          content =~ "Always return nothing" ->
-            # Child doesn't call return, will exceed max_turns
-            {:ok, "```clojure\n(+ 1 1)\n```"}
-
-          turn == 1 ->
-            # Parent calls child on turn 1
-            {:ok, "```clojure\n(call \"child\" {})\n```"}
-
-          turn == 2 ->
-            # Parent gets error feedback from child, tries again
-            {:ok, "```clojure\n(call \"child\" {})\n```"}
-
-          turn == 3 ->
-            # Parent gives up and returns something
-            {:ok, "```clojure\n(call \"return\" {:error \"child_failed\"})\n```"}
-        end
-      end
+      llm =
+        routing_llm([
+          {"Always return nothing", "```clojure\n(+ 1 1)\n```"},
+          {{:turn, 1}, "```clojure\n(call \"child\" {})\n```"},
+          {{:turn, 2}, "```clojure\n(call \"child\" {})\n```"},
+          {{:turn, 3}, "```clojure\n(call \"return\" {:error \"child_failed\"})\n```"}
+        ])
 
       # Parent should successfully handle child error by trying again and eventually returning
       result = SubAgent.run(parent, llm: llm, context: %{})
@@ -816,31 +750,21 @@ defmodule PtcRunner.SubAgentTest do
 
     test "nested agents respect nesting depth limit" do
       # Create a deeply nested structure: parent -> child -> grandchild
-      grandchild =
-        SubAgent.new(
-          prompt: "Return 1",
-          max_turns: 1,
-          max_depth: 3
-        )
-
+      grandchild = test_agent(prompt: "Return 1", max_turns: 1, max_depth: 3)
       grandchild_tool = SubAgent.as_tool(grandchild)
 
-      child =
-        SubAgent.new(
-          prompt: "Call grandchild",
-          tools: %{"grandchild" => grandchild_tool},
-          max_turns: 1,
-          max_depth: 3
-        )
-
-      child_tool = SubAgent.as_tool(child)
-
-      parent =
-        SubAgent.new(
-          prompt: "Call child and return",
-          tools: %{"child" => child_tool},
-          max_turns: 5,
-          max_depth: 3
+      %{parent: parent} =
+        parent_child_agents(
+          child: [
+            prompt: "Call grandchild",
+            tools: %{"grandchild" => grandchild_tool},
+            max_depth: 3
+          ],
+          parent: [
+            prompt: "Call child and return",
+            max_turns: 5,
+            max_depth: 3
+          ]
         )
 
       llm = fn %{messages: msgs} ->
@@ -868,28 +792,21 @@ defmodule PtcRunner.SubAgentTest do
     end
 
     test "nested agents exceed depth limit" do
-      # Set max_depth to 2, but try to nest 3 levels (parent=0, child=1, grandchild=2)
-      # With max_depth=2, grandchild at depth 2 should still work
-      # Let's use max_depth=1 to actually exceed it
-      grandchild = SubAgent.new(prompt: "Return 1", max_turns: 1, max_depth: 1)
+      # Set max_depth to 1 to actually exceed it with 3 levels
+      grandchild = test_agent(prompt: "Return 1", max_turns: 1, max_depth: 1)
       grandchild_tool = SubAgent.as_tool(grandchild)
 
-      child =
-        SubAgent.new(
-          prompt: "Call grandchild",
-          tools: %{"grandchild" => grandchild_tool},
-          max_turns: 2,
-          max_depth: 1
-        )
-
-      child_tool = SubAgent.as_tool(child)
-
-      parent =
-        SubAgent.new(
-          prompt: "Call child",
-          tools: %{"child" => child_tool},
-          max_turns: 2,
-          max_depth: 1
+      %{parent: parent} =
+        parent_child_agents(
+          child: [
+            prompt: "Call grandchild",
+            tools: %{"grandchild" => grandchild_tool},
+            max_depth: 1
+          ],
+          parent: [
+            prompt: "Call child",
+            max_depth: 1
+          ]
         )
 
       llm = fn %{messages: msgs, turn: turn} ->
