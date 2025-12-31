@@ -113,7 +113,7 @@ defmodule PtcRunner.SubAgent do
 
   ## Raises
 
-  - `ArgumentError` - if prompt is missing or not a string, max_turns is not positive, tools is not a map, or any optional field has an invalid type
+  - `ArgumentError` - if prompt is missing or not a string, max_turns is not positive, tools is not a map, any optional field has an invalid type, or prompt placeholders don't match signature parameters (when signature is provided)
 
   ## Examples
 
