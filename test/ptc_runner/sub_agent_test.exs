@@ -158,5 +158,83 @@ defmodule PtcRunner.SubAgentTest do
       # Unknown fields are simply not set in the struct
       refute Map.has_key?(agent, :unknown_field)
     end
+
+    test "raises when mission_timeout is negative" do
+      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", mission_timeout: -1)
+      end
+    end
+
+    test "raises when mission_timeout is zero" do
+      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", mission_timeout: 0)
+      end
+    end
+
+    test "raises when mission_timeout is not an integer" do
+      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", mission_timeout: "invalid")
+      end
+
+      assert_raise ArgumentError, "mission_timeout must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", mission_timeout: 5.5)
+      end
+    end
+
+    test "raises when signature is not a string" do
+      assert_raise ArgumentError, "signature must be a string", fn ->
+        SubAgent.new(prompt: "Test", signature: 123)
+      end
+
+      assert_raise ArgumentError, "signature must be a string", fn ->
+        SubAgent.new(prompt: "Test", signature: :atom)
+      end
+
+      assert_raise ArgumentError, "signature must be a string", fn ->
+        SubAgent.new(prompt: "Test", signature: %{})
+      end
+    end
+
+    test "raises when llm_retry is not a map" do
+      assert_raise ArgumentError, "llm_retry must be a map", fn ->
+        SubAgent.new(prompt: "Test", llm_retry: [])
+      end
+
+      assert_raise ArgumentError, "llm_retry must be a map", fn ->
+        SubAgent.new(prompt: "Test", llm_retry: "invalid")
+      end
+
+      assert_raise ArgumentError, "llm_retry must be a map", fn ->
+        SubAgent.new(prompt: "Test", llm_retry: 123)
+      end
+    end
+
+    test "raises when tool_catalog is not a map" do
+      assert_raise ArgumentError, "tool_catalog must be a map", fn ->
+        SubAgent.new(prompt: "Test", tool_catalog: [])
+      end
+
+      assert_raise ArgumentError, "tool_catalog must be a map", fn ->
+        SubAgent.new(prompt: "Test", tool_catalog: "not a map")
+      end
+
+      assert_raise ArgumentError, "tool_catalog must be a map", fn ->
+        SubAgent.new(prompt: "Test", tool_catalog: :atom)
+      end
+    end
+
+    test "raises when prompt_limit is not a map" do
+      assert_raise ArgumentError, "prompt_limit must be a map", fn ->
+        SubAgent.new(prompt: "Test", prompt_limit: [])
+      end
+
+      assert_raise ArgumentError, "prompt_limit must be a map", fn ->
+        SubAgent.new(prompt: "Test", prompt_limit: :atom)
+      end
+
+      assert_raise ArgumentError, "prompt_limit must be a map", fn ->
+        SubAgent.new(prompt: "Test", prompt_limit: "invalid")
+      end
+    end
   end
 end
