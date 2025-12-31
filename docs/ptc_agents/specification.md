@@ -289,7 +289,7 @@ defmodule PtcRunner.SubAgent.SubAgentTool do
   @type t :: %__MODULE__{
     agent: SubAgent.t(),
     bound_llm: atom() | function() | nil,
-    signature: String.t(),
+    signature: String.t() | nil,
     description: String.t() | nil
   }
 end

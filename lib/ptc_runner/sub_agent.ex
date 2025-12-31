@@ -496,4 +496,61 @@ defmodule PtcRunner.SubAgent do
     usage = step.usage || %{memory_bytes: 0}
     %{step | usage: Map.put(usage, :duration_ms, duration_ms)}
   end
+
+  @doc """
+  Wraps a SubAgent as a tool callable by other agents.
+
+  Returns a `SubAgentTool` struct that parent agents can include
+  in their tools map. When called, the wrapped agent inherits
+  LLM and registry from the parent unless overridden.
+
+  ## Options
+
+  - `:llm` - Bind specific LLM (atom or function). Overrides parent inheritance.
+  - `:description` - Override auto-derived description from agent's prompt
+  - `:name` - Suggested tool name (informational, not enforced by the struct)
+
+  ## LLM Resolution
+
+  When the tool is called, the LLM is resolved in priority order:
+  1. `agent.llm` - The agent's own LLM override (highest priority)
+  2. `bound_llm` - LLM bound via the `:llm` option
+  3. Parent's llm - Inherited from the calling agent (lowest priority)
+
+  ## Examples
+
+      iex> child = PtcRunner.SubAgent.new(
+      ...>   prompt: "Double {{n}}",
+      ...>   signature: "(n :int) -> {result :int}"
+      ...> )
+      iex> tool = PtcRunner.SubAgent.as_tool(child)
+      iex> tool.signature
+      "(n :int) -> {result :int}"
+      iex> tool.bound_llm
+      nil
+
+      iex> child = PtcRunner.SubAgent.new(prompt: "Process data")
+      iex> tool = PtcRunner.SubAgent.as_tool(child, llm: :haiku, description: "Processes data")
+      iex> tool.bound_llm
+      :haiku
+      iex> tool.description
+      "Processes data"
+
+      iex> child = PtcRunner.SubAgent.new(prompt: "Analyze {{text}}", signature: "(text :string) -> :string")
+      iex> tool = PtcRunner.SubAgent.as_tool(child, name: "analyzer")
+      iex> tool.signature
+      "(text :string) -> :string"
+
+  """
+  @spec as_tool(t(), keyword()) :: PtcRunner.SubAgent.SubAgentTool.t()
+  def as_tool(%__MODULE__{} = agent, opts \\ []) do
+    alias PtcRunner.SubAgent.SubAgentTool
+
+    %SubAgentTool{
+      agent: agent,
+      bound_llm: Keyword.get(opts, :llm),
+      signature: agent.signature,
+      description: Keyword.get(opts, :description)
+    }
+  end
 end

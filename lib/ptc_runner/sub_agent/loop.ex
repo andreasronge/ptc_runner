@@ -23,7 +23,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.Prompt
+  alias PtcRunner.SubAgent.{Prompt, SubAgentTool}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -94,6 +94,7 @@ defmodule PtcRunner.SubAgent.Loop do
     expanded_prompt = expand_template(agent.prompt, context)
 
     initial_state = %{
+      llm: llm,
       turn: 1,
       messages: [%{role: :user, content: expanded_prompt}],
       context: context,
@@ -240,13 +241,17 @@ defmodule PtcRunner.SubAgent.Loop do
         state.context
       end
 
+    # Normalize SubAgentTool instances to functions
+    normalized_tools = normalize_tools(agent.tools, state)
+
     # Merge system tools (return/fail) with user tools
+    # System tools must come second to take precedence
     system_tools = %{
       "return" => fn args -> args end,
       "fail" => fn args -> args end
     }
 
-    all_tools = Map.merge(system_tools, agent.tools)
+    all_tools = Map.merge(normalized_tools, system_tools)
 
     case Lisp.run(code, context: exec_context, memory: state.memory, tools: all_tools) do
       {:ok, lisp_step} ->
@@ -471,5 +476,45 @@ defmodule PtcRunner.SubAgent.Loop do
   # Check if mission timeout has been exceeded
   defp mission_timeout_exceeded?(deadline) do
     DateTime.compare(DateTime.utc_now(), deadline) == :gt
+  end
+
+  # Normalize tools map to convert SubAgentTool instances into executable functions
+  defp normalize_tools(tools, state) when is_map(tools) do
+    Map.new(tools, fn
+      {name, %SubAgentTool{} = tool} ->
+        {name, wrap_sub_agent_tool(tool, state)}
+
+      {name, other} ->
+        {name, other}
+    end)
+  end
+
+  # Wrap a SubAgentTool in a function closure that executes the child agent
+  defp wrap_sub_agent_tool(%SubAgentTool{} = tool, state) do
+    fn args ->
+      # Resolve LLM in priority order: agent.llm > bound_llm > parent's llm
+      resolved_llm = tool.agent.llm || tool.bound_llm || state.llm
+
+      unless resolved_llm do
+        raise ArgumentError, "No LLM available for SubAgentTool execution"
+      end
+
+      # Execute the wrapped agent with inherited context
+      case SubAgent.run(tool.agent,
+             llm: resolved_llm,
+             context: args,
+             _nesting_depth: state.nesting_depth + 1,
+             _remaining_turns: state.remaining_turns,
+             _mission_deadline: state.mission_deadline
+           ) do
+        {:ok, step} ->
+          step.return
+
+        {:error, step} ->
+          # Propagate child agent failure
+          raise RuntimeError,
+                "SubAgent tool failed: #{step.fail.message}"
+      end
+    end
   end
 end
