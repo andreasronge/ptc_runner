@@ -36,6 +36,10 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
+      - name: Setup Claude Code
+        id: setup-claude
+        uses: ./.github/actions/setup-claude-code
+
       - name: Run Claude Issue Review
         uses: anthropics/claude-code-action@v1
         env:
@@ -44,6 +48,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
           prompt: |
             REPO: ${{ github.repository }}
             ISSUE NUMBER: ${{ github.event.issue.number }}
