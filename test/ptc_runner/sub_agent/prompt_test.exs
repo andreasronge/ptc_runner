@@ -178,7 +178,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
     end
   end
 
-  describe "generate_tool_schemas/1" do
+  describe "generate_tool_schemas/2" do
     test "handles empty tools" do
       schemas = Prompt.generate_tool_schemas(%{})
 
@@ -186,6 +186,79 @@ defmodule PtcRunner.SubAgent.PromptTest do
       # Even with no user tools, should show return/fail
       assert schemas =~ "### return"
       assert schemas =~ "### fail"
+    end
+
+    test "generates catalog section when tool_catalog is provided" do
+      tools = %{"search" => fn _ -> [] end}
+      catalog = %{"email_agent" => nil, "report_agent" => nil}
+
+      schemas = Prompt.generate_tool_schemas(tools, catalog)
+
+      assert schemas =~ "## Tools you can call"
+      assert schemas =~ "### search"
+      assert schemas =~ "## Tools for planning (do not call)"
+      assert schemas =~ "These tools are shown for context but cannot be called directly"
+      assert schemas =~ "### email_agent"
+      assert schemas =~ "### report_agent"
+    end
+
+    test "handles empty tool_catalog" do
+      tools = %{"search" => fn _ -> [] end}
+
+      schemas = Prompt.generate_tool_schemas(tools, %{})
+
+      assert schemas =~ "### search"
+      refute schemas =~ "Tools for planning"
+    end
+
+    test "handles nil tool_catalog" do
+      tools = %{"search" => fn _ -> [] end}
+
+      schemas = Prompt.generate_tool_schemas(tools, nil)
+
+      assert schemas =~ "### search"
+      refute schemas =~ "Tools for planning"
+    end
+
+    test "catalog with no callable tools still shows return/fail" do
+      catalog = %{"email_agent" => nil}
+
+      schemas = Prompt.generate_tool_schemas(%{}, catalog)
+
+      assert schemas =~ "### return"
+      assert schemas =~ "### fail"
+      assert schemas =~ "## Tools for planning (do not call)"
+      assert schemas =~ "### email_agent"
+    end
+
+    test "sorts catalog tools alphabetically" do
+      catalog = %{"zebra_agent" => nil, "alpha_agent" => nil}
+
+      schemas = Prompt.generate_tool_schemas(%{}, catalog)
+
+      alpha_pos = String.split(schemas, "### alpha_agent") |> List.first() |> String.length()
+      zebra_pos = String.split(schemas, "### zebra_agent") |> List.first() |> String.length()
+
+      assert alpha_pos < zebra_pos
+    end
+
+    test "allows duplicate tool names in tools and catalog" do
+      tools = %{"search" => fn _ -> [] end}
+      catalog = %{"search" => nil}
+
+      schemas = Prompt.generate_tool_schemas(tools, catalog)
+
+      # Count occurrences of "### search"
+      search_count =
+        schemas
+        |> String.split("### search")
+        |> length()
+        |> Kernel.-(1)
+
+      # Should appear twice: once in callable, once in catalog
+      assert search_count == 2
+      assert schemas =~ "## Tools you can call"
+      assert schemas =~ "## Tools for planning (do not call)"
     end
 
     test "generates schemas for user tools" do
@@ -534,6 +607,48 @@ defmodule PtcRunner.SubAgent.PromptTest do
 
       # Should handle gracefully without erroring
       assert prompt =~ "ctx/config"
+    end
+
+    test "generates prompt with both tools and tool_catalog" do
+      tools = %{"search" => fn _ -> [] end}
+      catalog = %{"email_agent" => nil, "report_agent" => nil}
+
+      agent =
+        SubAgent.new(
+          prompt: "Find and process data",
+          tools: tools,
+          tool_catalog: catalog
+        )
+
+      prompt = Prompt.generate(agent, context: %{})
+
+      # Should have both sections
+      assert prompt =~ "## Tools you can call"
+      assert prompt =~ "### search"
+      assert prompt =~ "## Tools for planning (do not call)"
+      assert prompt =~ "These tools are shown for context but cannot be called directly"
+      assert prompt =~ "### email_agent"
+      assert prompt =~ "### report_agent"
+    end
+
+    test "generates prompt with only tool_catalog (no callable tools)" do
+      catalog = %{"email_agent" => nil}
+
+      agent =
+        SubAgent.new(
+          prompt: "Review available agents",
+          tool_catalog: catalog
+        )
+
+      prompt = Prompt.generate(agent, context: %{})
+
+      # Should show standard return/fail tools
+      assert prompt =~ "## Tools you can call"
+      assert prompt =~ "### return"
+      assert prompt =~ "### fail"
+      # And the catalog section
+      assert prompt =~ "## Tools for planning (do not call)"
+      assert prompt =~ "### email_agent"
     end
   end
 end

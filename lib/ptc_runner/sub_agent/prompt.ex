@@ -165,7 +165,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     role_section = generate_role_section()
     rules_section = generate_rules_section()
     data_inventory = generate_data_inventory(context, context_signature)
-    tool_schemas = generate_tool_schemas(agent.tools)
+    tool_schemas = generate_tool_schemas(agent.tools, agent.tool_catalog)
     mission = expand_mission(agent.prompt, context)
 
     # Combine all sections
@@ -264,10 +264,13 @@ defmodule PtcRunner.SubAgent.Prompt do
   Generate the tool schemas section.
 
   Shows all available tools with their signatures and descriptions.
+  Optionally includes a separate "Tools for planning (do not call)" section
+  for tools in the catalog.
 
   ## Parameters
 
   - `tools` - Map of tool name to function
+  - `tool_catalog` - Optional map of tool names for planning (default: nil)
 
   ## Returns
 
@@ -280,11 +283,19 @@ defmodule PtcRunner.SubAgent.Prompt do
       iex> schemas =~ "# Available Tools"
       true
 
+      iex> tools = %{"search" => fn _ -> [] end}
+      iex> catalog = %{"email_agent" => nil}
+      iex> schemas = PtcRunner.SubAgent.Prompt.generate_tool_schemas(tools, catalog)
+      iex> schemas =~ "## Tools for planning (do not call)"
+      true
+
   """
-  @spec generate_tool_schemas(map()) :: String.t()
-  def generate_tool_schemas(tools) when map_size(tools) == 0 do
+  @spec generate_tool_schemas(map(), map() | nil) :: String.t()
+  def generate_tool_schemas(tools, tool_catalog \\ nil)
+
+  def generate_tool_schemas(tools, tool_catalog) when map_size(tools) == 0 do
     # Even with no user tools, show return/fail
-    """
+    callable_section = """
     # Available Tools
 
     ## Tools you can call
@@ -293,9 +304,18 @@ defmodule PtcRunner.SubAgent.Prompt do
 
     #{format_tool("fail")}
     """
+
+    # Add catalog section if present
+    catalog_section = generate_catalog_section(tool_catalog)
+
+    if catalog_section == "" do
+      callable_section
+    else
+      callable_section <> "\n" <> catalog_section
+    end
   end
 
-  def generate_tool_schemas(tools) do
+  def generate_tool_schemas(tools, tool_catalog) do
     # Always include return and fail tools in the documentation
     tool_docs =
       tools
@@ -324,13 +344,22 @@ defmodule PtcRunner.SubAgent.Prompt do
           if standard_tools != "", do: "\n\n" <> standard_tools, else: ""
       end
 
-    """
+    callable_section = """
     # Available Tools
 
     ## Tools you can call
 
     #{tools_section}
     """
+
+    # Add catalog section if present
+    catalog_section = generate_catalog_section(tool_catalog)
+
+    if catalog_section == "" do
+      callable_section
+    else
+      callable_section <> "\n" <> catalog_section
+    end
   end
 
   @doc """
@@ -608,6 +637,25 @@ defmodule PtcRunner.SubAgent.Prompt do
   end
 
   defp format_sample(value), do: inspect(value)
+
+  defp generate_catalog_section(nil), do: ""
+  defp generate_catalog_section(tool_catalog) when map_size(tool_catalog) == 0, do: ""
+
+  defp generate_catalog_section(tool_catalog) do
+    catalog_tools =
+      tool_catalog
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.map_join("\n\n", fn name -> format_tool(name) end)
+
+    """
+    ## Tools for planning (do not call)
+
+    These tools are shown for context but cannot be called directly:
+
+    #{catalog_tools}
+    """
+  end
 
   defp format_tool("return") do
     """
