@@ -1,0 +1,162 @@
+defmodule PtcRunner.SubAgentTest do
+  use ExUnit.Case, async: true
+
+  doctest PtcRunner.SubAgent
+
+  alias PtcRunner.SubAgent
+
+  describe "new/1" do
+    test "creates agent with minimal valid input (just prompt)" do
+      agent = SubAgent.new(prompt: "Analyze the data")
+      assert agent.prompt == "Analyze the data"
+      assert agent.max_turns == 5
+      assert agent.tools == %{}
+      assert agent.signature == nil
+      assert agent.tool_catalog == nil
+      assert agent.prompt_limit == nil
+      assert agent.mission_timeout == nil
+      assert agent.llm_retry == nil
+      assert agent.llm == nil
+      assert agent.system_prompt == nil
+    end
+
+    test "creates agent with all fields provided" do
+      email_tools = %{"list_emails" => fn _args -> [] end}
+
+      agent =
+        SubAgent.new(
+          prompt: "Find urgent emails for {{user}}",
+          signature: "(user :string) -> {count :int, _ids [:int]}",
+          tools: email_tools,
+          max_turns: 10,
+          tool_catalog: %{"reference" => "schema"},
+          prompt_limit: %{max_length: 1000},
+          mission_timeout: 60_000,
+          llm_retry: %{max_attempts: 3},
+          llm: :sonnet,
+          system_prompt: %{prefix: "You are an expert"}
+        )
+
+      assert agent.prompt == "Find urgent emails for {{user}}"
+      assert agent.signature == "(user :string) -> {count :int, _ids [:int]}"
+      assert agent.tools == email_tools
+      assert agent.max_turns == 10
+      assert agent.tool_catalog == %{"reference" => "schema"}
+      assert agent.prompt_limit == %{max_length: 1000}
+      assert agent.mission_timeout == 60_000
+      assert agent.llm_retry == %{max_attempts: 3}
+      assert agent.llm == :sonnet
+      assert agent.system_prompt == %{prefix: "You are an expert"}
+    end
+
+    test "applies default values for optional fields" do
+      agent = SubAgent.new(prompt: "Test")
+      assert agent.max_turns == 5
+      assert agent.tools == %{}
+    end
+
+    test "raises when prompt is missing" do
+      assert_raise ArgumentError, "prompt is required", fn ->
+        SubAgent.new(tools: %{})
+      end
+
+      assert_raise ArgumentError, "prompt is required", fn ->
+        SubAgent.new([])
+      end
+
+      assert_raise ArgumentError, "prompt is required", fn ->
+        SubAgent.new(max_turns: 10)
+      end
+    end
+
+    test "raises when prompt is not a string" do
+      assert_raise ArgumentError, "prompt must be a string", fn ->
+        SubAgent.new(prompt: 123)
+      end
+
+      assert_raise ArgumentError, "prompt must be a string", fn ->
+        SubAgent.new(prompt: :atom)
+      end
+
+      assert_raise ArgumentError, "prompt must be a string", fn ->
+        SubAgent.new(prompt: nil)
+      end
+
+      assert_raise ArgumentError, "prompt must be a string", fn ->
+        SubAgent.new(prompt: %{})
+      end
+    end
+
+    test "raises when tools is not a map" do
+      assert_raise ArgumentError, "tools must be a map", fn ->
+        SubAgent.new(prompt: "Test", tools: [])
+      end
+
+      assert_raise ArgumentError, "tools must be a map", fn ->
+        SubAgent.new(prompt: "Test", tools: "invalid")
+      end
+
+      assert_raise ArgumentError, "tools must be a map", fn ->
+        SubAgent.new(prompt: "Test", tools: 123)
+      end
+    end
+
+    test "raises when max_turns is zero" do
+      assert_raise ArgumentError, "max_turns must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", max_turns: 0)
+      end
+    end
+
+    test "raises when max_turns is negative" do
+      assert_raise ArgumentError, "max_turns must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", max_turns: -1)
+      end
+    end
+
+    test "raises when max_turns is not an integer" do
+      assert_raise ArgumentError, "max_turns must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", max_turns: 5.5)
+      end
+
+      assert_raise ArgumentError, "max_turns must be a positive integer", fn ->
+        SubAgent.new(prompt: "Test", max_turns: "5")
+      end
+    end
+
+    test "allows llm as atom" do
+      agent = SubAgent.new(prompt: "Test", llm: :haiku)
+      assert agent.llm == :haiku
+    end
+
+    test "allows llm as function" do
+      llm_fn = fn _input -> {:ok, "response"} end
+      agent = SubAgent.new(prompt: "Test", llm: llm_fn)
+      assert agent.llm == llm_fn
+    end
+
+    test "allows system_prompt as map" do
+      opts = %{prefix: "Custom prefix", suffix: "Custom suffix"}
+      agent = SubAgent.new(prompt: "Test", system_prompt: opts)
+      assert agent.system_prompt == opts
+    end
+
+    test "allows system_prompt as function" do
+      fn_opt = fn prompt -> "Modified: #{prompt}" end
+      agent = SubAgent.new(prompt: "Test", system_prompt: fn_opt)
+      assert agent.system_prompt == fn_opt
+    end
+
+    test "allows system_prompt as string" do
+      agent = SubAgent.new(prompt: "Test", system_prompt: "Custom system prompt")
+      assert agent.system_prompt == "Custom system prompt"
+    end
+
+    test "ignores unknown options (lenient per Elixir convention)" do
+      agent = SubAgent.new(prompt: "Test", unknown_field: "ignored", another: 123)
+
+      assert agent.prompt == "Test"
+      # Unknown fields are simply not set in the struct
+      refute Map.has_key?(agent, :unknown_field)
+    end
+  end
+end
