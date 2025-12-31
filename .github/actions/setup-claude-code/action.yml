@@ -59,25 +59,61 @@ runs:
       if: steps.install.outputs.needs_install == 'true'
       shell: bash
       run: |
+        set -e
         echo "Installing Claude Code..."
-        for attempt in 1 2 3; do
-          echo "Installation attempt $attempt..."
-          # Clean all known lock file locations before each attempt
-          rm -rf ~/.local/state/claude/locks 2>/dev/null || true
-          rm -f /tmp/claude-install.lock 2>/dev/null || true
-          rm -f ~/.claude/.installing 2>/dev/null || true
-          if curl -fsSL https://claude.ai/install.sh | bash; then
-            echo "Claude Code installed successfully"
-            /home/runner/.local/bin/claude --version
-            break
-          fi
-          if [ $attempt -eq 3 ]; then
-            echo "Failed to install Claude Code after 3 attempts"
-            exit 1
-          fi
-          echo "Installation failed, retrying in 5s..."
-          sleep 5
-        done
+
+        # Clean all known lock file locations
+        rm -rf ~/.local/state/claude/locks 2>/dev/null || true
+        rm -f /tmp/claude-install.lock 2>/dev/null || true
+        rm -f ~/.claude/.installing 2>/dev/null || true
+
+        # Direct installation with --force to bypass lock issues
+        # This replicates install.sh but adds --force flag
+        GCS_BUCKET="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
+        DOWNLOAD_DIR="$HOME/.claude/downloads"
+        mkdir -p "$DOWNLOAD_DIR"
+
+        # Get stable version
+        version=$(curl -fsSL "$GCS_BUCKET/stable")
+        echo "Installing Claude Code v$version..."
+
+        # Detect platform
+        arch=$(uname -m)
+        case "$arch" in
+          x86_64|amd64) arch="x64" ;;
+          arm64|aarch64) arch="arm64" ;;
+        esac
+        platform="linux-${arch}"
+
+        # Download manifest and get checksum
+        manifest=$(curl -fsSL "$GCS_BUCKET/$version/manifest.json")
+        checksum=$(echo "$manifest" | jq -r ".platforms[\"$platform\"].checksum")
+
+        # Download binary
+        binary_path="$DOWNLOAD_DIR/claude-$version-$platform"
+        curl -fsSL -o "$binary_path" "$GCS_BUCKET/$version/$platform/claude"
+
+        # Verify checksum
+        actual=$(sha256sum "$binary_path" | cut -d' ' -f1)
+        if [ "$actual" != "$checksum" ]; then
+          echo "Checksum verification failed" >&2
+          rm -f "$binary_path"
+          exit 1
+        fi
+
+        chmod +x "$binary_path"
+
+        # Run install with --force to bypass any stale locks
+        echo "Setting up Claude Code with --force..."
+        rm -rf ~/.local/state/claude/locks 2>/dev/null || true
+        "$binary_path" install --force
+
+        # Clean up
+        rm -f "$binary_path"
+
+        # Verify installation
+        /home/runner/.local/bin/claude --version
+        echo "Claude Code installed successfully"
 
     - name: Add Claude Code to PATH
       shell: bash
