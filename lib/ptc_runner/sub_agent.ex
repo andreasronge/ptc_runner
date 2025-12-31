@@ -362,8 +362,9 @@ defmodule PtcRunner.SubAgent do
         # Single-shot mode
         run_single_shot(agent, llm, context, start_time)
       else
-        # Loop mode - delegate to Loop.run/2 (not implemented yet)
-        return_error(:not_implemented, "Loop mode not yet implemented", %{}, start_time)
+        # Loop mode - delegate to Loop.run/2
+        alias PtcRunner.SubAgent.Loop
+        Loop.run(agent, llm: llm, context: context)
       end
     else
       return_error(:llm_required, "llm option is required", %{}, start_time)
