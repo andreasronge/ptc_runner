@@ -867,9 +867,6 @@ defmodule PtcRunner.SubAgentTest do
       assert step.return == %{value: 1}
     end
 
-    # Skipped: SubAgent.run doesn't pass _nesting_depth to Loop.run (issue #445)
-    # This test cannot verify depth limit enforcement until that bug is fixed
-    @tag :skip
     test "nested agents exceed depth limit" do
       # Set max_depth to 2, but try to nest 3 levels (parent=0, child=1, grandchild=2)
       # With max_depth=2, grandchild at depth 2 should still work

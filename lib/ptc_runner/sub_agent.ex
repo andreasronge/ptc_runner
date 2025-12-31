@@ -381,7 +381,7 @@ defmodule PtcRunner.SubAgent do
       else
         # Loop mode - delegate to Loop.run/2
         alias PtcRunner.SubAgent.Loop
-        Loop.run(agent, llm: llm, context: context)
+        Loop.run(agent, opts)
       end
     else
       return_error(:llm_required, "llm option is required", %{}, start_time)
