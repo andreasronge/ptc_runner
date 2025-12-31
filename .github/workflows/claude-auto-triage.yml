@@ -302,17 +302,19 @@ jobs:
             - **IN-SCOPE incomplete work** (PR started a pattern but didn't finish applying it)
             - Fix follows same approach the PR already uses
 
-            **DEFER_ISSUE** when:
-            - Complex change requiring design decisions
-            - Out of PR scope BUT valuable suggestion
+            **DEFER_ISSUE** when the observation is worth remembering:
+            - If a human would want to revisit this later → create an issue
+            - "Future refactoring", "could consolidate", "spec drift", "tech debt" → track it
+            - Complex changes, architectural suggestions, missing features → track them
             - **IMPORTANT**: First search for existing issues: `gh issue list --search "keyword" --state all`
             - Only create issue if no existing issue covers it
 
-            **IGNORE** when:
+            **IGNORE** only when there's truly nothing to do:
             - False positive (investigation shows code is correct)
             - Existing GitHub issue already covers this (link to it in summary)
-            - Not valuable or not applicable to this codebase
-            - Truly optional stylistic preference with no functional benefit
+            - Pure style preference with zero functional benefit
+
+            When in doubt, create an issue. Issues are cheap; forgotten improvements are expensive.
 
             ## CRITICAL: How to Execute Actions
 
