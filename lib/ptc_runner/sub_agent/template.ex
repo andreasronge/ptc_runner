@@ -64,6 +64,67 @@ defmodule PtcRunner.SubAgent.Template do
   end
 
   @doc """
+  Extract placeholder names from a template string as a flat list.
+
+  This is a convenience wrapper around `extract_placeholders/1` that returns
+  only the placeholder names as flat strings (e.g., "name", "user.name").
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Template.extract_placeholder_names("Hello {{name}}")
+      ["name"]
+
+      iex> PtcRunner.SubAgent.Template.extract_placeholder_names("{{user.name}} has {{count}} items")
+      ["user.name", "count"]
+
+      iex> PtcRunner.SubAgent.Template.extract_placeholder_names("No placeholders here")
+      []
+
+      iex> PtcRunner.SubAgent.Template.extract_placeholder_names("{{name}} and {{name}}")
+      ["name"]
+
+  """
+  @spec extract_placeholder_names(String.t()) :: [String.t()]
+  def extract_placeholder_names(template) when is_binary(template) do
+    template
+    |> extract_placeholders()
+    |> Enum.map(fn %{path: path} -> Enum.join(path, ".") end)
+  end
+
+  @doc """
+  Extract parameter names from a SubAgent signature string.
+
+  Parses the signature and returns a list of parameter names.
+  Returns an empty list if the signature cannot be parsed.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Template.extract_signature_params("(user :string) -> :string")
+      ["user"]
+
+      iex> PtcRunner.SubAgent.Template.extract_signature_params("(name :string, age :int) -> :string")
+      ["name", "age"]
+
+      iex> PtcRunner.SubAgent.Template.extract_signature_params("invalid signature")
+      []
+
+  """
+  @spec extract_signature_params(String.t()) :: [String.t()]
+  def extract_signature_params(signature) when is_binary(signature) do
+    alias PtcRunner.SubAgent.Signature.Parser
+
+    case Parser.parse(signature) do
+      {:ok, {:signature, params, _output}} ->
+        Enum.map(params, fn {name, _type} -> name end)
+
+      {:error, _reason} ->
+        # If signature parsing fails, we can't extract params
+        # Let the signature validation fail elsewhere
+        []
+    end
+  end
+
+  @doc """
   Expand a template by replacing placeholders with values from the context.
 
   Returns `{:ok, expanded_string}` on success, or `{:error, {:missing_keys, keys}}`
