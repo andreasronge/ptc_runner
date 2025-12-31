@@ -1,0 +1,173 @@
+name: Claude Batch Fix
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+
+  # Auto-trigger when quick-fix label is added (checks if threshold reached)
+  issues:
+    types: [labeled]
+
+jobs:
+  check-threshold:
+    # Only run on label event if it's the quick-fix label
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'quick-fix'
+
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      issue_count: ${{ steps.check.outputs.issue_count }}
+      issues: ${{ steps.check.outputs.issues }}
+
+    steps:
+      - name: Check quick-fix issue count
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get all open quick-fix issues
+          ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "quick-fix" \
+            --state open \
+            --json number,title \
+            --limit 20)
+
+          COUNT=$(echo "$ISSUES" | jq length)
+          echo "issue_count=$COUNT" >> $GITHUB_OUTPUT
+          echo "issues=$ISSUES" >> $GITHUB_OUTPUT
+
+          echo "Found $COUNT quick-fix issues"
+
+          # Threshold: 5 issues for auto-trigger, always run for manual
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "$COUNT" -gt 0 ]; then
+            echo "Manual trigger with $COUNT issues - proceeding"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [ "$COUNT" -ge 5 ]; then
+            echo "Threshold reached ($COUNT >= 5) - proceeding"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "Below threshold ($COUNT < 5) - skipping"
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  batch-fix:
+    needs: check-threshold
+    if: needs.check-threshold.outputs.should_run == 'true'
+
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: claude-automation
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Setup Claude Code
+        id: setup-claude
+        uses: ./.github/actions/setup-claude-code
+
+      - name: Prepare issue list
+        id: issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get detailed info for all quick-fix issues
+          gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "quick-fix" \
+            --state open \
+            --json number,title,body \
+            --limit 20 > /tmp/quick-fix-issues.json
+
+          # Create summary for prompt
+          jq -r '.[] | "- #\(.number): \(.title)"' /tmp/quick-fix-issues.json > /tmp/issue-summary.txt
+
+          echo "Issues to fix:"
+          cat /tmp/issue-summary.txt
+
+          # Get issue numbers for closing
+          ISSUE_NUMBERS=$(jq -r '.[].number' /tmp/quick-fix-issues.json | tr '\n' ' ')
+          echo "issue_numbers=$ISSUE_NUMBERS" >> $GITHUB_OUTPUT
+
+      - name: Run Claude Batch Fix
+        id: claude-fix
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
+          prompt: |
+            # Batch Fix: Quick-Fix Issues
+
+            Fix all the following quick-fix issues in a SINGLE PR.
+
+            ## Issues to Fix
+
+            $(cat /tmp/issue-summary.txt)
+
+            ## Detailed Issue Information
+
+            $(cat /tmp/quick-fix-issues.json)
+
+            ## Instructions
+
+            1. **Read each issue** to understand what needs to be fixed
+            2. **Create a single branch** named `batch-fix/quick-fixes-$(date +%Y%m%d)`
+            3. **Fix ALL issues** with minimal, focused changes
+            4. **Run tests**: `mix test` to verify nothing is broken
+            5. **Create ONE PR** that:
+               - Has title: "fix: batch quick-fixes (N issues)"
+               - Lists all issues being fixed in the body
+               - Uses "Closes #N" for each issue so they auto-close on merge
+
+            ## PR Body Template
+
+            ```markdown
+            ## Summary
+            Batch fix for quick-fix issues.
+
+            ## Issues Fixed
+            - Closes #X: [title]
+            - Closes #Y: [title]
+            ...
+
+            ## Changes
+            - [Brief description of each change]
+
+            ---
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+            ```
+
+            ## Rules
+
+            - Make minimal changes - only fix what each issue describes
+            - Don't refactor unrelated code
+            - Don't add new features
+            - If an issue is unclear or too complex, skip it and note why in the PR
+            - Run `mix format` before committing
+
+            Begin fixing the issues now.
+
+          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,Task,TodoWrite,TodoRead"'
+          show_full_output: true

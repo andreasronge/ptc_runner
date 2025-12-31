@@ -309,6 +309,12 @@ jobs:
             - **IMPORTANT**: First search for existing issues: `gh issue list --search "keyword" --state all`
             - Only create issue if no existing issue covers it
 
+            **Use `quick-fix` label** for trivial OUT-OF-SCOPE mechanical fixes:
+            - Typos, formatting issues in unrelated files
+            - Missing null checks in unrelated code
+            - Simple cleanup noticed during review but unrelated to PR
+            - These skip normal review and get batched together later
+
             **IGNORE** only when there's truly nothing to do:
             - False positive (investigation shows code is correct)
             - Existing GitHub issue already covers this (link to it in summary)
@@ -362,6 +368,13 @@ jobs:
             ### For DEFER_ISSUE items - Create a GitHub issue
 
             Choose appropriate labels based on the issue type:
+
+            **For trivial out-of-scope fixes (use quick-fix label):**
+            ```bash
+            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
+              --label "quick-fix" --label "from-pr-review" \
+              --body "Simple fix noticed during review. Out of scope for current PR."
+            ```
 
             **For feature enhancements:**
             ```bash

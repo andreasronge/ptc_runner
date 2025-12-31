@@ -180,8 +180,14 @@ jobs:
           fi
 
           # Tech debt / from-pr-review count (PM monitors these regardless of epic)
-          tech_debt=$(gh issue list --label "from-pr-review" --state open --json number | jq length)
+          # Exclude quick-fix issues - they're handled by batch-fix workflow
+          tech_debt=$(gh issue list --label "from-pr-review" --state open --json number,labels \
+            | jq '[.[] | select(.labels | map(.name) | index("quick-fix") | not)] | length')
           echo "tech_debt=$tech_debt" >> $GITHUB_OUTPUT
+
+          # Quick-fix count (for awareness, handled by batch-fix workflow)
+          quick_fix=$(gh issue list --label "quick-fix" --state open --json number | jq length)
+          echo "quick_fix=$quick_fix" >> $GITHUB_OUTPUT
 
           # Ready for implementation count
           ready_issues=$(gh issue list --label "ready-for-implementation" --state open --json number | jq length)
@@ -193,6 +199,7 @@ jobs:
 
           echo "Status:"
           echo "  Tech debt: $tech_debt"
+          echo "  Quick-fix: $quick_fix (handled by batch-fix workflow)"
           echo "  Ready issues: $ready_issues"
           echo "  Needs review: $needs_review"
 
@@ -220,7 +227,7 @@ jobs:
 
             **Trigger**: ${{ github.event_name }}
             **Epic**: #${{ steps.epic.outputs.number || 'None' }} ${{ steps.epic.outputs.title || '' }}
-            **Tech debt**: ${{ steps.epic.outputs.tech_debt }} | **Ready**: ${{ steps.epic.outputs.ready_issues }} | **Needs review**: ${{ steps.epic.outputs.needs_review }}
+            **Tech debt**: ${{ steps.epic.outputs.tech_debt }} | **Quick-fix**: ${{ steps.epic.outputs.quick_fix }} (ignore) | **Ready**: ${{ steps.epic.outputs.ready_issues }} | **Needs review**: ${{ steps.epic.outputs.needs_review }}
 
             **Running workflows**: Implementation: ${{ steps.workflows.outputs.implementation }} | Review: ${{ steps.workflows.outputs.review }} | PR Fix: ${{ steps.workflows.outputs.pr_fix }}
 
@@ -228,11 +235,13 @@ jobs:
             $(cat /tmp/open-prs.txt)
 
             **Gather context:**
-            - `gh issue list --state open --json number,title,labels --limit 30`
-            - `gh issue list --label from-pr-review --state open` (priority)
+            - `gh issue list --state open --json number,title,labels --limit 30` (then filter out quick-fix)
+            - `gh issue list --label from-pr-review --state open` (priority, exclude quick-fix)
             - `gh issue list --label needs-clarification,needs-breakdown --state open` (stuck)
 
-            **Priorities:** tech debt (`from-pr-review`) > stuck reviews > stuck implementations > next epic task
+            **IGNORE**: Issues with `quick-fix` label - handled by batch-fix workflow separately.
+
+            **Priorities:** tech debt (`from-pr-review`, non-quick-fix) > stuck reviews > stuck implementations > next epic task
 
             **Your job:** Find the highest-priority item and take ONE action to move it forward.
 
