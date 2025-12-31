@@ -94,6 +94,7 @@ defmodule PtcRunner.SubAgent.Loop do
     expanded_prompt = expand_template(agent.prompt, context)
 
     initial_state = %{
+      llm: llm,
       turn: 1,
       messages: [%{role: :user, content: expanded_prompt}],
       context: context,

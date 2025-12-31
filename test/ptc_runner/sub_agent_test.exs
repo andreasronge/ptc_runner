@@ -627,7 +627,7 @@ defmodule PtcRunner.SubAgentTest do
         SubAgent.new(
           prompt: "Use double tool on {{value}}",
           tools: %{"double" => child_tool},
-          max_turns: 2
+          max_turns: 3
         )
 
       # Track LLM calls
@@ -648,6 +648,10 @@ defmodule PtcRunner.SubAgentTest do
 
           turn == 2 ->
             # Parent agent second turn - return result
+            {:ok, "```clojure\n(call \"return\" {:result 42})\n```"}
+
+          turn == 3 ->
+            # Parent agent third turn - return result
             {:ok, "```clojure\n(call \"return\" {:result 42})\n```"}
         end
       end
@@ -735,7 +739,7 @@ defmodule PtcRunner.SubAgentTest do
         SubAgent.new(
           prompt: "Call child",
           tools: %{"child" => child_tool},
-          max_turns: 2
+          max_turns: 3
         )
 
       # Parent LLM that calls the child
@@ -750,6 +754,9 @@ defmodule PtcRunner.SubAgentTest do
             {:ok, "```clojure\n(call \"child\" {})\n```"}
 
           turn == 2 ->
+            {:ok, "```clojure\n(call \"return\" {:value 42})\n```"}
+
+          turn == 3 ->
             {:ok, "```clojure\n(call \"return\" {:value 42})\n```"}
         end
       end
@@ -822,7 +829,7 @@ defmodule PtcRunner.SubAgentTest do
         SubAgent.new(
           prompt: "Call grandchild",
           tools: %{"grandchild" => grandchild_tool},
-          max_turns: 2,
+          max_turns: 1,
           max_depth: 3
         )
 
@@ -830,33 +837,28 @@ defmodule PtcRunner.SubAgentTest do
 
       parent =
         SubAgent.new(
-          prompt: "Call child",
+          prompt: "Call child and return",
           tools: %{"child" => child_tool},
-          max_turns: 2,
+          max_turns: 5,
           max_depth: 3
         )
 
-      llm = fn %{messages: msgs, turn: turn} ->
+      llm = fn %{messages: msgs} ->
         content = msgs |> List.last() |> Map.get(:content)
 
         cond do
           content =~ "Return 1" ->
             {:ok, "```clojure\n1\n```"}
 
-          content =~ "Call grandchild" and turn == 1 ->
+          content =~ "Call grandchild" ->
             {:ok, "```clojure\n(call \"grandchild\" {})\n```"}
 
-          content =~ "Call grandchild" and turn == 2 ->
-            {:ok, "```clojure\n(call \"return\" {:value 1})\n```"}
-
-          content =~ "Call child" and turn == 1 ->
+          content =~ "Call child" ->
             {:ok, "```clojure\n(call \"child\" {})\n```"}
 
-          content =~ "Call child" and turn == 2 ->
-            {:ok, "```clojure\n(call \"return\" {:value 1})\n```"}
-
           true ->
-            {:ok, "```clojure\n1\n```"}
+            # For any other input, return the value via return call
+            {:ok, "```clojure\n(call \"return\" {:value 1})\n```"}
         end
       end
 
