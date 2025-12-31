@@ -46,8 +46,6 @@ defmodule PtcRunner.SubAgent.LLMTool do
 
   """
 
-  alias PtcRunner.SubAgent.Signature.Parser
-
   defstruct [:prompt, :signature, :llm, :description, :tools]
 
   @type t :: %__MODULE__{
@@ -160,10 +158,12 @@ defmodule PtcRunner.SubAgent.LLMTool do
 
   # Validate that prompt placeholders match signature parameters
   defp validate_prompt_placeholders!(opts) do
+    alias PtcRunner.SubAgent.Template
+
     with {:ok, prompt} <- Keyword.fetch(opts, :prompt),
          {:ok, signature} <- Keyword.fetch(opts, :signature) do
-      placeholders = extract_placeholders(prompt)
-      signature_params = extract_signature_params(signature)
+      placeholders = Template.extract_placeholder_names(prompt)
+      signature_params = Template.extract_signature_params(signature)
 
       case placeholders -- signature_params do
         [] ->
@@ -177,28 +177,6 @@ defmodule PtcRunner.SubAgent.LLMTool do
       end
     else
       _ -> :ok
-    end
-  end
-
-  # Extract placeholders from prompt template (e.g., "{{user}}" -> "user", "{{email.subject}}" -> "email.subject")
-  defp extract_placeholders(prompt) do
-    ~r/\{\{([^}]+)\}\}/
-    |> Regex.scan(prompt, capture: :all_but_first)
-    |> List.flatten()
-    |> Enum.map(&String.trim/1)
-    |> Enum.uniq()
-  end
-
-  # Extract parameter names from signature string
-  defp extract_signature_params(signature) do
-    case Parser.parse(signature) do
-      {:ok, {:signature, params, _output}} ->
-        Enum.map(params, fn {name, _type} -> name end)
-
-      {:error, _reason} ->
-        # If signature parsing fails, we can't validate placeholders
-        # Let the signature validation fail elsewhere
-        []
     end
   end
 end
