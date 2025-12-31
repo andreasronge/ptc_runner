@@ -317,4 +317,230 @@ defmodule PtcRunner.SubAgentTest do
       end
     end
   end
+
+  describe "run/2 - error cases" do
+    test "returns error when llm is missing" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      {:error, step} = SubAgent.run(agent)
+
+      assert step.fail.reason == :llm_required
+      assert step.fail.message == "llm option is required"
+      assert step.return == nil
+      assert is_map(step.usage)
+      assert step.usage.duration_ms >= 0
+    end
+
+    test "returns error when llm is missing (with context)" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      {:error, step} = SubAgent.run(agent, context: %{x: 1})
+
+      assert step.fail.reason == :llm_required
+    end
+
+    test "returns error when LLM call fails" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      llm = fn _input -> {:error, :network_timeout} end
+
+      {:error, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.fail.reason == :llm_error
+      assert step.fail.message =~ "LLM call failed"
+      assert step.fail.message =~ "network_timeout"
+    end
+
+    test "returns error when no code found in LLM response" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      llm = fn _input -> {:ok, "Just plain text, no code"} end
+
+      {:error, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.fail.reason == :no_code_found
+      assert step.fail.message == "No PTC-Lisp code found in LLM response"
+    end
+
+    test "returns error for loop mode (not yet implemented)" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 5)
+      llm = fn _input -> {:ok, "42"} end
+
+      {:error, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.fail.reason == :not_implemented
+      assert step.fail.message == "Loop mode not yet implemented"
+    end
+
+    test "returns error for loop mode with tools (not yet implemented)" do
+      agent = SubAgent.new(prompt: "Test", tools: %{"test" => fn _ -> :ok end})
+      llm = fn _input -> {:ok, "42"} end
+
+      {:error, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.fail.reason == :not_implemented
+    end
+  end
+
+  describe "run/2 - single-shot mode" do
+    test "executes simple calculation" do
+      agent = SubAgent.new(prompt: "Calculate 2 + 3", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(+ 2 3)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 5
+      assert step.fail == nil
+      assert is_map(step.usage)
+      assert step.usage.duration_ms >= 0
+    end
+
+    test "executes with template expansion" do
+      agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{x: 10, y: 5})
+
+      assert step.return == 15
+    end
+
+    test "executes with string keys in context" do
+      agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{"x" => 7, "y" => 3})
+
+      assert step.return == 10
+    end
+
+    test "handles code without markdown blocks" do
+      agent = SubAgent.new(prompt: "Return 42", max_turns: 1)
+      llm = fn _input -> {:ok, "(+ 40 2)"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 42
+    end
+
+    test "handles lisp code blocks" do
+      agent = SubAgent.new(prompt: "Return 42", max_turns: 1)
+      llm = fn _input -> {:ok, "```lisp\n(+ 40 2)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 42
+    end
+
+    test "propagates errors from Lisp execution" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(/ 1 0)\n```"} end
+
+      {:error, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.fail.reason == :execution_error
+      assert step.return == nil
+    end
+
+    test "uses llm from agent struct if not in opts" do
+      llm = fn _input -> {:ok, "```clojure\n99\n```"} end
+      agent = SubAgent.new(prompt: "Test", llm: llm, max_turns: 1)
+
+      {:ok, step} = SubAgent.run(agent)
+
+      assert step.return == 99
+    end
+
+    test "opts llm overrides agent struct llm" do
+      agent_llm = fn _input -> {:ok, "```clojure\n1\n```"} end
+      opts_llm = fn _input -> {:ok, "```clojure\n2\n```"} end
+
+      agent = SubAgent.new(prompt: "Test", llm: agent_llm, max_turns: 1)
+
+      {:ok, step} = SubAgent.run(agent, llm: opts_llm)
+
+      assert step.return == 2
+    end
+
+    test "LLM receives expanded prompt in user message" do
+      agent = SubAgent.new(prompt: "Find {{item}}", max_turns: 1)
+
+      # Capture what the LLM receives
+      received_input = :erlang.make_ref()
+
+      llm = fn input ->
+        send(self(), {:llm_input, received_input, input})
+        {:ok, "```clojure\n42\n```"}
+      end
+
+      SubAgent.run(agent, llm: llm, context: %{item: "treasure"})
+
+      assert_received {:llm_input, ^received_input, input}
+      assert input.system =~ "PTC-Lisp"
+      assert [%{role: :user, content: "Find treasure"}] = input.messages
+    end
+
+    test "empty context uses empty map" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n42\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 42
+    end
+
+    test "missing context key keeps placeholder unchanged" do
+      agent = SubAgent.new(prompt: "Find {{missing}}", max_turns: 1)
+
+      llm = fn %{messages: [%{content: content}]} ->
+        # The missing key should remain as {{missing}}
+        assert content == "Find {{missing}}"
+        {:ok, "```clojure\n42\n```"}
+      end
+
+      SubAgent.run(agent, llm: llm, context: %{other: "value"})
+    end
+  end
+
+  describe "run/2 - string convenience form" do
+    test "creates agent from string prompt" do
+      llm = fn _input -> {:ok, "```clojure\n42\n```"} end
+
+      {:ok, step} = SubAgent.run("Return 42", max_turns: 1, llm: llm)
+
+      assert step.return == 42
+    end
+
+    test "accepts signature in opts for string form" do
+      llm = fn _input -> {:ok, "```clojure\n{:count 5}\n```"} end
+
+      {:ok, step} =
+        SubAgent.run("Count items", signature: "() -> {count :int}", max_turns: 1, llm: llm)
+
+      assert step.return == %{count: 5}
+    end
+
+    test "accepts tools in opts for string form (triggers loop mode)" do
+      tools = %{"test" => fn _ -> :ok end}
+      llm = fn _input -> {:ok, "42"} end
+
+      # This should trigger loop mode which is not implemented
+      {:error, step} = SubAgent.run("Test", tools: tools, llm: llm)
+
+      assert step.fail.reason == :not_implemented
+    end
+
+    test "accepts max_turns in opts for string form" do
+      llm = fn _input -> {:ok, "42"} end
+
+      # max_turns: 2 triggers loop mode
+      {:error, step} = SubAgent.run("Test", max_turns: 2, llm: llm)
+
+      assert step.fail.reason == :not_implemented
+    end
+
+    test "string form with context" do
+      llm = fn _input -> {:ok, "```clojure\n(+ ctx/a ctx/b)\n```"} end
+
+      {:ok, step} =
+        SubAgent.run("Add {{a}} and {{b}}", max_turns: 1, llm: llm, context: %{a: 3, b: 4})
+
+      assert step.return == 7
+    end
+  end
 end

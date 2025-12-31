@@ -268,4 +268,225 @@ defmodule PtcRunner.SubAgent do
         []
     end
   end
+
+  @doc """
+  Executes a SubAgent with the given options.
+
+  Returns a `Step` struct containing the result, metrics, and execution trace.
+
+  ## Parameters
+
+  - `agent` - A `%SubAgent{}` struct or a string prompt (for convenience)
+  - `opts` - Keyword list of runtime options
+
+  ## Runtime Options
+
+  - `llm` - Required. LLM callback function `(map() -> {:ok, String.t()} | {:error, term()})` or atom
+  - `context` - Map of input data (default: %{})
+  - Other options from agent definition can be overridden
+
+  ## Returns
+
+  - `{:ok, Step.t()}` on success
+  - `{:error, Step.t()}` on failure
+
+  ## Examples
+
+      # Using a SubAgent struct
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
+      iex> llm = fn %{messages: [%{content: _prompt}]} -> {:ok, "```clojure\\n(+ ctx/x ctx/y)\\n```"} end
+      iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{x: 5, y: 3})
+      iex> step.return
+      8
+
+      # Using string convenience form
+      iex> llm = fn %{messages: [%{content: _prompt}]} -> {:ok, "```clojure\\n42\\n```"} end
+      iex> {:ok, step} = PtcRunner.SubAgent.run("Return 42", max_turns: 1, llm: llm)
+      iex> step.return
+      42
+  """
+  @spec run(t() | String.t(), keyword()) ::
+          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+  def run(agent_or_prompt, opts \\ [])
+
+  # String convenience form - creates agent inline
+  def run(prompt, opts) when is_binary(prompt) do
+    # Extract struct fields from opts
+    struct_opts =
+      opts
+      |> Keyword.take([
+        :signature,
+        :tools,
+        :max_turns,
+        :tool_catalog,
+        :prompt_limit,
+        :mission_timeout,
+        :llm_retry,
+        :llm,
+        :system_prompt
+      ])
+      |> Keyword.put(:prompt, prompt)
+
+    agent = new(struct_opts)
+
+    # Remove struct opts and pass runtime opts
+    runtime_opts =
+      Keyword.drop(opts, [
+        :signature,
+        :tools,
+        :max_turns,
+        :tool_catalog,
+        :prompt_limit,
+        :mission_timeout,
+        :llm_retry,
+        :system_prompt,
+        :prompt
+      ])
+
+    run(agent, runtime_opts)
+  end
+
+  # Main implementation with SubAgent struct
+  def run(%__MODULE__{} = agent, opts) do
+    start_time = System.monotonic_time(:millisecond)
+
+    # Validate required llm option
+    llm = Keyword.get(opts, :llm) || agent.llm
+
+    if llm do
+      # Get context
+      context = Keyword.get(opts, :context, %{})
+
+      # Determine execution mode
+      if agent.max_turns == 1 and map_size(agent.tools) == 0 do
+        # Single-shot mode
+        run_single_shot(agent, llm, context, start_time)
+      else
+        # Loop mode - delegate to Loop.run/2 (not implemented yet)
+        return_error(:not_implemented, "Loop mode not yet implemented", %{}, start_time)
+      end
+    else
+      return_error(:llm_required, "llm option is required", %{}, start_time)
+    end
+  end
+
+  # Single-shot execution: one LLM call, no tools, expression result returned
+  defp run_single_shot(agent, llm, context, start_time) do
+    # Expand template in prompt
+    expanded_prompt = expand_template(agent.prompt, context)
+
+    # Build LLM input
+    llm_input = %{
+      system: default_system_prompt(),
+      messages: [%{role: :user, content: expanded_prompt}]
+    }
+
+    # Call LLM
+    case call_llm(llm, llm_input) do
+      {:ok, response} ->
+        # Extract code from response
+        case extract_code(response) do
+          {:ok, code} ->
+            # Execute via Lisp
+            lisp_result = PtcRunner.Lisp.run(code, context: context, tools: %{})
+
+            # Add usage metrics from this execution
+            case lisp_result do
+              {:ok, step} ->
+                duration_ms = System.monotonic_time(:millisecond) - start_time
+                updated_step = update_step_usage(step, duration_ms)
+                {:ok, updated_step}
+
+              {:error, step} ->
+                duration_ms = System.monotonic_time(:millisecond) - start_time
+                updated_step = update_step_usage(step, duration_ms)
+                {:error, updated_step}
+            end
+
+          :none ->
+            return_error(
+              :no_code_found,
+              "No PTC-Lisp code found in LLM response",
+              %{},
+              start_time
+            )
+        end
+
+      {:error, reason} ->
+        return_error(:llm_error, "LLM call failed: #{inspect(reason)}", %{}, start_time)
+    end
+  end
+
+  # Expand template placeholders with context values
+  defp expand_template(prompt, context) when is_map(context) do
+    Regex.replace(~r/\{\{\s*(\w+)\s*\}\}/, prompt, fn _, key ->
+      try do
+        # Try as atom first, then as string
+        context
+        |> Map.get(String.to_existing_atom(key), Map.get(context, key, "{{#{key}}}"))
+        |> to_string()
+      rescue
+        ArgumentError ->
+          # String.to_existing_atom failed, try as string key
+          context
+          |> Map.get(key, "{{#{key}}}")
+          |> to_string()
+      end
+    end)
+  end
+
+  # Extract PTC-Lisp code from LLM response
+  defp extract_code(text) do
+    # Try extracting from markdown code block (lisp, clojure, or unmarked)
+    case Regex.run(~r/```(?:lisp|clojure)?\s*([\s\S]+?)\s*```/, text) do
+      [_, content] ->
+        {:ok, String.trim(content)}
+
+      nil ->
+        # Try finding a bare S-expression (starts with paren)
+        # Match expressions like (+ 40 2) or more complex ones
+        trimmed = String.trim(text)
+
+        if String.starts_with?(trimmed, "(") do
+          {:ok, trimmed}
+        else
+          :none
+        end
+    end
+  end
+
+  # Minimal system prompt for single-shot mode
+  defp default_system_prompt do
+    """
+    You are an AI that solves tasks by writing PTC-Lisp programs.
+    Output your program in a ```clojure code block.
+    """
+  end
+
+  # Call the LLM (function or atom)
+  defp call_llm(llm, input) when is_function(llm) do
+    llm.(input)
+  end
+
+  defp call_llm(llm, _input) when is_atom(llm) do
+    # For now, atoms are not supported (registry support comes later)
+    {:error, :llm_atom_not_supported}
+  end
+
+  # Helper to create error Step
+  defp return_error(reason, message, memory, start_time) do
+    duration_ms = System.monotonic_time(:millisecond) - start_time
+
+    step = PtcRunner.Step.error(reason, message, memory)
+
+    updated_step = %{step | usage: %{duration_ms: duration_ms, memory_bytes: 0}}
+
+    {:error, updated_step}
+  end
+
+  # Update step with usage metrics
+  defp update_step_usage(step, duration_ms) do
+    usage = step.usage || %{memory_bytes: 0}
+    %{step | usage: Map.put(usage, :duration_ms, duration_ms)}
+  end
 end

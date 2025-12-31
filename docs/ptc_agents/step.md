@@ -220,6 +220,8 @@ Complete list of error reasons in `step.fail.reason`:
 | `:turn_budget_exhausted` | SubAgent | Total turn budget exhausted |
 | `:mission_timeout` | SubAgent | Total mission duration exceeded |
 | `:llm_error` | SubAgent | LLM callback failed after retries |
+| `:llm_required` | SubAgent | LLM option is required for agent execution |
+| `:no_code_found` | SubAgent | No PTC-Lisp code found in LLM response |
 | `:llm_not_found` | SubAgent | LLM atom not in registry |
 | `:llm_registry_required` | SubAgent | Atom LLM used without registry |
 | `:invalid_llm` | SubAgent | Registry value not a function |
