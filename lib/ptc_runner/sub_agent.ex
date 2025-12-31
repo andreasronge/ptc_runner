@@ -113,7 +113,7 @@ defmodule PtcRunner.SubAgent do
 
   ## Raises
 
-  - `ArgumentError` - if prompt is missing, not a string, max_turns is not positive, or tools is not a map
+  - `ArgumentError` - if prompt is missing or not a string, max_turns is not positive, tools is not a map, or any optional field has an invalid type
 
   ## Examples
 
@@ -151,6 +151,11 @@ defmodule PtcRunner.SubAgent do
     validate_prompt!(opts)
     validate_tools!(opts)
     validate_max_turns!(opts)
+    validate_mission_timeout!(opts)
+    validate_signature!(opts)
+    validate_llm_retry!(opts)
+    validate_tool_catalog!(opts)
+    validate_prompt_limit!(opts)
   end
 
   defp validate_prompt!(opts) do
@@ -173,6 +178,46 @@ defmodule PtcRunner.SubAgent do
     case Keyword.fetch(opts, :max_turns) do
       {:ok, max_turns} when is_integer(max_turns) and max_turns > 0 -> :ok
       {:ok, _} -> raise ArgumentError, "max_turns must be a positive integer"
+      :error -> :ok
+    end
+  end
+
+  defp validate_mission_timeout!(opts) do
+    case Keyword.fetch(opts, :mission_timeout) do
+      {:ok, timeout} when is_integer(timeout) and timeout > 0 -> :ok
+      {:ok, _} -> raise ArgumentError, "mission_timeout must be a positive integer"
+      :error -> :ok
+    end
+  end
+
+  defp validate_signature!(opts) do
+    case Keyword.fetch(opts, :signature) do
+      {:ok, sig} when is_binary(sig) -> :ok
+      {:ok, _} -> raise ArgumentError, "signature must be a string"
+      :error -> :ok
+    end
+  end
+
+  defp validate_llm_retry!(opts) do
+    case Keyword.fetch(opts, :llm_retry) do
+      {:ok, retry} when is_map(retry) -> :ok
+      {:ok, _} -> raise ArgumentError, "llm_retry must be a map"
+      :error -> :ok
+    end
+  end
+
+  defp validate_tool_catalog!(opts) do
+    case Keyword.fetch(opts, :tool_catalog) do
+      {:ok, catalog} when is_map(catalog) -> :ok
+      {:ok, _} -> raise ArgumentError, "tool_catalog must be a map"
+      :error -> :ok
+    end
+  end
+
+  defp validate_prompt_limit!(opts) do
+    case Keyword.fetch(opts, :prompt_limit) do
+      {:ok, limit} when is_map(limit) -> :ok
+      {:ok, _} -> raise ArgumentError, "prompt_limit must be a map"
       :error -> :ok
     end
   end
