@@ -236,6 +236,215 @@ defmodule PtcRunner.SubAgent.PromptTest do
     end
   end
 
+  describe "customization" do
+    test "prefix prepends to generated prompt" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze data",
+          system_prompt: %{prefix: "You are an expert analyst."}
+        )
+
+      prompt = Prompt.generate(agent, context: %{data: [1, 2, 3]})
+
+      assert String.starts_with?(prompt, "You are an expert analyst.")
+      assert prompt =~ "# Role"
+      assert prompt =~ "ctx/data"
+    end
+
+    test "suffix appends to generated prompt" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze data",
+          system_prompt: %{suffix: "Always explain your reasoning."}
+        )
+
+      prompt = Prompt.generate(agent, context: %{data: [1, 2, 3]})
+
+      assert String.ends_with?(prompt, "Always explain your reasoning.")
+      assert prompt =~ "# Role"
+      assert prompt =~ "ctx/data"
+    end
+
+    test "prefix and suffix work together" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze data",
+          system_prompt: %{
+            prefix: "You are an expert analyst.",
+            suffix: "Always explain your reasoning."
+          }
+        )
+
+      prompt = Prompt.generate(agent, context: %{data: [1, 2, 3]})
+
+      assert String.starts_with?(prompt, "You are an expert analyst.")
+      assert String.ends_with?(prompt, "Always explain your reasoning.")
+      assert prompt =~ "ctx/data"
+    end
+
+    test "language_spec replaces language section" do
+      custom_lang = "Use Python-like syntax only."
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: %{language_spec: custom_lang}
+        )
+
+      prompt = Prompt.generate(agent, context: %{})
+
+      assert prompt =~ custom_lang
+      refute prompt =~ "Clojure-inspired"
+    end
+
+    test "output_format replaces output section" do
+      custom_output = "Return JSON only."
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: %{output_format: custom_output}
+        )
+
+      prompt = Prompt.generate(agent, context: %{})
+
+      assert prompt =~ custom_output
+      # Check the Output Format section was replaced (not in code examples elsewhere)
+      refute prompt =~ "# Output Format\n\nRespond with a single ```clojure"
+    end
+
+    test "function transformer modifies prompt" do
+      transformer = fn prompt -> String.upcase(prompt) end
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: transformer
+        )
+
+      prompt = Prompt.generate(agent, context: %{})
+
+      assert prompt == String.upcase(prompt)
+      assert prompt =~ "# ROLE"
+    end
+
+    test "string override bypasses generation entirely" do
+      override = "Custom prompt completely replacing default"
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: override
+        )
+
+      prompt = Prompt.generate(agent, context: %{data: 123})
+
+      assert prompt == override
+      refute prompt =~ "# Role"
+    end
+
+    test "nil system_prompt uses default generation" do
+      agent = SubAgent.new(prompt: "Test", system_prompt: nil)
+
+      prompt = Prompt.generate(agent, context: %{})
+
+      assert prompt =~ "# Role"
+      assert prompt =~ "# Rules"
+    end
+  end
+
+  describe "error_recovery_prompt" do
+    test "generates error recovery prompt" do
+      error = %{type: :parse_error, message: "Unexpected token at position 45"}
+
+      recovery = Prompt.generate_error_recovery_prompt(error)
+
+      assert recovery =~ "# Previous Turn Error"
+      assert recovery =~ "parse_error"
+      assert recovery =~ "Unexpected token at position 45"
+      assert recovery =~ "```clojure code block"
+    end
+
+    test "handles missing error fields" do
+      error = %{}
+
+      recovery = Prompt.generate_error_recovery_prompt(error)
+
+      assert recovery =~ "# Previous Turn Error"
+      assert recovery =~ "unknown_error"
+    end
+
+    test "error context is appended to prompt" do
+      agent = SubAgent.new(prompt: "Test")
+      error = %{type: :parse_error, message: "Bad syntax"}
+
+      prompt = Prompt.generate(agent, context: %{}, error_context: error)
+
+      assert prompt =~ "# Role"
+      assert prompt =~ "# Previous Turn Error"
+      assert prompt =~ "Bad syntax"
+    end
+  end
+
+  describe "truncation" do
+    test "does not truncate when no limit set" do
+      long_prompt = String.duplicate("x", 10_000)
+
+      result = Prompt.truncate_if_needed(long_prompt, nil)
+
+      assert result == long_prompt
+    end
+
+    test "does not truncate when under limit" do
+      short_prompt = "Short prompt"
+
+      result = Prompt.truncate_if_needed(short_prompt, %{max_chars: 1000})
+
+      assert result == short_prompt
+    end
+
+    test "truncates when over limit" do
+      long_prompt = String.duplicate("x", 1000)
+
+      result = Prompt.truncate_if_needed(long_prompt, %{max_chars: 100})
+
+      assert String.length(result) > 100
+      assert String.length(result) < 300
+      assert result =~ "truncated"
+    end
+
+    test "truncation preserves beginning of prompt" do
+      prompt = "# Role\n\nImportant content" <> String.duplicate("x", 1000)
+
+      result = Prompt.truncate_if_needed(prompt, %{max_chars: 100})
+
+      assert result =~ "# Role"
+      assert result =~ "Important content"
+    end
+
+    test "truncation with agent applies to final prompt" do
+      # Create an agent with lots of tools and data
+      tools =
+        Map.new(1..50, fn i ->
+          {"tool_#{i}", fn _ -> :ok end}
+        end)
+
+      agent =
+        SubAgent.new(
+          prompt: "Process everything",
+          tools: tools,
+          prompt_limit: %{max_chars: 500}
+        )
+
+      context = Map.new(1..50, fn i -> {"key_#{i}", "value_#{i}"} end)
+
+      prompt = Prompt.generate(agent, context: context)
+
+      assert String.length(prompt) < 1000
+      assert prompt =~ "truncated"
+    end
+  end
+
   describe "integration" do
     test "E2E: generates complete prompt for realistic agent" do
       tools = %{

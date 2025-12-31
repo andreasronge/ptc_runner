@@ -101,6 +101,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   - `agent` - A `%SubAgent{}` struct
   - `opts` - Keyword list with:
     - `context` - Context map for data inventory (default: %{})
+    - `error_context` - Optional error from previous turn for recovery prompts
 
   ## Returns
 
@@ -119,12 +120,51 @@ defmodule PtcRunner.SubAgent.Prompt do
   @spec generate(SubAgent.t(), keyword()) :: String.t()
   def generate(%SubAgent{} = agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
+    error_context = Keyword.get(opts, :error_context)
 
+    # Generate base prompt
+    base_prompt = generate_base_prompt(agent, context)
+
+    # Add error recovery prompt if needed
+    base_prompt_with_error =
+      if error_context do
+        base_prompt <> "\n\n" <> generate_error_recovery_prompt(error_context)
+      else
+        base_prompt
+      end
+
+    # Apply customization
+    customized_prompt = apply_customization(base_prompt_with_error, agent.system_prompt)
+
+    # Apply truncation if prompt_limit is set
+    truncate_if_needed(customized_prompt, agent.prompt_limit)
+  end
+
+  @doc """
+  Generate the base system prompt without customization.
+
+  This is the core generated content before any prefix/suffix/replacements are applied.
+  """
+  @spec generate_base_prompt(SubAgent.t(), map()) :: String.t()
+  def generate_base_prompt(%SubAgent{} = agent, context) do
     # Parse signature if present
     context_signature =
       case agent.signature do
         nil -> nil
         sig_str -> Signature.parse(sig_str) |> elem(1)
+      end
+
+    # Get custom sections from system_prompt if it's a map
+    {language_ref, output_fmt} =
+      case agent.system_prompt do
+        opts when is_map(opts) ->
+          {
+            Map.get(opts, :language_spec, @language_reference),
+            Map.get(opts, :output_format, @output_format)
+          }
+
+        _ ->
+          {@language_reference, @output_format}
       end
 
     # Generate sections
@@ -140,8 +180,8 @@ defmodule PtcRunner.SubAgent.Prompt do
       rules_section,
       data_inventory,
       tool_schemas,
-      @language_reference,
-      @output_format,
+      language_ref,
+      output_fmt,
       "# Mission\n\n#{mission}"
     ]
     |> Enum.join("\n\n")
@@ -297,6 +337,157 @@ defmodule PtcRunner.SubAgent.Prompt do
 
     #{tools_section}
     """
+  end
+
+  @doc """
+  Apply system prompt customization.
+
+  Handles three forms:
+  - String: complete override
+  - Function: transformer that receives and modifies the prompt
+  - Map: selective section replacements and prefix/suffix
+
+  ## Parameters
+
+  - `base_prompt` - The generated base prompt
+  - `customization` - nil | String.t() | (String.t() -> String.t()) | map()
+
+  ## Returns
+
+  The customized prompt string.
+
+  ## Examples
+
+      iex> base = "# Role\\n\\nYou are a generator."
+      iex> PtcRunner.SubAgent.Prompt.apply_customization(base, nil)
+      "# Role\\n\\nYou are a generator."
+
+      iex> base = "# Role\\n\\nYou are a generator."
+      iex> PtcRunner.SubAgent.Prompt.apply_customization(base, "Custom prompt")
+      "Custom prompt"
+
+      iex> base = "# Role\\n\\nYou are a generator."
+      iex> transformer = fn prompt -> "PREFIX\\n\\n" <> prompt end
+      iex> PtcRunner.SubAgent.Prompt.apply_customization(base, transformer)
+      "PREFIX\\n\\n# Role\\n\\nYou are a generator."
+
+  """
+  @spec apply_customization(String.t(), SubAgent.system_prompt_opts() | nil) :: String.t()
+  def apply_customization(base_prompt, nil), do: base_prompt
+
+  # String override - use as-is
+  def apply_customization(_base_prompt, override) when is_binary(override), do: override
+
+  # Function transformer
+  def apply_customization(base_prompt, transformer) when is_function(transformer, 1) do
+    transformer.(base_prompt)
+  end
+
+  # Map customization - prefix and suffix (language_spec/output_format already applied)
+  def apply_customization(base_prompt, opts) when is_map(opts) do
+    # Apply prefix and suffix
+    prefix = Map.get(opts, :prefix, "")
+    suffix = Map.get(opts, :suffix, "")
+
+    [prefix, base_prompt, suffix]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  @doc """
+  Generate error recovery prompt for parse failures.
+
+  Shows the error and provides guidance to help the LLM fix the issue.
+
+  ## Parameters
+
+  - `error_context` - Map with error details (e.g., %{type: :parse_error, message: "..."})
+
+  ## Returns
+
+  A string with error recovery guidance.
+
+  ## Examples
+
+      iex> error = %{type: :parse_error, message: "Unexpected token at position 45"}
+      iex> recovery = PtcRunner.SubAgent.Prompt.generate_error_recovery_prompt(error)
+      iex> recovery =~ "Previous Turn Error"
+      true
+      iex> recovery =~ "Unexpected token"
+      true
+
+  """
+  @spec generate_error_recovery_prompt(map()) :: String.t()
+  def generate_error_recovery_prompt(error_context) do
+    error_type = Map.get(error_context, :type, :unknown_error)
+    error_message = Map.get(error_context, :message, "Unknown error")
+
+    """
+    # Previous Turn Error
+
+    Your previous program failed with:
+    - **Error**: #{error_type}
+    - **Message**: #{error_message}
+
+    Please ensure your response:
+    1. Contains a ```clojure code block
+    2. Uses valid s-expression syntax
+    3. Calls tools with (call "tool-name" {...})
+
+    Please fix the issue and try again.
+    """
+  end
+
+  @doc """
+  Truncate prompt if it exceeds the configured character limit.
+
+  Uses character count as an approximation for tokens (roughly 4 chars per token).
+  Preserves critical sections and truncates data/tools first.
+
+  ## Parameters
+
+  - `prompt` - The full prompt string
+  - `limit_config` - nil or map with :max_chars
+
+  ## Returns
+
+  The prompt, possibly truncated with a warning if limit was exceeded.
+
+  ## Examples
+
+      iex> short_prompt = "# Role\\n\\nShort prompt"
+      iex> PtcRunner.SubAgent.Prompt.truncate_if_needed(short_prompt, nil)
+      "# Role\\n\\nShort prompt"
+
+      iex> long_prompt = String.duplicate("x", 1000)
+      iex> result = PtcRunner.SubAgent.Prompt.truncate_if_needed(long_prompt, %{max_chars: 100})
+      iex> String.length(result) < String.length(long_prompt)
+      true
+      iex> result =~ "truncated"
+      true
+
+  """
+  @spec truncate_if_needed(String.t(), map() | nil) :: String.t()
+  def truncate_if_needed(prompt, nil), do: prompt
+
+  def truncate_if_needed(prompt, limit_config) when is_map(limit_config) do
+    max_chars = Map.get(limit_config, :max_chars)
+
+    if max_chars && String.length(prompt) > max_chars do
+      require Logger
+
+      Logger.warning(
+        "System prompt exceeds limit (#{String.length(prompt)} > #{max_chars} chars), truncating"
+      )
+
+      # Simple truncation strategy: keep first part, add warning
+      truncated = String.slice(prompt, 0, max_chars)
+
+      truncated <>
+        "\n\n[... truncated due to length limit ...]\n\nNote: Some content was removed to fit within the character limit."
+    else
+      prompt
+    end
   end
 
   # ============================================================
