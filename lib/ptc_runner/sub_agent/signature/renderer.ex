@@ -35,24 +35,41 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
   # Type Rendering
   # ============================================================
 
-  @spec render_type(term()) :: String.t()
-  defp render_type(:string), do: ":string"
-  defp render_type(:int), do: ":int"
-  defp render_type(:float), do: ":float"
-  defp render_type(:bool), do: ":bool"
-  defp render_type(:keyword), do: ":keyword"
-  defp render_type(:any), do: ":any"
-  defp render_type(:map), do: ":map"
+  @doc """
+  Render a type spec to its string representation.
 
-  defp render_type({:optional, type}) do
+  Converts type tuples and atoms to their PTC-Lisp syntax representation
+  (e.g., `:string`, `[int]`, `{key :string}`).
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Signature.Renderer.render_type(:string)
+      ":string"
+
+      iex> PtcRunner.SubAgent.Signature.Renderer.render_type({:optional, :int})
+      ":int?"
+
+      iex> PtcRunner.SubAgent.Signature.Renderer.render_type({:list, :string})
+      "[:string]"
+  """
+  @spec render_type(term()) :: String.t()
+  def render_type(:string), do: ":string"
+  def render_type(:int), do: ":int"
+  def render_type(:float), do: ":float"
+  def render_type(:bool), do: ":bool"
+  def render_type(:keyword), do: ":keyword"
+  def render_type(:any), do: ":any"
+  def render_type(:map), do: ":map"
+
+  def render_type({:optional, type}) do
     render_type(type) <> "?"
   end
 
-  defp render_type({:list, element_type}) do
+  def render_type({:list, element_type}) do
     "[" <> render_type(element_type) <> "]"
   end
 
-  defp render_type({:map, fields}) do
+  def render_type({:map, fields}) do
     fields_str =
       Enum.map_join(fields, ", ", fn {name, type} -> "#{name} #{render_type(type)}" end)
 

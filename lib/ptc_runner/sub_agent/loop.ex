@@ -23,6 +23,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Prompt
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -171,7 +172,7 @@ defmodule PtcRunner.SubAgent.Loop do
     else
       # Build LLM input
       llm_input = %{
-        system: build_system_prompt(),
+        system: build_system_prompt(agent, state.context),
         messages: state.messages,
         turn: state.turn,
         tool_names: Map.keys(agent.tools)
@@ -422,13 +423,9 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
   end
 
-  # System prompt generation - intentionally minimal for now.
-  # See issue #374 for future enhancements (context-aware prompts, tool documentation, etc.)
-  defp build_system_prompt do
-    """
-    You are an AI that solves tasks by writing PTC-Lisp programs.
-    Output your program in a ```clojure code block.
-    """
+  # System prompt generation
+  defp build_system_prompt(agent, context) do
+    Prompt.generate(agent, context: context)
   end
 
   # Call the LLM (function or atom)
