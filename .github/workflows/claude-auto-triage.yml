@@ -370,11 +370,17 @@ jobs:
             Choose appropriate labels based on the issue type:
 
             **For trivial out-of-scope fixes (use quick-fix label):**
+            First check if a similar quick-fix issue already exists:
+            ```bash
+            gh issue list --label "quick-fix" --state open --json number,title
+            ```
+            If no duplicate exists, create the issue:
             ```bash
             gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
               --label "quick-fix" --label "from-pr-review" \
               --body "Simple fix noticed during review. Out of scope for current PR."
             ```
+            If a similar issue exists, skip creating a duplicate and note in the summary.
 
             **For feature enhancements:**
             ```bash

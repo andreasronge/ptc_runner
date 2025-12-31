@@ -8,18 +8,56 @@ on:
   issues:
     types: [labeled]
 
+  # Clean up batch-pending labels when batch PR is closed without merge
+  pull_request:
+    types: [closed]
+
 jobs:
+  # Clean up batch-pending labels if PR closed without merge
+  cleanup-on-pr-close:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == false &&
+      startsWith(github.event.pull_request.head.ref, 'batch-fix/')
+
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Remove batch-pending labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Batch PR closed without merge - removing batch-pending labels"
+
+          # Find all issues with batch-pending and remove the label
+          ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "batch-pending" \
+            --state open \
+            --json number \
+            --jq '.[].number')
+
+          for issue in $ISSUES; do
+            echo "Removing batch-pending from issue #$issue"
+            gh issue edit "$issue" \
+              --repo "${{ github.repository }}" \
+              --remove-label "batch-pending" || true
+          done
+
+          echo "Cleanup complete - issues are available for next batch"
+
   check-threshold:
     # Only run on label event if it's the quick-fix label
     if: |
       github.event_name == 'workflow_dispatch' ||
-      github.event.label.name == 'quick-fix'
+      (github.event_name == 'issues' && github.event.label.name == 'quick-fix')
 
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       issue_count: ${{ steps.check.outputs.issue_count }}
-      issues: ${{ steps.check.outputs.issues }}
 
     steps:
       - name: Check quick-fix issue count
@@ -27,21 +65,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get all open quick-fix issues
+          # Get open quick-fix issues that are NOT already in a batch
+          # Exclude issues with batch-pending label
           ISSUES=$(gh issue list \
             --repo "${{ github.repository }}" \
             --label "quick-fix" \
             --state open \
-            --json number,title \
-            --limit 20)
+            --json number,title,labels \
+            --limit 20 \
+            | jq '[.[] | select(.labels | map(.name) | index("batch-pending") | not)]')
 
           COUNT=$(echo "$ISSUES" | jq length)
           echo "issue_count=$COUNT" >> $GITHUB_OUTPUT
-          echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
-          echo "Found $COUNT quick-fix issues"
+          echo "Found $COUNT available quick-fix issues (excluding batch-pending)"
 
-          # Threshold: 5 issues for auto-trigger, always run for manual
+          # Threshold: 5 issues for auto-trigger, always run for manual if any exist
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "$COUNT" -gt 0 ]; then
             echo "Manual trigger with $COUNT issues - proceeding"
             echo "should_run=true" >> $GITHUB_OUTPUT
@@ -86,18 +125,29 @@ jobs:
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
-      - name: Prepare issue list
+      - name: Prepare issue list and mark as pending
         id: issues
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get detailed info for all quick-fix issues
+          # Get quick-fix issues NOT already in a batch
           gh issue list \
             --repo "${{ github.repository }}" \
             --label "quick-fix" \
             --state open \
-            --json number,title,body \
-            --limit 20 > /tmp/quick-fix-issues.json
+            --json number,title,body,labels \
+            --limit 20 \
+            | jq '[.[] | select(.labels | map(.name) | index("batch-pending") | not)]' \
+            > /tmp/quick-fix-issues.json
+
+          COUNT=$(jq length /tmp/quick-fix-issues.json)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No issues to fix (all may have batch-pending)"
+            echo "has_issues=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "has_issues=true" >> $GITHUB_OUTPUT
 
           # Create summary for prompt
           jq -r '.[] | "- #\(.number): \(.title)"' /tmp/quick-fix-issues.json > /tmp/issue-summary.txt
@@ -105,11 +155,21 @@ jobs:
           echo "Issues to fix:"
           cat /tmp/issue-summary.txt
 
-          # Get issue numbers for closing
+          # Get issue numbers
           ISSUE_NUMBERS=$(jq -r '.[].number' /tmp/quick-fix-issues.json | tr '\n' ' ')
           echo "issue_numbers=$ISSUE_NUMBERS" >> $GITHUB_OUTPUT
 
+          # Mark issues as batch-pending to prevent duplicate processing
+          echo "Marking issues as batch-pending..."
+          for issue in $ISSUE_NUMBERS; do
+            echo "Adding batch-pending to issue #$issue"
+            gh issue edit "$issue" \
+              --repo "${{ github.repository }}" \
+              --add-label "batch-pending" || true
+          done
+
       - name: Run Claude Batch Fix
+        if: steps.issues.outputs.has_issues == 'true'
         id: claude-fix
         uses: anthropics/claude-code-action@v1
         env:
@@ -133,13 +193,16 @@ jobs:
             ## Instructions
 
             1. **Read each issue** to understand what needs to be fixed
-            2. **Create a single branch** named `batch-fix/quick-fixes-$(date +%Y%m%d)`
-            3. **Fix ALL issues** with minimal, focused changes
-            4. **Run tests**: `mix test` to verify nothing is broken
-            5. **Create ONE PR** that:
+            2. **Check for duplicates**: If two issues describe the same fix, only fix it once
+               and note in the PR which issues were duplicates
+            3. **Create a single branch** named `batch-fix/quick-fixes-$(date +%Y%m%d)-$(date +%H%M)`
+            4. **Fix ALL issues** with minimal, focused changes
+            5. **Run tests**: `mix test` to verify nothing is broken
+            6. **Create ONE PR** that:
                - Has title: "fix: batch quick-fixes (N issues)"
                - Lists all issues being fixed in the body
                - Uses "Closes #N" for each issue so they auto-close on merge
+               - Notes any issues skipped (duplicates, unclear, too complex)
 
             ## PR Body Template
 
@@ -151,6 +214,9 @@ jobs:
             - Closes #X: [title]
             - Closes #Y: [title]
             ...
+
+            ## Issues Skipped (if any)
+            - #Z: [reason - duplicate of #X / unclear / too complex]
 
             ## Changes
             - [Brief description of each change]
@@ -165,9 +231,25 @@ jobs:
             - Don't refactor unrelated code
             - Don't add new features
             - If an issue is unclear or too complex, skip it and note why in the PR
+            - If issues are duplicates, close all of them but only fix once
             - Run `mix format` before committing
 
             Begin fixing the issues now.
 
           claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,Task,TodoWrite,TodoRead"'
           show_full_output: true
+
+      # If Claude fails, remove batch-pending so issues can be retried
+      - name: Cleanup on failure
+        if: failure() && steps.issues.outputs.has_issues == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBERS: ${{ steps.issues.outputs.issue_numbers }}
+        run: |
+          echo "Batch fix failed - removing batch-pending labels"
+          for issue in $ISSUE_NUMBERS; do
+            echo "Removing batch-pending from issue #$issue"
+            gh issue edit "$issue" \
+              --repo "${{ github.repository }}" \
+              --remove-label "batch-pending" || true
+          done
