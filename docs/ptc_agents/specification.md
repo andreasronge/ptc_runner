@@ -1469,7 +1469,7 @@ Passing `Step` to `:context` auto-extracts `return` and `signature`.
 {:error, chained_step} = SubAgent.run(next_agent, llm: llm, context: failed_step)
 
 chained_step.fail.reason  #=> :chained_failure
-chained_step.fail.details #=> %{upstream_reason: failed_step.fail.reason}
+chained_step.fail.details #=> %{upstream: failed_step.fail}
 ```
 
 ### DD-6: Agents as Data
