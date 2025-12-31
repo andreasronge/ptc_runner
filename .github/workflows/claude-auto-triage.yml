@@ -310,9 +310,19 @@ jobs:
 
             ## CRITICAL: How to Execute Actions
 
-            ### For FIX_NOW items - Post ONE BATCHED comment that triggers claude.yml
+            ### For PR DESCRIPTION fixes - Fix directly (no @claude comment needed)
 
-            **IMPORTANT**: Batch ALL FIX_NOW items into a SINGLE comment to minimize workflow cycles.
+            If a FIX_NOW item only requires updating the PR description (not code), fix it directly:
+            1. Get current PR body: `gh pr view ${{ steps.pr.outputs.number }} --json body --jq '.body'`
+            2. Edit the description: `gh pr edit ${{ steps.pr.outputs.number }} --body "updated description..."`
+            3. Post a confirmation comment (without @claude prefix)
+            4. Do NOT count this as a pending fix - it's already done
+
+            This avoids triggering a separate workflow for trivial description updates.
+
+            ### For CODE fixes - Post ONE BATCHED comment that triggers claude-pr-fix.yml
+
+            **IMPORTANT**: Batch ALL code FIX_NOW items into a SINGLE comment to minimize workflow cycles.
 
             Post ONE comment using `gh pr comment` with this EXACT format:
 
