@@ -100,6 +100,21 @@ def new(opts)
 | `llm` | `atom() \| function()` | Optional LLM override (for inheritance) |
 | `system_prompt` | `system_prompt_opts()` | System prompt customization (see below) |
 
+**Validation (raises `ArgumentError` on failure):**
+- `prompt` is required and must be a string
+- `max_turns` must be a positive integer (if provided)
+- `tools` must be a map (if provided)
+- If `signature` is provided, template placeholders must match signature parameters
+
+```elixir
+# Error: placeholder not in signature
+SubAgent.new(
+  prompt: "Find emails for {{user}}",
+  signature: "(person :string) -> {count :int}"
+)
+#=> raises ArgumentError, "placeholder {{user}} not found in signature"
+```
+
 **Example:**
 ```elixir
 # Define a reusable agent
