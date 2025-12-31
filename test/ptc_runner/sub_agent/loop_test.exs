@@ -747,7 +747,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _remaining_turns: 0)
 
-      assert step.fail.reason == :max_turns
+      assert step.fail.reason == :turn_budget_exhausted
       assert step.fail.message =~ "Turn budget exhausted"
       assert step.usage.turns == 0
     end
@@ -772,7 +772,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{}, _remaining_turns: 1)
 
-      assert step.fail.reason == :max_turns
+      assert step.fail.reason == :turn_budget_exhausted
       assert step.fail.message =~ "Turn budget exhausted"
       # Should complete first turn, then fail on second
       assert step.usage.turns == 1
@@ -842,29 +842,23 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "rejects when mission deadline exceeded" do
+      # Deadline in the past
+      past_deadline = DateTime.utc_now() |> DateTime.add(-100, :millisecond)
+
       agent =
         SubAgent.new(
           prompt: "Test",
           tools: %{},
-          max_turns: 5,
-          mission_timeout: 10
+          max_turns: 5
         )
 
-      llm = fn %{turn: turn} ->
-        case turn do
-          1 ->
-            # Sleep to exceed mission timeout
-            Process.sleep(20)
-            {:ok, "```clojure\n(+ 1 2)\n```"}
-
-          _ ->
-            {:ok, ~S|```clojure
+      llm = fn _ ->
+        {:ok, ~S|```clojure
 (call "return" {:value 42})
 ```|}
-        end
       end
 
-      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+      {:error, step} = Loop.run(agent, llm: llm, context: %{}, _mission_deadline: past_deadline)
 
       assert step.fail.reason == :timeout
       assert step.fail.message =~ "Mission timeout exceeded"

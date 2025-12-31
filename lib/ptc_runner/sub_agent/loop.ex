@@ -72,7 +72,7 @@ defmodule PtcRunner.SubAgent.Loop do
       if remaining_turns <= 0 do
         step =
           Step.error(
-            :max_turns,
+            :turn_budget_exhausted,
             "Turn budget exhausted: #{agent.turn_budget - remaining_turns} turns used",
             %{}
           )
@@ -135,7 +135,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Check turn budget before each turn (guard clause)
   defp loop(_agent, _llm, state) when state.remaining_turns <= 0 do
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
-    step = Step.error(:max_turns, "Turn budget exhausted", state.memory)
+    step = Step.error(:turn_budget_exhausted, "Turn budget exhausted", state.memory)
 
     step_with_metrics = %{
       step
