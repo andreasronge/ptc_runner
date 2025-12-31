@@ -6,6 +6,20 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   doctest Loop
 
+  # Test helpers
+  defp test_agent(opts \\ []) do
+    defaults = [prompt: "Test", tools: %{}, max_turns: 2]
+    SubAgent.new(Keyword.merge(defaults, opts))
+  end
+
+  defp simple_return_llm do
+    fn _ ->
+      {:ok, ~S|```clojure
+(call "return" {:value 42})
+```|}
+    end
+  end
+
   describe "run/2 with successful execution" do
     test "single turn with explicit return" do
       agent =
@@ -83,12 +97,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "run/2 with max_turns exceeded" do
     test "returns error when max_turns exceeded" do
-      agent =
-        SubAgent.new(
-          prompt: "Do something",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       # LLM that causes errors, forcing retries
       llm = fn %{turn: _} ->
@@ -106,12 +115,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "run/2 with LLM errors" do
     test "returns error when LLM call fails" do
-      agent =
-        SubAgent.new(
-          prompt: "Do something",
-          tools: %{},
-          max_turns: 3
-        )
+      agent = test_agent(max_turns: 3)
 
       llm = fn _ ->
         {:error, :network_timeout}
@@ -127,12 +131,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "response parsing" do
     test "extracts code from clojure code block" do
-      agent =
-        SubAgent.new(
-          prompt: "test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|Here is the code:
@@ -146,12 +145,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "extracts code from lisp code block" do
-      agent =
-        SubAgent.new(
-          prompt: "test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```lisp
@@ -164,12 +158,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "falls back to raw s-expression" do
-      agent =
-        SubAgent.new(
-          prompt: "test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ -> {:ok, ~S|(call "return" {:value 42})|} end
 
@@ -391,12 +380,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "run/2 trace entries" do
     test "builds trace entries correctly" do
-      agent =
-        SubAgent.new(
-          prompt: "Do work",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -418,18 +402,8 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "run/2 usage metrics" do
     test "includes duration_ms in usage" do
-      agent =
-        SubAgent.new(
-          prompt: "Calculate",
-          tools: %{},
-          max_turns: 2
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent()
+      llm = simple_return_llm()
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
@@ -438,18 +412,8 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "includes turn count in usage" do
-      agent =
-        SubAgent.new(
-          prompt: "Calculate",
-          tools: %{},
-          max_turns: 3
-        )
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(call "return" {:value 42})
-```|}
-      end
+      agent = test_agent(max_turns: 3)
+      llm = simple_return_llm()
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
@@ -459,12 +423,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "run/2 with llm_input structure" do
     test "provides system prompt in llm_input" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn %{system: system} ->
         assert is_binary(system)
@@ -478,12 +437,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "provides turn number in llm_input" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 3
-        )
+      agent = test_agent(max_turns: 3)
 
       llm = fn %{turn: turn} ->
         assert is_integer(turn)
@@ -502,12 +456,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         "set-value" => fn _ -> :ok end
       }
 
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: tools,
-          max_turns: 2
-        )
+      agent = test_agent(tools: tools)
 
       llm = fn %{tool_names: tool_names} ->
         assert is_list(tool_names)
@@ -524,33 +473,19 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "memory limit configuration" do
     test "memory_limit field can be set" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          memory_limit: 1000
-        )
+      agent = test_agent(memory_limit: 1000)
 
       assert agent.memory_limit == 1000
     end
 
     test "memory_limit defaults to 1MB" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{}
-        )
+      agent = test_agent()
 
       assert agent.memory_limit == 1_048_576
     end
 
     test "memory_limit can be nil" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          memory_limit: nil
-        )
+      agent = test_agent(memory_limit: nil)
 
       assert agent.memory_limit == nil
     end
