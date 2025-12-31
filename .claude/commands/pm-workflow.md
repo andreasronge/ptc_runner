@@ -50,7 +50,7 @@ gh issue edit ISSUE_NUMBER --add-label "needs-review"
 ## Rules
 
 - **One action per run** - Take one action, then stop
-- **Wait for merge** - Don't create new work when PRs are open
+- **Open PRs = bookkeeping only** - When PRs are open, only do bookkeeping (update epic checkboxes, handle tech debt). Do NOT create new issues or queue new work.
 - **Escalate when stuck** - After 3 failed attempts, add `needs-human-review` and move on
 
 ## Epic Management
