@@ -656,6 +656,144 @@ defmodule PtcRunner.SubAgent do
   end
 
   @doc """
+  Compiles a SubAgent into a reusable program that executes without LLM calls.
+
+  Runs the agent once with an LLM to derive PTC-Lisp logic, then stores the program
+  for repeated execution. Only agents with pure (non-LLM) tools can be compiled.
+
+  ## Parameters
+
+  - `agent` - A `%SubAgent{}` struct with only pure tools
+  - `opts` - Keyword list with:
+    - `:llm` - Required. LLM callback function or atom
+    - `:llm_registry` - Required if `:llm` is an atom
+    - `:sample` - Optional sample data to help LLM understand structure
+
+  ## Returns
+
+  - `{:ok, CompiledAgent.t()}` on success
+  - `{:error, Step.t()}` if agent execution fails
+
+  ## Raises
+
+  - `ArgumentError` if agent contains LLMTool or SubAgentTool
+
+  ## Examples
+
+  Compilation requires an agent with tools and an LLM that generates valid PTC-Lisp.
+  See test/ptc_runner/sub_agent/compiled_agent_test.exs for usage examples.
+
+  """
+  @spec compile(t(), keyword()) ::
+          {:ok, PtcRunner.SubAgent.CompiledAgent.t()} | {:error, PtcRunner.Step.t()}
+  def compile(%__MODULE__{} = agent, opts) do
+    alias PtcRunner.SubAgent.CompiledAgent
+
+    # Validate that agent only has pure tools
+    validate_compilable_tools!(agent.tools)
+
+    # Extract required options
+    llm = Keyword.fetch!(opts, :llm)
+    llm_registry = Keyword.get(opts, :llm_registry, %{})
+    sample = Keyword.get(opts, :sample, %{})
+
+    # Run agent once to derive the program
+    case run(agent, llm: llm, llm_registry: llm_registry, context: sample) do
+      {:ok, step} ->
+        # Extract the PTC-Lisp source from the trace
+        source = extract_final_program(step.trace)
+
+        # Build executor function that runs the stored program
+        # Note: We need to add the built-in return and fail tools
+        tools_with_builtins =
+          Map.merge(agent.tools, %{
+            "return" => fn result -> {:return, result} end,
+            "fail" => fn result -> {:fail, result} end
+          })
+
+        execute = fn args ->
+          execute_compiled_program(source, args, tools_with_builtins)
+        end
+
+        # Build metadata
+        metadata = build_metadata(step, opts)
+
+        # Return CompiledAgent
+        {:ok,
+         %CompiledAgent{
+           source: source,
+           signature: agent.signature,
+           execute: execute,
+           metadata: metadata
+         }}
+
+      {:error, step} ->
+        {:error, step}
+    end
+  end
+
+  # Validate that all tools are compilable (no LLM-dependent tools)
+  defp validate_compilable_tools!(tools) do
+    Enum.each(tools, fn
+      {name, %PtcRunner.SubAgent.LLMTool{}} ->
+        raise ArgumentError, "cannot compile agent with LLM-dependent tool: #{name}"
+
+      {name, %PtcRunner.SubAgent.SubAgentTool{}} ->
+        raise ArgumentError, "cannot compile agent with LLM-dependent tool: #{name}"
+
+      {_name, func} when is_function(func, 1) ->
+        :ok
+
+      {_name, _other} ->
+        :ok
+    end)
+  end
+
+  # Execute a compiled program with the given tools
+  defp execute_compiled_program(source, args, tools) do
+    case PtcRunner.Lisp.run(source, context: args, tools: tools) do
+      {:ok, step} ->
+        # Check if the program called return or fail
+        case step.return do
+          {:return, value} -> {:ok, %{step | return: value}}
+          {:fail, error} -> {:error, %{step | return: nil, fail: error}}
+          other -> {:ok, %{step | return: other}}
+        end
+
+      {:error, step} ->
+        {:error, step}
+    end
+  end
+
+  # Extract the final program from the last trace entry
+  defp extract_final_program([_ | _] = trace) do
+    trace
+    |> List.last()
+    |> Map.get(:program)
+  end
+
+  # Handle nil trace (single-shot mode has no trace)
+  defp extract_final_program(nil) do
+    raise ArgumentError,
+          "cannot compile agent with single-shot mode (max_turns=1 and no tools). " <>
+            "Agents must use loop mode (have tools or max_turns > 1) to be compilable."
+  end
+
+  # Build compilation metadata
+  defp build_metadata(step, opts) do
+    %{
+      compiled_at: DateTime.utc_now(),
+      tokens_used: Map.get(step.usage, :total_tokens, 0),
+      turns: Map.get(step.usage, :turns, 0),
+      llm_model: get_llm_model_name(opts[:llm])
+    }
+  end
+
+  # Extract LLM model name if possible
+  defp get_llm_model_name(llm) when is_atom(llm), do: to_string(llm)
+  defp get_llm_model_name(_), do: nil
+
+  @doc """
   Wraps a SubAgent as a tool callable by other agents.
 
   Returns a `SubAgentTool` struct that parent agents can include
