@@ -81,7 +81,7 @@ The SubAgent API consists of functions for definition, execution, and compositio
 Creates a SubAgent struct (agent as data). No LLM is called - this just defines the agent.
 
 ```elixir
-@spec new(keyword()) :: SubAgent.t()
+@spec new(keyword()) :: t()
 def new(opts)
 ```
 
