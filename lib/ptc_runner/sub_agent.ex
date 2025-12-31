@@ -772,6 +772,12 @@ defmodule PtcRunner.SubAgent do
     |> Map.get(:program)
   end
 
+  # Handle empty trace (loop mode produced no steps)
+  defp extract_final_program([]) do
+    raise ArgumentError,
+          "empty trace - agent must produce at least one program"
+  end
+
   # Handle nil trace (single-shot mode has no trace)
   defp extract_final_program(nil) do
     raise ArgumentError,

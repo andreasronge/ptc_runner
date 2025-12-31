@@ -35,4 +35,21 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       end
     end
   end
+
+  describe "as_tool/1" do
+    test "wraps compiled agent as tool" do
+      compiled = %CompiledAgent{
+        source: "(call \"return\" {:result 42})",
+        signature: "() -> {result :int}",
+        execute: fn _ -> {:ok, %PtcRunner.Step{return: %{result: 42}}} end,
+        metadata: %{compiled_at: DateTime.utc_now(), tokens_used: 100, turns: 1, llm_model: nil}
+      }
+
+      tool = CompiledAgent.as_tool(compiled)
+
+      assert tool.type == :compiled
+      assert is_function(tool.execute, 1)
+      assert tool.signature == "() -> {result :int}"
+    end
+  end
 end
