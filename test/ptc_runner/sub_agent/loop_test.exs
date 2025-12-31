@@ -521,4 +521,82 @@ defmodule PtcRunner.SubAgent.LoopTest do
       {:ok, _step} = Loop.run(agent, llm: llm, context: %{})
     end
   end
+
+  describe "memory limit configuration" do
+    test "memory_limit field can be set" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          memory_limit: 1000
+        )
+
+      assert agent.memory_limit == 1000
+    end
+
+    test "memory_limit defaults to 1MB" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{}
+        )
+
+      assert agent.memory_limit == 1_048_576
+    end
+
+    test "memory_limit can be nil" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          memory_limit: nil
+        )
+
+      assert agent.memory_limit == nil
+    end
+
+    test "memory_limit is enforced during execution" do
+      turn_counter = :counters.new(1, [:atomics])
+
+      tools = %{
+        "store-large" => fn %{} ->
+          # Return a large map that will exceed 200 bytes when serialized
+          %{
+            data:
+              "this is a very long string designed to exceed the memory limit when stored in memory along with the erlang encoding overhead so we can test that the memory limit enforcement is working correctly"
+          }
+        end
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Store large data",
+          tools: tools,
+          memory_limit: 200,
+          max_turns: 3
+        )
+
+      llm = fn %{turn: turn} ->
+        :counters.put(turn_counter, 1, turn)
+
+        case turn do
+          1 ->
+            # Call tool that returns large data
+            # The returned map will be merged into context/memory, exceeding the limit
+            {:ok, ~S|```clojure
+(call "store-large" {})
+```|}
+
+          _ ->
+            {:ok, "Should not reach here"}
+        end
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.fail.reason == :memory_limit_exceeded
+      assert step.fail.message =~ "Memory limit exceeded"
+      assert step.usage.turns == 1
+    end
+  end
 end

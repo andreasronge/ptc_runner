@@ -32,4 +32,92 @@ defmodule PtcRunner.Lisp.EvalMemoryTest do
       assert new_memory == memory
     end
   end
+
+  describe "memory/put" do
+    test "stores a value in memory" do
+      ast = {:memory_put, :count, 42}
+      {:ok, value, new_memory} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert value == 42
+      assert new_memory == %{count: 42}
+    end
+
+    test "overwrites existing key" do
+      ast = {:memory_put, :count, 100}
+      {:ok, value, new_memory} = Eval.eval(ast, %{}, %{count: 5}, %{}, &dummy_tool/2)
+
+      assert value == 100
+      assert new_memory == %{count: 100}
+    end
+
+    test "evaluates value expression before storing" do
+      # (memory/put :result (+ 5 3))
+      ast = {:memory_put, :result, {:call, {:var, :+}, [5, 3]}}
+      env = %{+: {:variadic, &+/2, 0}}
+      {:ok, value, new_memory} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert value == 8
+      assert new_memory == %{result: 8}
+    end
+
+    test "returns the stored value" do
+      ast = {:memory_put, :data, {:string, "hello"}}
+      {:ok, value, _memory} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert value == "hello"
+    end
+  end
+
+  describe "memory/get" do
+    test "retrieves an existing value" do
+      ast = {:memory_get, :count}
+      {:ok, value, new_memory} = Eval.eval(ast, %{}, %{count: 42}, %{}, &dummy_tool/2)
+
+      assert value == 42
+      assert new_memory == %{count: 42}
+    end
+
+    test "returns nil for missing key" do
+      ast = {:memory_get, :missing}
+      {:ok, value, new_memory} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert value == nil
+      assert new_memory == %{}
+    end
+
+    test "does not modify memory" do
+      initial_memory = %{count: 5, name: "test"}
+      ast = {:memory_get, :count}
+      {:ok, _value, new_memory} = Eval.eval(ast, %{}, initial_memory, %{}, &dummy_tool/2)
+
+      assert new_memory == initial_memory
+    end
+  end
+
+  describe "memory/get and memory/put integration" do
+    test "put then get returns the stored value" do
+      # First put
+      put_ast = {:memory_put, :value, 123}
+      {:ok, _, memory1} = Eval.eval(put_ast, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Then get
+      get_ast = {:memory_get, :value}
+      {:ok, value, _memory2} = Eval.eval(get_ast, %{}, memory1, %{}, &dummy_tool/2)
+
+      assert value == 123
+    end
+
+    test "multiple puts update memory correctly" do
+      # Put key1
+      put1 = {:memory_put, :key1, {:string, "first"}}
+      {:ok, _, memory1} = Eval.eval(put1, %{}, %{}, %{}, &dummy_tool/2)
+
+      # Put key2
+      put2 = {:memory_put, :key2, {:string, "second"}}
+      {:ok, _, memory2} = Eval.eval(put2, %{}, memory1, %{}, &dummy_tool/2)
+
+      # Both keys should exist
+      assert memory2 == %{key1: "first", key2: "second"}
+    end
+  end
 end
