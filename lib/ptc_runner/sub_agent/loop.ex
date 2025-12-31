@@ -52,6 +52,43 @@ defmodule PtcRunner.SubAgent.Loop do
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
 
+    # Extract runtime context for nesting depth and turn budget
+    nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
+    remaining_turns = Keyword.get(opts, :_remaining_turns, agent.turn_budget)
+    mission_deadline = Keyword.get(opts, :_mission_deadline)
+
+    # Check nesting depth limit before starting
+    if nesting_depth >= agent.max_depth do
+      step =
+        Step.error(
+          :max_depth_exceeded,
+          "Nesting depth limit exceeded: #{nesting_depth} >= #{agent.max_depth}",
+          %{}
+        )
+
+      {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}}}
+    else
+      # Check turn budget before starting
+      if remaining_turns <= 0 do
+        step =
+          Step.error(
+            :max_turns,
+            "Turn budget exhausted: #{agent.turn_budget - remaining_turns} turns used",
+            %{}
+          )
+
+        {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}}}
+      else
+        do_run(agent, llm, context, nesting_depth, remaining_turns, mission_deadline)
+      end
+    end
+  end
+
+  # Helper to continue run after checks
+  defp do_run(agent, llm, context, nesting_depth, remaining_turns, mission_deadline) do
+    # Calculate mission deadline if mission_timeout is set and not already inherited
+    calculated_deadline = mission_deadline || calculate_mission_deadline(agent.mission_timeout)
+
     # Expand template in prompt
     expanded_prompt = expand_template(agent.prompt, context)
 
@@ -62,7 +99,10 @@ defmodule PtcRunner.SubAgent.Loop do
       trace: [],
       start_time: System.monotonic_time(:millisecond),
       memory: %{},
-      last_fail: nil
+      last_fail: nil,
+      nesting_depth: nesting_depth,
+      remaining_turns: remaining_turns,
+      mission_deadline: calculated_deadline
     }
 
     loop(agent, llm, initial_state)
@@ -92,107 +132,153 @@ defmodule PtcRunner.SubAgent.Loop do
     {:error, step_with_metrics}
   end
 
-  # Main loop iteration
-  defp loop(agent, llm, state) do
-    # Build LLM input
-    llm_input = %{
-      system: build_system_prompt(),
-      messages: state.messages,
-      turn: state.turn,
-      tool_names: Map.keys(agent.tools)
+  # Check turn budget before each turn (guard clause)
+  defp loop(_agent, _llm, state) when state.remaining_turns <= 0 do
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+    step = Step.error(:max_turns, "Turn budget exhausted", state.memory)
+
+    step_with_metrics = %{
+      step
+      | usage: %{
+          duration_ms: duration_ms,
+          memory_bytes: 0,
+          turns: state.turn - 1
+        },
+        trace: Enum.reverse(state.trace)
     }
 
-    # Call LLM
-    case call_llm(llm, llm_input) do
-      {:ok, response} ->
-        # Parse PTC-Lisp from response
-        case parse_response(response) do
-          {:ok, code} ->
-            # Execute via Lisp.run/2
-            # Add last_fail to context if present
-            exec_context =
-              if state.last_fail do
-                Map.put(state.context, :fail, state.last_fail)
-              else
-                state.context
-              end
+    {:error, step_with_metrics}
+  end
 
-            # Merge system tools (return/fail) with user tools
-            system_tools = %{
-              "return" => fn args -> args end,
-              "fail" => fn args -> args end
-            }
+  # Main loop iteration
+  defp loop(agent, llm, state) do
+    # Check mission timeout before each turn
+    if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
+      duration_ms = System.monotonic_time(:millisecond) - state.start_time
+      step = Step.error(:timeout, "Mission timeout exceeded", state.memory)
 
-            all_tools = Map.merge(system_tools, agent.tools)
+      step_with_metrics = %{
+        step
+        | usage: %{
+            duration_ms: duration_ms,
+            memory_bytes: 0,
+            turns: state.turn - 1
+          },
+          trace: Enum.reverse(state.trace)
+      }
 
-            case Lisp.run(code, context: exec_context, memory: state.memory, tools: all_tools) do
-              {:ok, lisp_step} ->
-                handle_successful_execution(code, response, lisp_step, state, agent, llm)
+      {:error, step_with_metrics}
+    else
+      # Build LLM input
+      llm_input = %{
+        system: build_system_prompt(),
+        messages: state.messages,
+        turn: state.turn,
+        tool_names: Map.keys(agent.tools)
+      }
 
-              {:error, lisp_step} ->
-                # Build trace entry for failed execution
-                trace_entry = %{
-                  turn: state.turn,
-                  program: code,
-                  result: nil,
-                  tool_calls: []
-                }
+      # Call LLM
+      case call_llm(llm, llm_input) do
+        {:ok, response} ->
+          handle_llm_response(response, agent, llm, state)
 
-                # Feed error back to LLM for next turn
-                error_message = format_error_for_llm(lisp_step.fail)
+        {:error, reason} ->
+          duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-                new_state = %{
-                  state
-                  | turn: state.turn + 1,
-                    messages:
-                      state.messages ++
-                        [
-                          %{role: :assistant, content: response},
-                          %{role: :user, content: error_message}
-                        ],
-                    trace: [trace_entry | state.trace],
-                    memory: lisp_step.memory,
-                    last_fail: lisp_step.fail
-                }
+          step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", state.memory)
 
-                loop(agent, llm, new_state)
-            end
+          step_with_metrics = %{
+            step
+            | usage: %{
+                duration_ms: duration_ms,
+                memory_bytes: 0,
+                turns: state.turn
+              },
+              trace: Enum.reverse(state.trace)
+          }
 
-          {:error, :no_code_in_response} ->
-            # Feed error back to LLM
-            error_message =
-              "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('."
+          {:error, step_with_metrics}
+      end
+    end
+  end
 
-            new_state = %{
-              state
-              | turn: state.turn + 1,
-                messages:
-                  state.messages ++
-                    [
-                      %{role: :assistant, content: response},
-                      %{role: :user, content: error_message}
-                    ]
-            }
+  # Handle LLM response - parse and execute code
+  defp handle_llm_response(response, agent, llm, state) do
+    case parse_response(response) do
+      {:ok, code} ->
+        execute_code(code, response, agent, llm, state)
 
-            loop(agent, llm, new_state)
-        end
+      {:error, :no_code_in_response} ->
+        # Feed error back to LLM
+        error_message =
+          "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('."
 
-      {:error, reason} ->
-        duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
-        step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", state.memory)
-
-        step_with_metrics = %{
-          step
-          | usage: %{
-              duration_ms: duration_ms,
-              memory_bytes: 0,
-              turns: state.turn
-            },
-            trace: Enum.reverse(state.trace)
+        new_state = %{
+          state
+          | turn: state.turn + 1,
+            messages:
+              state.messages ++
+                [
+                  %{role: :assistant, content: response},
+                  %{role: :user, content: error_message}
+                ],
+            remaining_turns: state.remaining_turns - 1
         }
 
-        {:error, step_with_metrics}
+        loop(agent, llm, new_state)
+    end
+  end
+
+  # Execute parsed code
+  defp execute_code(code, response, agent, llm, state) do
+    # Add last_fail to context if present
+    exec_context =
+      if state.last_fail do
+        Map.put(state.context, :fail, state.last_fail)
+      else
+        state.context
+      end
+
+    # Merge system tools (return/fail) with user tools
+    system_tools = %{
+      "return" => fn args -> args end,
+      "fail" => fn args -> args end
+    }
+
+    all_tools = Map.merge(system_tools, agent.tools)
+
+    case Lisp.run(code, context: exec_context, memory: state.memory, tools: all_tools) do
+      {:ok, lisp_step} ->
+        handle_successful_execution(code, response, lisp_step, state, agent, llm)
+
+      {:error, lisp_step} ->
+        # Build trace entry for failed execution
+        trace_entry = %{
+          turn: state.turn,
+          program: code,
+          result: nil,
+          tool_calls: []
+        }
+
+        # Feed error back to LLM for next turn
+        error_message = format_error_for_llm(lisp_step.fail)
+
+        new_state = %{
+          state
+          | turn: state.turn + 1,
+            messages:
+              state.messages ++
+                [
+                  %{role: :assistant, content: response},
+                  %{role: :user, content: error_message}
+                ],
+            trace: [trace_entry | state.trace],
+            memory: lisp_step.memory,
+            last_fail: lisp_step.fail,
+            remaining_turns: state.remaining_turns - 1
+        }
+
+        loop(agent, llm, new_state)
     end
   end
 
@@ -264,7 +350,8 @@ defmodule PtcRunner.SubAgent.Loop do
                 trace: [trace_entry | state.trace],
                 memory: lisp_step.memory,
                 context: Map.merge(state.context, lisp_step.memory_delta),
-                last_fail: nil
+                last_fail: nil,
+                remaining_turns: state.remaining_turns - 1
             }
 
             loop(agent, llm, new_state)
@@ -387,4 +474,16 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   defp check_memory_limit(_memory, nil), do: {:ok, 0}
+
+  # Calculate mission deadline from timeout in milliseconds
+  defp calculate_mission_deadline(nil), do: nil
+
+  defp calculate_mission_deadline(timeout_ms) when is_integer(timeout_ms) do
+    DateTime.utc_now() |> DateTime.add(timeout_ms, :millisecond)
+  end
+
+  # Check if mission timeout has been exceeded
+  defp mission_timeout_exceeded?(deadline) do
+    DateTime.compare(DateTime.utc_now(), deadline) == :gt
+  end
 end
