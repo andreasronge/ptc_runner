@@ -712,6 +712,7 @@ defmodule PtcRunner.SubAgent do
     }
   end
 
+  @doc "See `PtcRunner.SubAgent.Compiler.compile/2`."
   defdelegate compile(agent, opts), to: PtcRunner.SubAgent.Compiler
 
   @doc """
