@@ -112,7 +112,7 @@ SubAgent.new(
   prompt: "Find emails for {{user}}",
   signature: "(person :string) -> {count :int}"
 )
-#=> raises ArgumentError, "placeholder {{user}} not found in signature"
+#=> raises ArgumentError, "placeholders {{user}} not found in signature"
 ```
 
 **Example:**
