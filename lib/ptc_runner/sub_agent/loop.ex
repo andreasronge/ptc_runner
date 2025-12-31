@@ -407,20 +407,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Expand template placeholders with context values
   defp expand_template(prompt, context) when is_map(context) do
-    Regex.replace(~r/\{\{\s*(\w+)\s*\}\}/, prompt, fn _, key ->
-      try do
-        # Try as atom first, then as string
-        context
-        |> Map.get(String.to_existing_atom(key), Map.get(context, key, "{{#{key}}}"))
-        |> to_string()
-      rescue
-        ArgumentError ->
-          # String.to_existing_atom failed, try as string key
-          context
-          |> Map.get(key, "{{#{key}}}")
-          |> to_string()
-      end
-    end)
+    alias PtcRunner.SubAgent.Template
+    {:ok, result} = Template.expand(prompt, context, on_missing: :keep)
+    result
   end
 
   # System prompt generation

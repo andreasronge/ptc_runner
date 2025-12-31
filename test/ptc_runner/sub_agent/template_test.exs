@@ -153,4 +153,48 @@ defmodule PtcRunner.SubAgent.TemplateTest do
                {:error, {:missing_keys, ["user.name"]}}
     end
   end
+
+  describe "expand/3 with on_missing: :keep" do
+    test "keeps missing placeholder unchanged" do
+      assert Template.expand("{{missing}}", %{}, on_missing: :keep) == {:ok, "{{missing}}"}
+    end
+
+    test "expands available keys and keeps missing ones" do
+      assert Template.expand("{{a}} and {{b}}", %{a: "1"}, on_missing: :keep) ==
+               {:ok, "1 and {{b}}"}
+    end
+
+    test "expands all keys when all are present" do
+      assert Template.expand("{{a}} and {{b}}", %{a: "1", b: "2"}, on_missing: :keep) ==
+               {:ok, "1 and 2"}
+    end
+
+    test "keeps missing nested placeholder unchanged" do
+      assert Template.expand("{{user.name}}", %{}, on_missing: :keep) == {:ok, "{{user.name}}"}
+    end
+
+    test "expands partial nested path and keeps missing nested key" do
+      assert Template.expand("{{user.name}}", %{user: %{}}, on_missing: :keep) ==
+               {:ok, "{{user.name}}"}
+    end
+
+    test "handles template with no placeholders" do
+      assert Template.expand("No placeholders", %{}, on_missing: :keep) ==
+               {:ok, "No placeholders"}
+    end
+
+    test "handles empty template" do
+      assert Template.expand("", %{}, on_missing: :keep) == {:ok, ""}
+    end
+
+    test "keeps multiple missing placeholders" do
+      assert Template.expand("{{a}}, {{b}}, {{c}}", %{}, on_missing: :keep) ==
+               {:ok, "{{a}}, {{b}}, {{c}}"}
+    end
+
+    test "expands some and keeps others" do
+      assert Template.expand("{{a}}, {{b}}, {{c}}", %{b: "middle"}, on_missing: :keep) ==
+               {:ok, "{{a}}, middle, {{c}}"}
+    end
+  end
 end
