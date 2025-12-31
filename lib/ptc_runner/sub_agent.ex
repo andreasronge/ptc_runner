@@ -711,4 +711,66 @@ defmodule PtcRunner.SubAgent do
       description: Keyword.get(opts, :description)
     }
   end
+
+  @doc """
+  Preview the system and user prompts that would be sent to the LLM.
+
+  This function generates and returns the prompts without executing the agent,
+  useful for debugging prompt generation, verifying template expansion, and
+  reviewing what the LLM will see.
+
+  ## Parameters
+
+  - `agent` - A `%SubAgent{}` struct
+  - `opts` - Keyword list with:
+    - `context` - Context map for template expansion (default: %{})
+
+  ## Returns
+
+  A map with:
+  - `:system` - The complete system prompt string
+  - `:user` - The expanded user message (mission prompt)
+  - `:tool_schemas` - List of tool schema maps (empty for now, will be enhanced in future)
+
+  ## Examples
+
+      iex> agent = PtcRunner.SubAgent.new(
+      ...>   prompt: "Find emails for {{user}}",
+      ...>   signature: "(user :string) -> {count :int}",
+      ...>   tools: %{"list_emails" => fn _ -> [] end}
+      ...> )
+      iex> preview = PtcRunner.SubAgent.preview_prompt(agent, context: %{user: "alice"})
+      iex> preview.user
+      "Find emails for alice"
+      iex> preview.system =~ "PTC-Lisp"
+      true
+      iex> is_binary(preview.system)
+      true
+
+  """
+  @spec preview_prompt(t(), keyword()) :: %{
+          system: String.t(),
+          user: String.t(),
+          tool_schemas: [map()]
+        }
+  def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
+    context = Keyword.get(opts, :context, %{})
+
+    # Generate system prompt using existing Prompt module
+    alias PtcRunner.SubAgent.{Prompt, Template}
+    system_prompt = Prompt.generate(agent, context: context)
+
+    # Expand user message template
+    {:ok, user_message} = Template.expand(agent.prompt, context, on_missing: :keep)
+
+    # Tool schemas - for now return empty list
+    # In the future, this could extract actual tool schema information
+    tool_schemas = []
+
+    %{
+      system: system_prompt,
+      user: user_message,
+      tool_schemas: tool_schemas
+    }
+  end
 end

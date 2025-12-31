@@ -46,6 +46,8 @@ defmodule PtcRunner.SubAgent.Loop do
   - `opts` - Keyword list with:
     - `llm` - Required. LLM callback function
     - `context` - Initial context map (default: %{})
+    - `debug` - Enable verbose execution tracing (default: false)
+    - `trace` - Trace filtering: true (always), false (never), :on_error (only on failure) (default: true)
 
   ## Returns
 
@@ -65,6 +67,8 @@ defmodule PtcRunner.SubAgent.Loop do
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
     llm_registry = Keyword.get(opts, :llm_registry, %{})
+    debug = Keyword.get(opts, :debug, false)
+    trace_mode = Keyword.get(opts, :trace, true)
 
     # Extract runtime context for nesting depth and turn budget
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
@@ -93,43 +97,49 @@ defmodule PtcRunner.SubAgent.Loop do
 
         {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}}}
       else
-        do_run(
-          agent,
-          llm,
-          context,
-          nesting_depth,
-          remaining_turns,
-          mission_deadline,
-          llm_registry
-        )
+        run_opts = %{
+          llm: llm,
+          context: context,
+          nesting_depth: nesting_depth,
+          remaining_turns: remaining_turns,
+          mission_deadline: mission_deadline,
+          llm_registry: llm_registry,
+          debug: debug,
+          trace_mode: trace_mode
+        }
+
+        do_run(agent, run_opts)
       end
     end
   end
 
   # Helper to continue run after checks
-  defp do_run(agent, llm, context, nesting_depth, remaining_turns, mission_deadline, llm_registry) do
+  defp do_run(agent, run_opts) do
     # Calculate mission deadline if mission_timeout is set and not already inherited
-    calculated_deadline = mission_deadline || calculate_mission_deadline(agent.mission_timeout)
+    calculated_deadline =
+      run_opts.mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
     # Expand template in prompt
-    expanded_prompt = expand_template(agent.prompt, context)
+    expanded_prompt = expand_template(agent.prompt, run_opts.context)
 
     initial_state = %{
-      llm: llm,
-      llm_registry: llm_registry,
+      llm: run_opts.llm,
+      llm_registry: run_opts.llm_registry,
       turn: 1,
       messages: [%{role: :user, content: expanded_prompt}],
-      context: context,
+      context: run_opts.context,
       trace: [],
       start_time: System.monotonic_time(:millisecond),
       memory: %{},
       last_fail: nil,
-      nesting_depth: nesting_depth,
-      remaining_turns: remaining_turns,
-      mission_deadline: calculated_deadline
+      nesting_depth: run_opts.nesting_depth,
+      remaining_turns: run_opts.remaining_turns,
+      mission_deadline: calculated_deadline,
+      debug: run_opts.debug,
+      trace_mode: run_opts.trace_mode
     }
 
-    loop(agent, llm, initial_state)
+    loop(agent, run_opts.llm, initial_state)
   end
 
   # Loop when max_turns exceeded
@@ -150,7 +160,7 @@ defmodule PtcRunner.SubAgent.Loop do
           memory_bytes: 0,
           turns: state.turn - 1
         },
-        trace: Enum.reverse(state.trace)
+        trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
     }
 
     {:error, step_with_metrics}
@@ -168,7 +178,7 @@ defmodule PtcRunner.SubAgent.Loop do
           memory_bytes: 0,
           turns: state.turn - 1
         },
-        trace: Enum.reverse(state.trace)
+        trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
     }
 
     {:error, step_with_metrics}
@@ -188,7 +198,7 @@ defmodule PtcRunner.SubAgent.Loop do
             memory_bytes: 0,
             turns: state.turn - 1
           },
-          trace: Enum.reverse(state.trace)
+          trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
       }
 
       {:error, step_with_metrics}
@@ -220,7 +230,7 @@ defmodule PtcRunner.SubAgent.Loop do
                 memory_bytes: 0,
                 turns: state.turn
               },
-              trace: Enum.reverse(state.trace)
+              trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
           }
 
           {:error, step_with_metrics}
@@ -352,6 +362,9 @@ defmodule PtcRunner.SubAgent.Loop do
       tool_calls: []
     }
 
+    # Log turn execution if debug mode is enabled
+    maybe_log_turn(state, response, lisp_step.return, state.debug)
+
     # Check if code contains explicit return/fail call (Stage 4 preview)
     # For now, detect these as special tool names
     cond do
@@ -366,7 +379,12 @@ defmodule PtcRunner.SubAgent.Loop do
               memory_bytes: lisp_step.usage.memory_bytes,
               turns: state.turn
             },
-            trace: Enum.reverse([trace_entry | state.trace])
+            trace:
+              apply_trace_filter(
+                Enum.reverse([trace_entry | state.trace]),
+                state.trace_mode,
+                false
+              )
         }
 
         {:ok, final_step}
@@ -384,7 +402,12 @@ defmodule PtcRunner.SubAgent.Loop do
               memory_bytes: lisp_step.usage.memory_bytes,
               turns: state.turn
             },
-            trace: Enum.reverse([trace_entry | state.trace])
+            trace:
+              apply_trace_filter(
+                Enum.reverse([trace_entry | state.trace]),
+                state.trace_mode,
+                true
+              )
         }
 
         {:error, final_step}
@@ -431,7 +454,12 @@ defmodule PtcRunner.SubAgent.Loop do
                   memory_bytes: actual_size,
                   turns: state.turn
                 },
-                trace: Enum.reverse([trace_entry | state.trace])
+                trace:
+                  apply_trace_filter(
+                    Enum.reverse([trace_entry | state.trace]),
+                    state.trace_mode,
+                    true
+                  )
             }
 
             {:error, final_step}
@@ -594,5 +622,23 @@ defmodule PtcRunner.SubAgent.Loop do
                 "SubAgent tool failed: #{step.fail.message}"
       end
     end
+  end
+
+  # Apply trace filtering based on trace_mode and execution result
+  defp apply_trace_filter(_trace, false = _trace_mode, _is_error), do: nil
+  defp apply_trace_filter(trace, true = _trace_mode, _is_error), do: trace
+  defp apply_trace_filter(trace, :on_error = _trace_mode, true = _is_error), do: trace
+  defp apply_trace_filter(_trace, :on_error = _trace_mode, false = _is_error), do: nil
+
+  # Log turn execution if debug mode is enabled
+  defp maybe_log_turn(_state, _response, _result, false = _debug), do: :ok
+
+  defp maybe_log_turn(state, response, result, true = _debug) do
+    IO.puts("[Turn #{state.turn}] LLM response:")
+    IO.puts(response)
+    IO.puts("\n[Turn #{state.turn}] Execution result:")
+    # credo:disable-for-next-line Credo.Check.Warning.IoInspect
+    IO.inspect(result, pretty: true, limit: :infinity)
+    IO.puts("\n")
   end
 end
