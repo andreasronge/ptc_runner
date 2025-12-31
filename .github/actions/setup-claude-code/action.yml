@@ -19,9 +19,11 @@ runs:
   using: 'composite'
   steps:
     # Clean up any stale lock files from previous failed installations
+    # See: https://github.com/anthropics/claude-code-action/issues/709
     - name: Clean stale lock files
       shell: bash
       run: |
+        rm -rf ~/.local/state/claude/locks 2>/dev/null || true
         rm -f /tmp/claude-install.lock 2>/dev/null || true
         rm -f ~/.claude/.installing 2>/dev/null || true
 
@@ -60,6 +62,8 @@ runs:
         echo "Installing Claude Code..."
         for attempt in 1 2 3; do
           echo "Installation attempt $attempt..."
+          # Clean all known lock file locations before each attempt
+          rm -rf ~/.local/state/claude/locks 2>/dev/null || true
           rm -f /tmp/claude-install.lock 2>/dev/null || true
           rm -f ~/.claude/.installing 2>/dev/null || true
           if curl -fsSL https://claude.ai/install.sh | bash; then
