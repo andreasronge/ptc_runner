@@ -11,12 +11,24 @@ defmodule PtcRunner.SubAgent.Loop do
   ## Flow
 
   1. Build LLM input with system prompt, messages, and tool names
-  2. Call LLM to get response
+  2. Call LLM to get response (resolving atoms via `llm_registry` if needed)
   3. Parse PTC-Lisp code from response (code blocks or raw s-expressions)
   4. Execute code via `Lisp.run/2`
   5. Check for return/fail or continue to next turn
   6. Build trace entry and update message history
   7. Merge execution results into context for next turn
+
+  ## LLM Inheritance
+
+  Child SubAgents inherit the `llm_registry` from their parent, enabling atom-based
+  LLM references (like `:haiku` or `:sonnet`) to work throughout the agent hierarchy.
+  The registry only needs to be provided once at the top-level `SubAgent.run/2` call.
+
+  Resolution order for LLM selection:
+  1. `agent.llm` - Set in SubAgent struct
+  2. `as_tool(..., llm:)` - Bound at tool creation
+  3. Parent's LLM - Inherited from calling agent
+  4. Required at top level
 
   This is an internal module called by `SubAgent.run/2`.
   """
@@ -52,6 +64,7 @@ defmodule PtcRunner.SubAgent.Loop do
   def run(%SubAgent{} = agent, opts) do
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
+    llm_registry = Keyword.get(opts, :llm_registry, %{})
 
     # Extract runtime context for nesting depth and turn budget
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
@@ -80,13 +93,21 @@ defmodule PtcRunner.SubAgent.Loop do
 
         {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}}}
       else
-        do_run(agent, llm, context, nesting_depth, remaining_turns, mission_deadline)
+        do_run(
+          agent,
+          llm,
+          context,
+          nesting_depth,
+          remaining_turns,
+          mission_deadline,
+          llm_registry
+        )
       end
     end
   end
 
   # Helper to continue run after checks
-  defp do_run(agent, llm, context, nesting_depth, remaining_turns, mission_deadline) do
+  defp do_run(agent, llm, context, nesting_depth, remaining_turns, mission_deadline, llm_registry) do
     # Calculate mission deadline if mission_timeout is set and not already inherited
     calculated_deadline = mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
@@ -95,6 +116,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
     initial_state = %{
       llm: llm,
+      llm_registry: llm_registry,
       turn: 1,
       messages: [%{role: :user, content: expanded_prompt}],
       context: context,
@@ -180,7 +202,9 @@ defmodule PtcRunner.SubAgent.Loop do
       }
 
       # Call LLM
-      case call_llm(llm, llm_input) do
+      alias PtcRunner.SubAgent.LLMResolver
+
+      case LLMResolver.resolve(llm, llm_input, state.llm_registry) do
         {:ok, response} ->
           handle_llm_response(response, agent, llm, state)
 
@@ -233,26 +257,55 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Execute parsed code
   defp execute_code(code, response, agent, llm, state) do
-    # Add last_fail to context if present
-    exec_context =
-      if state.last_fail do
-        Map.put(state.context, :fail, state.last_fail)
-      else
-        state.context
-      end
+    # Check if code calls any catalog-only tools
+    case find_catalog_tool_call(code, agent.tools, agent.tool_catalog) do
+      {:error, catalog_tool_name} ->
+        # Feed error back to LLM
+        available_tools = Map.keys(agent.tools) |> Enum.sort() |> Enum.join(", ")
 
-    # Normalize SubAgentTool instances to functions
-    normalized_tools = normalize_tools(agent.tools, state)
+        error_message =
+          "Error: Tool '#{catalog_tool_name}' is for planning only and cannot be called. Available tools: #{available_tools}"
 
-    # Merge system tools (return/fail) with user tools
-    # System tools must come second to take precedence
-    system_tools = %{
-      "return" => fn args -> args end,
-      "fail" => fn args -> args end
-    }
+        new_state = %{
+          state
+          | turn: state.turn + 1,
+            messages:
+              state.messages ++
+                [
+                  %{role: :assistant, content: response},
+                  %{role: :user, content: error_message}
+                ],
+            remaining_turns: state.remaining_turns - 1
+        }
 
-    all_tools = Map.merge(normalized_tools, system_tools)
+        loop(agent, llm, new_state)
 
+      :ok ->
+        # Add last_fail to context if present
+        exec_context =
+          if state.last_fail do
+            Map.put(state.context, :fail, state.last_fail)
+          else
+            state.context
+          end
+
+        # Normalize SubAgentTool instances to functions
+        normalized_tools = normalize_tools(agent.tools, state)
+
+        # Merge system tools (return/fail) with user tools
+        # System tools must come second to take precedence
+        system_tools = %{
+          "return" => fn args -> args end,
+          "fail" => fn args -> args end
+        }
+
+        all_tools = Map.merge(normalized_tools, system_tools)
+        execute_code_with_tools(code, response, agent, llm, state, exec_context, all_tools)
+    end
+  end
+
+  # Continue execution after tool_catalog check
+  defp execute_code_with_tools(code, response, agent, llm, state, exec_context, all_tools) do
     case Lisp.run(code, context: exec_context, memory: state.memory, tools: all_tools) do
       {:ok, lisp_step} ->
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
@@ -422,14 +475,24 @@ defmodule PtcRunner.SubAgent.Loop do
     Prompt.generate(agent, context: context)
   end
 
-  # Call the LLM (function or atom)
-  defp call_llm(llm, input) when is_function(llm) do
-    llm.(input)
-  end
+  # Check if code calls a catalog-only tool (not in executable tools)
+  defp find_catalog_tool_call(code, executable_tools, tool_catalog) do
+    # Only check if tool_catalog exists and is not empty
+    if tool_catalog && map_size(tool_catalog) > 0 do
+      # Find catalog-only tools (in catalog but not in executable tools)
+      catalog_only = Map.keys(tool_catalog) -- Map.keys(executable_tools)
 
-  defp call_llm(llm, _input) when is_atom(llm) do
-    # For now, atoms are not supported (registry support comes later)
-    {:error, :llm_atom_not_supported}
+      # Check if code contains a call to any catalog-only tool
+      Enum.find_value(catalog_only, :ok, fn tool_name ->
+        if contains_call?(code, tool_name) do
+          {:error, tool_name}
+        else
+          nil
+        end
+      end)
+    else
+      :ok
+    end
   end
 
   # Format error for LLM feedback
@@ -484,9 +547,23 @@ defmodule PtcRunner.SubAgent.Loop do
       {name, %SubAgentTool{} = tool} ->
         {name, wrap_sub_agent_tool(tool, state)}
 
+      {name, func} when is_function(func, 1) ->
+        {name, wrap_tool_return(func)}
+
       {name, other} ->
         {name, other}
     end)
+  end
+
+  # Wrap a regular tool function to handle {:ok, value}, {:error, reason}, and raw values
+  defp wrap_tool_return(func) do
+    fn args ->
+      case func.(args) do
+        {:ok, value} -> value
+        {:error, reason} -> raise "Tool error: #{inspect(reason)}"
+        value -> value
+      end
+    end
   end
 
   # Wrap a SubAgentTool in a function closure that executes the child agent
@@ -502,6 +579,7 @@ defmodule PtcRunner.SubAgent.Loop do
       # Execute the wrapped agent with inherited context
       case SubAgent.run(tool.agent,
              llm: resolved_llm,
+             llm_registry: state.llm_registry,
              context: args,
              _nesting_depth: state.nesting_depth + 1,
              _remaining_turns: state.remaining_turns,
