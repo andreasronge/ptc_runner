@@ -376,7 +376,11 @@ defmodule PtcDemo.Agent do
     end
   end
 
-  defp format_answer(result), do: inspect(result, limit: 50, pretty: false)
+  defp format_answer(result) do
+    result
+    |> inspect(limit: 50, pretty: false)
+    |> truncate(500)
+  end
 
   defp format_error(%{reason: reason, message: message}) do
     reason_str =
