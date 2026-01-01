@@ -49,7 +49,7 @@ defmodule PtcRunner.SubAgent.Loop do
     - `debug` - Enable verbose execution tracing (default: false)
     - `trace` - Trace filtering: true (always), false (never), :on_error (only on failure) (default: true)
     - `llm_retry` - Optional retry configuration map with:
-      - `max_attempts` - Maximum number of retry attempts (default: 3)
+      - `max_attempts` - Maximum number of retry attempts (default: 1, meaning no retries unless explicitly configured)
       - `backoff` - Backoff strategy: :exponential, :linear, or :constant (default: :exponential)
       - `base_delay` - Base delay in milliseconds (default: 1000)
       - `retryable_errors` - List of error types to retry (default: [:rate_limit, :timeout, :server_error])
