@@ -135,16 +135,16 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
 
   # Try both atom and string keys
   defp get_field(data, field_name) when is_map(data) do
-    cond do
-      # Try existing atom key (prevents atom table leak)
-      match?({:ok, _}, try_existing_atom_key(data, field_name)) ->
-        try_existing_atom_key(data, field_name)
+    case try_existing_atom_key(data, field_name) do
+      {:ok, _} = result ->
+        result
 
-      Map.has_key?(data, field_name) ->
-        {:ok, Map.get(data, field_name)}
-
-      true ->
-        :missing
+      :missing ->
+        if Map.has_key?(data, field_name) do
+          {:ok, Map.get(data, field_name)}
+        else
+          :missing
+        end
     end
   end
 
