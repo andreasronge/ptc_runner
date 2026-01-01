@@ -8,86 +8,37 @@
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue.svg)](https://github.com/andreasronge/ptc_runner)
 [![Run in Livebook](https://img.shields.io/badge/Run_in-Livebook-purple)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
 
-A BEAM-native Elixir library for Programmatic Tool Calling (PTC). Execute LLM-generated programs that orchestrate tools and transform data safely inside sandboxed processes.
+Build LLM agents that write and execute programs. SubAgents combine the reasoning power of LLMs with the computational precision of a sandboxed interpreter.
 
-## What is PTC?
-
-Programmatic Tool Calling is an execution model where an LLM writes small programs to process data, rather than making individual tool calls. Instead of returning large datasets to the model (which bloats context), the model generates a program that calls tools, filters/transforms results, and returns only the final answer.
-
-The pattern was introduced by Anthropic in their blog posts on [advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use) and [code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp).
-
-## Quick Example
+## Quick Start
 
 ```elixir
-iex> tools = %{
-...>   "get_expenses" => fn _args ->
-...>     [
-...>       %{"category" => "travel", "amount" => 500},
-...>       %{"category" => "food", "amount" => 50},
-...>       %{"category" => "travel", "amount" => 200}
-...>     ]
-...>   end
-...> }
-iex> program = ~S|{"program": {"op": "pipe", "steps": [
-...>   {"op": "call", "tool": "get_expenses"},
-...>   {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-...>   {"op": "sum", "field": "amount"}
-...> ]}}|
-iex> {:ok, result, _delta, _memory} = PtcRunner.Json.run(program, tools: tools)
-iex> result
-700
+{:ok, step} = PtcRunner.SubAgent.run(
+  "What's the total value of orders over $100?",
+  tools: %{"get_orders" => &MyApp.Orders.list/0},
+  signature: "{total :float}",
+  llm: my_llm
+)
+
+step.return.total  #=> 2450.00
 ```
 
-PTC-Lisp (same result, more compact):
-
-```elixir
-iex> tools = %{"get-expenses" => fn _args ->
-...>   [%{"category" => "travel", "amount" => 500},
-...>    %{"category" => "food", "amount" => 50},
-...>    %{"category" => "travel", "amount" => 200}]
-...> end}
-iex> program = ~S|(->> (call "get-expenses" {}) (filter (where :category = "travel")) (sum-by :amount))|
-iex> {:ok, %{return: result}} = PtcRunner.Lisp.run(program, tools: tools)
-iex> result
-700
-```
-
-## Why PTC?
-
-Traditional tool calling requires multiple LLM round-trips:
-
-```
-LLM → get_employees() → LLM → filter(dept=eng) → LLM → avg(salary) → LLM
-```
-
-With PTC, the LLM writes one program executed locally:
+The SubAgent doesn't answer directly - it writes a program that computes the answer:
 
 ```clojure
-(->> (call "get-employees" {}) (filter (where :department = "engineering")) (avg-by :salary))
+(->> (call "get_orders" {})
+     (filter (where :amount > 100))
+     (sum-by :amount))
 ```
 
-## Why two DSLs?
+This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanced-tool-use): instead of the LLM being the computer, it programs the computer.
 
-- **PTC-JSON** — Easy for weaker models; JSON schema enforces valid programs.
-- **PTC-Lisp** — More expressive (anonymous functions, destructuring), ~8x fewer tokens. Clojure-inspired syntax (small subset).
+## Why SubAgents?
 
-**Can LLMs reliably generate these?** See [Benchmark Evaluation](docs/benchmark-eval.md) for results, or try the [LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd) to test with your own queries.
-
-Example of a LLM generated PTC-Lisp program that can not be expressed in PTC-JSON, see [LiveBook page](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd): Question: Which category has the highest total spending? Show the breakdown.
-
-```clojure
-(let [expenses (call "get-expenses" {})
-      by-category (group-by :category expenses)
-      spending-by-cat (map (fn [[cat items]]
-                             {:category cat
-                              :total (sum-by :amount items)
-                              :count (count items)
-                              :avg (avg-by :amount items)})
-                           by-category)
-      sorted (sort-by :total > spending-by-cat)]
-  {:highest (first sorted)
-   :breakdown sorted})
-```
+- **Precise computation**: LLMs reason and generate code; computation runs deterministically in a sandbox
+- **Context-efficient**: Process large datasets locally instead of sending everything to the LLM
+- **Multi-turn capable**: Agents can call tools, store results in memory, and iterate until done
+- **Type-safe**: Validate return structures with signatures; agents auto-retry on mismatch
 
 ## Installation
 
@@ -97,30 +48,43 @@ def deps do
 end
 ```
 
-## Features
-
-- **Two DSLs**: JSON (verbose, simple) and Lisp (compact, expressive)
-- **Safe**: Fixed operations, no arbitrary code execution
-- **Fast**: Isolated BEAM processes with configurable timeout (1s) and memory (10MB) limits
-- **Simple**: No external dependencies (Python, containers, etc.)
-- **Cost-efficient**: Tested with budget models (DeepSeek 3.2, Gemini 2.5 Flash)
-- **Retry-friendly**: Structured errors with actionable messages for LLM retry loops
-- **Stateful**: Context refs enable persistent memory across agentic loop iterations
-
-## Key Commands
-
-- `mix test` - Run all tests
-- `mix test --failed` - Re-run failed tests
-- `mix format` - Format code
-- `mix ptc.validate_spec` - Validate PTC-Lisp spec examples
-
 ## Documentation
 
-- **[Guide](docs/guide.md)** - Architecture, API reference, detailed examples
-- **[Benchmark Evaluation](docs/benchmark-eval.md)** - LLM accuracy benchmarks by model and DSL
-- **[PTC-JSON Specification](docs/ptc-json-specification.md)** - Complete JSON DSL reference
-- **[PTC-Lisp Overview](docs/ptc-lisp-overview.md)** - Lisp DSL introduction
-- **Livebooks**: [Playground](livebooks/ptc_runner_playground.livemd) (try the DSLs) · [LLM Agent](livebooks/ptc_runner_llm_agent.livemd) (build an agent)
+### Guides
+
+- **[Getting Started](docs/guides/subagent-getting-started.md)** - Build your first SubAgent
+- **[Core Concepts](docs/guides/subagent-concepts.md)** - Context, memory, and the firewall convention
+- **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
+- **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
+- **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions
+
+### Reference
+
+- **[Signature Syntax](docs/signature-syntax.md)** - Input/output type contracts
+- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write
+- **[Benchmark Evaluation](docs/benchmark-eval.md)** - LLM accuracy by model
+
+### Interactive
+
+- **[Playground Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)** - Try PTC-Lisp interactively
+- **[LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd)** - Build an agent end-to-end
+
+## Low-Level APIs
+
+For direct program execution without the agentic loop, use the DSL runners:
+
+```elixir
+# PTC-Lisp (compact, expressive)
+{:ok, %{return: result}} = PtcRunner.Lisp.run(
+  "(->> ctx/items (filter (where :active)) (count))",
+  context: %{items: items}
+)
+
+# PTC-JSON (verbose, schema-enforced)
+{:ok, result, _, _} = PtcRunner.Json.run(program_json, tools: tools)
+```
+
+See **[Guide](docs/guide.md)** for architecture and low-level API details.
 
 ## License
 

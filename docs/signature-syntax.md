@@ -406,4 +406,4 @@ These extensions should be added only when genuine use cases emerge.
 - [Core Concepts](guides/subagent-concepts.md) - How signatures interact with context
 - [Getting Started](guides/subagent-getting-started.md) - Using signatures in your first agent
 - [Patterns](guides/subagent-patterns.md) - Chaining agents using signatures
-- [SubAgent Specification](ptc_agents/specification.md) - SubAgent API reference
+- `PtcRunner.SubAgent` - API reference

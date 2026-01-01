@@ -1,263 +1,96 @@
 # PtcRunner Guide
 
+## What is PtcRunner?
+
+PtcRunner enables LLM agents that write and execute programs. The **SubAgent API** is the primary interface - it handles the agentic loop, tool calling, and result validation automatically.
+
+For most use cases, start with the [SubAgent Getting Started guide](guides/subagent-getting-started.md).
+
 ## Architecture
 
 ```mermaid
 flowchart TD
-      User([User / LLM Client]) -->|"run/2 (program)"| Runner[PtcRunner.Json / PtcRunner.Lisp]
+    User([User / LLM Client]) -->|"run/2 (prompt)"| SubAgent[PtcRunner.SubAgent]
 
-      subgraph "PtcRunner Process"
-          Runner -->|parse/1| Parser[Parser]
-          Parser -->|AST| Validator[Validator / Analyzer]
-          Validator -->|":ok"| Runner
-          Runner -->|Creates| Context[Execution Context]
-          Context -- Contains --> Tools[Tool Registry]
-      end
+    subgraph "SubAgent Loop"
+        SubAgent -->|Creates| Prompt[System Prompt]
+        Prompt -->|Sends| LLM[LLM Callback]
+        LLM -->|Returns| Code[PTC-Lisp Program]
+        Code -->|Validates| Sandbox
+    end
 
-      subgraph "Sandbox Process"
-          direction TB
-          Sandbox[Sandbox<br/>max_heap: 10MB<br/>timeout: 1s]
-          Sandbox -->|eval/2| Interpreter[Interpreter / Eval]
-          Interpreter -->|Dispatch| Ops[Operations / Runtime]
-          Ops -->|Access vars| ContextRef[Context]
-          Ops -->|Call| ToolsRef[Tools]
-      end
+    subgraph "Sandbox Process"
+        direction TB
+        Sandbox[Sandbox<br/>max_heap: 10MB<br/>timeout: 1s]
+        Sandbox -->|eval/2| Interpreter[Interpreter]
+        Interpreter -->|Dispatch| Ops[Operations]
+        Ops -->|Call| Tools[User Tools]
+    end
 
-      Runner -->|"execute/3 (AST, Context)"| Sandbox
-      Sandbox -->|Result| Runner
+    Sandbox -->|Result/Error| SubAgent
+    SubAgent -->|Success/Retry| LLM
+    SubAgent -->|"{:ok, step}"| User
 ```
 
-Two-phase execution: parse and validate in the main process, then execute in an isolated sandbox with memory and timeout limits.
+SubAgents manage a loop: prompt the LLM, execute the returned program in a sandbox, validate results, and either return or retry. Programs run in isolated BEAM processes with memory and timeout limits.
+
+## SubAgent Guides
+
+- **[Getting Started](guides/subagent-getting-started.md)** - Build your first agent
+- **[Core Concepts](guides/subagent-concepts.md)** - Context, memory, firewall convention
+- **[Patterns](guides/subagent-patterns.md)** - Chaining, orchestration, composition
+- **[Testing](guides/subagent-testing.md)** - Mocking LLMs, integration tests
+- **[Troubleshooting](guides/subagent-troubleshooting.md)** - Common issues and solutions
+- **[Advanced Topics](guides/subagent-advanced.md)** - Observability, compile pattern
+
+## Low-Level APIs
+
+For direct program execution without the agentic loop, PtcRunner provides two DSLs:
+
+### PTC-Lisp
+
+Compact, expressive Clojure subset. Used internally by SubAgents.
+
+```elixir
+{:ok, result, _delta, _memory} = PtcRunner.Lisp.run(
+  "(->> ctx/users (filter (where :active)) (count))",
+  context: %{users: users}
+)
+```
+
+See `PtcRunner.Lisp` module docs and [PTC-Lisp Specification](ptc-lisp-specification.md).
+
+### PTC-JSON
+
+Verbose but schema-enforced. Useful when you need JSON Schema validation of LLM output.
+
+```elixir
+{:ok, result, _delta, _memory} = PtcRunner.Json.run(program_json, tools: tools)
+```
+
+See `PtcRunner.Json` module docs and [PTC-JSON Specification](reference/ptc-json-specification.md).
+
+> **Note:** PTC-JSON is not supported in the SubAgent API. SubAgents use PTC-Lisp exclusively for its token efficiency and expressiveness.
 
 ## Design Principles
 
 1. **Safety First**: Programs run in isolated processes with resource limits
 2. **Simplicity**: DSLs are easy for LLMs to generate and humans to debug
-3. **Composability**: Operations chain via `pipe`, results can be stored and referenced
+3. **Composability**: Operations chain via threading; results can be stored and referenced
 4. **Extensibility**: Users register their own tools as simple functions
-5. **Execution Only**: No LLM integration—compose with ReqLLM or other clients
-
-## DSL Specifications
-
-- **[PTC-JSON Specification](ptc-json-specification.md)** - Complete JSON DSL reference
-- **[PTC-Lisp Specification](ptc-lisp-specification.md)** - Complete Lisp DSL reference
-- **[PTC-Lisp Overview](ptc-lisp-overview.md)** - Lisp DSL introduction
-- **[Benchmark Evaluation](benchmark-eval.md)** - LLM accuracy benchmarks by model and DSL
-
-### Quick Comparison
-
-**PTC-JSON**
-```json
-{
-  "program": {
-    "op": "pipe",
-    "steps": [
-      {"op": "load", "name": "expenses"},
-      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-      {"op": "sum", "field": "amount"}
-    ]
-  }
-}
-```
-
-**PTC-Lisp**
-```clojure
-(->> ctx/expenses
-     (filter (where :category = "travel"))
-     (sum-by :amount))
-```
-
-## API Reference
-
-See the module documentation for complete API details:
-
-- `PtcRunner.Json` - JSON DSL entry point, tool registration, error handling
-- `PtcRunner.Lisp` - Lisp DSL entry point, tool registration
-- `PtcRunner.Sandbox` - Resource limits and configuration
-- `PtcRunner.Context` - Context, memory, and tools management
-
-## LLM Integration
-
-PtcRunner is execution-only. Compose with your LLM client (e.g., [ReqLLM](https://hexdocs.pm/req_llm)):
-
-```elixir
-defmodule MyApp.PTCAgent do
-  @system_prompt """
-  Generate JSON programs using this DSL:
-  #{PtcRunner.Schema.to_prompt()}
-  """
-
-  def run(user_request, context \\ %{}) do
-    {:ok, response} = ReqLLM.generate_text("anthropic:claude-haiku-4.5",
-      user_request, system: @system_prompt)
-
-    program = extract_json(response)
-
-    case PtcRunner.Json.run(program, context: context, tools: @tools) do
-      {:ok, result, _} -> {:ok, result}
-      {:error, error} -> retry_with_error(user_request, program, error)
-    end
-  end
-end
-```
-
-### Dynamic Context Refs
-
-For large tool results, store them as context refs instead of returning to the LLM:
-
-```elixir
-def handle_tool_result(state, tool_name, result) do
-  if large_result?(result) do
-    ref = "#{tool_name}_#{System.unique_integer([:positive])}"
-    state = %{state | context: Map.put(state.context, ref, result)}
-    {state, {:context_ref, %{ref: ref, count: length(result)}}}
-  else
-    {state, {:inline, result}}
-  end
-end
-```
-
-The LLM queries via: `{"op": "load", "name": "get_orders_42"}`.
+5. **Execution Only**: No LLM integration in the core - SubAgent composes with your LLM client
 
 ## Demo Application
 
 The `demo/` directory contains an interactive chat application demonstrating PtcRunner with LLM integration:
 
 - **Interactive CLI**: Query datasets using natural language
-- **Both DSLs**: JSON (`mix run -e "PtcDemo.CLI.main([])"`) and Lisp (`mix lisp`)
 - **Test Runner**: Automated tests to evaluate LLM program generation accuracy
 - **Sample Data**: 2500 records across products, orders, employees, and expenses
 
 See `demo/README.md` for setup and usage.
 
-#### Running E2E Tests
-
-E2E tests require an API key. Copy `.env.example` to `.env` and configure:
-
-```bash
-cp .env.example .env
-# Edit .env with your OPENROUTER_API_KEY
-
-# Run JSON DSL e2e tests
-mix test test/ptc_runner/json/e2e_test.exs --include e2e
-
-# Run Lisp DSL e2e tests
-mix test test/ptc_runner/lisp/e2e_test.exs --include e2e
-
-# Run all e2e tests
-mix test --include e2e
-
-# Run with specific model
-PTC_TEST_MODEL=haiku mix test --include e2e
-```
-
-The same `.env` file is used by the demo application in `demo/`.
-
-## Clojure Validation
-
-PTC-Lisp is designed as a Clojure subset. You can validate programs against real Clojure using [Babashka](https://babashka.org/):
-
-```bash
-# Install Babashka (one-time)
-mix ptc.install_babashka
-
-# Run Clojure conformance tests
-mix test --only clojure
-
-# Skip Clojure tests (if Babashka not installed)
-mix test --exclude clojure
-
-# Demo test runner with Clojure syntax validation
-cd demo && mix lisp --test --validate-clojure
-```
-
-### Known Differences from Clojure
-
-PTC-Lisp aims for semantic compatibility with Clojure. All conformance tests currently pass.
-
-The main intentional difference is that sequence functions (`filter`, `map`, `sort`, etc.) return vectors instead of lazy sequences. This is practical for LLM use cases and doesn't affect program correctness.
-
-## Spec Validation
-
-PtcRunner includes tools to validate that the PTC-Lisp implementation matches the specification.
-
-### Overview
-
-The specification validator extracts examples from the specification markdown and verifies that executing them produces the expected results. This helps detect drift between specification and implementation.
-
-### Running Validation
-
-```bash
-# Validate all examples in the specification
-mix ptc.validate_spec
-
-# Validate against Clojure (requires Babashka)
-mix ptc.validate_spec --clojure
-
-# Update section checksums after intentional spec changes
-mix ptc.update_spec_checksums
-```
-
-### Output Format
-
-The validator displays:
-
-1. **Summary** - Total examples, pass/fail counts, success rate
-2. **Section Results** - Results grouped by specification section (e.g., "Section 3. Data Types")
-3. **Failures** - Detailed failure information for any examples that didn't pass
-
-Example output:
-
-```
-=== PTC-Lisp Specification Validation ===
-
-Total examples:  106
-Passed:          106
-Failed:          0
-Success rate:    100%
-
-=== Results by Section ===
-
-✓ ## 1. Overview: 3 passed
-✓ ## 2. Lexical Structure: 8 passed
-✓ ## 3. Data Types: 12 passed
-...
-```
-
-### Adding Examples to the Spec
-
-Examples in the specification use a simple format within code blocks:
-
-```clojure
-; Single-line examples
-(+ 1 2)  ; => 3
-(filter even? [1 2 3 4])  ; => [2 4]
-
-; Multi-line examples
-(let [x 10
-      y (+ x 5)]
-  (* x y))  ; => 150
-```
-
-The validator extracts any code with a `; =>` comment, treating the comment as the expected result.
-
-### Section Tracking
-
-When examples are validated, they are grouped by their specification section (headers starting with `## N.`). The `by_section` field in results shows pass/fail counts per section, helping identify which areas need attention.
-
-### Updating Checksums
-
-The specification file has checksums to detect unintended changes. After intentionally modifying the specification:
-
-```bash
-mix ptc.update_spec_checksums
-git add test/spec_cases/checksums.exs
-```
-
-The checksums file tracks content hashes for each section, allowing the validator to warn when sections change unexpectedly.
-
 ## References
 
-- [Anthropic PTC Blog Post](https://www.anthropic.com/research/ptc)
-- [Open-PTC-Agent (Python)](https://github.com/Chen-zexi/open-ptc-agent)
-- [ReqLLM Documentation](https://hexdocs.pm/req_llm)
+- [Anthropic: Advanced Tool Use](https://www.anthropic.com/engineering/advanced-tool-use)
+- [Anthropic: Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp)
