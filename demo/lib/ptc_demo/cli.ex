@@ -175,21 +175,23 @@ defmodule PtcDemo.CLI do
   end
 
   defp handle_input("/context") do
-    messages = PtcDemo.Agent.context()
+    programs = PtcDemo.Agent.programs()
 
-    if messages == [] do
+    if programs == [] do
       IO.puts("\n   No conversation yet (system prompt excluded, use /system to view).\n")
     else
-      IO.puts("\nConversation context (#{length(messages)} messages):")
+      IO.puts("\nConversation history (#{length(programs)} exchanges):\n")
 
-      for msg <- messages do
-        role = msg.role |> to_string() |> String.upcase()
-        content = format_message_content(msg.content)
-        IO.puts("\n[#{role}]")
-        IO.puts(truncate(content, 500))
-      end
-
-      IO.puts("")
+      programs
+      |> Enum.with_index(1)
+      |> Enum.each(fn {{program, result}, idx} ->
+        IO.puts("─── Exchange #{idx} ───")
+        IO.puts("[PROGRAM]")
+        IO.puts(truncate(program || "(no program)", 300))
+        IO.puts("\n[RESULT]")
+        IO.puts(truncate(format_program_result(result), 200))
+        IO.puts("")
+      end)
     end
 
     loop()
@@ -260,7 +262,7 @@ defmodule PtcDemo.CLI do
       /programs     - Show all programs generated this session
       /result       - Show last execution result (raw value)
       /system       - Show current system prompt
-      /context      - Show conversation history (excludes system prompt)
+      /context      - Show program/result history (excludes system prompt)
       /examples     - Show example queries
       /stats        - Show token usage and cost statistics
       /mode         - Show current data mode

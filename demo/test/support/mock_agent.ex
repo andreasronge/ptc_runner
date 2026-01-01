@@ -70,10 +70,6 @@ defmodule PtcDemo.MockAgent do
     :schema
   end
 
-  def context do
-    []
-  end
-
   def system_prompt do
     "Mock agent system prompt"
   end
@@ -109,8 +105,7 @@ defmodule PtcDemo.MockAgent do
         program_entry = {question, {:error, error}}
         new_program_results = state.program_results ++ [program_entry]
 
-        {:reply, {:error, error},
-         %{state | program_results: new_program_results}}
+        {:reply, {:error, error}, %{state | program_results: new_program_results}}
 
       response ->
         # Response format: {:ok, answer, program, result} or {:error, reason}
@@ -132,8 +127,7 @@ defmodule PtcDemo.MockAgent do
             program_entry = {question, {:error, reason}}
             new_program_results = state.program_results ++ [program_entry]
 
-            {:reply, {:error, reason},
-             %{state | program_results: new_program_results}}
+            {:reply, {:error, reason}, %{state | program_results: new_program_results}}
 
           answer when is_binary(answer) ->
             # Simple response - treat as answer with no specific program
