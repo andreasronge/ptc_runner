@@ -106,7 +106,15 @@ defmodule PtcRunner.SubAgent.DebugTest do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
       llm = fn _ -> {:ok, ~S|(call "return" {:done true})|} end
 
-      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
+      capture_io(fn ->
+        {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
+        send(self(), step)
+      end)
+
+      step =
+        receive do
+          step -> step
+        end
 
       [turn1] = step.trace
       assert Map.has_key?(turn1, :context_snapshot)
