@@ -156,7 +156,7 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call({:ask, question, opts}, _from, state) do
-    stop_on_success = Keyword.get(opts, :stop_on_success, false)
+    max_turns = Keyword.get(opts, :max_turns, @max_turns)
 
     # Build the SubAgent
     agent = build_agent(state.data_mode)
@@ -169,7 +169,7 @@ defmodule PtcDemo.Agent do
     case SubAgent.run(agent,
            llm: llm_callback(state.model),
            context: context,
-           max_turns: if(stop_on_success, do: 1, else: @max_turns)
+           max_turns: max_turns
          ) do
       {:ok, step} ->
         result = step.return
