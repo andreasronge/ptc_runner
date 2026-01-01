@@ -36,8 +36,7 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
     {:error, {:unsupported_pattern, other}}
   end
 
-  @doc false
-  def analyze_pattern_list(elements) do
+  defp analyze_pattern_list(elements) do
     elements
     |> Enum.reduce_while({:ok, []}, fn elem, {:ok, acc} ->
       case analyze_pattern(elem) do
