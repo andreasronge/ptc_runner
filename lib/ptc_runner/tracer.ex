@@ -5,6 +5,14 @@ defmodule PtcRunner.Tracer do
   Traces are built by prepending entries for efficiency, then reversed on finalize.
   Each Tracer has a unique trace_id for correlation in parallel/nested execution.
 
+  ## Design Goals
+
+  1. **Immutable traces** - No shared mutable state
+  2. **Correlation IDs** - Link parent and child executions
+  3. **Timestamp ordering** - Reconstruct parallel timelines
+  4. **Process isolation** - Each SubAgent owns its trace
+  5. **Safe aggregation** - Merge traces without race conditions
+
   ## Usage
 
       tracer = Tracer.new()
@@ -14,13 +22,18 @@ defmodule PtcRunner.Tracer do
 
   ## Parallel Traces
 
-  For parallel SubAgent execution via `Task.async_stream`, use `merge_parallel/2` to
-  combine child traces into a unified timeline:
+  When SubAgents run in parallel via `Task.async_stream`, their traces are
+  generated concurrently. Use `merge_parallel/2` to combine child traces
+  into a unified timeline sorted by timestamp:
 
       parent = Tracer.new()
       children = [child1, child2, child3]  # finalized tracers
       merged = Tracer.merge_parallel(parent, children)
       usage = Tracer.aggregate_usage(merged)
+
+  > **Note:** `Step.trace` is always a list `[trace_entry()]`. The merged map
+  > structure returned by `merge_parallel/2` is a **separate aggregation result**,
+  > not a replacement for `Step.trace`.
 
   ## Nested Traces
 
@@ -28,7 +41,10 @@ defmodule PtcRunner.Tracer do
 
       tracer = Tracer.record_nested_call(tracer, tool_call, child_step)
 
-  See [parallel-trace-design.md](docs/ptc_agents/parallel-trace-design.md) for architecture.
+  ## Trace ID Generation
+
+  Trace IDs are 32-character hex strings generated from cryptographically
+  secure random bytes. No external dependencies required.
   """
 
   defstruct [

@@ -5,9 +5,6 @@ defmodule PtcRunner.SubAgent.Loop do
   The loop repeatedly calls the LLM, parses PTC-Lisp from the response,
   executes it, and continues until `return`/`fail` is called or `max_turns` is exceeded.
 
-  See [specification.md#looprun2](https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc_agents/specification.md#looprun2)
-  for architecture details.
-
   ## Flow
 
   1. Build LLM input with system prompt, messages, and tool names
@@ -17,6 +14,20 @@ defmodule PtcRunner.SubAgent.Loop do
   5. Check for return/fail or continue to next turn
   6. Build trace entry and update message history
   7. Merge execution results into context for next turn
+
+  ## Termination Conditions
+
+  The loop terminates when any of these occur:
+
+  | Condition | Result | Reason |
+  |-----------|--------|--------|
+  | `(return value)` called | `{:ok, step}` | Normal completion |
+  | `(fail error)` called | `{:error, step}` | Explicit failure |
+  | `max_turns` exceeded | `{:error, step}` | `:max_turns_exceeded` |
+  | `max_depth` exceeded | `{:error, step}` | `:max_depth_exceeded` |
+  | `turn_budget` exhausted | `{:error, step}` | `:turn_budget_exhausted` |
+  | `mission_timeout` exceeded | `{:error, step}` | `:mission_timeout` |
+  | LLM error after retries | `{:error, step}` | `:llm_error` |
 
   ## LLM Inheritance
 

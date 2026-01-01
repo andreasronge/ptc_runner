@@ -6,9 +6,6 @@ defmodule PtcRunner.SubAgent.Telemetry do
   execution, enabling integration with observability tools like Prometheus,
   OpenTelemetry, and custom handlers.
 
-  See [specification.md#telemetry-hooks](https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc_agents/specification.md#telemetry-hooks)
-  for the full event reference.
-
   ## Events
 
   All events are prefixed with `[:ptc_runner, :sub_agent]`.
