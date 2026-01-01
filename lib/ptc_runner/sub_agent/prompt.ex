@@ -10,8 +10,47 @@ defmodule PtcRunner.SubAgent.Prompt do
   - PTC-Lisp language reference
   - Output format requirements
 
-  See [system-prompt-template.md](https://github.com/andreasronge/ptc_runner/blob/main/docs/ptc_agents/system-prompt-template.md)
-  for the full specification.
+  ## Prompt Structure
+
+  The system prompt consists of 7 sections:
+
+  1. **Role & Purpose** - Defines agent as PTC-Lisp generator
+  2. **Environment Rules** - Boundaries for code generation
+  3. **Data Inventory** - Typed view of `ctx/` variables
+  4. **Tool Schemas** - Available tools with signatures
+  5. **PTC-Lisp Reference** - Language syntax and built-in functions
+  6. **Output Format** - Code block requirements
+  7. **Mission Prompt** - User's task (from prompt option)
+
+  ## Customization
+
+  The `system_prompt` field on `SubAgent` accepts three forms:
+
+  - **Map options** - `:prefix`, `:suffix`, `:language_spec`, `:output_format`
+  - **Function** - `fn default_prompt -> modified_prompt end`
+  - **String** - Complete override (use with caution)
+
+  ### Map Options
+
+  | Option | Description |
+  |--------|-------------|
+  | `:prefix` | Prepended before all generated content |
+  | `:suffix` | Appended after all generated content |
+  | `:language_spec` | Replaces the PTC-Lisp language reference section |
+  | `:output_format` | Replaces output format instructions |
+
+  ### Prompt Assembly Order
+
+  When using a map, the final system prompt is assembled as:
+
+  1. prefix (if provided)
+  2. Core PTC-Lisp instructions
+  3. language_spec (custom or default language reference)
+  4. Error recovery section
+  5. Data inventory
+  6. Tool schemas
+  7. output_format (custom or default)
+  8. suffix (if provided)
 
   ## Examples
 

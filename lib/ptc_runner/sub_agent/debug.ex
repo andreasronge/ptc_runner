@@ -5,6 +5,27 @@ defmodule PtcRunner.SubAgent.Debug do
   Provides functions to pretty-print execution traces and agent chains,
   making it easier to understand what happened during agent execution.
 
+  ## Debug Option
+
+  Enable debug mode via the `:debug` option on `SubAgent.run/2`:
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
+
+  When enabled, each turn logs:
+  - Turn number
+  - LLM response (truncated)
+  - Execution result (truncated)
+
+  ## Trace Option
+
+  Control trace collection via the `:trace` option:
+
+  | Value | Behavior |
+  |-------|----------|
+  | `true` (default) | Always collect trace |
+  | `false` | Never collect trace |
+  | `:on_error` | Only include trace on failure |
+
   ## Examples
 
       iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{}, debug: true)
