@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert prompt =~ "# Rules"
       assert prompt =~ "# Data Inventory"
       assert prompt =~ "# Available Tools"
-      assert prompt =~ "# PTC-Lisp Quick Reference"
+      assert prompt =~ "### Language Overview"
       assert prompt =~ "# Output Format"
       assert prompt =~ "# Mission"
     end
@@ -554,7 +554,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert prompt =~ "Find urgent emails for Alice"
 
       # PTC-Lisp reference
-      assert prompt =~ "(call \"search\""
+      assert prompt =~ "(call \"tool-name\""
 
       # Output format
       assert prompt =~ "```clojure"
