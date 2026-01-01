@@ -26,7 +26,7 @@ defmodule PtcDemo.MockAgent do
   end
 
   def ask(question, _opts) do
-    # Options like stop_on_success are ignored in mock
+    # Options like max_turns are ignored in mock
     GenServer.call(__MODULE__, {:ask, question}, 30_000)
   end
 

@@ -318,7 +318,7 @@ defmodule PtcDemo.LispTestRunner do
     end
 
     result =
-      case agent_mod.ask(query, stop_on_success: true) do
+      case agent_mod.ask(query, max_turns: 1) do
         {:ok, _answer} ->
           # Get all programs attempted during this query
           all_programs = agent_mod.programs()
@@ -423,7 +423,7 @@ defmodule PtcDemo.LispTestRunner do
           IO.puts("   Turn: #{query}")
         end
 
-        case agent_mod.ask(query, stop_on_success: true) do
+        case agent_mod.ask(query, max_turns: 1) do
           {:ok, _answer} ->
             new_programs = agent_mod.programs()
             {:cont, {:ok, all_programs_acc ++ new_programs}}

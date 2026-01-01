@@ -273,7 +273,7 @@ defmodule PtcDemo.JsonTestRunner do
     end
 
     result =
-      case agent_mod.ask(query) do
+      case agent_mod.ask(query, max_turns: 1) do
         {:ok, _answer} ->
           # Get all programs attempted during this query
           all_programs = agent_mod.programs()
@@ -362,7 +362,7 @@ defmodule PtcDemo.JsonTestRunner do
           IO.puts("   Turn: #{query}")
         end
 
-        case agent_mod.ask(query) do
+        case agent_mod.ask(query, max_turns: 1) do
           {:ok, _answer} ->
             new_programs = agent_mod.programs()
             {:cont, {:ok, all_programs_acc ++ new_programs}}
