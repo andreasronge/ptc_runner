@@ -1426,7 +1426,8 @@ registry = %{
 ```elixir
 llm_retry: %{
   max_attempts: 3,
-  backoff: :exponential,  # or :linear
+  backoff: :exponential,  # or :linear, :constant
+  base_delay: 1000,  # milliseconds
   retryable_errors: [:rate_limit, :timeout]  # optional filter
 }
 ```

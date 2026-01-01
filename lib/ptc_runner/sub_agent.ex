@@ -305,6 +305,11 @@ defmodule PtcRunner.SubAgent do
   - `llm` - Required. LLM callback function `(map() -> {:ok, String.t()} | {:error, term()})` or atom
   - `llm_registry` - Map of atom to LLM callback for atom-based LLM references (default: %{})
   - `context` - Map of input data (default: %{})
+  - `llm_retry` - Optional map to configure retry behavior for transient LLM failures:
+    - `max_attempts` - Maximum retry attempts (default: 1, meaning no retries unless explicitly configured)
+    - `backoff` - Backoff strategy: `:exponential`, `:linear`, or `:constant` (default: `:exponential`)
+    - `base_delay` - Base delay in milliseconds (default: 1000)
+    - `retryable_errors` - List of error types to retry (default: `[:rate_limit, :timeout, :server_error]`)
   - Other options from agent definition can be overridden
 
   ## LLM Registry
