@@ -338,7 +338,7 @@ defmodule PtcRunner.SubAgent do
 
       # Failure case (using loop mode)
       iex> agent = PtcRunner.SubAgent.new(prompt: "Fail", max_turns: 2)
-      iex> mock_llm = fn _ -> {:ok, ~S|(call "fail" {:reason :test :message "Error"})|} end
+      iex> mock_llm = fn _ -> {:ok, ~S|(fail {:reason :test :message "Error"})|} end
       iex> PtcRunner.SubAgent.run!(agent, llm: mock_llm)
       ** (PtcRunner.SubAgentError) SubAgent failed: failed - %{message: "Error", reason: :test}
 
