@@ -137,7 +137,7 @@ signature: "{summary :string, _raw_data [:map]}"
 
 ### On `return`
 
-When the agent calls `(call "return" data)`:
+When the agent calls `(return data)`:
 
 1. Data is validated against the output signature
 2. If invalid, error message is sent to LLM for retry

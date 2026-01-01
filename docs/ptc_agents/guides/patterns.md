@@ -86,7 +86,7 @@ The main agent sees typed tool signatures and can compose them:
 ```clojure
 (let [customer (call "customer-finder" {:description "highest revenue"})
       orders (call "order-fetcher" {:customer_id (:customer_id customer)})]
-  (call "return" {:summary (str "Found " (count orders) " orders")}))
+  (return {:summary (str "Found " (count orders) " orders")}))
 ```
 
 ### LLM Inheritance
@@ -266,7 +266,7 @@ The LLM decides which tool sets each child needs:
       meetings (call "spawn_agent" {:prompt "Schedule follow-ups"
                                     :tools ["calendar"]
                                     :context emails})]
-  (call "return" {:scheduled (count meetings)}))
+  (return {:scheduled (count meetings)}))
 ```
 
 ### Pattern 2: Pre-defined SubAgents
