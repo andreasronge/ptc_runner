@@ -12,6 +12,22 @@ defmodule PtcRunner.Tracer do
       tracer = Tracer.add_entry(tracer, %{type: :llm_response, data: %{tokens: 100}})
       result = Tracer.finalize(tracer)
 
+  ## Parallel Traces
+
+  For parallel SubAgent execution via `Task.async_stream`, use `merge_parallel/2` to
+  combine child traces into a unified timeline:
+
+      parent = Tracer.new()
+      children = [child1, child2, child3]  # finalized tracers
+      merged = Tracer.merge_parallel(parent, children)
+      usage = Tracer.aggregate_usage(merged)
+
+  ## Nested Traces
+
+  For SubAgents calling other SubAgents via tools, use `record_nested_call/3`:
+
+      tracer = Tracer.record_nested_call(tracer, tool_call, child_step)
+
   See [parallel-trace-design.md](docs/ptc_agents/parallel-trace-design.md) for architecture.
   """
 
@@ -67,6 +83,36 @@ defmodule PtcRunner.Tracer do
           | :program_end
           | :return
           | :fail
+          | :nested_call
+
+  @typedoc """
+  Aggregated trace from parallel execution.
+
+  Returned by `merge_parallel/2` - separate from `Tracer.t()`.
+  """
+  @type merged_trace :: %{
+          root_trace_id: String.t(),
+          entries: [entry()],
+          metadata: %{
+            agent_count: non_neg_integer(),
+            parallel: boolean(),
+            wall_time_ms: non_neg_integer(),
+            total_turns: non_neg_integer()
+          }
+        }
+
+  @typedoc """
+  Aggregated usage statistics.
+
+  Returned by `aggregate_usage/1`.
+  """
+  @type usage_stats :: %{
+          total_duration_ms: non_neg_integer(),
+          llm_calls: non_neg_integer(),
+          tool_calls: non_neg_integer(),
+          total_turns: non_neg_integer(),
+          agent_count: non_neg_integer()
+        }
 
   @doc """
   Creates a new tracer with a unique trace ID.
@@ -171,6 +217,155 @@ defmodule PtcRunner.Tracer do
   @spec entries(t()) :: [entry()]
   def entries(%__MODULE__{finalized_at: nil, entries: entries}), do: Enum.reverse(entries)
   def entries(%__MODULE__{entries: entries}), do: entries
+
+  @doc """
+  Merge multiple traces from parallel execution.
+
+  Returns a merged trace map (not a `Tracer.t()`) with all entries sorted by timestamp.
+  The parent tracer provides the root trace ID, while child tracers provide the entries.
+
+  ## Examples
+
+      iex> parent = PtcRunner.Tracer.new()
+      iex> child1 = PtcRunner.Tracer.new(parent_id: parent.trace_id)
+      iex> child1 = PtcRunner.Tracer.add_entry(child1, %{type: :llm_call, data: %{turn: 1}})
+      iex> child1 = PtcRunner.Tracer.finalize(child1)
+      iex> merged = PtcRunner.Tracer.merge_parallel(parent, [child1])
+      iex> merged.root_trace_id == parent.trace_id
+      true
+      iex> merged.metadata.agent_count
+      1
+      iex> merged.metadata.parallel
+      true
+
+  """
+  @spec merge_parallel(t(), [t()]) :: merged_trace()
+  def merge_parallel(%__MODULE__{} = parent, child_tracers) when is_list(child_tracers) do
+    if child_tracers == [] do
+      %{
+        root_trace_id: parent.trace_id,
+        entries: entries(parent),
+        metadata: %{
+          agent_count: 0,
+          parallel: false,
+          wall_time_ms: 0,
+          total_turns: length(entries(parent))
+        }
+      }
+    else
+      all_entries =
+        child_tracers
+        |> Enum.flat_map(&entries/1)
+        |> Enum.sort_by(& &1.timestamp, DateTime)
+
+      start_times = Enum.map(child_tracers, & &1.started_at)
+
+      end_times =
+        Enum.map(child_tracers, fn t ->
+          t.finalized_at || DateTime.utc_now()
+        end)
+
+      %{
+        root_trace_id: parent.trace_id,
+        entries: all_entries,
+        metadata: %{
+          agent_count: length(child_tracers),
+          parallel: true,
+          wall_time_ms:
+            DateTime.diff(
+              Enum.max(end_times, DateTime),
+              Enum.min(start_times, DateTime),
+              :millisecond
+            ),
+          total_turns: length(all_entries)
+        }
+      }
+    end
+  end
+
+  @doc """
+  Record a nested SubAgent execution within a tool call.
+
+  Adds a `:nested_call` entry with the tool call and child step's return value and trace.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tool_call = %{name: "sub_agent", args: %{prompt: "test"}}
+      iex> child_step = %{return: "result", trace: [%{turn: 1}]}
+      iex> tracer = PtcRunner.Tracer.record_nested_call(tracer, tool_call, child_step)
+      iex> [entry] = PtcRunner.Tracer.entries(tracer)
+      iex> entry.type
+      :nested_call
+      iex> entry.data.result.return
+      "result"
+
+  """
+  @spec record_nested_call(t(), map(), map()) :: t()
+  def record_nested_call(%__MODULE__{finalized_at: nil} = tracer, tool_call, child_step) do
+    nested_tool_call =
+      Map.put(tool_call, :result, %{
+        return: child_step.return || child_step[:return],
+        nested_trace: child_step.trace || child_step[:trace]
+      })
+
+    add_entry(tracer, %{
+      type: :nested_call,
+      data: nested_tool_call
+    })
+  end
+
+  @doc """
+  Aggregate usage statistics from a tracer or merged trace.
+
+  Works on both `Tracer.t()` and `merged_trace()` maps.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :tool_call, data: %{}})
+      iex> tracer = PtcRunner.Tracer.finalize(tracer)
+      iex> usage = PtcRunner.Tracer.aggregate_usage(tracer)
+      iex> usage.llm_calls
+      1
+      iex> usage.tool_calls
+      1
+
+  """
+  @spec aggregate_usage(t() | merged_trace()) :: usage_stats()
+  def aggregate_usage(%__MODULE__{} = tracer) do
+    tracer_entries = entries(tracer)
+
+    duration_ms =
+      if tracer.finalized_at && tracer.started_at do
+        DateTime.diff(tracer.finalized_at, tracer.started_at, :millisecond)
+      else
+        0
+      end
+
+    %{
+      total_duration_ms: duration_ms,
+      llm_calls: count_type(tracer_entries, :llm_call),
+      tool_calls: count_type(tracer_entries, :tool_call),
+      total_turns: length(tracer_entries),
+      agent_count: 1
+    }
+  end
+
+  def aggregate_usage(%{entries: entries, metadata: metadata}) do
+    %{
+      total_duration_ms: metadata.wall_time_ms,
+      llm_calls: count_type(entries, :llm_call),
+      tool_calls: count_type(entries, :tool_call),
+      total_turns: metadata.total_turns,
+      agent_count: metadata.agent_count
+    }
+  end
+
+  defp count_type(entries, type) do
+    Enum.count(entries, &(&1.type == type))
+  end
 
   defp generate_trace_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)

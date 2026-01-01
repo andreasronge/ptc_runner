@@ -194,4 +194,278 @@ defmodule PtcRunner.TracerTest do
       assert is_struct(result.started_at, DateTime)
     end
   end
+
+  describe "merge_parallel/2" do
+    test "with empty child list returns parent-only merge" do
+      parent =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.finalize()
+
+      merged = Tracer.merge_parallel(parent, [])
+
+      assert merged.root_trace_id == parent.trace_id
+      assert merged.metadata.agent_count == 0
+      assert merged.metadata.parallel == false
+      assert merged.metadata.wall_time_ms == 0
+      assert merged.metadata.total_turns == 1
+    end
+
+    test "with multiple children creates proper metadata" do
+      parent = Tracer.new()
+
+      child1 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.finalize()
+
+      child2 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.finalize()
+
+      merged = Tracer.merge_parallel(parent, [child1, child2])
+
+      assert merged.root_trace_id == parent.trace_id
+      assert merged.metadata.agent_count == 2
+      assert merged.metadata.parallel == true
+      assert merged.metadata.total_turns == 2
+    end
+
+    test "sorts all entries by timestamp" do
+      parent = Tracer.new()
+      t1 = ~U[2024-01-15 10:00:00Z]
+      t2 = ~U[2024-01-15 10:00:01Z]
+      t3 = ~U[2024-01-15 10:00:02Z]
+
+      child1 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{order: 1}, timestamp: t1})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{order: 3}, timestamp: t3})
+        |> Tracer.finalize()
+
+      child2 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{order: 2}, timestamp: t2})
+        |> Tracer.finalize()
+
+      merged = Tracer.merge_parallel(parent, [child1, child2])
+      orders = Enum.map(merged.entries, & &1.data.order)
+
+      assert orders == [1, 2, 3]
+    end
+
+    test "calculates correct wall_time_ms" do
+      parent = Tracer.new()
+
+      child1 = %Tracer{
+        trace_id: "child1",
+        parent_id: parent.trace_id,
+        started_at: ~U[2024-01-15 10:00:00Z],
+        entries: [%{type: :llm_call, data: %{}, timestamp: ~U[2024-01-15 10:00:00Z]}],
+        finalized_at: ~U[2024-01-15 10:00:05Z]
+      }
+
+      child2 = %Tracer{
+        trace_id: "child2",
+        parent_id: parent.trace_id,
+        started_at: ~U[2024-01-15 10:00:01Z],
+        entries: [%{type: :llm_call, data: %{}, timestamp: ~U[2024-01-15 10:00:01Z]}],
+        finalized_at: ~U[2024-01-15 10:00:03Z]
+      }
+
+      merged = Tracer.merge_parallel(parent, [child1, child2])
+
+      # Wall time from earliest start (10:00:00) to latest end (10:00:05) = 5000ms
+      assert merged.metadata.wall_time_ms == 5000
+    end
+
+    test "handles unfinalized children using current time" do
+      parent = Tracer.new()
+
+      child =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+
+      assert child.finalized_at == nil
+
+      # Should not raise, uses DateTime.utc_now() for unfinalized
+      merged = Tracer.merge_parallel(parent, [child])
+
+      assert merged.metadata.agent_count == 1
+      assert merged.metadata.wall_time_ms >= 0
+    end
+  end
+
+  describe "record_nested_call/3" do
+    test "adds nested_call entry with tool call and child step data" do
+      tracer = Tracer.new()
+      tool_call = %{name: "sub_agent", args: %{prompt: "test"}}
+      child_step = %{return: "result", trace: [%{turn: 1}]}
+
+      tracer = Tracer.record_nested_call(tracer, tool_call, child_step)
+      [entry] = Tracer.entries(tracer)
+
+      assert entry.type == :nested_call
+      assert entry.data.name == "sub_agent"
+      assert entry.data.args == %{prompt: "test"}
+      assert entry.data.result.return == "result"
+      assert entry.data.result.nested_trace == [%{turn: 1}]
+    end
+
+    test "works with Step struct" do
+      tracer = Tracer.new()
+      tool_call = %{name: "agent", args: %{}}
+      child_step = %PtcRunner.Step{return: "value", trace: [%{turn: 1}]}
+
+      tracer = Tracer.record_nested_call(tracer, tool_call, child_step)
+      [entry] = Tracer.entries(tracer)
+
+      assert entry.data.result.return == "value"
+      assert entry.data.result.nested_trace == [%{turn: 1}]
+    end
+
+    test "on finalized tracer raises FunctionClauseError" do
+      tracer = Tracer.new() |> Tracer.finalize()
+      tool_call = %{name: "agent", args: %{}}
+      child_step = %{return: "result", trace: []}
+
+      assert_raise FunctionClauseError, fn ->
+        # credo:disable-for-next-line Credo.Check.Refactor.Apply
+        apply(PtcRunner.Tracer, :record_nested_call, [tracer, tool_call, child_step])
+      end
+    end
+  end
+
+  describe "aggregate_usage/1" do
+    test "counts LLM calls from tracer" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{}})
+        |> Tracer.finalize()
+
+      usage = Tracer.aggregate_usage(tracer)
+
+      assert usage.llm_calls == 2
+    end
+
+    test "counts tool calls from tracer" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :tool_call, data: %{}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{}})
+        |> Tracer.finalize()
+
+      usage = Tracer.aggregate_usage(tracer)
+
+      assert usage.tool_calls == 3
+    end
+
+    test "calculates total turns from tracer" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.add_entry(%{type: :llm_response, data: %{}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{}})
+        |> Tracer.finalize()
+
+      usage = Tracer.aggregate_usage(tracer)
+
+      assert usage.total_turns == 3
+    end
+
+    test "returns agent_count of 1 for single tracer" do
+      tracer = Tracer.new() |> Tracer.finalize()
+
+      usage = Tracer.aggregate_usage(tracer)
+
+      assert usage.agent_count == 1
+    end
+
+    test "works on merged_trace map" do
+      parent = Tracer.new()
+
+      child1 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{}})
+        |> Tracer.finalize()
+
+      child2 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.finalize()
+
+      merged = Tracer.merge_parallel(parent, [child1, child2])
+      usage = Tracer.aggregate_usage(merged)
+
+      assert usage.llm_calls == 2
+      assert usage.tool_calls == 1
+      assert usage.total_turns == 3
+      assert usage.agent_count == 2
+    end
+
+    test "calculates duration_ms from finalized tracer" do
+      tracer = %Tracer{
+        trace_id: "test",
+        parent_id: nil,
+        started_at: ~U[2024-01-15 10:00:00Z],
+        entries: [],
+        finalized_at: ~U[2024-01-15 10:00:02Z]
+      }
+
+      usage = Tracer.aggregate_usage(tracer)
+
+      assert usage.total_duration_ms == 2000
+    end
+
+    test "returns 0 duration for unfinalized tracer" do
+      tracer = Tracer.new()
+
+      usage = Tracer.aggregate_usage(tracer)
+
+      assert usage.total_duration_ms == 0
+    end
+  end
+
+  describe "merge parallel traces from Task.async_stream simulation" do
+    test "full integration workflow" do
+      parent = Tracer.new()
+
+      # Simulate 3 parallel child executions
+      child1 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :return, data: %{result: "a"}})
+        |> Tracer.finalize()
+
+      child2 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :return, data: %{result: "b"}})
+        |> Tracer.finalize()
+
+      child3 =
+        Tracer.new(parent_id: parent.trace_id)
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :return, data: %{result: "c"}})
+        |> Tracer.finalize()
+
+      merged = Tracer.merge_parallel(parent, [child1, child2, child3])
+
+      assert merged.root_trace_id == parent.trace_id
+      assert merged.metadata.agent_count == 3
+      assert merged.metadata.parallel == true
+      # 2 entries per child
+      assert length(merged.entries) == 6
+
+      usage = Tracer.aggregate_usage(merged)
+      assert usage.llm_calls == 3
+      assert usage.total_turns == 6
+      assert usage.agent_count == 3
+    end
+  end
 end
