@@ -80,14 +80,12 @@ With tools, the SubAgent enters an **agentic loop** - it calls tools and reasons
 
 ## Execution Behavior
 
-| `max_turns` | `tools` | Behavior |
-|-------------|---------|----------|
-| `1` | none | Single-turn: one LLM call, expression returned directly |
-| `1` | provided | Single-turn with tools: one turn to use them |
-| `>1` | provided | Agentic loop: multiple turns until `return`/`fail` |
-| `>1` | none | **Error**: multi-turn requires tools |
+| Mode | Condition | Behavior |
+|------|-----------|----------|
+| Single-shot | `max_turns: 1` and no tools | One LLM call, expression returned directly |
+| Loop | Otherwise | Multiple turns until `(return ...)` or `(fail ...)` |
 
-With `max_turns: 1` and no tools, the LLM evaluates and returns directly. With tools or `max_turns > 1`, the agent must explicitly call `return` to complete.
+In **single-shot mode**, the LLM's expression is evaluated and returned directly. In **loop mode**, the agent must explicitly call `return` or `fail` to complete.
 
 > **Common Pitfall:** If your agent produces correct results but keeps looping until
 > `max_turns_exceeded`, it's likely in loop mode without calling `return`. Either set
