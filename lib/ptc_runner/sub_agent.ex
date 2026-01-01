@@ -59,7 +59,23 @@ defmodule PtcRunner.SubAgent do
           | (String.t() -> String.t())
           | String.t()
 
-  @type llm_callback :: (map() -> {:ok, String.t()} | {:error, term()})
+  @typedoc """
+  LLM response format.
+
+  Can be either a plain string (backward compatible) or a map with content and optional tokens.
+  When tokens are provided, they are included in telemetry measurements and accumulated in Step.usage.
+  """
+  @type llm_response ::
+          String.t()
+          | %{
+              required(:content) => String.t(),
+              optional(:tokens) => %{
+                optional(:input) => pos_integer(),
+                optional(:output) => pos_integer()
+              }
+            }
+
+  @type llm_callback :: (map() -> {:ok, llm_response()} | {:error, term()})
 
   @type llm_registry :: %{atom() => llm_callback()}
 
@@ -72,12 +88,14 @@ defmodule PtcRunner.SubAgent do
           prompt_limit: map() | nil,
           mission_timeout: pos_integer() | nil,
           llm_retry: map() | nil,
-          llm: atom() | (map() -> {:ok, String.t()} | {:error, term()}) | nil,
+          llm: atom() | (map() -> {:ok, llm_response()} | {:error, term()}) | nil,
           system_prompt: system_prompt_opts() | nil,
           memory_limit: pos_integer() | nil,
           max_depth: pos_integer(),
           turn_budget: pos_integer()
         }
+
+  alias PtcRunner.SubAgent.LLMResolver
 
   defstruct [
     :prompt,
@@ -574,9 +592,9 @@ defmodule PtcRunner.SubAgent do
     alias PtcRunner.SubAgent.LLMResolver
 
     case LLMResolver.resolve(llm, llm_input, llm_registry) do
-      {:ok, response} ->
-        # Extract code from response
-        case extract_code(response) do
+      {:ok, %{content: content, tokens: tokens}} ->
+        # Extract code from response content
+        case extract_code(content) do
           {:ok, code} ->
             # Execute via Lisp
             lisp_result = PtcRunner.Lisp.run(code, context: context, tools: %{})
@@ -585,12 +603,12 @@ defmodule PtcRunner.SubAgent do
             case lisp_result do
               {:ok, step} ->
                 duration_ms = System.monotonic_time(:millisecond) - start_time
-                updated_step = update_step_usage(step, duration_ms)
+                updated_step = update_step_usage(step, duration_ms, tokens)
                 {:ok, updated_step}
 
               {:error, step} ->
                 duration_ms = System.monotonic_time(:millisecond) - start_time
-                updated_step = update_step_usage(step, duration_ms)
+                updated_step = update_step_usage(step, duration_ms, tokens)
                 {:error, updated_step}
             end
 
@@ -654,10 +672,27 @@ defmodule PtcRunner.SubAgent do
     {:error, updated_step}
   end
 
-  # Update step with usage metrics
-  defp update_step_usage(step, duration_ms) do
+  # Update step with usage metrics (for single-shot mode)
+  defp update_step_usage(step, duration_ms, tokens) do
     usage = step.usage || %{memory_bytes: 0}
-    %{step | usage: Map.put(usage, :duration_ms, duration_ms)}
+    base_usage = Map.put(usage, :duration_ms, duration_ms)
+
+    # Add token counts if available
+    usage_with_tokens =
+      case tokens do
+        %{input: input, output: output} ->
+          Map.merge(base_usage, %{
+            input_tokens: input,
+            output_tokens: output,
+            total_tokens: LLMResolver.total_tokens(tokens),
+            llm_requests: 1
+          })
+
+        _ ->
+          base_usage
+      end
+
+    %{step | usage: usage_with_tokens}
   end
 
   @doc """

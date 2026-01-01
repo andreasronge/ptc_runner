@@ -35,7 +35,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.{Prompt, SubAgentTool, Telemetry}
+  alias PtcRunner.SubAgent.{LLMResolver, Prompt, SubAgentTool, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -161,7 +161,13 @@ defmodule PtcRunner.SubAgent.Loop do
       mission_deadline: calculated_deadline,
       debug: run_opts.debug,
       trace_mode: run_opts.trace_mode,
-      llm_retry: run_opts.llm_retry
+      llm_retry: run_opts.llm_retry,
+      # Token accumulation across LLM calls
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      llm_requests: 0,
+      # Tokens from current turn's LLM call (for telemetry)
+      turn_tokens: nil
     }
 
     loop(agent, run_opts.llm, initial_state)
@@ -178,13 +184,10 @@ defmodule PtcRunner.SubAgent.Loop do
         state.memory
       )
 
+    # Use -1 offset: we haven't started this turn, so report turns completed
     step_with_metrics = %{
       step
-      | usage: %{
-          duration_ms: duration_ms,
-          memory_bytes: 0,
-          turns: state.turn - 1
-        },
+      | usage: build_final_usage(state, duration_ms, 0, -1),
         trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
     }
 
@@ -196,13 +199,10 @@ defmodule PtcRunner.SubAgent.Loop do
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
     step = Step.error(:turn_budget_exhausted, "Turn budget exhausted", state.memory)
 
+    # Use -1 offset: we haven't started this turn, so report turns completed
     step_with_metrics = %{
       step
-      | usage: %{
-          duration_ms: duration_ms,
-          memory_bytes: 0,
-          turns: state.turn - 1
-        },
+      | usage: build_final_usage(state, duration_ms, 0, -1),
         trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
     }
 
@@ -216,13 +216,10 @@ defmodule PtcRunner.SubAgent.Loop do
       duration_ms = System.monotonic_time(:millisecond) - state.start_time
       step = Step.error(:mission_timeout, "Mission timeout exceeded", state.memory)
 
+      # Use -1 offset: we haven't started this turn, so report turns completed
       step_with_metrics = %{
         step
-        | usage: %{
-            duration_ms: duration_ms,
-            memory_bytes: 0,
-            turns: state.turn - 1
-          },
+        | usage: build_final_usage(state, duration_ms, 0, -1),
           trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
       }
 
@@ -242,10 +239,13 @@ defmodule PtcRunner.SubAgent.Loop do
 
       # Call LLM with telemetry and retry logic
       case call_llm_with_telemetry(llm, llm_input, state, agent) do
-        {:ok, response} ->
-          result = handle_llm_response(response, agent, llm, state)
+        {:ok, %{content: content, tokens: tokens}} ->
+          # Accumulate tokens from this LLM call
+          state_with_tokens = accumulate_tokens(state, tokens)
+
+          result = handle_llm_response(content, agent, llm, state_with_tokens)
           # Emit turn stop event (only for completed turns, not continuation)
-          emit_turn_stop_if_final(result, agent, state, turn_start)
+          emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start)
           result
 
         {:error, reason} ->
@@ -255,11 +255,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
           step_with_metrics = %{
             step
-            | usage: %{
-                duration_ms: duration_ms,
-                memory_bytes: 0,
-                turns: state.turn
-              },
+            | usage: build_final_usage(state, duration_ms, 0),
               trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
           }
 
@@ -277,11 +273,56 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
+  # Accumulate tokens from an LLM call into state
+  defp accumulate_tokens(state, nil),
+    do: %{state | turn_tokens: nil, llm_requests: state.llm_requests + 1}
+
+  defp accumulate_tokens(state, tokens) when is_map(tokens) do
+    input = Map.get(tokens, :input, 0)
+    output = Map.get(tokens, :output, 0)
+
+    %{
+      state
+      | total_input_tokens: state.total_input_tokens + input,
+        total_output_tokens: state.total_output_tokens + output,
+        llm_requests: state.llm_requests + 1,
+        turn_tokens: tokens
+    }
+  end
+
+  # Build final usage map with token counts from accumulated state
+  # turn_offset: 0 for completed turns (return/fail), -1 for pre-turn failures (max_turns, etc.)
+  defp build_final_usage(state, duration_ms, memory_bytes, turn_offset \\ 0) do
+    base = %{
+      duration_ms: duration_ms,
+      memory_bytes: memory_bytes,
+      turns: state.turn + turn_offset
+    }
+
+    # Add token counts if any LLM calls were made with token reporting
+    if state.total_input_tokens > 0 or state.total_output_tokens > 0 do
+      Map.merge(base, %{
+        input_tokens: state.total_input_tokens,
+        output_tokens: state.total_output_tokens,
+        total_tokens: state.total_input_tokens + state.total_output_tokens,
+        llm_requests: state.llm_requests
+      })
+    else
+      # Still include llm_requests even without token counts
+      if state.llm_requests > 0 do
+        Map.put(base, :llm_requests, state.llm_requests)
+      else
+        base
+      end
+    end
+  end
+
   # Emit turn stop event only for final results (not loop continuations)
   defp emit_turn_stop_if_final({:ok, _step} = _result, agent, state, turn_start) do
     turn_duration = System.monotonic_time() - turn_start
+    measurements = build_turn_measurements(turn_duration, state.turn_tokens)
 
-    Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
+    Telemetry.emit([:turn, :stop], measurements, %{
       agent: agent,
       turn: state.turn,
       program: nil
@@ -290,12 +331,20 @@ defmodule PtcRunner.SubAgent.Loop do
 
   defp emit_turn_stop_if_final({:error, _step} = _result, agent, state, turn_start) do
     turn_duration = System.monotonic_time() - turn_start
+    measurements = build_turn_measurements(turn_duration, state.turn_tokens)
 
-    Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
+    Telemetry.emit([:turn, :stop], measurements, %{
       agent: agent,
       turn: state.turn,
       program: nil
     })
+  end
+
+  # Build measurements for turn stop event with optional tokens
+  defp build_turn_measurements(duration, nil), do: %{duration: duration}
+
+  defp build_turn_measurements(duration, tokens) when is_map(tokens) do
+    %{duration: duration, tokens: LLMResolver.total_tokens(tokens)}
   end
 
   # Call LLM with telemetry wrapper
@@ -305,14 +354,29 @@ defmodule PtcRunner.SubAgent.Loop do
     Telemetry.span([:llm], start_meta, fn ->
       result = call_llm_with_retry(llm, input, state)
 
-      stop_meta =
+      # Build stop measurements and metadata separately
+      # telemetry.span expects {result, extra_measurements, stop_metadata}
+      {extra_measurements, stop_meta} =
         case result do
-          {:ok, response} -> %{agent: agent, turn: state.turn, response: response}
-          {:error, _} -> %{agent: agent, turn: state.turn, response: nil}
+          {:ok, %{content: content, tokens: tokens}} ->
+            measurements = build_token_measurements(tokens)
+            meta = %{agent: agent, turn: state.turn, response: content}
+            {measurements, meta}
+
+          {:error, _} ->
+            meta = %{agent: agent, turn: state.turn, response: nil}
+            {%{}, meta}
         end
 
-      {result, stop_meta}
+      {result, extra_measurements, stop_meta}
     end)
+  end
+
+  # Build token measurements map for telemetry
+  defp build_token_measurements(nil), do: %{}
+
+  defp build_token_measurements(tokens) when is_map(tokens) do
+    %{tokens: LLMResolver.total_tokens(tokens)}
   end
 
   # Handle LLM response - parse and execute code
@@ -440,11 +504,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
         final_step = %{
           lisp_step
-          | usage: %{
-              duration_ms: duration_ms,
-              memory_bytes: lisp_step.usage.memory_bytes,
-              turns: state.turn
-            },
+          | usage: build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
             trace:
               apply_trace_filter(
                 Enum.reverse([trace_entry | state.trace]),
@@ -463,11 +523,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
         final_step = %{
           error_step
-          | usage: %{
-              duration_ms: duration_ms,
-              memory_bytes: lisp_step.usage.memory_bytes,
-              turns: state.turn
-            },
+          | usage: build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
             trace:
               apply_trace_filter(
                 Enum.reverse([trace_entry | state.trace]),
@@ -515,11 +571,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
             final_step = %{
               error_step
-              | usage: %{
-                  duration_ms: duration_ms,
-                  memory_bytes: actual_size,
-                  turns: state.turn
-                },
+              | usage: build_final_usage(state, duration_ms, actual_size),
                 trace:
                   apply_trace_filter(
                     Enum.reverse([trace_entry | state.trace]),

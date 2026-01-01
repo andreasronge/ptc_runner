@@ -884,7 +884,15 @@ import PtcRunner.SubAgent.Sigils
 ### Signature
 
 ```elixir
-@type llm :: (llm_input() -> {:ok, String.t()} | {:error, term()})
+@type llm :: (llm_input() -> {:ok, llm_response()} | {:error, term()})
+
+@type llm_response :: String.t() | %{
+  required(:content) => String.t(),
+  optional(:tokens) => %{
+    optional(:input) => pos_integer(),
+    optional(:output) => pos_integer()
+  }
+}
 
 @type llm_input :: %{
   required(:system) => String.t(),
@@ -895,6 +903,11 @@ import PtcRunner.SubAgent.Sigils
   optional(:llm_opts) => map()
 }
 ```
+
+The LLM callback can return either a plain string (backward compatible) or a map with
+`content` and optional `tokens`. When tokens are provided, they are:
+- Included in telemetry measurements for `:llm, :stop` and `:turn, :stop` events
+- Accumulated in `Step.usage` fields (`input_tokens`, `output_tokens`, `total_tokens`)
 
 ### System Prompt Contents
 
