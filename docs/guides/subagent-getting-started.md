@@ -111,7 +111,7 @@ When provided, signatures:
 - Document expected shape to the LLM
 - Give your Elixir code predictable types
 
-See [Signatures Guide](signatures.md) for full syntax.
+See [Signature Syntax](../signature-syntax.md) for full syntax.
 
 ## Providing an LLM
 
@@ -161,7 +161,7 @@ PtcRunner.SubAgent.run(prompt,
 )
 ```
 
-The registry is inherited by child SubAgents, so you only pass it once at the top level. See [Configuration](../specification.md#llm-registry) for more details.
+The registry is inherited by child SubAgents, so you only pass it once at the top level. See `PtcRunner.SubAgent.run/2` for more details.
 
 ### App-Level Default Registry
 
@@ -303,7 +303,7 @@ Fields prefixed with `_` are **firewalled** - available to your Elixir code and 
 signature: "{summary :string, count :int, _email_ids [:int]}"
 ```
 
-This keeps parent agent context lean while preserving full data access. See [Core Concepts](core-concepts.md) for details.
+This keeps parent agent context lean while preserving full data access. See [Core Concepts](subagent-concepts.md) for details.
 
 ## Memory
 
@@ -315,12 +315,12 @@ Each agent has private memory persisting across turns within a single `run`:
 memory/cache                 ; shorthand
 ```
 
-Memory is scoped per-agent and hidden from prompts. See [Core Concepts](core-concepts.md) for details.
+Memory is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-concepts.md) for details.
 
-## What's Next
+## See Also
 
-- [Core Concepts](core-concepts.md) - Context, memory, and the firewall convention
-- [Patterns](patterns.md) - Chaining, orchestration, and composition
-- [Signatures](signatures.md) - Full signature syntax reference
-- [Advanced Topics](advanced.md) - Observability and the compile pattern
-- [Specification](../specification.md) - SubAgent API reference
+- [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
+- [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
+- [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
+- [Advanced Topics](subagent-advanced.md) - Observability and the compile pattern
+- [SubAgent Specification](../ptc_agents/specification.md) - SubAgent API reference

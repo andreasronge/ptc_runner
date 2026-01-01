@@ -327,7 +327,6 @@ step.return._email_ids #=> [101, 102, 103, 104, 105] (hidden from LLM)
 ## Related Documents
 
 - [specification.md](specification.md) - SubAgent API reference
-- [guides/](guides/) - Usage guides and patterns
-- [signature-syntax.md](signature-syntax.md) - Signature syntax reference
-- [lisp-api-updates.md](lisp-api-updates.md) - Breaking changes to existing Lisp API
+- [SubAgent Guides](../guides/) - Usage guides and patterns
+- [signature-syntax.md](../signature-syntax.md) - Signature syntax reference
 - [parallel-trace-design.md](parallel-trace-design.md) - Trace aggregation for concurrent execution

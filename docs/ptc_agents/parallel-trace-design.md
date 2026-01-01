@@ -503,7 +503,6 @@ end
 ## Related Documents
 
 - [specification.md](specification.md) - SubAgent API reference
-- [guides/](guides/) - Usage guides and patterns
+- [SubAgent Guides](../guides/) - Usage guides and patterns
 - [step.md](step.md) - Step struct specification
-- [signature-syntax.md](signature-syntax.md) - Signature syntax reference
-- [spike-summary.md](spike-summary.md) - Historical spike validation results
+- [signature-syntax.md](../signature-syntax.md) - Signature syntax reference

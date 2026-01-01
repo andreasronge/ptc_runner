@@ -6,7 +6,7 @@ A BEAM-native Elixir library for Programmatic Tool Calling (PTC), enabling LLMs 
 
 **SubAgent API is implemented but not battle-tested.** The core functionality works, but real LLM e2e testing is limited. Expect bugs, edge cases, and documentation gaps.
 
-- **SubAgent API**: See `docs/ptc_agents/` (start with `specification.md`)
+- **SubAgent API**: See `docs/ptc_agents/specification.md` and `docs/guides/` (start with `subagent-getting-started.md`)
 - **Core API**: `docs/guide.md` - stable, well-tested
 - **E2E tests**: `mix test --include e2e` (requires `OPENROUTER_API_KEY`)
 
@@ -36,7 +36,7 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 - `lib/ptc_runner/lisp/` - Lisp DSL implementation
 - `test/` - Tests mirroring lib structure
 - `docs/` - Current API guide and guidelines
-- `docs/ptc_agents/` - **Planned SubAgent API** (breaking changes)
+- `docs/guides/` - SubAgent guides and tutorials
 - `demo/` - LLM integration testing and benchmarks
 
 ## Documentation

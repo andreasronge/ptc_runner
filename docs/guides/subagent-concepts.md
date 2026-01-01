@@ -256,10 +256,10 @@ Full agentic loop requiring explicit `return` or `fail`.
 | `mission_timeout` | `60000` | Total mission timeout (ms) |
 | `prompt_limit` | `%{list: 5, string: 1000}` | Truncation limits for prompts |
 
-## What's Next
+## See Also
 
-- [Getting Started](getting-started.md) - Build your first SubAgent
-- [Patterns](patterns.md) - Chaining, orchestration, and composition
-- [Signatures](signatures.md) - Full signature syntax reference
-- [Advanced Topics](advanced.md) - Observability and the compile pattern
-- [Specification](../specification.md) - SubAgent API reference
+- [Getting Started](subagent-getting-started.md) - Build your first SubAgent
+- [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
+- [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
+- [Advanced Topics](subagent-advanced.md) - Observability and the compile pattern
+- [SubAgent Specification](../ptc_agents/specification.md) - SubAgent API reference

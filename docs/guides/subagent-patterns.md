@@ -135,7 +135,7 @@ tools = %{
 )
 ```
 
-See [Configuration](../specification.md#llm-registry) for details on setting up the registry.
+See `PtcRunner.SubAgent.run/2` for details on setting up the registry.
 
 ## LLM-Powered Tools
 
@@ -415,9 +415,9 @@ domain_tools = %{
 
 The LLM sees tool schemas in `tool_catalog` for planning but can only call tools in `tools`.
 
-## What's Next
+## See Also
 
-- [Advanced Topics](advanced.md) - Multi-turn ReAct, compile pattern, observability
-- [Signatures](signatures.md) - Full signature syntax reference
-- [Core Concepts](core-concepts.md) - Context, memory, and the firewall
-- [Specification](../specification.md) - SubAgent API reference
+- [Advanced Topics](subagent-advanced.md) - Multi-turn ReAct, compile pattern, observability
+- [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
+- [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [SubAgent Specification](../ptc_agents/specification.md) - SubAgent API reference
