@@ -19,6 +19,8 @@ defmodule PtcRunner.SubAgent.Debug do
 
   alias PtcRunner.Step
 
+  @box_width 60
+
   @doc """
   Pretty-print a SubAgent execution trace.
 
@@ -73,8 +75,10 @@ defmodule PtcRunner.SubAgent.Debug do
   def print_chain([]), do: :ok
 
   def print_chain(steps) when is_list(steps) do
+    label = " Agent Chain "
+
     IO.puts(
-      "\n#{ansi(:cyan)}┌─ Agent Chain ─────────────────────────────────────┐#{ansi(:reset)}"
+      "\n#{ansi(:cyan)}┌─#{label}#{String.duplicate("─", @box_width - 3 - String.length(label))}┐#{ansi(:reset)}"
     )
 
     steps
@@ -83,9 +87,7 @@ defmodule PtcRunner.SubAgent.Debug do
       print_chain_step(step, index, length(steps))
     end)
 
-    IO.puts(
-      "#{ansi(:cyan)}└───────────────────────────────────────────────────┘#{ansi(:reset)}\n"
-    )
+    IO.puts("#{ansi(:cyan)}└#{String.duplicate("─", @box_width - 2)}┘#{ansi(:reset)}\n")
 
     :ok
   end
@@ -100,8 +102,10 @@ defmodule PtcRunner.SubAgent.Debug do
     result = Map.get(turn_entry, :result, nil)
     tool_calls = Map.get(turn_entry, :tool_calls, [])
 
+    header = " Turn #{turn_num} "
+
     IO.puts(
-      "\n#{ansi(:cyan)}┌─ Turn #{turn_num} ─────────────────────────────────────┐#{ansi(:reset)}"
+      "\n#{ansi(:cyan)}┌─#{header}#{String.duplicate("─", @box_width - 3 - String.length(header))}┐#{ansi(:reset)}"
     )
 
     IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
@@ -143,7 +147,7 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{truncate_line(line, 80)}")
     end)
 
-    IO.puts("#{ansi(:cyan)}└───────────────────────────────────────────────────┘#{ansi(:reset)}")
+    IO.puts("#{ansi(:cyan)}└#{String.duplicate("─", @box_width - 2)}┘#{ansi(:reset)}")
   end
 
   defp print_chain_step(step, index, total) do
