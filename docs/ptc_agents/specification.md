@@ -884,7 +884,15 @@ import PtcRunner.SubAgent.Sigils
 ### Signature
 
 ```elixir
-@type llm :: (llm_input() -> {:ok, String.t()} | {:error, term()})
+@type llm :: (llm_input() -> {:ok, llm_response()} | {:error, term()})
+
+@type llm_response :: String.t() | %{
+  required(:content) => String.t(),
+  optional(:tokens) => %{
+    optional(:input) => pos_integer(),
+    optional(:output) => pos_integer()
+  }
+}
 
 @type llm_input :: %{
   required(:system) => String.t(),
@@ -895,6 +903,11 @@ import PtcRunner.SubAgent.Sigils
   optional(:llm_opts) => map()
 }
 ```
+
+The LLM callback can return either a plain string (backward compatible) or a map with
+`content` and optional `tokens`. When tokens are provided, they are:
+- Included in telemetry measurements for `:llm, :stop` and `:turn, :stop` events
+- Accumulated in `Step.usage` fields (`input_tokens`, `output_tokens`, `total_tokens`)
 
 ### System Prompt Contents
 
@@ -1206,14 +1219,14 @@ SubAgent emits telemetry events for observability integration.
 |-------|--------------|----------|
 | `[:ptc_runner, :sub_agent, :run, :start]` | - | agent, context |
 | `[:ptc_runner, :sub_agent, :run, :stop]` | duration | agent, step, status |
-| `[:ptc_runner, :sub_agent, :run, :exception]` | duration | agent, error |
+| `[:ptc_runner, :sub_agent, :run, :exception]` | duration | agent, kind, reason, stacktrace |
 | `[:ptc_runner, :sub_agent, :turn, :start]` | - | agent, turn |
 | `[:ptc_runner, :sub_agent, :turn, :stop]` | duration, tokens | agent, turn, program |
 | `[:ptc_runner, :sub_agent, :llm, :start]` | - | agent, turn, messages |
 | `[:ptc_runner, :sub_agent, :llm, :stop]` | duration, tokens | agent, turn, response |
 | `[:ptc_runner, :sub_agent, :tool, :start]` | - | agent, tool_name, args |
 | `[:ptc_runner, :sub_agent, :tool, :stop]` | duration | agent, tool_name, result |
-| `[:ptc_runner, :sub_agent, :tool, :exception]` | duration | agent, tool_name, error |
+| `[:ptc_runner, :sub_agent, :tool, :exception]` | duration | agent, tool_name, kind, reason, stacktrace |
 
 **Attaching handlers:**
 
