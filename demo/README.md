@@ -64,39 +64,42 @@ PtcRunner.Lisp executes in sandbox → Only "42500" back to LLM
 ```bash
 cd demo
 
-# Set your API key (pick one)
-export OPENROUTER_API_KEY=sk-or-v1-...    # Recommended - many models
-# OR
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# Optional: choose a different model via environment variable
-export PTC_DEMO_MODEL=deepseek
+# Set your OpenRouter API key (one key works with all model aliases)
+export OPENROUTER_API_KEY=sk-or-v1-...
 
 # Install dependencies
 mix deps.get
 
-# === See Available Models ===
-mix json --list-models   # Show all available models
-
-# === JSON DSL ===
-# Run the JSON chat (default model)
-mix json
-
-# Or with options:
-mix json --model=haiku              # Use Claude Haiku
-mix json --model=devstral           # Use Mistral Devstral (free)
-mix json --explore                  # Start in explore mode
-
-# === Lisp DSL ===
 # Run the Lisp chat (recommended - most token efficient)
 mix lisp
 
-# Lisp with specific model
-mix lisp --model=haiku
-mix lisp --model=openrouter:anthropic/claude-haiku-4.5
+# Or JSON chat
+mix json
+```
 
-# Lisp with explore mode
-mix lisp --explore
+## Model Selection
+
+All model aliases use OpenRouter. Set `OPENROUTER_API_KEY` once and switch freely:
+
+```bash
+# Via CLI flag
+mix lisp --model=gemini        # Gemini 2.5 Flash
+mix lisp --model=deepseek      # DeepSeek Chat V3
+mix lisp --model=devstral      # Devstral (free)
+mix lisp --model=haiku         # Claude Haiku 4.5 (default)
+
+# Via environment variable
+export PTC_DEMO_MODEL=gemini
+mix lisp
+
+# See all available aliases
+mix lisp --list-models
+```
+
+**Direct provider access** (advanced - requires that provider's API key):
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+mix lisp --model=anthropic:claude-haiku-4.5
 ```
 
 ## Generation Modes
@@ -199,7 +202,7 @@ mix json [options]
 
 | Option | Description |
 |--------|-------------|
-| `--model=<name>` | Set model (preset name or full model ID) |
+| `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run all automated tests and exit |
@@ -208,16 +211,14 @@ mix json [options]
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 
-Model presets: `haiku`, `devstral`, `gemini`, `deepseek`, `kimi`, `gpt`
+Model aliases (via OpenRouter): `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt`
 
 Examples:
 ```bash
-mix json                                      # Interactive with default model
-mix json --list-models                        # Show available models
-mix json --model=haiku                        # Use Claude Haiku
-mix json --model=openrouter:anthropic/claude-haiku-4.5  # Use full model ID
-mix json --test --model=gemini --verbose      # Test with Gemini
-mix json --test --runs=3 --report=gemini.md   # Run 3x, save report
+mix json                                  # Interactive with default model (haiku)
+mix json --list-models                    # Show available models
+mix json --model=gemini                   # Use Gemini via OpenRouter
+mix json --test --model=deepseek -v       # Test with DeepSeek
 ```
 
 ## Lisp CLI Options
@@ -228,7 +229,7 @@ mix lisp [options]
 
 | Option | Description |
 |--------|-------------|
-| `--model=<name>` | Set model (preset name or full model ID) |
+| `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run all automated tests and exit |
@@ -238,17 +239,15 @@ mix lisp [options]
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--validate-clojure` | Validate generated programs against Babashka |
 
-Model presets: `haiku`, `devstral`, `gemini`, `deepseek`, `kimi`, `gpt`
+Model aliases (via OpenRouter): `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt`
 
 Examples:
 ```bash
-mix lisp                                      # Interactive with default model
-mix lisp --list-models                        # Show available models
-mix lisp --model=haiku                        # Use Claude Haiku
-mix lisp --model=openrouter:anthropic/claude-haiku-4.5  # Use full model ID
-mix lisp --test --model=gemini --verbose      # Test with Gemini
-mix lisp --test --runs=3 --report=gemini.md   # Run 3x, save report
-mix lisp --test --validate-clojure            # Validate syntax with Babashka
+mix lisp                                  # Interactive with default model (haiku)
+mix lisp --list-models                    # Show available models
+mix lisp --model=gemini                   # Use Gemini via OpenRouter
+mix lisp --test --model=deepseek -v       # Test with DeepSeek
+mix lisp --test --validate-clojure        # Validate syntax with Babashka
 ```
 
 ## Interactive Commands

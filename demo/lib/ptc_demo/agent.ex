@@ -119,7 +119,7 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Auto-detect which model to use based on available API keys.
+  Get the default model.
   """
   def detect_model do
     PtcDemo.ModelRegistry.default_model()
@@ -127,9 +127,22 @@ defmodule PtcDemo.Agent do
 
   # --- GenServer Callbacks ---
 
+  defp resolve_model_from_env do
+    case System.get_env(@model_env) do
+      nil ->
+        detect_model()
+
+      value ->
+        case PtcDemo.ModelRegistry.resolve(value) do
+          {:ok, model_id} -> model_id
+          {:error, _} -> value
+        end
+    end
+  end
+
   @impl true
   def init(opts) do
-    model = System.get_env(@model_env) || detect_model()
+    model = resolve_model_from_env()
     data_mode = Keyword.get(opts, :data_mode, :schema)
 
     datasets = %{
@@ -157,6 +170,7 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call({:ask, question, opts}, _from, state) do
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
+    debug = Keyword.get(opts, :debug, false)
 
     # Build the SubAgent
     agent = build_agent(state.data_mode)
@@ -172,6 +186,8 @@ defmodule PtcDemo.Agent do
            max_turns: max_turns
          ) do
       {:ok, step} ->
+        if debug, do: SubAgent.Debug.print_trace(step)
+
         result = step.return
         new_memory = step.memory || %{}
         program = extract_program_from_trace(step.trace)
@@ -199,6 +215,9 @@ defmodule PtcDemo.Agent do
          }}
 
       {:error, step} ->
+        # Always print trace on error for debugging
+        SubAgent.Debug.print_trace(step)
+
         error_msg = format_error(step.fail)
         IO.puts("   [Error] #{error_msg}")
 
@@ -294,15 +313,9 @@ defmodule PtcDemo.Agent do
     data_schema = SampleData.schema_prompt()
 
     """
-    You are a data analyst. Answer questions about data by querying datasets.
+    You are a data analyst answering questions about datasets.
 
-    To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
-    When you have the answer, call (return <value>) with your final answer.
-    Memory persists between programs - reference stored values with memory/key.
-    Return types: "store X as Y" -> call (return {:Y value}), "what is X?" -> call (return value) directly.
-    Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
-
-    Available datasets (access via ctx/name, e.g., ctx/products):
+    ## Datasets (access via ctx/name):
 
     #{data_schema}
     """
@@ -313,18 +326,10 @@ defmodule PtcDemo.Agent do
       SampleData.available_datasets() |> Enum.map_join(", ", fn {name, _} -> name end)
 
     """
-    You are a data analyst. Answer questions about data by querying datasets.
+    You are a data analyst answering questions about datasets.
 
-    To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
-    When you have the answer, call (return <value>) with your final answer.
-    Memory persists between programs - reference stored values with memory/key.
-    Return types: "store X as Y" -> call (return {:Y value}), "what is X?" -> call (return value) directly.
-    IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
-    Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
-
-    Available datasets (access via ctx/name): #{dataset_names}
-
-    Discover structure with: (first ctx/products) or (keys (first ctx/products))
+    Datasets: #{dataset_names} (access via ctx/name)
+    Discover structure: (first ctx/products) or (keys (first ctx/products))
     """
   end
 
@@ -352,11 +357,24 @@ defmodule PtcDemo.Agent do
 
           {:ok, %{content: text || "", tokens: tokens}}
 
-        {:error, _} = error ->
-          error
+        {:error, reason} ->
+          {:error, format_llm_error(reason, model)}
       end
     end
   end
+
+  defp format_llm_error(reason, model) do
+    base_msg = format_error_reason(reason)
+    "#{base_msg} (model: #{model})"
+  end
+
+  defp format_error_reason(%{reason: reason}) when is_binary(reason), do: reason
+  defp format_error_reason(%{message: msg}) when is_binary(msg), do: msg
+  defp format_error_reason(:invalid_format), do: "Invalid model format - check model string"
+  defp format_error_reason(:timeout), do: "Request timed out"
+  defp format_error_reason(:econnrefused), do: "Connection refused - API unreachable"
+  defp format_error_reason(reason) when is_atom(reason), do: "#{reason}"
+  defp format_error_reason(reason), do: inspect(reason)
 
   defp extract_program_from_trace(nil), do: nil
   defp extract_program_from_trace([]), do: nil

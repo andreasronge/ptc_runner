@@ -1,106 +1,82 @@
 defmodule PtcDemo.ModelRegistry do
   @moduledoc """
-  Single source of truth for model definitions and resolution.
+  Simple model registry for the demo.
 
-  Provides:
-  - Simple aliases (haiku, devstral, gemini, deepseek, kimi, gpt)
-  - Auto-detection of best provider based on available API keys
-  - Validation with helpful error messages
-  - Cost information for fallback calculation
+  All aliases resolve to OpenRouter models (requires only OPENROUTER_API_KEY).
+  For direct provider access, use explicit syntax like `anthropic:claude-haiku-4.5`.
 
   ## Usage
 
-      # Resolve an alias to a full model ID
+      # Resolve an alias to OpenRouter model ID
       {:ok, model_id} = ModelRegistry.resolve("haiku")
+      # => {:ok, "openrouter:anthropic/claude-haiku-4.5"}
 
-      # Get the default model based on API keys
-      model_id = ModelRegistry.default_model()
+      # Use explicit provider (bypasses aliases)
+      {:ok, model_id} = ModelRegistry.resolve("anthropic:claude-haiku-4.5")
 
       # List available models
       ModelRegistry.format_model_list() |> IO.puts()
   """
 
-  @type provider :: :anthropic | :openrouter | :openai | :google
-
+  # Simple alias -> OpenRouter model ID mapping
   @models %{
-    "haiku" => %{
-      description: "Claude Haiku 4.5 - Fast, cost-effective",
-      input_cost_per_mtok: 0.80,
-      output_cost_per_mtok: 4.00,
-      providers: [
-        anthropic: "anthropic:claude-haiku-4.5",
-        openrouter: "openrouter:anthropic/claude-haiku-4.5"
-      ]
-    },
-    "devstral" => %{
-      description: "Devstral 2512 - Mistral AI code model (free)",
-      input_cost_per_mtok: 0.0,
-      output_cost_per_mtok: 0.0,
-      providers: [
-        openrouter: "openrouter:mistralai/devstral-2512:free"
-      ]
-    },
-    "gemini" => %{
-      description: "Gemini 2.5 Flash - Google's fast model",
-      input_cost_per_mtok: 0.15,
-      output_cost_per_mtok: 0.60,
-      providers: [
-        google: "google:gemini-2.5-flash",
-        openrouter: "openrouter:google/gemini-2.5-flash"
-      ]
-    },
-    "deepseek" => %{
-      description: "DeepSeek V3.2 - Cost-effective reasoning",
-      input_cost_per_mtok: 0.14,
-      output_cost_per_mtok: 0.28,
-      providers: [
-        openrouter: "openrouter:deepseek/deepseek-v3.2"
-      ]
-    },
-    "kimi" => %{
-      description: "Kimi K2 - Moonshot AI's model",
-      input_cost_per_mtok: 0.60,
-      output_cost_per_mtok: 2.40,
-      providers: [
-        openrouter: "openrouter:moonshotai/kimi-k2"
-      ]
-    },
-    "gpt" => %{
-      description: "GPT-5.1 Codex Mini - OpenAI code model",
-      input_cost_per_mtok: 1.50,
-      output_cost_per_mtok: 6.00,
-      providers: [
-        openai: "openai:gpt-5.1-codex-mini",
-        openrouter: "openrouter:openai/gpt-5.1-codex-mini"
-      ]
-    }
+    "haiku" => "openrouter:anthropic/claude-haiku-4.5",
+    "sonnet" => "openrouter:anthropic/claude-sonnet-4",
+    "devstral" => "openrouter:mistralai/devstral-2512:free",
+    "gemini" => "openrouter:google/gemini-2.5-flash",
+    "deepseek" => "openrouter:deepseek/deepseek-chat-v3-0324",
+    "kimi" => "openrouter:moonshotai/kimi-k2",
+    "gpt" => "openrouter:openai/gpt-4.1-mini"
   }
 
-  @provider_keys %{
-    anthropic: "ANTHROPIC_API_KEY",
-    openrouter: "OPENROUTER_API_KEY",
-    openai: "OPENAI_API_KEY",
-    google: "GOOGLE_API_KEY"
+  # Descriptions for --list-models output
+  @model_info %{
+    "haiku" => "Claude Haiku 4.5 - Fast, cost-effective",
+    "sonnet" => "Claude Sonnet 4 - Balanced performance",
+    "devstral" => "Devstral 2512 - Mistral AI code model (free)",
+    "gemini" => "Gemini 2.5 Flash - Google's fast model",
+    "deepseek" => "DeepSeek Chat V3 - Cost-effective reasoning",
+    "kimi" => "Kimi K2 - Moonshot AI's model",
+    "gpt" => "GPT-4.1 Mini - OpenAI's efficient model"
   }
+
+  # Cost per million tokens (for estimation)
+  @model_costs %{
+    "haiku" => %{input: 0.80, output: 4.00},
+    "sonnet" => %{input: 3.00, output: 15.00},
+    "devstral" => %{input: 0.0, output: 0.0},
+    "gemini" => %{input: 0.15, output: 0.60},
+    "deepseek" => %{input: 0.14, output: 0.28},
+    "kimi" => %{input: 0.60, output: 2.40},
+    "gpt" => %{input: 0.40, output: 1.60}
+  }
+
+  @default_model "haiku"
 
   @doc """
   Resolve a model name to a full model ID.
 
-  Resolution order:
-  1. Check if it's already a full model ID (contains ":")
-  2. Look up in aliases
-  3. Auto-select provider based on available API keys
+  - Aliases (haiku, gemini, etc.) resolve to OpenRouter models
+  - Explicit format (provider:model) passes through after validation
 
-  Returns `{:ok, model_id}` or `{:error, reason}`.
+  ## Examples
+
+      iex> PtcDemo.ModelRegistry.resolve("haiku")
+      {:ok, "openrouter:anthropic/claude-haiku-4.5"}
+
+      iex> PtcDemo.ModelRegistry.resolve("anthropic:claude-haiku-4.5")
+      {:ok, "anthropic:claude-haiku-4.5"}
   """
   @spec resolve(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def resolve(name) when is_binary(name) do
     cond do
+      # Known alias -> OpenRouter model
+      Map.has_key?(@models, name) ->
+        {:ok, Map.get(@models, name)}
+
+      # Explicit provider format -> validate and pass through
       String.contains?(name, ":") ->
         validate_and_return(name)
-
-      Map.has_key?(@models, name) ->
-        resolve_for_available_provider(name)
 
       true ->
         {:error, unknown_model_error(name)}
@@ -119,34 +95,24 @@ defmodule PtcDemo.ModelRegistry do
   end
 
   @doc """
-  Get the default model based on available API keys.
-
-  Uses "haiku" as the default alias.
+  Get the default model (haiku via OpenRouter).
   """
   @spec default_model() :: String.t()
   def default_model do
-    resolve!("haiku")
+    Map.get(@models, @default_model)
   end
 
   @doc """
-  List all available models with their availability status.
-
-  Returns a list of maps with alias, description, providers, and availability.
+  List all available model aliases.
   """
   @spec list_models() :: [map()]
   def list_models do
-    available = available_providers()
-
     @models
-    |> Enum.map(fn {alias_name, model} ->
-      provider_atoms = Keyword.keys(model.providers)
-      available? = Enum.any?(provider_atoms, &(&1 in available))
-
+    |> Enum.map(fn {alias_name, model_id} ->
       %{
         alias: alias_name,
-        description: model.description,
-        providers: provider_atoms,
-        available: available?
+        model_id: model_id,
+        description: Map.get(@model_info, alias_name, "")
       }
     end)
     |> Enum.sort_by(& &1.alias)
@@ -157,41 +123,36 @@ defmodule PtcDemo.ModelRegistry do
   """
   @spec format_model_list() :: String.t()
   def format_model_list do
-    available = available_providers()
+    has_key? = System.get_env("OPENROUTER_API_KEY") != nil
 
     header = """
-    Available Models
-    ================
+    Model Aliases (via OpenRouter)
+    ===============================
 
     """
 
     models =
       list_models()
       |> Enum.map(fn model ->
-        status = if model.available, do: "[available]", else: "[needs API key]"
-        providers = model.providers |> Enum.map(&to_string/1) |> Enum.join(", ")
-
         "  #{String.pad_trailing(model.alias, 10)} #{model.description}\n" <>
-          "             Providers: #{providers} #{status}"
+          "             #{model.model_id}"
       end)
       |> Enum.join("\n\n")
 
-    available_str =
-      if available == [] do
-        "none"
-      else
-        available |> Enum.map(&to_string/1) |> Enum.join(", ")
-      end
+    status =
+      if has_key?,
+        do: "OPENROUTER_API_KEY is set",
+        else: "OPENROUTER_API_KEY not set (required for aliases)"
 
     footer = """
 
 
-    Current API keys: #{available_str}
+    Status: #{status}
 
     Usage:
-      mix lisp --model=haiku           # Use alias
-      mix lisp --model=anthropic:...   # Direct provider
-      mix lisp --model=openrouter:...  # Via OpenRouter
+      mix lisp --model=haiku                              # Use alias
+      mix lisp --model=openrouter:anthropic/claude-sonnet-4  # Explicit OpenRouter
+      mix lisp --model=anthropic:claude-haiku-4.5         # Direct Anthropic API
     """
 
     header <> models <> footer
@@ -204,31 +165,24 @@ defmodule PtcDemo.ModelRegistry do
   - "alias" - Known alias (haiku, gemini, etc.)
   - "provider:model" - Direct provider (anthropic:claude-haiku-4.5)
   - "openrouter:provider/model" - OpenRouter format
-
-  Returns `:ok` or `{:error, reason}`.
   """
   @spec validate(String.t()) :: :ok | {:error, String.t()}
   def validate(model_string) do
     cond do
-      # Known alias
       Map.has_key?(@models, model_string) ->
         :ok
 
-      # Valid direct provider format (provider:model-name)
       Regex.match?(~r/^(anthropic|openai|google):[\w.-]+$/, model_string) ->
         :ok
 
-      # Valid OpenRouter format (openrouter:provider/model or openrouter:provider/model:variant)
       Regex.match?(~r/^openrouter:[\w-]+\/[\w.-]+(:\w+)?$/, model_string) ->
         :ok
 
-      # OpenRouter with colon instead of slash (common mistake)
       Regex.match?(~r/^openrouter:\w+:\w+/, model_string) and
           not Regex.match?(~r/^openrouter:[\w-]+\//, model_string) ->
         {:error,
-         "Invalid OpenRouter format: '#{model_string}'. Use 'openrouter:provider/model' (slash, not colon after provider name)"}
+         "Invalid OpenRouter format: '#{model_string}'. Use 'openrouter:provider/model' (slash, not colon)"}
 
-      # Unknown format
       true ->
         {:error,
          "Unknown model format: '#{model_string}'. Use 'provider:model' or 'openrouter:provider/model'"}
@@ -236,86 +190,35 @@ defmodule PtcDemo.ModelRegistry do
   end
 
   @doc """
-  Get available API keys as provider atoms.
-  """
-  @spec available_providers() :: [provider()]
-  def available_providers do
-    @provider_keys
-    |> Enum.filter(fn {_provider, env_var} -> System.get_env(env_var) end)
-    |> Enum.map(fn {provider, _} -> provider end)
-  end
-
-  @doc """
-  Get all aliases as a map for backwards compatibility.
-
-  Returns a map of alias -> model_id using the first available provider.
+  Get all aliases as a map (for CLI /model command).
   """
   @spec preset_models() :: %{String.t() => String.t()}
-  def preset_models do
-    available = available_providers()
-
-    @models
-    |> Enum.map(fn {alias_name, model} ->
-      model_id =
-        case find_available_provider(model.providers, available) do
-          nil -> Keyword.values(model.providers) |> List.first()
-          id -> id
-        end
-
-      {alias_name, model_id}
-    end)
-    |> Map.new()
-  end
-
-  @doc """
-  Get full model info including cost rates.
-
-  Returns the model definition map or nil if not found.
-  """
-  @spec get_model_info(String.t()) :: map() | nil
-  def get_model_info(alias_or_model_id) do
-    cond do
-      Map.has_key?(@models, alias_or_model_id) ->
-        Map.get(@models, alias_or_model_id)
-
-      String.contains?(alias_or_model_id, ":") ->
-        # Try to find by model ID in providers
-        Enum.find_value(@models, fn {_alias, model} ->
-          if alias_or_model_id in Keyword.values(model.providers) do
-            model
-          end
-        end)
-
-      true ->
-        nil
-    end
-  end
-
-  @doc """
-  Calculate cost from token counts when API doesn't return it.
-
-  Uses the model's cost rates if available.
-  Returns the cost in dollars or 0.0 if rates not available.
-  """
-  @spec calculate_cost(String.t(), non_neg_integer(), non_neg_integer()) :: float()
-  def calculate_cost(alias_or_model_id, input_tokens, output_tokens) do
-    case get_model_info(alias_or_model_id) do
-      nil ->
-        0.0
-
-      model ->
-        input_cost = model.input_cost_per_mtok * input_tokens / 1_000_000
-        output_cost = model.output_cost_per_mtok * output_tokens / 1_000_000
-        input_cost + output_cost
-    end
-  end
+  def preset_models, do: @models
 
   @doc """
   Get list of all alias names.
   """
   @spec aliases() :: [String.t()]
-  def aliases do
-    Map.keys(@models) |> Enum.sort()
+  def aliases, do: Map.keys(@models) |> Enum.sort()
+
+  @doc """
+  Calculate cost from token counts.
+
+  Uses the model's cost rates if available (looks up by alias or model_id).
+  Returns the cost in dollars or 0.0 if rates not available.
+  """
+  @spec calculate_cost(String.t(), non_neg_integer(), non_neg_integer()) :: float()
+  def calculate_cost(alias_or_model_id, input_tokens, output_tokens) do
+    # Try direct alias lookup first
+    costs =
+      Map.get(@model_costs, alias_or_model_id) ||
+        find_costs_by_model_id(alias_or_model_id)
+
+    case costs do
+      nil -> 0.0
+      %{input: input_rate, output: output_rate} ->
+        input_rate * input_tokens / 1_000_000 + output_rate * output_tokens / 1_000_000
+    end
   end
 
   # Private functions
@@ -327,24 +230,12 @@ defmodule PtcDemo.ModelRegistry do
     end
   end
 
-  defp resolve_for_available_provider(alias_name) do
-    model = Map.get(@models, alias_name)
-    available = available_providers()
-
-    case find_available_provider(model.providers, available) do
-      nil ->
-        # Fall back to first provider (likely openrouter)
-        {:ok, model.providers |> Keyword.values() |> List.first()}
-
-      model_id ->
-        {:ok, model_id}
+  defp find_costs_by_model_id(model_id) do
+    # Find alias that maps to this model_id
+    case Enum.find(@models, fn {_alias, id} -> id == model_id end) do
+      {alias_name, _} -> Map.get(@model_costs, alias_name)
+      nil -> nil
     end
-  end
-
-  defp find_available_provider(providers, available) do
-    Enum.find_value(providers, fn {provider, model_id} ->
-      if provider in available, do: model_id
-    end)
   end
 
   defp unknown_model_error(name) do
@@ -355,9 +246,9 @@ defmodule PtcDemo.ModelRegistry do
 
     Available aliases: #{aliases_str}
 
-    Or use a full model ID:
-      - Direct: anthropic:claude-haiku-4.5
+    Or use explicit provider format:
       - OpenRouter: openrouter:anthropic/claude-haiku-4.5
+      - Direct: anthropic:claude-haiku-4.5
 
     Run with --list-models to see all options.
     """

@@ -101,6 +101,9 @@ defmodule PtcDemo.CLIBase do
         arg == "--verbose" or arg == "-v" ->
           Map.put(acc, :verbose, true)
 
+        arg == "--debug" or arg == "-d" ->
+          Map.put(acc, :debug, true)
+
         arg == "--list-models" ->
           Map.put(acc, :list_models, true)
 
@@ -282,7 +285,7 @@ defmodule PtcDemo.CLIBase do
   """
   def format_program_result(nil), do: "(no result captured)"
   def format_program_result({:error, msg}), do: "ERROR: #{msg}"
-  def format_program_result(result), do: truncate(result, 200)
+  def format_program_result(result), do: truncate(inspect(result, limit: 20), 200)
 
   @doc """
   Format message content which can be various types.
