@@ -211,11 +211,13 @@ memory/results        ; read from persistent memory
 (let [{:keys [a b]} m] body)       ; map destructuring
 (if cond then else)                ; conditional (else is REQUIRED)
 (when cond body)                   ; single-branch returns nil if false
+(if-let [x expr] then else)        ; bind x, eval then if truthy, else otherwise
+(when-let [x expr] body)           ; bind x, eval body if truthy, else nil
 (cond c1 r1 c2 r2 :else default)   ; multi-way conditional
 (do expr1 expr2 ... exprN)         ; sequential eval, returns last
-(fn [x] body)                      ; anonymous function with simple param
-(fn [[a b]] body)                  ; vector destructuring in params
-(fn [{:keys [x]}] body)            ; map destructuring in params
+(fn [x] body)                      ; anonymous function
+(fn [{:keys [x]}] body)            ; with destructuring
+#(+ % 1)                           ; short syntax: % is arg, %1 %2 for multiple
 (< a b)                            ; comparisons are 2-arity ONLY, NOT (<= a b c)
 ```
 
@@ -257,29 +259,43 @@ memory/results        ; read from persistent memory
 
 ### Core Functions
 ```clojure
+; Arithmetic & Comparison
+(+ 1 2 3)  (- 10 3)  (* 2 3)  (/ 10 2)  (mod 10 3)
+(inc x)  (dec x)  (abs x)  (max 1 5 3)  (min 1 5 3)
+(= a b)  (not= a b)  (< a b)  (> a b)  (<= a b)  (>= a b)
+
+; Logic
+(and x y ...)  (or x y ...)  (not x)
+
 ; Filtering
 (filter pred coll)  (remove pred coll)  (find pred coll)
+(some pred coll)  (every? pred coll)  (not-any? pred coll)
 
 ; Transforming
-(map f coll)  (mapv f coll)  (pluck :key coll)
+(map f coll)  (mapv f coll)  (pluck :key coll)  (reduce f init coll)
 ; map/filter/remove/sort-by on maps: each entry is [key value] vector
 ; Example: (map (fn [[key value]] {:cat key :avg (avg-by :amount value)}) grouped)
 
 ; Ordering
-(sort-by :key coll)  (sort-by :key > coll)  ; > for descending
+(sort coll)  (sort-by :key coll)  (sort-by :key > coll)  (reverse coll)
 
 ; Subsetting
 (first coll)  (second coll)  (last coll)  (take n coll)  (drop n coll)  (nth coll i)
+(take-while pred coll)  (drop-while pred coll)  (distinct coll)
+
+; Combining
+(conj coll x)  (concat c1 c2)  (into [] coll)  (flatten nested)  (zip c1 c2)
 
 ; Aggregation
-(count coll)  (sum-by :key coll)  (avg-by :key coll)
+(count coll)  (empty? coll)  (sum-by :key coll)  (avg-by :key coll)
 (min-by :key coll)  (max-by :key coll)
 (group-by :key coll)  ; returns {key => [items...]}, NOT counts!
 ; To count per group: (update-vals (group-by :key coll) count) - do NOT use ->>
 
 ; Maps
-(get m :key)  (get-in m [:a :b])  (assoc m :k v)  (merge m1 m2)
-(select-keys m [:a :b])  (keys m)  (vals m)
+(get m :key)  (get-in m [:a :b])  (assoc m :k v)  (assoc-in m [:a :b] v)
+(update m :k f)  (update-in m [:a :b] f)  (dissoc m :k)  (merge m1 m2)
+(select-keys m [:a :b])  (keys m)  (vals m)  (entries m)
 (:key m)  (:key m default)  ; keyword as function
 (update-vals m f)  ; apply f to each value in map
 (update-vals {:a 1 :b 2} inc)                        ; => {:a 2 :b 3}
@@ -290,15 +306,19 @@ memory/results        ; read from persistent memory
 (->> data (group-by :cat) (update-vals f))  ; WRONG - incompatible arg positions
 
 ; Sets
-(set? x)               ; is x a set?
-(set [1 2 2])          ; convert to set: #{1 2}
-(contains? #{1 2} 1)   ; membership: true
-(count #{1 2 3})       ; count: 3
-(empty? #{})           ; empty check: true
-
+(set? x)  (set [1 2 2])  (contains? #{1 2} 1)
 ; Note: map, filter, remove work on sets but return vectors
-(map inc #{1 2})       ; returns vector: [2 3]
-(filter odd? #{1 2 3}) ; returns vector: [1 3]
+
+; Strings
+(str "a" "b" 42)  (subs s start end)  (split s ",")  (join ", " coll)
+(trim s)  (replace s "old" "new")  (upcase s)  (downcase s)
+(starts-with? s prefix)  (ends-with? s suffix)  (includes? s sub)
+(parse-long "42")  (parse-double "3.14")  ; returns nil on failure
+
+; Type Predicates
+(nil? x)  (some? x)  (number? x)  (string? x)  (keyword? x)
+(vector? x)  (map? x)  (set? x)  (coll? x)  (boolean? x)
+(zero? x)  (pos? x)  (neg? x)  (even? x)  (odd? x)
 ```
 
 ### Tool Calls
@@ -361,6 +381,7 @@ memory/results           ; access stored value by key
 | `'(1 2 3)` | `[1 2 3]` |
 | `:foo/bar` | `:foo-bar` (no namespaced keywords) |
 | `(->> d (group-by :k) (update-vals f))` | `(-> (group-by :k d) (update-vals f))` |
+| `#(> (:price %) 100)` in filter | `(where :price > 100)` (simpler) |
 
 **Key constraints:**
 - `where` predicates MUST have an operator (except for truthy check)
