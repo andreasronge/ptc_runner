@@ -77,7 +77,7 @@ Each issue should be:
 
 [List docs that need updating, or "None" if purely internal change]
 - `docs/guide.md` - [what section needs update]
-- `docs/ptc-json-specification.md` - [if JSON DSL changes]
+- `docs/reference/ptc-json-specification.md` - [if JSON DSL changes]
 - `docs/ptc-lisp-specification.md` - [if PTC-Lisp changes]
 - [Other affected docs]
 ```
@@ -220,5 +220,5 @@ See [GitHub Workflows](github-workflows.md#labels-reference) for the complete la
 - [Testing Guidelines](testing-guidelines.md) - How to write good tests
 - [PR Review Guidelines](pr-review-guidelines.md) - What PR reviewers look for
 - [Guide](../guide.md) - System design and API reference
-- [PTC-JSON Specification](../ptc-json-specification.md) - JSON DSL reference
+- [PTC-JSON Specification](../reference/ptc-json-specification.md) - JSON DSL reference
 - [PTC-Lisp Specification](../ptc-lisp-specification.md) - PTC-Lisp reference

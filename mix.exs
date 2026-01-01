@@ -81,19 +81,30 @@ defmodule PtcRunner.MixProject do
         "README.md",
         "LICENSE",
         "CHANGELOG.md",
-        # Guides (basic → advanced)
+        # SubAgent Guides (learning path)
+        "docs/guides/subagent-getting-started.md",
+        "docs/guides/subagent-concepts.md",
+        "docs/guides/subagent-patterns.md",
+        "docs/guides/subagent-testing.md",
+        "docs/guides/subagent-troubleshooting.md",
+        "docs/guides/subagent-advanced.md",
+        # Overview and Reference
         "docs/guide.md",
+        "docs/signature-syntax.md",
         "docs/benchmark-eval.md",
-        "docs/ptc-json-specification.md",
+        # PTC-Lisp
         "docs/ptc-lisp-overview.md",
         "docs/ptc-lisp-specification.md",
-        "docs/ptc-lisp-llm-guide.md",
+        # Reference (low-level)
+        "docs/reference/ptc-json-specification.md",
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
         "livebooks/ptc_runner_llm_agent.livemd"
       ],
       groups_for_extras: [
-        Guides: ~r/docs\/.+\.md/,
+        "SubAgent Guides": ~r/docs\/guides\/subagent-.+\.md/,
+        Reference:
+          ~r/docs\/(guide|signature-syntax|benchmark-eval|ptc-lisp-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
       ],
       before_closing_body_tag: &before_closing_body_tag/1
@@ -131,8 +142,7 @@ defmodule PtcRunner.MixProject do
 
   defp package do
     [
-      files:
-        ~w(lib priv docs/ptc-lisp-llm-guide.md .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

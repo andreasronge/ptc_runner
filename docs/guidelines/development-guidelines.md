@@ -2,7 +2,7 @@
 
 This is an Elixir library for Programmatic Tool Calling (PTC).
 
-See **[Documentation](../README.md)** for system design and API reference. See **[PTC-JSON Specification](../ptc-json-specification.md)** and **[PTC-Lisp Specification](../ptc-lisp-specification.md)** for DSL details.
+See **[Documentation](../README.md)** for system design and API reference. See **[PTC-JSON Specification](../reference/ptc-json-specification.md)** and **[PTC-Lisp Specification](../ptc-lisp-specification.md)** for DSL details.
 
 ## Project Guidelines
 

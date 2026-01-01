@@ -323,4 +323,4 @@ Memory is scoped per-agent and hidden from prompts. See [Core Concepts](subagent
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
 - [Advanced Topics](subagent-advanced.md) - Observability and the compile pattern
-- [SubAgent Specification](../ptc_agents/specification.md) - SubAgent API reference
+- `PtcRunner.SubAgent` - API reference

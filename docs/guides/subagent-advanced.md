@@ -166,7 +166,7 @@ SubAgent emits telemetry events for observability integration:
 
 Events: `run:start/stop`, `turn:start/stop`, `llm:start/stop`, `tool:start/stop/exception`.
 
-> **Full details:** See [Debugging & Introspection](../ptc_agents/specification.md#debugging--introspection) in the specification.
+> **Full details:** See `PtcRunner.SubAgent.Debug` for trace inspection functions.
 
 ## Compile Pattern
 
@@ -349,5 +349,5 @@ memory/key                     ; Memory shorthand
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Type system details
-- [SubAgent Specification](../ptc_agents/specification.md) - Full API reference
+- `PtcRunner.SubAgent` - Full API reference
 - [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation

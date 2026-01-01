@@ -7,11 +7,13 @@ defmodule PtcRunner.Lisp.Schema do
   """
 
   # Register the markdown file as an external resource for recompilation
-  @external_resource Path.join(__DIR__, "../../../docs/ptc-lisp-llm-guide.md")
+  @external_resource Path.join(__DIR__, "../../../priv/prompts/ptc-lisp-reference.md")
 
   # Extract prompt content at compile time from the markdown file
   @prompt_content (fn ->
-                     markdown_path = Path.join(__DIR__, "../../../docs/ptc-lisp-llm-guide.md")
+                     markdown_path =
+                       Path.join(__DIR__, "../../../priv/prompts/ptc-lisp-reference.md")
+
                      content = File.read!(markdown_path)
 
                      case String.split(content, "<!-- PTC_PROMPT_START -->") do
