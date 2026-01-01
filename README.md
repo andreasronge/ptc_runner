@@ -13,6 +13,7 @@ Build LLM agents that write and execute programs. SubAgents combine the reasonin
 ## Quick Start
 
 ```elixir
+# Conceptual example - see Getting Started guide for runnable code
 {:ok, step} = PtcRunner.SubAgent.run(
   "What's the total value of orders over $100?",
   tools: %{"get_orders" => &MyApp.Orders.list/0},
@@ -22,6 +23,8 @@ Build LLM agents that write and execute programs. SubAgents combine the reasonin
 
 step.return.total  #=> 2450.00
 ```
+
+**Try it yourself:** The [Getting Started guide](docs/guides/subagent-getting-started.md) includes fully runnable examples you can copy-paste.
 
 The SubAgent doesn't answer directly - it writes a program that computes the answer:
 

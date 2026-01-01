@@ -463,12 +463,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "(return value) syntactic sugar" do
     test "return shorthand works same as call return" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -483,12 +478,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "return with expression value" do
-      agent =
-        SubAgent.new(
-          prompt: "Add numbers",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent(prompt: "Add numbers")
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -502,12 +492,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "return in let binding" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -522,12 +507,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "return in conditional" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -545,12 +525,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
   describe "(fail error) syntactic sugar" do
     test "fail shorthand produces user error" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -564,12 +539,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "fail with expression value" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       llm = fn _ ->
         {:ok, ~S|```clojure
@@ -583,12 +553,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
 
     test "fail alone in code" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          tools: %{},
-          max_turns: 2
-        )
+      agent = test_agent()
 
       # Test fail without return in the same code
       llm = fn _ ->
