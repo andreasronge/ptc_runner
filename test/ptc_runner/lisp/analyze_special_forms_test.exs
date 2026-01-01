@@ -3,6 +3,9 @@ defmodule PtcRunner.Lisp.AnalyzeSpecialFormsTest do
 
   alias PtcRunner.Lisp.Analyze
 
+  doctest PtcRunner.Lisp.Analyze.Patterns
+  doctest PtcRunner.Lisp.Analyze.Predicates
+
   describe "when desugars to if" do
     test "when becomes if with nil else" do
       raw = {:list, [{:symbol, :when}, true, 42]}

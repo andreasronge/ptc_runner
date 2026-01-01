@@ -10,6 +10,8 @@ defmodule PtcRunner.Lisp.Analyze do
   Returns `{:ok, CoreAST.t()}` on success or `{:error, error_reason()}` on failure.
   """
 
+  alias PtcRunner.Lisp.Analyze.Patterns
+  alias PtcRunner.Lisp.Analyze.Predicates
   alias PtcRunner.Lisp.Analyze.ShortFn
   alias PtcRunner.Lisp.CoreAST
 
@@ -178,165 +180,10 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # ============================================================
   # Pattern analysis (destructuring)
+  # Delegated to PtcRunner.Lisp.Analyze.Patterns
   # ============================================================
 
-  defp analyze_pattern({:symbol, name}), do: {:ok, {:var, name}}
-
-  defp analyze_pattern({:vector, elements}) do
-    with {:ok, patterns} <- analyze_pattern_list(elements) do
-      {:ok, {:destructure, {:seq, patterns}}}
-    end
-  end
-
-  defp analyze_pattern({:map, pairs}) do
-    analyze_destructure_map(pairs)
-  end
-
-  defp analyze_pattern(other) do
-    {:error, {:unsupported_pattern, other}}
-  end
-
-  defp analyze_pattern_list(elements) do
-    elements
-    |> Enum.reduce_while({:ok, []}, fn elem, {:ok, acc} ->
-      case analyze_pattern(elem) do
-        {:ok, p} -> {:cont, {:ok, [p | acc]}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
-    end
-  end
-
-  defp analyze_destructure_map(pairs) do
-    keys_pair =
-      Enum.find(pairs, fn
-        {{:keyword, k}, _} -> k == :keys
-        _ -> false
-      end)
-
-    or_pair =
-      Enum.find(pairs, fn
-        {{:keyword, k}, _} -> k == :or
-        _ -> false
-      end)
-
-    as_pair =
-      Enum.find(pairs, fn
-        {{:keyword, k}, _} -> k == :as
-        _ -> false
-      end)
-
-    # Extract rename pairs (symbol keys paired with keyword values)
-    rename_pairs =
-      pairs
-      |> Enum.filter(fn
-        {{:symbol, _}, {:keyword, _}} -> true
-        _ -> false
-      end)
-
-    with {:ok, keys} <- extract_keys_opt(keys_pair),
-         {:ok, renames} <- extract_renames(rename_pairs),
-         {:ok, defaults} <- extract_defaults(or_pair) do
-      # Only create a pattern if we have keys, renames, or defaults
-      has_keys = not Enum.empty?(keys)
-      has_renames = not Enum.empty?(renames)
-      has_defaults = not Enum.empty?(defaults)
-
-      if has_keys || has_renames || has_defaults do
-        base_pattern =
-          if has_renames do
-            {:destructure, {:map, keys, renames, defaults}}
-          else
-            {:destructure, {:keys, keys, defaults}}
-          end
-
-        maybe_wrap_as(base_pattern, as_pair)
-      else
-        {:error, {:unsupported_pattern, pairs}}
-      end
-    end
-  end
-
-  defp extract_keys_opt(keys_pair) do
-    case keys_pair do
-      {{:keyword, :keys}, {:vector, key_asts}} ->
-        extract_keys(key_asts)
-
-      nil ->
-        {:ok, []}
-
-      _ ->
-        {:error, {:invalid_form, "invalid :keys destructuring form"}}
-    end
-  end
-
-  defp extract_keys(key_asts) do
-    Enum.reduce_while(key_asts, {:ok, []}, fn
-      {:symbol, name}, {:ok, acc} ->
-        {:cont, {:ok, [name | acc]}}
-
-      {:keyword, k}, {:ok, acc} ->
-        {:cont, {:ok, [k | acc]}}
-
-      _other, _acc ->
-        {:halt, {:error, {:invalid_form, "expected keyword or symbol in destructuring key"}}}
-    end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
-    end
-  end
-
-  defp extract_renames(rename_pairs) do
-    Enum.reduce_while(rename_pairs, {:ok, []}, fn
-      {{:symbol, bind_name}, {:keyword, source_key}}, {:ok, acc} ->
-        {:cont, {:ok, [{bind_name, source_key} | acc]}}
-
-      _other, _acc ->
-        {:halt, {:error, {:invalid_form, "rename pairs must be {symbol :keyword}"}}}
-    end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
-    end
-  end
-
-  defp extract_defaults(or_pair) do
-    case or_pair do
-      {{:keyword, :or}, {:map, default_pairs}} ->
-        extract_default_pairs(default_pairs)
-
-      nil ->
-        {:ok, []}
-    end
-  end
-
-  defp extract_default_pairs(default_pairs) do
-    Enum.reduce_while(default_pairs, {:ok, []}, fn
-      {{:symbol, k}, v}, {:ok, acc} ->
-        {:cont, {:ok, [{k, v} | acc]}}
-
-      {_other_key, _v}, _acc ->
-        {:halt, {:error, {:invalid_form, "default keys must be symbols"}}}
-    end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
-    end
-  end
-
-  defp maybe_wrap_as(base_pattern, as_pair) do
-    case as_pair do
-      {{:keyword, :as}, {:symbol, as_name}} ->
-        {:ok, {:destructure, {:as, as_name, base_pattern}}}
-
-      nil ->
-        {:ok, base_pattern}
-    end
-  end
+  defp analyze_pattern(ast), do: Patterns.analyze_pattern(ast)
 
   # ============================================================
   # Special form: if and when
@@ -566,79 +413,14 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # Predicates: where
+  # Predicates: where and combinators
+  # Delegated to PtcRunner.Lisp.Analyze.Predicates
   # ============================================================
 
-  defp analyze_where(args) do
-    case args do
-      [field_ast] ->
-        with {:ok, field_path} <- analyze_field_path(field_ast) do
-          {:ok, {:where, field_path, :truthy, nil}}
-        end
+  defp analyze_where(args), do: Predicates.analyze_where(args, &do_analyze/1)
 
-      [field_ast, {:symbol, op}, value_ast] ->
-        with {:ok, field_path} <- analyze_field_path(field_ast),
-             {:ok, op_tag} <- classify_where_op(op),
-             {:ok, value} <- do_analyze(value_ast) do
-          {:ok, {:where, field_path, op_tag, value}}
-        end
-
-      _ ->
-        {:error, {:invalid_where_form, "expected (where field) or (where field op value)"}}
-    end
-  end
-
-  defp analyze_field_path({:keyword, k}) do
-    {:ok, {:field, [{:keyword, k}]}}
-  end
-
-  defp analyze_field_path({:vector, elems}) do
-    with {:ok, segments} <- extract_field_segments(elems) do
-      {:ok, {:field, segments}}
-    end
-  end
-
-  defp analyze_field_path(other) do
-    {:error, {:invalid_where_form, "field must be keyword or vector, got: #{inspect(other)}"}}
-  end
-
-  defp extract_field_segments(elems) do
-    Enum.reduce_while(elems, {:ok, []}, fn
-      {:keyword, k}, {:ok, acc} ->
-        {:cont, {:ok, [{:keyword, k} | acc]}}
-
-      {:string, s}, {:ok, acc} ->
-        {:cont, {:ok, [{:string, s} | acc]}}
-
-      _other, _acc ->
-        {:halt,
-         {:error, {:invalid_where_form, "field path elements must be keywords or strings"}}}
-    end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
-    end
-  end
-
-  defp classify_where_op(:=), do: {:ok, :eq}
-  defp classify_where_op(:"not="), do: {:ok, :not_eq}
-  defp classify_where_op(:>), do: {:ok, :gt}
-  defp classify_where_op(:<), do: {:ok, :lt}
-  defp classify_where_op(:>=), do: {:ok, :gte}
-  defp classify_where_op(:<=), do: {:ok, :lte}
-  defp classify_where_op(:includes), do: {:ok, :includes}
-  defp classify_where_op(:in), do: {:ok, :in}
-  defp classify_where_op(op), do: {:error, {:invalid_where_operator, op}}
-
-  # ============================================================
-  # Predicate combinators: all-of, any-of, none-of
-  # ============================================================
-
-  defp analyze_pred_comb(kind, args) do
-    with {:ok, preds} <- analyze_list(args) do
-      {:ok, {:pred_combinator, kind, preds}}
-    end
-  end
+  defp analyze_pred_comb(kind, args),
+    do: Predicates.analyze_pred_comb(kind, args, &analyze_list/1)
 
   # ============================================================
   # Tool invocation: call
