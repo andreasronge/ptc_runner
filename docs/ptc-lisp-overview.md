@@ -172,7 +172,7 @@ Programs are pure functions of `(memory, context) → result`:
 |----------|---------|----------|
 | **[ptc-lisp-overview.md](ptc-lisp-overview.md)** | This document - rationale and evaluation plan | Everyone |
 | **[ptc-lisp-specification.md](ptc-lisp-specification.md)** | Complete language specification | Language designers, implementers |
-| **[ptc-lisp-llm-guide.md](ptc-lisp-llm-guide.md)** | Quick reference for LLM prompts | Application developers, prompt engineers |
+| **[ptc-lisp-llm-guide.md](../priv/prompts/ptc-lisp-reference.md)** | Quick reference for LLM prompts | Application developers, prompt engineers |
 
 ---
 
@@ -180,7 +180,7 @@ Programs are pure functions of `(memory, context) → result`:
 
 ### For Application Developers
 
-1. Read **[ptc-lisp-llm-guide.md](ptc-lisp-llm-guide.md)** for API usage
+1. Read **[ptc-lisp-llm-guide.md](../priv/prompts/ptc-lisp-reference.md)** for API usage
 2. Extract the "Quick Reference" section for your LLM prompts
 3. Register your tools and execute programs
 
@@ -201,7 +201,7 @@ Programs are pure functions of `(memory, context) → result`:
 
 ### For LLM Prompt Engineers
 
-The **[ptc-lisp-llm-guide.md](ptc-lisp-llm-guide.md)** contains a compact quick reference (~2.5KB) designed to be included in LLM system prompts. Key sections:
+The **[ptc-lisp-llm-guide.md](../priv/prompts/ptc-lisp-reference.md)** contains a compact quick reference (~2.5KB) designed to be included in LLM system prompts. Key sections:
 
 - Data types and access patterns
 - Predicate builders (`where`, `all-of`, `any-of`, `none-of`)
@@ -289,7 +289,7 @@ Testing with various LLM models has revealed common patterns where LLMs generate
 (filter (where :department = "engineering") employees)
 ```
 
-These patterns should be prominently documented in the "Common Mistakes" section of `ptc-lisp-llm-guide.md`.
+These patterns should be prominently documented in the "Common Mistakes" section of `../priv/prompts/ptc-lisp-reference.md`.
 
 ### Test Report Analysis (2025-12-10)
 
