@@ -35,7 +35,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.{LLMResolver, Prompt, SubAgentTool, Telemetry}
+  alias PtcRunner.SubAgent.Loop.{LLMRetry, Metrics, ResponseHandler, ToolNormalizer}
+  alias PtcRunner.SubAgent.{Prompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -187,8 +188,8 @@ defmodule PtcRunner.SubAgent.Loop do
     # Use -1 offset: we haven't started this turn, so report turns completed
     step_with_metrics = %{
       step
-      | usage: build_final_usage(state, duration_ms, 0, -1),
-        trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+      | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
+        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
     }
 
     {:error, step_with_metrics}
@@ -202,8 +203,8 @@ defmodule PtcRunner.SubAgent.Loop do
     # Use -1 offset: we haven't started this turn, so report turns completed
     step_with_metrics = %{
       step
-      | usage: build_final_usage(state, duration_ms, 0, -1),
-        trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+      | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
+        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
     }
 
     {:error, step_with_metrics}
@@ -219,8 +220,8 @@ defmodule PtcRunner.SubAgent.Loop do
       # Use -1 offset: we haven't started this turn, so report turns completed
       step_with_metrics = %{
         step
-        | usage: build_final_usage(state, duration_ms, 0, -1),
-          trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+        | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
+          trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
       }
 
       {:error, step_with_metrics}
@@ -241,11 +242,11 @@ defmodule PtcRunner.SubAgent.Loop do
       case call_llm_with_telemetry(llm, llm_input, state, agent) do
         {:ok, %{content: content, tokens: tokens}} ->
           # Accumulate tokens from this LLM call
-          state_with_tokens = accumulate_tokens(state, tokens)
+          state_with_tokens = Metrics.accumulate_tokens(state, tokens)
 
           result = handle_llm_response(content, agent, llm, state_with_tokens)
           # Emit turn stop event (only for completed turns, not continuation)
-          emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start)
+          Metrics.emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start)
           result
 
         {:error, reason} ->
@@ -255,8 +256,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
           step_with_metrics = %{
             step
-            | usage: build_final_usage(state, duration_ms, 0),
-              trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+            | usage: Metrics.build_final_usage(state, duration_ms, 0),
+              trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
           }
 
           # Emit turn stop on error
@@ -273,83 +274,19 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Accumulate tokens from an LLM call into state
-  defp accumulate_tokens(state, nil),
-    do: %{state | turn_tokens: nil, llm_requests: state.llm_requests + 1}
-
-  defp accumulate_tokens(state, tokens) when is_map(tokens) do
-    input = Map.get(tokens, :input, 0)
-    output = Map.get(tokens, :output, 0)
-
-    %{
-      state
-      | total_input_tokens: state.total_input_tokens + input,
-        total_output_tokens: state.total_output_tokens + output,
-        llm_requests: state.llm_requests + 1,
-        turn_tokens: tokens
-    }
-  end
-
-  # Build final usage map with token counts from accumulated state
-  # turn_offset: 0 for completed turns (return/fail), -1 for pre-turn failures (max_turns, etc.)
-  defp build_final_usage(state, duration_ms, memory_bytes, turn_offset \\ 0) do
-    base = %{
-      duration_ms: duration_ms,
-      memory_bytes: memory_bytes,
-      turns: state.turn + turn_offset
-    }
-
-    # Add token counts if any LLM calls were made with token reporting
-    if state.total_input_tokens > 0 or state.total_output_tokens > 0 do
-      Map.merge(base, %{
-        input_tokens: state.total_input_tokens,
-        output_tokens: state.total_output_tokens,
-        total_tokens: state.total_input_tokens + state.total_output_tokens,
-        llm_requests: state.llm_requests
-      })
-    else
-      # Still include llm_requests even without token counts
-      if state.llm_requests > 0 do
-        Map.put(base, :llm_requests, state.llm_requests)
-      else
-        base
-      end
-    end
-  end
-
-  # Emit turn stop event only for final results (not loop continuations)
-  defp emit_turn_stop_if_final({status, _step} = _result, agent, state, turn_start)
-       when status in [:ok, :error] do
-    turn_duration = System.monotonic_time() - turn_start
-    measurements = build_turn_measurements(turn_duration, state.turn_tokens)
-
-    Telemetry.emit([:turn, :stop], measurements, %{
-      agent: agent,
-      turn: state.turn,
-      program: nil
-    })
-  end
-
-  # Build measurements for turn stop event with optional tokens
-  defp build_turn_measurements(duration, nil), do: %{duration: duration}
-
-  defp build_turn_measurements(duration, tokens) when is_map(tokens) do
-    %{duration: duration, tokens: LLMResolver.total_tokens(tokens)}
-  end
-
   # Call LLM with telemetry wrapper
   defp call_llm_with_telemetry(llm, input, state, agent) do
     start_meta = %{agent: agent, turn: state.turn, messages: input.messages}
 
     Telemetry.span([:llm], start_meta, fn ->
-      result = call_llm_with_retry(llm, input, state)
+      result = LLMRetry.call_with_retry(llm, input, state.llm_registry, state.llm_retry)
 
       # Build stop measurements and metadata separately
       # telemetry.span expects {result, extra_measurements, stop_metadata}
       {extra_measurements, stop_meta} =
         case result do
           {:ok, %{content: content, tokens: tokens}} ->
-            measurements = build_token_measurements(tokens)
+            measurements = Metrics.build_token_measurements(tokens)
             meta = %{agent: agent, turn: state.turn, response: content}
             {measurements, meta}
 
@@ -362,16 +299,9 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
   end
 
-  # Build token measurements map for telemetry
-  defp build_token_measurements(nil), do: %{}
-
-  defp build_token_measurements(tokens) when is_map(tokens) do
-    %{tokens: LLMResolver.total_tokens(tokens)}
-  end
-
   # Handle LLM response - parse and execute code
   defp handle_llm_response(response, agent, llm, state) do
-    case parse_response(response) do
+    case ResponseHandler.parse(response) do
       {:ok, code} ->
         execute_code(code, response, agent, llm, state)
 
@@ -399,7 +329,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Execute parsed code
   defp execute_code(code, response, agent, llm, state) do
     # Check if code calls any catalog-only tools
-    case find_catalog_tool_call(code, agent.tools, agent.tool_catalog) do
+    case ResponseHandler.find_catalog_tool_call(code, agent.tools, agent.tool_catalog) do
       {:error, catalog_tool_name} ->
         # Feed error back to LLM
         available_tools = Map.keys(agent.tools) |> Enum.sort() |> Enum.join(", ")
@@ -431,7 +361,7 @@ defmodule PtcRunner.SubAgent.Loop do
           end
 
         # Normalize SubAgentTool instances to functions with telemetry
-        normalized_tools = normalize_tools(agent.tools, state, agent)
+        normalized_tools = ToolNormalizer.normalize(agent.tools, state, agent)
 
         # Merge system tools (return/fail) with user tools
         # System tools must come second to take precedence
@@ -453,10 +383,10 @@ defmodule PtcRunner.SubAgent.Loop do
 
       {:error, lisp_step} ->
         # Build trace entry for failed execution
-        trace_entry = build_trace_entry(state, code, nil, [])
+        trace_entry = Metrics.build_trace_entry(state, code, nil, [])
 
         # Feed error back to LLM for next turn
-        error_message = format_error_for_llm(lisp_step.fail)
+        error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
 
         new_state = %{
           state
@@ -480,23 +410,23 @@ defmodule PtcRunner.SubAgent.Loop do
   # Handle successful Lisp execution
   defp handle_successful_execution(code, response, lisp_step, state, agent, llm) do
     # Build trace entry (TODO: Tool calls tracking in Stage 4)
-    trace_entry = build_trace_entry(state, code, lisp_step.return, [])
+    trace_entry = Metrics.build_trace_entry(state, code, lisp_step.return, [])
 
     # Log turn execution if debug mode is enabled
-    maybe_log_turn(state, response, lisp_step.return, state.debug)
+    Metrics.maybe_log_turn(state, response, lisp_step.return, state.debug)
 
     # Check if code contains explicit return/fail call (Stage 4 preview)
     # For now, detect these as special tool names
     cond do
-      contains_call?(code, "return") ->
+      ResponseHandler.contains_call?(code, "return") ->
         # Explicit return - complete successfully
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
         final_step = %{
           lisp_step
-          | usage: build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
+          | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
             trace:
-              apply_trace_filter(
+              Metrics.apply_trace_filter(
                 Enum.reverse([trace_entry | state.trace]),
                 state.trace_mode,
                 false
@@ -505,7 +435,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
         {:ok, final_step}
 
-      contains_call?(code, "fail") ->
+      ResponseHandler.contains_call?(code, "fail") ->
         # Explicit fail - complete with error
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
@@ -513,9 +443,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
         final_step = %{
           error_step
-          | usage: build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
+          | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
             trace:
-              apply_trace_filter(
+              Metrics.apply_trace_filter(
                 Enum.reverse([trace_entry | state.trace]),
                 state.trace_mode,
                 true
@@ -530,7 +460,7 @@ defmodule PtcRunner.SubAgent.Loop do
         case check_memory_limit(lisp_step.memory, agent.memory_limit) do
           {:ok, _size} ->
             # Merge result into context and memory for next turn
-            execution_result = format_execution_result(lisp_step.return)
+            execution_result = ResponseHandler.format_execution_result(lisp_step.return)
 
             new_state = %{
               state
@@ -561,9 +491,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
             final_step = %{
               error_step
-              | usage: build_final_usage(state, duration_ms, actual_size),
+              | usage: Metrics.build_final_usage(state, duration_ms, actual_size),
                 trace:
-                  apply_trace_filter(
+                  Metrics.apply_trace_filter(
                     Enum.reverse([trace_entry | state.trace]),
                     state.trace_mode,
                     true
@@ -572,30 +502,6 @@ defmodule PtcRunner.SubAgent.Loop do
 
             {:error, final_step}
         end
-    end
-  end
-
-  # Parse PTC-Lisp from LLM response
-  defp parse_response(response) do
-    # Try extracting from code blocks (clojure or lisp)
-    case Regex.scan(~r/```(?:clojure|lisp)\n(.*?)```/s, response) do
-      [] ->
-        # Try raw s-expression
-        trimmed = String.trim(response)
-
-        if String.starts_with?(trimmed, "(") do
-          {:ok, trimmed}
-        else
-          {:error, :no_code_in_response}
-        end
-
-      [[_, code]] ->
-        {:ok, String.trim(code)}
-
-      blocks ->
-        # Multiple blocks - wrap in do
-        code = Enum.map_join(blocks, "\n", &List.last/1)
-        {:ok, "(do #{code})"}
     end
   end
 
@@ -609,49 +515,6 @@ defmodule PtcRunner.SubAgent.Loop do
   # System prompt generation
   defp build_system_prompt(agent, context) do
     Prompt.generate(agent, context: context)
-  end
-
-  # Check if code calls a catalog-only tool (not in executable tools)
-  defp find_catalog_tool_call(code, executable_tools, tool_catalog) do
-    # Only check if tool_catalog exists and is not empty
-    if tool_catalog && map_size(tool_catalog) > 0 do
-      # Find catalog-only tools (in catalog but not in executable tools)
-      catalog_only = Map.keys(tool_catalog) -- Map.keys(executable_tools)
-
-      # Check if code contains a call to any catalog-only tool
-      Enum.find_value(catalog_only, :ok, fn tool_name ->
-        if contains_call?(code, tool_name) do
-          {:error, tool_name}
-        else
-          nil
-        end
-      end)
-    else
-      :ok
-    end
-  end
-
-  # Format error for LLM feedback
-  defp format_error_for_llm(fail) do
-    "Error: #{fail.message}"
-  end
-
-  # Format execution result for LLM feedback
-  defp format_execution_result(result) do
-    "Result: #{inspect(result, limit: :infinity, printable_limit: :infinity)}"
-  end
-
-  # Check if code contains a call to a specific tool
-  defp contains_call?(code, tool_name) do
-    # Standard call pattern for all tools
-    call_match = Regex.match?(~r/\(call\s+"#{tool_name}"/, code)
-
-    # Shorthand only for return and fail
-    shorthand_match =
-      tool_name in ["return", "fail"] and
-        Regex.match?(~r/\(#{tool_name}[\s\{]/, code)
-
-    call_match or shorthand_match
   end
 
   # Calculate approximate memory size in bytes
@@ -682,178 +545,5 @@ defmodule PtcRunner.SubAgent.Loop do
   # Check if mission timeout has been exceeded
   defp mission_timeout_exceeded?(deadline) do
     DateTime.compare(DateTime.utc_now(), deadline) == :gt
-  end
-
-  # Normalize tools map to convert SubAgentTool instances into executable functions
-  defp normalize_tools(tools, state, agent) when is_map(tools) do
-    Map.new(tools, fn
-      {name, %SubAgentTool{} = tool} ->
-        wrapped = wrap_sub_agent_tool(tool, state)
-        {name, wrap_tool_with_telemetry(name, wrapped, agent)}
-
-      {name, func} when is_function(func, 1) ->
-        wrapped = wrap_tool_return(func)
-        {name, wrap_tool_with_telemetry(name, wrapped, agent)}
-
-      {name, other} ->
-        {name, other}
-    end)
-  end
-
-  # Wrap a tool function with telemetry events
-  defp wrap_tool_with_telemetry(name, func, agent) do
-    fn args ->
-      start_meta = %{agent: agent, tool_name: name, args: args}
-
-      Telemetry.span([:tool], start_meta, fn ->
-        result = func.(args)
-        {result, %{agent: agent, tool_name: name, result: result}}
-      end)
-    end
-  end
-
-  # Build a trace entry with optional debug information
-  defp build_trace_entry(state, program, result, tool_calls) do
-    base = %{
-      turn: state.turn,
-      program: program,
-      result: result,
-      tool_calls: tool_calls
-    }
-
-    if state.debug do
-      Map.merge(base, %{
-        context_snapshot: state.context,
-        memory_snapshot: state.memory,
-        full_prompt: List.last(state.messages)
-      })
-    else
-      base
-    end
-  end
-
-  # Wrap a regular tool function to handle {:ok, value}, {:error, reason}, and raw values
-  defp wrap_tool_return(func) do
-    fn args ->
-      case func.(args) do
-        {:ok, value} -> value
-        {:error, reason} -> raise "Tool error: #{inspect(reason)}"
-        value -> value
-      end
-    end
-  end
-
-  # Wrap a SubAgentTool in a function closure that executes the child agent
-  defp wrap_sub_agent_tool(%SubAgentTool{} = tool, state) do
-    fn args ->
-      # Resolve LLM in priority order: agent.llm > bound_llm > parent's llm
-      resolved_llm = tool.agent.llm || tool.bound_llm || state.llm
-
-      unless resolved_llm do
-        raise ArgumentError, "No LLM available for SubAgentTool execution"
-      end
-
-      # Execute the wrapped agent with inherited context
-      case SubAgent.run(tool.agent,
-             llm: resolved_llm,
-             llm_registry: state.llm_registry,
-             context: args,
-             _nesting_depth: state.nesting_depth + 1,
-             _remaining_turns: state.remaining_turns,
-             _mission_deadline: state.mission_deadline
-           ) do
-        {:ok, step} ->
-          step.return
-
-        {:error, step} ->
-          # Propagate child agent failure
-          raise RuntimeError,
-                "SubAgent tool failed: #{step.fail.message}"
-      end
-    end
-  end
-
-  # Apply trace filtering based on trace_mode and execution result
-  defp apply_trace_filter(_trace, false = _trace_mode, _is_error), do: nil
-  defp apply_trace_filter(trace, true = _trace_mode, _is_error), do: trace
-  defp apply_trace_filter(trace, :on_error = _trace_mode, true = _is_error), do: trace
-  defp apply_trace_filter(_trace, :on_error = _trace_mode, false = _is_error), do: nil
-
-  # Log turn execution if debug mode is enabled
-  defp maybe_log_turn(_state, _response, _result, false = _debug), do: :ok
-
-  defp maybe_log_turn(state, response, result, true = _debug) do
-    IO.puts("[Turn #{state.turn}] LLM response:")
-    IO.puts(response)
-    IO.puts("\n[Turn #{state.turn}] Execution result:")
-    # credo:disable-for-next-line Credo.Check.Warning.IoInspect
-    IO.inspect(result, pretty: true, limit: :infinity)
-    IO.puts("\n")
-  end
-
-  # Call LLM with retry logic based on retry configuration
-  defp call_llm_with_retry(llm, input, state, attempt \\ 1) do
-    alias PtcRunner.SubAgent.LLMResolver
-
-    retry_config = state.llm_retry || %{}
-    max_attempts = Map.get(retry_config, :max_attempts, 1)
-
-    case LLMResolver.resolve(llm, input, state.llm_registry) do
-      {:ok, response} ->
-        {:ok, response}
-
-      {:error, reason} when attempt < max_attempts ->
-        if retryable?(reason, retry_config) do
-          delay = calculate_delay(retry_config, attempt)
-          Process.sleep(delay)
-          call_llm_with_retry(llm, input, state, attempt + 1)
-        else
-          {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Determine if an error should be retried based on configuration
-  defp retryable?(reason, config) do
-    error_type = classify_error(reason)
-    default_retryable = [:rate_limit, :timeout, :server_error]
-    retryable_errors = Map.get(config, :retryable_errors, default_retryable)
-    error_type in retryable_errors
-  end
-
-  # Classify error type for retry decision
-  defp classify_error({:http_error, 429, _}), do: :rate_limit
-  defp classify_error({:http_error, status, _}) when status >= 500, do: :server_error
-  defp classify_error({:http_error, status, _}) when status >= 400, do: :client_error
-  defp classify_error(:timeout), do: :timeout
-  defp classify_error({:llm_not_found, _}), do: :config_error
-  defp classify_error({:llm_registry_required, _}), do: :config_error
-  defp classify_error({:invalid_llm, _}), do: :config_error
-  defp classify_error(_), do: :unknown
-
-  # Calculate delay based on backoff strategy
-  defp calculate_delay(%{backoff: :exponential, base_delay: base}, attempt) do
-    trunc(base * :math.pow(2, attempt - 1))
-  end
-
-  defp calculate_delay(%{backoff: :linear, base_delay: base}, attempt) do
-    base * attempt
-  end
-
-  defp calculate_delay(%{backoff: :constant, base_delay: base}, _attempt) do
-    base
-  end
-
-  defp calculate_delay(%{base_delay: base}, attempt) do
-    # Default to exponential if backoff not specified
-    trunc(base * :math.pow(2, attempt - 1))
-  end
-
-  defp calculate_delay(_config, _attempt) do
-    # Default delay when base_delay not specified
-    1000
   end
 end
