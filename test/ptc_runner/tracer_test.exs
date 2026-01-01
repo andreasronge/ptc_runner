@@ -102,14 +102,9 @@ defmodule PtcRunner.TracerTest do
     test "on finalized tracer raises FunctionClauseError" do
       tracer = Tracer.new() |> Tracer.finalize()
 
-      # Use Code.eval_quoted to avoid compile-time type warnings
       assert_raise FunctionClauseError, fn ->
-        Code.eval_quoted(
-          quote do
-            unquote(Macro.escape(tracer))
-            |> PtcRunner.Tracer.add_entry(%{type: :llm_call, data: %{}})
-          end
-        )
+        # credo:disable-for-next-line Credo.Check.Refactor.Apply
+        apply(PtcRunner.Tracer, :add_entry, [tracer, %{type: :llm_call, data: %{}}])
       end
     end
   end
@@ -143,14 +138,9 @@ defmodule PtcRunner.TracerTest do
     test "on already finalized tracer raises FunctionClauseError" do
       tracer = Tracer.new() |> Tracer.finalize()
 
-      # Use Code.eval_quoted to avoid compile-time type warnings
       assert_raise FunctionClauseError, fn ->
-        Code.eval_quoted(
-          quote do
-            unquote(Macro.escape(tracer))
-            |> PtcRunner.Tracer.finalize()
-          end
-        )
+        # credo:disable-for-next-line Credo.Check.Refactor.Apply
+        apply(PtcRunner.Tracer, :finalize, [tracer])
       end
     end
   end
