@@ -135,7 +135,6 @@ defmodule PtcDemo.MockAgentTest do
       assert MockAgent.model() == "mock:test-model"
       assert is_list(MockAgent.stats() |> Map.keys())
       assert MockAgent.data_mode() == :schema
-      assert is_list(MockAgent.context())
       assert is_binary(MockAgent.system_prompt())
       assert MockAgent.set_data_mode(:schema) == :ok
       assert MockAgent.set_model("some-model") == :ok

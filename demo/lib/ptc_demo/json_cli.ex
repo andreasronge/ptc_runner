@@ -221,21 +221,23 @@ defmodule PtcDemo.JsonCLI do
   end
 
   defp handle_input("/context") do
-    messages = PtcDemo.Agent.context()
+    programs = PtcDemo.Agent.programs()
 
-    if messages == [] do
+    if programs == [] do
       IO.puts("\n   No conversation yet (system prompt excluded, use /system to view).\n")
     else
-      IO.puts("\nConversation context (#{length(messages)} messages):")
+      IO.puts("\nConversation history (#{length(programs)} exchanges):\n")
 
-      for msg <- messages do
-        role = msg.role |> to_string() |> String.upcase()
-        content = CLIBase.format_message_content(msg.content)
-        IO.puts("\n[#{role}]")
-        IO.puts(CLIBase.truncate(content, 500))
-      end
-
-      IO.puts("")
+      programs
+      |> Enum.with_index(1)
+      |> Enum.each(fn {{program, result}, idx} ->
+        IO.puts("─── Exchange #{idx} ───")
+        IO.puts("[PROGRAM]")
+        IO.puts(CLIBase.truncate(program || "(no program)", 300))
+        IO.puts("\n[RESULT]")
+        IO.puts(CLIBase.truncate(CLIBase.format_program_result(result), 200))
+        IO.puts("")
+      end)
     end
 
     loop()
