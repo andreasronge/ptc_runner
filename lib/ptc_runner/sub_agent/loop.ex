@@ -344,8 +344,7 @@ defmodule PtcRunner.SubAgent.Loop do
   defp build_turn_measurements(duration, nil), do: %{duration: duration}
 
   defp build_turn_measurements(duration, tokens) when is_map(tokens) do
-    total = Map.get(tokens, :input, 0) + Map.get(tokens, :output, 0)
-    %{duration: duration, tokens: total}
+    %{duration: duration, tokens: total_tokens(tokens)}
   end
 
   # Call LLM with telemetry wrapper
@@ -377,8 +376,12 @@ defmodule PtcRunner.SubAgent.Loop do
   defp build_token_measurements(nil), do: %{}
 
   defp build_token_measurements(tokens) when is_map(tokens) do
-    total = Map.get(tokens, :input, 0) + Map.get(tokens, :output, 0)
-    %{tokens: total}
+    %{tokens: total_tokens(tokens)}
+  end
+
+  # Calculate total tokens from input and output token counts
+  defp total_tokens(tokens) when is_map(tokens) do
+    Map.get(tokens, :input, 0) + Map.get(tokens, :output, 0)
   end
 
   # Handle LLM response - parse and execute code
