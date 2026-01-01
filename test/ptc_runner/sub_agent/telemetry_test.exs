@@ -1,5 +1,5 @@
 defmodule PtcRunner.SubAgent.TelemetryTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Telemetry
