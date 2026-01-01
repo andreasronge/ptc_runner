@@ -7,6 +7,8 @@ defmodule PtcRunner.SubAgent.LoopTest do
   import PtcRunner.TestSupport.SubAgentTestHelpers
 
   doctest Loop
+  doctest Loop.LLMRetry
+  doctest Loop.ResponseHandler
 
   describe "run/2 with successful execution" do
     test "single turn with explicit return" do
