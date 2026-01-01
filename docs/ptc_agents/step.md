@@ -34,7 +34,9 @@ defmodule PtcRunner.Step do
     :memory_delta,
     :signature,
     :usage,
-    :trace
+    :trace,
+    :trace_id,
+    :parent_trace_id
   ]
 
   @type t :: %__MODULE__{
@@ -44,7 +46,9 @@ defmodule PtcRunner.Step do
     memory_delta: map() | nil,
     signature: String.t() | nil,
     usage: usage() | nil,
-    trace: [trace_entry()] | nil
+    trace: [trace_entry()] | nil,
+    trace_id: String.t() | nil,
+    parent_trace_id: String.t() | nil
   }
 end
 ```
@@ -196,6 +200,40 @@ step.trace
 #=>   %{turn: 2, program: "(call \"return\" {:count 5})", result: %{count: 5}, tool_calls: []}
 #=> ]
 ```
+
+### `trace_id`
+
+Unique identifier for this execution (for tracing correlation).
+
+- **Type:** `String.t() | nil`
+- **Set when:** SubAgent execution (32-character hex string)
+- **Nil when:** Lisp execution
+- **Used for:** Correlating traces in parallel and nested agent executions
+
+```elixir
+step.trace_id  #=> "a1b2c3d4e5f6..."
+```
+
+### `parent_trace_id`
+
+ID of parent trace for nested agent calls.
+
+- **Type:** `String.t() | nil`
+- **Set when:** This agent was spawned by another agent
+- **Nil when:** Root-level execution (no parent)
+- **Used for:** Linking child executions to their parent
+
+```elixir
+# Root agent
+root_step.trace_id         #=> "abc123..."
+root_step.parent_trace_id  #=> nil
+
+# Nested agent spawned by root
+nested_step.trace_id         #=> "def456..."
+nested_step.parent_trace_id  #=> "abc123..."  # Links to parent
+```
+
+See `PtcRunner.Tracer` for trace generation and management.
 
 ---
 
