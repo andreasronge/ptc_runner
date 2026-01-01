@@ -459,6 +459,148 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
   end
 
+  describe "(return value) syntactic sugar" do
+    test "return shorthand works same as call return" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(return {:result 42})
+```|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+      assert step.fail == nil
+    end
+
+    test "return with expression value" do
+      agent =
+        SubAgent.new(
+          prompt: "Add numbers",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(return {:sum (+ ctx/x ctx/y)})
+```|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{x: 10, y: 5})
+
+      assert step.return == %{sum: 15}
+    end
+
+    test "return in let binding" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(let [x (+ 1 2)]
+  (return {:value x}))
+```|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{value: 3}
+    end
+
+    test "return in conditional" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(if (> ctx/n 0)
+  (return {:sign :positive})
+  (return {:sign :non-positive}))
+```|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{n: 5})
+
+      assert step.return == %{sign: :positive}
+    end
+  end
+
+  describe "(fail error) syntactic sugar" do
+    test "fail shorthand produces user error" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(fail {:reason :bad-input})
+```|}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.fail.reason == :failed
+    end
+
+    test "fail with expression value" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(fail {:error (str "code: " ctx/code)})
+```|}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{code: 500})
+
+      assert step.fail.reason == :failed
+    end
+
+    test "fail alone in code" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          max_turns: 2
+        )
+
+      # Test fail without return in the same code
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(fail {:reason :missing-data})
+```|}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.fail.reason == :failed
+    end
+  end
+
   describe "memory limit configuration" do
     test "memory_limit field can be set" do
       agent = test_agent(memory_limit: 1000)

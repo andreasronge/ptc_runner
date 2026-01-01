@@ -59,7 +59,7 @@ The `:return` key name clearly indicates "what this turn returns to the caller/L
 | Mechanism | Scope | Purpose |
 |-----------|-------|---------|
 | `:return` key in map | Per-turn | Separate LLM-visible result from persisted memory |
-| `(call "return" ...)` tool | Per-mission | Terminate agentic loop with final answer |
+| `(return ...)` | Per-mission | Terminate agentic loop with final answer |
 
 Both are about "giving back a value" but at different granularity. The parallel naming reinforces the concept.
 
@@ -72,8 +72,8 @@ Both are about "giving back a value" but at different granularity. The parallel 
 ; LLM history: "fetched 50 users"
 ; Memory: {:users [...]}
 
-; Turn 2 - return TOOL terminates the loop
-(call "return" {:total (count memory/users)})
+; Turn 2 - return terminates the loop
+(return {:total (count memory/users)})
 ; Mission complete
 ```
 

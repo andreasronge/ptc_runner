@@ -92,7 +92,7 @@ With `max_turns: 1` and no tools, the LLM evaluates and returns directly. With t
 > **Common Pitfall:** If your agent produces correct results but keeps looping until
 > `max_turns_exceeded`, it's likely in loop mode without calling `return`. Either set
 > `max_turns: 1` for single-shot execution, or ensure your prompt guides the LLM to
-> use `(call "return" {:value ...})` when done.
+> use `(return {:value ...})` when done.
 
 ## Signatures (Optional)
 

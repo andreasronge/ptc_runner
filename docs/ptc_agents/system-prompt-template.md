@@ -93,8 +93,8 @@ the result directly. No `return` call is needed - your expression result is the 
 3. Use `(call "tool-name" args)` to invoke tools
 4. Use `ctx/key` to access context data
 5. Use `memory/key` or `(memory/get :key)` for persistent state
-6. Call `(call "return" result)` when the mission is complete
-7. Call `(call "fail" {:reason :keyword :message "..."})` on unrecoverable errors
+6. Call `(return result)` when the mission is complete
+7. Call `(fail {:reason :keyword :message "..."})` on unrecoverable errors
 ```
 
 ---
@@ -225,8 +225,8 @@ Specialized agent for email processing.
 
 ;; Conditional logic
 (if (empty? results)
-  (call "fail" {:reason :not_found :message "No results"})
-  (call "return" {:count (count results)}))
+  (fail {:reason :not_found :message "No results"})
+  (return {:count (count results)}))
 
 ;; Multi-step with memory
 (do
@@ -246,7 +246,7 @@ Respond with a single ```clojure code block containing your program:
 
 ```clojure
 (let [data (call "fetch" {:id ctx/user_id})]
-  (call "return" {:result data}))
+  (return {:result data}))
 ```
 
 Do NOT include:
@@ -296,8 +296,8 @@ defmodule PtcRunner.SubAgent.Prompt do
   4. Use `ctx/key` to access context data
   5. Use `memory/key` for persistent state
   <%= if @mode == :agent do %>
-  6. Call `(call "return" result)` when the mission is complete
-  7. Call `(call "fail" {:reason :keyword :message "..."})` on unrecoverable errors
+  6. Call `(return result)` when the mission is complete
+  7. Call `(fail {:reason :keyword :message "..."})` on unrecoverable errors
   <% end %>
 
   # Data Inventory

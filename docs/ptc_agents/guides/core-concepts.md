@@ -173,8 +173,8 @@ When the agent determines it cannot complete the mission, it calls `fail`:
 ```clojure
 (let [user (call "get_user" {:id 123})]
   (if (nil? user)
-    (call "fail" {:reason :not_found
-                  :message "User 123 does not exist"})
+    (fail {:reason :not_found
+           :message "User 123 does not exist"})
     (call "process" user)))
 ```
 
@@ -184,14 +184,14 @@ Result: `{:error, step}` where `step.fail` contains the error.
 
 Programming bugs in your tool functions follow "let it crash" - they're returned as internal errors for developer investigation.
 
-## Built-in Tools
+## Built-in Special Forms
 
-Every SubAgent has two built-in tools:
+Every SubAgent has two built-in special forms for termination:
 
 ### `return` - Mission Success
 
 ```clojure
-(call "return" {:name "Widget" :price 99.99})
+(return {:name "Widget" :price 99.99})
 ```
 
 - Validates data against the signature
@@ -201,7 +201,7 @@ Every SubAgent has two built-in tools:
 ### `fail` - Mission Failure
 
 ```clojure
-(call "fail" {:reason :not_found :message "No matching items"})
+(fail {:reason :not_found :message "No matching items"})
 ```
 
 - Terminates the loop immediately

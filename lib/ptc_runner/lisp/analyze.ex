@@ -121,6 +121,8 @@ defmodule PtcRunner.Lisp.Analyze do
     do: analyze_pred_comb(:none_of, rest)
 
   defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
+  defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
+  defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
 
   # Memory operations
   defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
@@ -666,6 +668,30 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_call_tool(_) do
     {:error,
      {:invalid_arity, :call, "expected (call \"tool-name\") or (call \"tool-name\" args)"}}
+  end
+
+  # ============================================================
+  # Syntactic sugar: return and fail (desugar to call_tool)
+  # ============================================================
+
+  defp analyze_return([value_ast]) do
+    with {:ok, value} <- do_analyze(value_ast) do
+      {:ok, {:call_tool, "return", value}}
+    end
+  end
+
+  defp analyze_return(_) do
+    {:error, {:invalid_arity, :return, "expected (return value)"}}
+  end
+
+  defp analyze_fail([error_ast]) do
+    with {:ok, error} <- do_analyze(error_ast) do
+      {:ok, {:call_tool, "fail", error}}
+    end
+  end
+
+  defp analyze_fail(_) do
+    {:error, {:invalid_arity, :fail, "expected (fail error)"}}
   end
 
   # ============================================================
