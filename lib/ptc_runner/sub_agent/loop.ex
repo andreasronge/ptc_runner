@@ -48,6 +48,11 @@ defmodule PtcRunner.SubAgent.Loop do
     - `context` - Initial context map (default: %{})
     - `debug` - Enable verbose execution tracing (default: false)
     - `trace` - Trace filtering: true (always), false (never), :on_error (only on failure) (default: true)
+    - `llm_retry` - Optional retry configuration map with:
+      - `max_attempts` - Maximum number of retry attempts (default: 3)
+      - `backoff` - Backoff strategy: :exponential, :linear, or :constant (default: :exponential)
+      - `base_delay` - Base delay in milliseconds (default: 1000)
+      - `retryable_errors` - List of error types to retry (default: [:rate_limit, :timeout, :server_error])
 
   ## Returns
 
@@ -69,6 +74,7 @@ defmodule PtcRunner.SubAgent.Loop do
     llm_registry = Keyword.get(opts, :llm_registry, %{})
     debug = Keyword.get(opts, :debug, false)
     trace_mode = Keyword.get(opts, :trace, true)
+    llm_retry = Keyword.get(opts, :llm_retry)
 
     # Extract runtime context for nesting depth and turn budget
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
@@ -105,7 +111,8 @@ defmodule PtcRunner.SubAgent.Loop do
           mission_deadline: mission_deadline,
           llm_registry: llm_registry,
           debug: debug,
-          trace_mode: trace_mode
+          trace_mode: trace_mode,
+          llm_retry: llm_retry
         }
 
         do_run(agent, run_opts)
@@ -136,7 +143,8 @@ defmodule PtcRunner.SubAgent.Loop do
       remaining_turns: run_opts.remaining_turns,
       mission_deadline: calculated_deadline,
       debug: run_opts.debug,
-      trace_mode: run_opts.trace_mode
+      trace_mode: run_opts.trace_mode,
+      llm_retry: run_opts.llm_retry
     }
 
     loop(agent, run_opts.llm, initial_state)
@@ -211,10 +219,10 @@ defmodule PtcRunner.SubAgent.Loop do
         tool_names: Map.keys(agent.tools)
       }
 
-      # Call LLM
+      # Call LLM with retry logic
       alias PtcRunner.SubAgent.LLMResolver
 
-      case LLMResolver.resolve(llm, llm_input, state.llm_registry) do
+      case call_llm_with_retry(llm, llm_input, state) do
         {:ok, response} ->
           handle_llm_response(response, agent, llm, state)
 
@@ -649,5 +657,71 @@ defmodule PtcRunner.SubAgent.Loop do
     # credo:disable-for-next-line Credo.Check.Warning.IoInspect
     IO.inspect(result, pretty: true, limit: :infinity)
     IO.puts("\n")
+  end
+
+  # Call LLM with retry logic based on retry configuration
+  defp call_llm_with_retry(llm, input, state, attempt \\ 1) do
+    alias PtcRunner.SubAgent.LLMResolver
+
+    retry_config = state.llm_retry || %{}
+    max_attempts = Map.get(retry_config, :max_attempts, 1)
+
+    case LLMResolver.resolve(llm, input, state.llm_registry) do
+      {:ok, response} ->
+        {:ok, response}
+
+      {:error, reason} when attempt < max_attempts ->
+        if retryable?(reason, retry_config) do
+          delay = calculate_delay(retry_config, attempt)
+          Process.sleep(delay)
+          call_llm_with_retry(llm, input, state, attempt + 1)
+        else
+          {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Determine if an error should be retried based on configuration
+  defp retryable?(reason, config) do
+    error_type = classify_error(reason)
+    default_retryable = [:rate_limit, :timeout, :server_error]
+    retryable_errors = Map.get(config, :retryable_errors, default_retryable)
+    error_type in retryable_errors
+  end
+
+  # Classify error type for retry decision
+  defp classify_error({:http_error, 429, _}), do: :rate_limit
+  defp classify_error({:http_error, status, _}) when status >= 500, do: :server_error
+  defp classify_error({:http_error, status, _}) when status >= 400, do: :client_error
+  defp classify_error(:timeout), do: :timeout
+  defp classify_error({:llm_not_found, _}), do: :config_error
+  defp classify_error({:llm_registry_required, _}), do: :config_error
+  defp classify_error({:invalid_llm, _}), do: :config_error
+  defp classify_error(_), do: :unknown
+
+  # Calculate delay based on backoff strategy
+  defp calculate_delay(%{backoff: :exponential, base_delay: base}, attempt) do
+    trunc(base * :math.pow(2, attempt - 1))
+  end
+
+  defp calculate_delay(%{backoff: :linear, base_delay: base}, attempt) do
+    base * attempt
+  end
+
+  defp calculate_delay(%{backoff: :constant, base_delay: base}, _attempt) do
+    base
+  end
+
+  defp calculate_delay(%{base_delay: base}, attempt) do
+    # Default to exponential if backoff not specified
+    trunc(base * :math.pow(2, attempt - 1))
+  end
+
+  defp calculate_delay(_config, _attempt) do
+    # Default delay when base_delay not specified
+    1000
   end
 end
