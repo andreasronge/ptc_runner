@@ -19,9 +19,9 @@ defmodule PtcRunner.SubAgent.Telemetry do
   | `[:run, :stop]` | `%{duration: native_time}` | agent, step, status |
   | `[:run, :exception]` | `%{duration: native_time}` | agent, kind, reason, stacktrace |
   | `[:turn, :start]` | `%{}` | agent, turn |
-  | `[:turn, :stop]` | `%{duration: native_time}` | agent, turn, program |
+  | `[:turn, :stop]` | `%{duration: native_time, tokens: n}` | agent, turn, program |
   | `[:llm, :start]` | `%{}` | agent, turn, messages |
-  | `[:llm, :stop]` | `%{duration: native_time}` | agent, turn, response |
+  | `[:llm, :stop]` | `%{duration: native_time, tokens: n}` | agent, turn, response |
   | `[:tool, :start]` | `%{}` | agent, tool_name, args |
   | `[:tool, :stop]` | `%{duration: native_time}` | agent, tool_name, result |
   | `[:tool, :exception]` | `%{duration: native_time}` | agent, tool_name, kind, reason, stacktrace |

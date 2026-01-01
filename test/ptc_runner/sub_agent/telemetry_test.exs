@@ -177,6 +177,130 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert stop_meta.turn == 1
       assert stop_meta.response =~ "return"
     end
+
+    test "includes tokens in :llm :stop measurements when LLM returns tokens", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, %{content: ~S|(call "return" {:done true})|, tokens: %{input: 100, output: 50}}}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      llm_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :llm, :stop])
+      assert length(llm_stops) == 1
+
+      [{_, stop_measurements, _stop_meta, _}] = llm_stops
+
+      assert is_integer(stop_measurements.duration)
+      assert stop_measurements.tokens == 150
+    end
+
+    test "omits tokens from measurements when LLM returns plain string", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(call "return" {:done true})|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      llm_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :llm, :stop])
+      [{_, stop_measurements, _stop_meta, _}] = llm_stops
+
+      refute Map.has_key?(stop_measurements, :tokens)
+    end
+  end
+
+  describe "token accumulation in Step.usage" do
+    test "accumulates tokens across multiple LLM calls", %{table: _table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 3)
+
+      llm = fn %{turn: turn} ->
+        tokens = %{input: turn * 10, output: turn * 5}
+
+        code =
+          case turn do
+            1 -> "(+ 1 2)"
+            _ -> ~S|(call "return" {:value 42})|
+          end
+
+        {:ok, %{content: code, tokens: tokens}}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      # Turn 1: input=10, output=5
+      # Turn 2: input=20, output=10
+      # Total: input=30, output=15
+      assert step.usage.input_tokens == 30
+      assert step.usage.output_tokens == 15
+      assert step.usage.total_tokens == 45
+      assert step.usage.llm_requests == 2
+    end
+
+    test "includes llm_requests even without token counts", %{table: _table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(call "return" {:done true})|}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.usage.llm_requests == 1
+      refute Map.has_key?(step.usage, :input_tokens)
+      refute Map.has_key?(step.usage, :output_tokens)
+      refute Map.has_key?(step.usage, :total_tokens)
+    end
+
+    test "works with mixed token and non-token responses", %{table: _table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 4)
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 ->
+            # First turn: no tokens
+            {:ok, "(+ 1 2)"}
+
+          2 ->
+            # Second turn: with tokens
+            {:ok, %{content: "(+ 3 4)", tokens: %{input: 20, output: 10}}}
+
+          _ ->
+            # Final turn: return
+            {:ok, ~S|(call "return" {:value 42})|}
+        end
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      # Only turn 2 contributed tokens
+      assert step.usage.input_tokens == 20
+      assert step.usage.output_tokens == 10
+      assert step.usage.total_tokens == 30
+      assert step.usage.llm_requests == 3
+    end
+  end
+
+  describe "turn events with tokens" do
+    test "includes tokens in :turn :stop measurements", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, %{content: ~S|(call "return" {:done true})|, tokens: %{input: 50, output: 25}}}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+      assert length(turn_stops) == 1
+
+      [{_, stop_measurements, _stop_meta, _}] = turn_stops
+
+      assert is_integer(stop_measurements.duration)
+      assert stop_measurements.tokens == 75
+    end
   end
 
   describe "tool events" do

@@ -4,10 +4,26 @@ defmodule PtcRunner.SubAgent.LLMResolver do
 
   Handles calling LLMs that can be either functions or atoms, with support for
   LLM registry lookups for atom-based LLM references (like `:haiku` or `:sonnet`).
+
+  LLM responses are normalized to a consistent format:
+  - Plain string responses become `%{content: string, tokens: nil}`
+  - Map responses with `:content` key preserve tokens if present
   """
+
+  @typedoc """
+  Normalized LLM response with content and optional token counts.
+  """
+  @type normalized_response :: %{
+          content: String.t(),
+          tokens: %{input: pos_integer(), output: pos_integer()} | nil
+        }
 
   @doc """
   Resolve and invoke an LLM, handling both functions and atom references.
+
+  Normalizes the LLM response to always return a map with `:content` and `:tokens` keys.
+  This provides a consistent interface for callers regardless of whether the LLM
+  callback returns a plain string or a map with token information.
 
   ## Parameters
 
@@ -17,29 +33,39 @@ defmodule PtcRunner.SubAgent.LLMResolver do
 
   ## Returns
 
-  - `{:ok, response}` - LLM response string on success
+  - `{:ok, %{content: String.t(), tokens: map() | nil}}` - Normalized response on success
   - `{:error, reason}` - Error tuple with reason on failure
 
   ## Examples
 
       iex> llm = fn %{messages: [%{content: _}]} -> {:ok, "result"} end
       iex> PtcRunner.SubAgent.LLMResolver.resolve(llm, %{messages: [%{content: "test"}]}, %{})
-      {:ok, "result"}
+      {:ok, %{content: "result", tokens: nil}}
+
+      iex> llm = fn _ -> {:ok, %{content: "result", tokens: %{input: 10, output: 5}}} end
+      iex> PtcRunner.SubAgent.LLMResolver.resolve(llm, %{messages: []}, %{})
+      {:ok, %{content: "result", tokens: %{input: 10, output: 5}}}
 
       iex> registry = %{haiku: fn %{messages: _} -> {:ok, "response"} end}
       iex> PtcRunner.SubAgent.LLMResolver.resolve(:haiku, %{messages: [%{content: "test"}]}, registry)
-      {:ok, "response"}
+      {:ok, %{content: "response", tokens: nil}}
   """
-  @spec resolve(atom() | (map() -> {:ok, String.t()} | {:error, term()}), map(), map()) ::
-          {:ok, String.t()} | {:error, term()}
+  @spec resolve(atom() | (map() -> {:ok, term()} | {:error, term()}), map(), map()) ::
+          {:ok, normalized_response()} | {:error, term()}
   def resolve(llm, input, _registry) when is_function(llm, 1) do
-    llm.(input)
+    case llm.(input) do
+      {:ok, response} -> {:ok, normalize_response(response)}
+      {:error, _} = error -> error
+    end
   end
 
   def resolve(llm, input, registry) when is_atom(llm) do
     case Map.fetch(registry, llm) do
       {:ok, callback} when is_function(callback, 1) ->
-        callback.(input)
+        case callback.(input) do
+          {:ok, response} -> {:ok, normalize_response(response)}
+          {:error, _} = error -> error
+        end
 
       {:ok, _other} ->
         {:error,
@@ -56,5 +82,29 @@ defmodule PtcRunner.SubAgent.LLMResolver do
          {:llm_not_found,
           "LLM #{inspect(llm)} not found in registry. Available: #{inspect(Map.keys(registry))}"}}
     end
+  end
+
+  @doc """
+  Normalize an LLM response to a consistent format.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.LLMResolver.normalize_response("hello")
+      %{content: "hello", tokens: nil}
+
+      iex> PtcRunner.SubAgent.LLMResolver.normalize_response(%{content: "hello"})
+      %{content: "hello", tokens: nil}
+
+      iex> PtcRunner.SubAgent.LLMResolver.normalize_response(%{content: "hello", tokens: %{input: 10, output: 5}})
+      %{content: "hello", tokens: %{input: 10, output: 5}}
+  """
+  @spec normalize_response(String.t() | map()) :: normalized_response()
+  def normalize_response(response) when is_binary(response) do
+    %{content: response, tokens: nil}
+  end
+
+  def normalize_response(%{content: content} = response) when is_binary(content) do
+    tokens = Map.get(response, :tokens)
+    %{content: content, tokens: tokens}
   end
 end
