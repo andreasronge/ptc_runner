@@ -2,8 +2,6 @@
 
 This guide walks you through your first SubAgent - from a minimal example to understanding the core execution model.
 
-> **Note:** This API is not yet implemented. These docs exist to validate the design before committing to implementation.
-
 ## Prerequisites
 
 - Elixir 1.14+
@@ -90,6 +88,11 @@ With tools, the SubAgent enters an **agentic loop** - it calls tools and reasons
 | `>1` | none | **Error**: multi-turn requires tools |
 
 With `max_turns: 1` and no tools, the LLM evaluates and returns directly. With tools or `max_turns > 1`, the agent must explicitly call `return` to complete.
+
+> **Common Pitfall:** If your agent produces correct results but keeps looping until
+> `max_turns_exceeded`, it's likely in loop mode without calling `return`. Either set
+> `max_turns: 1` for single-shot execution, or ensure your prompt guides the LLM to
+> use `(call "return" {:value ...})` when done.
 
 ## Signatures (Optional)
 
@@ -181,17 +184,17 @@ This is useful for production apps but not available in Livebook (use explicit r
 
 ```elixir
 defmodule MyApp.LLM do
-  def callback(model \\ "anthropic/claude-sonnet") do
-    fn %{system: system, messages: messages} = params ->
-      opts = Map.get(params, :llm_opts, %{})
+  @timeout 30_000
 
-      case ReqLLM.chat(:openrouter,
-             model: model,
-             system: system,
-             messages: messages,
-             temperature: opts[:temperature] || 0.7) do
-        {:ok, %{choices: [%{message: %{content: text}} | _]}} ->
-          {:ok, text}
+  def callback(model \\ "openrouter:anthropic/claude-haiku-4.5") do
+    fn %{system: system, messages: messages} ->
+      # Prepend system prompt to messages
+      full_messages = [%{role: :system, content: system} | messages]
+
+      case ReqLLM.generate_text(model, full_messages, receive_timeout: @timeout) do
+        {:ok, %ReqLLM.Response{} = response} ->
+          {:ok, ReqLLM.Response.text(response)}
+
         {:error, reason} ->
           {:error, reason}
       end
@@ -203,6 +206,10 @@ end
 llm = MyApp.LLM.callback()
 PtcRunner.SubAgent.run(prompt, llm: llm, signature: "...")
 ```
+
+> **Note:** The callback must include the `system` prompt in the messages sent to the LLM.
+> The SubAgent's system prompt contains critical PTC-Lisp instructions that guide the LLM
+> to output valid programs.
 
 ## Defining Tools
 
