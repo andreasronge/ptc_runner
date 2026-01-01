@@ -321,17 +321,22 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   # Get field with the original key that was used
   defp get_field_with_key(data, field_name) when is_map(data) do
-    atom_key = String.to_atom(field_name)
+    atom_key = String.to_existing_atom(field_name)
 
-    cond do
-      Map.has_key?(data, atom_key) ->
-        {:ok, Map.get(data, atom_key), atom_key}
+    if Map.has_key?(data, atom_key) do
+      {:ok, Map.get(data, atom_key), atom_key}
+    else
+      check_string_key(data, field_name)
+    end
+  rescue
+    ArgumentError -> check_string_key(data, field_name)
+  end
 
-      Map.has_key?(data, field_name) ->
-        {:ok, Map.get(data, field_name), field_name}
-
-      true ->
-        :missing
+  defp check_string_key(data, field_name) do
+    if Map.has_key?(data, field_name) do
+      {:ok, Map.get(data, field_name), field_name}
+    else
+      :missing
     end
   end
 
