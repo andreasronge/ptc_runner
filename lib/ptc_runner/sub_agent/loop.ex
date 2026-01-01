@@ -35,7 +35,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.{Prompt, SubAgentTool}
+  alias PtcRunner.SubAgent.{Prompt, SubAgentTool, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -115,9 +115,26 @@ defmodule PtcRunner.SubAgent.Loop do
           llm_retry: llm_retry
         }
 
-        do_run(agent, run_opts)
+        run_with_telemetry(agent, run_opts)
       end
     end
+  end
+
+  # Wrap execution with telemetry span
+  defp run_with_telemetry(agent, run_opts) do
+    start_meta = %{agent: agent, context: run_opts.context}
+
+    Telemetry.span([:run], start_meta, fn ->
+      result = do_run(agent, run_opts)
+
+      stop_meta =
+        case result do
+          {:ok, step} -> %{agent: agent, step: step, status: :ok}
+          {:error, step} -> %{agent: agent, step: step, status: :error}
+        end
+
+      {result, stop_meta}
+    end)
   end
 
   # Helper to continue run after checks
@@ -211,6 +228,10 @@ defmodule PtcRunner.SubAgent.Loop do
 
       {:error, step_with_metrics}
     else
+      # Emit turn start event
+      Telemetry.emit([:turn, :start], %{}, %{agent: agent, turn: state.turn})
+      turn_start = System.monotonic_time()
+
       # Build LLM input
       llm_input = %{
         system: build_system_prompt(agent, state.context),
@@ -219,12 +240,13 @@ defmodule PtcRunner.SubAgent.Loop do
         tool_names: Map.keys(agent.tools)
       }
 
-      # Call LLM with retry logic
-      alias PtcRunner.SubAgent.LLMResolver
-
-      case call_llm_with_retry(llm, llm_input, state) do
+      # Call LLM with telemetry and retry logic
+      case call_llm_with_telemetry(llm, llm_input, state, agent) do
         {:ok, response} ->
-          handle_llm_response(response, agent, llm, state)
+          result = handle_llm_response(response, agent, llm, state)
+          # Emit turn stop event (only for completed turns, not continuation)
+          emit_turn_stop_if_final(result, agent, state, turn_start)
+          result
 
         {:error, reason} ->
           duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -241,9 +263,56 @@ defmodule PtcRunner.SubAgent.Loop do
               trace: apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
           }
 
+          # Emit turn stop on error
+          turn_duration = System.monotonic_time() - turn_start
+
+          Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
+            agent: agent,
+            turn: state.turn,
+            program: nil
+          })
+
           {:error, step_with_metrics}
       end
     end
+  end
+
+  # Emit turn stop event only for final results (not loop continuations)
+  defp emit_turn_stop_if_final({:ok, _step} = _result, agent, state, turn_start) do
+    turn_duration = System.monotonic_time() - turn_start
+
+    Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
+      agent: agent,
+      turn: state.turn,
+      program: nil
+    })
+  end
+
+  defp emit_turn_stop_if_final({:error, _step} = _result, agent, state, turn_start) do
+    turn_duration = System.monotonic_time() - turn_start
+
+    Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
+      agent: agent,
+      turn: state.turn,
+      program: nil
+    })
+  end
+
+  # Call LLM with telemetry wrapper
+  defp call_llm_with_telemetry(llm, input, state, agent) do
+    start_meta = %{agent: agent, turn: state.turn, messages: input.messages}
+
+    Telemetry.span([:llm], start_meta, fn ->
+      result = call_llm_with_retry(llm, input, state)
+
+      stop_meta =
+        case result do
+          {:ok, response} -> %{agent: agent, turn: state.turn, response: response}
+          {:error, _} -> %{agent: agent, turn: state.turn, response: nil}
+        end
+
+      {result, stop_meta}
+    end)
   end
 
   # Handle LLM response - parse and execute code
@@ -307,8 +376,8 @@ defmodule PtcRunner.SubAgent.Loop do
             state.context
           end
 
-        # Normalize SubAgentTool instances to functions
-        normalized_tools = normalize_tools(agent.tools, state)
+        # Normalize SubAgentTool instances to functions with telemetry
+        normalized_tools = normalize_tools(agent.tools, state, agent)
 
         # Merge system tools (return/fail) with user tools
         # System tools must come second to take precedence
@@ -567,17 +636,31 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Normalize tools map to convert SubAgentTool instances into executable functions
-  defp normalize_tools(tools, state) when is_map(tools) do
+  defp normalize_tools(tools, state, agent) when is_map(tools) do
     Map.new(tools, fn
       {name, %SubAgentTool{} = tool} ->
-        {name, wrap_sub_agent_tool(tool, state)}
+        wrapped = wrap_sub_agent_tool(tool, state)
+        {name, wrap_tool_with_telemetry(name, wrapped, agent)}
 
       {name, func} when is_function(func, 1) ->
-        {name, wrap_tool_return(func)}
+        wrapped = wrap_tool_return(func)
+        {name, wrap_tool_with_telemetry(name, wrapped, agent)}
 
       {name, other} ->
         {name, other}
     end)
+  end
+
+  # Wrap a tool function with telemetry events
+  defp wrap_tool_with_telemetry(name, func, agent) do
+    fn args ->
+      start_meta = %{agent: agent, tool_name: name, args: args}
+
+      Telemetry.span([:tool], start_meta, fn ->
+        result = func.(args)
+        {result, %{agent: agent, tool_name: name, result: result}}
+      end)
+    end
   end
 
   # Build a trace entry with optional debug information
