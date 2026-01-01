@@ -205,7 +205,7 @@ Update the plan as work progresses:
 
 ## Example
 
-See [ptc_agents/implementation_plan.md](../ptc_agents/implementation_plan.md) for a real example.
+See [ptc_agents/docs-migration-plan.md](../ptc_agents/docs-migration-plan.md) for a real example of a multi-phase implementation plan.
 
 ## References
 
