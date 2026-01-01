@@ -126,7 +126,7 @@ Enable verbose tracing:
 SubAgent.Debug.print_trace(step)
 ```
 
-Debug mode captures additional data: parsed AST, context snapshots per turn, and full tool arguments/results.
+Debug mode captures additional data: context snapshots, memory snapshots, full prompts, and execution results.
 
 ### Prompt Preview
 
