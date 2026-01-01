@@ -265,7 +265,7 @@ Complete list of error reasons in `step.fail.reason`:
 | `:invalid_llm` | SubAgent | Registry value not a function |
 | `:chained_failure` | SubAgent | Chained onto a failed step |
 | `:template_error` | SubAgent | Template placeholder missing |
-| Custom atoms | SubAgent | From `(call "fail" {:reason :custom ...})` |
+| Custom atoms | SubAgent | From `(fail {:reason :custom ...})` |
 
 ---
 

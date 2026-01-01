@@ -643,8 +643,15 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Check if code contains a call to a specific tool
   defp contains_call?(code, tool_name) do
-    # Simple regex to detect (call "tool-name" ...)
-    Regex.match?(~r/\(call\s+"#{tool_name}"/, code)
+    # Standard call pattern for all tools
+    call_match = Regex.match?(~r/\(call\s+"#{tool_name}"/, code)
+
+    # Shorthand only for return and fail
+    shorthand_match =
+      tool_name in ["return", "fail"] and
+        Regex.match?(~r/\(#{tool_name}[\s\{]/, code)
+
+    call_match or shorthand_match
   end
 
   # Calculate approximate memory size in bytes

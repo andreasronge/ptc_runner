@@ -222,10 +222,10 @@ The LLM might generate:
 ; LLM sees: "found columns"
 ; Memory now has: {:row-count 1000, :sample [...], :columns [...]}
 
-; Turn 3 - satisfied with exploration, call return TOOL to terminate
-(call "return" {:row_count memory/row-count
-                :columns memory/columns
-                :insights ["Dataset has 1000 rows" "All numeric values"]})
+; Turn 3 - satisfied with exploration, call return to terminate
+(return {:row_count memory/row-count
+         :columns memory/columns
+         :insights ["Dataset has 1000 rows" "All numeric values"]})
 ; Loop terminates, validated against signature
 ```
 
@@ -619,10 +619,10 @@ return(data :any) -> :exit-success
 - **Argument:** Value matching the signature's output type
 - **Effect:** Terminates loop, returns `{:ok, step}`
 - **Validation:** If data doesn't match signature, error fed back for self-correction
-- **Note:** The `:exit-success` return type indicates this tool terminates the loop
+- **Note:** The `:exit-success` return type indicates this terminates the loop
 
 ```clojure
-(call "return" {:count 5 :items ["a" "b"]})
+(return {:count 5 :items ["a" "b"]})
 ```
 
 #### `fail`
@@ -634,7 +634,7 @@ fail(error {:reason :keyword, :message :string, :op :string?, :details :map?}) -
 ```
 
 - **Effect:** Terminates loop, returns `{:error, step}`
-- **Note:** The `:exit-error` return type indicates this tool terminates the loop with failure
+- **Note:** The `:exit-error` return type indicates this terminates the loop with failure
 
 **Fail signature fields:**
 
@@ -646,7 +646,7 @@ fail(error {:reason :keyword, :message :string, :op :string?, :details :map?}) -
 | `details` | `:map` | No | Additional context |
 
 ```clojure
-(call "fail" {:reason :not_found :message "User does not exist"})
+(fail {:reason :not_found :message "User does not exist"})
 ```
 
 #### System Tool Implementation
@@ -1134,7 +1134,7 @@ SubAgent.Debug.print_trace(step)
 # │ Prompt: Find urgent emails for alice@example.com
 # │ Program:
 # │   (let [emails (call "list_emails" {:user ctx/user})]
-# │     (call "return" {:count (count emails) :ids (map :id emails)}))
+# │     (return {:count (count emails) :ids (map :id emails)}))
 # │ Tools:
 # │   → list_emails({user: "alice@example.com"})
 # │     ← [{id: 1, subject: "Urgent"}, {id: 2, subject: "Hello"}]
@@ -1638,11 +1638,11 @@ The `:return` key in a map result controls **LLM visibility** within a turn:
 {:return "Found 5 items" :items [...]}
 ```
 
-The `return` **tool** terminates the mission:
+The `return` special form terminates the mission:
 
 ```clojure
-;; return tool = mission complete, validate against signature
-(call "return" {:count 5})
+;; return = mission complete, validate against signature
+(return {:count 5})
 ```
 
 These are different mechanisms at different scopes. The LLM is instructed on both in the system prompt.

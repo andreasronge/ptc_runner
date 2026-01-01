@@ -46,7 +46,7 @@ Program Result:
 ```clojure
 ;; Process all results from ctx/results
 (let [urgent (filter (fn [e] (includes? (:subject e) "Urgent")) ctx/results)]
-  (call "return" {
+  (return {
     :summary (str "Found " (count urgent) " urgent emails")
     :_ids (mapv :id urgent)
   }))
@@ -94,7 +94,7 @@ The LLM can "walk" the data across turns:
 (first (filter #(= (:id %) 123) ctx/reports))
 
 ;; Turn 3: Return with reasoning
-(call "return" {:report_id 123 :reasoning "..."})
+(return {:report_id 123 :reasoning "..."})
 ```
 
 ## Debugging & Observability

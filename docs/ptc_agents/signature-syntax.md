@@ -171,7 +171,7 @@ When `return` is called, data is validated against the return type:
 
 ```elixir
 # Signature: () -> {count :int, items [:string]}
-# Return: (call "return" {:count 5 :items ["a" "b"]})
+# Return: (return {:count 5 :items ["a" "b"]})
 
 # Behavior:
 # 1. Validate count is int
