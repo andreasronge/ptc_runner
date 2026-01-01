@@ -1,42 +1,42 @@
 defmodule PtcDemo.Agent do
   @moduledoc """
-  PTC Agent that uses LLM to generate programs and PtcRunner to execute them.
+  PTC Agent that uses SubAgent API to generate and execute PTC-Lisp programs.
+
+  This module provides a GenServer-based wrapper around `PtcRunner.SubAgent` to maintain
+  conversation state (memory, context history, stats) for the demo CLI and test runners.
 
   Uses an agentic loop where:
-  - LLM decides when to query data by outputting a PTC program
-  - Program results are returned as tool results
-  - LLM continues until it provides a final answer (no program)
-  - Memory persists automatically between program executions via native memory model
+  - LLM generates PTC-Lisp programs to query data
+  - Program results are returned for further reasoning
+  - LLM continues until it provides a final answer
+  - Memory persists between turns via SubAgent's native memory model
 
   This demonstrates the key advantage of Programmatic Tool Calling:
   - Large datasets stay in BEAM memory, never enter LLM context
-  - LLM generates compact programs (~200 bytes) instead of processing raw data
+  - LLM generates compact programs (~100 bytes) instead of processing raw data
   - Only small results return to LLM for final response
-  - Multi-turn conversations with persistent memory across queries
   """
 
   use GenServer
 
-  import ReqLLM.Context
-
   alias PtcDemo.SampleData
+  alias PtcRunner.SubAgent
 
   @model_env "PTC_DEMO_MODEL"
-  @llm_timeout 60_000
-  @max_iterations 5
-  # GenServer timeout must accommodate worst case: max_iterations * llm_timeout + processing buffer
-  @genserver_timeout @max_iterations * @llm_timeout + 30_000
+  @timeout 60_000
+  @max_turns 5
+  @genserver_timeout @max_turns * @timeout + 30_000
 
-  # --- State ---
   defstruct [
     :model,
-    :context,
+    :data_mode,
     :datasets,
     :last_program,
     :last_result,
-    :data_mode,
+    :memory,
     :usage,
-    :memory
+    :programs_history,
+    :context_messages
   ]
 
   # --- Public API ---
@@ -45,8 +45,8 @@ defmodule PtcDemo.Agent do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def ask(question) do
-    GenServer.call(__MODULE__, {:ask, question}, @genserver_timeout)
+  def ask(question, opts \\ []) do
+    GenServer.call(__MODULE__, {:ask, question, opts}, @genserver_timeout)
   end
 
   def reset do
@@ -62,8 +62,8 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Get all programs generated in this session (extracted from conversation context).
-  Returns a list of {program_json, result} tuples.
+  Get all programs generated in this session.
+  Returns a list of {program, result} tuples.
   """
   def programs do
     GenServer.call(__MODULE__, :programs)
@@ -92,7 +92,7 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Get the current conversation context (list of messages, excluding system prompt).
+  Get the current conversation context (list of messages).
   """
   def context do
     GenServer.call(__MODULE__, :context)
@@ -106,7 +106,7 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Set the data mode and reset context with new system prompt.
+  Set the data mode and reset context.
   """
   def set_data_mode(mode) when mode in [:schema, :explore] do
     GenServer.call(__MODULE__, {:set_data_mode, mode})
@@ -121,7 +121,6 @@ defmodule PtcDemo.Agent do
 
   @doc """
   Available preset models for easy switching.
-  Delegates to ModelRegistry for single source of truth.
   """
   def preset_models do
     PtcDemo.ModelRegistry.preset_models()
@@ -129,7 +128,6 @@ defmodule PtcDemo.Agent do
 
   @doc """
   Auto-detect which model to use based on available API keys.
-  Delegates to ModelRegistry for single source of truth.
   """
   def detect_model do
     PtcDemo.ModelRegistry.default_model()
@@ -140,10 +138,8 @@ defmodule PtcDemo.Agent do
   @impl true
   def init(opts) do
     model = System.get_env(@model_env) || detect_model()
-    # Data mode: :schema (default, full schema) or :explore (discover via introspection)
     data_mode = Keyword.get(opts, :data_mode, :schema)
 
-    # Pre-load datasets into memory (simulating a real system)
     datasets = %{
       "products" => SampleData.products(),
       "orders" => SampleData.orders(),
@@ -151,68 +147,92 @@ defmodule PtcDemo.Agent do
       "expenses" => SampleData.expenses()
     }
 
-    context = ReqLLM.Context.new([system(system_prompt(data_mode))])
-
     IO.puts("   [Data] #{data_mode}")
 
     {:ok,
      %__MODULE__{
        model: model,
-       context: context,
+       data_mode: data_mode,
        datasets: datasets,
        last_program: nil,
        last_result: nil,
-       data_mode: data_mode,
+       memory: %{},
        usage: empty_usage(),
-       memory: %{}
+       programs_history: [],
+       context_messages: []
      }}
   end
 
   @impl true
-  def handle_call({:ask, question}, _from, state) do
-    # Add user question to context
-    context = ReqLLM.Context.append(state.context, user(question))
+  def handle_call({:ask, question, opts}, _from, state) do
+    stop_on_success = Keyword.get(opts, :stop_on_success, false)
 
-    # Run the agentic loop with initial last_exec = {nil, nil} and persisted memory
-    case agent_loop(
-           state.model,
-           context,
-           state.datasets,
-           state.usage,
-           @max_iterations,
-           {nil, nil},
-           state.memory
+    # Build the SubAgent
+    agent = build_agent(state.data_mode)
+
+    # Build context with datasets and current memory
+    context = Map.merge(state.datasets, %{"memory" => state.memory, "question" => question})
+
+    IO.puts("\n   [Agent] Generating response...")
+
+    case SubAgent.run(agent,
+           llm: llm_callback(state.model),
+           context: context,
+           max_turns: if(stop_on_success, do: 1, else: @max_turns)
          ) do
-      {:ok, answer, final_context, new_usage, last_program, last_result, new_memory} ->
+      {:ok, step} ->
+        result = step.return
+        new_memory = step.memory || %{}
+        program = extract_program_from_trace(step.trace)
+
+        # Update usage stats
+        new_usage = add_usage(state.usage, step.usage)
+
+        # Track program/result for programs/0
+        program_entry = {program, result}
+        new_programs = state.programs_history ++ [program_entry]
+
+        # Update context messages for display
+        new_context = state.context_messages ++ [%{role: :user, content: question}]
+
+        # Format answer - if it's the raw value, format it nicely
+        answer = format_answer(result)
+
+        IO.puts("   [Result] #{truncate(inspect(result), 80)}")
+
         {:reply, {:ok, answer},
          %{
            state
-           | context: final_context,
-             last_program: last_program,
-             last_result: last_result,
+           | last_program: program,
+             last_result: result,
+             memory: new_memory,
              usage: new_usage,
-             memory: new_memory
+             programs_history: new_programs,
+             context_messages: new_context
          }}
 
-      {:error, reason, final_context, new_usage} ->
-        {:reply, {:error, reason}, %{state | context: final_context, usage: new_usage}}
+      {:error, step} ->
+        error_msg = format_error(step.fail)
+        IO.puts("   [Error] #{error_msg}")
+
+        new_usage = add_usage(state.usage, step.usage)
+
+        {:reply, {:error, error_msg}, %{state | usage: new_usage}}
     end
   end
 
   @impl true
   def handle_call(:reset, _from, state) do
-    # Reset to :schema mode (default)
-    new_context = ReqLLM.Context.new([system(system_prompt(:schema))])
-
     {:reply, :ok,
      %{
        state
-       | context: new_context,
+       | data_mode: :schema,
          last_program: nil,
          last_result: nil,
-         data_mode: :schema,
+         memory: %{},
          usage: empty_usage(),
-         memory: %{}
+         programs_history: [],
+         context_messages: []
      }}
   end
 
@@ -228,8 +248,7 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call(:programs, _from, state) do
-    programs = extract_all_programs(state.context)
-    {:reply, programs, state}
+    {:reply, state.programs_history, state}
   end
 
   @impl true
@@ -249,30 +268,27 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call(:context, _from, state) do
-    # Exclude system messages
-    messages = Enum.reject(state.context.messages, &(&1.role == :system))
-    {:reply, messages, state}
+    {:reply, state.context_messages, state}
   end
 
   @impl true
   def handle_call(:system_prompt, _from, state) do
-    system_msg = Enum.find(state.context.messages, &(&1.role == :system))
-    content = if system_msg, do: extract_text_content(system_msg.content), else: ""
-    {:reply, content, state}
+    agent = build_agent(state.data_mode)
+    preview = SubAgent.preview_prompt(agent, context: state.datasets)
+    {:reply, preview.system, state}
   end
 
   @impl true
   def handle_call({:set_data_mode, mode}, _from, state) do
-    new_context = ReqLLM.Context.new([system(system_prompt(mode))])
-
     {:reply, :ok,
      %{
        state
        | data_mode: mode,
-         context: new_context,
          last_program: nil,
          last_result: nil,
-         memory: %{}
+         memory: %{},
+         programs_history: [],
+         context_messages: []
      }}
   end
 
@@ -281,285 +297,98 @@ defmodule PtcDemo.Agent do
     {:reply, :ok, %{state | model: model}}
   end
 
-  # --- Agentic Loop ---
-
-  defp agent_loop(_model, context, _datasets, usage, 0, _last_exec, _memory) do
-    {:error, "Max iterations reached", context, usage}
-  end
-
-  defp agent_loop(model, context, datasets, usage, remaining, last_exec, memory) do
-    IO.puts("\n   [Agent] Generating response (#{remaining} iterations left)...")
-
-    case ReqLLM.generate_text(model, context.messages,
-           receive_timeout: @llm_timeout,
-           req_http_options: [retry: :transient, max_retries: 3]
-         ) do
-      {:ok, response} ->
-        text = ReqLLM.Response.text(response)
-        new_usage = add_usage(usage, ReqLLM.Response.usage(response))
-
-        # Handle empty/nil responses from LLM - retry instead of failing immediately
-        if is_nil(text) or text == "" do
-          if remaining > 1 do
-            IO.puts("   [Retry] Empty response, retrying...")
-            Process.sleep(1000)
-            agent_loop(model, context, datasets, new_usage, remaining - 1, last_exec, memory)
-          else
-            {:error, "LLM returned empty response", context, new_usage}
-          end
-        else
-          # Check if response contains a PTC program
-          case extract_ptc_program(text) do
-            {:ok, program_json} ->
-              IO.puts("   [Program] #{truncate(program_json, 80)}")
-
-              # Increment run counter when program is generated
-              run_tracked_usage = increment_run_count(new_usage)
-
-              # Execute the program with native memory support
-              case PtcRunner.Json.run(program_json,
-                     context: datasets,
-                     memory: memory,
-                     timeout: 5000
-                   ) do
-                {:ok, result, _memory_delta, new_memory} ->
-                  result_str = format_result(result)
-                  IO.puts("   [Result] #{truncate(result_str, 80)}")
-
-                  # Add assistant message and tool result, then continue loop
-                  new_context =
-                    context
-                    |> ReqLLM.Context.append(assistant(text))
-                    |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
-
-                  # Track raw result for test runner
-                  new_last_exec = {program_json, result}
-
-                  agent_loop(
-                    model,
-                    new_context,
-                    datasets,
-                    run_tracked_usage,
-                    remaining - 1,
-                    new_last_exec,
-                    new_memory
-                  )
-
-                {:error, reason} ->
-                  error_msg = PtcRunner.Json.format_error(reason)
-                  IO.puts("   [Error] #{error_msg}")
-
-                  # Add error as tool result and continue
-                  new_context =
-                    context
-                    |> ReqLLM.Context.append(assistant(text))
-                    |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
-
-                  agent_loop(
-                    model,
-                    new_context,
-                    datasets,
-                    run_tracked_usage,
-                    remaining - 1,
-                    last_exec,
-                    memory
-                  )
-              end
-
-            :none ->
-              # No program found - this is the final answer
-              IO.puts("   [Answer] Final response (no program)")
-              final_context = ReqLLM.Context.append(context, assistant(text))
-
-              # Use tracked last execution (raw values, not formatted strings)
-              {last_program, last_result} = last_exec
-
-              {:ok, text, final_context, new_usage, last_program, last_result, memory}
-          end
-        end
-
-      {:error, reason} ->
-        {:error, "LLM error: #{inspect(reason)}", context, usage}
-    end
-  end
-
   # --- Private Functions ---
 
-  defp system_prompt(:schema) do
-    # Get schema from data module (simulates MCP tool schema discovery)
+  defp build_agent(data_mode) do
+    SubAgent.new(
+      prompt: "{{question}}",
+      signature: "(question :string) -> :any",
+      max_turns: @max_turns,
+      system_prompt: %{
+        prefix: system_prompt_prefix(data_mode)
+      }
+    )
+  end
+
+  defp system_prompt_prefix(:schema) do
     data_schema = SampleData.schema_prompt()
-    # Get operations prompt from library
-    operations = PtcRunner.Schema.to_prompt()
 
     """
     You are a data analyst. Answer questions about data by querying datasets.
 
-    To query data, output a PTC program in a ```json code block. The result will be returned to you.
-    When you have the answer, respond in plain text WITHOUT a code block.
-    Memory persists automatically between programs - reference stored values with {"op": "var", "name": "key"}.
-    Return types: "store X as Y" → use let to bind, "what is X?" → return the value directly (not a map).
+    To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
+    When you have the answer, call (return <value>) with your final answer.
+    Memory persists between programs - reference stored values with memory/key.
+    Return types: "store X as Y" -> call (return {:Y value}), "what is X?" -> call (return value) directly.
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
-    Available datasets (with field types):
+    Available datasets (access via ctx/name, e.g., ctx/products):
 
     #{data_schema}
-
-    #{operations}
     """
   end
 
-  defp system_prompt(:explore) do
-    # Get operations prompt from library
-    operations = PtcRunner.Schema.to_prompt()
-    # Get dataset names dynamically
+  defp system_prompt_prefix(:explore) do
     dataset_names =
       SampleData.available_datasets() |> Enum.map_join(", ", fn {name, _} -> name end)
 
     """
     You are a data analyst. Answer questions about data by querying datasets.
 
-    To query data, output a PTC program in a ```json code block. The result will be returned to you.
-    When you have the answer, respond in plain text WITHOUT a code block.
+    To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
+    When you have the answer, call (return <value>) with your final answer.
+    Memory persists between programs - reference stored values with memory/key.
+    Return types: "store X as Y" -> call (return {:Y value}), "what is X?" -> call (return value) directly.
     IMPORTANT: Output only ONE program per response. Wait for the result before generating another.
-    Memory persists automatically between programs - reference stored values with {"op": "var", "name": "key"}.
-    Return types: "store X as Y" → use let to bind, "what is X?" → return the value directly (not a map).
     Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
 
-    Available datasets: #{dataset_names}
+    Available datasets (access via ctx/name): #{dataset_names}
 
-    Discover structure with: load <name> | first | keys
-
-    #{operations}
+    Discover structure with: (first ctx/products) or (keys (first ctx/products))
     """
   end
 
-  # Extract PTC program from LLM response (looks for ```json blocks)
-  defp extract_ptc_program(nil), do: :none
+  defp llm_callback(model) do
+    fn %{system: system, messages: messages} ->
+      full_messages = [%{role: :system, content: system} | messages]
 
-  defp extract_ptc_program(text) do
-    # Try extracting from markdown code block
-    case Regex.run(~r/```(?:json)?\s*([\s\S]+?)\s*```/, text) do
-      [_, content] ->
-        content = String.trim(content)
+      case ReqLLM.generate_text(model, full_messages,
+             receive_timeout: @timeout,
+             req_http_options: [retry: :transient, max_retries: 3]
+           ) do
+        {:ok, response} ->
+          text = ReqLLM.Response.text(response)
+          usage = ReqLLM.Response.usage(response)
 
-        if String.starts_with?(content, "{") do
-          json = extract_balanced_json(content)
-
-          case validate_program(json) do
-            :ok -> {:ok, json}
-            {:error, _} -> :none
-          end
-        else
-          :none
-        end
-
-      nil ->
-        # Try finding a JSON object with "program" key anywhere in text
-        case :binary.match(text, "{\"program\"") do
-          {start, _} ->
-            substring = binary_part(text, start, byte_size(text) - start)
-            json = extract_balanced_json(substring)
-
-            case validate_program(json) do
-              :ok -> {:ok, json}
-              {:error, _} -> :none
+          tokens =
+            if usage do
+              %{
+                input: usage[:input_tokens] || usage["input_tokens"] || 0,
+                output: usage[:output_tokens] || usage["output_tokens"] || 0
+              }
+            else
+              %{input: 0, output: 0}
             end
 
-          :nomatch ->
-            :none
-        end
-    end
-  end
+          {:ok, %{content: text || "", tokens: tokens}}
 
-  defp validate_program(json) do
-    case Jason.decode(json) do
-      {:ok, %{"program" => %{"op" => _}}} -> :ok
-      {:ok, %{"program" => _}} -> {:error, "program must have 'op' field"}
-      {:ok, _} -> {:error, "missing 'program' key"}
-      {:error, _} -> {:error, "invalid JSON"}
-    end
-  end
-
-  # Extract a complete JSON object by counting balanced braces
-  defp extract_balanced_json(text) do
-    text
-    |> String.graphemes()
-    |> Enum.reduce_while({0, []}, fn
-      "{", {depth, acc} -> {:cont, {depth + 1, ["{" | acc]}}
-      "}", {1, acc} -> {:halt, {0, ["}" | acc]}}
-      "}", {depth, acc} -> {:cont, {depth - 1, ["}" | acc]}}
-      char, {depth, acc} when depth > 0 -> {:cont, {depth, [char | acc]}}
-      _, {0, _} = state -> {:cont, state}
-    end)
-    |> case do
-      {0, chars} -> chars |> Enum.reverse() |> Enum.join()
-      _ -> text
-    end
-  end
-
-  # Extract all programs and their results from conversation context
-  defp extract_all_programs(context) do
-    messages = context.messages
-
-    messages
-    |> Enum.with_index()
-    |> Enum.filter(fn {msg, _idx} -> msg.role == :assistant end)
-    |> Enum.flat_map(fn {msg, idx} ->
-      content = extract_text_content(msg.content)
-
-      case extract_ptc_program(content) do
-        {:ok, program_json} ->
-          # Look for the next user message which should be the tool result
-          result =
-            messages
-            |> Enum.drop(idx + 1)
-            |> Enum.find(fn m -> m.role == :user end)
-            |> case do
-              nil ->
-                nil
-
-              user_msg ->
-                user_content = extract_text_content(user_msg.content)
-
-                cond do
-                  String.starts_with?(user_content, "[Tool Result]") ->
-                    user_content |> String.replace_prefix("[Tool Result]\n", "") |> String.trim()
-
-                  String.starts_with?(user_content, "[Tool Error]") ->
-                    {:error,
-                     user_content |> String.replace_prefix("[Tool Error]\n", "") |> String.trim()}
-
-                  true ->
-                    nil
-                end
-            end
-
-          [{program_json, result}]
-
-        :none ->
-          []
+        {:error, _} = error ->
+          error
       end
-    end)
+    end
   end
 
-  # Extract text from various content formats (string, ContentPart list, etc.)
-  defp extract_text_content(content) when is_binary(content), do: content
+  defp extract_program_from_trace(nil), do: nil
+  defp extract_program_from_trace([]), do: nil
 
-  defp extract_text_content(content) when is_list(content) do
-    content
-    |> Enum.map(&extract_text_content/1)
-    |> Enum.join("")
+  defp extract_program_from_trace(trace) when is_list(trace) do
+    case List.last(trace) do
+      %{program: program} -> program
+      _ -> nil
+    end
   end
 
-  defp extract_text_content(%{text: text}), do: text
-  defp extract_text_content(%{content: content}), do: extract_text_content(content)
-  defp extract_text_content(_), do: ""
-
-  # Truncated format for console output
-  # Uses string length (not item count) to preserve short lists like keys output
-  @max_result_chars 200
-
-  defp format_result(result) when is_number(result) do
+  defp format_answer(result) when is_number(result) do
     if is_float(result) do
       :erlang.float_to_binary(result, decimals: 2)
     else
@@ -567,26 +396,20 @@ defmodule PtcDemo.Agent do
     end
   end
 
-  defp format_result(result) do
-    full = inspect(result, limit: 50)
+  defp format_answer(result), do: inspect(result, limit: 50, pretty: false)
 
-    if String.length(full) > @max_result_chars do
-      truncate_with_context(result, full)
-    else
-      full
-    end
+  defp format_error(%{reason: reason, message: message}) do
+    reason_str =
+      reason
+      |> Atom.to_string()
+      |> String.split("_")
+      |> Enum.map(&String.capitalize/1)
+      |> Enum.join("")
+
+    "#{reason_str}: #{message}"
   end
 
-  defp truncate_with_context(result, full) when is_list(result) do
-    count = length(result)
-    truncated = String.slice(full, 0, @max_result_chars)
-    "#{truncated}... (#{count} items total)"
-  end
-
-  defp truncate_with_context(_result, full) do
-    truncated = String.slice(full, 0, @max_result_chars)
-    "#{truncated}..."
-  end
+  defp format_error(other), do: "Error: #{inspect(other, limit: 5)}"
 
   defp truncate(str, max_len) do
     if String.length(str) > max_len do
@@ -596,53 +419,35 @@ defmodule PtcDemo.Agent do
     end
   end
 
-  # --- Usage Tracking Helpers ---
-
-  defp estimate_system_prompt_tokens(prompt) when is_binary(prompt) do
-    # Rough approximation: ~4 characters per token on average
-    div(String.length(prompt), 4)
-  end
+  # --- Usage Tracking ---
 
   defp empty_usage do
     %{
       input_tokens: 0,
       output_tokens: 0,
       total_tokens: 0,
-      system_prompt_tokens: estimate_system_prompt_tokens(system_prompt(:schema)),
+      system_prompt_tokens: 0,
       total_runs: 0,
       total_cost: 0.0,
       requests: 0
     }
   end
 
-  defp add_usage(acc, nil), do: acc
-  defp add_usage(nil, usage), do: normalize_usage(usage)
+  defp add_usage(acc, nil), do: Map.put(acc, :total_runs, acc.total_runs + 1)
 
   defp add_usage(acc, usage) when is_map(usage) do
-    normalized = normalize_usage(usage)
+    input = Map.get(usage, :input_tokens, 0)
+    output = Map.get(usage, :output_tokens, 0)
+    total = Map.get(usage, :total_tokens, input + output)
 
     %{
-      input_tokens: acc.input_tokens + normalized.input_tokens,
-      output_tokens: acc.output_tokens + normalized.output_tokens,
-      total_tokens: acc.total_tokens + normalized.total_tokens,
+      input_tokens: acc.input_tokens + input,
+      output_tokens: acc.output_tokens + output,
+      total_tokens: acc.total_tokens + total,
       system_prompt_tokens: acc.system_prompt_tokens,
-      total_runs: acc.total_runs,
-      total_cost: acc.total_cost + normalized.total_cost,
-      requests: acc.requests + 1
-    }
-  end
-
-  defp increment_run_count(usage) do
-    %{usage | total_runs: usage.total_runs + 1}
-  end
-
-  defp normalize_usage(usage) when is_map(usage) do
-    %{
-      input_tokens: usage[:input_tokens] || usage["input_tokens"] || 0,
-      output_tokens: usage[:output_tokens] || usage["output_tokens"] || 0,
-      total_tokens: usage[:total_tokens] || usage["total_tokens"] || 0,
-      total_cost: usage[:total_cost] || usage["total_cost"] || 0.0,
-      requests: 1
+      total_runs: acc.total_runs + 1,
+      total_cost: acc.total_cost,
+      requests: acc.requests + Map.get(usage, :llm_requests, 1)
     }
   end
 end

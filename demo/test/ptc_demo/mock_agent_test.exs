@@ -97,6 +97,7 @@ defmodule PtcDemo.MockAgentTest do
 
   describe "programs/0" do
     test "returns list of {program, result} tuples" do
+      # When no program is specified, MockAgent generates (return value) as the program
       responses = %{
         "Query 1" => {:ok, "Answer 1", nil, 1},
         "Query 2" => {:ok, "Answer 2", nil, 2}
@@ -109,8 +110,9 @@ defmodule PtcDemo.MockAgentTest do
 
       programs = MockAgent.programs()
       assert length(programs) == 2
-      assert {"Query 1", 1} in programs
-      assert {"Query 2", 2} in programs
+      # Programs are auto-generated as (return <value>) when nil is passed
+      assert {"(return 1)", 1} in programs
+      assert {"(return 2)", 2} in programs
     end
 
     test "returns empty list when no queries asked" do

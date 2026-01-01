@@ -1,6 +1,9 @@
 defmodule PtcDemo.JsonTestRunner do
   @moduledoc """
-  Automated test runner for the PTC-JSON demo.
+  Automated test runner for the PTC demo using SubAgent.
+
+  Note: This runner now uses PTC-Lisp via SubAgent (the JSON DSL has been unified).
+  Test cases are DSL-agnostic English queries - the LLM generates appropriate Lisp code.
 
   Runs example queries and validates results match expected constraints.
   Since data is randomly generated, we test properties not exact values.
