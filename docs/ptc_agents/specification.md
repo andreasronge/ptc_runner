@@ -1750,9 +1750,6 @@ end
 
 ## Related Documents
 
-- [specification.md](specification.md) - Full API reference
 - [step.md](step.md) - Step struct specification
-- [signature-syntax.md](signature-syntax.md) - Signature syntax reference
-- [guides/](guides/) - Usage guides and patterns
-- [lisp-api-updates.md](lisp-api-updates.md) - Breaking changes to Lisp API
-- [spike-summary.md](spike-summary.md) - Historical spike validation results
+- [signature-syntax.md](../signature-syntax.md) - Signature syntax reference
+- [SubAgent Guides](../guides/) - Usage guides and patterns
