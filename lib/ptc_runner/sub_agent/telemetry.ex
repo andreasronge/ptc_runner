@@ -53,17 +53,19 @@ defmodule PtcRunner.SubAgent.Telemetry do
 
   Emits `:start`, `:stop`, and `:exception` events automatically.
   The start metadata is passed as-is. The stop metadata receives
-  any additional measurements returned from the function.
+  any additional measurements or metadata returned from the function.
 
   ## Parameters
 
   - `event_suffix` - List of atoms to append to the prefix (e.g., `[:run]`)
   - `start_meta` - Metadata map for the start event
-  - `fun` - Zero-arity function to execute. Should return `{result, extra_measurements}`
-    where `extra_measurements` is a map merged into stop measurements.
+  - `fun` - Zero-arity function to execute. Should return one of:
+    - `{result, stop_meta}` - where `stop_meta` is merged into stop event metadata
+    - `{result, extra_measurements, stop_meta}` - where `extra_measurements` is merged
+      into stop measurements and `stop_meta` is merged into stop event metadata
 
   """
-  @spec span(list(atom()), map(), (-> {any(), map()})) :: any()
+  @spec span(list(atom()), map(), (-> {any(), map()} | {any(), map(), map()})) :: any()
   def span(event_suffix, start_meta, fun) when is_list(event_suffix) and is_function(fun, 0) do
     :telemetry.span(@prefix ++ event_suffix, start_meta, fun)
   end

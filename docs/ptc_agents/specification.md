@@ -1219,14 +1219,14 @@ SubAgent emits telemetry events for observability integration.
 |-------|--------------|----------|
 | `[:ptc_runner, :sub_agent, :run, :start]` | - | agent, context |
 | `[:ptc_runner, :sub_agent, :run, :stop]` | duration | agent, step, status |
-| `[:ptc_runner, :sub_agent, :run, :exception]` | duration | agent, error |
+| `[:ptc_runner, :sub_agent, :run, :exception]` | duration | agent, kind, reason, stacktrace |
 | `[:ptc_runner, :sub_agent, :turn, :start]` | - | agent, turn |
 | `[:ptc_runner, :sub_agent, :turn, :stop]` | duration, tokens | agent, turn, program |
 | `[:ptc_runner, :sub_agent, :llm, :start]` | - | agent, turn, messages |
 | `[:ptc_runner, :sub_agent, :llm, :stop]` | duration, tokens | agent, turn, response |
 | `[:ptc_runner, :sub_agent, :tool, :start]` | - | agent, tool_name, args |
 | `[:ptc_runner, :sub_agent, :tool, :stop]` | duration | agent, tool_name, result |
-| `[:ptc_runner, :sub_agent, :tool, :exception]` | duration | agent, tool_name, error |
+| `[:ptc_runner, :sub_agent, :tool, :exception]` | duration | agent, tool_name, kind, reason, stacktrace |
 
 **Attaching handlers:**
 
