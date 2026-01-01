@@ -9,7 +9,7 @@ The SubAgent loop naturally supports **ReAct** (Reason + Act). Each turn's resul
 ### Implicit Context Chaining
 
 ```
-Turn 1: LLM program → execute → result merged to ctx/
+Turn 1: LLM program -> execute -> result merged to ctx/
 Turn 2: LLM sees ctx/results, generates next program
 Turn 3: LLM calls return with final answer
 ```
@@ -166,7 +166,7 @@ SubAgent emits telemetry events for observability integration:
 
 Events: `run:start/stop`, `turn:start/stop`, `llm:start/stop`, `tool:start/stop/exception`.
 
-> **Full details:** See [Debugging & Introspection](../specification.md#debugging--introspection) in the specification.
+> **Full details:** See [Debugging & Introspection](../ptc_agents/specification.md#debugging--introspection) in the specification.
 
 ## Compile Pattern
 
@@ -176,9 +176,9 @@ For repetitive batch processing, separate the cognitive step (writing logic) fro
 
 | Tool Type | Compilable? | Why |
 |-----------|-------------|-----|
-| Pure Elixir functions | ✓ | Deterministic |
-| LLMTool | ✗ | Needs LLM |
-| SubAgent as tool | ✗ | Needs LLM |
+| Pure Elixir functions | Yes | Deterministic |
+| LLMTool | No | Needs LLM |
+| SubAgent as tool | No | Needs LLM |
 
 ### 1. Derive Phase
 
@@ -344,10 +344,10 @@ memory/key                     ; Memory shorthand
 | **Turn** | One LLM generation + execution cycle |
 | **Mission** | Complete SubAgent execution until `return`/`fail` |
 
-## Further Reading
+## See Also
 
-- [Core Concepts](core-concepts.md) - Context, memory, and the firewall
-- [Patterns](patterns.md) - Chaining, orchestration, and composition
-- [Signatures](signatures.md) - Type system details
-- [Specification](../specification.md) - Full API reference
-- [PtcRunner Guide](../../guide.md) - Core PTC-Lisp documentation
+- [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
+- [Signature Syntax](../signature-syntax.md) - Type system details
+- [SubAgent Specification](../ptc_agents/specification.md) - Full API reference
+- [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation
