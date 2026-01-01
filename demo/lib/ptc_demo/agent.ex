@@ -35,8 +35,7 @@ defmodule PtcDemo.Agent do
     :last_result,
     :memory,
     :usage,
-    :programs_history,
-    :context_messages
+    :programs_history
   ]
 
   # --- Public API ---
@@ -89,13 +88,6 @@ defmodule PtcDemo.Agent do
   """
   def data_mode do
     GenServer.call(__MODULE__, :data_mode)
-  end
-
-  @doc """
-  Get the current conversation context (list of messages).
-  """
-  def context do
-    GenServer.call(__MODULE__, :context)
   end
 
   @doc """
@@ -158,8 +150,7 @@ defmodule PtcDemo.Agent do
        last_result: nil,
        memory: %{},
        usage: empty_usage(),
-       programs_history: [],
-       context_messages: []
+       programs_history: []
      }}
   end
 
@@ -192,9 +183,6 @@ defmodule PtcDemo.Agent do
         program_entry = {program, result}
         new_programs = state.programs_history ++ [program_entry]
 
-        # Update context messages for display
-        new_context = state.context_messages ++ [%{role: :user, content: question}]
-
         # Format answer - if it's the raw value, format it nicely
         answer = format_answer(result)
 
@@ -207,8 +195,7 @@ defmodule PtcDemo.Agent do
              last_result: result,
              memory: new_memory,
              usage: new_usage,
-             programs_history: new_programs,
-             context_messages: new_context
+             programs_history: new_programs
          }}
 
       {:error, step} ->
@@ -231,8 +218,7 @@ defmodule PtcDemo.Agent do
          last_result: nil,
          memory: %{},
          usage: empty_usage(),
-         programs_history: [],
-         context_messages: []
+         programs_history: []
      }}
   end
 
@@ -267,11 +253,6 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
-  def handle_call(:context, _from, state) do
-    {:reply, state.context_messages, state}
-  end
-
-  @impl true
   def handle_call(:system_prompt, _from, state) do
     agent = build_agent(state.data_mode)
     preview = SubAgent.preview_prompt(agent, context: state.datasets)
@@ -287,8 +268,7 @@ defmodule PtcDemo.Agent do
          last_program: nil,
          last_result: nil,
          memory: %{},
-         programs_history: [],
-         context_messages: []
+         programs_history: []
      }}
   end
 
