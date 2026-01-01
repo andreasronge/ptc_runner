@@ -54,7 +54,7 @@ defmodule PtcDemo.JsonCLI do
       IO.puts(banner(PtcDemo.Agent.model(), PtcDemo.Agent.data_mode()))
 
       # Enter REPL loop
-      loop()
+      loop(debug: opts[:debug] || false)
     end
   end
 
@@ -80,7 +80,7 @@ defmodule PtcDemo.JsonCLI do
     end
   end
 
-  defp loop do
+  defp loop(opts) do
     case IO.gets("you> ") do
       nil ->
         IO.puts("\nGoodbye!")
@@ -88,49 +88,49 @@ defmodule PtcDemo.JsonCLI do
 
       line ->
         line = String.trim(line)
-        handle_input(line)
+        handle_input(line, opts)
     end
   end
 
-  defp handle_input(""), do: loop()
-  defp handle_input("/quit"), do: IO.puts("Goodbye!")
-  defp handle_input("/exit"), do: IO.puts("Goodbye!")
+  defp handle_input("", opts), do: loop(opts)
+  defp handle_input("/quit", _opts), do: IO.puts("Goodbye!")
+  defp handle_input("/exit", _opts), do: IO.puts("Goodbye!")
 
-  defp handle_input("/help") do
+  defp handle_input("/help", opts) do
     IO.puts(help_text())
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/reset") do
+  defp handle_input("/reset", opts) do
     PtcDemo.Agent.reset()
     IO.puts("   [Context cleared, data mode reset to schema]\n")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/mode") do
+  defp handle_input("/mode", opts) do
     mode = PtcDemo.Agent.data_mode()
     IO.puts("   [Data mode: #{mode}]\n")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/mode schema") do
+  defp handle_input("/mode schema", opts) do
     PtcDemo.Agent.set_data_mode(:schema)
     IO.puts("   [Switched to schema mode - LLM receives full schema]\n")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/mode explore") do
+  defp handle_input("/mode explore", opts) do
     PtcDemo.Agent.set_data_mode(:explore)
     IO.puts("   [Switched to explore mode - LLM must discover schema]\n")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/mode " <> _invalid) do
+  defp handle_input("/mode " <> _invalid, opts) do
     IO.puts("   [Unknown mode. Use: /mode, /mode schema, or /mode explore]\n")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/model") do
+  defp handle_input("/model", opts) do
     model = PtcDemo.Agent.model()
     presets = PtcDemo.Agent.preset_models()
 
@@ -143,10 +143,10 @@ defmodule PtcDemo.JsonCLI do
     end
 
     IO.puts("\nOr use any model: /model openrouter:provider/model-name\n")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/model " <> name) do
+  defp handle_input("/model " <> name, opts) do
     name = String.trim(name)
 
     case PtcDemo.ModelRegistry.resolve(name) do
@@ -158,10 +158,10 @@ defmodule PtcDemo.JsonCLI do
         IO.puts("   [Error] #{reason}\n")
     end
 
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/datasets") do
+  defp handle_input("/datasets", opts) do
     IO.puts("\nAvailable datasets:")
 
     for {name, desc} <- PtcDemo.Agent.list_datasets() do
@@ -169,10 +169,10 @@ defmodule PtcDemo.JsonCLI do
     end
 
     IO.puts("")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/program") do
+  defp handle_input("/program", opts) do
     case PtcDemo.Agent.last_program() do
       nil ->
         IO.puts("   No program generated yet.\n")
@@ -183,10 +183,10 @@ defmodule PtcDemo.JsonCLI do
         IO.puts("")
     end
 
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/programs") do
+  defp handle_input("/programs", opts) do
     case PtcDemo.Agent.programs() do
       [] ->
         IO.puts("   No programs generated yet.\n")
@@ -203,10 +203,10 @@ defmodule PtcDemo.JsonCLI do
         end)
     end
 
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/result") do
+  defp handle_input("/result", opts) do
     case PtcDemo.Agent.last_result() do
       nil ->
         IO.puts("   No result yet.\n")
@@ -217,10 +217,10 @@ defmodule PtcDemo.JsonCLI do
         IO.puts("")
     end
 
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/context") do
+  defp handle_input("/context", opts) do
     programs = PtcDemo.Agent.programs()
 
     if programs == [] do
@@ -240,30 +240,30 @@ defmodule PtcDemo.JsonCLI do
       end)
     end
 
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/system") do
+  defp handle_input("/system", opts) do
     prompt = PtcDemo.Agent.system_prompt()
     IO.puts("\n[SYSTEM PROMPT]\n")
     IO.puts(prompt)
     IO.puts("")
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/examples") do
+  defp handle_input("/examples", opts) do
     IO.puts(examples_text())
-    loop()
+    loop(opts)
   end
 
-  defp handle_input("/stats") do
+  defp handle_input("/stats", opts) do
     stats = PtcDemo.Agent.stats()
     IO.puts(CLIBase.format_stats(stats))
-    loop()
+    loop(opts)
   end
 
-  defp handle_input(question) do
-    case PtcDemo.Agent.ask(question) do
+  defp handle_input(question, opts) do
+    case PtcDemo.Agent.ask(question, debug: opts[:debug]) do
       {:ok, answer} ->
         IO.puts("\nassistant> #{answer}\n")
 
@@ -271,7 +271,7 @@ defmodule PtcDemo.JsonCLI do
         IO.puts("\n   [Error] #{reason}\n")
     end
 
-    loop()
+    loop(opts)
   end
 
   defp banner(model, data_mode) do
