@@ -35,7 +35,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.{Prompt, SubAgentTool, Telemetry}
+  alias PtcRunner.SubAgent.{LLMResolver, Prompt, SubAgentTool, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -344,7 +344,7 @@ defmodule PtcRunner.SubAgent.Loop do
   defp build_turn_measurements(duration, nil), do: %{duration: duration}
 
   defp build_turn_measurements(duration, tokens) when is_map(tokens) do
-    %{duration: duration, tokens: total_tokens(tokens)}
+    %{duration: duration, tokens: LLMResolver.total_tokens(tokens)}
   end
 
   # Call LLM with telemetry wrapper
@@ -376,12 +376,7 @@ defmodule PtcRunner.SubAgent.Loop do
   defp build_token_measurements(nil), do: %{}
 
   defp build_token_measurements(tokens) when is_map(tokens) do
-    %{tokens: total_tokens(tokens)}
-  end
-
-  # Calculate total tokens from input and output token counts
-  defp total_tokens(tokens) when is_map(tokens) do
-    Map.get(tokens, :input, 0) + Map.get(tokens, :output, 0)
+    %{tokens: LLMResolver.total_tokens(tokens)}
   end
 
   # Handle LLM response - parse and execute code

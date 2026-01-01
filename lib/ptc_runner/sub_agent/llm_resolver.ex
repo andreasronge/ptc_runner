@@ -107,4 +107,23 @@ defmodule PtcRunner.SubAgent.LLMResolver do
     tokens = Map.get(response, :tokens)
     %{content: content, tokens: tokens}
   end
+
+  @doc """
+  Calculate total tokens from input and output token counts.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.LLMResolver.total_tokens(%{input: 10, output: 5})
+      15
+
+      iex> PtcRunner.SubAgent.LLMResolver.total_tokens(%{input: 0, output: 0})
+      0
+
+      iex> PtcRunner.SubAgent.LLMResolver.total_tokens(%{})
+      0
+  """
+  @spec total_tokens(map()) :: non_neg_integer()
+  def total_tokens(tokens) when is_map(tokens) do
+    Map.get(tokens, :input, 0) + Map.get(tokens, :output, 0)
+  end
 end

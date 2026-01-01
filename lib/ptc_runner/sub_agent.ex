@@ -95,6 +95,8 @@ defmodule PtcRunner.SubAgent do
           turn_budget: pos_integer()
         }
 
+  alias PtcRunner.SubAgent.LLMResolver
+
   defstruct [
     :prompt,
     :signature,
@@ -682,7 +684,7 @@ defmodule PtcRunner.SubAgent do
           Map.merge(base_usage, %{
             input_tokens: input,
             output_tokens: output,
-            total_tokens: input + output,
+            total_tokens: LLMResolver.total_tokens(tokens),
             llm_requests: 1
           })
 
