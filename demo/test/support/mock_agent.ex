@@ -3,12 +3,17 @@ defmodule PtcDemo.MockAgent do
   Mock agent for testing test runners without real LLM calls.
 
   Implements the same public API as PtcDemo.Agent but returns predetermined responses.
+  Instead of making LLM calls, it uses a mock LLM callback that returns pre-configured
+  programs based on the query.
+
   `programs/0` returns a list of {program, result} tuples matching the real agent format.
   """
 
   use GenServer
 
-  defstruct [:responses, :call_count, :last_result, :last_program, :calls, :program_results]
+  alias PtcDemo.SampleData
+
+  defstruct [:responses, :last_result, :last_program, :program_results, :memory]
 
   # --- Public API ---
 
@@ -17,12 +22,12 @@ defmodule PtcDemo.MockAgent do
   end
 
   def ask(question) do
-    GenServer.call(__MODULE__, {:ask, question})
+    GenServer.call(__MODULE__, {:ask, question}, 30_000)
   end
 
   def ask(question, _opts) do
     # Options like stop_on_success are ignored in mock
-    GenServer.call(__MODULE__, {:ask, question})
+    GenServer.call(__MODULE__, {:ask, question}, 30_000)
   end
 
   def reset do
@@ -42,7 +47,7 @@ defmodule PtcDemo.MockAgent do
   end
 
   def list_datasets do
-    PtcDemo.SampleData.available_datasets()
+    SampleData.available_datasets()
   end
 
   def model do
@@ -88,61 +93,74 @@ defmodule PtcDemo.MockAgent do
     {:ok,
      %__MODULE__{
        responses: responses,
-       call_count: 0,
        last_result: nil,
        last_program: nil,
-       calls: [],
-       program_results: []
+       program_results: [],
+       memory: %{}
      }}
   end
 
   @impl true
   def handle_call({:ask, question}, _from, state) do
-    # Record the call
-    new_calls = [question | state.calls]
-
     case Map.get(state.responses, question) do
       nil ->
         # Unknown query - return error with query text
         error = "Unknown query: #{question}"
-        new_program_results = [{question, {:error, error}} | state.program_results]
+        program_entry = {question, {:error, error}}
+        new_program_results = state.program_results ++ [program_entry]
 
         {:reply, {:error, error},
-         %{state | calls: new_calls, program_results: new_program_results}}
+         %{state | program_results: new_program_results}}
 
       response ->
-        # Response can be a tuple {status, answer} or just the answer value
-        {status, answer, last_program, last_result} =
-          case response do
-            {:ok, ans, prog, res} ->
-              {:ok, ans, prog, res}
+        # Response format: {:ok, answer, program, result} or {:error, reason}
+        case response do
+          {:ok, answer, program, result} ->
+            program_str = program || "(return #{inspect(result)})"
+            program_entry = {program_str, result}
+            new_program_results = state.program_results ++ [program_entry]
 
-            {:error, reason} ->
-              {:error, reason, nil, nil}
+            {:reply, {:ok, answer},
+             %{
+               state
+               | last_result: result,
+                 last_program: program_str,
+                 program_results: new_program_results
+             }}
 
-            ans when is_binary(ans) ->
-              # Default to simple response with answer as both result and program
-              {:ok, ans, nil, ans}
+          {:error, reason} ->
+            program_entry = {question, {:error, reason}}
+            new_program_results = state.program_results ++ [program_entry]
 
-            ans ->
-              # Convert non-binary answer to string
-              {:ok, inspect(ans), nil, ans}
-          end
+            {:reply, {:error, reason},
+             %{state | program_results: new_program_results}}
 
-        # Track program and result for programs/0
-        program_entry = {last_program || question, last_result}
-        new_program_results = [program_entry | state.program_results]
+          answer when is_binary(answer) ->
+            # Simple response - treat as answer with no specific program
+            program_entry = {question, answer}
+            new_program_results = state.program_results ++ [program_entry]
 
-        new_state = %{
-          state
-          | call_count: state.call_count + 1,
-            last_result: last_result,
-            last_program: last_program,
-            calls: new_calls,
-            program_results: new_program_results
-        }
+            {:reply, {:ok, answer},
+             %{
+               state
+               | last_result: answer,
+                 last_program: nil,
+                 program_results: new_program_results
+             }}
 
-        {:reply, {status, answer}, new_state}
+          result ->
+            # Non-binary answer - convert to string for answer
+            program_entry = {question, result}
+            new_program_results = state.program_results ++ [program_entry]
+
+            {:reply, {:ok, inspect(result)},
+             %{
+               state
+               | last_result: result,
+                 last_program: nil,
+                 program_results: new_program_results
+             }}
+        end
     end
   end
 
@@ -151,11 +169,10 @@ defmodule PtcDemo.MockAgent do
     {:reply, :ok,
      %{
        state
-       | call_count: 0,
-         last_result: nil,
+       | last_result: nil,
          last_program: nil,
-         calls: [],
-         program_results: []
+         program_results: [],
+         memory: %{}
      }}
   end
 
@@ -171,8 +188,6 @@ defmodule PtcDemo.MockAgent do
 
   @impl true
   def handle_call(:programs, _from, state) do
-    # Return list of {program, result} tuples (matching real agent format)
-    programs = Enum.reverse(state.program_results)
-    {:reply, programs, state}
+    {:reply, state.program_results, state}
   end
 end

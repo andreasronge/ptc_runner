@@ -1,9 +1,10 @@
 defmodule PtcDemo.JsonCLI do
   @moduledoc """
-  Interactive CLI for the PTC-JSON Demo.
+  Interactive CLI for the PTC Demo.
 
-  Demonstrates how PtcRunner.Json enables LLMs to query large datasets efficiently
-  by generating JSON programs that execute in BEAM memory, keeping data out of
+  Note: This CLI now uses PTC-Lisp via SubAgent (the JSON DSL has been unified).
+  It demonstrates how PtcRunner enables LLMs to query large datasets efficiently
+  by generating Lisp programs that execute in BEAM memory, keeping data out of
   LLM context.
   """
 
@@ -281,9 +282,9 @@ defmodule PtcDemo.JsonCLI do
     """
 
     +-----------------------------------------------------------------+
-    |        PTC-JSON Demo - Programmatic Tool Calling                |
+    |         PTC Demo - Programmatic Tool Calling                    |
     +-----------------------------------------------------------------+
-    |  Ask questions about data. The LLM generates JSON programs      |
+    |  Ask questions about data. The LLM generates Lisp programs      |
     |  that execute in a sandbox - large data stays in BEAM memory,   |
     |  never entering LLM context. Only small results return.         |
     +-----------------------------------------------------------------+
@@ -301,7 +302,7 @@ defmodule PtcDemo.JsonCLI do
     Commands:
       /help         - Show this help
       /datasets     - List available datasets
-      /program      - Show last generated PTC-JSON program
+      /program      - Show last generated PTC-Lisp program
       /programs     - Show all programs generated this session
       /result       - Show last execution result (raw value)
       /system       - Show current system prompt
@@ -362,11 +363,11 @@ defmodule PtcDemo.JsonCLI do
       "How many employees have submitted expenses?"
       "What's the average order value per product category?"
 
-    Expected JSON programs:
-      {"op": "count", "value": {"op": "filter", "data": "products", ...}}
-      {"op": "sum-by", "data": "orders", "field": "total", ...}
-      {"op": "avg-by", "data": "employees", "field": "salary", ...}
-      {"op": "count", "value": {"op": "distinct", ...}}
+    Expected Lisp programs:
+      (count (filter (where :category = "electronics") ctx/products))
+      (->> ctx/orders (filter (where :status = "delivered")) (sum-by :total))
+      (avg-by :salary (filter (where :department = "engineering") ctx/employees))
+      (count (distinct (pluck :product_id ctx/orders)))
 
     """
   end

@@ -1,6 +1,9 @@
 defmodule PtcDemo.LispTestRunner do
   @moduledoc """
-  Automated test runner for the PTC-Lisp demo.
+  Automated test runner for the PTC demo using SubAgent.
+
+  Uses PTC-Lisp via SubAgent to generate and execute programs.
+  Includes Lisp-specific test cases in addition to common test cases.
 
   Runs example queries and validates results match expected constraints.
   Since data is randomly generated, we test properties not exact values.
@@ -26,7 +29,7 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_one(3)
   """
 
-  alias PtcDemo.LispAgent
+  alias PtcDemo.Agent
   alias PtcDemo.TestRunner.{Base, TestCase, Report}
   alias PtcDemo.CLIBase
 
@@ -59,10 +62,10 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all(validate_clojure: true)
   """
   def run_all(opts \\ []) do
-    agent_mod = Keyword.get(opts, :agent, LispAgent)
+    agent_mod = Keyword.get(opts, :agent, Agent)
 
     # Only load dotenv and check API key if using real agent
-    if agent_mod == LispAgent do
+    if agent_mod == Agent do
       CLIBase.load_dotenv()
       CLIBase.ensure_api_key!()
     end
@@ -202,10 +205,10 @@ defmodule PtcDemo.LispTestRunner do
   Run a single test by index (1-based).
   """
   def run_one(index, opts \\ []) do
-    agent_mod = Keyword.get(opts, :agent, LispAgent)
+    agent_mod = Keyword.get(opts, :agent, Agent)
 
     # Only load dotenv and check API key if using real agent
-    if agent_mod == LispAgent do
+    if agent_mod == Agent do
       CLIBase.load_dotenv()
       CLIBase.ensure_api_key!()
     end
@@ -261,17 +264,17 @@ defmodule PtcDemo.LispTestRunner do
 
   defp ensure_agent_started(data_mode, agent_mod) do
     # For mock agents, assume they're already started or will be in test setup
-    # For real LispAgent, check and start if needed
-    if agent_mod == LispAgent do
-      case Process.whereis(LispAgent) do
+    # For real Agent, check and start if needed
+    if agent_mod == Agent do
+      case Process.whereis(Agent) do
         nil ->
-          {:ok, _pid} = LispAgent.start_link(data_mode: data_mode)
+          {:ok, _pid} = Agent.start_link(data_mode: data_mode)
           :ok
 
         _pid ->
           # Reset to ensure clean state
-          LispAgent.reset()
-          LispAgent.set_data_mode(data_mode)
+          Agent.reset()
+          Agent.set_data_mode(data_mode)
           :ok
       end
     else

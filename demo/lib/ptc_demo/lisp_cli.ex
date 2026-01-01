@@ -1,8 +1,8 @@
 defmodule PtcDemo.LispCLI do
   @moduledoc """
-  Interactive CLI for the PTC-Lisp Demo.
+  Interactive CLI for the PTC-Lisp Demo using SubAgent.
 
-  Demonstrates how PtcRunner.Lisp enables LLMs to query large datasets efficiently
+  Demonstrates how PtcRunner enables LLMs to query large datasets efficiently
   by generating Lisp programs that execute in BEAM memory, keeping data out of
   LLM context.
   """
@@ -283,7 +283,7 @@ defmodule PtcDemo.LispCLI do
     """
 
     +-----------------------------------------------------------------+
-    |        PTC-Lisp Demo - Programmatic Tool Calling                |
+    |    PTC-Lisp Demo - Programmatic Tool Calling via SubAgent       |
     +-----------------------------------------------------------------+
     |  Ask questions about data. The LLM generates Lisp programs      |
     |  that execute in a sandbox - large data stays in BEAM memory,   |
