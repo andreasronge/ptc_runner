@@ -4,10 +4,13 @@ A BEAM-native Elixir library for Programmatic Tool Calling (PTC), enabling LLMs 
 
 ## ⚠️ Current Status
 
-**Breaking changes in progress.** We're adding SubAgent support - isolated workers with typed signatures that enable agentic loops and agent composition.
+**SubAgent API is implemented but not battle-tested.** The core functionality works, but real LLM e2e testing is limited. Expect bugs, edge cases, and documentation gaps.
 
-- **Planned API**: See `docs/ptc_agents/` (start with `specification.md`)
-- **Current API**: `docs/guide.md` and other `docs/` files reflect the current stable API
+- **SubAgent API**: See `docs/ptc_agents/` (start with `specification.md`)
+- **Core API**: `docs/guide.md` - stable, well-tested
+- **E2E tests**: `mix test --include e2e` (requires `OPENROUTER_API_KEY`)
+
+When you find issues, fix both the code and the docs together.
 
 ## Tech Stack
 
