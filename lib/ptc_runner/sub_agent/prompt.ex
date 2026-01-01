@@ -25,57 +25,11 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   """
 
+  alias PtcRunner.Lisp.Schema
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.Signature.Renderer
   alias PtcRunner.SubAgent.Template
-
-  @language_reference """
-  # PTC-Lisp Quick Reference
-
-  ## Syntax
-  - Clojure-inspired syntax
-  - Keywords: `:keyword`
-  - Maps: `{:key value :key2 value2}`
-  - Vectors: `[1 2 3]`
-  - Function calls: `(function arg1 arg2)`
-
-  ## Core Functions
-  - `call` - Invoke tools: `(call "tool-name" {:arg value})`
-  - `let` - Local bindings: `(let [x 1 y 2] (+ x y))`
-  - `if` - Conditional: `(if condition then-expr else-expr)`
-  - `do` - Sequential: `(do expr1 expr2 expr3)`
-  - `fn` - Anonymous function: `(fn [x] (* x 2))`
-
-  ## Context Access
-  - `ctx/key` - Read from context
-  - `memory/key` - Read from persistent memory
-  - `(memory/put :key value)` - Store in memory
-
-  ## Collections
-  - `map`, `mapv` - Transform: `(mapv :id items)`
-  - `filter` - Filter: `(filter #(> (:score %) 0.5) items)`
-  - `reduce` - Fold: `(reduce + 0 numbers)`
-  - `first`, `last`, `nth` - Access elements
-  - `count`, `empty?` - Collection info
-
-  ## Common Patterns
-  ```clojure
-  ;; Fetch and process
-  (let [users (call "get_users" {:limit 10})]
-    (mapv :name users))
-
-  ;; Conditional logic
-  (if (empty? results)
-    (call "fail" {:reason :not_found :message "No results"})
-    (call "return" {:count (count results)}))
-
-  ;; Multi-step with memory
-  (do
-    (memory/put :step1 (call "search" {:q "test"}))
-    (call "process" {:data memory/step1}))
-  ```
-  """
 
   @output_format """
   # Output Format
@@ -153,12 +107,12 @@ defmodule PtcRunner.SubAgent.Prompt do
       case agent.system_prompt do
         opts when is_map(opts) ->
           {
-            Map.get(opts, :language_spec, @language_reference),
+            Map.get(opts, :language_spec, Schema.to_prompt()),
             Map.get(opts, :output_format, @output_format)
           }
 
         _ ->
-          {@language_reference, @output_format}
+          {Schema.to_prompt(), @output_format}
       end
 
     # Generate sections
