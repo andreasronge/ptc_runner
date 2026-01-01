@@ -318,18 +318,8 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Emit turn stop event only for final results (not loop continuations)
-  defp emit_turn_stop_if_final({:ok, _step} = _result, agent, state, turn_start) do
-    turn_duration = System.monotonic_time() - turn_start
-    measurements = build_turn_measurements(turn_duration, state.turn_tokens)
-
-    Telemetry.emit([:turn, :stop], measurements, %{
-      agent: agent,
-      turn: state.turn,
-      program: nil
-    })
-  end
-
-  defp emit_turn_stop_if_final({:error, _step} = _result, agent, state, turn_start) do
+  defp emit_turn_stop_if_final({status, _step} = _result, agent, state, turn_start)
+       when status in [:ok, :error] do
     turn_duration = System.monotonic_time() - turn_start
     measurements = build_turn_measurements(turn_duration, state.turn_tokens)
 
