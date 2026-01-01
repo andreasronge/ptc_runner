@@ -141,10 +141,10 @@ defmodule PtcDemo.Agent do
     data_mode = Keyword.get(opts, :data_mode, :schema)
 
     datasets = %{
-      products: SampleData.products(),
-      orders: SampleData.orders(),
-      employees: SampleData.employees(),
-      expenses: SampleData.expenses()
+      "products" => SampleData.products(),
+      "orders" => SampleData.orders(),
+      "employees" => SampleData.employees(),
+      "expenses" => SampleData.expenses()
     }
 
     IO.puts("   [Data] #{data_mode}")
@@ -171,7 +171,7 @@ defmodule PtcDemo.Agent do
     agent = build_agent(state.data_mode)
 
     # Build context with datasets and current memory
-    context = Map.merge(state.datasets, %{memory: state.memory})
+    context = Map.merge(state.datasets, %{"memory" => state.memory, "question" => question})
 
     IO.puts("\n   [Agent] Generating response...")
 
@@ -217,8 +217,7 @@ defmodule PtcDemo.Agent do
 
         new_usage = add_usage(state.usage, step.usage)
 
-        {:reply, {:error, error_msg},
-         %{state | usage: new_usage}}
+        {:reply, {:error, error_msg}, %{state | usage: new_usage}}
     end
   end
 
