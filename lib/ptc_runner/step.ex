@@ -13,6 +13,8 @@ defmodule PtcRunner.Step do
   - `signature`: The contract used for validation
   - `usage`: Execution metrics
   - `trace`: Execution trace for debugging (SubAgent only, nil for Lisp)
+  - `trace_id`: Unique ID for this execution (for tracing correlation)
+  - `parent_trace_id`: ID of parent trace (for nested agents)
 
   See the [Step Specification](ptc_agents/step.md) for detailed field documentation.
   """
@@ -24,7 +26,9 @@ defmodule PtcRunner.Step do
     :memory_delta,
     :signature,
     :usage,
-    :trace
+    :trace,
+    :trace_id,
+    :parent_trace_id
   ]
 
   @typedoc """
@@ -107,6 +111,9 @@ defmodule PtcRunner.Step do
   One of `return` or `fail` will be set, but never both:
   - Success: `return` is set, `fail` is nil
   - Failure: `fail` is set, `return` is nil
+
+  The `trace_id` and `parent_trace_id` fields are used for tracing correlation
+  in parallel and nested agent executions. See `PtcRunner.Tracer` for details.
   """
   @type t :: %__MODULE__{
           return: term() | nil,
@@ -115,7 +122,9 @@ defmodule PtcRunner.Step do
           memory_delta: map() | nil,
           signature: String.t() | nil,
           usage: usage() | nil,
-          trace: [trace_entry()] | nil
+          trace: [trace_entry()] | nil,
+          trace_id: String.t() | nil,
+          parent_trace_id: String.t() | nil
         }
 
   @doc """
@@ -139,7 +148,9 @@ defmodule PtcRunner.Step do
       memory_delta: nil,
       signature: nil,
       usage: nil,
-      trace: nil
+      trace: nil,
+      trace_id: nil,
+      parent_trace_id: nil
     }
   end
 
@@ -173,7 +184,9 @@ defmodule PtcRunner.Step do
         memory_delta: nil,
         signature: nil,
         usage: nil,
-        trace: nil
+        trace: nil,
+        trace_id: nil,
+        parent_trace_id: nil
       }
 
   """
@@ -186,7 +199,9 @@ defmodule PtcRunner.Step do
       memory_delta: nil,
       signature: nil,
       usage: nil,
-      trace: nil
+      trace: nil,
+      trace_id: nil,
+      parent_trace_id: nil
     }
   end
 end
