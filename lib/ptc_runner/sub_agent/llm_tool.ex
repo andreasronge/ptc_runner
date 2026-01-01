@@ -6,15 +6,37 @@ defmodule PtcRunner.SubAgent.LLMTool do
   generate structured outputs. The tool is configured with a prompt template
   and signature that defines its inputs and outputs.
 
+  ## Use Cases
+
+  LLMTool is ideal for:
+  - **Classification** - Categorize inputs (sentiment, priority, type)
+  - **Evaluation** - Score quality, relevance, urgency
+  - **Judgment** - Make yes/no decisions with reasoning
+  - **Extraction** - Pull structured data from text
+
+  For complex multi-step tasks, use `SubAgent.as_tool/2` instead.
+
   ## LLM Inheritance
 
   The `:llm` option controls which LLM is used:
-  - `:caller` (default) - Inherit from the calling agent
-  - atom (e.g., `:haiku`) - Use specific model via registry
-  - function - Custom LLM function
+
+  | Value | Behavior |
+  |-------|----------|
+  | `:caller` (default) | Inherit from calling agent |
+  | `:haiku`, `:sonnet` | Specific model via registry |
+  | `fn input -> result end` | Custom LLM function |
 
   The `:caller` atom is only valid for LLMTool and explicitly signals
   "use whatever LLM the calling agent is using."
+
+  ## Execution
+
+  LLMTool executes as a single-shot SubAgent when called:
+  1. Arguments validated against signature parameters
+  2. Template expanded with arguments
+  3. LLM called for response
+  4. Response parsed as PTC-Lisp, executed
+  5. Result validated against signature return type
 
   ## Examples
 

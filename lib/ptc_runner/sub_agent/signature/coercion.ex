@@ -5,19 +5,65 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
   This module handles lenient input validation for LLMs, which sometimes
   produce slightly malformed data (e.g., quoted numbers, missing types).
 
+  ## Elixir to Signature Type Mapping
+
+  ### Primitive Types
+
+  | Elixir Type | Signature Type | Notes |
+  |-------------|----------------|-------|
+  | `String.t()` | `:string` | UTF-8 strings |
+  | `binary()` | `:string` | Same as String.t() |
+  | `integer()` | `:int` | Whole numbers |
+  | `non_neg_integer()` | `:int` | Validation can enforce >= 0 |
+  | `pos_integer()` | `:int` | Validation can enforce > 0 |
+  | `float()` | `:float` | Decimal numbers |
+  | `number()` | `:float` | Accepts int or float |
+  | `boolean()` | `:bool` | Boolean values |
+  | `atom()` | `:keyword` | Atoms as keywords |
+  | `any()` | `:any` | Matches everything |
+
+  ### Collection Types
+
+  | Elixir Type | Signature Type | Notes |
+  |-------------|----------------|-------|
+  | `list(t)` | `[:t]` | Homogeneous lists |
+  | `map()` | `:map` | Untyped dictionary |
+  | `%{key: type}` | `{:key :type}` | Typed map |
+
+  ### Special Types
+
+  | Elixir Type | Signature Type | Rationale |
+  |-------------|----------------|-----------|
+  | `DateTime.t()` | `:string` | ISO 8601 format, LLM-friendly |
+  | `t \| nil` | `:t?` | Optional via `?` suffix |
+
   ## Coercion Rules
 
-  Input coercion is lenient with warnings:
-  - `"42"` → `:int` produces `42` with warning
-  - `"3.14"` → `:float` produces `3.14` with warning
-  - `42` → `:float` produces `42.0` silently (widening is safe)
-  - `42.0` → `:int` produces error (precision loss not allowed)
+  LLMs sometimes produce slightly malformed data. Input coercion handles common cases:
+
+  | From | To | Behavior | Warning |
+  |------|-----|----------|---------|
+  | `"42"` | `:int` | `42` | Yes |
+  | `"3.14"` | `:float` | `3.14` | Yes |
+  | `"-5"` | `:int` | `-5` | Yes |
+  | `"true"` | `:bool` | `true` | Yes |
+  | `"false"` | `:bool` | `false` | Yes |
+  | `42` | `:float` | `42.0` | No (silent widening) |
+  | `42.0` | `:int` | Error | - |
+  | `"hello"` | `:int` | Error | - |
+  | `:atom` | `:string` | `"atom"` | Yes |
+  | `"atom"` | `:keyword` | `:atom` | Yes |
 
   Output validation is strict - no coercion applied.
 
-  ## Special Types
+  ## Coercion Modes
 
-  - Atoms: Coerce atoms to strings, strings to atoms (using `String.to_existing_atom/1`)
+  | Mode | Input Coercion | Output Validation | Use Case |
+  |------|----------------|-------------------|----------|
+  | `:enabled` (default) | Apply with warnings | Strict | Production |
+  | `:warn_only` | Apply with warnings | Log warnings only | Development |
+  | `:strict` | No coercion | Strict, reject extra fields | Testing |
+  | `:disabled` | Skip | Skip | Debugging |
 
   ## Examples
 
