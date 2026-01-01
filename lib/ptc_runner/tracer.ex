@@ -363,6 +363,158 @@ defmodule PtcRunner.Tracer do
     }
   end
 
+  @doc """
+  Total duration in milliseconds from started_at to finalized_at.
+
+  Returns 0 if the tracer is not finalized or timestamps are nil.
+
+  ## Examples
+
+      iex> tracer = %PtcRunner.Tracer{
+      ...>   trace_id: "test",
+      ...>   parent_id: nil,
+      ...>   started_at: ~U[2024-01-15 10:00:00Z],
+      ...>   entries: [],
+      ...>   finalized_at: ~U[2024-01-15 10:00:02Z]
+      ...> }
+      iex> PtcRunner.Tracer.total_duration(tracer)
+      2000
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> PtcRunner.Tracer.total_duration(tracer)
+      0
+
+  """
+  @spec total_duration(t()) :: non_neg_integer()
+  def total_duration(%__MODULE__{started_at: start, finalized_at: finish})
+      when not is_nil(start) and not is_nil(finish) do
+    DateTime.diff(finish, start, :millisecond)
+  end
+
+  def total_duration(%__MODULE__{}), do: 0
+
+  @doc """
+  Returns all entries with type `:llm_call`.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{turn: 1}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :tool_call, data: %{name: "search"}})
+      iex> PtcRunner.Tracer.llm_calls(tracer) |> length()
+      1
+
+  """
+  @spec llm_calls(t()) :: [entry()]
+  def llm_calls(tracer), do: find_by_type(tracer, :llm_call)
+
+  @doc """
+  Returns all entries with type `:tool_call`.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{turn: 1}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :tool_call, data: %{name: "search"}})
+      iex> PtcRunner.Tracer.tool_calls(tracer) |> length()
+      1
+
+  """
+  @spec tool_calls(t()) :: [entry()]
+  def tool_calls(tracer), do: find_by_type(tracer, :tool_call)
+
+  @doc """
+  Returns entries matching the given type.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{turn: 1}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :tool_call, data: %{name: "search"}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{turn: 2}})
+      iex> entries = PtcRunner.Tracer.find_by_type(tracer, :llm_call)
+      iex> length(entries)
+      2
+      iex> Enum.all?(entries, & &1.type == :llm_call)
+      true
+
+  """
+  @spec find_by_type(t(), entry_type()) :: [entry()]
+  def find_by_type(%__MODULE__{} = tracer, type) do
+    tracer
+    |> entries()
+    |> Enum.filter(&(&1.type == type))
+  end
+
+  @doc """
+  Returns entries with `duration_ms` in data, sorted by duration descending.
+
+  Only includes entries that have a `:duration_ms` key in their data map.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{duration_ms: 100}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :tool_call, data: %{duration_ms: 50}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{duration_ms: 200}})
+      iex> [slowest | _] = PtcRunner.Tracer.slowest_entries(tracer, 1)
+      iex> slowest.data.duration_ms
+      200
+
+  """
+  @spec slowest_entries(t(), non_neg_integer()) :: [entry()]
+  def slowest_entries(%__MODULE__{} = tracer, n) when is_integer(n) and n >= 0 do
+    tracer
+    |> entries()
+    |> Enum.filter(&Map.has_key?(&1.data, :duration_ms))
+    |> Enum.sort_by(& &1.data.duration_ms, :desc)
+    |> Enum.take(n)
+  end
+
+  @doc """
+  Enhanced usage summary with duration breakdown.
+
+  Includes total duration, LLM and tool call durations (summed from entries with
+  `duration_ms` in their data), and counts.
+
+  ## Examples
+
+      iex> tracer = PtcRunner.Tracer.new()
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :llm_call, data: %{duration_ms: 100}})
+      iex> tracer = PtcRunner.Tracer.add_entry(tracer, %{type: :tool_call, data: %{duration_ms: 50}})
+      iex> tracer = PtcRunner.Tracer.finalize(tracer)
+      iex> summary = PtcRunner.Tracer.usage_summary(tracer)
+      iex> summary.llm_duration_ms
+      100
+      iex> summary.tool_duration_ms
+      50
+      iex> summary.llm_call_count
+      1
+      iex> summary.tool_call_count
+      1
+
+  """
+  @spec usage_summary(t()) :: map()
+  def usage_summary(%__MODULE__{} = tracer) do
+    all_entries = entries(tracer)
+
+    %{
+      total_duration_ms: total_duration(tracer),
+      llm_duration_ms: sum_duration_by_type(all_entries, :llm_call),
+      tool_duration_ms: sum_duration_by_type(all_entries, :tool_call),
+      llm_call_count: count_type(all_entries, :llm_call),
+      tool_call_count: count_type(all_entries, :tool_call),
+      total_entries: length(all_entries)
+    }
+  end
+
+  defp sum_duration_by_type(entries, type) do
+    entries
+    |> Enum.filter(&(&1.type == type))
+    |> Enum.map(&Map.get(&1.data, :duration_ms, 0))
+    |> Enum.sum()
+  end
+
   defp count_type(entries, type) do
     Enum.count(entries, &(&1.type == type))
   end

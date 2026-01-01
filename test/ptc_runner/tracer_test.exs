@@ -468,4 +468,182 @@ defmodule PtcRunner.TracerTest do
       assert usage.agent_count == 3
     end
   end
+
+  describe "total_duration/1" do
+    test "calculates duration from finalized tracer" do
+      tracer = %Tracer{
+        trace_id: "test",
+        parent_id: nil,
+        started_at: ~U[2024-01-15 10:00:00Z],
+        entries: [],
+        finalized_at: ~U[2024-01-15 10:00:02Z]
+      }
+
+      assert Tracer.total_duration(tracer) == 2000
+    end
+
+    test "returns 0 for unfinalized tracer" do
+      tracer = Tracer.new()
+
+      assert Tracer.total_duration(tracer) == 0
+    end
+  end
+
+  describe "find_by_type/2" do
+    test "returns matching entries" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{name: "search"}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 2}})
+        |> Tracer.finalize()
+
+      llm_entries = Tracer.find_by_type(tracer, :llm_call)
+
+      assert length(llm_entries) == 2
+      assert Enum.all?(llm_entries, &(&1.type == :llm_call))
+    end
+
+    test "returns empty list when no matches" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.finalize()
+
+      assert Tracer.find_by_type(tracer, :tool_call) == []
+    end
+  end
+
+  describe "llm_calls/1" do
+    test "returns LLM call entries" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{name: "search"}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 2}})
+        |> Tracer.finalize()
+
+      llm_entries = Tracer.llm_calls(tracer)
+
+      assert length(llm_entries) == 2
+      assert Enum.all?(llm_entries, &(&1.type == :llm_call))
+    end
+  end
+
+  describe "tool_calls/1" do
+    test "returns tool call entries" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{name: "search"}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{name: "fetch"}})
+        |> Tracer.finalize()
+
+      tool_entries = Tracer.tool_calls(tracer)
+
+      assert length(tool_entries) == 2
+      assert Enum.all?(tool_entries, &(&1.type == :tool_call))
+    end
+  end
+
+  describe "slowest_entries/2" do
+    test "returns top N entries by duration" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 100}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{duration_ms: 50}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 200}})
+        |> Tracer.finalize()
+
+      [slowest | _] = Tracer.slowest_entries(tracer, 1)
+
+      assert slowest.data.duration_ms == 200
+    end
+
+    test "returns entries in descending order by duration" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 100}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{duration_ms: 50}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 200}})
+        |> Tracer.finalize()
+
+      durations =
+        tracer
+        |> Tracer.slowest_entries(3)
+        |> Enum.map(& &1.data.duration_ms)
+
+      assert durations == [200, 100, 50]
+    end
+
+    test "excludes entries without duration_ms" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 100}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{name: "no_duration"}})
+        |> Tracer.finalize()
+
+      entries = Tracer.slowest_entries(tracer, 10)
+
+      assert length(entries) == 1
+      assert hd(entries).data.duration_ms == 100
+    end
+
+    test "returns empty list when no entries have duration" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{}})
+        |> Tracer.finalize()
+
+      assert Tracer.slowest_entries(tracer, 3) == []
+    end
+  end
+
+  describe "usage_summary/1" do
+    test "aggregates all stats" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 100}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{duration_ms: 50}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{duration_ms: 200}})
+        |> Tracer.finalize()
+
+      summary = Tracer.usage_summary(tracer)
+
+      assert summary.llm_duration_ms == 300
+      assert summary.tool_duration_ms == 50
+      assert summary.llm_call_count == 2
+      assert summary.tool_call_count == 1
+      assert summary.total_entries == 3
+    end
+
+    test "handles entries without duration_ms gracefully" do
+      tracer =
+        Tracer.new()
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{name: "search"}})
+        |> Tracer.finalize()
+
+      summary = Tracer.usage_summary(tracer)
+
+      assert summary.llm_duration_ms == 0
+      assert summary.tool_duration_ms == 0
+      assert summary.llm_call_count == 1
+      assert summary.tool_call_count == 1
+    end
+
+    test "includes total_duration_ms from tracer timestamps" do
+      tracer = %Tracer{
+        trace_id: "test",
+        parent_id: nil,
+        started_at: ~U[2024-01-15 10:00:00Z],
+        entries: [],
+        finalized_at: ~U[2024-01-15 10:00:05Z]
+      }
+
+      summary = Tracer.usage_summary(tracer)
+
+      assert summary.total_duration_ms == 5000
+    end
+  end
 end
