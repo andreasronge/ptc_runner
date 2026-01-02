@@ -150,10 +150,10 @@ defmodule PtcDemo.Prompts do
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}
   def validate_profile(profile_str) when is_binary(profile_str) do
-    profile_atom = String.to_atom(profile_str)
+    known_profiles = Enum.map(profiles(), &Atom.to_string/1)
 
-    if profile_atom in profiles() do
-      {:ok, profile_atom}
+    if profile_str in known_profiles do
+      {:ok, String.to_existing_atom(profile_str)}
     else
       valid = Enum.join(profiles(), ", ")
       {:error, "Unknown prompt profile '#{profile_str}'. Valid: #{valid}"}
