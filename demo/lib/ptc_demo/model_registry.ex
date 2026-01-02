@@ -2,14 +2,20 @@ defmodule PtcDemo.ModelRegistry do
   @moduledoc """
   Simple model registry for the demo.
 
-  All aliases resolve to OpenRouter models (requires only OPENROUTER_API_KEY).
-  For direct provider access, use explicit syntax like `anthropic:claude-haiku-4.5`.
+  Supports multiple provider types:
+  - Aliases resolve to OpenRouter models (requires OPENROUTER_API_KEY)
+  - Local Ollama models via `ollama:model-name`
+  - OpenAI-compatible APIs via `openai-compat:base_url|model`
+  - Direct provider access via `anthropic:model`, `openai:model`, etc.
 
   ## Usage
 
       # Resolve an alias to OpenRouter model ID
       {:ok, model_id} = ModelRegistry.resolve("haiku")
       # => {:ok, "openrouter:anthropic/claude-haiku-4.5"}
+
+      # Use local Ollama model
+      {:ok, model_id} = ModelRegistry.resolve("ollama:deepseek-coder:6.7b")
 
       # Use explicit provider (bypasses aliases)
       {:ok, model_id} = ModelRegistry.resolve("anthropic:claude-haiku-4.5")
@@ -18,15 +24,20 @@ defmodule PtcDemo.ModelRegistry do
       ModelRegistry.format_model_list() |> IO.puts()
   """
 
-  # Simple alias -> OpenRouter model ID mapping
+  # Simple alias -> model ID mapping
   @models %{
+    # Cloud models (via OpenRouter)
     "haiku" => "openrouter:anthropic/claude-haiku-4.5",
     "sonnet" => "openrouter:anthropic/claude-sonnet-4",
     "devstral" => "openrouter:mistralai/devstral-2512:free",
     "gemini" => "openrouter:google/gemini-2.5-flash",
     "deepseek" => "openrouter:deepseek/deepseek-chat-v3-0324",
     "kimi" => "openrouter:moonshotai/kimi-k2",
-    "gpt" => "openrouter:openai/gpt-4.1-mini"
+    "gpt" => "openrouter:openai/gpt-4.1-mini",
+    # Local models (via Ollama)
+    "deepseek-local" => "ollama:deepseek-coder:6.7b",
+    "qwen-local" => "ollama:qwen2.5-coder:7b",
+    "llama-local" => "ollama:llama3.2:3b"
   }
 
   # Descriptions for --list-models output
@@ -37,7 +48,10 @@ defmodule PtcDemo.ModelRegistry do
     "gemini" => "Gemini 2.5 Flash - Google's fast model",
     "deepseek" => "DeepSeek Chat V3 - Cost-effective reasoning",
     "kimi" => "Kimi K2 - Moonshot AI's model",
-    "gpt" => "GPT-4.1 Mini - OpenAI's efficient model"
+    "gpt" => "GPT-4.1 Mini - OpenAI's efficient model",
+    "deepseek-local" => "DeepSeek Coder 6.7B - Local via Ollama",
+    "qwen-local" => "Qwen 2.5 Coder 7B - Local via Ollama",
+    "llama-local" => "Llama 3.2 3B - Local via Ollama (fast)"
   }
 
   # Cost per million tokens (for estimation)
@@ -48,7 +62,11 @@ defmodule PtcDemo.ModelRegistry do
     "gemini" => %{input: 0.15, output: 0.60},
     "deepseek" => %{input: 0.14, output: 0.28},
     "kimi" => %{input: 0.60, output: 2.40},
-    "gpt" => %{input: 0.40, output: 1.60}
+    "gpt" => %{input: 0.40, output: 1.60},
+    # Local models are free
+    "deepseek-local" => %{input: 0.0, output: 0.0},
+    "qwen-local" => %{input: 0.0, output: 0.0},
+    "llama-local" => %{input: 0.0, output: 0.0}
   }
 
   @default_model "haiku"
@@ -123,48 +141,75 @@ defmodule PtcDemo.ModelRegistry do
   """
   @spec format_model_list() :: String.t()
   def format_model_list do
-    has_key? = System.get_env("OPENROUTER_API_KEY") != nil
+    has_openrouter_key? = System.get_env("OPENROUTER_API_KEY") != nil
+    ollama_available? = PtcDemo.LLM.available?("ollama:test")
+
+    {cloud_models, local_models} =
+      list_models()
+      |> Enum.split_with(fn m -> String.starts_with?(m.model_id, "openrouter:") end)
 
     header = """
-    Model Aliases (via OpenRouter)
-    ===============================
+    Available Models
+    ================
 
+    Cloud Models (via OpenRouter):
     """
 
-    models =
-      list_models()
+    cloud_section =
+      cloud_models
       |> Enum.map(fn model ->
-        "  #{String.pad_trailing(model.alias, 10)} #{model.description}\n" <>
-          "             #{model.model_id}"
+        "  #{String.pad_trailing(model.alias, 12)} #{model.description}"
       end)
-      |> Enum.join("\n\n")
+      |> Enum.join("\n")
 
-    status =
-      if has_key?,
+    local_header = """
+
+    Local Models (via Ollama):
+    """
+
+    local_section =
+      local_models
+      |> Enum.map(fn model ->
+        "  #{String.pad_trailing(model.alias, 12)} #{model.description}"
+      end)
+      |> Enum.join("\n")
+
+    openrouter_status =
+      if has_openrouter_key?,
         do: "OPENROUTER_API_KEY is set",
-        else: "OPENROUTER_API_KEY not set (required for aliases)"
+        else: "OPENROUTER_API_KEY not set"
+
+    ollama_status =
+      if ollama_available?,
+        do: "Ollama is running",
+        else: "Ollama not running (start with: ollama serve)"
 
     footer = """
 
 
-    Status: #{status}
+    Status:
+      #{openrouter_status}
+      #{ollama_status}
 
     Usage:
-      mix lisp --model=haiku                              # Use alias
-      mix lisp --model=openrouter:anthropic/claude-sonnet-4  # Explicit OpenRouter
-      mix lisp --model=anthropic:claude-haiku-4.5         # Direct Anthropic API
+      mix lisp --model=haiku                                 # Cloud alias
+      mix lisp --model=deepseek-local                        # Local alias
+      mix lisp --model=ollama:codellama:7b                   # Direct Ollama
+      mix lisp --model=openrouter:anthropic/claude-sonnet-4  # Direct OpenRouter
     """
 
-    header <> models <> footer
+    header <> cloud_section <> local_header <> local_section <> footer
   end
 
   @doc """
   Validate a model string format.
 
   Valid formats:
-  - "alias" - Known alias (haiku, gemini, etc.)
+  - "alias" - Known alias (haiku, gemini, deepseek-local, etc.)
   - "provider:model" - Direct provider (anthropic:claude-haiku-4.5)
   - "openrouter:provider/model" - OpenRouter format
+  - "ollama:model-name" - Local Ollama model
+  - "openai-compat:base_url|model" - OpenAI-compatible API
   """
   @spec validate(String.t()) :: :ok | {:error, String.t()}
   def validate(model_string) do
@@ -172,9 +217,19 @@ defmodule PtcDemo.ModelRegistry do
       Map.has_key?(@models, model_string) ->
         :ok
 
+      # Ollama models
+      Regex.match?(~r/^ollama:[\w.-]+(:[\w.-]+)?$/, model_string) ->
+        :ok
+
+      # OpenAI-compatible APIs
+      String.starts_with?(model_string, "openai-compat:") ->
+        :ok
+
+      # Direct providers (anthropic, openai, google)
       Regex.match?(~r/^(anthropic|openai|google):[\w.-]+$/, model_string) ->
         :ok
 
+      # OpenRouter format
       Regex.match?(~r/^openrouter:[\w-]+\/[\w.-]+(:\w+)?$/, model_string) ->
         :ok
 
@@ -185,7 +240,7 @@ defmodule PtcDemo.ModelRegistry do
 
       true ->
         {:error,
-         "Unknown model format: '#{model_string}'. Use 'provider:model' or 'openrouter:provider/model'"}
+         "Unknown model format: '#{model_string}'. Use 'provider:model', 'ollama:model', or 'openrouter:provider/model'"}
     end
   end
 
