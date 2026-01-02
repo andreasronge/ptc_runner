@@ -727,9 +727,38 @@ defmodule PtcRunner.Lisp.Eval do
   defp normalize_for_comparison(value), do: value
 
   # Convert Lisp closures to Erlang functions for use with higher-order functions
-  # The closure must have 1 parameter (enforced at evaluation time)
+  # Creates functions with appropriate arity based on number of patterns
   defp closure_to_fun({:closure, patterns, body, closure_env}, ctx, memory, tool_exec) do
-    fn arg -> eval_closure_arg(arg, patterns, body, closure_env, ctx, memory, tool_exec) end
+    case length(patterns) do
+      0 ->
+        fn -> eval_closure_args([], patterns, body, closure_env, ctx, memory, tool_exec) end
+
+      1 ->
+        fn arg1 ->
+          eval_closure_args([arg1], patterns, body, closure_env, ctx, memory, tool_exec)
+        end
+
+      2 ->
+        fn arg1, arg2 ->
+          eval_closure_args([arg1, arg2], patterns, body, closure_env, ctx, memory, tool_exec)
+        end
+
+      3 ->
+        fn arg1, arg2, arg3 ->
+          eval_closure_args(
+            [arg1, arg2, arg3],
+            patterns,
+            body,
+            closure_env,
+            ctx,
+            memory,
+            tool_exec
+          )
+        end
+
+      n ->
+        raise RuntimeError, "closures with more than 3 parameters not supported (got #{n})"
+    end
   end
 
   # Unwrap builtin function tuples so they can be passed to higher-order functions
@@ -752,28 +781,34 @@ defmodule PtcRunner.Lisp.Eval do
     value
   end
 
-  # Helper to evaluate closure with a single argument.
-  # This function is used inside Erlang functions passed to builtins like Enum.map,
+  # Helper to evaluate closure with multiple arguments.
+  # This function is used inside Erlang functions passed to builtins like Enum.map/reduce,
   # so it must raise (not return error tuples) to signal errors.
   # The raised RuntimeError is caught in apply_fun and converted to an error tuple.
-  defp eval_closure_arg(arg, patterns, body, closure_env, ctx, memory, tool_exec) do
-    if length(patterns) != 1 do
-      raise RuntimeError, "closure arity mismatch: expected 1, got #{length(patterns)}"
+  defp eval_closure_args(args, patterns, body, closure_env, ctx, memory, tool_exec) do
+    if length(args) != length(patterns) do
+      raise RuntimeError,
+            "closure arity mismatch: expected #{length(patterns)}, got #{length(args)}"
     end
 
-    [pattern] = patterns
+    # Match each argument against its corresponding pattern
+    bindings =
+      Enum.zip(patterns, args)
+      |> Enum.reduce(%{}, fn {pattern, arg}, acc ->
+        case match_pattern(pattern, arg) do
+          {:ok, bindings} ->
+            Map.merge(acc, bindings)
 
-    case match_pattern(pattern, arg) do
-      {:ok, bindings} ->
-        new_env = Map.merge(closure_env, bindings)
-
-        case do_eval(body, ctx, memory, new_env, tool_exec) do
-          {:ok, result, _} -> result
-          {:error, reason} -> raise RuntimeError, "closure eval error: #{inspect(reason)}"
+          {:error, {:destructure_error, reason}} ->
+            raise RuntimeError, "destructure error: #{reason}"
         end
+      end)
 
-      {:error, {:destructure_error, reason}} ->
-        raise RuntimeError, "destructure error: #{reason}"
+    new_env = Map.merge(closure_env, bindings)
+
+    case do_eval(body, ctx, memory, new_env, tool_exec) do
+      {:ok, result, _} -> result
+      {:error, reason} -> raise RuntimeError, "closure eval error: #{inspect(reason)}"
     end
   end
 
