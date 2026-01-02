@@ -189,6 +189,17 @@ Keywords can be called as functions to access map values:
 (:missing {:name "Alice"} "default")  ; => "default"
 ```
 
+Keywords also work as predicates in higher-order functions, checking if the field is truthy:
+
+```clojure
+;; As predicate in filter/remove/find (checks field truthiness)
+(filter :active [{:active true} {:active false}])  ; => [{:active true}]
+(remove :deleted [{:deleted true} {:deleted nil}]) ; => [{:deleted nil}]
+
+;; As accessor in map (extracts field value)
+(map :name [{:name "Alice"} {:name "Bob"}])        ; => ["Alice" "Bob"]
+```
+
 ### 3.6 Vectors
 
 Ordered, indexed collections:
@@ -813,9 +824,15 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
+;; Using where (explicit predicate builder)
 (filter (where :active) users)
 (remove (where :deleted) items)
 (find (where :id = 42) users)
+
+;; Using keyword directly (concise, checks truthiness)
+(filter :active users)
+(remove :deleted items)
+(find :special items)
 ```
 
 **Map support:** `filter` and `remove` accept maps as input, treating each entry as a `[key value]` pair passed to the predicate. They return a **list** of `[key value]` pairs (not a map):
@@ -908,6 +925,17 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (take 2 [1 2 3 4])    ; => [1 2]
 (drop 2 [1 2 3 4])    ; => [3 4]
 (distinct [1 2 1 3])  ; => [1 2 3]
+```
+
+**take-while and drop-while with keywords:**
+
+```clojure
+;; Using keyword directly (checks field truthiness)
+(take-while :active [{:active true} {:active true} {:active false}])
+;; => [{:active true} {:active true}]
+
+(drop-while :pending [{:pending true} {:pending false} {:pending true}])
+;; => [{:pending false} {:pending true}]
 ```
 
 #### Combining
