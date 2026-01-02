@@ -241,9 +241,16 @@ defmodule PtcRunner.SubAgent.Loop do
       Telemetry.emit([:turn, :start], %{}, %{agent: agent, turn: state.turn})
       turn_start = System.monotonic_time()
 
-      # Build LLM input
+      # Build LLM input with resolution context for language_spec callbacks
+      resolution_context = %{
+        turn: state.turn,
+        model: state.llm,
+        memory: state.memory,
+        messages: state.messages
+      }
+
       llm_input = %{
-        system: build_system_prompt(agent, state.context),
+        system: build_system_prompt(agent, state.context, resolution_context),
         messages: state.messages,
         turn: state.turn,
         tool_names: Map.keys(agent.tools)
@@ -523,9 +530,9 @@ defmodule PtcRunner.SubAgent.Loop do
     result
   end
 
-  # System prompt generation
-  defp build_system_prompt(agent, context) do
-    Prompt.generate(agent, context: context)
+  # System prompt generation with resolution context for language_spec callbacks
+  defp build_system_prompt(agent, context, resolution_context) do
+    Prompt.generate(agent, context: context, resolution_context: resolution_context)
   end
 
   # Calculate approximate memory size in bytes

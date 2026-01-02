@@ -12,15 +12,19 @@ defmodule PtcRunner.SubAgent.E2ETest do
 
   @moduletag :e2e
 
+  alias PtcRunner.Lisp.Prompts
   alias PtcRunner.SubAgent
   alias PtcRunner.TestSupport.LispLLMClient
 
   @timeout 30_000
+  # Use the minimal prompt - token efficient
+  @prompt_profile :minimal
 
   setup_all do
     ensure_api_key!()
     IO.puts("\n=== SubAgent E2E Tests ===")
-    IO.puts("Model: #{model()}\n")
+    IO.puts("Model: #{model()}")
+    IO.puts("Prompt: #{@prompt_profile}\n")
     :ok
   end
 
@@ -30,37 +34,42 @@ defmodule PtcRunner.SubAgent.E2ETest do
         SubAgent.new(
           prompt: "What is 2 + 2?",
           signature: "() -> :int",
-          max_turns: 1
+          max_turns: 1,
+          system_prompt: %{language_spec: Prompts.get(@prompt_profile)}
         )
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback())
       assert step.return == 4
     end
 
-    test "string transformation" do
+    test "count items in context" do
       agent =
         SubAgent.new(
-          prompt: "Convert 'hello' to uppercase",
-          signature: "() -> :string",
-          max_turns: 1
+          prompt: "How many items are in ctx/items?",
+          signature: "(items [:any]) -> :int",
+          max_turns: 1,
+          system_prompt: %{language_spec: Prompts.get(@prompt_profile)}
         )
 
-      assert {:ok, step} = SubAgent.run(agent, llm: llm_callback())
-      assert step.return == "HELLO"
-    end
-
-    test "with context data" do
-      agent =
-        SubAgent.new(
-          prompt: "Sum the numbers in ctx/numbers using reduce",
-          signature: "(numbers [:int]) -> :int",
-          max_turns: 1
-        )
-
-      context = %{"numbers" => [1, 2, 3, 4, 5]}
+      context = %{"items" => [1, 2, 3, 4, 5]}
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), context: context)
-      assert step.return == 15
+      assert step.return == 5
+    end
+
+    test "sum field in context" do
+      agent =
+        SubAgent.new(
+          prompt: "What is the total of all :amount values in ctx/orders?",
+          signature: "(orders [{:amount :int}]) -> :int",
+          max_turns: 1,
+          system_prompt: %{language_spec: Prompts.get(@prompt_profile)}
+        )
+
+      context = %{"orders" => [%{"amount" => 10}, %{"amount" => 20}, %{"amount" => 30}]}
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), context: context)
+      assert step.return == 60
     end
   end
 

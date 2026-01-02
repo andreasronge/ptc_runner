@@ -231,6 +231,10 @@ mix lisp [options]
 |--------|-------------|
 | `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
+| `--prompt=<name>` | Set prompt profile (minimal, single_shot, multi_turn, default) |
+| `--prompt=a,b` | Compare multiple prompts (e.g., `--prompt=minimal,default`) |
+| `--list-prompts` | Show available prompt profiles and exit |
+| `--show-prompt` | Show system prompt and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
 | `--test` | Run all automated tests and exit |
 | `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
@@ -246,8 +250,56 @@ Examples:
 mix lisp                                  # Interactive with default model (haiku)
 mix lisp --list-models                    # Show available models
 mix lisp --model=gemini                   # Use Gemini via OpenRouter
+mix lisp --prompt=minimal                 # Use minimal prompt (token efficient)
 mix lisp --test --model=deepseek -v       # Test with DeepSeek
 mix lisp --test --validate-clojure        # Validate syntax with Babashka
+```
+
+## Prompt Profiles
+
+Different prompts trade off between token efficiency and LLM accuracy:
+
+| Profile | Tokens | Use Case |
+|---------|--------|----------|
+| `:default` | ~3000 | Full reference - production, complex queries |
+| `:minimal` | ~400 | Bare essentials - token-efficient, simple queries |
+| `:single_shot` | ~450 | One-turn optimized with examples |
+| `:multi_turn` | ~500 | Memory-focused for conversational analysis |
+
+```bash
+# Use minimal prompt for simple queries
+mix lisp --prompt=minimal
+
+# Compare prompt performance
+mix lisp --test --prompt=minimal,default
+
+# See available profiles
+mix lisp --list-prompts
+```
+
+### Prompt Comparison Benchmark
+
+Compare multiple prompts in a single test run:
+
+```bash
+mix lisp --test --prompt=minimal,default
+```
+
+Output:
+```
+========================================
+PROMPT COMPARISON
+========================================
+
+Prompt             Pass    Rate    Tokens      Time
+---------------------------------------------------
+minimal           12/15   80.0%       450      12.5s
+default           14/15   93.3%      1200      18.2s
+```
+
+Or programmatically:
+```elixir
+PtcDemo.LispTestRunner.run_comparison([:minimal, :default])
 ```
 
 ## Interactive Commands
@@ -262,6 +314,7 @@ mix lisp --test --validate-clojure        # Validate syntax with Babashka
 | `/stats` | Show token usage and cost statistics |
 | `/mode` | Show/change data mode (schema/explore) |
 | `/model` | Show/change model |
+| `/prompt` | Show/change prompt profile |
 | `/system` | Show system prompt |
 | `/context` | Show conversation history |
 | `/reset` | Clear conversation context and stats |

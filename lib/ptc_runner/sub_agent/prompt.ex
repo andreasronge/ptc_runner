@@ -64,7 +64,7 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   """
 
-  alias PtcRunner.Lisp.Schema
+  alias PtcRunner.Lisp.{Prompts, Schema}
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.Signature.Renderer
@@ -114,9 +114,10 @@ defmodule PtcRunner.SubAgent.Prompt do
   def generate(%SubAgent{} = agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
     error_context = Keyword.get(opts, :error_context)
+    resolution_context = Keyword.get(opts, :resolution_context, %{})
 
-    # Generate base prompt
-    base_prompt = generate_base_prompt(agent, context)
+    # Generate base prompt with resolution context for language_spec callbacks
+    base_prompt = generate_base_prompt(agent, context, resolution_context)
 
     # Add error recovery prompt if needed
     base_prompt_with_error =
@@ -133,7 +134,67 @@ defmodule PtcRunner.SubAgent.Prompt do
     truncate_if_needed(customized_prompt, agent.prompt_limit)
   end
 
-  defp generate_base_prompt(%SubAgent{} = agent, context) do
+  @doc """
+  Resolve a language_spec value to a string.
+
+  Supports three forms:
+  - String: returned as-is
+  - Atom: resolved via `PtcRunner.Lisp.Prompts.get!/1`
+  - Function: called with context map
+
+  ## Parameters
+
+  - `spec` - The language_spec value (string, atom, or function)
+  - `context` - Context map passed to callback functions
+
+  ## Context Keys
+
+  The context map (for callbacks) contains:
+
+  | Key | Type | Description |
+  |-----|------|-------------|
+  | `:turn` | integer | Current turn number (1-indexed) |
+  | `:model` | atom \\| function | The LLM reference (atom from registry or callback) |
+  | `:memory` | map | Current memory state |
+  | `:messages` | list | Conversation history |
+
+  ## Returns
+
+  The resolved prompt string.
+
+  ## Examples
+
+      # String passthrough
+      iex> PtcRunner.SubAgent.Prompt.resolve_language_spec("custom prompt", %{})
+      "custom prompt"
+
+      # Atom resolution
+      iex> spec = PtcRunner.SubAgent.Prompt.resolve_language_spec(:default, %{})
+      iex> is_binary(spec) and String.contains?(spec, "PTC-Lisp")
+      true
+
+      # Callback
+      iex> callback = fn ctx -> if ctx.turn > 1, do: "multi", else: "single" end
+      iex> PtcRunner.SubAgent.Prompt.resolve_language_spec(callback, %{turn: 1})
+      "single"
+      iex> PtcRunner.SubAgent.Prompt.resolve_language_spec(callback, %{turn: 2})
+      "multi"
+
+  """
+  @spec resolve_language_spec(String.t() | atom() | (map() -> String.t()), map()) :: String.t()
+  def resolve_language_spec(spec, context)
+
+  def resolve_language_spec(spec, _context) when is_binary(spec), do: spec
+
+  def resolve_language_spec(spec, _context) when is_atom(spec) do
+    Prompts.get!(spec)
+  end
+
+  def resolve_language_spec(spec, context) when is_function(spec, 1) do
+    spec.(context)
+  end
+
+  defp generate_base_prompt(%SubAgent{} = agent, context, resolution_context) do
     # Parse signature if present
     context_signature =
       case agent.signature do
@@ -145,8 +206,12 @@ defmodule PtcRunner.SubAgent.Prompt do
     {language_ref, output_fmt} =
       case agent.system_prompt do
         opts when is_map(opts) ->
+          # Resolve language_spec (can be string, atom, or callback)
+          raw_spec = Map.get(opts, :language_spec, :default)
+          resolved_spec = resolve_language_spec(raw_spec, resolution_context)
+
           {
-            Map.get(opts, :language_spec, Schema.to_prompt()),
+            resolved_spec,
             Map.get(opts, :output_format, @output_format)
           }
 

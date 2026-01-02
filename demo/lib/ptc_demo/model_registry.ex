@@ -215,7 +215,9 @@ defmodule PtcDemo.ModelRegistry do
         find_costs_by_model_id(alias_or_model_id)
 
     case costs do
-      nil -> 0.0
+      nil ->
+        0.0
+
       %{input: input_rate, output: output_rate} ->
         input_rate * input_tokens / 1_000_000 + output_rate * output_tokens / 1_000_000
     end
