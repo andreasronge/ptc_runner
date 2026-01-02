@@ -356,5 +356,26 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       assert result == false
     end
+
+    test "some with keyword on empty collection returns nil" do
+      {:ok, %Step{return: result}} =
+        Lisp.run("(some :active [])")
+
+      assert result == nil
+    end
+
+    test "every? with keyword on empty collection returns true" do
+      {:ok, %Step{return: result}} =
+        Lisp.run("(every? :active [])")
+
+      assert result == true
+    end
+
+    test "not-any? with keyword on empty collection returns true" do
+      {:ok, %Step{return: result}} =
+        Lisp.run("(not-any? :error [])")
+
+      assert result == true
+    end
   end
 end
