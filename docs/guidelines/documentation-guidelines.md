@@ -1,0 +1,104 @@
+# Documentation Guidelines
+
+Writing documentation for Elixir projects using HexDocs.
+
+## First Paragraph Rule
+
+Keep the first paragraph concise (typically one line). Tools extract this for summaries.
+
+```elixir
+@doc """
+Executes a SubAgent and returns the result.
+
+Takes a prompt or SubAgent struct and runs it through the agentic loop
+until completion or failure.
+"""
+```
+
+## Tone
+
+- **Direct**: Use imperative mood ("Run the command" not "You should run")
+- **No fluff**: Avoid "simply", "just", "easily"
+- **Technical but approachable**: Explain "why" alongside "how"
+
+## Structure
+
+**Module docs (`@moduledoc`):**
+1. One-line summary
+2. Overview (2-3 sentences)
+3. `## Examples`
+4. Detailed sections
+5. `## Options` (if applicable)
+
+**Guides:**
+1. What this covers (1-2 sentences)
+2. Prerequisites (if any)
+3. Content (progressive complexity)
+4. See Also / cross-links
+
+## Formatting
+
+| Element | Convention |
+|---------|------------|
+| Module refs | `` `PtcRunner.SubAgent` `` |
+| Function refs | `` `run/2` `` local, `` `SubAgent.run/2` `` external |
+| Type refs | `` `t:Step.t/0` `` |
+| Callback refs | `` `c:llm_callback/1` `` |
+| Options | Bullet list: `:option` - Description |
+| Headings | `##` for sections (never `#`) |
+
+## Code Examples
+
+Use `iex>` prompt for doctests:
+
+```elixir
+## Examples
+
+    iex> SubAgent.run("Hello", llm: fn _ -> {:ok, "(return 42)"} end)
+    {:ok, %Step{return: 42}}
+```
+
+## Guides vs Module Docs
+
+| Guides | Module Docs |
+|--------|-------------|
+| Conceptual, tutorial-style | API reference |
+| Multiple modules | Single module focus |
+| "How to achieve X" | "What does Y do" |
+
+## Brevity
+
+- Paragraphs: 2-4 sentences max
+- Guide sections: <30 lines (split or move to module docs)
+- Prefer linking over explaining
+
+```markdown
+<!-- Don't: restate module docs -->
+The `max_turns` option limits iterations. Default is 10...
+
+<!-- Do: show usage, link for details -->
+Limit iterations with `max_turns`. See `PtcRunner.SubAgent.run/2` for all options.
+```
+
+## What NOT to Document
+
+- Implementation details (use code comments)
+- Private functions (use `@doc false`)
+- Obvious behavior
+- Future plans or TODOs
+
+## Audience
+
+Guides are for library users, not contributors.
+
+- Use `MyApp.*` namespaces in examples (not internal modules)
+- Focus on public API usage
+- Assume readers installed the library as a dependency
+
+## File Naming
+
+| Location | Pattern |
+|----------|---------|
+| SubAgent guides | `subagent-<topic>.md` |
+| General guides | `<topic>.md` |
+| Guidelines | `<topic>-guidelines.md` |
