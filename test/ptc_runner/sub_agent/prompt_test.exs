@@ -370,6 +370,39 @@ defmodule PtcRunner.SubAgent.PromptTest do
       refute prompt =~ "Clojure-inspired"
     end
 
+    test "language_spec atom resolves to prompt profile" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: %{language_spec: :minimal}
+        )
+
+      prompt = Prompt.generate(agent, context: %{})
+      assert prompt =~ "Quick Reference"
+      # not the full default
+      refute prompt =~ "Clojure-inspired"
+    end
+
+    test "language_spec callback receives resolution context" do
+      callback = fn ctx ->
+        "turn:#{ctx.turn}"
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: %{language_spec: callback}
+        )
+
+      prompt =
+        Prompt.generate(agent,
+          context: %{},
+          resolution_context: %{turn: 2, model: :test, memory: %{}, messages: []}
+        )
+
+      assert prompt =~ "turn:2"
+    end
+
     test "output_format replaces output section" do
       custom_output = "Return JSON only."
 

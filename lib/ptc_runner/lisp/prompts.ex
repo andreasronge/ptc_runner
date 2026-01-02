@@ -303,7 +303,18 @@ defmodule PtcRunner.Lisp.Prompts do
   @doc """
   List all prompts with descriptions.
 
-  Returns a list of `{key, description}` tuples.
+  Returns a list of `{key, description}` tuples for all available prompts.
+  The description is extracted from the first line of the prompt content.
+  Archived prompts have "[archived]" appended to their description.
+
+  ## Examples
+
+      iex> list = PtcRunner.Lisp.Prompts.list_with_descriptions()
+      iex> Enum.any?(list, fn {k, _} -> k == :default end)
+      true
+      iex> is_list(list)
+      true
+
   """
   @spec list_with_descriptions() :: [{atom(), String.t()}]
   def list_with_descriptions do
