@@ -41,6 +41,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
 | `pluck` | Extract field values from collections (§8) |
+| `floor`, `ceil`, `round`, `trunc` | Integer rounding (returns int, not double) |
 | `call` | Tool invocation special form (§9) |
 | Keyword/string coercion in `where` | `:status = :active` matches `"active"` (§7.6) |
 | Path-based `where` | `(where [:user :role] = :admin)` for nested access (§7.1) |
@@ -1119,6 +1120,10 @@ The `seq` function converts a collection to a sequence:
 | `abs` | `(abs x)` | Absolute value |
 | `max` | `(max x y ...)` | Maximum value |
 | `min` | `(min x y ...)` | Minimum value |
+| `floor` | `(floor x)` | Round toward -∞ |
+| `ceil` | `(ceil x)` | Round toward +∞ |
+| `round` | `(round x)` | Round to nearest integer |
+| `trunc` | `(trunc x)` | Truncate toward zero |
 
 **Division behavior:** The `/` operator always returns a float, even for exact divisions. Integer division (`quot`) is not supported. Division by zero raises an execution error.
 
@@ -1134,6 +1139,10 @@ The `seq` function converts a collection to a sequence:
 (abs -5)        ; => 5
 (max 1 5 3)     ; => 5
 (min 1 5 3)     ; => 1
+(floor 3.7)     ; => 3
+(ceil 3.2)      ; => 4
+(round 3.5)     ; => 4
+(trunc -3.7)    ; => -3
 ```
 
 ### 8.5 Comparison

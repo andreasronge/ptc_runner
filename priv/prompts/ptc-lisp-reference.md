@@ -87,6 +87,7 @@ memory/results        ; read from persistent memory
 ; Arithmetic & Comparison
 (+ 1 2 3)  (- 10 3)  (* 2 3)  (/ 10 2)  (mod 10 3)
 (inc x)  (dec x)  (abs x)  (max 1 5 3)  (min 1 5 3)
+(floor x)  (ceil x)  (round x)  (trunc x)
 (= a b)  (not= a b)  (< a b)  (> a b)  (<= a b)  (>= a b)
 
 ; Logic
