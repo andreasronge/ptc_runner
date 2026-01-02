@@ -36,8 +36,24 @@ defmodule PtcRunner.SubAgent.Prompt do
   |--------|-------------|
   | `:prefix` | Prepended before all generated content |
   | `:suffix` | Appended after all generated content |
-  | `:language_spec` | Replaces the PTC-Lisp language reference section |
+  | `:language_spec` | Replaces the PTC-Lisp language reference section (see below) |
   | `:output_format` | Replaces output format instructions |
+
+  ### Language Spec Resolution
+
+  The `:language_spec` option determines the PTC-Lisp reference included in the prompt.
+  It can be:
+
+  - **Atom** - Resolved via `PtcRunner.Lisp.Prompts.get!/1` (e.g., `:single_shot`, `:multi_turn`)
+  - **String** - Used as-is
+  - **Callback** - Function receiving resolution context: `fn ctx -> "prompt" end`
+
+  **Smart default based on `max_turns`:**
+
+  - `max_turns: 1` (single-shot) → `:single_shot` (base language reference)
+  - `max_turns: > 1` (loop mode) → `:multi_turn` (includes memory documentation)
+
+  This ensures LLMs in multi-turn scenarios know how to use `memory/` for persistence.
 
   ### Prompt Assembly Order
 
@@ -64,7 +80,7 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   """
 
-  alias PtcRunner.Lisp.{Prompts, Schema}
+  alias PtcRunner.Lisp.Prompts
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.Signature.Renderer
@@ -169,7 +185,7 @@ defmodule PtcRunner.SubAgent.Prompt do
       "custom prompt"
 
       # Atom resolution
-      iex> spec = PtcRunner.SubAgent.Prompt.resolve_language_spec(:default, %{})
+      iex> spec = PtcRunner.SubAgent.Prompt.resolve_language_spec(:single_shot, %{})
       iex> is_binary(spec) and String.contains?(spec, "PTC-Lisp")
       true
 
@@ -198,16 +214,25 @@ defmodule PtcRunner.SubAgent.Prompt do
     # Parse signature if present
     context_signature =
       case agent.signature do
-        nil -> nil
-        sig_str -> Signature.parse(sig_str) |> elem(1)
+        nil ->
+          nil
+
+        sig_str ->
+          case Signature.parse(sig_str) do
+            {:ok, sig} -> sig
+            {:error, _reason} -> nil
+          end
       end
 
     # Get custom sections from system_prompt if it's a map
+    # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
+    default_spec = if agent.max_turns > 1, do: :multi_turn, else: :single_shot
+
     {language_ref, output_fmt} =
       case agent.system_prompt do
         opts when is_map(opts) ->
           # Resolve language_spec (can be string, atom, or callback)
-          raw_spec = Map.get(opts, :language_spec, :default)
+          raw_spec = Map.get(opts, :language_spec, default_spec)
           resolved_spec = resolve_language_spec(raw_spec, resolution_context)
 
           {
@@ -216,7 +241,7 @@ defmodule PtcRunner.SubAgent.Prompt do
           }
 
         _ ->
-          {Schema.to_prompt(), @output_format}
+          {Prompts.get(default_spec), @output_format}
       end
 
     # Generate sections
@@ -224,6 +249,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     rules_section = generate_rules_section()
     data_inventory = generate_data_inventory(context, context_signature)
     tool_schemas = generate_tool_schemas(agent.tools, agent.tool_catalog)
+    expected_output = generate_expected_output_section(context_signature)
     mission = expand_mission(agent.prompt, context)
 
     # Combine all sections
@@ -233,9 +259,11 @@ defmodule PtcRunner.SubAgent.Prompt do
       data_inventory,
       tool_schemas,
       language_ref,
+      expected_output,
       output_fmt,
       "# Mission\n\n#{mission}"
     ]
+    |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
 
@@ -721,7 +749,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     ```
     return(data :any) -> :exit-success
     ```
-    Complete the mission successfully. Data must match your mission's signature.
+    Complete the mission successfully. Return the required data.
     """
   end
 
@@ -744,5 +772,45 @@ defmodule PtcRunner.SubAgent.Prompt do
     ```
     User-defined tool. Check implementation for details.
     """
+  end
+
+  defp generate_expected_output_section(nil), do: ""
+
+  defp generate_expected_output_section({:signature, _params, return_type}) do
+    type_str = Renderer.render_type(return_type)
+    example_val = generate_return_example_value(return_type)
+
+    """
+    # Expected Output
+
+    Your final answer must match this format: `#{type_str}`
+
+    Call `(return #{example_val})` when complete.
+    """
+  end
+
+  defp generate_return_example_value(:int), do: "42"
+  defp generate_return_example_value(:float), do: "3.14"
+  defp generate_return_example_value(:string), do: "\"result\""
+  defp generate_return_example_value(:bool), do: "true"
+  defp generate_return_example_value(:keyword), do: ":ok"
+  defp generate_return_example_value(:any), do: "nil"
+  defp generate_return_example_value(:map), do: "{}"
+
+  defp generate_return_example_value({:optional, type}) do
+    generate_return_example_value(type)
+  end
+
+  defp generate_return_example_value({:list, _type}) do
+    "[]"
+  end
+
+  defp generate_return_example_value({:map, fields}) do
+    inner =
+      Enum.map_join(fields, ", ", fn {name, type} ->
+        ":#{name} #{generate_return_example_value(type)}"
+      end)
+
+    "{#{inner}}"
   end
 end
