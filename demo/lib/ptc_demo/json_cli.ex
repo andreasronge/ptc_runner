@@ -23,8 +23,6 @@ defmodule PtcDemo.JsonCLI do
     # Handle --show-prompt (needs agent but not API key)
     CLIBase.handle_show_prompt(opts, PtcDemo.Agent)
 
-    CLIBase.ensure_api_key!()
-
     data_mode = if opts[:explore], do: :explore, else: :schema
     model = opts[:model]
     run_tests = opts[:test]
@@ -33,12 +31,17 @@ defmodule PtcDemo.JsonCLI do
     report_path = opts[:report]
     runs = opts[:runs]
 
+    # Resolve model early so we can check if it's a local provider
+    resolved_model = if model, do: CLIBase.resolve_model(model), else: nil
+
+    # Check API key (skipped for local providers like Ollama)
+    CLIBase.ensure_api_key!(resolved_model)
+
     # Start the agent
     {:ok, _pid} = PtcDemo.Agent.start_link(data_mode: data_mode)
 
     # Set model if specified
-    if model do
-      resolved_model = CLIBase.resolve_model(model)
+    if resolved_model do
       PtcDemo.Agent.set_model(resolved_model)
     end
 

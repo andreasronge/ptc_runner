@@ -23,10 +23,8 @@ defmodule PtcDemo.LispCLI do
     # Handle --show-prompt (needs agent but not API key)
     CLIBase.handle_show_prompt(opts, PtcDemo.LispAgent)
 
-    CLIBase.ensure_api_key!()
-
     data_mode = if opts[:explore], do: :explore, else: :schema
-    prompt_profile = opts[:prompt] || :default
+    prompt_profile = opts[:prompt] || :auto
     prompts_for_comparison = opts[:prompts]
     model = opts[:model]
     run_tests = opts[:test]
@@ -36,20 +34,30 @@ defmodule PtcDemo.LispCLI do
     runs = opts[:runs]
     validate_clojure = opts[:validate_clojure]
 
+    # Resolve model early so we can check if it's a local provider
+    resolved_model = if model, do: CLIBase.resolve_model(model), else: nil
+
+    # Check API key (skipped for local providers like Ollama)
+    CLIBase.ensure_api_key!(resolved_model)
+
     # Start the agent (use first prompt for comparison mode, or specified prompt)
+    # Note: :auto is resolved to :single_shot for agent startup; test runner overrides per-test
     initial_prompt =
-      if prompts_for_comparison, do: hd(prompts_for_comparison), else: prompt_profile
+      cond do
+        prompts_for_comparison -> hd(prompts_for_comparison)
+        prompt_profile == :auto -> :single_shot
+        true -> prompt_profile
+      end
 
     {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode, prompt: initial_prompt)
 
     # Set model if specified
-    if model do
-      resolved_model = CLIBase.resolve_model(model)
+    if resolved_model do
       PtcDemo.LispAgent.set_model(resolved_model)
     end
 
     # Handle comparison mode (multiple prompts)
-    if run_tests and prompts_for_comparison do
+    if run_tests && prompts_for_comparison do
       run_comparison_and_exit(prompts_for_comparison, verbose: verbose, data_mode: data_mode)
     end
 
@@ -335,12 +343,7 @@ defmodule PtcDemo.LispCLI do
         :explore -> "explore (LLM discovers schema via introspection)"
       end
 
-    prompt_desc =
-      if prompt_profile == :default do
-        "default"
-      else
-        "#{prompt_profile}"
-      end
+    prompt_desc = "#{prompt_profile}"
 
     """
 

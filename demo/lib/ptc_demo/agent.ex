@@ -161,7 +161,7 @@ defmodule PtcDemo.Agent do
   def init(opts) do
     model = resolve_model_from_env()
     data_mode = Keyword.get(opts, :data_mode, :schema)
-    prompt_profile = Keyword.get(opts, :prompt, :default)
+    prompt_profile = Keyword.get(opts, :prompt, :single_shot)
 
     datasets = %{
       "products" => SampleData.products(),
@@ -368,24 +368,11 @@ defmodule PtcDemo.Agent do
     fn %{system: system, messages: messages} ->
       full_messages = [%{role: :system, content: system} | messages]
 
-      case ReqLLM.generate_text(model, full_messages,
+      case PtcDemo.LLM.generate_text(model, full_messages,
              receive_timeout: @timeout,
              req_http_options: [retry: :transient, max_retries: 3]
            ) do
-        {:ok, response} ->
-          text = ReqLLM.Response.text(response)
-          usage = ReqLLM.Response.usage(response)
-
-          tokens =
-            if usage do
-              %{
-                input: usage[:input_tokens] || usage["input_tokens"] || 0,
-                output: usage[:output_tokens] || usage["output_tokens"] || 0
-              }
-            else
-              %{input: 0, output: 0}
-            end
-
+        {:ok, %{content: text, tokens: tokens}} ->
           {:ok, %{content: text || "", tokens: tokens}}
 
         {:error, reason} ->

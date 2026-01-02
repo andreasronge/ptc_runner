@@ -21,43 +21,68 @@ defmodule PtcDemo.CLIBase do
     if env_file do
       env_file
       |> Dotenvy.source!()
-      |> Enum.each(fn {key, value} -> System.put_env(key, value) end)
+      |> Enum.each(fn {key, value} ->
+        # Only set if not already set (command line env vars take precedence)
+        unless System.get_env(key) do
+          System.put_env(key, value)
+        end
+      end)
     end
   end
 
   @doc """
-  Ensure that an API key environment variable is set.
+  Ensure that an API key environment variable is set (unless using local models).
 
   Checks for OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY.
   Halts the program with exit code 1 if none are found.
+
+  If a model is specified that uses a local provider (e.g., ollama:*),
+  the check is skipped.
   """
-  def ensure_api_key! do
-    has_key =
-      System.get_env("OPENROUTER_API_KEY") ||
-        System.get_env("ANTHROPIC_API_KEY") ||
-        System.get_env("OPENAI_API_KEY")
+  def ensure_api_key!(model \\ nil) do
+    # Skip check for local providers
+    if local_provider?(model) do
+      :ok
+    else
+      has_key =
+        System.get_env("OPENROUTER_API_KEY") ||
+          System.get_env("ANTHROPIC_API_KEY") ||
+          System.get_env("OPENAI_API_KEY")
 
-    unless has_key do
-      IO.puts("""
+      unless has_key do
+        IO.puts("""
 
-      ERROR: No API key found!
+        ERROR: No API key found!
 
-      Set one of these environment variables:
-        - OPENROUTER_API_KEY (recommended, supports many models)
-        - ANTHROPIC_API_KEY
-        - OPENAI_API_KEY
+        Set one of these environment variables:
+          - OPENROUTER_API_KEY (recommended, supports many models)
+          - ANTHROPIC_API_KEY
+          - OPENAI_API_KEY
 
-      You can create a .env file in the demo directory:
-        OPENROUTER_API_KEY=sk-or-...
+        You can create a .env file in the demo directory:
+          OPENROUTER_API_KEY=sk-or-...
 
-      Or export directly:
-        export OPENROUTER_API_KEY=sk-or-...
+        Or export directly:
+          export OPENROUTER_API_KEY=sk-or-...
 
-      """)
+        Or use a local model (no API key required):
+          mix lisp --model=ollama:deepseek-coder:6.7b
 
-      System.halt(1)
+        """)
+
+        System.halt(1)
+      end
     end
   end
+
+  defp local_provider?(nil), do: false
+
+  defp local_provider?(model) when is_binary(model) do
+    String.starts_with?(model, "ollama:") or
+      String.starts_with?(model, "openai-compat:")
+  end
+
+  defp local_provider?(_), do: false
 
   @doc """
   Parse common CLI arguments.
@@ -216,11 +241,21 @@ defmodule PtcDemo.CLIBase do
 
   Takes opts map and the agent module (PtcDemo.Agent or PtcDemo.LispAgent).
   The data_mode is determined from opts[:explore].
+  The prompt profile is determined from opts[:prompt] or opts[:prompts] (first one).
   """
   def handle_show_prompt(opts, agent_module) do
     if opts[:show_prompt] do
       data_mode = if opts[:explore], do: :explore, else: :schema
-      {:ok, _pid} = agent_module.start_link(data_mode: data_mode)
+
+      # Resolve prompt: use opts[:prompt], first of opts[:prompts], or default to :single_shot
+      prompt_profile =
+        cond do
+          opts[:prompt] -> opts[:prompt]
+          opts[:prompts] -> hd(opts[:prompts])
+          true -> :single_shot
+        end
+
+      {:ok, _pid} = agent_module.start_link(data_mode: data_mode, prompt: prompt_profile)
       prompt = agent_module.system_prompt()
       IO.puts("\n[SYSTEM PROMPT]\n")
       IO.puts(prompt)

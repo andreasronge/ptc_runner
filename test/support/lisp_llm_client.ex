@@ -29,24 +29,33 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
       PTC_TEST_MODEL=haiku mix test test/ptc_runner/lisp/e2e_test.exs --include e2e
   """
 
-  alias PtcRunner.Lisp.Schema
+  alias PtcRunner.Lisp.Prompts
+  alias PtcRunner.TestSupport.LLM
 
   @default_model "openrouter:google/gemini-2.5-flash"
   @timeout 60_000
+  # Retry options for transient errors (502, 503, 504) via Req
+  # :transient retries all HTTP methods (including POST), unlike :safe_transient
+  @req_opts [retry: :transient, max_retries: 3]
 
   @model_presets %{
+    # Cloud models (via OpenRouter)
     "haiku" => "openrouter:anthropic/claude-haiku-4.5",
     "devstral" => "openrouter:mistralai/devstral-2512:free",
     "gemini" => "openrouter:google/gemini-2.5-flash",
     "deepseek" => "openrouter:deepseek/deepseek-v3.2",
     "kimi" => "openrouter:moonshotai/kimi-k2",
-    "gpt" => "openrouter:openai/gpt-5.1-codex-mini"
+    "gpt" => "openrouter:openai/gpt-5.1-codex-mini",
+    # Local models (via Ollama)
+    "deepseek-local" => "ollama:deepseek-coder:6.7b",
+    "qwen-local" => "ollama:qwen2.5-coder:7b",
+    "llama-local" => "ollama:llama3.2:3b"
   }
 
   @doc """
   Generates a PTC-Lisp program from a natural language task description.
 
-  Uses the compact `PtcRunner.Lisp.Schema.to_prompt()` reference to guide
+  Uses the compact `PtcRunner.Lisp.Prompts.get(:single_shot)` reference to guide
   the LLM in generating valid PTC-Lisp code.
 
   ## Arguments
@@ -62,7 +71,7 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
     prompt = """
     You are generating a PTC-Lisp program for data transformation.
 
-    #{Schema.to_prompt()}
+    #{Prompts.get(:single_shot)}
 
     Available data (access via ctx/):
     - ctx/products - list of product maps with keys: name, price, category, in_stock
@@ -74,7 +83,21 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
     Return ONLY the PTC-Lisp expression, no explanation or markdown formatting.
     """
 
-    text = ReqLLM.generate_text!(model(), prompt, receive_timeout: @timeout)
+    text =
+      if local_provider?(model()) do
+        # Use TestSupport.LLM for local providers
+        messages = [%{role: :user, content: prompt}]
+
+        case LLM.generate_text(model(), messages, receive_timeout: @timeout) do
+          {:ok, text} -> text
+          {:error, reason} -> raise "LLM error: #{inspect(reason)}"
+        end
+      else
+        # Use ReqLLM for cloud providers
+        opts = [receive_timeout: @timeout, req_http_options: @req_opts]
+        ReqLLM.generate_text!(model(), prompt, opts)
+      end
+
     clean_response(text)
   end
 
@@ -140,7 +163,8 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
   defp ensure_api_key! do
     load_dotenv()
 
-    unless System.get_env("OPENROUTER_API_KEY") do
+    # Skip API key check for local providers
+    unless local_provider?(model()) or System.get_env("OPENROUTER_API_KEY") do
       raise """
       OPENROUTER_API_KEY not set.
 
@@ -148,8 +172,16 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
         OPENROUTER_API_KEY=sk-or-...
         PTC_TEST_MODEL=haiku  # optional, defaults to gemini
 
+      Or use a local model (no API key required):
+        PTC_TEST_MODEL=deepseek-local
+
       For CI, ensure the secret is configured.
       """
     end
+  end
+
+  defp local_provider?(model) do
+    String.starts_with?(model, "ollama:") or
+      String.starts_with?(model, "openai-compat:")
   end
 end
