@@ -199,4 +199,108 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == %{n: 2}
     end
   end
+
+  # ==========================================================================
+  # Keywords as Functions in Higher-Order Functions
+  # ==========================================================================
+
+  describe "keywords as functions in HOFs" do
+    test "map with keyword extracts field values" do
+      items = [%{name: "Alice"}, %{name: "Bob"}]
+      {:ok, %Step{return: result}} = Lisp.run("(map :name ctx/items)", context: %{items: items})
+      assert result == ["Alice", "Bob"]
+    end
+
+    test "mapv with keyword extracts field values" do
+      items = [%{name: "Alice"}, %{name: "Bob"}]
+      {:ok, %Step{return: result}} = Lisp.run("(mapv :name ctx/items)", context: %{items: items})
+      assert result == ["Alice", "Bob"]
+    end
+
+    test "filter with keyword as predicate" do
+      items = [
+        %{active: true, name: "A"},
+        %{active: false, name: "B"},
+        %{active: true, name: "C"}
+      ]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(filter :active ctx/items)", context: %{items: items})
+
+      assert length(result) == 2
+      assert Enum.all?(result, & &1.active)
+    end
+
+    test "filter with keyword checks truthiness not just presence" do
+      items = [
+        %{value: nil},
+        %{value: false},
+        %{value: true},
+        %{value: 0},
+        %{value: ""}
+      ]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(filter :value ctx/items)", context: %{items: items})
+
+      # nil and false are falsy, 0 and "" are truthy
+      assert length(result) == 3
+    end
+
+    test "remove with keyword as predicate" do
+      items = [%{active: true}, %{active: false}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(remove :active ctx/items)", context: %{items: items})
+
+      assert length(result) == 1
+      assert hd(result).active == false
+    end
+
+    test "find with keyword as predicate" do
+      items = [%{special: false}, %{special: true}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(find :special ctx/items)", context: %{items: items})
+
+      assert result == %{special: true}
+    end
+
+    test "take-while with keyword as predicate" do
+      items = [%{active: true}, %{active: true}, %{active: false}, %{active: true}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(take-while :active ctx/items)", context: %{items: items})
+
+      assert length(result) == 2
+    end
+
+    test "drop-while with keyword as predicate" do
+      items = [%{active: true}, %{active: true}, %{active: false}, %{active: true}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(drop-while :active ctx/items)", context: %{items: items})
+
+      assert length(result) == 2
+      assert hd(result).active == false
+    end
+
+    test "pluck still works with atoms as regular values" do
+      items = [%{email: "a@b.com"}, %{email: "c@d.com"}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(pluck :email ctx/items)", context: %{items: items})
+
+      assert result == ["a@b.com", "c@d.com"]
+    end
+
+    test "sort-by still works with keywords" do
+      items = [%{score: 3}, %{score: 1}, %{score: 2}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(sort-by :score ctx/items)", context: %{items: items})
+
+      assert Enum.map(result, & &1.score) == [1, 2, 3]
+    end
+  end
 end
