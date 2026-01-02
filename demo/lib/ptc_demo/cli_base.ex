@@ -123,14 +123,13 @@ defmodule PtcDemo.CLIBase do
 
           prompts =
             Enum.map(prompt_names, fn name ->
-              atom = String.to_atom(String.trim(name))
+              case PtcDemo.Prompts.validate_profile(String.trim(name)) do
+                {:ok, atom} ->
+                  atom
 
-              if atom in PtcDemo.Prompts.profiles() do
-                atom
-              else
-                valid = Enum.join(PtcDemo.Prompts.profiles(), ", ")
-                IO.puts("Error: Unknown prompt profile '#{name}'. Valid: #{valid}")
-                System.halt(1)
+                {:error, message} ->
+                  IO.puts("Error: #{message}")
+                  System.halt(1)
               end
             end)
 
