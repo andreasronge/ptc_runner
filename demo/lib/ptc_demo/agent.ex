@@ -30,6 +30,7 @@ defmodule PtcDemo.Agent do
   defstruct [
     :model,
     :data_mode,
+    :prompt_profile,
     :datasets,
     :last_program,
     :last_result,
@@ -91,6 +92,13 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
+  Get the current prompt profile.
+  """
+  def prompt_profile do
+    GenServer.call(__MODULE__, :prompt_profile)
+  end
+
+  @doc """
   Get the current system prompt.
   """
   def system_prompt do
@@ -102,6 +110,15 @@ defmodule PtcDemo.Agent do
   """
   def set_data_mode(mode) when mode in [:schema, :explore] do
     GenServer.call(__MODULE__, {:set_data_mode, mode})
+  end
+
+  @doc """
+  Set the prompt profile.
+
+  See `PtcDemo.Prompts.list/0` for available profiles.
+  """
+  def set_prompt_profile(profile) when is_atom(profile) do
+    GenServer.call(__MODULE__, {:set_prompt_profile, profile})
   end
 
   @doc """
@@ -144,6 +161,7 @@ defmodule PtcDemo.Agent do
   def init(opts) do
     model = resolve_model_from_env()
     data_mode = Keyword.get(opts, :data_mode, :schema)
+    prompt_profile = Keyword.get(opts, :prompt, :default)
 
     datasets = %{
       "products" => SampleData.products(),
@@ -153,11 +171,13 @@ defmodule PtcDemo.Agent do
     }
 
     IO.puts("   [Data] #{data_mode}")
+    IO.puts("   [Prompt] #{prompt_profile}")
 
     {:ok,
      %__MODULE__{
        model: model,
        data_mode: data_mode,
+       prompt_profile: prompt_profile,
        datasets: datasets,
        last_program: nil,
        last_result: nil,
@@ -173,7 +193,7 @@ defmodule PtcDemo.Agent do
     debug = Keyword.get(opts, :debug, false)
 
     # Build the SubAgent
-    agent = build_agent(state.data_mode)
+    agent = build_agent(state.data_mode, state.prompt_profile)
 
     # Build context with datasets and current memory
     context = Map.merge(state.datasets, %{"memory" => state.memory, "question" => question})
@@ -272,8 +292,13 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
+  def handle_call(:prompt_profile, _from, state) do
+    {:reply, state.prompt_profile, state}
+  end
+
+  @impl true
   def handle_call(:system_prompt, _from, state) do
-    agent = build_agent(state.data_mode)
+    agent = build_agent(state.data_mode, state.prompt_profile)
     preview = SubAgent.preview_prompt(agent, context: state.datasets)
     {:reply, preview.system, state}
   end
@@ -292,19 +317,25 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
+  def handle_call({:set_prompt_profile, profile}, _from, state) do
+    {:reply, :ok, %{state | prompt_profile: profile}}
+  end
+
+  @impl true
   def handle_call({:set_model, model}, _from, state) do
     {:reply, :ok, %{state | model: model}}
   end
 
   # --- Private Functions ---
 
-  defp build_agent(data_mode) do
+  defp build_agent(data_mode, prompt_profile) do
     SubAgent.new(
       prompt: "{{question}}",
       signature: "(question :string) -> :any",
       max_turns: @max_turns,
       system_prompt: %{
-        prefix: system_prompt_prefix(data_mode)
+        prefix: system_prompt_prefix(data_mode),
+        language_spec: PtcDemo.Prompts.get(prompt_profile)
       }
     )
   end

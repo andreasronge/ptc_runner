@@ -68,14 +68,16 @@ defmodule PtcDemo.CLIBase do
     - --test=<n>: run a single test by index (e.g., --test=14)
     - --verbose or -v: verbose output
     - --model=<name>: specify model (e.g., --model=haiku)
+    - --prompt=<name>: specify prompt profile (e.g., --prompt=minimal)
     - --report=<path>: generate report file (e.g., --report=report.md)
     - --runs=<n>: number of test runs (e.g., --runs=3)
     - --list-models: list available models and exit
+    - --list-prompts: list available prompt profiles and exit
     - --show-prompt: show system prompt and exit
     - --validate-clojure: validate generated programs against Babashka
     - --no-validate-clojure: skip Clojure validation
 
-  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :report, :runs, :list_models, :show_prompt, :validate_clojure
+  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -107,8 +109,37 @@ defmodule PtcDemo.CLIBase do
         arg == "--list-models" ->
           Map.put(acc, :list_models, true)
 
+        arg == "--list-prompts" ->
+          Map.put(acc, :list_prompts, true)
+
         arg == "--show-prompt" ->
           Map.put(acc, :show_prompt, true)
+
+        String.starts_with?(arg, "--prompt=") ->
+          prompt_value = String.replace_prefix(arg, "--prompt=", "")
+
+          # Support comma-separated prompts for comparison mode
+          prompt_names = String.split(prompt_value, ",")
+
+          prompts =
+            Enum.map(prompt_names, fn name ->
+              atom = String.to_atom(String.trim(name))
+
+              if atom in PtcDemo.Prompts.profiles() do
+                atom
+              else
+                valid = Enum.join(PtcDemo.Prompts.profiles(), ", ")
+                IO.puts("Error: Unknown prompt profile '#{name}'. Valid: #{valid}")
+                System.halt(1)
+              end
+            end)
+
+          # If single prompt, store as atom; if multiple, store as list for comparison mode
+          if length(prompts) == 1 do
+            Map.put(acc, :prompt, hd(prompts))
+          else
+            Map.put(acc, :prompts, prompts)
+          end
 
         arg == "--validate-clojure" ->
           Map.put(acc, :validate_clojure, true)
@@ -160,6 +191,23 @@ defmodule PtcDemo.CLIBase do
   def handle_list_models(opts) do
     if opts[:list_models] do
       IO.puts(PtcDemo.ModelRegistry.format_model_list())
+      System.halt(0)
+    end
+  end
+
+  @doc """
+  Handle --list-prompts flag. Prints prompt profiles and exits if flag is set.
+  """
+  def handle_list_prompts(opts) do
+    if opts[:list_prompts] do
+      IO.puts("\nAvailable prompt profiles:\n")
+
+      for {name, description} <- PtcDemo.Prompts.list() do
+        IO.puts("  #{name}")
+        IO.puts("    #{description}\n")
+      end
+
+      IO.puts("Usage: --prompt=<name>  (e.g., --prompt=minimal)\n")
       System.halt(0)
     end
   end

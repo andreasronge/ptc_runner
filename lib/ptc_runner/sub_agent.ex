@@ -80,11 +80,21 @@ defmodule PtcRunner.SubAgent do
       10
   """
 
+  @typedoc """
+  Language spec for system prompts.
+
+  Can be:
+  - String: used as-is
+  - Atom: resolved via `PtcRunner.Lisp.Prompts.get!/1` (e.g., `:minimal`, `:default`)
+  - Function: callback receiving context map with `:turn`, `:model`, `:memory`, `:messages`
+  """
+  @type language_spec :: String.t() | atom() | (map() -> String.t())
+
   @type system_prompt_opts ::
           %{
             optional(:prefix) => String.t(),
             optional(:suffix) => String.t(),
-            optional(:language_spec) => String.t(),
+            optional(:language_spec) => language_spec(),
             optional(:output_format) => String.t()
           }
           | (String.t() -> String.t())
@@ -475,9 +485,36 @@ defmodule PtcRunner.SubAgent do
     # Expand template in prompt
     expanded_prompt = expand_template(agent.prompt, context)
 
+    # Build resolution context for language_spec callbacks
+    messages = [%{role: :user, content: expanded_prompt}]
+
+    resolution_context = %{
+      turn: 1,
+      model: llm,
+      memory: %{},
+      messages: messages
+    }
+
+    # Build system prompt - use language_spec from system_prompt if available
+    alias PtcRunner.SubAgent.Prompt
+
+    system_prompt =
+      case agent.system_prompt do
+        %{language_spec: lang_spec} ->
+          # Resolve language_spec (can be string, atom, or callback)
+          Prompt.resolve_language_spec(lang_spec, resolution_context)
+
+        override when is_binary(override) ->
+          # String override
+          override
+
+        _ ->
+          default_system_prompt()
+      end
+
     # Build LLM input
     llm_input = %{
-      system: default_system_prompt(),
+      system: system_prompt,
       messages: [%{role: :user, content: expanded_prompt}]
     }
 

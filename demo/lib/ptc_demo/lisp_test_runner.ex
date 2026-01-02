@@ -41,6 +41,94 @@ defmodule PtcDemo.LispTestRunner do
   end
 
   @doc """
+  Run a comparison benchmark across multiple prompt profiles.
+
+  Runs the full test suite once per prompt and outputs a comparison table.
+
+  ## Options
+
+    * `:model` - Model to use (default: agent's current model)
+    * `:data_mode` - Data mode :schema or :explore (default: :schema)
+    * `:verbose` - Show detailed output per run (default: false)
+
+  ## Examples
+
+      # Compare minimal vs default prompts
+      PtcDemo.LispTestRunner.run_comparison([:minimal, :default])
+
+      # Compare all prompt profiles
+      PtcDemo.LispTestRunner.run_comparison([:minimal, :single_shot, :multi_turn, :default])
+  """
+  def run_comparison(prompts, opts \\ []) when is_list(prompts) do
+    CLIBase.load_dotenv()
+    CLIBase.ensure_api_key!()
+
+    IO.puts("\n=== Prompt Comparison Benchmark ===")
+    IO.puts("Prompts: #{inspect(prompts)}")
+    IO.puts("")
+
+    # Run tests for each prompt
+    results =
+      Enum.map(prompts, fn prompt ->
+        IO.puts("\n--- Running with prompt: #{prompt} ---")
+        summary = run_all(Keyword.merge(opts, prompt: prompt, verbose: false))
+        {prompt, summary}
+      end)
+
+    # Print comparison table
+    print_comparison_table(results)
+
+    results
+  end
+
+  defp print_comparison_table(results) do
+    IO.puts("\n========================================")
+    IO.puts("PROMPT COMPARISON")
+    IO.puts("========================================")
+    IO.puts("")
+
+    # Header
+    IO.puts(
+      String.pad_trailing("Prompt", 15) <>
+        String.pad_leading("Pass", 8) <>
+        String.pad_leading("Rate", 8) <>
+        String.pad_leading("Tokens", 10) <>
+        String.pad_leading("Time", 10)
+    )
+
+    IO.puts(String.duplicate("-", 51))
+
+    # Rows
+    Enum.each(results, fn {prompt, summary} ->
+      pass_rate = Float.round(summary.passed / summary.total * 100, 1)
+
+      tokens =
+        if summary[:stats][:total_tokens] do
+          "#{summary.stats.total_tokens}"
+        else
+          "-"
+        end
+
+      time =
+        if summary[:duration_ms] do
+          "#{Float.round(summary.duration_ms / 1000, 1)}s"
+        else
+          "-"
+        end
+
+      IO.puts(
+        String.pad_trailing("#{prompt}", 15) <>
+          String.pad_leading("#{summary.passed}/#{summary.total}", 8) <>
+          String.pad_leading("#{pass_rate}%", 8) <>
+          String.pad_leading(tokens, 10) <>
+          String.pad_leading(time, 10)
+      )
+    end)
+
+    IO.puts("")
+  end
+
+  @doc """
   Run all test cases and report results.
 
   ## Options
@@ -48,6 +136,7 @@ defmodule PtcDemo.LispTestRunner do
     * `:verbose` - Show detailed output (default: false)
     * `:model` - Model to use (default: agent's current model)
     * `:data_mode` - Data mode :schema or :explore (default: :schema)
+    * `:prompt` - Prompt profile to use (default: :default). See `PtcDemo.Prompts.list/0`.
     * `:report` - Path to write markdown report file (optional)
     * `:runs` - Number of times to run all tests (default: 1)
     * `:validate_clojure` - Validate generated programs against Babashka (default: false)
@@ -57,6 +146,7 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all()
       PtcDemo.LispTestRunner.run_all(verbose: true)
       PtcDemo.LispTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest")
+      PtcDemo.LispTestRunner.run_all(prompt: :minimal)
       PtcDemo.LispTestRunner.run_all(report: "test_report.md")
       PtcDemo.LispTestRunner.run_all(runs: 3)
       PtcDemo.LispTestRunner.run_all(validate_clojure: true)
@@ -73,6 +163,7 @@ defmodule PtcDemo.LispTestRunner do
     verbose = Keyword.get(opts, :verbose, false)
     model = Keyword.get(opts, :model)
     data_mode = Keyword.get(opts, :data_mode, :schema)
+    prompt_profile = Keyword.get(opts, :prompt, :default)
     report_path = Keyword.get(opts, :report)
     runs = Keyword.get(opts, :runs, 1)
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
@@ -81,7 +172,7 @@ defmodule PtcDemo.LispTestRunner do
     clojure_available = check_clojure_validation(validate_clojure)
 
     # Ensure agent is started
-    ensure_agent_started(data_mode, agent_mod)
+    ensure_agent_started(data_mode, prompt_profile, agent_mod)
 
     # Set model if specified
     if model do
@@ -93,6 +184,7 @@ defmodule PtcDemo.LispTestRunner do
     IO.puts("\n=== PTC-Lisp Demo Test Runner ===")
     IO.puts("Model: #{current_model}")
     IO.puts("Data mode: #{data_mode}")
+    IO.puts("Prompt: #{prompt_profile}")
 
     if runs > 1 do
       IO.puts("Runs: #{runs}")
@@ -217,10 +309,11 @@ defmodule PtcDemo.LispTestRunner do
 
     if index > 0 and index <= length(cases) do
       data_mode = Keyword.get(opts, :data_mode, :schema)
+      prompt_profile = Keyword.get(opts, :prompt, :default)
       model = Keyword.get(opts, :model)
       validate_clojure = Keyword.get(opts, :validate_clojure, false)
 
-      ensure_agent_started(data_mode, agent_mod)
+      ensure_agent_started(data_mode, prompt_profile, agent_mod)
 
       if model do
         agent_mod.set_model(model)
@@ -262,19 +355,20 @@ defmodule PtcDemo.LispTestRunner do
 
   # Private functions
 
-  defp ensure_agent_started(data_mode, agent_mod) do
+  defp ensure_agent_started(data_mode, prompt_profile, agent_mod) do
     # For mock agents, assume they're already started or will be in test setup
     # For real Agent, check and start if needed
     if agent_mod == Agent do
       case Process.whereis(Agent) do
         nil ->
-          {:ok, _pid} = Agent.start_link(data_mode: data_mode)
+          {:ok, _pid} = Agent.start_link(data_mode: data_mode, prompt: prompt_profile)
           :ok
 
         _pid ->
           # Reset to ensure clean state
           Agent.reset()
           Agent.set_data_mode(data_mode)
+          Agent.set_prompt_profile(prompt_profile)
           :ok
       end
     else

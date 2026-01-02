@@ -19,6 +19,8 @@ defmodule PtcDemo.LispAgent do
   defdelegate data_mode(), to: PtcDemo.Agent
   defdelegate system_prompt(), to: PtcDemo.Agent
   defdelegate set_data_mode(mode), to: PtcDemo.Agent
+  defdelegate set_prompt_profile(profile), to: PtcDemo.Agent
+  defdelegate prompt_profile(), to: PtcDemo.Agent
   defdelegate set_model(model), to: PtcDemo.Agent
   defdelegate preset_models(), to: PtcDemo.Agent
   defdelegate detect_model(), to: PtcDemo.Agent
