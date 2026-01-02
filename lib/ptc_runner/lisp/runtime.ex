@@ -166,6 +166,11 @@ defmodule PtcRunner.Lisp.Runtime do
   # ============================================================
 
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
+
+  def filter(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.filter(coll, fn item -> !!flex_get(item, key) end)
+  end
+
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
 
   def filter(pred, coll) when is_map(coll) do
@@ -177,6 +182,11 @@ defmodule PtcRunner.Lisp.Runtime do
   end
 
   def remove(pred, %MapSet{} = set), do: Enum.reject(set, pred)
+
+  def remove(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.reject(coll, fn item -> !!flex_get(item, key) end)
+  end
+
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
 
   def remove(pred, coll) when is_map(coll) do
@@ -187,8 +197,13 @@ defmodule PtcRunner.Lisp.Runtime do
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
+  def find(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.find(coll, fn item -> !!flex_get(item, key) end)
+  end
+
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
+  def map(key, coll) when is_list(coll) and is_atom(key), do: Enum.map(coll, &flex_get(&1, key))
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
 
   def map(f, %MapSet{} = set), do: Enum.map(set, f)
@@ -198,6 +213,7 @@ defmodule PtcRunner.Lisp.Runtime do
     Enum.map(coll, fn {k, v} -> f.([k, v]) end)
   end
 
+  def mapv(key, coll) when is_list(coll) and is_atom(key), do: Enum.map(coll, &flex_get(&1, key))
   def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
 
   def mapv(f, %MapSet{} = set), do: Enum.map(set, f)
@@ -252,8 +268,19 @@ defmodule PtcRunner.Lisp.Runtime do
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
+
+  def take_while(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.take_while(coll, fn item -> !!flex_get(item, key) end)
+  end
+
   def take_while(pred, coll) when is_list(coll), do: Enum.take_while(coll, pred)
+
+  def drop_while(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.drop_while(coll, fn item -> !!flex_get(item, key) end)
+  end
+
   def drop_while(pred, coll) when is_list(coll), do: Enum.drop_while(coll, pred)
+
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
