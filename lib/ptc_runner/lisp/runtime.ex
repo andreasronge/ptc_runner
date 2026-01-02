@@ -165,10 +165,12 @@ defmodule PtcRunner.Lisp.Runtime do
   # Collection Operations
   # ============================================================
 
+  defp truthy_key_pred(key), do: fn item -> !!flex_get(item, key) end
+
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
 
   def filter(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.filter(coll, fn item -> !!flex_get(item, key) end)
+    Enum.filter(coll, truthy_key_pred(key))
   end
 
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
@@ -184,7 +186,7 @@ defmodule PtcRunner.Lisp.Runtime do
   def remove(pred, %MapSet{} = set), do: Enum.reject(set, pred)
 
   def remove(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.reject(coll, fn item -> !!flex_get(item, key) end)
+    Enum.reject(coll, truthy_key_pred(key))
   end
 
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
@@ -198,7 +200,7 @@ defmodule PtcRunner.Lisp.Runtime do
   end
 
   def find(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.find(coll, fn item -> !!flex_get(item, key) end)
+    Enum.find(coll, truthy_key_pred(key))
   end
 
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
@@ -270,13 +272,13 @@ defmodule PtcRunner.Lisp.Runtime do
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
 
   def take_while(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.take_while(coll, fn item -> !!flex_get(item, key) end)
+    Enum.take_while(coll, truthy_key_pred(key))
   end
 
   def take_while(pred, coll) when is_list(coll), do: Enum.take_while(coll, pred)
 
   def drop_while(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.drop_while(coll, fn item -> !!flex_get(item, key) end)
+    Enum.drop_while(coll, truthy_key_pred(key))
   end
 
   def drop_while(pred, coll) when is_list(coll), do: Enum.drop_while(coll, pred)
