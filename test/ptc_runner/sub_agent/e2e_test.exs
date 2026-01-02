@@ -15,10 +15,11 @@ defmodule PtcRunner.SubAgent.E2ETest do
   alias PtcRunner.Lisp.Prompts
   alias PtcRunner.SubAgent
   alias PtcRunner.TestSupport.LispLLMClient
+  alias PtcRunner.TestSupport.LLM
 
   @timeout 30_000
-  # Use the minimal prompt - token efficient
-  @prompt_profile :minimal
+  # Use single-shot prompt - no return/fail tools, expression value is the result
+  @prompt_profile :single_shot
 
   setup_all do
     ensure_api_key!()
@@ -35,7 +36,8 @@ defmodule PtcRunner.SubAgent.E2ETest do
           prompt: "What is 2 + 2?",
           signature: "() -> :int",
           max_turns: 1,
-          system_prompt: %{language_spec: Prompts.get(@prompt_profile)}
+          # String override completely replaces generated prompt (no return/fail tools)
+          system_prompt: Prompts.get(@prompt_profile)
         )
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback())
@@ -48,7 +50,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
           prompt: "How many items are in ctx/items?",
           signature: "(items [:any]) -> :int",
           max_turns: 1,
-          system_prompt: %{language_spec: Prompts.get(@prompt_profile)}
+          system_prompt: Prompts.get(@prompt_profile)
         )
 
       context = %{"items" => [1, 2, 3, 4, 5]}
@@ -63,7 +65,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
           prompt: "What is the total of all :amount values in ctx/orders?",
           signature: "(orders [{:amount :int}]) -> :int",
           max_turns: 1,
-          system_prompt: %{language_spec: Prompts.get(@prompt_profile)}
+          system_prompt: Prompts.get(@prompt_profile)
         )
 
       context = %{"orders" => [%{"amount" => 10}, %{"amount" => 20}, %{"amount" => 30}]}
@@ -80,9 +82,9 @@ defmodule PtcRunner.SubAgent.E2ETest do
       # Build messages with system prompt
       full_messages = [%{role: :system, content: system} | messages]
 
-      case ReqLLM.generate_text(model(), full_messages, receive_timeout: @timeout) do
-        {:ok, %ReqLLM.Response{} = response} ->
-          text = ReqLLM.Response.text(response)
+      # Use TestSupport.LLM which handles both local and cloud providers
+      case LLM.generate_text(model(), full_messages, receive_timeout: @timeout) do
+        {:ok, text} ->
           {:ok, text}
 
         {:error, _} = error ->
@@ -92,16 +94,25 @@ defmodule PtcRunner.SubAgent.E2ETest do
   end
 
   defp ensure_api_key! do
-    LispLLMClient.model()
+    model = LispLLMClient.model()
 
-    unless System.get_env("OPENROUTER_API_KEY") do
+    # Skip API key check for local providers
+    unless local_provider?(model) or System.get_env("OPENROUTER_API_KEY") do
       raise """
       OPENROUTER_API_KEY not set.
 
       Create .env file with:
         OPENROUTER_API_KEY=sk-or-...
         PTC_TEST_MODEL=haiku  # optional
+
+      Or use a local model (no API key required):
+        PTC_TEST_MODEL=deepseek-local
       """
     end
+  end
+
+  defp local_provider?(model) do
+    String.starts_with?(model, "ollama:") or
+      String.starts_with?(model, "openai-compat:")
   end
 end
