@@ -331,6 +331,14 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert result == 6
     end
 
+    test "3-arity closure #(+ %1 %3)" do
+      # Call a 3-param function directly - uses %1 and %3, ignores %2
+      program = "(#(+ %1 %3) 10 999 30)"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == 40
+    end
+
     test "map with #(* % %)" do
       program = "(map #(* % %) [1 2 3 4])"
 
