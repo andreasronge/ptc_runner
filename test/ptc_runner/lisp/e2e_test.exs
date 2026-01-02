@@ -346,14 +346,14 @@ defmodule PtcRunner.Lisp.E2ETest do
     end
 
     test "zero-arity thunk #(42)" do
-      program = "((fn [] #(42)))"
+      program = "(#(42))"
 
       assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == 42
     end
 
     test "chained operations with short functions" do
-      program = "(-> [1 2 3 4 5] (filter #(> % 2)) (map #(* % 2)))"
+      program = "(->> [1 2 3 4 5] (filter #(> % 2)) (map #(* % 2)))"
 
       assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
       assert result == [6, 8, 10]
