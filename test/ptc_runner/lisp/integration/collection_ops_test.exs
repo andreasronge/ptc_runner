@@ -302,5 +302,59 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       assert Enum.map(result, & &1.score) == [1, 2, 3]
     end
+
+    test "some with keyword finds first truthy" do
+      items = [%{active: false}, %{active: true}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(some :active ctx/items)", context: %{items: items})
+
+      assert result == true
+    end
+
+    test "some with keyword returns nil when none match" do
+      items = [%{active: false}, %{active: nil}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(some :active ctx/items)", context: %{items: items})
+
+      assert result == nil
+    end
+
+    test "every? with keyword checks all truthy" do
+      items = [%{valid: true}, %{valid: "yes"}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(every? :valid ctx/items)", context: %{items: items})
+
+      assert result == true
+    end
+
+    test "every? with keyword returns false when any falsy" do
+      items = [%{valid: true}, %{valid: nil}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(every? :valid ctx/items)", context: %{items: items})
+
+      assert result == false
+    end
+
+    test "not-any? with keyword checks none truthy" do
+      items = [%{error: nil}, %{error: false}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(not-any? :error ctx/items)", context: %{items: items})
+
+      assert result == true
+    end
+
+    test "not-any? with keyword returns false when any truthy" do
+      items = [%{error: nil}, %{error: "oops"}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(not-any? :error ctx/items)", context: %{items: items})
+
+      assert result == false
+    end
   end
 end
