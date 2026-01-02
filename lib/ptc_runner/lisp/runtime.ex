@@ -530,6 +530,10 @@ defmodule PtcRunner.Lisp.Runtime do
   def abs(x), do: Kernel.abs(x)
   def max(args), do: Enum.max(args)
   def min(args), do: Enum.min(args)
+  def floor(x), do: Kernel.floor(x)
+  def ceil(x), do: Kernel.ceil(x)
+  def round(x), do: Kernel.round(x)
+  def trunc(x), do: Kernel.trunc(x)
 
   # ============================================================
   # Comparison (for direct use, not inside where)

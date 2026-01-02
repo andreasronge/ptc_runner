@@ -104,6 +104,10 @@ defmodule PtcRunner.Lisp.Env do
       {:abs, {:normal, &Runtime.abs/1}},
       {:max, {:variadic_nonempty, &Kernel.max/2}},
       {:min, {:variadic_nonempty, &Kernel.min/2}},
+      {:floor, {:normal, &Runtime.floor/1}},
+      {:ceil, {:normal, &Runtime.ceil/1}},
+      {:round, {:normal, &Runtime.round/1}},
+      {:trunc, {:normal, &Runtime.trunc/1}},
 
       # ============================================================
       # Comparison — normal (binary)
