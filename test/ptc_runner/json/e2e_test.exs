@@ -3,7 +3,6 @@ defmodule PtcRunner.Json.E2ETest do
 
   @moduletag :e2e
 
-  alias PtcRunner.Step
   alias PtcRunner.TestSupport.LLMClient
 
   setup_all do
@@ -27,7 +26,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert is_list(result)
@@ -47,7 +46,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result == 60
@@ -65,7 +64,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result == 2
@@ -86,7 +85,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result["name"] == "Bob"
@@ -106,7 +105,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result["name"] == "Book"
@@ -126,7 +125,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result == ["Apple", "Book", "Laptop"]
@@ -145,7 +144,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert is_list(result)
@@ -170,7 +169,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       # Constraint assertions - not exact values
@@ -192,7 +191,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result == 60
@@ -211,7 +210,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       assert result == 2
@@ -230,7 +229,7 @@ defmodule PtcRunner.Json.E2ETest do
         ]
       }
 
-      assert {:ok, %Step{return: result}} =
+      assert {:ok, result, _memory_delta, _new_memory} =
                PtcRunner.Json.run(program_json, context: context)
 
       # 2 delivered out of 3 total = 66.67%
