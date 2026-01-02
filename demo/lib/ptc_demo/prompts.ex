@@ -56,10 +56,9 @@ defmodule PtcDemo.Prompts do
   def get(profile \\ :default)
 
   # Delegate standard prompts to the library
-  def get(:default), do: LibPrompts.get(:default)
-  def get(:minimal), do: LibPrompts.get(:minimal)
-  def get(:single_shot), do: LibPrompts.get(:single_shot)
-  def get(:multi_turn), do: LibPrompts.get(:multi_turn)
+  def get(profile) when profile in [:default, :minimal, :single_shot, :multi_turn] do
+    LibPrompts.get(profile)
+  end
 
   # Demo-specific aliases for backwards compatibility
   def get(:minimal_single_shot), do: LibPrompts.get(:minimal)
@@ -135,6 +134,30 @@ defmodule PtcDemo.Prompts do
   @spec profiles() :: [atom()]
   def profiles do
     Enum.map(list(), fn {name, _} -> name end)
+  end
+
+  @doc """
+  Validate a prompt profile name string and convert to atom.
+
+  ## Examples
+
+      iex> PtcDemo.Prompts.validate_profile("minimal")
+      {:ok, :minimal}
+
+      iex> PtcDemo.Prompts.validate_profile("invalid")
+      {:error, "Unknown prompt profile 'invalid'. Valid: default, minimal, single_shot, multi_turn, multi_turn_full, minimal_single_shot, minimal_multi_turn"}
+
+  """
+  @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}
+  def validate_profile(profile_str) when is_binary(profile_str) do
+    known_profiles = Enum.map(profiles(), &Atom.to_string/1)
+
+    if profile_str in known_profiles do
+      {:ok, String.to_existing_atom(profile_str)}
+    else
+      valid = Enum.join(profiles(), ", ")
+      {:error, "Unknown prompt profile '#{profile_str}'. Valid: #{valid}"}
+    end
   end
 
   @doc """

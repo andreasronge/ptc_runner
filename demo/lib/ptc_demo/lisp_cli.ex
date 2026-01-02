@@ -172,15 +172,13 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/prompt " <> name, opts) do
-    name = String.trim(name)
-    profile_atom = String.to_atom(name)
+    case PtcDemo.Prompts.validate_profile(String.trim(name)) do
+      {:ok, profile_atom} ->
+        PtcDemo.LispAgent.set_prompt_profile(profile_atom)
+        IO.puts("   [Switched to prompt profile: #{profile_atom}]\n")
 
-    if profile_atom in PtcDemo.Prompts.profiles() do
-      PtcDemo.LispAgent.set_prompt_profile(profile_atom)
-      IO.puts("   [Switched to prompt profile: #{profile_atom}]\n")
-    else
-      valid = Enum.join(PtcDemo.Prompts.profiles(), ", ")
-      IO.puts("   [Unknown profile '#{name}'. Valid: #{valid}]\n")
+      {:error, message} ->
+        IO.puts("   [#{message}]\n")
     end
 
     loop(opts)

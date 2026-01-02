@@ -1,5 +1,9 @@
 # PTC-Lisp Multi-Turn Reference
 
+<!-- version: 1 -->
+<!-- date: 2025-01-02 -->
+<!-- changes: Initial multi-turn prompt for conversational sessions -->
+
 Emphasizes memory persistence for conversational sessions.
 
 <!-- PTC_PROMPT_START -->

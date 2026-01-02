@@ -1,5 +1,9 @@
 # PTC-Lisp Single Shot Reference
 
+<!-- version: 1 -->
+<!-- date: 2025-01-02 -->
+<!-- changes: Initial single-shot prompt for one-turn queries -->
+
 Optimized for one-turn queries with concrete examples.
 
 <!-- PTC_PROMPT_START -->
