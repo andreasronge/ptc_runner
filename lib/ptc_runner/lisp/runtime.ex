@@ -433,8 +433,22 @@ defmodule PtcRunner.Lisp.Runtime do
 
   def group_by(key, coll) when is_list(coll), do: Enum.group_by(coll, &flex_get(&1, key))
 
+  def some(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.find_value(coll, truthy_key_pred(key))
+  end
+
   def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, pred)
+
+  def every?(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.all?(coll, truthy_key_pred(key))
+  end
+
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
+
+  def not_any?(key, coll) when is_list(coll) and is_atom(key) do
+    not Enum.any?(coll, truthy_key_pred(key))
+  end
+
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)

@@ -1016,14 +1016,20 @@ The `seq` function converts a collection to a sequence:
 |----------|-----------|-------------|
 | `empty?` | `(empty? coll)` | True if empty |
 | `some` | `(some pred coll)` | First truthy result of pred, or nil |
+| `some` | `(some :key coll)` | First truthy `:key` value, or nil |
 | `every?` | `(every? pred coll)` | True if all match |
+| `every?` | `(every? :key coll)` | True if all have truthy `:key` |
 | `not-any?` | `(not-any? pred coll)` | True if none match |
+| `not-any?` | `(not-any? :key coll)` | True if none have truthy `:key` |
 | `contains?` | `(contains? coll key)` | True if key exists |
 
 ```clojure
 (empty? [])                        ; => true
-(some (where :admin) users)   ; any admins?
-(every? (where :active) users); all active?
+(some (where :admin) users)        ; any admins? (with predicate)
+(some :admin users)                ; any admins? (keyword shorthand)
+(every? (where :active) users)     ; all active? (with predicate)
+(every? :active users)             ; all active? (keyword shorthand)
+(not-any? :error items)            ; no errors?
 (contains? {:a 1} :a)              ; => true
 (contains? {:a 1} :b)              ; => false
 ```
