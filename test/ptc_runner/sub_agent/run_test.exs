@@ -71,6 +71,80 @@ defmodule PtcRunner.SubAgent.RunTest do
   end
 
   describe "run/2 - single-shot mode" do
+    test "single-shot uses Prompt.generate with same structure as loop mode" do
+      # Verify that single-shot mode uses the same prompt generation as loop mode
+      agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
+      context = %{x: 5, y: 3}
+
+      # Capture what the LLM receives in single-shot mode
+      llm = fn input ->
+        send(self(), {:llm_input, input})
+        {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, context: context)
+
+      assert_received {:llm_input, input}
+      system_prompt = input.system
+
+      # Single-shot mode should now use full Prompt.generate, which includes:
+      assert system_prompt =~ "# Role"
+      assert system_prompt =~ "You are a PTC-Lisp program generator"
+      assert system_prompt =~ "# Rules"
+      assert system_prompt =~ "# Data Inventory"
+      assert system_prompt =~ "ctx/x"
+      assert system_prompt =~ "ctx/y"
+      assert system_prompt =~ "# Available Tools"
+      assert system_prompt =~ "# Output Format"
+      assert system_prompt =~ "# Mission"
+    end
+
+    test "single-shot with language_spec: :minimal gets minimal prompt" do
+      agent =
+        SubAgent.new(
+          prompt: "Return 42",
+          max_turns: 1,
+          system_prompt: %{language_spec: :minimal}
+        )
+
+      llm = fn input ->
+        send(self(), {:llm_input, input})
+        {:ok, "```clojure\n42\n```"}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      assert_received {:llm_input, input}
+      system_prompt = input.system
+
+      # Should use minimal language spec
+      assert system_prompt =~ "Quick Reference"
+      # minimal profile doesn't include full language overview
+      refute system_prompt =~ "Clojure-inspired"
+    end
+
+    test "single-shot with string override uses custom prompt" do
+      custom_prompt = "You are a custom agent."
+
+      agent =
+        SubAgent.new(
+          prompt: "Return 42",
+          max_turns: 1,
+          system_prompt: custom_prompt
+        )
+
+      llm = fn input ->
+        send(self(), {:llm_input, input})
+        {:ok, "```clojure\n42\n```"}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      assert_received {:llm_input, input}
+      # String override bypasses generation entirely
+      assert input.system == custom_prompt
+    end
+
     test "executes simple calculation" do
       agent = SubAgent.new(prompt: "Calculate 2 + 3", max_turns: 1)
       llm = fn _input -> {:ok, "```clojure\n(+ 2 3)\n```"} end
