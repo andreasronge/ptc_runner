@@ -927,11 +927,13 @@ Developers can customize the system prompt via the `system_prompt` field. This e
 **Type definition:**
 
 ```elixir
+@type language_spec :: String.t() | atom() | (map() -> String.t())
+
 @type system_prompt_opts ::
   %{
     optional(:prefix) => String.t(),
     optional(:suffix) => String.t(),
-    optional(:language_spec) => String.t(),
+    optional(:language_spec) => language_spec(),
     optional(:output_format) => String.t()
   }
   | (String.t() -> String.t())
@@ -944,8 +946,25 @@ Developers can customize the system prompt via the `system_prompt` field. This e
 |--------|------|-------------|
 | `:prefix` | `String.t()` | Prepended before all generated content |
 | `:suffix` | `String.t()` | Appended after all generated content |
-| `:language_spec` | `String.t()` | Replaces the PTC-Lisp language reference section |
+| `:language_spec` | `language_spec()` | Language reference (string, atom, or callback - see below) |
 | `:output_format` | `String.t()` | Replaces output format instructions |
+
+**language_spec forms:**
+
+| Form | Description |
+|------|-------------|
+| `String.t()` | Custom language specification string (used as-is) |
+| `atom()` | Resolved via `PtcRunner.Lisp.Prompts.get!/1` (e.g., `:minimal`, `:default`) |
+| `fn ctx -> String.t()` | Callback called per-turn with context map |
+
+**Callback context (for function form):**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `:turn` | `integer` | Current turn number (1-indexed) |
+| `:model` | `atom \| function` | The LLM reference |
+| `:memory` | `map` | Current memory state |
+| `:messages` | `list` | Conversation history |
 
 **Alternative forms:**
 
@@ -962,6 +981,25 @@ SubAgent.new(
   system_prompt: %{
     prefix: "You are a senior data analyst. Be thorough and precise.",
     suffix: "Always validate your assumptions before returning."
+  }
+)
+
+# Use a preset prompt profile (atom form)
+SubAgent.new(
+  prompt: "Simple query",
+  signature: "(query :string) -> {answer :any}",
+  system_prompt: %{language_spec: :minimal}  # Token-efficient prompt
+)
+
+# Dynamic prompt selection based on context (callback form)
+SubAgent.new(
+  prompt: "Analyze {{data}}",
+  signature: "(data :map) -> {result :map}",
+  system_prompt: %{
+    language_spec: fn ctx ->
+      alias PtcRunner.Lisp.Prompts
+      if ctx.turn > 1, do: Prompts.get(:multi_turn), else: Prompts.get(:minimal)
+    end
   }
 )
 

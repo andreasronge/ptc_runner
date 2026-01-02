@@ -16,8 +16,9 @@ defmodule PtcDemo.LispCLI do
     # Parse command line arguments
     opts = CLIBase.parse_common_args(args)
 
-    # Handle --list-models early (before API key check)
+    # Handle --list-models and --list-prompts early (before API key check)
     CLIBase.handle_list_models(opts)
+    CLIBase.handle_list_prompts(opts)
 
     # Handle --show-prompt (needs agent but not API key)
     CLIBase.handle_show_prompt(opts, PtcDemo.LispAgent)
@@ -25,6 +26,8 @@ defmodule PtcDemo.LispCLI do
     CLIBase.ensure_api_key!()
 
     data_mode = if opts[:explore], do: :explore, else: :schema
+    prompt_profile = opts[:prompt] || :default
+    prompts_for_comparison = opts[:prompts]
     model = opts[:model]
     run_tests = opts[:test]
     test_index = opts[:test_index]
@@ -33,13 +36,21 @@ defmodule PtcDemo.LispCLI do
     runs = opts[:runs]
     validate_clojure = opts[:validate_clojure]
 
-    # Start the agent
-    {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode)
+    # Start the agent (use first prompt for comparison mode, or specified prompt)
+    initial_prompt =
+      if prompts_for_comparison, do: hd(prompts_for_comparison), else: prompt_profile
+
+    {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode, prompt: initial_prompt)
 
     # Set model if specified
     if model do
       resolved_model = CLIBase.resolve_model(model)
       PtcDemo.LispAgent.set_model(resolved_model)
+    end
+
+    # Handle comparison mode (multiple prompts)
+    if run_tests and prompts_for_comparison do
+      run_comparison_and_exit(prompts_for_comparison, verbose: verbose, data_mode: data_mode)
     end
 
     # Run tests if --test flag is present
@@ -49,14 +60,26 @@ defmodule PtcDemo.LispCLI do
         report: report_path,
         runs: runs,
         validate_clojure: validate_clojure,
-        test_index: test_index
+        test_index: test_index,
+        prompt: prompt_profile
       )
     else
-      IO.puts(banner(PtcDemo.LispAgent.model(), PtcDemo.LispAgent.data_mode()))
+      IO.puts(
+        banner(
+          PtcDemo.LispAgent.model(),
+          PtcDemo.LispAgent.data_mode(),
+          PtcDemo.LispAgent.prompt_profile()
+        )
+      )
 
       # Enter REPL loop
       loop(debug: opts[:debug] || false)
     end
+  end
+
+  defp run_comparison_and_exit(prompts, opts) do
+    PtcDemo.LispTestRunner.run_comparison(prompts, opts)
+    System.halt(0)
   end
 
   defp run_tests_and_exit(opts) do
@@ -128,6 +151,38 @@ defmodule PtcDemo.LispCLI do
 
   defp handle_input("/mode " <> _invalid, opts) do
     IO.puts("   [Unknown mode. Use: /mode, /mode schema, or /mode explore]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/prompt", opts) do
+    profile = PtcDemo.LispAgent.prompt_profile()
+    profiles = PtcDemo.Prompts.list()
+
+    IO.puts("\nCurrent prompt: #{profile}")
+    IO.puts("\nAvailable profiles:")
+
+    for {name, description} <- profiles do
+      marker = if name == profile, do: " *", else: ""
+      IO.puts("  /prompt #{name}#{marker}")
+      IO.puts("    #{description}")
+    end
+
+    IO.puts("")
+    loop(opts)
+  end
+
+  defp handle_input("/prompt " <> name, opts) do
+    name = String.trim(name)
+    profile_atom = String.to_atom(name)
+
+    if profile_atom in PtcDemo.Prompts.profiles() do
+      PtcDemo.LispAgent.set_prompt_profile(profile_atom)
+      IO.puts("   [Switched to prompt profile: #{profile_atom}]\n")
+    else
+      valid = Enum.join(PtcDemo.Prompts.profiles(), ", ")
+      IO.puts("   [Unknown profile '#{name}'. Valid: #{valid}]\n")
+    end
+
     loop(opts)
   end
 
@@ -275,11 +330,18 @@ defmodule PtcDemo.LispCLI do
     loop(opts)
   end
 
-  defp banner(model, data_mode) do
+  defp banner(model, data_mode, prompt_profile) do
     data_mode_desc =
       case data_mode do
         :schema -> "schema (LLM receives full schema)"
         :explore -> "explore (LLM discovers schema via introspection)"
+      end
+
+    prompt_desc =
+      if prompt_profile == :default do
+        "default"
+      else
+        "#{prompt_profile}"
       end
 
     """
@@ -292,8 +354,9 @@ defmodule PtcDemo.LispCLI do
     |  never entering LLM context. Only small results return.         |
     +-----------------------------------------------------------------+
 
-    Model: #{model}
-    Data:  #{data_mode_desc}
+    Model:  #{model}
+    Data:   #{data_mode_desc}
+    Prompt: #{prompt_desc}
 
     Type /help for commands, /examples for sample queries.
     """
@@ -303,22 +366,24 @@ defmodule PtcDemo.LispCLI do
     """
 
     Commands:
-      /help         - Show this help
-      /datasets     - List available datasets
-      /program      - Show last generated PTC-Lisp program
-      /programs     - Show all programs generated this session
-      /result       - Show last execution result (raw value)
-      /system       - Show current system prompt
-      /context      - Show conversation history (excludes system prompt)
-      /examples     - Show example queries
-      /stats        - Show token usage and cost statistics
-      /mode         - Show current data mode
-      /mode schema  - Switch to schema mode (LLM gets full schema)
-      /mode explore - Switch to explore mode (LLM discovers schema)
-      /model        - Show current model and available presets
-      /model <name> - Switch model (haiku, gemini, deepseek, kimi, gpt)
-      /reset        - Clear conversation context, stats, and reset to schema mode
-      /quit         - Exit
+      /help            - Show this help
+      /datasets        - List available datasets
+      /program         - Show last generated PTC-Lisp program
+      /programs        - Show all programs generated this session
+      /result          - Show last execution result (raw value)
+      /system          - Show current system prompt
+      /context         - Show conversation history (excludes system prompt)
+      /examples        - Show example queries
+      /stats           - Show token usage and cost statistics
+      /mode            - Show current data mode
+      /mode schema     - Switch to schema mode (LLM gets full schema)
+      /mode explore    - Switch to explore mode (LLM discovers schema)
+      /prompt          - Show current prompt profile and available profiles
+      /prompt <name>   - Switch prompt profile (default, minimal, single_shot, multi_turn)
+      /model           - Show current model and available presets
+      /model <name>    - Switch model (haiku, gemini, deepseek, kimi, gpt)
+      /reset           - Clear conversation context, stats, and reset to schema mode
+      /quit            - Exit
 
     Just type your question to query the data!
 
@@ -328,8 +393,11 @@ defmodule PtcDemo.LispCLI do
       mix lisp --test --verbose    Run tests with detailed output
       mix lisp --test --runs=3     Run tests multiple times
       mix lisp --model=<name>      Start with specific model
+      mix lisp --prompt=<name>     Start with prompt profile (minimal, single_shot, etc.)
+      mix lisp --prompt=a,b        Compare multiple prompts (e.g., --prompt=minimal,default)
       mix lisp --explore           Start in explore mode
       mix lisp --list-models       Show available models and exit
+      mix lisp --list-prompts      Show available prompt profiles and exit
       mix lisp --show-prompt       Show system prompt and exit
     """
   end
