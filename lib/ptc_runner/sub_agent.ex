@@ -495,22 +495,11 @@ defmodule PtcRunner.SubAgent do
       messages: messages
     }
 
-    # Build system prompt - use language_spec from system_prompt if available
+    # Use Prompt.generate for consistency with loop mode
     alias PtcRunner.SubAgent.Prompt
 
     system_prompt =
-      case agent.system_prompt do
-        %{language_spec: lang_spec} ->
-          # Resolve language_spec (can be string, atom, or callback)
-          Prompt.resolve_language_spec(lang_spec, resolution_context)
-
-        override when is_binary(override) ->
-          # String override
-          override
-
-        _ ->
-          default_system_prompt()
-      end
+      Prompt.generate(agent, context: context, resolution_context: resolution_context)
 
     # Build LLM input
     llm_input = %{
@@ -581,14 +570,6 @@ defmodule PtcRunner.SubAgent do
           :none
         end
     end
-  end
-
-  # Minimal system prompt for single-shot mode
-  defp default_system_prompt do
-    """
-    You are an AI that solves tasks by writing PTC-Lisp programs.
-    Output your program in a ```clojure code block.
-    """
   end
 
   # Helper to create error Step
