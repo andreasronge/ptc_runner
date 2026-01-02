@@ -26,7 +26,7 @@ defmodule PtcRunner.Lisp do
   - Should not raise (return `{:error, reason}` for errors)
   """
 
-  alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser}
+  alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser, SymbolCounter}
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
@@ -45,6 +45,7 @@ defmodule PtcRunner.Lisp do
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds (default: 1000)
     - `:max_heap` - Max heap size in words (default: 1_250_000)
+    - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
 
   ## Return Value
 
@@ -103,6 +104,7 @@ defmodule PtcRunner.Lisp do
     float_precision = Keyword.get(opts, :float_precision)
     timeout = Keyword.get(opts, :timeout, 1000)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    max_symbols = Keyword.get(opts, :max_symbols, 10_000)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -123,7 +125,8 @@ defmodule PtcRunner.Lisp do
         signature_str: signature_str,
         float_precision: float_precision,
         timeout: timeout,
-        max_heap: max_heap
+        max_heap: max_heap,
+        max_symbols: max_symbols
       }
 
       execute_program(source, opts)
@@ -146,10 +149,12 @@ defmodule PtcRunner.Lisp do
       signature_str: signature_str,
       float_precision: float_precision,
       timeout: timeout,
-      max_heap: max_heap
+      max_heap: max_heap,
+      max_symbols: max_symbols
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
+         :ok <- check_symbol_limit(raw_ast, max_symbols, memory),
          {:ok, core_ast} <- Analyze.analyze(raw_ast) do
       # Build Context for sandbox
       context = PtcRunner.Context.new(ctx, memory, normalized_tools)
@@ -199,6 +204,10 @@ defmodule PtcRunner.Lisp do
     else
       {:error, {:parse_error, msg}} ->
         {:error, Step.error(:parse_error, msg, %{})}
+
+      {:error, %Step{} = step} ->
+        # Pass through Step errors from check_symbol_limit
+        {:error, step}
 
       {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
         # Preserve specific error atoms from Analyze phase (e.g., {:invalid_arity, :if, "msg"})
@@ -304,6 +313,22 @@ defmodule PtcRunner.Lisp do
   end
 
   defp round_floats(value, _precision), do: value
+
+  # Check if symbol count exceeds limit
+  defp check_symbol_limit(ast, max_symbols, memory) do
+    count = SymbolCounter.count(ast)
+
+    if count <= max_symbols do
+      :ok
+    else
+      {:error,
+       Step.error(
+         :symbol_limit_exceeded,
+         "program contains #{count} unique symbols/keywords, exceeds limit of #{max_symbols}",
+         memory
+       )}
+    end
+  end
 
   # Normalize tools from various formats to Tool structs
   defp normalize_tools(raw_tools) do

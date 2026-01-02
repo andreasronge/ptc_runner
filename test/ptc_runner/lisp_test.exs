@@ -870,6 +870,43 @@ defmodule PtcRunner.LispTest do
     end
   end
 
+  describe "max_symbols option" do
+    test "rejects programs exceeding symbol limit" do
+      # Program with 100 unique keywords exceeds limit of 50
+      keywords = Enum.map_join(1..100, " ", &":k#{&1}")
+      program = "{#{keywords}}"
+
+      assert {:error, step} = Lisp.run(program, max_symbols: 50)
+      assert step.fail.reason == :symbol_limit_exceeded
+      assert step.fail.message =~ "100 unique symbols/keywords"
+      assert step.fail.message =~ "exceeds limit of 50"
+    end
+
+    test "accepts programs within limit" do
+      program = "{:a 1 :b 2 :c 3}"
+      assert {:ok, %{return: %{a: 1, b: 2, c: 3}}} = Lisp.run(program, max_symbols: 10)
+    end
+
+    test "uses default limit of 10_000" do
+      # Simple program should pass with default limit
+      assert {:ok, _} = Lisp.run("{:a 1}")
+    end
+
+    test "core symbols do not count toward limit" do
+      # (if true 1 2) uses only core symbols
+      assert {:ok, _} = Lisp.run("(if true 1 2)", max_symbols: 0)
+    end
+
+    test "preserves memory on symbol limit error" do
+      keywords = Enum.map_join(1..10, " ", &":k#{&1}")
+      program = "{#{keywords}}"
+      initial_memory = %{preserved: true}
+
+      assert {:error, step} = Lisp.run(program, max_symbols: 5, memory: initial_memory)
+      assert step.memory == initial_memory
+    end
+  end
+
   describe "sandbox - integration with existing features" do
     test "float_precision still works with sandbox" do
       assert {:ok, %{return: 3.33, memory_delta: %{}, memory: %{}}} =
