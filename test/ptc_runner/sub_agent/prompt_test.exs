@@ -374,13 +374,14 @@ defmodule PtcRunner.SubAgent.PromptTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          system_prompt: %{language_spec: :minimal}
+          system_prompt: %{language_spec: :single_shot}
         )
 
       prompt = Prompt.generate(agent, context: %{})
-      assert prompt =~ "Quick Reference"
-      # not the full default
-      refute prompt =~ "Clojure-inspired"
+      assert prompt =~ "PTC-Lisp"
+      assert prompt =~ "Core Functions"
+      # single_shot should not have memory docs
+      refute prompt =~ "Memory: Persisting Data Between Turns"
     end
 
     test "language_spec callback receives resolution context" do
@@ -591,6 +592,58 @@ defmodule PtcRunner.SubAgent.PromptTest do
 
       # Output format
       assert prompt =~ "```clojure"
+    end
+
+    test "includes Expected Output section when signature is present" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          signature: "(x :int) -> {count :int, ids [:string]}"
+        )
+
+      prompt = Prompt.generate(agent, context: %{x: 10})
+
+      assert prompt =~ "# Expected Output"
+      assert prompt =~ "Your final answer must match this format: `{count :int, ids [:string]}`"
+      assert prompt =~ "Call `(return {:count 42, :ids []})` when complete."
+    end
+
+    test "omits Expected Output section when signature is nil" do
+      agent = SubAgent.new(prompt: "Test")
+      prompt = Prompt.generate(agent, context: %{})
+
+      refute prompt =~ "# Expected Output"
+    end
+
+    test "handles different return types in examples" do
+      # Int
+      agent = SubAgent.new(prompt: "T", signature: ":int")
+      assert Prompt.generate(agent) =~ "(return 42)"
+
+      # String
+      agent = SubAgent.new(prompt: "T", signature: ":string")
+      assert Prompt.generate(agent) =~ "(return \"result\")"
+
+      # Boolean
+      agent = SubAgent.new(prompt: "T", signature: ":bool")
+      assert Prompt.generate(agent) =~ "(return true)"
+
+      # List
+      agent = SubAgent.new(prompt: "T", signature: "[:int]")
+      assert Prompt.generate(agent) =~ "(return [])"
+
+      # Nested Map
+      agent = SubAgent.new(prompt: "T", signature: "{a {b :int}}")
+      assert Prompt.generate(agent) =~ "(return {:a {:b 42}})"
+    end
+
+    test "handles firewalled fields in signatures" do
+      # Firewalled fields should be visible in the expected output format
+      agent = SubAgent.new(prompt: "T", signature: "{_id :int, status :string}")
+      prompt = Prompt.generate(agent)
+
+      assert prompt =~ "{_id :int, status :string}"
+      assert prompt =~ "(return {:_id 42, :status \"result\"})"
     end
 
     test "handles agent with signature but no tools" do
