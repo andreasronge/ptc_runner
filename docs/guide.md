@@ -72,6 +72,18 @@ See `PtcRunner.Json` module docs and [PTC-JSON Specification](reference/ptc-json
 
 > **Note:** PTC-JSON is not supported in the SubAgent API. SubAgents use PTC-Lisp exclusively for its token efficiency and expressiveness.
 
+## Resource Limits
+
+Programs execute in isolated BEAM processes with configurable limits:
+
+| Resource | Default | Description |
+|----------|---------|-------------|
+| `timeout` | 1,000 ms | Execution time limit |
+| `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
+| `max_symbols` | 10,000 | Unique symbols/keywords limit |
+
+The `max_symbols` limit prevents atom table exhaustion from malicious programs that create many unique symbols or keywords. Atoms are never garbage collected in BEAM.
+
 ## Design Principles
 
 1. **Safety First**: Programs run in isolated processes with resource limits
