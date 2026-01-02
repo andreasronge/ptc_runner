@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :cond,
                   :do,
                   :and,
+                  :not,
                   :or,
                   :"->>",
                   :->,
