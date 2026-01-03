@@ -42,14 +42,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Updates memory in the context, returning a new context.
-  """
-  @spec put_memory(t(), atom(), term()) :: t()
-  def put_memory(%__MODULE__{} = context, key, value) do
-    %{context | memory: Map.put(context.memory, key, value)}
-  end
-
-  @doc """
   Updates the memory map in the context.
   """
   @spec update_memory(t(), map()) :: t()
