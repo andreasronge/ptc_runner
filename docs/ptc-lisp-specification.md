@@ -189,6 +189,17 @@ Keywords can be called as functions to access map values:
 (:missing {:name "Alice"} "default")  ; => "default"
 ```
 
+Keywords also work as predicates in higher-order functions, checking if the field is truthy:
+
+```clojure
+;; As predicate in filter/remove/find (checks field truthiness)
+(filter :active [{:active true} {:active false}])  ; => [{:active true}]
+(remove :deleted [{:deleted true} {:deleted nil}]) ; => [{:deleted nil}]
+
+;; As accessor in map (extracts field value)
+(map :name [{:name "Alice"} {:name "Bob"}])        ; => ["Alice" "Bob"]
+```
+
 ### 3.6 Vectors
 
 Ordered, indexed collections:
@@ -244,6 +255,15 @@ Sets are **unordered** - iteration order is not guaranteed.
 | `count` | `(count #{1 2})` | Returns element count |
 | `empty?` | `(empty? #{})` | Returns true if empty |
 | `contains?` | `(contains? #{1 2} 1)` | Membership test (O(1)) |
+
+**Sets as predicates:** Sets can be invoked as functions to check membership:
+
+| Expression | Result | Description |
+|------------|--------|-------------|
+| `(#{1 2 3} 2)` | `2` | Element found, returns it |
+| `(#{1 2 3} 4)` | `nil` | Not found, returns nil |
+| `(filter #{:a :b} [:a :c :b])` | `[:a :b]` | Filter using set membership |
+| `(some #{"x"} ["a" "x"])` | `"x"` | Find first matching element |
 
 **Not supported for sets:** `first`, `last`, `nth`, `sort`, `sort-by` (sets are unordered).
 
@@ -813,9 +833,15 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
+;; Using where (explicit predicate builder)
 (filter (where :active) users)
 (remove (where :deleted) items)
 (find (where :id = 42) users)
+
+;; Using keyword directly (concise, checks truthiness)
+(filter :active users)
+(remove :deleted items)
+(find :special items)
 ```
 
 **Map support:** `filter` and `remove` accept maps as input, treating each entry as a `[key value]` pair passed to the predicate. They return a **list** of `[key value]` pairs (not a map):
@@ -910,6 +936,17 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (distinct [1 2 1 3])  ; => [1 2 3]
 ```
 
+**take-while and drop-while with keywords:**
+
+```clojure
+;; Using keyword directly (checks field truthiness)
+(take-while :active [{:active true} {:active true} {:active false}])
+;; => [{:active true} {:active true}]
+
+(drop-while :pending [{:pending true} {:pending false} {:pending true}])
+;; => [{:pending false} {:pending true}]
+```
+
 #### Combining
 
 | Function | Signature | Description |
@@ -988,14 +1025,20 @@ The `seq` function converts a collection to a sequence:
 |----------|-----------|-------------|
 | `empty?` | `(empty? coll)` | True if empty |
 | `some` | `(some pred coll)` | First truthy result of pred, or nil |
+| `some` | `(some :key coll)` | First truthy `:key` value, or nil |
 | `every?` | `(every? pred coll)` | True if all match |
+| `every?` | `(every? :key coll)` | True if all have truthy `:key` |
 | `not-any?` | `(not-any? pred coll)` | True if none match |
+| `not-any?` | `(not-any? :key coll)` | True if none have truthy `:key` |
 | `contains?` | `(contains? coll key)` | True if key exists |
 
 ```clojure
 (empty? [])                        ; => true
-(some (where :admin) users)   ; any admins?
-(every? (where :active) users); all active?
+(some (where :admin) users)        ; any admins? (with predicate)
+(some :admin users)                ; any admins? (keyword shorthand)
+(every? (where :active) users)     ; all active? (with predicate)
+(every? :active users)             ; all active? (keyword shorthand)
+(not-any? :error items)            ; no errors?
 (contains? {:a 1} :a)              ; => true
 (contains? {:a 1} :b)              ; => false
 ```
