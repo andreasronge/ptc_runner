@@ -12,6 +12,7 @@ jobs:
     name: Compile, test, format, credo, dialyzer & deps check
     env:
       MIX_ENV: test
+      HEX_SPONSOR: false
 
     steps:
       - name: Checkout repository
