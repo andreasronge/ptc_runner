@@ -72,6 +72,21 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
       {:ok, result, _} = run(~S"(#{:a} :a)")
       assert result == :a
     end
+
+    test "set works with remove" do
+      {:ok, result, _} = run(~S'(remove #{"b"} ["a" "b" "c"])')
+      assert result == ["a", "c"]
+    end
+
+    test "set works with every?" do
+      {:ok, result, _} = run(~S'(every? #{1 2 3} [1 2])')
+      assert result == true
+    end
+
+    test "set works with not-any?" do
+      {:ok, result, _} = run(~S'(not-any? #{4 5} [1 2 3])')
+      assert result == true
+    end
   end
 
   describe "collection operations on sets" do
