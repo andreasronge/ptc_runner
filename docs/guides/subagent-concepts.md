@@ -1,6 +1,18 @@
-# Core Concepts
-
 This guide covers the foundational concepts of SubAgents: context management, the firewall convention, memory, and error handling.
+
+## Quick Example
+
+A typical SubAgent program calls a tool and returns the result:
+
+```clojure
+(let [data (call "fetch_items" {:category ctx/category})]
+  (return (filter (where :price < 100) data)))
+```
+
+Key points:
+- `ctx/category`: Accesses the input context.
+- `call`: Invokes a tool with an argument map.
+- `return`: Completes the mission with the final value.
 
 ## The Context Firewall
 
@@ -140,6 +152,37 @@ Use memory for:
 - Tracking state across turns
 - Storing data too large for context
 
+### Result Contract (Output Firewall)
+
+The program's return value determines what the LLM sees in subsequent turns:
+
+| Return Value | LLM Sees | Memory Update |
+|--------------|----------|---------------|
+| Non-map (number, vector) | The value | None |
+| Map without `:return` | Entire map | Entire map merged |
+| Map with `:return` | Only `:return` value | Rest of map merged |
+
+The `:return` key acts as an **output firewall** - it controls what flows back into the LLM's context while keeping full data accessible in BEAM memory.
+
+**Without `:return`** - LLM sees full dataset:
+```clojure
+{:all-users (call "fetch-users" {})}
+;; LLM context gets: {:all-users [{:id 1, :name "Alice"}, ...500 items]}
+;; memory/all-users = same data
+```
+
+**With `:return`** - LLM sees only summary:
+```clojure
+{:all-users (call "fetch-users" {})
+ :return "Stored 500 users"}
+;; LLM context gets: "Stored 500 users"
+;; memory/all-users = full dataset (accessible via programs)
+```
+
+This is the core value of PTC: large datasets stay in BEAM memory, LLM only sees compact summaries. The `_` prefix firewalls *input* data; the `:return` key firewalls *output* data.
+
+> **See also:** `PtcRunner.Lisp` module docs for the full memory contract specification.
+
 ## Error Handling
 
 SubAgents handle errors at three levels:
@@ -259,6 +302,7 @@ Full agentic loop requiring explicit `return` or `fail`.
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
+- [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
 - [Advanced Topics](subagent-advanced.md) - Observability and the compile pattern

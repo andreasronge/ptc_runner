@@ -347,7 +347,8 @@ memory/key                     ; Memory shorthand
 ## See Also
 
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Type system details
 - `PtcRunner.SubAgent` - Full API reference
-- [PtcRunner Guide](../guide.md) - Core PTC-Lisp documentation
+- [PTC-Lisp Specification](../ptc-lisp-specification.md) - Language reference
