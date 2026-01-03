@@ -5,8 +5,13 @@ repo_root = Path.expand("..", __DIR__)
 
 deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
-    [{:ptc_runner, path: repo_root}]
+    # Local development - includes llm_client for model presets
+    [
+      {:ptc_runner, path: repo_root},
+      {:llm_client, path: Path.join(repo_root, "llm_client")}
+    ]
   else
+    # Public/URL mode
     [{:ptc_runner, "~> 0.3.3"}]
   end
 
@@ -65,15 +70,28 @@ System.put_env("OPENROUTER_API_KEY", api_key)
 Select a model:
 
 ```elixir
-# Models from PtcDemo.ModelRegistry - {value, label} tuples
-model_options = [
-  {"openrouter:mistralai/devstral-2512:free", "Devstral 2512 (free)"},
-  {"openrouter:deepseek/deepseek-v3.2", "DeepSeek V3.2"},
-  {"openrouter:google/gemini-2.5-flash", "Gemini 2.5 Flash"},
-  {"openrouter:anthropic/claude-haiku-4.5", "Claude Haiku 4.5"},
-  {"openrouter:moonshotai/kimi-k2", "Kimi K2"},
-  {"openrouter:openai/gpt-5.1-codex-mini", "GPT-5.1 Codex Mini"}
-]
+# Build model options from LLMClient if available, otherwise use fallback
+model_options =
+  if Code.ensure_loaded?(LLMClient) do
+    # Use LLMClient presets for local development
+    LLMClient.presets()
+    |> Enum.map(fn {alias_name, model_id} ->
+      info = LLMClient.get_model_info(alias_name)
+      label = if info, do: info.description, else: alias_name
+      {model_id, label}
+    end)
+    |> Enum.sort_by(fn {_, label} -> label end)
+  else
+    # Fallback for public mode (when llm_client is not installed)
+    [
+      {"openrouter:mistralai/devstral-2512:free", "Devstral 2512 (free)"},
+      {"openrouter:deepseek/deepseek-chat-v3-0324", "DeepSeek Chat V3"},
+      {"openrouter:google/gemini-2.5-flash", "Gemini 2.5 Flash"},
+      {"openrouter:anthropic/claude-haiku-4.5", "Claude Haiku 4.5"},
+      {"openrouter:moonshotai/kimi-k2", "Kimi K2"},
+      {"openrouter:openai/gpt-4.1-mini", "GPT-4.1 Mini"}
+    ]
+  end
 
 model_input = Kino.Input.select("Model", model_options)
 ```

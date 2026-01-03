@@ -133,14 +133,14 @@ defmodule PtcDemo.Agent do
   Available preset models for easy switching.
   """
   def preset_models do
-    PtcDemo.ModelRegistry.preset_models()
+    LLMClient.presets()
   end
 
   @doc """
   Get the default model.
   """
   def detect_model do
-    PtcDemo.ModelRegistry.default_model()
+    LLMClient.default_model()
   end
 
   # --- GenServer Callbacks ---
@@ -151,7 +151,7 @@ defmodule PtcDemo.Agent do
         detect_model()
 
       value ->
-        case PtcDemo.ModelRegistry.resolve(value) do
+        case LLMClient.resolve(value) do
           {:ok, model_id} -> model_id
           {:error, _} -> value
         end
@@ -466,7 +466,7 @@ defmodule PtcDemo.Agent do
     fn %{system: system, messages: messages} ->
       full_messages = [%{role: :system, content: system} | messages]
 
-      case PtcDemo.LLM.generate_text(model, full_messages,
+      case LLMClient.generate_text(model, full_messages,
              receive_timeout: @timeout,
              req_http_options: [retry: :transient, max_retries: 3]
            ) do

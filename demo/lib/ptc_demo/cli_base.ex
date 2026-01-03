@@ -214,7 +214,7 @@ defmodule PtcDemo.CLIBase do
   """
   def handle_list_models(opts) do
     if opts[:list_models] do
-      IO.puts(PtcDemo.ModelRegistry.format_model_list())
+      IO.puts(LLMClient.format_model_list())
       System.halt(0)
     end
   end
@@ -269,7 +269,7 @@ defmodule PtcDemo.CLIBase do
   Returns the resolved model ID or exits with an error message.
   """
   def resolve_model(name) do
-    case PtcDemo.ModelRegistry.resolve(name) do
+    case LLMClient.resolve(name) do
       {:ok, model_id} ->
         model_id
 

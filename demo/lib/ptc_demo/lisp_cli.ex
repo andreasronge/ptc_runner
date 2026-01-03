@@ -211,7 +211,7 @@ defmodule PtcDemo.LispCLI do
   defp handle_input("/model " <> name, opts) do
     name = String.trim(name)
 
-    case PtcDemo.ModelRegistry.resolve(name) do
+    case LLMClient.resolve(name) do
       {:ok, model} ->
         PtcDemo.LispAgent.set_model(model)
         IO.puts("   [Switched to model: #{model}]\n")
