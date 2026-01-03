@@ -379,7 +379,7 @@ defmodule PtcDemo.TestRunner.Base do
       %{total_cost: cost} when cost == nil or cost == 0.0 ->
         # Calculate cost from tokens if not provided by API
         calculated_cost =
-          PtcDemo.ModelRegistry.calculate_cost(
+          LLMClient.calculate_cost(
             model,
             Map.get(stats, :input_tokens, 0),
             Map.get(stats, :output_tokens, 0)

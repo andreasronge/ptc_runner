@@ -1,4 +1,4 @@
-defmodule PtcDemo.LLM do
+defmodule LLMClient.Providers do
   @moduledoc """
   Unified LLM client supporting multiple providers.
 
@@ -10,13 +10,13 @@ defmodule PtcDemo.LLM do
   ## Examples
 
       # Local Ollama
-      PtcDemo.LLM.generate_text("ollama:deepseek-coder:6.7b", messages)
+      LLMClient.Providers.generate_text("ollama:deepseek-coder:6.7b", messages)
 
       # OpenAI-compatible endpoint (e.g., LMStudio, vLLM)
-      PtcDemo.LLM.generate_text("openai-compat:http://localhost:1234/v1|local-model", messages)
+      LLMClient.Providers.generate_text("openai-compat:http://localhost:1234/v1|local-model", messages)
 
       # ReqLLM providers (default)
-      PtcDemo.LLM.generate_text("openrouter:anthropic/claude-haiku-4.5", messages)
+      LLMClient.Providers.generate_text("openrouter:anthropic/claude-haiku-4.5", messages)
   """
 
   require Logger
@@ -88,6 +88,21 @@ defmodule PtcDemo.LLM do
 
       {:req_llm, model_id} ->
         check_req_llm_available(model_id)
+    end
+  end
+
+  @doc """
+  Check if the model requires an API key.
+
+  Returns false for local providers (Ollama, OpenAI-compat),
+  true for cloud providers (OpenRouter, Anthropic, etc.).
+  """
+  @spec requires_api_key?(String.t()) :: boolean()
+  def requires_api_key?(model) do
+    case parse_provider(model) do
+      {:ollama, _} -> false
+      {:openai_compat, _, _} -> false
+      {:req_llm, _} -> true
     end
   end
 

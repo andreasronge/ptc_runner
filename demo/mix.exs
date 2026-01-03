@@ -24,13 +24,13 @@ defmodule PtcDemo.MixProject do
   end
 
   defp escript do
-    [main_module: PtcDemo.CLI]
+    [main_module: PtcDemo.JsonCLI]
   end
 
   defp deps do
     [
       {:ptc_runner, path: ".."},
-      {:req_llm, "~> 1.2.0"},
+      {:llm_client, path: "../llm_client"},
       {:dotenvy, "~> 1.1"}
     ]
   end

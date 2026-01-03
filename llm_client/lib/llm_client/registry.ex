@@ -1,6 +1,6 @@
-defmodule PtcDemo.ModelRegistry do
+defmodule LLMClient.Registry do
   @moduledoc """
-  Simple model registry for the demo.
+  Simple model registry for LLM providers.
 
   Supports multiple provider types:
   - Aliases resolve to OpenRouter models (requires OPENROUTER_API_KEY)
@@ -11,62 +11,73 @@ defmodule PtcDemo.ModelRegistry do
   ## Usage
 
       # Resolve an alias to OpenRouter model ID
-      {:ok, model_id} = ModelRegistry.resolve("haiku")
+      {:ok, model_id} = LLMClient.Registry.resolve("haiku")
       # => {:ok, "openrouter:anthropic/claude-haiku-4.5"}
 
       # Use local Ollama model
-      {:ok, model_id} = ModelRegistry.resolve("ollama:deepseek-coder:6.7b")
+      {:ok, model_id} = LLMClient.Registry.resolve("ollama:deepseek-coder:6.7b")
 
       # Use explicit provider (bypasses aliases)
-      {:ok, model_id} = ModelRegistry.resolve("anthropic:claude-haiku-4.5")
+      {:ok, model_id} = LLMClient.Registry.resolve("anthropic:claude-haiku-4.5")
 
       # List available models
-      ModelRegistry.format_model_list() |> IO.puts()
+      LLMClient.Registry.format_model_list() |> IO.puts()
   """
 
-  # Simple alias -> model ID mapping
+  # Unified model metadata: alias -> %{id, description, costs}
   @models %{
     # Cloud models (via OpenRouter)
-    "haiku" => "openrouter:anthropic/claude-haiku-4.5",
-    "sonnet" => "openrouter:anthropic/claude-sonnet-4",
-    "devstral" => "openrouter:mistralai/devstral-2512:free",
-    "gemini" => "openrouter:google/gemini-2.5-flash",
-    "deepseek" => "openrouter:deepseek/deepseek-chat-v3-0324",
-    "kimi" => "openrouter:moonshotai/kimi-k2",
-    "gpt" => "openrouter:openai/gpt-4.1-mini",
-    # Local models (via Ollama)
-    "deepseek-local" => "ollama:deepseek-coder:6.7b",
-    "qwen-local" => "ollama:qwen2.5-coder:7b",
-    "llama-local" => "ollama:llama3.2:3b"
-  }
-
-  # Descriptions for --list-models output
-  @model_info %{
-    "haiku" => "Claude Haiku 4.5 - Fast, cost-effective",
-    "sonnet" => "Claude Sonnet 4 - Balanced performance",
-    "devstral" => "Devstral 2512 - Mistral AI code model (free)",
-    "gemini" => "Gemini 2.5 Flash - Google's fast model",
-    "deepseek" => "DeepSeek Chat V3 - Cost-effective reasoning",
-    "kimi" => "Kimi K2 - Moonshot AI's model",
-    "gpt" => "GPT-4.1 Mini - OpenAI's efficient model",
-    "deepseek-local" => "DeepSeek Coder 6.7B - Local via Ollama",
-    "qwen-local" => "Qwen 2.5 Coder 7B - Local via Ollama",
-    "llama-local" => "Llama 3.2 3B - Local via Ollama (fast)"
-  }
-
-  # Cost per million tokens (for estimation)
-  @model_costs %{
-    "haiku" => %{input: 0.80, output: 4.00},
-    "sonnet" => %{input: 3.00, output: 15.00},
-    "devstral" => %{input: 0.0, output: 0.0},
-    "gemini" => %{input: 0.15, output: 0.60},
-    "deepseek" => %{input: 0.14, output: 0.28},
-    "kimi" => %{input: 0.60, output: 2.40},
-    "gpt" => %{input: 0.40, output: 1.60},
-    # Local models are free
-    "deepseek-local" => %{input: 0.0, output: 0.0},
-    "qwen-local" => %{input: 0.0, output: 0.0},
-    "llama-local" => %{input: 0.0, output: 0.0}
+    "haiku" => %{
+      id: "openrouter:anthropic/claude-haiku-4.5",
+      description: "Claude Haiku 4.5 - Fast, cost-effective",
+      costs: %{input: 0.80, output: 4.00}
+    },
+    "sonnet" => %{
+      id: "openrouter:anthropic/claude-sonnet-4",
+      description: "Claude Sonnet 4 - Balanced performance",
+      costs: %{input: 3.00, output: 15.00}
+    },
+    "devstral" => %{
+      id: "openrouter:mistralai/devstral-2512:free",
+      description: "Devstral 2512 - Mistral AI code model (free)",
+      costs: %{input: 0.0, output: 0.0}
+    },
+    "gemini" => %{
+      id: "openrouter:google/gemini-2.5-flash",
+      description: "Gemini 2.5 Flash - Google's fast model",
+      costs: %{input: 0.15, output: 0.60}
+    },
+    "deepseek" => %{
+      id: "openrouter:deepseek/deepseek-chat-v3-0324",
+      description: "DeepSeek Chat V3 - Cost-effective reasoning",
+      costs: %{input: 0.14, output: 0.28}
+    },
+    "kimi" => %{
+      id: "openrouter:moonshotai/kimi-k2",
+      description: "Kimi K2 - Moonshot AI's model",
+      costs: %{input: 0.60, output: 2.40}
+    },
+    "gpt" => %{
+      id: "openrouter:openai/gpt-4.1-mini",
+      description: "GPT-4.1 Mini - OpenAI's efficient model",
+      costs: %{input: 0.40, output: 1.60}
+    },
+    # Local models (via Ollama) - free
+    "deepseek-local" => %{
+      id: "ollama:deepseek-coder:6.7b",
+      description: "DeepSeek Coder 6.7B - Local via Ollama",
+      costs: %{input: 0.0, output: 0.0}
+    },
+    "qwen-local" => %{
+      id: "ollama:qwen2.5-coder:7b",
+      description: "Qwen 2.5 Coder 7B - Local via Ollama",
+      costs: %{input: 0.0, output: 0.0}
+    },
+    "llama-local" => %{
+      id: "ollama:llama3.2:3b",
+      description: "Llama 3.2 3B - Local via Ollama (fast)",
+      costs: %{input: 0.0, output: 0.0}
+    }
   }
 
   @default_model "haiku"
@@ -79,10 +90,10 @@ defmodule PtcDemo.ModelRegistry do
 
   ## Examples
 
-      iex> PtcDemo.ModelRegistry.resolve("haiku")
+      iex> LLMClient.Registry.resolve("haiku")
       {:ok, "openrouter:anthropic/claude-haiku-4.5"}
 
-      iex> PtcDemo.ModelRegistry.resolve("anthropic:claude-haiku-4.5")
+      iex> LLMClient.Registry.resolve("anthropic:claude-haiku-4.5")
       {:ok, "anthropic:claude-haiku-4.5"}
   """
   @spec resolve(String.t()) :: {:ok, String.t()} | {:error, String.t()}
@@ -90,7 +101,7 @@ defmodule PtcDemo.ModelRegistry do
     cond do
       # Known alias -> OpenRouter model
       Map.has_key?(@models, name) ->
-        {:ok, Map.get(@models, name)}
+        {:ok, @models[name].id}
 
       # Explicit provider format -> validate and pass through
       String.contains?(name, ":") ->
@@ -117,7 +128,7 @@ defmodule PtcDemo.ModelRegistry do
   """
   @spec default_model() :: String.t()
   def default_model do
-    Map.get(@models, @default_model)
+    @models[@default_model].id
   end
 
   @doc """
@@ -128,13 +139,13 @@ defmodule PtcDemo.ModelRegistry do
     providers = available_providers()
 
     @models
-    |> Enum.map(fn {alias_name, model_id} ->
-      model_providers = providers_for_model(model_id)
+    |> Enum.map(fn {alias_name, meta} ->
+      model_providers = providers_for_model(meta.id)
 
       %{
         alias: alias_name,
-        model_id: model_id,
-        description: Map.get(@model_info, alias_name, ""),
+        model_id: meta.id,
+        description: meta.description,
         providers: model_providers,
         available: Enum.any?(model_providers, &(&1 in providers))
       }
@@ -156,7 +167,7 @@ defmodule PtcDemo.ModelRegistry do
     |> Enum.filter(fn {_p, env} -> System.get_env(env) != nil end)
     |> Enum.map(fn {p, _env} -> p end)
     |> then(fn cloud ->
-      if PtcDemo.LLM.available?("ollama:test"), do: [:ollama | cloud], else: cloud
+      if LLMClient.Providers.available?("ollama:test"), do: [:ollama | cloud], else: cloud
     end)
   end
 
@@ -169,24 +180,28 @@ defmodule PtcDemo.ModelRegistry do
     case Map.get(@models, alias_or_model_id) do
       nil ->
         # Try as model_id
-        alias_name = Enum.find_value(@models, fn {a, id} -> if id == alias_or_model_id, do: a end)
-        if alias_name, do: build_model_info(alias_name, alias_or_model_id), else: nil
+        alias_name =
+          Enum.find_value(@models, fn {a, meta} ->
+            if meta.id == alias_or_model_id, do: a
+          end)
 
-      model_id ->
-        build_model_info(alias_or_model_id, model_id)
+        if alias_name, do: build_model_info(alias_name), else: nil
+
+      _meta ->
+        build_model_info(alias_or_model_id)
     end
   end
 
-  defp build_model_info(alias_name, model_id) do
-    costs = Map.get(@model_costs, alias_name, %{input: 0.0, output: 0.0})
+  defp build_model_info(alias_name) do
+    meta = @models[alias_name]
 
     %{
       alias: alias_name,
-      model_id: model_id,
-      description: Map.get(@model_info, alias_name, ""),
-      input_cost_per_mtok: costs.input,
-      output_cost_per_mtok: costs.output,
-      providers: providers_for_model(model_id)
+      model_id: meta.id,
+      description: meta.description,
+      input_cost_per_mtok: meta.costs.input,
+      output_cost_per_mtok: meta.costs.output,
+      providers: providers_for_model(meta.id)
     }
   end
 
@@ -210,7 +225,9 @@ defmodule PtcDemo.ModelRegistry do
 
     {cloud_models, local_models} =
       list_models()
-      |> Enum.split_with(fn m -> Enum.any?([:openrouter, :anthropic, :openai, :google], &(&1 in m.providers)) end)
+      |> Enum.split_with(fn m ->
+        Enum.any?([:openrouter, :anthropic, :openai, :google], &(&1 in m.providers))
+      end)
 
     header = """
     Available Models
@@ -239,6 +256,7 @@ defmodule PtcDemo.ModelRegistry do
       local_models
       |> Enum.map(fn model ->
         status = if model.available, do: "[available]", else: "[needs Ollama]"
+
         "  #{String.pad_trailing(model.alias, 12)} #{String.pad_trailing(status, 16)} #{model.description}"
       end)
       |> Enum.join("\n")
@@ -320,7 +338,9 @@ defmodule PtcDemo.ModelRegistry do
   Get all aliases as a map (for CLI /model command).
   """
   @spec preset_models() :: %{String.t() => String.t()}
-  def preset_models, do: @models
+  def preset_models do
+    Map.new(@models, fn {alias_name, meta} -> {alias_name, meta.id} end)
+  end
 
   @doc """
   Get list of all alias names.
@@ -336,10 +356,7 @@ defmodule PtcDemo.ModelRegistry do
   """
   @spec calculate_cost(String.t(), non_neg_integer(), non_neg_integer()) :: float()
   def calculate_cost(alias_or_model_id, input_tokens, output_tokens) do
-    # Try direct alias lookup first
-    costs =
-      Map.get(@model_costs, alias_or_model_id) ||
-        find_costs_by_model_id(alias_or_model_id)
+    costs = find_costs(alias_or_model_id)
 
     case costs do
       nil ->
@@ -352,18 +369,25 @@ defmodule PtcDemo.ModelRegistry do
 
   # Private functions
 
+  defp find_costs(alias_or_model_id) do
+    # Try direct alias lookup first
+    case Map.get(@models, alias_or_model_id) do
+      %{costs: costs} ->
+        costs
+
+      nil ->
+        # Try as model_id
+        case Enum.find(@models, fn {_alias, meta} -> meta.id == alias_or_model_id end) do
+          {_alias, meta} -> meta.costs
+          nil -> nil
+        end
+    end
+  end
+
   defp validate_and_return(model_string) do
     case validate(model_string) do
       :ok -> {:ok, model_string}
       error -> error
-    end
-  end
-
-  defp find_costs_by_model_id(model_id) do
-    # Find alias that maps to this model_id
-    case Enum.find(@models, fn {_alias, id} -> id == model_id end) do
-      {alias_name, _} -> Map.get(@model_costs, alias_name)
-      nil -> nil
     end
   end
 
