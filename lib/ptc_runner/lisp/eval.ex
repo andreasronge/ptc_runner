@@ -777,7 +777,7 @@ defmodule PtcRunner.Lisp.Eval do
   # Handles 5-tuple closure format: {:closure, patterns, body, closure_env, turn_history}
   defp closure_to_fun(
          {:closure, patterns, body, closure_env, closure_turn_history},
-         %EvalContext{ctx: ctx, memory: memory, tool_exec: tool_exec}
+         %EvalContext{} = eval_context
        ) do
     case length(patterns) do
       0 ->
@@ -787,9 +787,7 @@ defmodule PtcRunner.Lisp.Eval do
             patterns,
             body,
             closure_env,
-            ctx,
-            memory,
-            tool_exec,
+            eval_context,
             closure_turn_history
           )
         end
@@ -801,9 +799,7 @@ defmodule PtcRunner.Lisp.Eval do
             patterns,
             body,
             closure_env,
-            ctx,
-            memory,
-            tool_exec,
+            eval_context,
             closure_turn_history
           )
         end
@@ -815,9 +811,7 @@ defmodule PtcRunner.Lisp.Eval do
             patterns,
             body,
             closure_env,
-            ctx,
-            memory,
-            tool_exec,
+            eval_context,
             closure_turn_history
           )
         end
@@ -829,9 +823,7 @@ defmodule PtcRunner.Lisp.Eval do
             patterns,
             body,
             closure_env,
-            ctx,
-            memory,
-            tool_exec,
+            eval_context,
             closure_turn_history
           )
         end
@@ -866,7 +858,14 @@ defmodule PtcRunner.Lisp.Eval do
   # This function is used inside Erlang functions passed to builtins like Enum.map/reduce,
   # so it must raise (not return error tuples) to signal errors.
   # The raised RuntimeError is caught in apply_fun and converted to an error tuple.
-  defp eval_closure_args(args, patterns, body, closure_env, ctx, memory, tool_exec, turn_history) do
+  defp eval_closure_args(
+         args,
+         patterns,
+         body,
+         closure_env,
+         %EvalContext{} = eval_context,
+         closure_turn_history
+       ) do
     if length(args) != length(patterns) do
       raise RuntimeError,
             "closure arity mismatch: expected #{length(patterns)}, got #{length(args)}"
@@ -886,7 +885,15 @@ defmodule PtcRunner.Lisp.Eval do
       end)
 
     new_env = Map.merge(closure_env, bindings)
-    eval_ctx = EvalContext.new(ctx, memory, new_env, tool_exec, turn_history)
+
+    eval_ctx =
+      EvalContext.new(
+        eval_context.ctx,
+        eval_context.memory,
+        new_env,
+        eval_context.tool_exec,
+        closure_turn_history
+      )
 
     case do_eval(body, eval_ctx) do
       {:ok, result, _} -> result
