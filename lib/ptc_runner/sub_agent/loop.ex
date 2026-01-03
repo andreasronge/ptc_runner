@@ -204,55 +204,23 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Loop when max_turns exceeded
   defp loop(agent, _llm, state) when state.turn > agent.max_turns do
-    duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
-    step =
-      Step.error(
-        :max_turns_exceeded,
-        "Exceeded max_turns limit of #{agent.max_turns}",
-        state.memory
-      )
-
-    # Use -1 offset: we haven't started this turn, so report turns completed
-    step_with_metrics = %{
-      step
-      | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
-        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
-    }
-
-    {:error, step_with_metrics}
+    build_termination_error(
+      :max_turns_exceeded,
+      "Exceeded max_turns limit of #{agent.max_turns}",
+      state
+    )
   end
 
   # Check turn budget before each turn (guard clause)
   defp loop(_agent, _llm, state) when state.remaining_turns <= 0 do
-    duration_ms = System.monotonic_time(:millisecond) - state.start_time
-    step = Step.error(:turn_budget_exhausted, "Turn budget exhausted", state.memory)
-
-    # Use -1 offset: we haven't started this turn, so report turns completed
-    step_with_metrics = %{
-      step
-      | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
-        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
-    }
-
-    {:error, step_with_metrics}
+    build_termination_error(:turn_budget_exhausted, "Turn budget exhausted", state)
   end
 
   # Main loop iteration
   defp loop(agent, llm, state) do
     # Check mission timeout before each turn
     if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
-      duration_ms = System.monotonic_time(:millisecond) - state.start_time
-      step = Step.error(:mission_timeout, "Mission timeout exceeded", state.memory)
-
-      # Use -1 offset: we haven't started this turn, so report turns completed
-      step_with_metrics = %{
-        step
-        | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
-          trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
-      }
-
-      {:error, step_with_metrics}
+      build_termination_error(:mission_timeout, "Mission timeout exceeded", state)
     else
       # Emit turn start event
       Telemetry.emit([:turn, :start], %{}, %{agent: agent, turn: state.turn})
@@ -445,34 +413,14 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Handle successful Lisp execution
   defp handle_successful_execution(code, response, lisp_step, state, agent, llm) do
-    # Build trace entry (TODO: Tool calls tracking in Stage 4)
     trace_entry = Metrics.build_trace_entry(state, code, lisp_step.return, [])
 
     # Log turn execution if debug mode is enabled
     Metrics.maybe_log_turn(state, response, lisp_step.return, state.debug)
 
-    # Check if code contains explicit return/fail call (Stage 4 preview)
-    # For now, detect these as special tool names
     cond do
-      ResponseHandler.contains_call?(code, "return") ->
-        # Explicit return - complete successfully
-        duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
-        final_step = %{
-          lisp_step
-          | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
-            trace:
-              Metrics.apply_trace_filter(
-                Enum.reverse([trace_entry | state.trace]),
-                state.trace_mode,
-                false
-              )
-        }
-
-        {:ok, final_step}
-
-      agent.max_turns == 1 ->
-        # Single-shot mode: expression result IS the answer (implicit return)
+      # Explicit return or single-shot mode (expression result is the answer)
+      ResponseHandler.contains_call?(code, "return") or agent.max_turns == 1 ->
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
         final_step = %{
@@ -597,6 +545,21 @@ defmodule PtcRunner.SubAgent.Loop do
   # Check if mission timeout has been exceeded
   defp mission_timeout_exceeded?(deadline) do
     DateTime.compare(DateTime.utc_now(), deadline) == :gt
+  end
+
+  # Build error step for loop termination conditions (max_turns, turn_budget, mission_timeout)
+  # Uses -1 turn offset since we haven't started the turn that would exceed the limit
+  defp build_termination_error(reason, message, state) do
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+    step = Step.error(reason, message, state.memory)
+
+    step_with_metrics = %{
+      step
+      | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
+        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+    }
+
+    {:error, step_with_metrics}
   end
 
   defp format_turn_feedback(agent, state, lisp_step) do
