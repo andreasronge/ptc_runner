@@ -918,6 +918,12 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `second` | `(second coll)` | Second item or nil |
 | `last` | `(last coll)` | Last item or nil |
 | `nth` | `(nth coll idx)` | Item at index or nil |
+| `rest` | `(rest coll)` | All but first (empty list if none) |
+| `next` | `(next coll)` | All but first (nil if none) |
+| `ffirst` | `(ffirst coll)` | First of first |
+| `fnext` | `(fnext coll)` | First of next |
+| `nfirst` | `(nfirst coll)` | Next of first |
+| `nnext` | `(nnext coll)` | Next of next |
 | `take` | `(take n coll)` | First n items |
 | `drop` | `(drop n coll)` | Skip first n items |
 | `take-while` | `(take-while pred coll)` | Take while pred is true |
@@ -931,6 +937,15 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (last [1 2 3])        ; => 3
 (nth [1 2 3] 1)       ; => 2
 (nth [1 2 3] 10)      ; => nil (out of bounds)
+(rest [1 2 3])        ; => [2 3]
+(rest [])             ; => []
+(next [1 2 3])        ; => [2 3]
+(next [])             ; => nil
+(next [1])            ; => nil
+(ffirst [[1 2] [3]])  ; => 1
+(fnext [1 2 3])       ; => 2
+(nfirst [[1 2] [3]])  ; => [2]
+(nnext [1 2 3 4])     ; => [3 4]
 (take 2 [1 2 3 4])    ; => [1 2]
 (drop 2 [1 2 3 4])    ; => [3 4]
 (distinct [1 2 1 3])  ; => [1 2 3]

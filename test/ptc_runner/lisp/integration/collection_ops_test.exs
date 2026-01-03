@@ -378,4 +378,133 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == true
     end
   end
+
+  # ==========================================================================
+  # rest, next, and composed accessor functions
+  # ==========================================================================
+
+  describe "rest" do
+    test "returns tail of list with multiple elements" do
+      {:ok, %Step{return: result}} = Lisp.run("(rest [1 2 3])")
+      assert result == [2, 3]
+    end
+
+    test "returns empty list for empty list" do
+      {:ok, %Step{return: result}} = Lisp.run("(rest [])")
+      assert result == []
+    end
+
+    test "returns empty list for single-element list" do
+      {:ok, %Step{return: result}} = Lisp.run("(rest [1])")
+      assert result == []
+    end
+  end
+
+  describe "next" do
+    test "returns tail of list with multiple elements" do
+      {:ok, %Step{return: result}} = Lisp.run("(next [1 2 3])")
+      assert result == [2, 3]
+    end
+
+    test "returns nil for empty list" do
+      {:ok, %Step{return: result}} = Lisp.run("(next [])")
+      assert result == nil
+    end
+
+    test "returns nil for single-element list" do
+      {:ok, %Step{return: result}} = Lisp.run("(next [1])")
+      assert result == nil
+    end
+  end
+
+  describe "ffirst" do
+    test "returns first of first with nested collections" do
+      {:ok, %Step{return: result}} = Lisp.run("(ffirst [[1 2] [3 4]])")
+      assert result == 1
+    end
+
+    test "returns nil when first element is empty" do
+      {:ok, %Step{return: result}} = Lisp.run("(ffirst [[] [3 4]])")
+      assert result == nil
+    end
+
+    test "errors when outer collection is empty (first returns nil which is not a list)" do
+      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(ffirst [])")
+    end
+  end
+
+  describe "fnext" do
+    test "returns first of next" do
+      {:ok, %Step{return: result}} = Lisp.run("(fnext [1 2 3])")
+      assert result == 2
+    end
+
+    test "errors when next returns nil (single-element list)" do
+      # next([1]) returns nil, first(nil) errors because nil is not a list
+      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(fnext [1])")
+    end
+
+    test "errors when next returns nil (empty list)" do
+      # next([]) returns nil, first(nil) errors because nil is not a list
+      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(fnext [])")
+    end
+  end
+
+  describe "nfirst" do
+    test "returns next of first with nested collections" do
+      {:ok, %Step{return: result}} = Lisp.run("(nfirst [[1 2] [3 4]])")
+      assert result == [2]
+    end
+
+    test "returns nil when first element has single element" do
+      {:ok, %Step{return: result}} = Lisp.run("(nfirst [[1] [3 4]])")
+      assert result == nil
+    end
+
+    test "returns nil when first element is empty" do
+      {:ok, %Step{return: result}} = Lisp.run("(nfirst [[] [3 4]])")
+      assert result == nil
+    end
+  end
+
+  describe "nnext" do
+    test "returns next of next" do
+      {:ok, %Step{return: result}} = Lisp.run("(nnext [1 2 3 4])")
+      assert result == [3, 4]
+    end
+
+    test "returns nil for two-element list" do
+      {:ok, %Step{return: result}} = Lisp.run("(nnext [1 2])")
+      assert result == nil
+    end
+
+    test "errors when next returns nil (single-element list)" do
+      # next([1]) returns nil, next(nil) errors because nil is not a list
+      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(nnext [1])")
+    end
+
+    test "errors when next returns nil (empty list)" do
+      # next([]) returns nil, next(nil) errors because nil is not a list
+      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(nnext [])")
+    end
+  end
+
+  describe "rest/next practical use case" do
+    test "processing nested data with composed accessors" do
+      program = """
+      (let [matrix [[1 2 3] [4 5 6] [7 8 9]]]
+        {:first-row-head (ffirst matrix)
+         :first-row-tail (nfirst matrix)
+         :remaining-rows (next matrix)})
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(program)
+
+      assert result == %{
+               "first-row-head": 1,
+               "first-row-tail": [2, 3],
+               "remaining-rows": [[4, 5, 6], [7, 8, 9]]
+             }
+    end
+  end
 end
