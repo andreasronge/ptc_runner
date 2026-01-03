@@ -173,4 +173,105 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   def format_execution_result(result, _opts) do
     "Result: #{inspect(result, limit: :infinity, printable_limit: :infinity)}"
   end
+
+  # Default maximum size for turn history entries (1KB)
+  @default_max_history_bytes 1024
+
+  @doc """
+  Truncate a result value for storage in turn history.
+
+  Large results are truncated to prevent memory bloat. The default limit is 1KB.
+  Truncation preserves structure where possible:
+  - Lists: keeps first N elements that fit
+  - Maps: keeps first N key-value pairs that fit
+  - Strings: truncates with "..." suffix
+  - Other values: converted to truncated string representation
+
+  ## Options
+
+  - `:max_bytes` - Maximum size in bytes (default: 1024)
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.truncate_for_history([1, 2, 3])
+      [1, 2, 3]
+
+      iex> result = PtcRunner.SubAgent.Loop.ResponseHandler.truncate_for_history(String.duplicate("x", 2000))
+      iex> byte_size(result) <= 1024
+      true
+
+  """
+  @spec truncate_for_history(term(), keyword()) :: term()
+  def truncate_for_history(value, opts \\ []) do
+    max_bytes = Keyword.get(opts, :max_bytes, @default_max_history_bytes)
+    do_truncate(value, max_bytes)
+  end
+
+  defp do_truncate(value, max_bytes) do
+    current_size = :erlang.external_size(value)
+
+    if current_size <= max_bytes do
+      value
+    else
+      truncate_value(value, max_bytes)
+    end
+  end
+
+  # Truncate strings with "..." suffix
+  defp truncate_value(value, max_bytes) when is_binary(value) do
+    # Reserve space for "..." suffix
+    target_size = max_bytes - 3
+
+    if target_size > 0 do
+      String.slice(value, 0, target_size) <> "..."
+    else
+      "..."
+    end
+  end
+
+  # Truncate lists by keeping first elements that fit
+  defp truncate_value(value, max_bytes) when is_list(value) do
+    truncate_list(value, [], 0, max_bytes)
+  end
+
+  # Truncate maps by keeping first entries that fit
+  defp truncate_value(value, max_bytes) when is_map(value) do
+    truncate_map(Map.to_list(value), %{}, 0, max_bytes)
+  end
+
+  # For other types, convert to string representation and truncate
+  defp truncate_value(value, max_bytes) do
+    inspected = inspect(value, limit: 50, printable_limit: max_bytes)
+    truncate_value(inspected, max_bytes)
+  end
+
+  defp truncate_list([], acc, _size, _max), do: Enum.reverse(acc)
+
+  defp truncate_list([head | tail], acc, current_size, max_bytes) do
+    head_size = :erlang.external_size(head)
+    new_size = current_size + head_size
+
+    if new_size <= max_bytes do
+      truncate_list(tail, [head | acc], new_size, max_bytes)
+    else
+      # Try to truncate the head if it's large
+      truncated_head = do_truncate(head, max_bytes - current_size)
+      Enum.reverse([truncated_head | acc])
+    end
+  end
+
+  defp truncate_map([], acc, _size, _max), do: acc
+
+  defp truncate_map([{k, v} | tail], acc, current_size, max_bytes) do
+    entry_size = :erlang.external_size({k, v})
+    new_size = current_size + entry_size
+
+    if new_size <= max_bytes do
+      truncate_map(tail, Map.put(acc, k, v), new_size, max_bytes)
+    else
+      # Try to truncate the value if it's large
+      truncated_v = do_truncate(v, max_bytes - current_size - :erlang.external_size(k))
+      Map.put(acc, k, truncated_v)
+    end
+  end
 end

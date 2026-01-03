@@ -90,6 +90,9 @@ defmodule PtcRunner.Lisp.Analyze do
   defp do_analyze({:ns_symbol, :ctx, key}), do: {:ok, {:ctx, key}}
   defp do_analyze({:ns_symbol, :memory, key}), do: {:ok, {:memory, key}}
 
+  # Turn history variables: *1, *2, *3
+  defp do_analyze({:turn_history, n}) when n in [1, 2, 3], do: {:ok, {:turn_history, n}}
+
   # ============================================================
   # List forms (special forms and function calls)
   # ============================================================

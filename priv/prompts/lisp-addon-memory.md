@@ -28,7 +28,9 @@ Then you produce the next Thought/Action based on what you observed.
 
 - You SEE previous result as feedback
 - **NEVER copy/paste result data into your code** - this doesn't work!
-- Your code can ONLY access: `ctx/*` (original data) and `memory/*` (stored values)
+- Your code can ONLY access: `ctx/*` (original data), `memory/*` (stored values), and `*1`/`*2`/`*3` (recent results)
+
+**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~1KB), so use `memory/` for large values.
 
 After observing a result:
 1. Analyze what you observed and draw a conclusion
