@@ -6,36 +6,8 @@ defmodule PtcDemo.JsonTestRunnerTest do
   alias PtcDemo.{JsonTestRunner, MockAgent}
 
   setup do
-    # Define mock responses for all test queries used by JsonTestRunner
-    # JsonTestRunner uses: common_test_cases (13 tests) + multi_turn_cases (2 tests) = 15 tests
-    responses = %{
-      # Level 1: Basic Operations
-      "How many products are there?" => {:ok, "500 products", nil, 500},
-      "How many orders have status 'delivered'?" => {:ok, "200 delivered orders", nil, 200},
-      "What is the total revenue from all orders? (sum the total field)" =>
-        {:ok, "Total is 2500000", nil, 2_500_000},
-      "What is the average product rating?" => {:ok, "Average rating is 3.5", nil, 3.5},
-      # Level 2: Intermediate Operations
-      "How many employees work remotely?" => {:ok, "100 remote employees", nil, 100},
-      "How many products cost more than $500?" => {:ok, "250 products", nil, 250},
-      "How many orders over $1000 were paid by credit card?" => {:ok, "150 orders", nil, 150},
-      "What is the name of the cheapest product?" => {:ok, "Product 42", nil, "Product 42"},
-      # Level 3: Advanced Operations
-      "Get the names of the 3 most expensive products" =>
-        {:ok, "[Product A, Product B, Product C]", nil, ["Product A", "Product B", "Product C"]},
-      "How many orders are either cancelled or refunded?" => {:ok, "300 orders", nil, 300},
-      "What is the average salary of senior-level employees? Return only the numeric value." =>
-        {:ok, "Average is 150000", nil, 150_000},
-      "How many unique products have been ordered? (count distinct product_id values in orders)" =>
-        {:ok, "300 unique products", nil, 300},
-      "What is the total expense amount for employees in the engineering department? (Find engineering employee IDs, then sum expenses for those employees)" =>
-        {:ok, "Total expenses: 50000", nil, 50_000},
-      # Multi-turn cases
-      "Analyze expense claims to find suspicious patterns. Which employee's spending looks most like potential fraud or abuse? Return their employee_id." =>
-        {:ok, "Employee 102 looks suspicious", nil, 102},
-      "Use the search tool to find the policy document that covers BOTH 'remote work' AND 'expense reimbursement'. Return the document title." =>
-        {:ok, "Policy WFH-2024-REIMB", nil, "Policy WFH-2024-REIMB"}
-    }
+    # JsonTestRunner: 13 common + 2 multi_turn = 15 tests
+    responses = common_mock_responses()
 
     start_supervised!({MockAgent, responses})
 

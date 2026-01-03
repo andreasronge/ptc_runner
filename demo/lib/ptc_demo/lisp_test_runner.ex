@@ -370,15 +370,9 @@ defmodule PtcDemo.LispTestRunner do
     test_cases()
     |> Enum.with_index(1)
     |> Enum.each(fn {tc, i} ->
-      case tc do
-        %{queries: queries} ->
-          IO.puts("  #{i}. [MULTI-TURN]")
-          Enum.each(queries, fn q -> IO.puts("     → #{q}") end)
-
-        %{query: query} ->
-          IO.puts("  #{i}. #{query}")
-      end
-
+      max_turns = Map.get(tc, :max_turns, 1)
+      prefix = if max_turns > 1, do: "[MULTI-TURN] ", else: ""
+      IO.puts("  #{i}. #{prefix}#{tc.query}")
       IO.puts("     Expected: #{tc.description}")
     end)
 
@@ -421,18 +415,7 @@ defmodule PtcDemo.LispTestRunner do
   end
 
   defp run_test(test_case, index, total, verbose, agent_mod, clojure_available) do
-    run_single_turn_test(
-      test_case,
-      test_case.query,
-      index,
-      total,
-      verbose,
-      agent_mod,
-      clojure_available
-    )
-  end
-
-  defp run_single_turn_test(test_case, query, index, total, verbose, agent_mod, clojure_available) do
+    query = test_case.query
     max_turns = Map.get(test_case, :max_turns, 1)
 
     if verbose do
