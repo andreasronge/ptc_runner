@@ -100,5 +100,5 @@ result
 
 * [LLM Agent Livebook](ptc_runner_llm_agent.livemd) - Build an LLM-powered data analyst with retry loop
 * [PTC-JSON Specification](https://hexdocs.pm/ptc_runner/ptc-json-specification.html) - Complete JSON DSL reference
-* [PTC-Lisp Overview](https://hexdocs.pm/ptc_runner/ptc-lisp-overview.html) - Lisp DSL introduction
-* [Guide](https://hexdocs.pm/ptc_runner/guide.html) - Architecture and API reference
+* [PTC-Lisp Specification](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html) - Lisp DSL reference
+* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html) - Build your first agent

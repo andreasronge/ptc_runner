@@ -407,8 +407,8 @@ end
 ## Learn More
 
 * [Playground Livebook](ptc_runner_playground.livemd) - Explore PTC-JSON and PTC-Lisp basics
-* [PTC Runner Guide](https://hexdocs.pm/ptc_runner/guide.html) - Full documentation
-* [PTC-Lisp Overview](https://hexdocs.pm/ptc_runner/ptc-lisp-overview.html) - Lisp DSL reference
+* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html) - Build your first agent
+* [PTC-Lisp Specification](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html) - Lisp DSL reference
 * [OpenRouter](https://openrouter.ai/) - Multi-model API provider
 
 <!-- livebook:{"offset":12396,"stamp":{"token":"XCP.u2Q8K9Bm9y1GUPZBLhBzbcWXZOGLFdVrBEZD5l0bsnzDlhAwag7yoXTb1I5WJ-ACpApaZkjCaskQraUAjGSZRdCEgvvsyWqT5UXYUvAKaFbwsnnoSfpl5yEeJXe0","version":2}} -->

@@ -121,19 +121,84 @@ defmodule PtcDemo.ModelRegistry do
   end
 
   @doc """
-  List all available model aliases.
+  List all available model aliases with status.
   """
   @spec list_models() :: [map()]
   def list_models do
+    providers = available_providers()
+
     @models
     |> Enum.map(fn {alias_name, model_id} ->
+      model_providers = providers_for_model(model_id)
+
       %{
         alias: alias_name,
         model_id: model_id,
-        description: Map.get(@model_info, alias_name, "")
+        description: Map.get(@model_info, alias_name, ""),
+        providers: model_providers,
+        available: Enum.any?(model_providers, &(&1 in providers))
       }
     end)
     |> Enum.sort_by(& &1.alias)
+  end
+
+  @doc """
+  Get all available providers based on environment variables.
+  """
+  @spec available_providers() :: [atom()]
+  def available_providers do
+    [
+      {:anthropic, "ANTHROPIC_API_KEY"},
+      {:openai, "OPENAI_API_KEY"},
+      {:google, "GOOGLE_API_KEY"},
+      {:openrouter, "OPENROUTER_API_KEY"}
+    ]
+    |> Enum.filter(fn {_p, env} -> System.get_env(env) != nil end)
+    |> Enum.map(fn {p, _env} -> p end)
+    |> then(fn cloud ->
+      if PtcDemo.LLM.available?("ollama:test"), do: [:ollama | cloud], else: cloud
+    end)
+  end
+
+  @doc """
+  Get detailed info for a model by alias or model_id.
+  """
+  @spec get_model_info(String.t()) :: map() | nil
+  def get_model_info(alias_or_model_id) do
+    # Try alias first
+    case Map.get(@models, alias_or_model_id) do
+      nil ->
+        # Try as model_id
+        alias_name = Enum.find_value(@models, fn {a, id} -> if id == alias_or_model_id, do: a end)
+        if alias_name, do: build_model_info(alias_name, alias_or_model_id), else: nil
+
+      model_id ->
+        build_model_info(alias_or_model_id, model_id)
+    end
+  end
+
+  defp build_model_info(alias_name, model_id) do
+    costs = Map.get(@model_costs, alias_name, %{input: 0.0, output: 0.0})
+
+    %{
+      alias: alias_name,
+      model_id: model_id,
+      description: Map.get(@model_info, alias_name, ""),
+      input_cost_per_mtok: costs.input,
+      output_cost_per_mtok: costs.output,
+      providers: providers_for_model(model_id)
+    }
+  end
+
+  defp providers_for_model(model_id) do
+    cond do
+      String.starts_with?(model_id, "openrouter:") -> [:openrouter]
+      String.starts_with?(model_id, "ollama:") -> [:ollama]
+      String.starts_with?(model_id, "anthropic:") -> [:anthropic]
+      String.starts_with?(model_id, "openai:") -> [:openai]
+      String.starts_with?(model_id, "google:") -> [:google]
+      true -> []
+    end
   end
 
   @doc """
@@ -141,26 +206,29 @@ defmodule PtcDemo.ModelRegistry do
   """
   @spec format_model_list() :: String.t()
   def format_model_list do
-    has_openrouter_key? = System.get_env("OPENROUTER_API_KEY") != nil
-    ollama_available? = PtcDemo.LLM.available?("ollama:test")
+    available = available_providers()
 
     {cloud_models, local_models} =
       list_models()
-      |> Enum.split_with(fn m -> String.starts_with?(m.model_id, "openrouter:") end)
+      |> Enum.split_with(fn m -> Enum.any?([:openrouter, :anthropic, :openai, :google], &(&1 in m.providers)) end)
 
     header = """
     Available Models
     ================
 
-    Cloud Models (via OpenRouter):
+    Cloud Models:
     """
 
     cloud_section =
       cloud_models
       |> Enum.map(fn model ->
-        "  #{String.pad_trailing(model.alias, 12)} #{model.description}"
+        status = if model.available, do: "[available]", else: "[needs API key]"
+        providers_str = model.providers |> Enum.map(&to_string/1) |> Enum.join(", ")
+
+        "  #{String.pad_trailing(model.alias, 12)} #{String.pad_trailing(status, 16)} #{model.description}\n" <>
+          "               Providers: #{providers_str}"
       end)
-      |> Enum.join("\n")
+      |> Enum.join("\n\n")
 
     local_header = """
 
@@ -170,26 +238,30 @@ defmodule PtcDemo.ModelRegistry do
     local_section =
       local_models
       |> Enum.map(fn model ->
-        "  #{String.pad_trailing(model.alias, 12)} #{model.description}"
+        status = if model.available, do: "[available]", else: "[needs Ollama]"
+        "  #{String.pad_trailing(model.alias, 12)} #{String.pad_trailing(status, 16)} #{model.description}"
       end)
       |> Enum.join("\n")
 
-    openrouter_status =
-      if has_openrouter_key?,
-        do: "OPENROUTER_API_KEY is set",
-        else: "OPENROUTER_API_KEY not set"
+    api_keys =
+      [
+        {"ANTHROPIC_API_KEY", :anthropic},
+        {"OPENROUTER_API_KEY", :openrouter},
+        {"OPENAI_API_KEY", :openai},
+        {"GOOGLE_API_KEY", :google}
+      ]
+      |> Enum.filter(fn {_env, p} -> p in available end)
+      |> Enum.map(fn {env, _p} -> env end)
+      |> Enum.join(", ")
 
-    ollama_status =
-      if ollama_available?,
-        do: "Ollama is running",
-        else: "Ollama not running (start with: ollama serve)"
+    api_keys_str = if api_keys == "", do: "none", else: api_keys
 
     footer = """
 
 
     Status:
-      #{openrouter_status}
-      #{ollama_status}
+      Current API keys: #{api_keys_str}
+      Ollama: #{if :ollama in available, do: "running", else: "not running"}
 
     Usage:
       mix lisp --model=haiku                                 # Cloud alias

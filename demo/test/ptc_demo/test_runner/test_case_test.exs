@@ -214,24 +214,17 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
       assert length(cases) == 2
     end
 
-    test "each multi-turn test case has queries field" do
+    test "each multi-turn test case has query field" do
       cases = TestCase.multi_turn_cases()
 
       Enum.each(cases, fn test_case ->
-        assert Map.has_key?(test_case, :queries),
-               "Multi-turn test case must have :queries field"
+        assert Map.has_key?(test_case, :query),
+               "Multi-turn test case must have :query field"
 
-        assert is_list(test_case.queries),
-               "queries field must be a list"
+        assert is_binary(test_case.query),
+               "query field must be a string"
 
-        assert length(test_case.queries) >= 2,
-               "Multi-turn tests must have at least 2 queries"
-
-        # Each query should be a non-empty string
-        Enum.each(test_case.queries, fn query ->
-          assert is_binary(query)
-          assert String.length(query) > 0
-        end)
+        assert String.length(test_case.query) > 0
       end)
     end
 
@@ -248,12 +241,12 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
       end)
     end
 
-    test "multi-turn tests do not have :query field" do
+    test "multi-turn tests have :max_turns > 1" do
       cases = TestCase.multi_turn_cases()
 
       Enum.each(cases, fn test_case ->
-        assert !Map.has_key?(test_case, :query),
-               "Multi-turn tests should use :queries, not :query"
+        assert Map.get(test_case, :max_turns, 1) > 1,
+               "Multi-turn tests should have :max_turns > 1"
       end)
     end
 
@@ -267,39 +260,34 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
       end)
     end
 
-    test "includes memory persistence test case" do
+    test "includes complex reasoning test case" do
       cases = TestCase.multi_turn_cases()
 
-      # Check for test that mentions storing and retrieving
-      memory_tests =
+      # Check for test that mentions searching or analyzing
+      reasoning_tests =
         Enum.filter(cases, fn tc ->
-          first_query = List.first(tc.queries)
-
-          String.contains?(first_query, "store") or
-            String.contains?(first_query, "memory")
+          query = tc.query
+          String.contains?(query, "Analyze") or String.contains?(query, "search")
         end)
 
-      assert length(memory_tests) > 0,
-             "Should have at least one test that demonstrates memory usage"
+      assert length(reasoning_tests) > 0,
+             "Should have at least one test that demonstrates complex reasoning"
     end
 
-    test "queries mention storing results for later use" do
+    test "queries mention searching or analyzing" do
       cases = TestCase.multi_turn_cases()
 
       Enum.each(cases, fn test_case ->
-        # First query should often mention storing
-        first_query = List.first(test_case.queries)
-        second_query = Enum.at(test_case.queries, 1)
+        query = test_case.query
 
         # At least one query should mention storing or using stored values
-        mentions_storage =
-          String.contains?(first_query, "store") or
-            String.contains?(first_query, "memory") or
-            String.contains?(second_query, "memory") or
-            String.contains?(second_query, "stored")
+        mentions_logic =
+          String.contains?(query, "Analyze") or
+            String.contains?(query, "search") or
+            String.contains?(query, "suspicious")
 
-        assert mentions_storage,
-               "Multi-turn test should demonstrate memory persistence"
+        assert mentions_logic,
+               "Multi-turn test should demonstrate complex reasoning"
       end)
     end
 
@@ -320,57 +308,45 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
       end)
     end
 
-    test "delivered orders percentage test case structure" do
+    test "suspicious pattern test case structure" do
       cases = TestCase.multi_turn_cases()
 
-      # Find the delivered orders percentage test
-      pct_test =
+      # Find the suspicious pattern test
+      susp_test =
         Enum.find(cases, fn tc ->
-          String.contains?(Enum.join(tc.queries), "percentage")
+          String.contains?(tc.query, "suspicious")
         end)
 
-      assert pct_test != nil
+      assert susp_test != nil
 
       # Verify structure
-      assert length(pct_test.queries) == 2
-      assert pct_test.expect == :number
-      assert pct_test.constraint == {:between, 1, 99}
-
-      # First query should count and store
-      first_query = List.first(pct_test.queries)
-
-      assert String.contains?(first_query, "delivered") or
-               String.contains?(first_query, "store")
+      assert susp_test.expect == :integer
+      assert susp_test.max_turns == 4
+      assert elem(susp_test.constraint, 0) == :between
     end
 
-    test "engineering employees salary test case structure" do
+    test "policy search test case structure" do
       cases = TestCase.multi_turn_cases()
 
-      # Find the engineering employees salary test
-      eng_test =
+      # Find the policy search test
+      search_test =
         Enum.find(cases, fn tc ->
-          String.contains?(Enum.join(tc.queries), "engineering")
+          String.contains?(tc.query, "search tool")
         end)
 
-      assert eng_test != nil
+      assert search_test != nil
 
       # Verify structure
-      assert length(eng_test.queries) == 2
-      assert eng_test.expect == :number
-      assert eng_test.constraint == {:between, 50_000, 200_000}
-
-      # Both queries should reference engineering or stored employees
-      full_text = Enum.join(eng_test.queries)
-
-      assert String.contains?(full_text, "engineering") or
-               String.contains?(full_text, "memory")
+      assert search_test.expect == :string
+      assert search_test.max_turns == 6
+      assert search_test.constraint == {:eq, "Policy WFH-2024-REIMB"}
     end
   end
 
   describe "test case consistency across functions" do
     test "multi-turn cases are distinct from common cases" do
       common_queries = TestCase.common_test_cases() |> Enum.map(& &1.query)
-      multi_queries = TestCase.multi_turn_cases() |> Enum.map(&Enum.join(&1.queries))
+      multi_queries = TestCase.multi_turn_cases() |> Enum.map(& &1.query)
 
       # Multi-turn queries should not appear in common cases
       Enum.each(multi_queries, fn multi_query ->

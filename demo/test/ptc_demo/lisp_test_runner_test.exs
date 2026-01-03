@@ -24,7 +24,7 @@ defmodule PtcDemo.LispTestRunnerTest do
       "Get the names of the 3 most expensive products" =>
         {:ok, "[Product A, Product B, Product C]", nil, ["Product A", "Product B", "Product C"]},
       "How many orders are either cancelled or refunded?" => {:ok, "300 orders", nil, 300},
-      "What is the average salary of senior-level employees?" =>
+      "What is the average salary of senior-level employees? Return only the numeric value." =>
         {:ok, "Average is 150000", nil, 150_000},
       "How many unique products have been ordered? (count distinct product_id values in orders)" =>
         {:ok, "300 unique products", nil, 300},
@@ -41,14 +41,10 @@ defmodule PtcDemo.LispTestRunnerTest do
            ]
          }},
       # Multi-turn cases
-      "Count delivered orders and store the result in memory as delivered-count" =>
-        {:ok, "750 delivered orders", nil, 750},
-      "What percentage of all orders are delivered? Use memory/delivered-count and total order count." =>
-        {:ok, "75 percent", nil, 75},
-      "Store the list of employees in the engineering department in memory as engineering-employees" =>
-        {:ok, "Stored employee list", nil, ["Employee1", "Employee2"]},
-      "What is the average salary of the engineering employees stored in memory?" =>
-        {:ok, "Average salary is 100000", nil, 100_000}
+      "Analyze expense claims to find suspicious patterns. Which employee's spending looks most like potential fraud or abuse? Return their employee_id." =>
+        {:ok, "Employee 102 looks suspicious", nil, 102},
+      "Use the search tool to find the policy document that covers BOTH 'remote work' AND 'expense reimbursement'. Return the document title." =>
+        {:ok, "Policy WFH-2024-REIMB", nil, "Policy WFH-2024-REIMB"}
     }
 
     start_supervised!({MockAgent, responses})

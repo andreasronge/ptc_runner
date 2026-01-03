@@ -231,8 +231,8 @@ mix lisp [options]
 |--------|-------------|
 | `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
-| `--prompt=<name>` | Set prompt profile (minimal, single_shot, multi_turn, default) |
-| `--prompt=a,b` | Compare multiple prompts (e.g., `--prompt=minimal,default`) |
+| `--prompt=<name>` | Set prompt profile (single_shot, multi_turn, or auto) |
+| `--prompt=a,b` | Compare multiple prompts (e.g., `--prompt=single_shot,multi_turn`) |
 | `--list-prompts` | Show available prompt profiles and exit |
 | `--show-prompt` | Show system prompt and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
@@ -250,28 +250,30 @@ Examples:
 mix lisp                                  # Interactive with default model (haiku)
 mix lisp --list-models                    # Show available models
 mix lisp --model=gemini                   # Use Gemini via OpenRouter
-mix lisp --prompt=minimal                 # Use minimal prompt (token efficient)
+mix lisp --prompt=single_shot             # Use single-shot prompt explicitly
 mix lisp --test --model=deepseek -v       # Test with DeepSeek
 mix lisp --test --validate-clojure        # Validate syntax with Babashka
 ```
 
 ## Prompt Profiles
 
-Different prompts trade off between token efficiency and LLM accuracy:
+Two prompts are available, automatically selected based on test type:
 
-| Profile | Tokens | Use Case |
-|---------|--------|----------|
-| `:default` | ~3000 | Full reference - production, complex queries |
-| `:minimal` | ~400 | Bare essentials - token-efficient, simple queries |
-| `:single_shot` | ~450 | One-turn optimized with examples |
-| `:multi_turn` | ~500 | Memory-focused for conversational analysis |
+| Profile | Description |
+|---------|-------------|
+| `:single_shot` | Base language reference - for single-turn queries |
+| `:multi_turn` | Base + memory addon - for conversational analysis |
+| `:auto` | Auto-select based on test type (default) |
+
+The test runner uses `:auto` by default, selecting `:single_shot` for single-query tests and `:multi_turn` for tests with multiple queries.
 
 ```bash
-# Use minimal prompt for simple queries
-mix lisp --prompt=minimal
+# Explicit prompt selection
+mix lisp --prompt=single_shot
+mix lisp --prompt=multi_turn
 
 # Compare prompt performance
-mix lisp --test --prompt=minimal,default
+mix lisp --test --prompt=single_shot,multi_turn
 
 # See available profiles
 mix lisp --list-prompts
@@ -282,7 +284,7 @@ mix lisp --list-prompts
 Compare multiple prompts in a single test run:
 
 ```bash
-mix lisp --test --prompt=minimal,default
+mix lisp --test --prompt=single_shot,multi_turn
 ```
 
 Output:
@@ -293,13 +295,13 @@ PROMPT COMPARISON
 
 Prompt             Pass    Rate    Tokens      Time
 ---------------------------------------------------
-minimal           12/15   80.0%       450      12.5s
-default           14/15   93.3%      1200      18.2s
+single_shot       14/15   93.3%      1200      18.2s
+multi_turn        14/15   93.3%      1400      19.1s
 ```
 
 Or programmatically:
 ```elixir
-PtcDemo.LispTestRunner.run_comparison([:minimal, :default])
+PtcDemo.LispTestRunner.run_comparison([:single_shot, :multi_turn])
 ```
 
 ## Interactive Commands
@@ -542,6 +544,41 @@ Both runners share a common test suite, with Lisp having additional tests for Li
 | **Total** | **15** | **16** | |
 
 The common tests enable direct comparison. The Lisp-only test exercises advanced features (like `fn [[key items]]` destructuring) not expressible in JSON.
+
+### Test Runner Internals
+
+Understanding how the test runner works helps when debugging failures:
+
+**Key files:**
+- `lib/ptc_demo/lisp_test_runner.ex` - Main test execution logic
+- `lib/ptc_demo/agent.ex` - GenServer wrapper around SubAgent
+- `lib/ptc_demo/test_runner/test_case.ex` - Test definitions
+- `lib/ptc_demo/test_runner/base.ex` - Validation logic
+
+**Single-turn test flow:**
+1. `agent_mod.reset()` clears memory and history
+2. `agent_mod.ask(query)` calls `SubAgent.run/2` with default `max_turns: 5`
+3. LLM generates PTC-Lisp, executed via `Lisp.run/2`
+4. Result validated against `expect` type and `constraint`
+
+**Multi-turn test flow:**
+1. `agent_mod.reset()` clears state before the test
+2. For each query in `queries` list:
+   - `agent_mod.ask(query, max_turns: 1)` - single turn per query
+   - Memory persists between queries (no reset)
+   - `agent_mod.programs()` accumulates all programs across queries
+3. Final result validated after last query
+
+**Memory persistence in multi-turn:**
+- `agent.ex` line 199: `context = Map.merge(datasets, %{"memory" => state.memory})`
+- `agent.ex` line 232: `memory: step.memory` - updated from SubAgent result
+- Memory flows: Agent state → SubAgent context → Lisp execution → Step.memory → Agent state
+
+**Common debugging tips:**
+- Check if memory was actually stored (map return vs non-map)
+- Check if `ctx/memory` is `%{}` vs `nil` (empty map is truthy, not nil)
+- Use `--verbose` or `-v` to see all programs and their results
+- Multi-turn "All programs tried" shows programs from ALL queries combined
 
 ### Test Assertions
 
