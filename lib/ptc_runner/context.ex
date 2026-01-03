@@ -9,7 +9,7 @@ defmodule PtcRunner.Context do
   See `PtcRunner.SubAgent` for usage in agentic loops.
   """
 
-  defstruct [:ctx, :memory, :tools]
+  defstruct [:ctx, :memory, :tools, turn_history: []]
 
   @typedoc """
   Context structure containing external data, memory, and tool registry.
@@ -17,11 +17,12 @@ defmodule PtcRunner.Context do
   @type t :: %__MODULE__{
           ctx: map(),
           memory: map(),
-          tools: map()
+          tools: map(),
+          turn_history: list()
         }
 
   @doc """
-  Creates a new context with external data, memory, and tools.
+  Creates a new context with external data, memory, tools, and optional turn history.
 
   ## Examples
 
@@ -34,12 +35,13 @@ defmodule PtcRunner.Context do
       %{"counter" => 0}
 
   """
-  @spec new(map(), map(), map()) :: t()
-  def new(ctx \\ %{}, memory \\ %{}, tools \\ %{}) do
+  @spec new(map(), map(), map(), list()) :: t()
+  def new(ctx \\ %{}, memory \\ %{}, tools \\ %{}, turn_history \\ []) do
     %__MODULE__{
       ctx: ctx,
       memory: memory,
-      tools: tools
+      tools: tools,
+      turn_history: turn_history
     }
   end
 

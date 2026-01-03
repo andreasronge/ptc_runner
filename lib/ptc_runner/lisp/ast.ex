@@ -23,11 +23,24 @@ defmodule PtcRunner.Lisp.AST do
 
   @doc "Create a symbol node"
   def symbol(name) when is_binary(name) do
-    case String.split(name, "/", parts: 2) do
-      ["ctx", key] -> {:ns_symbol, :ctx, String.to_atom(key)}
-      ["memory", key] -> {:ns_symbol, :memory, String.to_atom(key)}
-      [name] -> {:symbol, String.to_atom(name)}
-      [_ns, _key] -> {:symbol, String.to_atom(name)}
+    case name do
+      # Turn history variables: *1, *2, *3
+      "*1" ->
+        {:turn_history, 1}
+
+      "*2" ->
+        {:turn_history, 2}
+
+      "*3" ->
+        {:turn_history, 3}
+
+      _ ->
+        case String.split(name, "/", parts: 2) do
+          ["ctx", key] -> {:ns_symbol, :ctx, String.to_atom(key)}
+          ["memory", key] -> {:ns_symbol, :memory, String.to_atom(key)}
+          [name] -> {:symbol, String.to_atom(name)}
+          [_ns, _key] -> {:symbol, String.to_atom(name)}
+        end
     end
   end
 

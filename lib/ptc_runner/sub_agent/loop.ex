@@ -196,7 +196,9 @@ defmodule PtcRunner.SubAgent.Loop do
       total_output_tokens: 0,
       llm_requests: 0,
       # Tokens from current turn's LLM call (for telemetry)
-      turn_tokens: nil
+      turn_tokens: nil,
+      # Turn history for *1/*2/*3 access (last 3 results, most recent last)
+      turn_history: []
     }
 
     loop(agent, run_opts.llm, initial_state)
@@ -380,7 +382,14 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Continue execution after tool_catalog check
   defp execute_code_with_tools(code, response, agent, llm, state, exec_context, all_tools) do
-    case Lisp.run(code, context: exec_context, memory: state.memory, tools: all_tools) do
+    lisp_opts = [
+      context: exec_context,
+      memory: state.memory,
+      tools: all_tools,
+      turn_history: state.turn_history
+    ]
+
+    case Lisp.run(code, lisp_opts) do
       {:ok, lisp_step} ->
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
 
@@ -462,6 +471,10 @@ defmodule PtcRunner.SubAgent.Loop do
           {:ok, _size} ->
             execution_result = format_turn_feedback(agent, state, lisp_step)
 
+            # Update turn history with truncated result (keep last 3)
+            truncated_result = ResponseHandler.truncate_for_history(lisp_step.return)
+            updated_history = update_turn_history(state.turn_history, truncated_result)
+
             new_state = %{
               state
               | turn: state.turn + 1,
@@ -475,7 +488,8 @@ defmodule PtcRunner.SubAgent.Loop do
                 memory: lisp_step.memory,
                 # Context stays immutable - memory_delta only goes to memory/
                 last_fail: nil,
-                remaining_turns: state.remaining_turns - 1
+                remaining_turns: state.remaining_turns - 1,
+                turn_history: updated_history
             }
 
             loop(agent, llm, new_state)
@@ -560,6 +574,19 @@ defmodule PtcRunner.SubAgent.Loop do
     }
 
     {:error, step_with_metrics}
+  end
+
+  # Update turn history, keeping only the last 3 results
+  # New results are appended to the end so *1 = last, *2 = second-to-last, *3 = third-to-last
+  defp update_turn_history(history, new_result) do
+    updated = history ++ [new_result]
+
+    # Keep only the last 3 entries
+    if length(updated) > 3 do
+      Enum.drop(updated, length(updated) - 3)
+    else
+      updated
+    end
   end
 
   defp format_turn_feedback(agent, state, lisp_step) do

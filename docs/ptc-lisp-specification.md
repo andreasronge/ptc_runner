@@ -38,6 +38,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | Extension | Description |
 |-----------|-------------|
 | `ctx/path` and `memory/path` | Namespace-qualified access to context and memory (§9) |
+| `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
 | `pluck` | Extract field values from collections (§8) |
@@ -1386,6 +1387,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 |-----------|----------------|-------------|
 | `memory/` | Read via symbol | Persistent state across turns |
 | `ctx/` | Read via symbol | Current request context (read-only) |
+| `*1`, `*2`, `*3` | Symbols | Recent turn results (for debugging) |
 | `(call ...)` | Function call | Tool invocation |
 
 ### 9.2 Memory Access — `memory/`
@@ -1432,7 +1434,39 @@ Context is **per-request** data passed by the host. It does not persist across t
      (sum-by :amount))
 ```
 
-### 9.4 Tool Invocation — `call`
+### 9.4 Turn History — `*1`, `*2`, `*3`
+
+Access results from previous turns using the turn history symbols:
+
+```clojure
+*1                        ; result from the previous turn (most recent)
+*2                        ; result from 2 turns ago
+*3                        ; result from 3 turns ago
+```
+
+**Semantics:**
+- `*1` returns the result of the most recent turn
+- Returns `nil` if the turn doesn't exist (e.g., `*1` on turn 1)
+- Results are **truncated** to ~1KB to prevent memory bloat
+- Use `memory/` for persistent access to full values
+
+**Use cases:**
+- Quick inspection of previous results during debugging
+- Lightweight chaining when full values aren't needed
+
+```clojure
+;; On turn 2, check if previous result was a list
+(if (list? *1)
+  (count *1)
+  0)
+
+;; Compare current with previous
+(> (count ctx/items) (count *1))
+```
+
+**Prefer memory/ for most use cases.** Turn history is primarily a debugging aid. For reliable multi-turn patterns, use `memory/` to store and access values.
+
+### 9.5 Tool Invocation — `call`
 
 Call registered tools using the `call` function:
 
