@@ -66,7 +66,9 @@ defmodule PtcRunner.MixProject do
         "dialyzer",
         "schema.gen",
         "ptc.validate_spec",
-        "test --warnings-as-errors"
+        "test --warnings-as-errors",
+        "cmd --cd llm_client mix test --color",
+        "cmd --cd demo mix test --color"
       ],
       "schema.gen": [
         "run -e 'File.write!(\"priv/ptc_schema.json\", Jason.encode!(PtcRunner.Schema.to_json_schema(), pretty: true))'"
