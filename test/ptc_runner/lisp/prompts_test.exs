@@ -6,31 +6,31 @@ defmodule PtcRunner.Lisp.PromptsTest do
   doctest Prompts
 
   describe "get/1" do
-    test "returns default prompt from Schema" do
-      prompt = Prompts.get(:default)
+    test "returns single_shot prompt (base only)" do
+      prompt = Prompts.get(:single_shot)
       assert is_binary(prompt)
       assert String.contains?(prompt, "PTC-Lisp")
     end
 
-    test "returns minimal prompt" do
-      prompt = Prompts.get(:minimal)
-      assert is_binary(prompt)
-      assert String.contains?(prompt, "Quick Reference")
-      refute String.contains?(prompt, "memory/")
-    end
-
-    test "returns single_shot prompt with examples" do
-      prompt = Prompts.get(:single_shot)
-      assert is_binary(prompt)
-      assert String.contains?(prompt, "Single Query Mode")
-      assert String.contains?(prompt, "Common Patterns")
-    end
-
-    test "returns multi_turn prompt with memory docs" do
+    test "returns multi_turn prompt (base + memory addon)" do
       prompt = Prompts.get(:multi_turn)
       assert is_binary(prompt)
+      assert String.contains?(prompt, "PTC-Lisp")
+      # multi_turn is longer than single_shot (has addon)
+      assert String.length(prompt) > String.length(Prompts.get(:single_shot))
+    end
+
+    test "returns base snippet" do
+      prompt = Prompts.get(:base)
+      assert is_binary(prompt)
+      assert String.contains?(prompt, "PTC-Lisp")
+    end
+
+    test "returns addon_memory snippet" do
+      prompt = Prompts.get(:addon_memory)
+      assert is_binary(prompt)
+      # addon should reference memory access
       assert String.contains?(prompt, "memory/")
-      assert String.contains?(prompt, "Multi-Turn")
     end
 
     test "returns nil for unknown prompt" do
@@ -40,7 +40,7 @@ defmodule PtcRunner.Lisp.PromptsTest do
 
   describe "get!/1" do
     test "returns prompt for valid key" do
-      prompt = Prompts.get!(:minimal)
+      prompt = Prompts.get!(:single_shot)
       assert is_binary(prompt)
     end
 
@@ -51,13 +51,27 @@ defmodule PtcRunner.Lisp.PromptsTest do
     end
   end
 
+  describe "compositions" do
+    test "single_shot equals base" do
+      assert Prompts.get(:single_shot) == Prompts.get(:base)
+    end
+
+    test "multi_turn equals base + addon_memory" do
+      base = Prompts.get(:base)
+      memory = Prompts.get(:addon_memory)
+      expected = base <> "\n\n" <> memory
+
+      assert Prompts.get(:multi_turn) == expected
+    end
+  end
+
   describe "list/0" do
     test "returns list of available prompts" do
       keys = Prompts.list()
-      assert :default in keys
-      assert :minimal in keys
       assert :single_shot in keys
       assert :multi_turn in keys
+      assert :base in keys
+      assert :addon_memory in keys
     end
   end
 
@@ -72,19 +86,23 @@ defmodule PtcRunner.Lisp.PromptsTest do
         assert is_binary(desc)
       end
 
-      # Check default is included
-      assert Enum.any?(items, fn {key, _} -> key == :default end)
+      # Check compositions are included
+      assert Enum.any?(items, fn {key, _} -> key == :single_shot end)
+      assert Enum.any?(items, fn {key, _} -> key == :multi_turn end)
     end
   end
 
   describe "version/1" do
-    test "returns 1 for default prompt" do
-      assert Prompts.version(:default) == 1
+    test "returns 1 for single_shot" do
+      assert Prompts.version(:single_shot) == 1
     end
 
-    test "returns 1 for prompts without version metadata" do
-      # Prompts without explicit version should default to 1
-      assert Prompts.version(:minimal) == 1
+    test "returns 1 for multi_turn" do
+      assert Prompts.version(:multi_turn) == 1
+    end
+
+    test "returns 1 for base" do
+      assert Prompts.version(:base) == 1
     end
 
     test "raises for unknown prompt" do
@@ -95,18 +113,14 @@ defmodule PtcRunner.Lisp.PromptsTest do
   end
 
   describe "metadata/1" do
-    test "returns version 1 map for default prompt" do
-      meta = Prompts.metadata(:default)
-      assert meta == %{version: 1}
+    test "returns metadata for single_shot (from base)" do
+      meta = Prompts.metadata(:single_shot)
+      assert is_map(meta)
     end
 
-    test "returns parsed metadata for prompts with metadata" do
-      # The minimal prompt now has version metadata
-      meta = Prompts.metadata(:minimal)
+    test "returns metadata for base" do
+      meta = Prompts.metadata(:base)
       assert is_map(meta)
-      assert meta[:version] == 1
-      assert meta[:date] == "2025-01-02"
-      assert meta[:changes] == "Initial minimal prompt for token-efficient queries"
     end
 
     test "raises for unknown prompt" do
@@ -117,13 +131,14 @@ defmodule PtcRunner.Lisp.PromptsTest do
   end
 
   describe "archived?/1" do
-    test "returns false for default prompt" do
-      refute Prompts.archived?(:default)
+    test "returns false for compositions" do
+      refute Prompts.archived?(:single_shot)
+      refute Prompts.archived?(:multi_turn)
     end
 
-    test "returns false for current prompts" do
-      refute Prompts.archived?(:minimal)
-      refute Prompts.archived?(:single_shot)
+    test "returns false for current snippets" do
+      refute Prompts.archived?(:base)
+      refute Prompts.archived?(:addon_memory)
     end
 
     test "raises for unknown prompt" do
@@ -136,10 +151,10 @@ defmodule PtcRunner.Lisp.PromptsTest do
   describe "list_current/0" do
     test "returns list of current (non-archived) prompts" do
       keys = Prompts.list_current()
-      assert :default in keys
-      assert :minimal in keys
       assert :single_shot in keys
       assert :multi_turn in keys
+      assert :base in keys
+      assert :addon_memory in keys
     end
 
     test "list_current is subset of list" do

@@ -33,6 +33,9 @@ defmodule PtcRunner.TestSupport.LLMClient do
 
   @default_model "openrouter:google/gemini-2.5-flash"
   @timeout 60_000
+  # Retry options for transient errors (502, 503, 504) via Req
+  # :transient retries all HTTP methods (including POST), unlike :safe_transient
+  @req_opts [retry: :transient, max_retries: 3]
 
   @model_presets %{
     "haiku" => "openrouter:anthropic/claude-haiku-4.5",
@@ -71,7 +74,8 @@ defmodule PtcRunner.TestSupport.LLMClient do
     Respond with ONLY valid JSON, no explanation or markdown formatting.
     """
 
-    text = ReqLLM.generate_text!(model(), prompt, receive_timeout: @timeout)
+    opts = [receive_timeout: @timeout, req_http_options: @req_opts]
+    text = ReqLLM.generate_text!(model(), prompt, opts)
     clean_response(text)
   end
 
@@ -109,7 +113,8 @@ defmodule PtcRunner.TestSupport.LLMClient do
     llm_schema = PtcRunner.Schema.to_llm_schema()
 
     # Use structured output API - schema descriptions guide the LLM
-    result = ReqLLM.generate_object!(model(), prompt, llm_schema, receive_timeout: @timeout)
+    opts = [receive_timeout: @timeout, req_http_options: @req_opts]
+    result = ReqLLM.generate_object!(model(), prompt, llm_schema, opts)
 
     # Wrap the result in the program envelope and return as JSON string
     case result do

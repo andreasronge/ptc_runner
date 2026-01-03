@@ -2,11 +2,13 @@ defmodule PtcRunner.Lisp do
   @moduledoc """
   Execute PTC programs written in Lisp DSL (Clojure subset).
 
-  PtcRunner.Lisp enables LLMs to write safe programs that orchestrate tools
-  and transform data inside a sandboxed environment using Lisp syntax.
+  PTC-Lisp enables LLMs to write safe programs that orchestrate tools and transform
+  data. Unlike raw code execution (Python, JavaScript), PTC-Lisp provides safety by
+  design: no filesystem/network access, no unbounded recursion, and deterministic
+  execution in isolated BEAM processes with resource limits.
 
   See the [PTC-Lisp Specification](ptc-lisp-specification.md) for the complete
-  DSL reference and the [PTC-Lisp Overview](ptc-lisp-overview.md) for an introduction.
+  language reference.
 
   ## Tool Registration
 
@@ -64,10 +66,14 @@ defmodule PtcRunner.Lisp do
 
   ## Memory Contract
 
-  The memory contract is applied only at the top level:
+  The memory contract is applied only at the top level (via `apply_memory_contract/3`):
   - If result is not a map: `step.return` = value, no memory update
   - If result is a map without `:return`: merges map into memory, returns map as `step.return`
   - If result is a map with `:return`: merges remaining keys into memory, returns `:return` value as `step.return`
+
+  **Related modules:**
+  - `PtcRunner.SubAgent.Loop` - Uses this contract to persist memory across turns
+  - `PtcRunner.Lisp.Eval` - Provides `memory/key` syntax for reading memory in programs
 
   ## Float Precision
 

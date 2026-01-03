@@ -32,12 +32,12 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert system_prompt =~ "# Mission"
     end
 
-    test "single-shot with language_spec: :minimal gets minimal prompt" do
+    test "single-shot with language_spec: :single_shot gets base prompt" do
       agent =
         SubAgent.new(
           prompt: "Return 42",
           max_turns: 1,
-          system_prompt: %{language_spec: :minimal}
+          system_prompt: %{language_spec: :single_shot}
         )
 
       llm = fn input ->
@@ -50,10 +50,11 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert_received {:llm_input, input}
       system_prompt = input.system
 
-      # Should use minimal language spec
-      assert system_prompt =~ "Quick Reference"
-      # minimal profile doesn't include full language overview
-      refute system_prompt =~ "Clojure-inspired"
+      # Should use single_shot (base) language spec
+      assert system_prompt =~ "PTC-Lisp"
+      assert system_prompt =~ "Core Functions"
+      # single_shot should NOT have memory docs
+      refute system_prompt =~ "Memory: Persisting Data Between Turns"
     end
 
     test "single-shot with string override uses custom prompt" do

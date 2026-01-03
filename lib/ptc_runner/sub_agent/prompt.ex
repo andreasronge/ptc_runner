@@ -85,6 +85,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.Signature.Renderer
   alias PtcRunner.SubAgent.Template
+  alias PtcRunner.Tool
 
   @output_format """
   # Output Format
@@ -402,12 +403,17 @@ defmodule PtcRunner.SubAgent.Prompt do
   end
 
   def generate_tool_schemas(tools, tool_catalog) do
+    # Normalize tools to %Tool{} structs so signatures are rendered
+    normalized_tools =
+      tools
+      |> Enum.map(fn {name, format} -> {name, normalize_tool_for_prompt(name, format)} end)
+      |> Map.new()
+
     # Always include return and fail tools in the documentation
     tool_docs =
-      tools
-      |> Map.keys()
-      |> Enum.sort()
-      |> Enum.map_join("\n\n", fn name -> format_tool(name) end)
+      normalized_tools
+      |> Enum.sort_by(fn {name, _} -> name end)
+      |> Enum.map_join("\n\n", fn {name, tool} -> format_tool(name, tool) end)
 
     # Add standard return/fail tools if not already present
     standard_tools =
@@ -743,6 +749,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     """
   end
 
+  # 1-arity format_tool for special tools and fallback
   defp format_tool("return") do
     """
     ### return
@@ -764,7 +771,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   end
 
   defp format_tool(name) do
-    # For user-defined tools, show basic signature
+    # Fallback for tool names without struct (used by tool_catalog)
     """
     ### #{name}
     ```
@@ -772,6 +779,28 @@ defmodule PtcRunner.SubAgent.Prompt do
     ```
     User-defined tool. Check implementation for details.
     """
+  end
+
+  # 2-arity format_tool for tools with struct
+  defp format_tool(name, %Tool{signature: sig, description: desc})
+       when not is_nil(sig) do
+    # User-defined tool with explicit signature
+    desc_line = if desc, do: desc, else: "User-defined tool."
+    example = generate_tool_example(name, sig)
+
+    """
+    ### #{name}
+    ```
+    #{name}#{sig}
+    ```
+    #{desc_line}
+    #{example}
+    """
+  end
+
+  defp format_tool(name, _tool) do
+    # For user-defined tools without signature, show basic signature
+    format_tool(name)
   end
 
   defp generate_expected_output_section(nil), do: ""
@@ -813,4 +842,47 @@ defmodule PtcRunner.SubAgent.Prompt do
 
     "{#{inner}}"
   end
+
+  # Normalize tool format to %Tool{} struct for prompt rendering
+  defp normalize_tool_for_prompt(_name, %Tool{} = tool), do: tool
+
+  defp normalize_tool_for_prompt(name, format) do
+    case Tool.new(name, format) do
+      {:ok, tool} -> tool
+      {:error, _reason} -> nil
+    end
+  end
+
+  # Generate usage example for a tool based on its signature
+  defp generate_tool_example(name, sig) do
+    case Signature.parse(sig) do
+      {:ok, {:signature, [], _return_type}} ->
+        # No parameters
+        "Example: `(call \"#{name}\" {})`"
+
+      {:ok, {:signature, params, _return_type}} ->
+        args = generate_example_args(params)
+        "Example: `(call \"#{name}\" {#{args}})`"
+
+      {:error, _} ->
+        ""
+    end
+  end
+
+  defp generate_example_args(params) do
+    Enum.map_join(params, " ", fn {param_name, type} ->
+      ":#{param_name} #{generate_example_value(type)}"
+    end)
+  end
+
+  defp generate_example_value(:string), do: "\"...\""
+  defp generate_example_value(:int), do: "10"
+  defp generate_example_value(:float), do: "1.0"
+  defp generate_example_value(:bool), do: "true"
+  defp generate_example_value(:keyword), do: ":value"
+  defp generate_example_value(:any), do: "..."
+  defp generate_example_value(:map), do: "{}"
+  defp generate_example_value({:optional, type}), do: generate_example_value(type)
+  defp generate_example_value({:list, _type}), do: "[]"
+  defp generate_example_value({:map, _fields}), do: "{...}"
 end

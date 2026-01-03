@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert prompt =~ "# Rules"
       assert prompt =~ "# Data Inventory"
       assert prompt =~ "# Available Tools"
-      assert prompt =~ "### Language Overview"
+      assert prompt =~ "## PTC-Lisp"
       assert prompt =~ "# Output Format"
       assert prompt =~ "# Mission"
     end
@@ -306,6 +306,51 @@ defmodule PtcRunner.SubAgent.PromptTest do
       zebra_pos = String.split(schemas, "### zebra") |> List.first() |> String.length()
 
       assert alpha_pos < zebra_pos
+    end
+
+    test "renders explicit tool signature in prompt with example" do
+      # Tool with explicit signature string
+      tools = %{
+        "search" => {fn _args -> [] end, "(query :string, limit :int) -> [{id :int}]"}
+      }
+
+      schemas = Prompt.generate_tool_schemas(tools)
+
+      assert schemas =~ "### search"
+      # The signature should be rendered, not just "User-defined tool"
+      assert schemas =~ "search(query :string, limit :int) -> [{id :int}]"
+      # Should include usage example
+      assert schemas =~ "Example: `(call \"search\" {:query \"...\" :limit 10})`"
+    end
+
+    test "renders tool with keyword options signature and description" do
+      tools = %{
+        "analyze" =>
+          {fn _args -> %{} end,
+           signature: "(data :map) -> {score :float}",
+           description: "Analyzes data and returns a score."}
+      }
+
+      schemas = Prompt.generate_tool_schemas(tools)
+
+      assert schemas =~ "### analyze"
+      assert schemas =~ "analyze(data :map) -> {score :float}"
+      assert schemas =~ "Analyzes data and returns a score."
+    end
+
+    test "renders signature extracted from bare function reference" do
+      # Bare function reference - signature/description auto-extracted from @spec/@doc
+      alias PtcRunner.TypeExtractorFixtures, as: TestFunctions
+
+      tools = %{
+        "search" => &TestFunctions.search/2
+      }
+
+      schemas = Prompt.generate_tool_schemas(tools)
+
+      assert schemas =~ "### search"
+      assert schemas =~ "search(query :string, limit :int) -> [:map]"
+      assert schemas =~ "Search for items matching query"
     end
   end
 

@@ -6,7 +6,7 @@ defmodule PtcRunner.Json do
   and transform data inside a sandboxed environment using JSON syntax.
 
   See the [PTC-JSON Specification](reference/ptc-json-specification.md) for the complete
-  DSL reference and the [Guide](guide.md) for architecture overview.
+  DSL reference.
 
   ## Tool Registration
 

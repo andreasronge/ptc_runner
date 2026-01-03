@@ -537,6 +537,10 @@ defmodule PtcRunner.Lisp.Eval do
       e in RuntimeError ->
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
         {:error, {:type_error, Exception.message(e), converted_args}}
+
+      e in BadFunctionError ->
+        # Catch attempts to use non-functions as functions (e.g., :keyword passed to map)
+        {:error, {:type_error, Exception.message(e), converted_args}}
     end
   end
 
@@ -817,7 +821,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     case do_eval(body, ctx, memory, new_env, tool_exec) do
       {:ok, result, _} -> result
-      {:error, reason} -> raise RuntimeError, "closure eval error: #{inspect(reason)}"
+      {:error, reason} -> raise RuntimeError, format_closure_error(reason)
     end
   end
 
@@ -868,4 +872,19 @@ defmodule PtcRunner.Lisp.Eval do
   defp describe_type(x) when is_function(x), do: "function"
   defp describe_type(nil), do: "nil"
   defp describe_type(_), do: "unknown"
+
+  # Format closure errors with helpful messages
+  defp format_closure_error({:unbound_var, name}) do
+    var_str = to_string(name)
+
+    # Check for common underscore/hyphen confusion
+    if String.contains?(var_str, "_") do
+      suggested = String.replace(var_str, "_", "-")
+      "Undefined variable: #{var_str}. Hint: Use hyphens not underscores (try: #{suggested})"
+    else
+      "Undefined variable: #{var_str}"
+    end
+  end
+
+  defp format_closure_error(reason), do: "closure error: #{inspect(reason)}"
 end

@@ -29,6 +29,23 @@ defmodule PtcRunner.SubAgent.Loop do
   | `mission_timeout` exceeded | `{:error, step}` | `:mission_timeout` |
   | LLM error after retries | `{:error, step}` | `:llm_error` |
 
+  ## Memory Handling
+
+  Memory persists across turns within a single `run/2` call. After each successful
+  Lisp execution:
+
+  1. `Lisp.run/2` applies the memory contract (see `PtcRunner.Lisp` for details)
+  2. `step.memory` contains the updated memory state
+  3. Loop updates `state.memory` for the next turn
+  4. Memory is merged into context via `state.context`
+
+  The memory contract determines how return values affect memory:
+  - Non-map returns: no memory update
+  - Map without `:return`: merged into memory
+  - Map with `:return`: rest merged, `:return` value returned
+
+  See `PtcRunner.Lisp.run/2` for the authoritative memory contract documentation.
+
   ## LLM Inheritance
 
   Child SubAgents inherit the `llm_registry` from their parent, enabling atom-based
@@ -400,8 +417,9 @@ defmodule PtcRunner.SubAgent.Loop do
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
 
       {:error, lisp_step} ->
-        # Build trace entry for failed execution
-        trace_entry = Metrics.build_trace_entry(state, code, nil, [])
+        # Build trace entry for failed execution (show error message, not nil)
+        error_result = {:error, lisp_step.fail.message}
+        trace_entry = Metrics.build_trace_entry(state, code, error_result, [])
 
         # Feed error back to LLM for next turn
         error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
@@ -453,6 +471,23 @@ defmodule PtcRunner.SubAgent.Loop do
 
         {:ok, final_step}
 
+      agent.max_turns == 1 ->
+        # Single-shot mode: expression result IS the answer (implicit return)
+        duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+        final_step = %{
+          lisp_step
+          | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
+            trace:
+              Metrics.apply_trace_filter(
+                Enum.reverse([trace_entry | state.trace]),
+                state.trace_mode,
+                false
+              )
+        }
+
+        {:ok, final_step}
+
       ResponseHandler.contains_call?(code, "fail") ->
         # Explicit fail - complete with error
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -477,8 +512,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Check memory limit before continuing
         case check_memory_limit(lisp_step.memory, agent.memory_limit) do
           {:ok, _size} ->
-            # Merge result into context and memory for next turn
-            execution_result = ResponseHandler.format_execution_result(lisp_step.return)
+            execution_result = format_turn_feedback(agent, state, lisp_step)
 
             new_state = %{
               state
@@ -491,7 +525,7 @@ defmodule PtcRunner.SubAgent.Loop do
                     ],
                 trace: [trace_entry | state.trace],
                 memory: lisp_step.memory,
-                context: Map.merge(state.context, lisp_step.memory_delta),
+                # Context stays immutable - memory_delta only goes to memory/
                 last_fail: nil,
                 remaining_turns: state.remaining_turns - 1
             }
@@ -563,5 +597,29 @@ defmodule PtcRunner.SubAgent.Loop do
   # Check if mission timeout has been exceeded
   defp mission_timeout_exceeded?(deadline) do
     DateTime.compare(DateTime.utc_now(), deadline) == :gt
+  end
+
+  defp format_turn_feedback(agent, state, lisp_step) do
+    turns_remaining = state.remaining_turns - 1
+    has_more_turns = turns_remaining > 0
+
+    base_result =
+      ResponseHandler.format_execution_result(lisp_step.return,
+        show_memory_hints: has_more_turns
+      )
+
+    # Add turn info for multi-turn agents
+    if agent.max_turns > 1 do
+      turn_info =
+        if turns_remaining == 1 do
+          "\n\n⚠️ FINAL TURN - you must call (return result) or (fail reason) next."
+        else
+          "\n\nTurn #{state.turn + 1} of #{agent.max_turns} (#{turns_remaining} remaining)"
+        end
+
+      base_result <> turn_info
+    else
+      base_result
+    end
   end
 end
