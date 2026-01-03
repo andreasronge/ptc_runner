@@ -256,6 +256,15 @@ Sets are **unordered** - iteration order is not guaranteed.
 | `empty?` | `(empty? #{})` | Returns true if empty |
 | `contains?` | `(contains? #{1 2} 1)` | Membership test (O(1)) |
 
+**Sets as predicates:** Sets can be invoked as functions to check membership:
+
+| Expression | Result | Description |
+|------------|--------|-------------|
+| `(#{1 2 3} 2)` | `2` | Element found, returns it |
+| `(#{1 2 3} 4)` | `nil` | Not found, returns nil |
+| `(filter #{:a :b} [:a :c :b])` | `[:a :b]` | Filter using set membership |
+| `(some #{"x"} ["a" "x"])` | `"x"` | Find first matching element |
+
 **Not supported for sets:** `first`, `last`, `nth`, `sort`, `sort-by` (sets are unordered).
 
 **Not supported:** Lists (`'()`)
