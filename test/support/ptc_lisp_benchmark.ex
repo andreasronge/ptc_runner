@@ -23,7 +23,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
   Results are saved to `priv/ptc_lisp_benchmark/` with timestamp.
   """
 
-  alias PtcRunner.Lisp.Schema
+  alias PtcRunner.Lisp.Prompts
 
   @generator_models [
     "openrouter:google/gemini-2.5-flash",
@@ -48,7 +48,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     """
     You are generating PTC-Lisp programs. PTC-Lisp is a minimal Clojure subset for data transformation.
 
-    #{Schema.to_prompt()}
+    #{Prompts.get(:single_shot)}
 
     IMPORTANT:
     - Respond with ONLY the PTC-Lisp code, no explanation or markdown formatting.
