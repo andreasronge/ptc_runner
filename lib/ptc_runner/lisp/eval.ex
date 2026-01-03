@@ -583,6 +583,9 @@ defmodule PtcRunner.Lisp.Eval do
       # For other variadic functions like *, single arg returns the arg itself
       {:ok, x, memory}
     end
+  rescue
+    ArithmeticError ->
+      {:error, {:type_error, "expected number, got #{describe_type(x)}", x}}
   end
 
   # Variadic builtins: {:variadic, fun2, identity}
@@ -597,6 +600,9 @@ defmodule PtcRunner.Lisp.Eval do
       end
 
     {:ok, result, memory}
+  rescue
+    ArithmeticError ->
+      {:error, type_error_for_args(fun2, args)}
   end
 
   # Variadic requiring at least one arg: {:variadic_nonempty, fun2}
@@ -614,6 +620,9 @@ defmodule PtcRunner.Lisp.Eval do
       end
 
     {:ok, result, memory}
+  rescue
+    ArithmeticError ->
+      {:error, type_error_for_args(fun2, args)}
   end
 
   # Multi-arity builtins: select function based on argument count
@@ -938,6 +947,7 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  defp describe_type(nil), do: "nil"
   defp describe_type(%MapSet{}), do: "set"
   defp describe_type(x) when is_list(x), do: "list"
   defp describe_type(x) when is_map(x), do: "map"
@@ -946,7 +956,6 @@ defmodule PtcRunner.Lisp.Eval do
   defp describe_type(x) when is_boolean(x), do: "boolean"
   defp describe_type(x) when is_atom(x), do: "keyword"
   defp describe_type(x) when is_function(x), do: "function"
-  defp describe_type(nil), do: "nil"
   defp describe_type(_), do: "unknown"
 
   # Format closure errors with helpful messages
