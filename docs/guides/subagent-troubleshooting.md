@@ -208,11 +208,11 @@ Common issues and solutions when working with SubAgents.
    {:cached_data (call "fetch_data" {})}
    ```
 
-2. **Use :result to separate return value from memory**:
+2. **Use :return to separate return value from memory**:
    ```clojure
    ;; Persists :cached_data, returns 42
    {:cached_data (call "fetch_data" {})
-    :result 42}
+    :return 42}
    ```
 
 3. **Non-maps don't update memory**:

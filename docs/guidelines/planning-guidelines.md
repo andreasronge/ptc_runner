@@ -41,7 +41,6 @@ Before diving into the 9-point checklist, verify these basics:
 
 ### Documentation Impact
 If the issue changes public API or behavior, verify it identifies which docs need updating:
-- `docs/guide.md` - API reference, system design
 - `docs/reference/ptc-json-specification.md` - JSON DSL operations
 - `docs/ptc-lisp-specification.md` - PTC-Lisp operations
 - `README.md` - Public API, installation

@@ -88,12 +88,10 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-testing.md",
         "docs/guides/subagent-troubleshooting.md",
         "docs/guides/subagent-advanced.md",
-        # Overview and Reference
-        "docs/guide.md",
+        # Reference
         "docs/signature-syntax.md",
         "docs/benchmark-eval.md",
         # PTC-Lisp
-        "docs/ptc-lisp-overview.md",
         "docs/ptc-lisp-specification.md",
         # Reference (low-level)
         "docs/reference/ptc-json-specification.md",
@@ -103,8 +101,7 @@ defmodule PtcRunner.MixProject do
       ],
       groups_for_extras: [
         "SubAgent Guides": ~r/docs\/guides\/subagent-.+\.md/,
-        Reference:
-          ~r/docs\/(guide|signature-syntax|benchmark-eval|ptc-lisp-.+|reference\/.+)\.md/,
+        Reference: ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
       ],
       before_closing_body_tag: &before_closing_body_tag/1
