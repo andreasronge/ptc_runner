@@ -1,0 +1,231 @@
+# Prompt Customization
+
+This guide covers customizing SubAgent system prompts for different LLMs, execution modes, and use cases.
+
+## System Prompt Structure
+
+SubAgent generates a system prompt with these sections:
+
+1. **Role & Purpose** - Defines agent as PTC-Lisp generator
+2. **Rules** - Boundaries for code generation
+3. **Data Inventory** - Typed view of `ctx/` variables
+4. **Tool Schemas** - Available tools with signatures
+5. **Language Reference** - PTC-Lisp syntax (customizable)
+6. **Output Format** - Code block requirements (customizable)
+7. **Mission** - User's task from `prompt` option
+
+## Customization Options
+
+The `system_prompt` field accepts three forms:
+
+```elixir
+# Map with options
+system_prompt: %{
+  prefix: "You are an expert data analyst.",
+  suffix: "Always validate results before returning.",
+  language_spec: :multi_turn,
+  output_format: "..."
+}
+
+# Function transformer
+system_prompt: fn prompt -> "CUSTOM PREFIX\n\n" <> prompt end
+
+# Complete override (use with caution)
+system_prompt: "Your entire custom prompt here..."
+```
+
+### Map Options
+
+| Option | Description |
+|--------|-------------|
+| `:prefix` | Prepended before generated content |
+| `:suffix` | Appended after generated content |
+| `:language_spec` | Replaces PTC-Lisp reference section |
+| `:output_format` | Replaces output format instructions |
+
+## Language Spec Profiles
+
+The `:language_spec` option controls the PTC-Lisp reference shown to the LLM:
+
+| Profile | Description | Use Case |
+|---------|-------------|----------|
+| `:single_shot` | Base language reference | Quick lookups, no memory |
+| `:multi_turn` | Base + memory addon | Conversational analysis |
+
+```elixir
+# Single-turn: no memory docs needed
+SubAgent.new(
+  prompt: "Count items over $100",
+  max_turns: 1,
+  system_prompt: %{language_spec: :single_shot}
+)
+
+# Multi-turn: include memory documentation
+SubAgent.new(
+  prompt: "Analyze sales trends",
+  max_turns: 5,
+  system_prompt: %{language_spec: :multi_turn}
+)
+```
+
+## Dynamic Language Spec
+
+Use a callback to change prompts based on runtime context:
+
+```elixir
+SubAgent.new(
+  prompt: "Process the data",
+  system_prompt: %{
+    language_spec: fn ctx ->
+      if ctx.turn == 1 do
+        PtcRunner.Lisp.Prompts.get(:single_shot)
+      else
+        PtcRunner.Lisp.Prompts.get(:multi_turn)
+      end
+    end
+  }
+)
+```
+
+The callback receives:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `:turn` | integer | Current turn number (1-indexed) |
+| `:model` | atom \| function | The LLM reference |
+| `:memory` | map | Current memory state |
+| `:messages` | list | Conversation history |
+
+## LLM-Specific Prompts
+
+Different models may need different prompt styles:
+
+```elixir
+defmodule MyApp.Prompts do
+  def language_spec_for_model(ctx) do
+    base = PtcRunner.Lisp.Prompts.get(:single_shot)
+
+    case ctx.model do
+      :gemini ->
+        # Gemini benefits from more examples
+        base <> "\n\n" <> extra_examples()
+
+      :claude ->
+        # Claude handles concise prompts well
+        base
+
+      _ ->
+        base
+    end
+  end
+
+  defp extra_examples do
+    """
+    ## Additional Examples
+
+    ```clojure
+    ;; Filtering with multiple conditions
+    (->> ctx/orders
+         (filter (all-of (where :status = "pending")
+                         (where :total > 100)))
+         (count))
+    ```
+    """
+  end
+end
+
+# Usage
+SubAgent.new(
+  prompt: "Analyze orders",
+  system_prompt: %{language_spec: &MyApp.Prompts.language_spec_for_model/1}
+)
+```
+
+## Custom Prompt Addons
+
+Build on top of library prompts:
+
+```elixir
+defmodule MyApp.Prompts do
+  alias PtcRunner.Lisp.Prompts
+
+  def with_domain_context do
+    """
+    #{Prompts.get(:single_shot)}
+
+    ## Domain Context
+
+    - Orders have statuses: pending, shipped, delivered, cancelled
+    - Products belong to categories: electronics, clothing, food
+    - Use `ctx/current_user` for permission checks
+    """
+  end
+end
+
+SubAgent.new(
+  prompt: "Find high-value orders",
+  system_prompt: %{language_spec: MyApp.Prompts.with_domain_context()}
+)
+```
+
+## Single-Turn vs Multi-Turn
+
+### Single-Turn (Classification, Extraction)
+
+For simple tasks with one LLM call:
+
+```elixir
+SubAgent.new(
+  prompt: "Classify sentiment: {{text}}",
+  signature: "{sentiment :string, confidence :float}",
+  max_turns: 1,
+  system_prompt: %{language_spec: :single_shot}
+)
+```
+
+No `return` call needed - the expression result is returned directly.
+
+### Multi-Turn (Investigation, Analysis)
+
+For complex tasks requiring iteration:
+
+```elixir
+SubAgent.new(
+  prompt: "Find anomalies in the dataset",
+  signature: "{anomalies [:map], summary :string}",
+  tools: analysis_tools,
+  max_turns: 10,
+  system_prompt: %{language_spec: :multi_turn}
+)
+```
+
+The `:multi_turn` profile documents:
+- Memory persistence with `memory/key`
+- The `:return` key for output firewalling
+- Multi-turn workflow patterns
+
+## Prompt Preview
+
+Inspect the generated prompt without execution:
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Find emails for {{user}}",
+  system_prompt: %{
+    prefix: "You are a helpful assistant.",
+    language_spec: :multi_turn
+  }
+)
+
+preview = SubAgent.preview_prompt(agent, context: %{user: "alice"})
+
+IO.puts(preview.system)  # Full system prompt
+IO.puts(preview.user)    # Expanded user prompt
+```
+
+## See Also
+
+- [Core Concepts](subagent-concepts.md) - Context, memory, and firewalls
+- [Advanced Topics](subagent-advanced.md) - System prompt structure details
+- `PtcRunner.SubAgent.Prompt` - API reference for prompt generation
+- `PtcRunner.Lisp.Prompts` - Available prompt profiles

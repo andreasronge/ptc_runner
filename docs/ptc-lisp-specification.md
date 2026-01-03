@@ -1975,10 +1975,10 @@ The program's return value determines memory behavior:
 | Return Value | Memory Behavior | Use Case |
 |--------------|-----------------|----------|
 | Non-map value | No memory change | Pure queries |
-| Map without `:result` | Entire map merged into memory | Update memory only |
-| Map with `:result` | Map (minus `:result`) merged into memory; `:result` returned to caller | Update memory AND return value |
+| Map without `:return` | Entire map merged into memory | Update memory only |
+| Map with `:return` | Map (minus `:return`) merged into memory; `:return` returned to caller | Update memory AND return value |
 
-**Reserved key:** `:result` is reserved at the top level of return maps. It controls the return value and is never persisted to memory. Do not use `:result` as a memory key name—use alternatives like `:query-result`, `:computation-result`, or `:output`.
+**Reserved key:** `:return` is reserved at the top level of return maps. It controls the return value and is never persisted to memory. Do not use `:return` as a memory key name—use alternatives like `:query-result`, `:computation-result`, or `:output`.
 
 #### Case 1: Pure Query (No Memory Update)
 
@@ -2007,10 +2007,10 @@ After execution:
 #### Case 3: Memory Update AND Return Value
 
 ```clojure
-;; Returns map with :result - memory updated, :result returned
+;; Returns map with :return - memory updated, :return returned
 (let [high-paid (->> (call "find-employees" {})
                      (filter (where :salary > 100000)))]
-  {:result (pluck :email high-paid)   ; returned to caller
+  {:return (pluck :email high-paid)   ; returned to caller
    :high-paid high-paid})              ; merged into memory
 ```
 
@@ -2020,11 +2020,11 @@ After execution:
 
 #### Returning a Map Without Memory Update
 
-If you want to return a map to the caller without updating memory, wrap it in `:result`:
+If you want to return a map to the caller without updating memory, wrap it in `:return`:
 
 ```clojure
 ;; Return a map structure but don't persist anything
-{:result {:summary "Query complete"
+{:return {:summary "Query complete"
           :count (count ctx/items)
           :items ctx/items}}
 ```
@@ -2102,7 +2102,7 @@ Memory updates use **shallow merge**:
 **Turn 2:** Query stored data (no memory change)
 
 ```clojure
-{:result (count memory/high-paid)}
+{:return (count memory/high-paid)}
 ```
 
 *Returns:* `5`
@@ -2123,7 +2123,7 @@ Memory updates use **shallow merge**:
 
 ```clojure
 (let [prev-count (or memory/query-count 0)]
-  {:result {:employee-count (count memory/high-paid)
+  {:return {:employee-count (count memory/high-paid)
             :order-count memory/order-count}
    :query-count (inc prev-count)})
 ```

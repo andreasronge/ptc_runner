@@ -118,9 +118,60 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
   @doc """
   Format execution result for LLM feedback.
+
+  For map results in multi-turn mode, includes guidance about memory storage
+  so the LLM knows to access values via `memory/key` in subsequent turns.
+
+  ## Parameters
+
+  - `result` - The execution result
+  - `opts` - Options:
+    - `:show_memory_hints` - Whether to show memory access hints (default: true)
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(42)
+      "Result: 42"
+
+      iex> result = PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(%{count: 5, items: []})
+      iex> result =~ "memory/count"
+      true
+
+      iex> result = PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(%{count: 5}, show_memory_hints: false)
+      iex> result =~ "memory/"
+      false
+
   """
-  @spec format_execution_result(term()) :: String.t()
-  def format_execution_result(result) do
+  @spec format_execution_result(term(), keyword()) :: String.t()
+  def format_execution_result(result, opts \\ [])
+
+  def format_execution_result(result, opts) when is_map(result) and map_size(result) > 0 do
+    result_str = inspect(result, limit: :infinity, printable_limit: :infinity)
+    show_hints = Keyword.get(opts, :show_memory_hints, true)
+
+    if show_hints do
+      memory_keys =
+        result
+        |> Map.keys()
+        |> Enum.map(fn
+          k when is_atom(k) -> "memory/#{k}"
+          k when is_binary(k) -> "memory/#{k}"
+          k -> "memory/#{inspect(k)}"
+        end)
+        |> Enum.join(", ")
+
+      """
+      Result: #{result_str}
+
+      Stored in memory. Access via: #{memory_keys}
+      """
+      |> String.trim()
+    else
+      "Result: #{result_str}"
+    end
+  end
+
+  def format_execution_result(result, _opts) do
     "Result: #{inspect(result, limit: :infinity, printable_limit: :infinity)}"
   end
 end

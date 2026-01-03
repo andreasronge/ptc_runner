@@ -6,7 +6,7 @@ defmodule PtcRunner.Context do
   - `memory`: Mutable state passed through evaluation
   - `tools`: Tool registry
 
-  See the [Guide](guide.md) for details on how context, memory, and tools interact.
+  See `PtcRunner.SubAgent` for usage in agentic loops.
   """
 
   defstruct [:ctx, :memory, :tools]

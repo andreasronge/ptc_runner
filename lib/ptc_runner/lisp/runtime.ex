@@ -514,7 +514,10 @@ defmodule PtcRunner.Lisp.Runtime do
     end)
   end
 
+  def keys(nil), do: nil
   def keys(m), do: m |> Map.keys() |> Enum.sort()
+
+  def vals(nil), do: nil
   def vals(m), do: m |> Enum.sort_by(fn {k, _v} -> k end) |> Enum.map(fn {_k, v} -> v end)
 
   @doc """

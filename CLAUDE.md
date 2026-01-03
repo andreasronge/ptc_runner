@@ -2,8 +2,8 @@
 
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC), enabling LLMs to write safe programs that orchestrate tools and transform data inside a sandboxed environment.
 
-- **SubAgent API**: See `docs/ptc_agents/specification.md` and `docs/guides/` (start with `subagent-getting-started.md`)
-- **Core API**: `docs/guide.md` - stable, well-tested
+- **SubAgent API**: See `docs/guides/` (start with `subagent-getting-started.md`)
+- **PTC-Lisp**: See `docs/ptc-lisp-specification.md` for language reference
 - **E2E tests**: `mix test --include e2e` (requires `OPENROUTER_API_KEY`)
 
 When you find issues, fix both the code and the docs together.
@@ -27,36 +27,62 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 
 ## Project Structure
 
-- `lib/ptc_runner/` - Core library (sandbox, context, schema)
-- `lib/ptc_runner/json/` - JSON DSL implementation
-- `lib/ptc_runner/lisp/` - Lisp DSL implementation
-- `test/` - Tests mirroring lib structure
-- `docs/` - Current API guide and guidelines
-- `docs/guides/` - SubAgent guides and tutorials
+- `docs/` - Specifications and guidelines
 - `demo/` - LLM integration testing and benchmarks
 - `priv/prompts/` - LLM prompt templates (compile-time; recompile after changes)
 
+## Architecture
+
+```
+lib/ptc_runner/
+├── sub_agent/        # Loop logic, prompt generation, signatures
+├── lisp/             # Parser, analyzer, interpreter
+├── json/             # JSON DSL operations
+├── sandbox.ex        # Isolated BEAM process execution
+├── step.ex           # Result type for all executions
+├── tool.ex           # Tool normalization
+├── context.ex        # ctx/memory/tools container
+├── schema.ex         # JSON Schema validation
+└── tracer.ex         # Execution tracing/observability
+```
+
+**Flow**: `SubAgent.run/2` → LLM generates PTC-Lisp → `Lisp.run/2` → `Sandbox.execute/3` → `Eval.eval/5`
+
+Programs execute in isolated BEAM processes with timeout (1s) and memory limits (10MB).
+
+### Key Flows
+
+**Single-shot vs Multi-turn:**
+- **Single-shot**: Expression result is the answer. No `return` form needed.
+- **Multi-turn**: Loop continues until `(return value)` or `(fail reason)` is called.
+
+**Loop termination** (in `Loop`, detected by `ResponseHandler.contains_call?`):
+- `(return value)` → loop ends with `{:ok, step}`
+- `(fail reason)` → loop ends with `{:error, step}`
+- Neither → loop continues, `step.return` sent as feedback to LLM
+
+**Memory contract** (in `Lisp.run/2`, via `apply_memory_contract/3`):
+| Program Result | Feedback to LLM | Memory Update |
+|----------------|-----------------|---------------|
+| `42` (non-map) | `42` | None |
+| `{:a 1, :b 2}` | `{:a 1, :b 2}` | Both keys stored |
+| `{:a 1, :return 42}` | `42` | Only `:a` stored |
+
+Note: `:return` KEY in a map ≠ `(return ...)` CALL. The key controls feedback; the call terminates the loop.
+
+**Cross-references:**
+- Loop termination: `lib/ptc_runner/sub_agent/loop.ex` (lines 455-490)
+- Memory contract: `lib/ptc_runner/lisp.ex` (`apply_memory_contract/3`)
+- Memory access: `lib/ptc_runner/lisp/eval.ex` (`memory/key` syntax)
+
 ## Documentation
 
-- **[Guide](docs/guide.md)** - System design and API reference
+- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - Language reference
 - **[Testing Guidelines](docs/guidelines/testing-guidelines.md)** - Test quality and patterns
 - **[Planning Guidelines](docs/guidelines/planning-guidelines.md)** - Issue review and feature planning
 - **[Roadmap Guidelines](docs/guidelines/roadmap-guidelines.md)** - Multi-issue feature planning
 - **[GitHub Workflows](docs/guidelines/github-workflows.md)** - PM workflow, epics, and automation
 - **[Documentation Guidelines](docs/guidelines/documentation-guidelines.md)** - Writing docs and guides
-
-## Architecture Overview
-
-See **[docs/guide.md](docs/guide.md)** for full details.
-
-The library has four main layers:
-
-1. **Parser** - JSON parsing and validation
-2. **Validator** - Schema validation for DSL programs
-3. **Interpreter** - AST evaluation with resource limits
-4. **Tool Registry** - User-defined tool functions
-
-Programs execute in isolated BEAM processes with configurable timeout (default 1s) and memory limits (default 10MB).
 
 ## Elixir/Mix Guidelines
 
