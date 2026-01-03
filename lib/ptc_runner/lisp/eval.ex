@@ -193,8 +193,6 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:fn, params, body}, _ctx, memory, env, _tool_exec) do
-    # Closures now store patterns directly instead of just param names
-    # This enables destructuring patterns in function parameters (Phase 2)
     # Capture the current environment (lexical scoping)
     {:ok, {:closure, params, body, env}, memory}
   end
