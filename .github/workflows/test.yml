@@ -26,6 +26,12 @@ jobs:
       - name: Run tests
         run: mix test --max-failures 1 --trace --warnings-as-errors
 
+      - name: Test llm_client
+        run: cd llm_client && mix deps.get && mix test --max-failures 1 --trace --warnings-as-errors
+
+      - name: Test demo
+        run: cd demo && mix deps.get && mix test --max-failures 1 --trace --warnings-as-errors
+
       - name: Check code is formatted
         run: mix format --check-formatted
 
