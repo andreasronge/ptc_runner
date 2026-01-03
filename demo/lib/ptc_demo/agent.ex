@@ -20,6 +20,7 @@ defmodule PtcDemo.Agent do
   use GenServer
 
   alias PtcDemo.SampleData
+  alias PtcDemo.SearchTool
   alias PtcRunner.SubAgent
 
   @model_env "PTC_DEMO_MODEL"
@@ -163,6 +164,7 @@ defmodule PtcDemo.Agent do
     data_mode = Keyword.get(opts, :data_mode, :schema)
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
 
+    # Note: documents not included in ctx - use search tool instead
     datasets = %{
       "products" => SampleData.products(),
       "orders" => SampleData.orders(),
@@ -192,11 +194,11 @@ defmodule PtcDemo.Agent do
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
     debug = Keyword.get(opts, :debug, false)
 
-    # Build the SubAgent
-    agent = build_agent(state.data_mode, state.prompt_profile)
+    # Build the SubAgent with requested max_turns
+    agent = build_agent(state.data_mode, state.prompt_profile, max_turns)
 
-    # Build context with datasets and current memory
-    context = Map.merge(state.datasets, %{"memory" => state.memory, "question" => question})
+    # Build context with datasets (memory is handled internally by SubAgent)
+    context = Map.merge(state.datasets, %{"question" => question})
 
     IO.puts("\n   [Agent] Generating response...")
 
@@ -215,9 +217,9 @@ defmodule PtcDemo.Agent do
         # Update usage stats
         new_usage = add_usage(state.usage, step.usage)
 
-        # Track program/result for programs/0
-        program_entry = {program, result}
-        new_programs = state.programs_history ++ [program_entry]
+        # Track ALL programs from this ask (for multi-turn visibility)
+        all_programs = extract_all_programs_from_trace(step.trace)
+        new_programs = state.programs_history ++ all_programs
 
         # Format answer - if it's the raw value, format it nicely
         answer = format_answer(result)
@@ -328,19 +330,115 @@ defmodule PtcDemo.Agent do
 
   # --- Private Functions ---
 
-  defp build_agent(data_mode, prompt_profile) do
+  defp build_agent(data_mode, prompt_profile, max_turns \\ @max_turns) do
     SubAgent.new(
       prompt: "{{question}}",
       signature: "(question :string) -> :any",
-      max_turns: @max_turns,
-      system_prompt: %{
-        prefix: system_prompt_prefix(data_mode),
-        language_spec: PtcDemo.Prompts.get(prompt_profile)
-      }
+      max_turns: max_turns,
+      tools: build_tools(),
+      system_prompt: build_system_prompt(data_mode, prompt_profile, max_turns)
     )
   end
 
-  defp system_prompt_prefix(:schema) do
+  defp build_tools do
+    %{
+      "search" =>
+        {&SearchTool.search/1,
+         signature:
+           "(query :string, limit :int?, cursor :string?) -> " <>
+             "{results [{id :string, title :string, topics [:string], department :string}], " <>
+             "cursor :string?, has_more :bool, total :int}",
+         description: "Search policy documents by keyword. Returns paginated results."}
+    }
+  end
+
+  # For single-shot (max_turns == 1), strip the Tools section that mentions return/fail
+  defp build_system_prompt(data_mode, prompt_profile, 1) do
+    fn base_prompt ->
+      # Remove the entire "# Available Tools" section
+      stripped =
+        base_prompt
+        |> String.replace(~r/# Available Tools.*?(?=\n#|\z)/s, "")
+
+      prefix = system_prompt_prefix(data_mode, prompt_profile)
+      language_spec = PtcDemo.Prompts.get(prompt_profile)
+      output_format = output_format_for(prompt_profile)
+
+      [prefix, stripped, language_spec, output_format]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n\n")
+    end
+  end
+
+  defp build_system_prompt(data_mode, prompt_profile, _max_turns) do
+    %{
+      prefix: system_prompt_prefix(data_mode, prompt_profile),
+      language_spec: PtcDemo.Prompts.get(prompt_profile),
+      output_format: output_format_for(prompt_profile)
+    }
+  end
+
+  defp output_format_for(:multi_turn) do
+    """
+    # Output Format
+
+    Respond with a single ```clojure code block containing your program for THIS TURN:
+
+    ```clojure
+    (->> ctx/data (filter pred) (map transform))
+    ```
+
+    Do NOT include:
+    - Explanatory text before or after the code
+    - Multiple code blocks
+    - Programs for future turns (write ONE program, observe result, then decide next)
+    """
+  end
+
+  defp output_format_for(:single_shot) do
+    """
+    # Output Format
+
+    Respond with a single ```clojure code block. The expression's value IS the result.
+
+    ```clojure
+    (count ctx/products)
+    ```
+
+    **IMPORTANT:** Do NOT wrap in `(return ...)` - just write the expression directly.
+    """
+  end
+
+  defp system_prompt_prefix(:schema, :multi_turn) do
+    data_schema = SampleData.schema_prompt()
+
+    """
+    You are a data analyst answering questions about datasets.
+
+    ## Closed-form vs Open-form Tasks
+
+    Before writing a program, determine whether the task is closed-form or open-form.
+
+    **Closed-form**: Final program can be fully specified without executing any prior program.
+    → Write one PTC-Lisp program and call (return result).
+
+    **Open-form**: Choice of entities, thresholds, or next computation depends on values
+    that must be observed at runtime (e.g., "most", "unusual", "inequity").
+    → Multi-turn: compute → observe → decide → compute → return.
+
+    **Turn 2 rules:**
+    - You SEE Turn 1's result as feedback
+    - You CANNOT embed it as literal data in Turn 2's code
+    - Turn 2 can only access: `ctx/*` (original data) and `memory/*` (stored values)
+    - Use your observed conclusion to hardcode values in Turn 2
+
+    ## Datasets (access via ctx/name):
+
+    #{data_schema}
+    """
+  end
+
+  defp system_prompt_prefix(:schema, _prompt_profile) do
     data_schema = SampleData.schema_prompt()
 
     """
@@ -352,7 +450,7 @@ defmodule PtcDemo.Agent do
     """
   end
 
-  defp system_prompt_prefix(:explore) do
+  defp system_prompt_prefix(:explore, _prompt_profile) do
     dataset_names =
       SampleData.available_datasets() |> Enum.map_join(", ", fn {name, _} -> name end)
 
@@ -402,6 +500,19 @@ defmodule PtcDemo.Agent do
       %{program: program} -> program
       _ -> nil
     end
+  end
+
+  # Extract ALL programs from trace (for multi-turn visibility)
+  defp extract_all_programs_from_trace(nil), do: []
+  defp extract_all_programs_from_trace([]), do: []
+
+  defp extract_all_programs_from_trace(trace) when is_list(trace) do
+    Enum.map(trace, fn
+      %{program: program, result: result} -> {program, result}
+      %{program: program} -> {program, nil}
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp format_answer(result) when is_number(result) do

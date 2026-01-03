@@ -435,11 +435,17 @@ defmodule PtcDemo.LispCLI do
       "How many employees have submitted expenses?"
       "What's the average order value per product category?"
 
+    Search tool (40 policy documents, use /prompt multi_turn first):
+      "Search for documents about remote work"
+      "Find policies related to expense reimbursement"
+      "Which document covers both remote work and expenses?"
+
     Expected Lisp programs:
       (count (filter (where :category = "electronics") ctx/products))
       (->> ctx/orders (filter (where :status = "delivered")) (sum-by :total))
       (avg-by :salary (filter (where :department = "engineering") ctx/employees))
       (count (distinct (pluck :product_id ctx/orders)))
+      (call "search" {:query "remote work"})
 
     """
   end

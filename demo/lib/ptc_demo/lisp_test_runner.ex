@@ -53,11 +53,8 @@ defmodule PtcDemo.LispTestRunner do
 
   ## Examples
 
-      # Compare minimal vs default prompts
-      PtcDemo.LispTestRunner.run_comparison([:minimal, :default])
-
-      # Compare all prompt profiles
-      PtcDemo.LispTestRunner.run_comparison([:minimal, :single_shot, :multi_turn, :default])
+      # Compare single_shot vs multi_turn prompts
+      PtcDemo.LispTestRunner.run_comparison([:single_shot, :multi_turn])
   """
   def run_comparison(prompts, opts \\ []) when is_list(prompts) do
     CLIBase.load_dotenv()
@@ -136,7 +133,7 @@ defmodule PtcDemo.LispTestRunner do
     * `:verbose` - Show detailed output (default: false)
     * `:model` - Model to use (default: agent's current model)
     * `:data_mode` - Data mode :schema or :explore (default: :schema)
-    * `:prompt` - Prompt profile to use (default: :default). See `PtcDemo.Prompts.list/0`.
+    * `:prompt` - Prompt profile to use (default: :auto). See `PtcDemo.Prompts.list/0`.
     * `:report` - Path to write markdown report file (optional)
     * `:runs` - Number of times to run all tests (default: 1)
     * `:validate_clojure` - Validate generated programs against Babashka (default: false)
@@ -146,7 +143,7 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all()
       PtcDemo.LispTestRunner.run_all(verbose: true)
       PtcDemo.LispTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest")
-      PtcDemo.LispTestRunner.run_all(prompt: :minimal)
+      PtcDemo.LispTestRunner.run_all(prompt: :single_shot)
       PtcDemo.LispTestRunner.run_all(report: "test_report.md")
       PtcDemo.LispTestRunner.run_all(runs: 3)
       PtcDemo.LispTestRunner.run_all(validate_clojure: true)
@@ -163,7 +160,7 @@ defmodule PtcDemo.LispTestRunner do
     verbose = Keyword.get(opts, :verbose, false)
     model = Keyword.get(opts, :model)
     data_mode = Keyword.get(opts, :data_mode, :schema)
-    prompt_profile = Keyword.get(opts, :prompt, :default)
+    prompt_profile = Keyword.get(opts, :prompt, :auto)
     report_path = Keyword.get(opts, :report)
     runs = Keyword.get(opts, :runs, 1)
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
@@ -184,7 +181,15 @@ defmodule PtcDemo.LispTestRunner do
     IO.puts("\n=== PTC-Lisp Demo Test Runner ===")
     IO.puts("Model: #{current_model}")
     IO.puts("Data mode: #{data_mode}")
-    IO.puts("Prompt: #{prompt_profile}")
+
+    prompt_display =
+      if prompt_profile == :auto do
+        "auto (single_shot/multi_turn per test)"
+      else
+        "#{prompt_profile}"
+      end
+
+    IO.puts("Prompt: #{prompt_display}")
 
     if runs > 1 do
       IO.puts("Runs: #{runs}")
@@ -203,6 +208,7 @@ defmodule PtcDemo.LispTestRunner do
           run_num,
           runs,
           data_mode,
+          prompt_profile,
           verbose,
           agent_mod,
           current_model,
@@ -238,6 +244,7 @@ defmodule PtcDemo.LispTestRunner do
          run_num,
          total_runs,
          data_mode,
+         prompt_profile,
          verbose,
          agent_mod,
          current_model,
@@ -256,6 +263,11 @@ defmodule PtcDemo.LispTestRunner do
         # Reset context before each test to get clean attempt count
         agent_mod.reset()
         agent_mod.set_data_mode(data_mode)
+
+        # Set prompt based on test type when :auto
+        effective_prompt = prompt_for_test(test_case, prompt_profile)
+        agent_mod.set_prompt_profile(effective_prompt)
+
         run_test(test_case, index, length(test_cases()), verbose, agent_mod, clojure_available)
       end)
 
@@ -309,18 +321,26 @@ defmodule PtcDemo.LispTestRunner do
 
     if index > 0 and index <= length(cases) do
       data_mode = Keyword.get(opts, :data_mode, :schema)
-      prompt_profile = Keyword.get(opts, :prompt, :default)
+      prompt_profile = Keyword.get(opts, :prompt, :auto)
       model = Keyword.get(opts, :model)
       validate_clojure = Keyword.get(opts, :validate_clojure, false)
 
-      ensure_agent_started(data_mode, prompt_profile, agent_mod)
+      test_case = Enum.at(cases, index - 1)
+
+      # Use :single_shot as default for starting the agent (will be overridden)
+      ensure_agent_started(data_mode, :single_shot, agent_mod)
 
       if model do
         agent_mod.set_model(model)
       end
 
+      # Set prompt based on test type when :auto
+      effective_prompt = prompt_for_test(test_case, prompt_profile)
+      agent_mod.set_prompt_profile(effective_prompt)
+      max_turns = Map.get(test_case, :max_turns, 1)
+      IO.puts("   [Prompt] #{effective_prompt}, max_turns: #{max_turns}")
+
       clojure_available = check_clojure_validation(validate_clojure)
-      test_case = Enum.at(cases, index - 1)
       run_test(test_case, index, length(cases), true, agent_mod, clojure_available)
     else
       IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
@@ -355,20 +375,30 @@ defmodule PtcDemo.LispTestRunner do
 
   # Private functions
 
+  # Select appropriate prompt for test type
+  defp prompt_for_test(test_case, :auto) do
+    if Map.get(test_case, :max_turns, 1) > 1, do: :multi_turn, else: :single_shot
+  end
+
+  defp prompt_for_test(_test_case, explicit_profile), do: explicit_profile
+
   defp ensure_agent_started(data_mode, prompt_profile, agent_mod) do
+    # When :auto, use :single_shot as default for starting (will be overridden per-test)
+    start_prompt = if prompt_profile == :auto, do: :single_shot, else: prompt_profile
+
     # For mock agents, assume they're already started or will be in test setup
     # For real Agent, check and start if needed
     if agent_mod == Agent do
       case Process.whereis(Agent) do
         nil ->
-          {:ok, _pid} = Agent.start_link(data_mode: data_mode, prompt: prompt_profile)
+          {:ok, _pid} = Agent.start_link(data_mode: data_mode, prompt: start_prompt)
           :ok
 
         _pid ->
           # Reset to ensure clean state
           Agent.reset()
           Agent.set_data_mode(data_mode)
-          Agent.set_prompt_profile(prompt_profile)
+          Agent.set_prompt_profile(start_prompt)
           :ok
       end
     else
@@ -378,41 +408,29 @@ defmodule PtcDemo.LispTestRunner do
   end
 
   defp run_test(test_case, index, total, verbose, agent_mod, clojure_available) do
-    # Handle multi-turn tests (queries list) vs single-turn (query string)
-    case test_case do
-      %{queries: queries} ->
-        run_multi_turn_test(
-          test_case,
-          queries,
-          index,
-          total,
-          verbose,
-          agent_mod,
-          clojure_available
-        )
-
-      %{query: query} ->
-        run_single_turn_test(
-          test_case,
-          query,
-          index,
-          total,
-          verbose,
-          agent_mod,
-          clojure_available
-        )
-    end
+    run_single_turn_test(
+      test_case,
+      test_case.query,
+      index,
+      total,
+      verbose,
+      agent_mod,
+      clojure_available
+    )
   end
 
   defp run_single_turn_test(test_case, query, index, total, verbose, agent_mod, clojure_available) do
+    max_turns = Map.get(test_case, :max_turns, 1)
+
     if verbose do
-      IO.puts("\n[#{index}/#{total}] #{query}")
+      prefix = if max_turns > 1, do: "[MULTI-TURN] ", else: ""
+      IO.puts("\n[#{index}/#{total}] #{prefix}#{query}")
     else
-      IO.write(".")
+      IO.write(if max_turns > 1, do: "M", else: ".")
     end
 
     result =
-      case agent_mod.ask(query, max_turns: 1) do
+      case agent_mod.ask(query, max_turns: max_turns) do
         {:ok, _answer} ->
           # Get all programs attempted during this query
           all_programs = agent_mod.programs()
@@ -471,8 +489,19 @@ defmodule PtcDemo.LispTestRunner do
         IO.puts("   PASS: #{test_case.description}")
         IO.puts("   Attempts: #{result.attempts}")
 
-        if result[:program] do
-          IO.puts("   Program: #{String.trim(result.program)}")
+        # Show all programs for multi-turn tests
+        if result[:all_programs] && length(result.all_programs) > 1 do
+          IO.puts("   All programs:")
+
+          Enum.each(result.all_programs, fn {prog, prog_result} ->
+            result_str = Base.format_attempt_result(prog_result)
+            IO.puts("     - #{Base.truncate(prog, 70)}")
+            IO.puts("       Result: #{Base.truncate(result_str, 60)}")
+          end)
+        else
+          if result[:program] do
+            IO.puts("   Program: #{String.trim(result.program)}")
+          end
         end
       else
         IO.puts("   FAIL: #{result.error}")
@@ -493,130 +522,6 @@ defmodule PtcDemo.LispTestRunner do
     result
   end
 
-  defp run_multi_turn_test(
-         test_case,
-         queries,
-         index,
-         total,
-         verbose,
-         agent_mod,
-         clojure_available
-       ) do
-    query_display = Enum.join(queries, " → ")
-
-    if verbose do
-      IO.puts("\n[#{index}/#{total}] [MULTI-TURN] #{query_display}")
-    else
-      IO.write("M")
-    end
-
-    # Run each query in sequence without resetting (memory persists)
-    {result, _} =
-      Enum.reduce_while(queries, {nil, []}, fn query, {_prev_result, all_programs_acc} ->
-        if verbose do
-          IO.puts("   Turn: #{query}")
-        end
-
-        case agent_mod.ask(query, max_turns: 1) do
-          {:ok, _answer} ->
-            new_programs = agent_mod.programs()
-            {:cont, {:ok, all_programs_acc ++ new_programs}}
-
-          {:error, reason} ->
-            new_programs = agent_mod.programs()
-
-            {:halt,
-             {%{
-                passed: false,
-                error: "Query failed: #{inspect(reason)}",
-                program: agent_mod.last_program(),
-                attempts: length(all_programs_acc) + length(new_programs),
-                all_programs: all_programs_acc ++ new_programs
-              }, []}}
-        end
-      end)
-
-    # If we got through all queries successfully, validate the final result
-    result =
-      case result do
-        :ok ->
-          all_programs = agent_mod.programs()
-          attempts = length(all_programs)
-
-          case agent_mod.last_result() do
-            nil ->
-              %{
-                passed: false,
-                error: "No result returned after multi-turn",
-                attempts: attempts,
-                all_programs: all_programs
-              }
-
-            value ->
-              validation = Base.validate_result(value, test_case)
-
-              validation
-              |> Map.put(:program, agent_mod.last_program())
-              |> Map.put(:attempts, attempts)
-              |> Map.put(:all_programs, all_programs)
-              |> Map.put(:final_result, value)
-          end
-
-        %{passed: false} = error_result ->
-          error_result
-      end
-
-    # Add Clojure validation if enabled and we have a program
-    result =
-      if clojure_available and result[:program] do
-        add_clojure_validation(result, verbose)
-      else
-        result
-      end
-
-    result =
-      Map.merge(result, %{
-        query: query_display,
-        queries: queries,
-        index: index,
-        description: test_case.description,
-        constraint: test_case.constraint,
-        multi_turn: true
-      })
-
-    if verbose do
-      if result.passed do
-        IO.puts("   PASS: #{test_case.description}")
-        IO.puts("   Attempts: #{result.attempts}")
-
-        if result[:all_programs] && length(result.all_programs) > 0 do
-          IO.puts("   All programs:")
-
-          Enum.each(result.all_programs, fn {prog, prog_result} ->
-            result_str = Base.format_attempt_result(prog_result)
-            IO.puts("     - #{Base.truncate(prog, 70)}")
-            IO.puts("       → #{result_str}")
-          end)
-        end
-      else
-        IO.puts("   FAIL: #{result.error}")
-        IO.puts("   Attempts: #{result.attempts}")
-
-        if result[:all_programs] && length(result.all_programs) > 0 do
-          IO.puts("   All programs tried:")
-
-          Enum.each(result.all_programs, fn {prog, prog_result} ->
-            result_str = Base.format_attempt_result(prog_result)
-            IO.puts("     - #{Base.truncate(prog, 70)}")
-            IO.puts("       → #{result_str}")
-          end)
-        end
-      end
-    end
-
-    result
-  end
-
   # Execute program in Clojure and compare results
   defp add_clojure_validation(result, verbose) do
     program = result[:program]
@@ -627,7 +532,8 @@ defmodule PtcDemo.LispTestRunner do
       "products" => PtcDemo.SampleData.products(),
       "orders" => PtcDemo.SampleData.orders(),
       "employees" => PtcDemo.SampleData.employees(),
-      "expenses" => PtcDemo.SampleData.expenses()
+      "expenses" => PtcDemo.SampleData.expenses(),
+      "documents" => PtcDemo.SampleData.documents()
     }
 
     case PtcRunner.Lisp.ClojureValidator.execute(program, context: context) do

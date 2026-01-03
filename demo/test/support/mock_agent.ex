@@ -82,6 +82,10 @@ defmodule PtcDemo.MockAgent do
     :ok
   end
 
+  def set_prompt_profile(_profile) do
+    :ok
+  end
+
   # --- GenServer Callbacks ---
 
   @impl true

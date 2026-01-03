@@ -15,18 +15,17 @@ defmodule PtcDemo.Prompts do
 
   | Profile | Description | Use Case |
   |---------|-------------|----------|
-  | `:default` | Full PTC-Lisp reference | Production, complex queries |
-  | `:minimal` | Bare essentials only | Token-efficient, simple queries |
-  | `:single_shot` | Optimized for one-turn | Quick lookups, no memory |
-  | `:multi_turn` | Emphasizes memory/state | Conversational analysis |
+  | `:single_shot` | Base language reference | Quick lookups, no memory |
+  | `:multi_turn` | Base + memory addon | Conversational analysis |
+  | `:multi_turn_full` | Multi-turn with extra workflow guidance | Complex sessions |
 
   ## Usage
 
       # In test runner
-      PtcDemo.LispTestRunner.run_all(prompt: :minimal)
+      PtcDemo.LispTestRunner.run_all(prompt: :single_shot)
 
       # In agent
-      PtcDemo.Agent.start_link(prompt: :minimal)
+      PtcDemo.Agent.start_link(prompt: :multi_turn)
 
       # List available profiles
       PtcDemo.Prompts.list()
@@ -39,7 +38,7 @@ defmodule PtcDemo.Prompts do
 
   ## Parameters
 
-  - `profile` - Atom identifying the prompt profile (default: `:default`)
+  - `profile` - Atom identifying the prompt profile (default: `:single_shot`)
 
   ## Returns
 
@@ -47,27 +46,23 @@ defmodule PtcDemo.Prompts do
 
   ## Examples
 
-      iex> prompt = PtcDemo.Prompts.get(:minimal)
-      iex> String.contains?(prompt, "count")
+      iex> prompt = PtcDemo.Prompts.get(:single_shot)
+      iex> String.contains?(prompt, "PTC-Lisp")
       true
 
   """
   @spec get(atom()) :: String.t()
-  def get(profile \\ :default)
+  def get(profile \\ :single_shot)
 
   # Delegate standard prompts to the library
-  def get(profile) when profile in [:default, :minimal, :single_shot, :multi_turn] do
+  def get(profile) when profile in [:single_shot, :multi_turn, :base, :addon_memory] do
     LibPrompts.get(profile)
   end
 
-  # Demo-specific aliases for backwards compatibility
-  def get(:minimal_single_shot), do: LibPrompts.get(:minimal)
-  def get(:minimal_multi_turn), do: LibPrompts.get(:multi_turn)
-
-  # Demo-specific: full reference with multi-turn workflow guidance
+  # Demo-specific: multi-turn with extra workflow guidance
   def get(:multi_turn_full) do
     """
-    #{LibPrompts.get(:default)}
+    #{LibPrompts.get(:multi_turn)}
 
     ## Multi-Turn Workflow
 
@@ -82,12 +77,12 @@ defmodule PtcDemo.Prompts do
     ```clojure
     {:summary {:count (count memory/filtered-data)
                :total (sum-by :amount memory/filtered-data)}
-     :result "Analysis complete"}
+     :return "Analysis complete"}
     ```
 
     **Memory Contract:**
     - Return a map → keys merge into memory
-    - Include `:result` key → that value is shown to user
+    - Include `:return` key → that value is shown to user
     - Non-map return → shown directly, no memory update
 
     Build your analysis step by step, storing intermediate results for later reference.
@@ -104,21 +99,16 @@ defmodule PtcDemo.Prompts do
   ## Examples
 
       iex> profiles = PtcDemo.Prompts.list()
-      iex> Enum.find(profiles, fn {name, _} -> name == :minimal end)
-      {:minimal, "Minimal prompt - most token efficient"}
+      iex> Enum.find(profiles, fn {name, _} -> name == :single_shot end)
+      {:single_shot, "Base language reference for single-turn queries"}
 
   """
   @spec list() :: [{atom(), String.t()}]
   def list do
     [
-      {:default, "Full PTC-Lisp reference - comprehensive documentation"},
-      {:minimal, "Minimal prompt - most token efficient"},
-      {:single_shot, "Optimized for one-turn queries with examples"},
-      {:multi_turn, "Minimal prompt with memory documentation"},
-      {:multi_turn_full, "Full reference with multi-turn workflow guidance"},
-      # Backwards compatibility aliases
-      {:minimal_single_shot, "Alias for :minimal"},
-      {:minimal_multi_turn, "Alias for :multi_turn"}
+      {:single_shot, "Base language reference for single-turn queries"},
+      {:multi_turn, "Base + memory addon for multi-turn conversations"},
+      {:multi_turn_full, "Multi-turn with extra workflow guidance"}
     ]
   end
 
@@ -127,7 +117,7 @@ defmodule PtcDemo.Prompts do
 
   ## Examples
 
-      iex> :minimal in PtcDemo.Prompts.profiles()
+      iex> :single_shot in PtcDemo.Prompts.profiles()
       true
 
   """
@@ -141,11 +131,11 @@ defmodule PtcDemo.Prompts do
 
   ## Examples
 
-      iex> PtcDemo.Prompts.validate_profile("minimal")
-      {:ok, :minimal}
+      iex> PtcDemo.Prompts.validate_profile("single_shot")
+      {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: default, minimal, single_shot, multi_turn, multi_turn_full, minimal_single_shot, minimal_multi_turn"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, multi_turn, multi_turn_full"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}
@@ -167,14 +157,12 @@ defmodule PtcDemo.Prompts do
 
   ## Examples
 
-      iex> PtcDemo.Prompts.version(:default)
+      iex> PtcDemo.Prompts.version(:single_shot)
       1
 
   """
   @spec version(atom()) :: pos_integer()
   def version(:multi_turn_full), do: 1
-  def version(:minimal_single_shot), do: LibPrompts.version(:minimal)
-  def version(:minimal_multi_turn), do: LibPrompts.version(:multi_turn)
   def version(profile), do: LibPrompts.version(profile)
 
   @doc """
@@ -184,15 +172,13 @@ defmodule PtcDemo.Prompts do
 
   ## Examples
 
-      iex> meta = PtcDemo.Prompts.metadata(:default)
+      iex> meta = PtcDemo.Prompts.metadata(:single_shot)
       iex> is_map(meta)
       true
 
   """
   @spec metadata(atom()) :: map()
   def metadata(:multi_turn_full), do: %{version: 1, type: :demo}
-  def metadata(:minimal_single_shot), do: LibPrompts.metadata(:minimal)
-  def metadata(:minimal_multi_turn), do: LibPrompts.metadata(:multi_turn)
   def metadata(profile), do: LibPrompts.metadata(profile)
 
   @doc """
@@ -202,14 +188,12 @@ defmodule PtcDemo.Prompts do
 
   ## Examples
 
-      iex> PtcDemo.Prompts.archived?(:default)
+      iex> PtcDemo.Prompts.archived?(:single_shot)
       false
 
   """
   @spec archived?(atom()) :: boolean()
   def archived?(:multi_turn_full), do: false
-  def archived?(:minimal_single_shot), do: false
-  def archived?(:minimal_multi_turn), do: false
   def archived?(profile), do: LibPrompts.archived?(profile)
 
   @doc """
@@ -218,14 +202,14 @@ defmodule PtcDemo.Prompts do
   ## Examples
 
       iex> keys = PtcDemo.Prompts.list_current()
-      iex> :default in keys
+      iex> :single_shot in keys
       true
 
   """
   @spec list_current() :: [atom()]
   def list_current do
     # All demo prompts are current, plus library's current prompts
-    demo_prompts = [:multi_turn_full, :minimal_single_shot, :minimal_multi_turn]
+    demo_prompts = [:multi_turn_full]
     lib_current = LibPrompts.list_current()
     Enum.uniq(lib_current ++ demo_prompts)
   end

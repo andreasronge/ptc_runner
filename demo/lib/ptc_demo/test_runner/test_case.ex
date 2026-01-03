@@ -122,7 +122,8 @@ defmodule PtcDemo.TestRunner.TestCase do
 
       # 11. Two-step filter + aggregate
       %{
-        query: "What is the average salary of senior-level employees?",
+        query:
+          "What is the average salary of senior-level employees? Return only the numeric value.",
         expect: :number,
         constraint: {:between, 50_000, 200_000},
         description: "Filter then aggregate"
@@ -182,15 +183,19 @@ defmodule PtcDemo.TestRunner.TestCase do
   end
 
   @doc """
-  Return multi-turn test cases that require memory persistence.
+  Return multi-turn test cases requiring observation and judgment.
 
-  Multi-turn tests execute multiple queries in sequence without resetting state,
-  allowing the test to store results from one query and use them in subsequent queries.
+  These are "open-form" tasks where the LLM must:
+  1. Execute a program to gather data
+  2. Observe and analyze the result
+  3. Make a judgment call based on subjective criteria
+  4. Execute a follow-up program using that judgment
 
   Each test case has:
-    - `:queries` - list of query strings to execute in sequence
+    - `:query` - single query requiring multi-turn execution
     - `:expect` - expected return type of the final result
     - `:constraint` - validation constraint on the final result
+    - `:max_turns` - maximum turns allowed (typically 2-3)
     - `:description` - what the multi-turn test validates
 
   Returns a list of test case maps.
@@ -198,24 +203,29 @@ defmodule PtcDemo.TestRunner.TestCase do
   @spec multi_turn_cases() :: [map()]
   def multi_turn_cases do
     [
-      # Multi-turn query (tests memory persistence between questions)
+      # Open-form task requiring observation and judgment
+      # Cannot be solved in one program - requires interpreting what "suspicious" means
       %{
-        queries: [
-          "Count delivered orders and store the result in memory as delivered-count",
-          "What percentage of all orders are delivered? Use memory/delivered-count and total order count."
-        ],
-        expect: :number,
-        constraint: {:between, 1, 99},
-        description: "Multi-turn: percentage calculation using stored count"
+        query:
+          "Analyze expense claims to find suspicious patterns. " <>
+            "Which employee's spending looks most like potential fraud or abuse? " <>
+            "Return their employee_id.",
+        expect: :integer,
+        constraint: {:between, 1, 200},
+        max_turns: 4,
+        description: "Multi-turn: explore expense patterns, judge suspicious, return employee_id"
       },
+
+      # Search-based task requiring query refinement
+      # Must use the search tool to find documents, then narrow down results
       %{
-        queries: [
-          "Store the list of employees in the engineering department in memory as engineering-employees",
-          "What is the average salary of the engineering employees stored in memory?"
-        ],
-        expect: :number,
-        constraint: {:between, 50_000, 200_000},
-        description: "Multi-turn: average salary using stored employee list"
+        query:
+          "Use the search tool to find the policy document that covers BOTH " <>
+            "'remote work' AND 'expense reimbursement'. Return the document title.",
+        expect: :string,
+        constraint: {:eq, "Policy WFH-2024-REIMB"},
+        max_turns: 6,
+        description: "Multi-turn: search, narrow results, find document covering both topics"
       }
     ]
   end

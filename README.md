@@ -72,22 +72,21 @@ end
 - **[Playground Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)** - Try PTC-Lisp interactively
 - **[LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd)** - Build an agent end-to-end
 
-## Low-Level APIs
+## Low-Level API
 
-For direct program execution without the agentic loop, use the DSL runners:
+For direct program execution without the agentic loop:
 
 ```elixir
-# PTC-Lisp (compact, expressive)
-{:ok, %{return: result}} = PtcRunner.Lisp.run(
+{:ok, step} = PtcRunner.Lisp.run(
   "(->> ctx/items (filter (where :active)) (count))",
   context: %{items: items}
 )
-
-# PTC-JSON (verbose, schema-enforced)
-{:ok, result, _, _} = PtcRunner.Json.run(program_json, tools: tools)
+step.return  #=> 3
 ```
 
-See **[Guide](docs/guide.md)** for architecture and low-level API details.
+Programs run in isolated BEAM processes with resource limits (1s timeout, 10MB heap).
+
+See `PtcRunner.Lisp` module docs for options. A JSON DSL (`PtcRunner.Json`) is also available for schema-enforced execution.
 
 ## License
 

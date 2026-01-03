@@ -108,6 +108,14 @@ defmodule PtcDemo.TestRunner.Base do
     end
   end
 
+  def check_constraint(value, {:one_of, options}) when is_list(options) do
+    if value in options do
+      true
+    else
+      "Expected one of #{inspect(options)}, got #{inspect(value)}"
+    end
+  end
+
   def check_constraint(value, {:has_keys, keys}) when is_map(value) and is_list(keys) do
     missing = Enum.filter(keys, fn key -> not Map.has_key?(value, key) end)
 

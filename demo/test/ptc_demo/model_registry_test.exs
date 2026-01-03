@@ -208,11 +208,11 @@ defmodule PtcDemo.ModelRegistryTest do
     end
 
     test "calculates cost for known alias 'gpt'" do
-      # gpt: input_cost_per_mtok: 1.50, output_cost_per_mtok: 6.00
+      # gpt: input_cost_per_mtok: 0.40, output_cost_per_mtok: 1.60
       # 1,000,000 input tokens + 1,000,000 output tokens
-      # Expected: (1.50 * 1_000_000 / 1_000_000) + (6.00 * 1_000_000 / 1_000_000) = 1.50 + 6.00 = 7.50
+      # Expected: (0.40 * 1_000_000 / 1_000_000) + (1.60 * 1_000_000 / 1_000_000) = 0.40 + 1.60 = 2.00
       cost = ModelRegistry.calculate_cost("gpt", 1_000_000, 1_000_000)
-      assert_in_delta(cost, 7.50, 0.01)
+      assert_in_delta(cost, 2.00, 0.01)
     end
 
     test "calculates cost for known OpenRouter model ID" do
