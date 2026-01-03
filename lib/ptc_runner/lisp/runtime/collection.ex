@@ -56,6 +56,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find(coll, truthy_key_pred(key))
   end
 
+  def find(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.find(coll, fn item -> MapSet.member?(set, item) end)
+  end
+
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
   def map(key, coll) when is_list(coll) and is_atom(key),
