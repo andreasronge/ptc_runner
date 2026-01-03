@@ -223,7 +223,7 @@ defmodule PtcRunner.Lisp.Prompts do
   ## Examples
 
       iex> PtcRunner.Lisp.Prompts.version(:base)
-      1
+      2
 
   """
   @spec version(atom()) :: pos_integer()

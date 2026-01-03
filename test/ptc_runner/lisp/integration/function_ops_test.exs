@@ -296,7 +296,8 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
         (+ 3 3))
       """
 
-      assert {:error, %Step{fail: %{reason: :execution_error}}} = Lisp.run(source)
+      # Type errors return helpful messages about the argument types
+      assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(source)
     end
   end
 end
