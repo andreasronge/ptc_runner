@@ -87,6 +87,16 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
       {:ok, result, _} = run(~S'(not-any? #{4 5} [1 2 3])')
       assert result == true
     end
+
+    test "set works with find" do
+      {:ok, result, _} = run(~S'(find #{"b" "c"} ["a" "b" "d"])')
+      assert result == "b"
+    end
+
+    test "set with find returns nil when no match" do
+      {:ok, result, _} = run(~S'(find #{"x" "y"} ["a" "b" "c"])')
+      assert result == nil
+    end
   end
 
   describe "collection operations on sets" do
