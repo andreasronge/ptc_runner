@@ -14,7 +14,6 @@ defmodule PtcRunner.TestSupport.LLM do
   def generate_text(model, messages, opts \\ []) do
     case LLMClient.generate_text(model, messages, opts) do
       {:ok, %{content: text}} -> {:ok, text}
-      {:ok, text} when is_binary(text) -> {:ok, text}
       error -> error
     end
   end
