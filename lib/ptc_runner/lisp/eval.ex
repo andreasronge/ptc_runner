@@ -473,6 +473,15 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Set as function: (#{1 2 3} x) → checks membership, returns element or nil
+  defp apply_fun(set, [arg], _ctx, memory, _tool_exec) when is_struct(set, MapSet) do
+    {:ok, if(MapSet.member?(set, arg), do: arg, else: nil), memory}
+  end
+
+  defp apply_fun(set, args, _ctx, _memory, _tool_exec) when is_struct(set, MapSet) do
+    {:error, {:arity_error, "set expects 1 argument, got #{length(args)}"}}
+  end
+
   # Closure application
   defp apply_fun({:closure, patterns, body, closure_env}, args, ctx, memory, tool_exec) do
     if length(patterns) != length(args) do

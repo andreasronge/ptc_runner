@@ -9,10 +9,17 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   defp truthy_key_pred(key), do: fn item -> !!FlexAccess.flex_get(item, key) end
 
+  # Set-as-predicate: returns element if member, nil if not (used with filter/some/etc)
+  defp set_pred(set), do: fn item -> if MapSet.member?(set, item), do: item, else: nil end
+
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
 
   def filter(key, coll) when is_list(coll) and is_atom(key) do
     Enum.filter(coll, truthy_key_pred(key))
+  end
+
+  def filter(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.filter(coll, set_pred(set))
   end
 
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
@@ -29,6 +36,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def remove(key, coll) when is_list(coll) and is_atom(key) do
     Enum.reject(coll, truthy_key_pred(key))
+  end
+
+  def remove(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.reject(coll, set_pred(set))
   end
 
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
@@ -285,16 +296,28 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find_value(coll, truthy_key_pred(key))
   end
 
+  def some(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.find_value(coll, set_pred(set))
+  end
+
   def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, pred)
 
   def every?(key, coll) when is_list(coll) and is_atom(key) do
     Enum.all?(coll, truthy_key_pred(key))
   end
 
+  def every?(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.all?(coll, set_pred(set))
+  end
+
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
 
   def not_any?(key, coll) when is_list(coll) and is_atom(key) do
     not Enum.any?(coll, truthy_key_pred(key))
+  end
+
+  def not_any?(%MapSet{} = set, coll) when is_list(coll) do
+    not Enum.any?(coll, set_pred(set))
   end
 
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)

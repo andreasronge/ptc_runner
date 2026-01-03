@@ -27,6 +27,53 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
     end
   end
 
+  describe "set as predicate" do
+    test "set returns element when found" do
+      {:ok, result, _} = run(~S"(#{1 2 3} 2)")
+      assert result == 2
+    end
+
+    test "set returns nil when not found" do
+      {:ok, result, _} = run(~S"(#{1 2 3} 4)")
+      assert result == nil
+    end
+
+    test "set works with filter" do
+      {:ok, result, _} = run(~S'(filter #{"a" "b"} ["a" "c" "b" "d"])')
+      assert result == ["a", "b"]
+    end
+
+    test "set works with some" do
+      {:ok, result, _} = run(~S'(some #{"x"} ["a" "x" "b"])')
+      assert result == "x"
+    end
+
+    test "set with some returns nil when no match" do
+      {:ok, result, _} = run(~S'(some #{"z"} ["a" "b"])')
+      assert result == nil
+    end
+
+    test "empty set always returns nil" do
+      {:ok, result, _} = run(~S"(#{} :anything)")
+      assert result == nil
+    end
+
+    test "set with wrong arity returns error" do
+      {:error, %Step{fail: %{reason: :arity_error, message: message}}} = run(~S"(#{1 2} 1 2)")
+      assert message =~ "set expects 1 argument, got 2"
+    end
+
+    test "set with keywords works as predicate" do
+      {:ok, result, _} = run(~S"(#{:a :b :c} :b)")
+      assert result == :b
+    end
+
+    test "set with single element" do
+      {:ok, result, _} = run(~S"(#{:a} :a)")
+      assert result == :a
+    end
+  end
+
   describe "collection operations on sets" do
     test "map on set returns vector" do
       {:ok, result, _} = run(~S"(map inc #{1 2 3})")
@@ -77,6 +124,7 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
   defp run(source) do
     case PtcRunner.Lisp.run(source) do
       {:ok, %Step{return: result}} -> {:ok, result, %{}}
+      {:error, %Step{} = step} -> {:error, step}
       {:error, reason} -> {:error, reason}
     end
   end
