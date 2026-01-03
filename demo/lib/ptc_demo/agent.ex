@@ -172,9 +172,6 @@ defmodule PtcDemo.Agent do
       "expenses" => SampleData.expenses()
     }
 
-    IO.puts("   [Data] #{data_mode}")
-    IO.puts("   [Prompt] #{prompt_profile}")
-
     {:ok,
      %__MODULE__{
        model: model,
@@ -193,6 +190,7 @@ defmodule PtcDemo.Agent do
   def handle_call({:ask, question, opts}, _from, state) do
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
     debug = Keyword.get(opts, :debug, false)
+    verbose = Keyword.get(opts, :verbose, false)
 
     # Build the SubAgent with requested max_turns
     agent = build_agent(state.data_mode, state.prompt_profile, max_turns)
@@ -200,7 +198,7 @@ defmodule PtcDemo.Agent do
     # Build context with datasets (memory is handled internally by SubAgent)
     context = Map.merge(state.datasets, %{"question" => question})
 
-    IO.puts("\n   [Agent] Generating response...")
+    if verbose, do: IO.puts("\n   [Agent] Generating response...")
 
     case SubAgent.run(agent,
            llm: llm_callback(state.model),
@@ -224,7 +222,7 @@ defmodule PtcDemo.Agent do
         # Format answer - if it's the raw value, format it nicely
         answer = format_answer(result)
 
-        IO.puts("   [Result] #{truncate(inspect(result), 80)}")
+        if verbose, do: IO.puts("   [Result] #{truncate(inspect(result), 80)}")
 
         {:reply, {:ok, answer},
          %{
@@ -237,11 +235,11 @@ defmodule PtcDemo.Agent do
          }}
 
       {:error, step} ->
-        # Always print trace on error for debugging
-        SubAgent.Debug.print_trace(step)
+        # Print trace on error for debugging when verbose
+        if verbose, do: SubAgent.Debug.print_trace(step)
 
         error_msg = format_error(step.fail)
-        IO.puts("   [Error] #{error_msg}")
+        if verbose, do: IO.puts("   [Error] #{error_msg}")
 
         new_usage = add_usage(state.usage, step.usage)
 
