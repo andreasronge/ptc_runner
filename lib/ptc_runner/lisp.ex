@@ -111,6 +111,7 @@ defmodule PtcRunner.Lisp do
     timeout = Keyword.get(opts, :timeout, 1000)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
     max_symbols = Keyword.get(opts, :max_symbols, 10_000)
+    turn_history = Keyword.get(opts, :turn_history, [])
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -132,7 +133,8 @@ defmodule PtcRunner.Lisp do
         float_precision: float_precision,
         timeout: timeout,
         max_heap: max_heap,
-        max_symbols: max_symbols
+        max_symbols: max_symbols,
+        turn_history: turn_history
       }
 
       execute_program(source, opts)
@@ -156,14 +158,15 @@ defmodule PtcRunner.Lisp do
       float_precision: float_precision,
       timeout: timeout,
       max_heap: max_heap,
-      max_symbols: max_symbols
+      max_symbols: max_symbols,
+      turn_history: turn_history
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
          :ok <- check_symbol_limit(raw_ast, max_symbols, memory),
          {:ok, core_ast} <- Analyze.analyze(raw_ast) do
-      # Build Context for sandbox
-      context = PtcRunner.Context.new(ctx, memory, normalized_tools)
+      # Build Context for sandbox (turn_history passed for completeness, used via eval_fn)
+      context = PtcRunner.Context.new(ctx, memory, normalized_tools, turn_history)
 
       # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
       eval_fn = fn _ast, sandbox_context ->
@@ -172,7 +175,8 @@ defmodule PtcRunner.Lisp do
           sandbox_context.ctx,
           sandbox_context.memory,
           Env.initial(),
-          tool_executor
+          tool_executor,
+          sandbox_context.turn_history
         )
       end
 

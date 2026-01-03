@@ -12,7 +12,8 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
 
       {:ok, closure, %{}} = Eval.eval({:fn, params, body}, %{}, %{}, %{}, &dummy_tool/2)
 
-      assert match?({:closure, ^params, ^body, _env}, closure)
+      # Closures now capture turn_history as 5th element
+      assert match?({:closure, ^params, ^body, _env, _turn_history}, closure)
     end
 
     test "closure captures environment" do
@@ -20,7 +21,8 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       params = [{:var, :x}]
       body = {:var, :y}
 
-      {:ok, {:closure, _, _, captured_env}, %{}} =
+      # Closures now capture turn_history as 5th element
+      {:ok, {:closure, _, _, captured_env, _turn_history}, %{}} =
         Eval.eval({:fn, params, body}, %{}, %{}, env, &dummy_tool/2)
 
       assert captured_env == env

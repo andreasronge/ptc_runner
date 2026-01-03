@@ -101,6 +101,9 @@ defmodule PtcRunner.Lisp.SymbolCounter do
     end
   end
 
+  # Turn history symbols (*1, *2, *3) don't create new atoms
+  defp collect_symbols({:turn_history, _n}, acc), do: acc
+
   defp collect_symbols({:vector, elems}, acc) do
     Enum.reduce(elems, acc, fn elem, inner_acc -> collect_symbols(elem, inner_acc) end)
   end
