@@ -579,14 +579,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Update turn history, keeping only the last 3 results
   # New results are appended to the end so *1 = last, *2 = second-to-last, *3 = third-to-last
   defp update_turn_history(history, new_result) do
-    updated = history ++ [new_result]
-
-    # Keep only the last 3 entries
-    if length(updated) > 3 do
-      Enum.drop(updated, length(updated) - 3)
-    else
-      updated
-    end
+    (history ++ [new_result]) |> Enum.take(-3)
   end
 
   defp format_turn_feedback(agent, state, lisp_step) do

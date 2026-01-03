@@ -24,7 +24,7 @@ defmodule PtcRunner.Lisp.Eval do
           | map()
           | MapSet.t()
           | function()
-          | {:closure, [CoreAST.pattern()], CoreAST.t(), env()}
+          | {:closure, [CoreAST.pattern()], CoreAST.t(), env(), list()}
 
   @type runtime_error ::
           {:unbound_var, atom()}
