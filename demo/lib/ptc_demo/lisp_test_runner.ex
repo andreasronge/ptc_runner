@@ -178,28 +178,30 @@ defmodule PtcDemo.LispTestRunner do
 
     current_model = agent_mod.model()
 
-    IO.puts("\n=== PTC-Lisp Demo Test Runner ===")
-    IO.puts("Model: #{current_model}")
-    IO.puts("Data mode: #{data_mode}")
+    if verbose do
+      IO.puts("\n=== PTC-Lisp Demo Test Runner ===")
+      IO.puts("Model: #{current_model}")
+      IO.puts("Data mode: #{data_mode}")
 
-    prompt_display =
-      if prompt_profile == :auto do
-        "auto (single_shot/multi_turn per test)"
-      else
-        "#{prompt_profile}"
+      prompt_display =
+        if prompt_profile == :auto do
+          "auto (single_shot/multi_turn per test)"
+        else
+          "#{prompt_profile}"
+        end
+
+      IO.puts("Prompt: #{prompt_display}")
+
+      if runs > 1 do
+        IO.puts("Runs: #{runs}")
       end
 
-    IO.puts("Prompt: #{prompt_display}")
+      if clojure_available do
+        IO.puts("Clojure validation: enabled")
+      end
 
-    if runs > 1 do
-      IO.puts("Runs: #{runs}")
+      IO.puts("")
     end
-
-    if clojure_available do
-      IO.puts("Clojure validation: enabled")
-    end
-
-    IO.puts("")
 
     # Run tests multiple times if requested
     summaries =
@@ -274,8 +276,10 @@ defmodule PtcDemo.LispTestRunner do
     stats = agent_mod.stats()
     summary = Base.build_summary(results, start_time, current_model, data_mode, stats)
 
-    Base.print_summary(summary)
-    Base.print_failed_tests(results)
+    if verbose do
+      Base.print_summary(summary)
+      Base.print_failed_tests(results)
+    end
 
     summary
   end
@@ -324,6 +328,7 @@ defmodule PtcDemo.LispTestRunner do
       prompt_profile = Keyword.get(opts, :prompt, :auto)
       model = Keyword.get(opts, :model)
       validate_clojure = Keyword.get(opts, :validate_clojure, false)
+      verbose = Keyword.get(opts, :verbose, true)
 
       test_case = Enum.at(cases, index - 1)
 
@@ -337,13 +342,21 @@ defmodule PtcDemo.LispTestRunner do
       # Set prompt based on test type when :auto
       effective_prompt = prompt_for_test(test_case, prompt_profile)
       agent_mod.set_prompt_profile(effective_prompt)
-      max_turns = Map.get(test_case, :max_turns, 1)
-      IO.puts("   [Prompt] #{effective_prompt}, max_turns: #{max_turns}")
+
+      if verbose do
+        max_turns = Map.get(test_case, :max_turns, 1)
+        IO.puts("   [Prompt] #{effective_prompt}, max_turns: #{max_turns}")
+      end
 
       clojure_available = check_clojure_validation(validate_clojure)
-      run_test(test_case, index, length(cases), true, agent_mod, clojure_available)
+      run_test(test_case, index, length(cases), verbose, agent_mod, clojure_available)
     else
-      IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
+      verbose = Keyword.get(opts, :verbose, true)
+
+      if verbose do
+        IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
+      end
+
       nil
     end
   end

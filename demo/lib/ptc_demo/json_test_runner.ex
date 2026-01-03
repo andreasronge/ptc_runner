@@ -83,15 +83,17 @@ defmodule PtcDemo.JsonTestRunner do
 
     current_model = agent_mod.model()
 
-    IO.puts("\n=== PTC-JSON Demo Test Runner ===")
-    IO.puts("Model: #{current_model}")
-    IO.puts("Data mode: #{data_mode}")
+    if verbose do
+      IO.puts("\n=== PTC-JSON Demo Test Runner ===")
+      IO.puts("Model: #{current_model}")
+      IO.puts("Data mode: #{data_mode}")
 
-    if runs > 1 do
-      IO.puts("Runs: #{runs}")
+      if runs > 1 do
+        IO.puts("Runs: #{runs}")
+      end
+
+      IO.puts("")
     end
-
-    IO.puts("")
 
     # Run tests multiple times if requested
     summaries =
@@ -143,8 +145,10 @@ defmodule PtcDemo.JsonTestRunner do
     stats = agent_mod.stats()
     summary = Base.build_summary(results, start_time, current_model, data_mode, stats)
 
-    Base.print_summary(summary)
-    Base.print_failed_tests(results)
+    if verbose do
+      Base.print_summary(summary)
+      Base.print_failed_tests(results)
+    end
 
     summary
   end
@@ -191,6 +195,7 @@ defmodule PtcDemo.JsonTestRunner do
     if index > 0 and index <= length(cases) do
       data_mode = Keyword.get(opts, :data_mode, :schema)
       model = Keyword.get(opts, :model)
+      verbose = Keyword.get(opts, :verbose, true)
 
       ensure_agent_started(data_mode, agent_mod)
 
@@ -199,9 +204,14 @@ defmodule PtcDemo.JsonTestRunner do
       end
 
       test_case = Enum.at(cases, index - 1)
-      run_test(test_case, index, length(cases), true, agent_mod)
+      run_test(test_case, index, length(cases), verbose, agent_mod)
     else
-      IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
+      verbose = Keyword.get(opts, :verbose, true)
+
+      if verbose do
+        IO.puts("Invalid index. Use list() to see available tests (1-#{length(cases)}).")
+      end
+
       nil
     end
   end
