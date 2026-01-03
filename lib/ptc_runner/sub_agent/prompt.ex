@@ -80,6 +80,8 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   """
 
+  require Logger
+
   alias PtcRunner.Lisp.Prompts
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Signature
@@ -589,8 +591,6 @@ defmodule PtcRunner.SubAgent.Prompt do
     max_chars = Map.get(limit_config, :max_chars)
 
     if max_chars && String.length(prompt) > max_chars do
-      require Logger
-
       Logger.warning(
         "System prompt exceeds limit (#{String.length(prompt)} > #{max_chars} chars), truncating"
       )

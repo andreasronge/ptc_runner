@@ -709,11 +709,9 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert prompt =~ "### return"
     end
 
-    test "handles very long tool descriptions gracefully" do
-      long_desc_tool = fn _ -> "result" end
-
+    test "handles very long tool names gracefully" do
       tools = %{
-        "very_long_named_tool_with_lots_of_words" => long_desc_tool
+        "very_long_named_tool_with_lots_of_words" => fn _ -> "result" end
       }
 
       agent = SubAgent.new(prompt: "Test", tools: tools)

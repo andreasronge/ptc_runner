@@ -67,6 +67,29 @@ defmodule PtcRunner.Lisp.Prompts do
     @external_resource file
   end
 
+  # Parse metadata from file header (before PTC_PROMPT_START marker)
+  @parse_metadata fn header ->
+    ~r/<!--\s*(\w+):\s*(.+?)\s*-->/
+    |> Regex.scan(header)
+    |> Enum.reduce(%{}, fn [_full, k, v], acc ->
+      parsed_key = String.to_atom(k)
+
+      parsed_value =
+        case parsed_key do
+          :version ->
+            case Integer.parse(String.trim(v)) do
+              {int, _} -> int
+              :error -> nil
+            end
+
+          _ ->
+            String.trim(v)
+        end
+
+      Map.put(acc, parsed_key, parsed_value)
+    end)
+  end
+
   # Helper function to load a prompt file (content + metadata extraction)
   @load_prompt_file fn path, archived ->
     filename = Path.basename(path, ".md")
@@ -79,49 +102,22 @@ defmodule PtcRunner.Lisp.Prompts do
 
     file_content = File.read!(path)
 
-    content =
+    {header, content} =
       case String.split(file_content, "<!-- PTC_PROMPT_START -->") do
-        [_before, after_start] ->
-          case String.split(after_start, "<!-- PTC_PROMPT_END -->") do
-            [prompt_text, _after_end] ->
-              String.trim(prompt_text)
+        [before, after_start] ->
+          trimmed_content =
+            case String.split(after_start, "<!-- PTC_PROMPT_END -->") do
+              [prompt_text, _after_end] -> String.trim(prompt_text)
+              _ -> String.trim(after_start)
+            end
 
-            _ ->
-              String.trim(after_start)
-          end
+          {before, trimmed_content}
 
         _ ->
-          String.trim(file_content)
+          {file_content, String.trim(file_content)}
       end
 
-    # Metadata parsing
-    header =
-      case String.split(file_content, "<!-- PTC_PROMPT_START -->") do
-        [before, _rest] -> before
-        _ -> file_content
-      end
-
-    metadata_regex = ~r/<!--\s*(\w+):\s*(.+?)\s*-->/
-
-    metadata =
-      Regex.scan(metadata_regex, header)
-      |> Enum.reduce(%{}, fn [_full, k, v], acc ->
-        parsed_key = String.to_atom(k)
-
-        parsed_value =
-          case parsed_key do
-            :version ->
-              case Integer.parse(String.trim(v)) do
-                {int, _} -> int
-                :error -> nil
-              end
-
-            _ ->
-              String.trim(v)
-          end
-
-        Map.put(acc, parsed_key, parsed_value)
-      end)
+    metadata = @parse_metadata.(header)
 
     {key, %{content: content, metadata: metadata, archived: archived}}
   end
