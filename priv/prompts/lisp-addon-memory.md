@@ -47,9 +47,21 @@ After observing a result:
 ; OR filter ctx/* using your concluded key
 ```
 
+### Memory Storage Rules
+
+**Only maps are stored in memory.** When your program returns a map, its keys become accessible via `memory/key`.
+
+- **Map result** `{:foo 1 :bar 2}` → stored as `memory/foo` and `memory/bar`
+- **List/scalar result** `[...]` or `42` → NOT stored, only shown as feedback
+
+If you need to access a list in a later turn, wrap it in a map:
+```clojure
+{:results (->> ctx/data (filter ...))}  ; → memory/results
+```
+
 ### Memory Accumulation
 
-**Important:** When a tool returns a map, its keys are stored in memory and **overwrite** any previous values with the same keys.
+**Important:** When you return a map, its keys **overwrite** any previous values with the same keys.
 
 To accumulate results across multiple tool calls (e.g., pagination):
 

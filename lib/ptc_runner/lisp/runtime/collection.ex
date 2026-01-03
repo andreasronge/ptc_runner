@@ -56,6 +56,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find(coll, truthy_key_pred(key))
   end
 
+  def find(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.find(coll, fn item -> MapSet.member?(set, item) end)
+  end
+
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
 
   def map(key, coll) when is_list(coll) and is_atom(key),
@@ -126,6 +130,24 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def second(coll) when is_list(coll), do: Enum.at(coll, 1)
   def last(coll) when is_list(coll), do: List.last(coll)
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
+
+  # rest - always returns list (empty list for empty/single-element collections)
+  def rest(coll) when is_list(coll), do: Enum.drop(coll, 1)
+
+  # next - returns nil for empty/single-element collections
+  def next(coll) when is_list(coll) do
+    case Enum.drop(coll, 1) do
+      [] -> nil
+      tail -> tail
+    end
+  end
+
+  # Composed accessors for nested collections
+  def ffirst(coll) when is_list(coll), do: first(first(coll))
+  def fnext(coll) when is_list(coll), do: first(next(coll))
+  def nfirst(coll) when is_list(coll), do: next(first(coll))
+  def nnext(coll) when is_list(coll), do: next(next(coll))
+
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
 
