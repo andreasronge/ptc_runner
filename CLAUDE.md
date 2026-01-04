@@ -8,6 +8,11 @@ A BEAM-native Elixir library for Programmatic Tool Calling (PTC), enabling LLMs 
 
 When you find issues, fix both the code and the docs together.
 
+This is a **0.x library** — expect breaking changes. Backward compatibility is not a priority. When refactoring:
+- Delete old code rather than deprecate
+- Simplify aggressively
+- Don't add compatibility shims
+
 ## Tech Stack
 
 - **Language**: Elixir 1.19+ / Erlang OTP 28+
