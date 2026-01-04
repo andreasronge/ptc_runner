@@ -135,6 +135,10 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
   defp dispatch_list_form({:ns_symbol, :memory, :get}, rest, _list), do: analyze_memory_get(rest)
 
+  # Tool invocation via ctx namespace: (ctx/tool-name args...)
+  defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list),
+    do: analyze_ctx_call(tool_name, rest)
+
   # Comparison operators (strict 2-arity per spec section 8.4)
   defp dispatch_list_form({:symbol, op}, rest, _list)
        when op in [:=, :"not=", :>, :<, :>=, :<=],
@@ -465,6 +469,16 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_call_tool(_) do
     {:error,
      {:invalid_arity, :call, "expected (call \"tool-name\") or (call \"tool-name\" args)"}}
+  end
+
+  # ============================================================
+  # Tool invocation via ctx namespace: (ctx/tool-name args...)
+  # ============================================================
+
+  defp analyze_ctx_call(tool_name, arg_asts) do
+    with {:ok, args} <- analyze_list(arg_asts) do
+      {:ok, {:ctx_call, tool_name, args}}
+    end
   end
 
   # ============================================================

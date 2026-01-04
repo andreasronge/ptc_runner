@@ -1575,6 +1575,41 @@ Call registered tools using the `call` function:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
+### 9.6 Alternative Tool Invocation — `ctx/tool-name`
+
+As an alternative to `call`, tools can be invoked using the `ctx/` namespace directly (see §9.3):
+
+```clojure
+(ctx/search {:query "foo"})                    ; v2 syntax
+(call "search" {:query "foo"})                 ; legacy syntax - equivalent
+```
+
+**Syntax:**
+- Tool names become atoms in `ctx/` namespace: `ctx/tool-name`
+- Arguments follow the same rules as `call`:
+  - No arguments: `(ctx/get-users)`
+  - Single map argument is passed through: `(ctx/fetch {:id 123})`
+  - Multiple arguments are wrapped: `(ctx/transform arg1 arg2)` → `{:args [arg1 arg2]}`
+
+**Examples:**
+```clojure
+(ctx/get-users)                                ; no arguments
+(ctx/search {:query "budget"})                 ; single map argument
+(ctx/fetch {:id 123})                         ; with parameters
+(let [results (ctx/fetch {:id 123})]          ; store result
+  (count results))
+```
+
+**Comparison with legacy `call` syntax:**
+
+| New Syntax | Legacy Syntax | Notes |
+|-----------|---------------|-------|
+| `(ctx/search {:query "x"})` | `(call "search" {:query "x"})` | Semantically equivalent |
+| `(ctx/get-users)` | `(call "get-users")` | Both invoke the same tool |
+| `(ctx/transform a b)` | `(call "transform" a b)` | Both wrap multiple args |
+
+Both syntaxes are fully supported and produce identical results.
+
 ---
 
 ## 10. Complete Examples

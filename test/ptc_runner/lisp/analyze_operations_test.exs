@@ -356,6 +356,43 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
     end
   end
 
+  describe "ctx/tool invocation syntax" do
+    test "ctx/tool with no args" do
+      raw = {:list, [{:ns_symbol, :ctx, :"get-users"}]}
+      assert {:ok, {:ctx_call, :"get-users", []}} = Analyze.analyze(raw)
+    end
+
+    test "ctx/tool with map arg" do
+      raw =
+        {:list, [{:ns_symbol, :ctx, :search}, {:map, [{{:keyword, :query}, {:string, "test"}}]}]}
+
+      assert {:ok, {:ctx_call, :search, [{:map, [{{:keyword, :query}, {:string, "test"}}]}]}} =
+               Analyze.analyze(raw)
+    end
+
+    test "ctx/tool with multiple args" do
+      raw =
+        {:list, [{:ns_symbol, :ctx, :"fetch-user"}, 123, {:keyword, :include_details}]}
+
+      assert {:ok, {:ctx_call, :"fetch-user", [123, {:keyword, :include_details}]}} =
+               Analyze.analyze(raw)
+    end
+
+    test "ctx/tool with nested expression args" do
+      raw =
+        {:list,
+         [
+           {:ns_symbol, :ctx, :search},
+           {:map, [{{:keyword, :query}, {:list, [{:symbol, :str}, {:string, "test"}]}}]}
+         ]}
+
+      assert {:ok,
+              {:ctx_call, :search,
+               [{:map, [{{:keyword, :query}, {:call, {:var, :str}, [{:string, "test"}]}}]}]}} =
+               Analyze.analyze(raw)
+    end
+  end
+
   describe "empty list fails" do
     test "empty list is invalid" do
       raw = {:list, []}

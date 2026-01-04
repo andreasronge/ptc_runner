@@ -120,4 +120,83 @@ defmodule PtcRunner.Lisp.EvalMemoryTest do
       assert memory2 == %{key1: "first", key2: "second"}
     end
   end
+
+  describe "ctx/tool invocation (ctx_call)" do
+    test "ctx_call with no args invokes tool with empty map" do
+      tool = fn name, args ->
+        assert name == "get-users"
+        assert args == %{}
+        [%{id: 1}]
+      end
+
+      ast = {:ctx_call, :"get-users", []}
+      {:ok, result, _memory} = Eval.eval(ast, %{}, %{}, %{}, tool)
+
+      assert result == [%{id: 1}]
+    end
+
+    test "ctx_call with single map arg passes map directly" do
+      tool = fn name, args ->
+        assert name == "search"
+        assert args == %{query: "test"}
+        [%{id: 1, name: "result"}]
+      end
+
+      ast = {:ctx_call, :search, [{:map, [{{:keyword, :query}, {:string, "test"}}]}]}
+      {:ok, result, _memory} = Eval.eval(ast, %{}, %{}, %{}, tool)
+
+      assert result == [%{id: 1, name: "result"}]
+    end
+
+    test "ctx_call with single non-map arg wraps in args key" do
+      tool = fn name, args ->
+        assert name == "fetch-user"
+        assert args == %{args: [123]}
+        %{id: 123, name: "Alice"}
+      end
+
+      ast = {:ctx_call, :"fetch-user", [123]}
+      {:ok, result, _memory} = Eval.eval(ast, %{}, %{}, %{}, tool)
+
+      assert result == %{id: 123, name: "Alice"}
+    end
+
+    test "ctx_call with multiple args wraps in args key" do
+      tool = fn name, args ->
+        assert name == "fetch-user"
+        assert args == %{args: [123, :include_details]}
+        %{id: 123}
+      end
+
+      ast = {:ctx_call, :"fetch-user", [123, {:keyword, :include_details}]}
+      {:ok, result, _memory} = Eval.eval(ast, %{}, %{}, %{}, tool)
+
+      assert result == %{id: 123}
+    end
+
+    test "ctx_call evaluates arg expressions before calling tool" do
+      tool = fn name, args ->
+        assert name == "process"
+        assert args == %{value: 8}
+        {:processed, 8}
+      end
+
+      env = %{+: {:variadic, &+/2, 0}}
+      # (ctx/process {:value (+ 5 3)})
+      ast = {:ctx_call, :process, [{:map, [{{:keyword, :value}, {:call, {:var, :+}, [5, 3]}}]}]}
+      {:ok, result, _memory} = Eval.eval(ast, %{}, %{}, env, tool)
+
+      assert result == {:processed, 8}
+    end
+
+    test "ctx_call threads memory correctly" do
+      tool = fn _name, _args -> :ok end
+
+      memory = %{existing: "value"}
+      ast = {:ctx_call, :noop, []}
+      {:ok, _result, new_memory} = Eval.eval(ast, %{}, memory, %{}, tool)
+
+      assert new_memory == memory
+    end
+  end
 end

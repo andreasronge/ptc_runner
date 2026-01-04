@@ -324,9 +324,41 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Tool invocation via ctx namespace: (ctx/tool-name args...)
+  defp do_eval({:ctx_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
+    # Evaluate all arguments
+    result =
+      Enum.reduce_while(arg_asts, {:ok, [], eval_ctx.memory}, fn arg_ast, {:ok, acc, mem} ->
+        case do_eval(arg_ast, EvalContext.update_memory(eval_ctx, mem)) do
+          {:ok, v, mem2} -> {:cont, {:ok, [v | acc], mem2}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, arg_vals, memory2} ->
+        # Convert args list to map for tool executor
+        args_map = build_args_map(Enum.reverse(arg_vals))
+        # Convert atom to string for backward compatibility with tool_exec
+        tool_result = tool_exec.(Atom.to_string(tool_name), args_map)
+        {:ok, tool_result, memory2}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   # ============================================================
   # Evaluation helpers
   # ============================================================
+
+  # Build args map from a list of evaluated arguments for tool calls.
+  # - Single map argument: pass through as-is
+  # - No arguments: return empty map
+  # - Other cases: wrap in a list under :args key
+  defp build_args_map([]), do: %{}
+  defp build_args_map([arg]) when is_map(arg), do: arg
+  defp build_args_map(args), do: %{args: args}
 
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do
