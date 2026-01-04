@@ -37,6 +37,11 @@ defmodule PtcRunner.Lisp.ParserHelpers do
 
   def build_keyword([name]), do: {:keyword, String.to_atom(name)}
 
+  def build_var(parts) do
+    name = Enum.join(parts)
+    {:var, String.to_atom(name)}
+  end
+
   def build_symbol(parts) do
     name = Enum.join(parts)
     AST.symbol(name)
