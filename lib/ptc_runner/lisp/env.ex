@@ -25,6 +25,27 @@ defmodule PtcRunner.Lisp.Env do
     builtin_bindings() |> Map.new()
   end
 
+  @doc """
+  Check if a name is a builtin function.
+
+  Returns `true` if the given atom is a builtin function name.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Env.builtin?(:map)
+      true
+
+      iex> PtcRunner.Lisp.Env.builtin?(:filter)
+      true
+
+      iex> PtcRunner.Lisp.Env.builtin?(:my_var)
+      false
+  """
+  @spec builtin?(atom()) :: boolean()
+  def builtin?(name) when is_atom(name) do
+    Map.has_key?(initial(), name)
+  end
+
   defp builtin_bindings do
     [
       # ============================================================
