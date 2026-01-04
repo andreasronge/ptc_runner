@@ -41,7 +41,7 @@ for issue_num in $(seq $START_ISSUE $END_ISSUE); do
 
 Your task:
 1. Fetch the issue: gh issue view $issue_num --repo $REPO --json body,title
-2. Read the specification at docs/ptc_agents/specification.md to verify the issue matches the spec
+2. Read the specification at docs/ptc-lisp-v2-requirements.md to verify the issue matches the spec
 3. Read docs/guidelines/issue-creation-guidelines.md for the template
 4. Compare the issue against the guidelines template. Check for:
    - Current State section (what exists now)
