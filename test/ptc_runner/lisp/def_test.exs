@@ -142,17 +142,13 @@ defmodule PtcRunner.Lisp.DefTest do
       assert value == 10
     end
 
-    test "def binding shadows builtins" do
-      # Define count as 999 in user_ns
+    test "user_ns values take precedence over builtins when reading" do
+      # When user_ns is externally populated, values in user_ns take precedence
+      # over builtins when resolving variables (not related to def behavior)
       ast = {:var, :count}
       user_ns = %{count: 999}
       {:ok, value, _} = Eval.eval(ast, %{}, user_ns, %{}, &dummy_tool/2)
 
-      # The builtin count function is shadowed by the user binding
-      # But wait - def cannot shadow builtins, so this shouldn't happen
-      # This test is actually checking that user_ns takes precedence when reading
-      # However, def will error when trying to create the binding
-      # So this scenario can only happen if user_ns is populated externally
       assert value == 999
     end
 
