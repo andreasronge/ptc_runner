@@ -270,6 +270,29 @@ Sets are **unordered** - iteration order is not guaranteed.
 
 **Not supported:** Lists (`'()`)
 
+### 3.9 Vars
+
+Vars are references to bindings created by the `def` form. They allow you to create references to named values that can be stored in collections and passed around.
+
+**Reader syntax:** The `#'name` syntax produces a var reference:
+
+```clojure
+#'x                    ; var reference to binding x
+#'my-var               ; var reference to binding my-var
+#'suspicious?          ; var reference to binding suspicious?
+#'save!                ; var reference to binding save!
+```
+
+Vars can be stored in collections:
+
+| Expression | Description |
+|------------|-------------|
+| `[#'x #'y]` | Vector containing two var references |
+| `{:result #'foo}` | Map with var reference as value |
+| `#{#'a #'b #'c}` | Set containing var references |
+
+**Var dereferencing:** The actual dereferencing of vars and access to the values they reference is handled by the `def` form. See the `def` form documentation for details on how var bindings work and how vars are evaluated.
+
 ---
 
 ## 4. Truthiness

@@ -140,6 +140,18 @@ defmodule PtcRunner.Lisp.Parser do
     |> map({ParserHelpers, :build_set, []})
   )
 
+  # Var reader syntax: #'name (references a var)
+  # Symbol name follows same rules as regular symbols (but simpler - no namespace allowed)
+  defcombinatorp(
+    :var_reader,
+    ignore(string("#'"))
+    |> ascii_string([?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_], 1)
+    |> optional(
+      ascii_string([?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_], min: 1)
+    )
+    |> reduce({ParserHelpers, :build_var, []})
+  )
+
   defcombinatorp(
     :short_fn,
     ignore(string("#("))
@@ -177,6 +189,7 @@ defmodule PtcRunner.Lisp.Parser do
       symbol,
       parsec(:vector),
       parsec(:set),
+      parsec(:var_reader),
       parsec(:short_fn),
       parsec(:map_literal),
       parsec(:list)

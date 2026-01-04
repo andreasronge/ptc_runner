@@ -93,6 +93,42 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
+  describe "to_string/2 with vars" do
+    test "formats simple var" do
+      assert Format.to_string({:var, :x}) == "#'x"
+    end
+
+    test "formats var with question mark" do
+      assert Format.to_string({:var, :suspicious?}) == "#'suspicious?"
+    end
+
+    test "formats var nested in map" do
+      assert Format.to_string(%{result: {:var, :foo}}) == "%{result: #'foo}"
+    end
+
+    test "formats var nested in list" do
+      assert Format.to_string([{:var, :a}, {:var, :b}]) == "[#'a, #'b]"
+    end
+  end
+
+  describe "to_clojure/2 with vars" do
+    test "formats simple var" do
+      assert Format.to_clojure({:var, :x}) == "#'x"
+    end
+
+    test "formats var with question mark" do
+      assert Format.to_clojure({:var, :suspicious?}) == "#'suspicious?"
+    end
+
+    test "formats var nested in list" do
+      assert Format.to_clojure([{:var, :x}, {:var, :y}]) == "[#'x #'y]"
+    end
+
+    test "formats var nested in map" do
+      assert Format.to_clojure(%{result: {:var, :foo}}) == "{:result #'foo}"
+    end
+  end
+
   describe "to_string/2 with options" do
     test "respects limit option" do
       assert Format.to_string([1, 2, 3, 4, 5], limit: 2) == "[1, 2, ...]"

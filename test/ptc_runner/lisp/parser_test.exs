@@ -257,6 +257,45 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
   end
 
+  describe "var reader syntax #'" do
+    test "simple var" do
+      assert {:ok, {:var, :x}} = Parser.parse("#'x")
+    end
+
+    test "var with question mark" do
+      assert {:ok, {:var, :suspicious?}} = Parser.parse("#'suspicious?")
+    end
+
+    test "var with bang" do
+      assert {:ok, {:var, :save!}} = Parser.parse("#'save!")
+    end
+
+    test "var with underscore" do
+      assert {:ok, {:var, :my_var}} = Parser.parse("#'my_var")
+    end
+
+    test "var with hyphen" do
+      assert {:ok, {:var, :"my-var"}} = Parser.parse("#'my-var")
+    end
+
+    test "var in collection" do
+      assert {:ok, {:vector, [{:var, :x}, {:var, :y}]}} = Parser.parse("[#'x #'y]")
+    end
+
+    test "var in map value" do
+      assert {:ok, {:map, [{{:keyword, :result}, {:var, :foo}}]}} =
+               Parser.parse("{:result #'foo}")
+    end
+
+    test "invalid var - number" do
+      assert {:error, {:parse_error, _}} = Parser.parse("#'123")
+    end
+
+    test "invalid var - missing symbol" do
+      assert {:error, {:parse_error, _}} = Parser.parse("#'")
+    end
+  end
+
   describe "short function syntax #()" do
     test "empty short function" do
       assert {:ok, {:short_fn, []}} = Parser.parse("#()")
