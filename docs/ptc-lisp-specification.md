@@ -581,6 +581,73 @@ Binds a name to a value in the user namespace, persisting across turns:
 
 ---
 
+### 5.8 `defn` — Named Function Definition
+
+Syntactic sugar for defining named functions in the user namespace:
+
+```clojure
+(defn name [params] body)
+(defn name docstring [params] body)  ; docstring is optional and ignored
+```
+
+**Desugars to:** `(def name (fn [params] body))`
+
+**Semantics:**
+- Returns the var (`#'name`), not the function
+- Creates or overwrites the function binding in user namespace
+- Functions persist across turns via user namespace
+- Can reference other user-defined symbols and functions
+- Can access `ctx/` data and call `ctx/` tools
+- Cannot shadow builtin function names (returns error)
+
+```clojure
+(defn double [x] (* x 2))             ; => #'double
+(defn greet [name] (str "Hello, " name))  ; => #'greet
+
+; Use defined function
+(do
+  (defn double [x] (* x 2))
+  (double 21))                        ; => 42
+
+; Reference ctx/ data
+(defn expensive? [e] (> (:amount e) ctx/threshold))
+
+; Reference other defs
+(do
+  (def rate 0.1)
+  (defn apply-rate [x] (* x rate))
+  (apply-rate 100))                   ; => 10.0
+
+; With higher-order functions
+(do
+  (defn expensive? [e] (> (:amount e) 5000))
+  (filter expensive? ctx/expenses))   ; => filtered list
+```
+
+**Multiple body expressions (implicit do):**
+```clojure
+(defn with-logging [x]
+  (def last-input x)                  ; side effect
+  (* x 2))                            ; return value
+```
+
+**Multi-turn persistence:**
+```clojure
+; Turn 1: Define function
+(defn expensive? [e] (> (:amount e) 5000))
+
+; Turn 2: Use function (passed via memory)
+(filter expensive? ctx/expenses)
+```
+
+**Not supported:**
+- Multi-arity: `(defn f ([x] ...) ([x y] ...))` — use separate `defn` forms
+- Variadic args: `(defn f [& args] ...)` — not supported
+- Destructuring in params: `(defn f [{:keys [a]}] ...)` — not supported
+- Pre/post conditions
+
+---
+
 ## 6. Threading Macros
 
 Threading macros transform nested function calls into linear pipelines.
@@ -1995,7 +2062,6 @@ type-error at line 5:
 
 | Feature | Reason |
 |---------|--------|
-| `def`, `defn` | No global definitions |
 | `loop`, `recur` | No unbounded recursion |
 | `lazy-seq` | All operations are eager |
 | Macros | No metaprogramming |
