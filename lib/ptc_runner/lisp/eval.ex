@@ -290,6 +290,31 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # ============================================================
+  # Function combinator: juxt
+  # ============================================================
+
+  defp do_eval({:juxt, func_asts}, %EvalContext{} = eval_ctx) do
+    result =
+      Enum.reduce_while(func_asts, {:ok, [], eval_ctx.memory}, fn f_ast, {:ok, acc, mem} ->
+        case do_eval(f_ast, EvalContext.update_memory(eval_ctx, mem)) do
+          {:ok, f, mem2} -> {:cont, {:ok, [f | acc], mem2}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, fns, memory2} ->
+        # Convert each fn to Erlang function (handles closures, keywords, builtins)
+        erlang_fns = Enum.map(Enum.reverse(fns), &juxt_fn_to_erlang(&1, eval_ctx))
+        fun = build_juxt_fn(erlang_fns)
+        {:ok, fun, memory2}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   # Tool calls
   defp do_eval({:call_tool, tool_name, args_ast}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     with {:ok, args_map, memory2} <- do_eval(args_ast, eval_ctx) do
@@ -742,6 +767,19 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp build_pred_combinator(:none_of, fns),
     do: fn row -> not Enum.any?(fns, & &1.(row)) end
+
+  # Build juxt function that applies all functions and returns vector of results
+  defp build_juxt_fn(fns), do: fn arg -> Enum.map(fns, & &1.(arg)) end
+
+  # Convert a value to an Erlang function for use in juxt
+  # Keywords need special handling as map accessors
+  defp juxt_fn_to_erlang(k, %EvalContext{}) when is_atom(k) and not is_boolean(k) do
+    fn m -> flex_get(m, k) end
+  end
+
+  defp juxt_fn_to_erlang(value, %EvalContext{} = eval_ctx) do
+    closure_to_fun(value, eval_ctx)
+  end
 
   # Nil-safe comparison helpers
   defp safe_eq(nil, nil), do: true

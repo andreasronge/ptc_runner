@@ -112,6 +112,43 @@ defmodule PtcRunner.Lisp.E2ETest do
     end
   end
 
+  describe "juxt function combinator" do
+    test "multi-criteria sorting with juxt" do
+      # Sort by priority (ascending) then name (ascending)
+      program = "(sort-by (juxt :priority :name) ctx/tasks)"
+
+      context = %{
+        tasks: [
+          %{priority: 2, name: "Deploy"},
+          %{priority: 1, name: "Test"},
+          %{priority: 1, name: "Build"}
+        ]
+      }
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
+
+      assert result == [
+               %{priority: 1, name: "Build"},
+               %{priority: 1, name: "Test"},
+               %{priority: 2, name: "Deploy"}
+             ]
+    end
+
+    test "extract multiple values with map and juxt" do
+      program = "(map (juxt :x :y) [{:x 1 :y 2} {:x 3 :y 4}])"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [[1, 2], [3, 4]]
+    end
+
+    test "juxt with closures" do
+      program = "((juxt #(+ % 1) #(* % 2)) 5)"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [6, 10]
+    end
+  end
+
   describe "Memory operations" do
     test "memory/put and memory/get work correctly" do
       program = """
