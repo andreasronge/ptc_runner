@@ -30,6 +30,9 @@ defmodule PtcRunner.SubAgent do
   - `memory_limit` - pos_integer() | nil, max bytes for memory map (default: 1MB)
   - `max_depth` - pos_integer(), max nesting depth for SubAgents (default: 3)
   - `turn_budget` - pos_integer(), total turns across all nested agents (default: 20)
+  - `description` - String.t() | nil, human-readable description for external documentation
+  - `field_descriptions` - map() | nil, descriptions for signature fields (keys are field names)
+  - `format_options` - keyword list controlling output truncation (see `t:format_options/0`)
 
   ## Tool Resolution
 
@@ -120,6 +123,24 @@ defmodule PtcRunner.SubAgent do
 
   @type llm_registry :: %{atom() => llm_callback()}
 
+  @typedoc """
+  Output format options for truncation and display.
+
+  Fields:
+  - `feedback_limit` - Max collection items in turn feedback (default: 20)
+  - `feedback_max_chars` - Max chars in turn feedback (default: 2048)
+  - `history_max_bytes` - Truncation limit for `*1/*2/*3` history (default: 1024)
+  - `result_limit` - Inspect `:limit` for final result (default: 50)
+  - `result_max_chars` - Final string truncation (default: 500)
+  """
+  @type format_options :: [
+          feedback_limit: pos_integer(),
+          feedback_max_chars: pos_integer(),
+          history_max_bytes: pos_integer(),
+          result_limit: pos_integer(),
+          result_max_chars: pos_integer()
+        ]
+
   @type t :: %__MODULE__{
           prompt: String.t(),
           signature: String.t() | nil,
@@ -133,10 +154,21 @@ defmodule PtcRunner.SubAgent do
           system_prompt: system_prompt_opts() | nil,
           memory_limit: pos_integer() | nil,
           max_depth: pos_integer(),
-          turn_budget: pos_integer()
+          turn_budget: pos_integer(),
+          description: String.t() | nil,
+          field_descriptions: map() | nil,
+          format_options: format_options()
         }
 
   alias PtcRunner.SubAgent.LLMResolver
+
+  @default_format_options [
+    feedback_limit: 20,
+    feedback_max_chars: 2048,
+    history_max_bytes: 1024,
+    result_limit: 50,
+    result_max_chars: 500
+  ]
 
   defstruct [
     :prompt,
@@ -147,12 +179,19 @@ defmodule PtcRunner.SubAgent do
     :llm_retry,
     :llm,
     :system_prompt,
+    :description,
+    :field_descriptions,
     tools: %{},
     max_turns: 5,
     memory_limit: 1_048_576,
     max_depth: 3,
-    turn_budget: 20
+    turn_budget: 20,
+    format_options: @default_format_options
   ]
+
+  @doc "Returns the default format options."
+  @spec default_format_options() :: format_options()
+  def default_format_options, do: @default_format_options
 
   @doc """
   Creates a SubAgent struct from keyword options.
@@ -179,6 +218,9 @@ defmodule PtcRunner.SubAgent do
   - `llm` - Atom or function for optional LLM override
   - `system_prompt` - System prompt customization (map, function, or string)
   - `memory_limit` - Positive integer for max bytes for memory map (default: 1MB = 1,048,576 bytes)
+  - `description` - String describing the agent's purpose (for external docs)
+  - `field_descriptions` - Map of field names to descriptions for signature fields
+  - `format_options` - Keyword list controlling output truncation (merged with defaults)
 
   ## Returns
 
@@ -208,6 +250,18 @@ defmodule PtcRunner.SubAgent do
   def new(opts) when is_list(opts) do
     alias PtcRunner.SubAgent.Validator
     Validator.validate!(opts)
+
+    # Merge format_options with defaults (user values override)
+    opts =
+      case Keyword.fetch(opts, :format_options) do
+        {:ok, user_opts} when is_list(user_opts) ->
+          merged = Keyword.merge(@default_format_options, user_opts)
+          Keyword.put(opts, :format_options, merged)
+
+        _ ->
+          opts
+      end
+
     struct(__MODULE__, opts)
   end
 

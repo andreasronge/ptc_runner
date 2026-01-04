@@ -301,6 +301,51 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
     end
   end
 
+  describe "field_descriptions propagation" do
+    test "compiled agent inherits field_descriptions from source agent" do
+      fd = %{result: "The doubled value"}
+      tools = %{"double" => fn %{n: n} -> n * 2 end}
+
+      agent =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          tools: tools,
+          max_turns: 1,
+          field_descriptions: fd
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
+
+      assert compiled.field_descriptions == fd
+      assert compiled.field_descriptions[:result] == "The doubled value"
+    end
+
+    test "compiled agent has nil field_descriptions when source has none" do
+      tools = %{"double" => fn %{n: n} -> n * 2 end}
+
+      agent =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
+
+      assert compiled.field_descriptions == nil
+    end
+  end
+
   describe "end-to-end workflow" do
     test "compile and execute many times without LLM" do
       tools = %{

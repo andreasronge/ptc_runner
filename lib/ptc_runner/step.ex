@@ -82,6 +82,15 @@ defmodule PtcRunner.Step do
 
   See `PtcRunner.Tracer` for trace generation and management.
 
+  ### `field_descriptions`
+
+  Descriptions for signature fields, propagated from SubAgent.
+
+  - **Type:** `map() | nil`
+  - **Set when:** SubAgent had `field_descriptions` option
+  - **Nil when:** No field descriptions provided
+  - **Used for:** Passing field documentation through chained executions
+
   ## Error Reasons
 
   Complete list of error reasons in `step.fail.reason`:
@@ -168,7 +177,8 @@ defmodule PtcRunner.Step do
     :usage,
     :trace,
     :trace_id,
-    :parent_trace_id
+    :parent_trace_id,
+    :field_descriptions
   ]
 
   @typedoc """
@@ -264,7 +274,8 @@ defmodule PtcRunner.Step do
           usage: usage() | nil,
           trace: [trace_entry()] | nil,
           trace_id: String.t() | nil,
-          parent_trace_id: String.t() | nil
+          parent_trace_id: String.t() | nil,
+          field_descriptions: map() | nil
         }
 
   @doc """
@@ -290,7 +301,8 @@ defmodule PtcRunner.Step do
       usage: nil,
       trace: nil,
       trace_id: nil,
-      parent_trace_id: nil
+      parent_trace_id: nil,
+      field_descriptions: nil
     }
   end
 
@@ -326,7 +338,8 @@ defmodule PtcRunner.Step do
         usage: nil,
         trace: nil,
         trace_id: nil,
-        parent_trace_id: nil
+        parent_trace_id: nil,
+        field_descriptions: nil
       }
 
   """
@@ -341,7 +354,8 @@ defmodule PtcRunner.Step do
       usage: nil,
       trace: nil,
       trace_id: nil,
-      parent_trace_id: nil
+      parent_trace_id: nil,
+      field_descriptions: nil
     }
   end
 end

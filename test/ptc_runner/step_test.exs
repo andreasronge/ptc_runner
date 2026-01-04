@@ -417,4 +417,53 @@ defmodule PtcRunner.StepTest do
       assert step.memory_delta == %{}
     end
   end
+
+  describe "field_descriptions field" do
+    test "field_descriptions can hold a map of descriptions" do
+      fd = %{count: "Number of items", name: "Item name"}
+
+      step = %PtcRunner.Step{
+        return: %{count: 5, name: "test"},
+        fail: nil,
+        memory: %{},
+        field_descriptions: fd
+      }
+
+      assert step.field_descriptions == fd
+      assert step.field_descriptions[:count] == "Number of items"
+    end
+
+    test "field_descriptions can be nil" do
+      step = PtcRunner.Step.ok(%{}, %{})
+      assert step.field_descriptions == nil
+    end
+
+    test "Step.ok/2 sets field_descriptions to nil" do
+      step = PtcRunner.Step.ok(%{count: 5}, %{})
+      assert step.field_descriptions == nil
+    end
+
+    test "Step.error/3 sets field_descriptions to nil" do
+      step = PtcRunner.Step.error(:timeout, "Error", %{})
+      assert step.field_descriptions == nil
+    end
+
+    test "Step.error/4 sets field_descriptions to nil" do
+      step = PtcRunner.Step.error(:validation, "Error", %{}, %{field: "x"})
+      assert step.field_descriptions == nil
+    end
+
+    test "field_descriptions can contain string keys" do
+      fd = %{"count" => "Number of items", "name" => "Item name"}
+
+      step = %PtcRunner.Step{
+        return: %{},
+        fail: nil,
+        memory: %{},
+        field_descriptions: fd
+      }
+
+      assert step.field_descriptions["count"] == "Number of items"
+    end
+  end
 end
