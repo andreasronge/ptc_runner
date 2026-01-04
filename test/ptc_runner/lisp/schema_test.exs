@@ -16,13 +16,10 @@ defmodule PtcRunner.Lisp.SchemaTest do
       assert String.contains?(prompt, "single expressions")
     end
 
-    # TODO: Fix in #538 - prompt no longer contains "Data Types"
-    @tag :skip
-    test "contains data types section" do
+    test "contains data access section" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "Data Types")
-      assert String.contains?(prompt, "nil true false")
-      assert String.contains?(prompt, ":keyword")
+      assert String.contains?(prompt, "Data Access")
+      assert String.contains?(prompt, "ctx/products")
     end
 
     test "contains accessing data section" do
@@ -31,13 +28,10 @@ defmodule PtcRunner.Lisp.SchemaTest do
       assert String.contains?(prompt, "memory/")
     end
 
-    # TODO: Fix in #538 - prompt no longer contains "if cond then else"
-    @tag :skip
-    test "contains special forms section" do
+    test "contains unsupported features section" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "let")
-      assert String.contains?(prompt, "if cond then else")
-      assert String.contains?(prompt, "fn")
+      assert String.contains?(prompt, "NOT Supported")
+      assert String.contains?(prompt, "`if` without else")
     end
 
     test "contains threading macros" do
