@@ -10,6 +10,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Debug logging for turn execution
   """
 
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
 
@@ -182,8 +183,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     IO.puts("[Turn #{state.turn}] LLM response:")
     IO.puts(response)
     IO.puts("\n[Turn #{state.turn}] Execution result:")
-    # credo:disable-for-next-line Credo.Check.Warning.IoInspect
-    IO.inspect(result, pretty: true, limit: :infinity)
+    IO.puts(Format.to_string(result, pretty: true, limit: :infinity))
     IO.puts("\n")
     :ok
   end

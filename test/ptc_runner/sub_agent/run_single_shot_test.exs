@@ -135,7 +135,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
       {:error, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.fail.reason == :type_error
+      assert step.fail.reason == :arithmetic_error
       assert step.return == nil
     end
 
