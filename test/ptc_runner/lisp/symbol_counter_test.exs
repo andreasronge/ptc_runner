@@ -59,7 +59,7 @@ defmodule PtcRunner.Lisp.SymbolCounterTest do
     end
 
     test "namespaced symbols count the key part" do
-      assert {:ok, ast} = Parser.parse("[ctx/foo memory/bar]")
+      assert {:ok, ast} = Parser.parse("[ctx/foo ctx/bar]")
       assert SymbolCounter.count(ast) == 2
     end
 

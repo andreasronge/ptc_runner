@@ -122,7 +122,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   Format execution result for LLM feedback.
 
   For map results in multi-turn mode, includes guidance about memory storage
-  so the LLM knows to access values via `memory/key` in subsequent turns.
+  so the LLM knows to access values as plain symbols in subsequent turns.
 
   ## Parameters
 
@@ -136,11 +136,11 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
       "Result: 42"
 
       iex> result = PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(%{count: 5, items: []})
-      iex> result =~ "memory/count"
+      iex> result =~ "count"
       true
 
       iex> result = PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(%{count: 5}, show_memory_hints: false)
-      iex> result =~ "memory/"
+      iex> result =~ "Access as:"
       false
 
   """
@@ -156,15 +156,15 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
         result
         |> Map.keys()
         |> Enum.map_join(", ", fn
-          k when is_atom(k) -> "memory/#{k}"
-          k when is_binary(k) -> "memory/#{k}"
-          k -> "memory/#{inspect(k)}"
+          k when is_atom(k) -> "#{k}"
+          k when is_binary(k) -> "#{k}"
+          k -> "#{inspect(k)}"
         end)
 
       """
       Result: #{result_str}
 
-      Stored in memory. Access via: #{memory_keys}
+      Stored in memory. Access as: #{memory_keys}
       """
       |> String.trim()
     else

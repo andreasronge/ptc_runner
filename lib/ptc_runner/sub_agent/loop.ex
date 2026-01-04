@@ -486,7 +486,7 @@ defmodule PtcRunner.SubAgent.Loop do
                     ],
                 trace: [trace_entry | state.trace],
                 memory: lisp_step.memory,
-                # Context stays immutable - memory_delta only goes to memory/
+                # Context stays immutable - memory_delta becomes available as symbols
                 last_fail: nil,
                 remaining_turns: state.remaining_turns - 1,
                 turn_history: updated_history
@@ -593,7 +593,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
     # Add turn info for multi-turn agents
     if agent.max_turns > 1 do
-      # Only show *1 hint for non-maps (maps already get memory/ hints)
+      # Only show *1 hint for non-maps (maps already get memory hints)
       history_hint =
         if has_more_turns and not is_map(lisp_step.return) do
           "\n(Access this result with *1 in next turn)"
