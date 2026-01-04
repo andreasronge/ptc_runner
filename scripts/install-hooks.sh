@@ -25,8 +25,20 @@ else
   exit 1
 fi
 
+# Copy pre-push hook
+if [ -f scripts/pre-push ]; then
+  cp scripts/pre-push "$HOOKS_DIR/pre-push"
+  chmod +x "$HOOKS_DIR/pre-push"
+  echo "✅ Pre-push hook installed at $HOOKS_DIR/pre-push"
+else
+  echo "⚠️  Pre-push hook not found: scripts/pre-push (skipping)"
+fi
+
 echo ""
 echo "Git hooks installed successfully!"
 echo ""
 echo "To bypass pre-commit checks (not recommended):"
 echo "  git commit --no-verify"
+echo ""
+echo "To bypass pre-push checks (not recommended):"
+echo "  git push --no-verify"
