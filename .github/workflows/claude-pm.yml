@@ -204,7 +204,14 @@ jobs:
           echo "" >> $GITHUB_OUTPUT
           echo "EPIC_BODY_EOF" >> $GITHUB_OUTPUT
 
+      - name: Skip if work in progress
+        if: steps.open-prs.outputs.count != '0' || steps.workflows.outputs.implementation != '0'
+        run: |
+          echo "::notice::Skipping PM - work in progress (Open PRs: ${{ steps.open-prs.outputs.count }}, Running implementations: ${{ steps.workflows.outputs.implementation }})"
+          echo "PM will run again after the current work completes."
+
       - name: Run Claude PM
+        if: steps.open-prs.outputs.count == '0' && steps.workflows.outputs.implementation == '0'
         id: claude-pm
         uses: anthropics/claude-code-action@v1
         env:
