@@ -55,23 +55,9 @@ lib/ptc_runner/
 
 Programs execute in isolated BEAM processes with timeout (1s) and memory limits (10MB).
 
-### Key Flows
-
 **Single-shot vs Multi-turn:**
 - **Single-shot**: Expression result is the answer. No `return` form needed.
 - **Multi-turn**: Loop continues until `(return value)` or `(fail reason)` is called.
-
-**Loop termination** (in `Loop`, detected by `ResponseHandler.contains_call?`):
-- `(return value)` → loop ends with `{:ok, step}`
-- `(fail reason)` → loop ends with `{:error, step}`
-- Neither → loop continues, `step.return` sent as feedback to LLM
-
-**Memory contract** (in `Lisp.run/2`, via `apply_memory_contract/3`):
-Note: `:return` KEY in a map ≠ `(return ...)` CALL. The key controls feedback; the call terminates the loop.
-
-- Loop termination: `lib/ptc_runner/sub_agent/loop.ex`
-- Memory contract: `lib/ptc_runner/lisp.ex` (`apply_memory_contract/3`)
-- Memory access: `lib/ptc_runner/lisp/eval.ex` (`memory/key` syntax)
 
 ## Documentation
 
