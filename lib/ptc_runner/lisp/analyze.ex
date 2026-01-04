@@ -131,6 +131,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
   defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
   defp dispatch_list_form({:symbol, :def}, rest, _list), do: analyze_def(rest)
+  defp dispatch_list_form({:symbol, :defn}, rest, _list), do: analyze_defn(rest)
 
   # Memory operations
   defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
@@ -539,6 +540,74 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_def(_) do
     {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
+  end
+
+  # ============================================================
+  # Named function definition: defn (desugars to def + fn)
+  # ============================================================
+
+  # (defn name docstring [params] body) - docstring variant (4 args, must be checked first)
+  defp analyze_defn([{:symbol, name}, {:string, _docstring}, {:vector, _} = params_ast, body_ast]) do
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- do_analyze(body_ast) do
+      {:ok, {:def, name, {:fn, params, body}}}
+    end
+  end
+
+  # (defn name docstring [params] body1 body2 ...) - docstring + multiple bodies
+  defp analyze_defn([
+         {:symbol, name},
+         {:string, _docstring},
+         {:vector, _} = params_ast | body_asts
+       ])
+       when is_list(body_asts) and length(body_asts) > 1 do
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, bodies} <- analyze_list(body_asts) do
+      {:ok, {:def, name, {:fn, params, {:do, bodies}}}}
+    end
+  end
+
+  # (defn name [params] body) - standard 3 args
+  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, body_ast]) do
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- do_analyze(body_ast) do
+      # Desugar: (defn name [params] body) → (def name (fn [params] body))
+      {:ok, {:def, name, {:fn, params, body}}}
+    end
+  end
+
+  # (defn name [params] body1 body2 ...) - multiple body expressions → implicit do
+  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast | body_asts])
+       when is_list(body_asts) and length(body_asts) > 1 do
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, bodies} <- analyze_list(body_asts) do
+      {:ok, {:def, name, {:fn, params, {:do, bodies}}}}
+    end
+  end
+
+  # Error: (defn name [params]) - missing body
+  defp analyze_defn([{:symbol, _name}, {:vector, _params}]) do
+    {:error, {:invalid_arity, :defn, "expected (defn name [params] body), missing body"}}
+  end
+
+  # Error: (defn name) - missing params and body
+  defp analyze_defn([{:symbol, _name}]) do
+    {:error, {:invalid_arity, :defn, "expected (defn name [params] body)"}}
+  end
+
+  # Error: multi-arity syntax (defn f ([x] ...) ([x y] ...))
+  defp analyze_defn([{:symbol, _name}, {:list, _} | _]) do
+    {:error,
+     {:invalid_form, "multi-arity defn not supported, use separate defn forms for each arity"}}
+  end
+
+  # Error: non-symbol name
+  defp analyze_defn([non_symbol | _]) do
+    {:error, {:invalid_form, "defn name must be a symbol, got: #{inspect(non_symbol)}"}}
+  end
+
+  defp analyze_defn(_) do
+    {:error, {:invalid_arity, :defn, "expected (defn name [params] body)"}}
   end
 
   # ============================================================
