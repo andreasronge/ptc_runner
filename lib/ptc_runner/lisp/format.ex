@@ -112,6 +112,12 @@ defmodule PtcRunner.Lisp.Format do
 
       iex> PtcRunner.Lisp.Format.to_clojure([%{a: 1}, %{b: 2}])
       "[{:a 1} {:b 2}]"
+
+      iex> PtcRunner.Lisp.Format.to_clojure([1, 2, 3, 4, 5], limit: 2)
+      "[1 2 ...]"
+
+      iex> PtcRunner.Lisp.Format.to_clojure("very long string here", printable_limit: 10)
+      ~s("very long ...")
   """
   @spec to_clojure(term(), keyword()) :: String.t()
   def to_clojure(value, opts \\ []) do
