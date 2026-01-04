@@ -1,6 +1,6 @@
 # PTC-Lisp v2: Requirements Specification
 
-**Source Document:** `docs/ptc-lisp-v2-requirements.md`
+**Source Document:** `docs/ptc-lisp-v2-namespace-specs.md`
 **Generated:** 2025-01-04
 
 ---
