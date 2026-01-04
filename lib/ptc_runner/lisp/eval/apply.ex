@@ -29,22 +29,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Keyword as function: (:key map) → Map.get(map, :key)
-  defp do_apply_fun(k, args, %EvalContext{memory: memory}, _do_eval_fn) when is_atom(k) do
+  defp do_apply_fun(k, args, %EvalContext{user_ns: user_ns}, _do_eval_fn) when is_atom(k) do
     case args do
       [m] when is_map(m) ->
-        {:ok, flex_get(m, k), memory}
+        {:ok, flex_get(m, k), user_ns}
 
       [m, default] when is_map(m) ->
         case flex_fetch(m, k) do
-          {:ok, val} -> {:ok, val, memory}
-          :error -> {:ok, default, memory}
+          {:ok, val} -> {:ok, val, user_ns}
+          :error -> {:ok, default, user_ns}
         end
 
       [nil] ->
-        {:ok, nil, memory}
+        {:ok, nil, user_ns}
 
       [nil, default] ->
-        {:ok, default, memory}
+        {:ok, default, user_ns}
 
       _ ->
         {:error, {:invalid_keyword_call, k, args}}
@@ -52,9 +52,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Set as function: (#{1 2 3} x) → checks membership, returns element or nil
-  defp do_apply_fun(set, [arg], %EvalContext{memory: memory}, _do_eval_fn)
+  defp do_apply_fun(set, [arg], %EvalContext{user_ns: user_ns}, _do_eval_fn)
        when is_struct(set, MapSet) do
-    {:ok, if(MapSet.member?(set, arg), do: arg, else: nil), memory}
+    {:ok, if(MapSet.member?(set, arg), do: arg, else: nil), user_ns}
   end
 
   defp do_apply_fun(set, args, %EvalContext{}, _do_eval_fn)
@@ -66,7 +66,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp do_apply_fun(
          {:closure, patterns, body, closure_env, closure_turn_history},
          args,
-         %EvalContext{ctx: ctx, memory: memory, tool_exec: tool_exec},
+         %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec},
          do_eval_fn
        ) do
     if length(patterns) != length(args) do
@@ -84,7 +84,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       case result do
         {:ok, bindings} ->
           new_env = Map.merge(closure_env, bindings)
-          closure_ctx = EvalContext.new(ctx, memory, new_env, tool_exec, closure_turn_history)
+          closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
           do_eval_fn.(body, closure_ctx)
 
         {:error, _} = err ->
@@ -100,7 +100,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
     try do
-      {:ok, apply(fun, converted_args), eval_ctx.memory}
+      {:ok, apply(fun, converted_args), eval_ctx.user_ns}
     rescue
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
@@ -132,12 +132,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Special handling for unary minus: (- x) means negation, not (identity - x)
-  defp do_apply_fun({:variadic, fun2, _identity}, [x], %EvalContext{memory: memory}, _do_eval_fn) do
+  defp do_apply_fun(
+         {:variadic, fun2, _identity},
+         [x],
+         %EvalContext{user_ns: user_ns},
+         _do_eval_fn
+       ) do
     if fun2 == (&Kernel.-/2) do
-      {:ok, -x, memory}
+      {:ok, -x, user_ns}
     else
       # For other variadic functions like *, single arg returns the arg itself
-      {:ok, x, memory}
+      {:ok, x, user_ns}
     end
   rescue
     ArithmeticError ->
@@ -145,7 +150,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Variadic builtins: {:variadic, fun2, identity}
-  defp do_apply_fun({:variadic, fun2, identity}, args, %EvalContext{memory: memory}, _do_eval_fn)
+  defp do_apply_fun(
+         {:variadic, fun2, identity},
+         args,
+         %EvalContext{user_ns: user_ns},
+         _do_eval_fn
+       )
        when is_function(fun2, 2) do
     result =
       case args do
@@ -155,7 +165,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
 
-    {:ok, result, memory}
+    {:ok, result, user_ns}
   rescue
     ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
@@ -171,7 +181,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     {:error, {:arity_error, "requires at least 1 argument"}}
   end
 
-  defp do_apply_fun({:variadic_nonempty, fun2}, args, %EvalContext{memory: memory}, _do_eval_fn)
+  defp do_apply_fun({:variadic_nonempty, fun2}, args, %EvalContext{user_ns: user_ns}, _do_eval_fn)
        when is_function(fun2, 2) do
     result =
       case args do
@@ -180,7 +190,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
 
-    {:ok, result, memory}
+    {:ok, result, user_ns}
   rescue
     ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors
@@ -215,7 +225,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       fun = elem(funs, idx)
 
       try do
-        {:ok, apply(fun, converted_args), eval_ctx.memory}
+        {:ok, apply(fun, converted_args), eval_ctx.user_ns}
       rescue
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
@@ -232,8 +242,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Plain function value (from user code or closures that escape)
-  defp do_apply_fun(fun, args, %EvalContext{memory: memory}, _do_eval_fn) when is_function(fun) do
-    {:ok, apply(fun, args), memory}
+  defp do_apply_fun(fun, args, %EvalContext{user_ns: user_ns}, _do_eval_fn)
+       when is_function(fun) do
+    {:ok, apply(fun, args), user_ns}
   end
 
   # Fallback: not callable
@@ -368,7 +379,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     eval_ctx =
       EvalContext.new(
         eval_context.ctx,
-        eval_context.memory,
+        eval_context.user_ns,
         new_env,
         eval_context.tool_exec,
         closure_turn_history
