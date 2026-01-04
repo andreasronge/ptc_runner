@@ -311,7 +311,7 @@ defmodule PtcRunner.Lisp.DefnTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == 42
-      assert user_ns[:"last-x"] == 42 or user_ns[:"with-side-effect"] != nil
+      assert user_ns[:"last-x"] == 42
     end
 
     test "real-world: expense filter across turns" do
