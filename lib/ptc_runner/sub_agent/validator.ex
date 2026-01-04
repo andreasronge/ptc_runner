@@ -42,6 +42,9 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_max_depth!(opts)
     validate_turn_budget!(opts)
     validate_prompt_placeholders!(opts)
+    validate_description!(opts)
+    validate_field_descriptions!(opts)
+    validate_format_options!(opts)
   end
 
   defp validate_prompt!(opts) do
@@ -155,6 +158,33 @@ defmodule PtcRunner.SubAgent.Validator do
       end
     else
       _ -> :ok
+    end
+  end
+
+  defp validate_description!(opts) do
+    case Keyword.fetch(opts, :description) do
+      {:ok, nil} -> :ok
+      {:ok, desc} when is_binary(desc) and desc != "" -> :ok
+      {:ok, ""} -> raise ArgumentError, "description must be a non-empty string or nil"
+      {:ok, _} -> raise ArgumentError, "description must be a string"
+      :error -> :ok
+    end
+  end
+
+  defp validate_field_descriptions!(opts) do
+    case Keyword.fetch(opts, :field_descriptions) do
+      {:ok, nil} -> :ok
+      {:ok, fd} when is_map(fd) -> :ok
+      {:ok, _} -> raise ArgumentError, "field_descriptions must be a map"
+      :error -> :ok
+    end
+  end
+
+  defp validate_format_options!(opts) do
+    case Keyword.fetch(opts, :format_options) do
+      {:ok, fo} when is_list(fo) -> :ok
+      {:ok, _} -> raise ArgumentError, "format_options must be a keyword list"
+      :error -> :ok
     end
   end
 end

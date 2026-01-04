@@ -236,5 +236,110 @@ defmodule PtcRunner.SubAgent.NewTest do
         SubAgent.new(prompt: "Test", prompt_limit: "invalid")
       end
     end
+
+    test "accepts description as string" do
+      agent = SubAgent.new(prompt: "Test", description: "A helpful agent")
+      assert agent.description == "A helpful agent"
+    end
+
+    test "accepts description as nil" do
+      agent = SubAgent.new(prompt: "Test", description: nil)
+      assert agent.description == nil
+    end
+
+    test "description defaults to nil" do
+      agent = SubAgent.new(prompt: "Test")
+      assert agent.description == nil
+    end
+
+    test "raises when description is empty string" do
+      assert_raise ArgumentError, "description must be a non-empty string or nil", fn ->
+        SubAgent.new(prompt: "Test", description: "")
+      end
+    end
+
+    test "raises when description is not a string" do
+      assert_raise ArgumentError, "description must be a string", fn ->
+        SubAgent.new(prompt: "Test", description: 123)
+      end
+
+      assert_raise ArgumentError, "description must be a string", fn ->
+        SubAgent.new(prompt: "Test", description: :atom)
+      end
+
+      assert_raise ArgumentError, "description must be a string", fn ->
+        SubAgent.new(prompt: "Test", description: %{})
+      end
+    end
+
+    test "accepts field_descriptions as map" do
+      fd = %{count: "Number of items", name: "Item name"}
+      agent = SubAgent.new(prompt: "Test", field_descriptions: fd)
+      assert agent.field_descriptions == fd
+    end
+
+    test "accepts field_descriptions as nil" do
+      agent = SubAgent.new(prompt: "Test", field_descriptions: nil)
+      assert agent.field_descriptions == nil
+    end
+
+    test "field_descriptions defaults to nil" do
+      agent = SubAgent.new(prompt: "Test")
+      assert agent.field_descriptions == nil
+    end
+
+    test "raises when field_descriptions is not a map" do
+      assert_raise ArgumentError, "field_descriptions must be a map", fn ->
+        SubAgent.new(prompt: "Test", field_descriptions: [])
+      end
+
+      assert_raise ArgumentError, "field_descriptions must be a map", fn ->
+        SubAgent.new(prompt: "Test", field_descriptions: "invalid")
+      end
+
+      assert_raise ArgumentError, "field_descriptions must be a map", fn ->
+        SubAgent.new(prompt: "Test", field_descriptions: 123)
+      end
+    end
+
+    test "accepts format_options as keyword list" do
+      agent = SubAgent.new(prompt: "Test", format_options: [feedback_limit: 10])
+      assert agent.format_options[:feedback_limit] == 10
+    end
+
+    test "format_options uses default values" do
+      agent = SubAgent.new(prompt: "Test")
+      assert agent.format_options == SubAgent.default_format_options()
+      assert agent.format_options[:feedback_limit] == 20
+      assert agent.format_options[:feedback_max_chars] == 2048
+      assert agent.format_options[:history_max_bytes] == 1024
+      assert agent.format_options[:result_limit] == 50
+      assert agent.format_options[:result_max_chars] == 500
+    end
+
+    test "format_options merges with defaults" do
+      agent = SubAgent.new(prompt: "Test", format_options: [feedback_limit: 5, result_limit: 100])
+      # User overrides
+      assert agent.format_options[:feedback_limit] == 5
+      assert agent.format_options[:result_limit] == 100
+      # Defaults preserved
+      assert agent.format_options[:feedback_max_chars] == 2048
+      assert agent.format_options[:history_max_bytes] == 1024
+      assert agent.format_options[:result_max_chars] == 500
+    end
+
+    test "raises when format_options is not a keyword list" do
+      assert_raise ArgumentError, "format_options must be a keyword list", fn ->
+        SubAgent.new(prompt: "Test", format_options: %{feedback_limit: 10})
+      end
+
+      assert_raise ArgumentError, "format_options must be a keyword list", fn ->
+        SubAgent.new(prompt: "Test", format_options: "invalid")
+      end
+
+      assert_raise ArgumentError, "format_options must be a keyword list", fn ->
+        SubAgent.new(prompt: "Test", format_options: 123)
+      end
+    end
   end
 end

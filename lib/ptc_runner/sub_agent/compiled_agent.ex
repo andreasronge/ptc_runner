@@ -27,6 +27,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   - `signature` - Functional contract copied from agent (String)
   - `execute` - Pre-bound executor function `(map() -> result)`
   - `metadata` - Compilation metadata (see `t:metadata/0`)
+  - `field_descriptions` - Descriptions for signature fields (Map, optional)
 
   ## Examples
 
@@ -74,15 +75,17 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   - `signature` - Type signature for inputs/outputs
   - `execute` - Function that executes the program `(map() -> Step.t())`
   - `metadata` - Compilation metadata
+  - `field_descriptions` - Descriptions for signature fields
   """
   @type t :: %__MODULE__{
           source: String.t(),
           signature: String.t() | nil,
           execute: (map() -> PtcRunner.Step.t()),
-          metadata: metadata()
+          metadata: metadata(),
+          field_descriptions: map() | nil
         }
 
-  defstruct [:source, :signature, :execute, :metadata]
+  defstruct [:source, :signature, :execute, :metadata, :field_descriptions]
 
   @doc """
   Wraps a compiled agent as a callable tool.
