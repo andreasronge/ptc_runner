@@ -55,6 +55,61 @@ jobs:
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
+      - name: Run tests and capture failures
+        id: test-feedback
+        continue-on-error: true
+        run: |
+          echo "Running tests to capture any failures..."
+          FAILURES=""
+
+          # Compile
+          echo "=== Compiling ===" | tee /tmp/test_output.txt
+          if ! mix compile --warnings-as-errors 2>&1 | tee -a /tmp/test_output.txt; then
+            FAILURES="${FAILURES}COMPILE_FAILED "
+          fi
+
+          # Tests (limit failures for manageable output)
+          echo "" >> /tmp/test_output.txt
+          echo "=== Running tests ===" | tee -a /tmp/test_output.txt
+          if ! mix test --max-failures 5 --warnings-as-errors 2>&1 | tee -a /tmp/test_output.txt; then
+            FAILURES="${FAILURES}TESTS_FAILED "
+          fi
+
+          # Format check
+          echo "" >> /tmp/test_output.txt
+          echo "=== Checking format ===" | tee -a /tmp/test_output.txt
+          if ! mix format --check-formatted 2>&1 | tee -a /tmp/test_output.txt; then
+            FAILURES="${FAILURES}FORMAT_FAILED "
+          fi
+
+          # Credo
+          echo "" >> /tmp/test_output.txt
+          echo "=== Running Credo ===" | tee -a /tmp/test_output.txt
+          if ! mix credo --strict 2>&1 | tee -a /tmp/test_output.txt; then
+            FAILURES="${FAILURES}CREDO_FAILED "
+          fi
+
+          # Capture output for Claude
+          if [ -n "$FAILURES" ]; then
+            echo "has_failures=true" >> $GITHUB_OUTPUT
+            echo "failures=$FAILURES" >> $GITHUB_OUTPUT
+
+            # Truncate output if too long (keep last 200 lines)
+            tail -200 /tmp/test_output.txt > /tmp/test_output_truncated.txt
+
+            # Store output in multiline format
+            {
+              echo 'output<<EOF'
+              cat /tmp/test_output_truncated.txt
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
+
+            echo "::warning::Test failures detected: $FAILURES"
+          else
+            echo "has_failures=false" >> $GITHUB_OUTPUT
+            echo "All checks passed"
+          fi
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -71,6 +126,17 @@ jobs:
 
             Read the issue and comments: `gh issue view ${{ github.event.issue.number }} --comments`
 
+            ${{ steps.test-feedback.outputs.has_failures == 'true' && format('## Current Test Failures
+
+            The following checks are currently failing: {0}
+
+            ```
+            {1}
+            ```
+
+            **Be aware of these existing failures when implementing the issue. If related to your changes, fix them.**
+
+            ', steps.test-feedback.outputs.failures, steps.test-feedback.outputs.output) || '' }}
             **Guidelines:**
             - Keep it simple - only implement what's requested
             - Run `mix precommit` before committing - NEVER use `--no-verify`
