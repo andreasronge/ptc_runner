@@ -55,7 +55,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp read_expression(prompt, buffer) do
     case IO.gets(prompt) do
-      nil ->
+      :eof ->
         nil
 
       line ->
@@ -98,6 +98,4 @@ defmodule Mix.Tasks.Ptc.Repl do
     reason_str = reason |> to_string() |> String.replace("_", " ")
     "Error (#{reason_str}): #{message}"
   end
-
-  defp format_error(error), do: "Error: #{inspect(error)}"
 end
