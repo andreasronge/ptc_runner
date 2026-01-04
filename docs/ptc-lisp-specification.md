@@ -1790,6 +1790,7 @@ The formatted strings shown below are human-readable renderings for display to u
 | `parse-error` | Invalid syntax |
 | `validation-error` | Invalid program structure |
 | `type-error` | Wrong argument type |
+| `arithmetic-error` | Arithmetic operation error (division by zero) |
 | `arity-error` | Wrong number of arguments |
 | `undefined-error` | Unknown function/symbol |
 | `execution-error` | Runtime error |
