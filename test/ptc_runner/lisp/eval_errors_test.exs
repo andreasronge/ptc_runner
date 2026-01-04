@@ -272,10 +272,6 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
   end
 
   describe "arithmetic errors in variadic functions" do
-    setup do
-      {:ok, %{env: Env.initial()}}
-    end
-
     test "division with nil operand returns type_error" do
       # (/ 10 nil) should return type error, not :badarith
       env = Env.initial()
