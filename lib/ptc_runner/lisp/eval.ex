@@ -602,7 +602,12 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, result, memory}
   rescue
     ArithmeticError ->
-      {:error, type_error_for_args(fun2, args)}
+      # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
+      if Enum.all?(args, &is_number/1) do
+        {:error, {:arithmetic_error, "bad argument in arithmetic expression"}}
+      else
+        {:error, type_error_for_args(fun2, args)}
+      end
   end
 
   # Variadic requiring at least one arg: {:variadic_nonempty, fun2}
@@ -622,7 +627,20 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, result, memory}
   rescue
     ArithmeticError ->
-      {:error, type_error_for_args(fun2, args)}
+      # Distinguish between type errors (nil/non-number) and arithmetic errors
+      if Enum.all?(args, &is_number/1) do
+        # Check for division by zero specifically
+        msg =
+          if fun2 == (&Kernel.//2) and Enum.any?(tl(args), &(&1 == 0)) do
+            "division by zero"
+          else
+            "bad argument in arithmetic expression"
+          end
+
+        {:error, {:arithmetic_error, msg}}
+      else
+        {:error, type_error_for_args(fun2, args)}
+      end
   end
 
   # Multi-arity builtins: select function based on argument count

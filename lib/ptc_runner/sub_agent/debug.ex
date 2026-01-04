@@ -38,6 +38,7 @@ defmodule PtcRunner.SubAgent.Debug do
 
   """
 
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Step
 
   @box_width 60
@@ -220,7 +221,7 @@ defmodule PtcRunner.SubAgent.Debug do
     if map_size(result) == 0 do
       ["{}"]
     else
-      formatted = inspect(result, pretty: true, limit: 5, width: 80)
+      formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
 
       if String.length(formatted) > 200 do
         [String.slice(formatted, 0, 197) <> "..."]
@@ -231,7 +232,7 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   defp format_result(result) when is_list(result) do
-    formatted = inspect(result, pretty: true, limit: 5, width: 80)
+    formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
 
     if String.length(formatted) > 200 do
       [String.slice(formatted, 0, 197) <> "..."]
@@ -241,7 +242,7 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   defp format_result(result) do
-    formatted = inspect(result, pretty: true, limit: 5, width: 80)
+    formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
     String.split(formatted, "\n")
   end
 
@@ -259,7 +260,7 @@ defmodule PtcRunner.SubAgent.Debug do
       if map_size(data) > 3 do
         "{#{keys}, ... (#{map_size(data)} keys)}"
       else
-        inspect(data, limit: 3, pretty: false, width: 60)
+        Format.to_string(data, limit: 3, pretty: false, width: 60)
       end
     end
   end
@@ -270,10 +271,10 @@ defmodule PtcRunner.SubAgent.Debug do
         "[]"
 
       length(data) <= 3 ->
-        inspect(data, limit: 3, pretty: false, width: 60)
+        Format.to_string(data, limit: 3, pretty: false, width: 60)
 
       true ->
-        sample = Enum.take(data, 3) |> inspect(limit: 3, pretty: false)
+        sample = Enum.take(data, 3) |> Format.to_string(limit: 3, pretty: false)
         "#{sample}... (#{length(data)} items)"
     end
   end
@@ -287,7 +288,7 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   defp format_compact(data) do
-    formatted = inspect(data, limit: 3, pretty: false, width: 60)
+    formatted = Format.to_string(data, limit: 3, pretty: false, width: 60)
 
     if String.length(formatted) > 50 do
       String.slice(formatted, 0, 47) <> "..."

@@ -255,6 +255,10 @@ defmodule PtcRunner.Lisp do
   def format_error({:memory_exceeded, bytes}), do: "Memory exceeded: #{bytes} byte limit"
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
+  # Handle Eval errors with specific types
+  def format_error({:unbound_var, name}), do: "undefined variable: #{name}"
+  def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
+  def format_error({:arity_error, msg}), do: "arity error: #{msg}"
   # Handle other 3-tuple error formats from Eval: {type, message, data}
   def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"

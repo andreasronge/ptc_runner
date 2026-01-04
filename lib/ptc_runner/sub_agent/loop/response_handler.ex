@@ -12,6 +12,8 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   3. Multiple code blocks are wrapped in a (do ...) form
   """
 
+  alias PtcRunner.Lisp.Format
+
   @doc """
   Parse PTC-Lisp from LLM response.
 
@@ -146,7 +148,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   def format_execution_result(result, opts \\ [])
 
   def format_execution_result(result, opts) when is_map(result) and map_size(result) > 0 do
-    result_str = inspect(result, limit: :infinity, printable_limit: :infinity)
+    result_str = Format.to_string(result, limit: :infinity, printable_limit: :infinity)
     show_hints = Keyword.get(opts, :show_memory_hints, true)
 
     if show_hints do
@@ -171,7 +173,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   end
 
   def format_execution_result(result, _opts) do
-    "Result: #{inspect(result, limit: :infinity, printable_limit: :infinity)}"
+    "Result: #{Format.to_string(result, limit: :infinity, printable_limit: :infinity)}"
   end
 
   # Default maximum size for turn history entries (1KB)
@@ -241,7 +243,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
   # For other types, convert to string representation and truncate
   defp truncate_value(value, max_bytes) do
-    inspected = inspect(value, limit: 50, printable_limit: max_bytes)
+    inspected = Format.to_string(value, limit: 50, printable_limit: max_bytes)
     truncate_value(inspected, max_bytes)
   end
 
