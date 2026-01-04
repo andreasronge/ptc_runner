@@ -1,0 +1,38 @@
+#!/bin/bash
+
+set -e
+
+echo "🔍 Running pre-push checks..."
+
+# Track time
+START_TIME=$(date +%s)
+
+# 1. Run full test suite
+echo "  ⏳ Running full test suite..."
+if ! mix test --exclude clojure 2>&1; then
+  echo "  ❌ Tests failed. Run: mix test"
+  exit 1
+fi
+echo "  ✅ Tests passed"
+
+# 2. Run dialyzer
+echo "  ⏳ Running dialyzer (this may take a moment)..."
+DIALYZER_OUTPUT=$(mix dialyzer 2>&1)
+DIALYZER_EXIT=$?
+
+if [ $DIALYZER_EXIT -ne 0 ]; then
+  echo "  ❌ Dialyzer found errors:"
+  echo "$DIALYZER_OUTPUT"
+  echo ""
+  echo "  Run: mix dialyzer"
+  exit 1
+fi
+echo "  ✅ Dialyzer passed"
+
+# Calculate elapsed time
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+
+echo ""
+echo "✅ All pre-push checks passed in ${ELAPSED}s"
+echo ""
