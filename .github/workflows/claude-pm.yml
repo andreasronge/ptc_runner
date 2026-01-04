@@ -1,10 +1,6 @@
 name: Claude PM
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
-
   issues:
     types: [closed, labeled]
 
@@ -12,18 +8,16 @@ on:
 
 jobs:
   pm:
-    # Run on: schedule, manual, merged PRs, closed issues, or relevant labels
+    # Run on: manual, closed issues, or relevant labels
     if: |
-      github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'issues' && github.event.action == 'closed') ||
       (github.event_name == 'issues' && github.event.action == 'labeled' && contains(fromJSON('["ready-for-implementation", "needs-clarification", "needs-breakdown", "from-pr-review"]'), github.event.label.name))
 
     runs-on: ubuntu-latest
 
     concurrency:
-      group: claude-automation
+      group: claude-pm
       cancel-in-progress: false
 
     permissions:
