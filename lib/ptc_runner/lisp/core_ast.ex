@@ -51,6 +51,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:pred_combinator, :all_of | :any_of | :none_of, [t()]}
           # Tool call
           | {:call_tool, String.t(), t()}
+          # Tool invocation via ctx namespace: (ctx/tool-name args...)
+          | {:ctx_call, atom(), [t()]}
 
   @type binding :: {:binding, pattern(), t()}
 
