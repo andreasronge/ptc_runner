@@ -105,7 +105,8 @@ defmodule PtcRunner.SubAgent.Compiler do
            source: source,
            signature: agent.signature,
            execute: execute,
-           metadata: metadata
+           metadata: metadata,
+           field_descriptions: agent.field_descriptions
          }}
 
       {:error, step} ->

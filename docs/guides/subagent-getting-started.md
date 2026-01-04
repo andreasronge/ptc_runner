@@ -293,6 +293,39 @@ product_finder = PtcRunner.SubAgent.new(
 
 This separation enables testing, composition, and reuse.
 
+### Additional Struct Fields
+
+SubAgents support additional optional fields for documentation and output control:
+
+```elixir
+PtcRunner.SubAgent.new(
+  prompt: "Find products matching {{query}}",
+  signature: "(query :string) -> [{name :string, price :float}]",
+  tools: product_tools,
+
+  # Human-readable description for external documentation
+  description: "Searches the product catalog and returns matching items",
+
+  # Descriptions for individual signature fields
+  field_descriptions: %{
+    query: "Search term to match against product names",
+    name: "Product name",
+    price: "Price in USD"
+  },
+
+  # Output formatting options (shown with defaults)
+  format_options: [
+    feedback_limit: 20,        # max collection items in turn feedback
+    feedback_max_chars: 2048,  # max chars in turn feedback
+    history_max_bytes: 1024,   # truncation limit for *1/*2/*3 history
+    result_limit: 50,          # inspect :limit for final result
+    result_max_chars: 500      # final string truncation
+  ]
+)
+```
+
+These fields are used by the v2 namespace model for enhanced documentation flow and output control. See `PtcRunner.SubAgent` for full details.
+
 ## The Firewall Convention
 
 Fields prefixed with `_` are **firewalled** - available to your Elixir code and the agent's programs, but hidden from LLM prompt history:
