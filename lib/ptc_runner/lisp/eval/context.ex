@@ -4,17 +4,17 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   Bundles the parameters that flow through recursive evaluation:
   - `ctx`: External data (read-only)
-  - `memory`: Mutable state
+  - `user_ns`: User namespace (mutable bindings from `def`)
   - `env`: Lexical environment (variable bindings)
   - `tool_exec`: Tool executor function
   - `turn_history`: Previous turn results for multi-turn loops
   """
 
-  defstruct [:ctx, :memory, :env, :tool_exec, :turn_history]
+  defstruct [:ctx, :user_ns, :env, :tool_exec, :turn_history]
 
   @type t :: %__MODULE__{
           ctx: map(),
-          memory: map(),
+          user_ns: map(),
           env: map(),
           tool_exec: (String.t(), map() -> term()),
           turn_history: list()
@@ -26,15 +26,15 @@ defmodule PtcRunner.Lisp.Eval.Context do
   ## Examples
 
       iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])
-      iex> ctx.memory
+      iex> ctx.user_ns
       %{}
 
   """
   @spec new(map(), map(), map(), (String.t(), map() -> term()), list()) :: t()
-  def new(ctx, memory, env, tool_exec, turn_history) do
+  def new(ctx, user_ns, env, tool_exec, turn_history) do
     %__MODULE__{
       ctx: ctx,
-      memory: memory,
+      user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
       turn_history: turn_history
@@ -42,11 +42,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Updates the memory map in the context.
+  Updates the user namespace in the context.
   """
-  @spec update_memory(t(), map()) :: t()
-  def update_memory(%__MODULE__{} = context, new_memory) do
-    %{context | memory: new_memory}
+  @spec update_user_ns(t(), map()) :: t()
+  def update_user_ns(%__MODULE__{} = context, new_user_ns) do
+    %{context | user_ns: new_user_ns}
   end
 
   @doc """
