@@ -41,6 +41,15 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  defmodule Var do
+    @moduledoc false
+    defstruct [:name]
+
+    defimpl Inspect do
+      def inspect(%{name: name}, _opts), do: "#'#{name}"
+    end
+  end
+
   @doc """
   Format a Lisp value as a string for display.
 
@@ -59,6 +68,9 @@ defmodule PtcRunner.Lisp.Format do
 
       iex> PtcRunner.Lisp.Format.to_string({:closure, [{:var, :x}, {:var, :y}], nil, %{}, []})
       "#fn[x y]"
+
+      iex> PtcRunner.Lisp.Format.to_string({:var, :my_var})
+      "#'my_var"
 
       iex> PtcRunner.Lisp.Format.to_string([1, 2, 3], limit: 2)
       "[1, 2, ...]"
@@ -104,6 +116,9 @@ defmodule PtcRunner.Lisp.Format do
       iex> PtcRunner.Lisp.Format.to_clojure({:closure, [{:var, :x}], nil, %{}, []})
       "#fn[x]"
 
+      iex> PtcRunner.Lisp.Format.to_clojure({:var, :x})
+      "#'x"
+
       iex> PtcRunner.Lisp.Format.to_clojure(nil)
       "nil"
 
@@ -137,6 +152,7 @@ defmodule PtcRunner.Lisp.Format do
 
   defp format_clojure(%Fn{params: params}, _opts), do: "#fn[#{params}]"
   defp format_clojure(%Builtin{}, _opts), do: "#<builtin>"
+  defp format_clojure(%Var{name: name}, _opts), do: "#'#{name}"
 
   defp format_clojure(list, opts) when is_list(list) do
     limit = Keyword.get(opts, :limit, :infinity)
@@ -214,6 +230,9 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize({:variadic, fun, _identity}) when is_function(fun), do: %Builtin{}
   defp sanitize({:variadic_nonempty, fun}) when is_function(fun), do: %Builtin{}
   defp sanitize({:multi_arity, funs}) when is_tuple(funs), do: %Builtin{}
+
+  # Var references - convert to Var struct for display
+  defp sanitize({:var, name}) when is_atom(name), do: %Var{name: name}
 
   defp sanitize(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {k, sanitize(v)} end)
