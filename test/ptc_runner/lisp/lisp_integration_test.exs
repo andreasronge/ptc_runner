@@ -240,5 +240,58 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert {:ok, %{return: [1, 2], memory_delta: %{}, memory: %{}}} =
                Lisp.run(source, context: ctx)
     end
+
+    test "juxt enables multi-criteria sorting" do
+      source = ~S"""
+      (sort-by (juxt :priority :name) ctx/tasks)
+      """
+
+      ctx = %{
+        tasks: [
+          %{priority: 2, name: "Deploy"},
+          %{priority: 1, name: "Test"},
+          %{priority: 1, name: "Build"}
+        ]
+      }
+
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, context: ctx)
+
+      # Should sort by priority first, then by name
+      assert result == [
+               %{priority: 1, name: "Build"},
+               %{priority: 1, name: "Test"},
+               %{priority: 2, name: "Deploy"}
+             ]
+    end
+
+    test "juxt with map extracts multiple values" do
+      source = "(map (juxt :x :y) ctx/points)"
+
+      ctx = %{points: [%{x: 1, y: 2}, %{x: 3, y: 4}]}
+
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, context: ctx)
+      assert result == [[1, 2], [3, 4]]
+    end
+
+    test "juxt with closures applies multiple transformations" do
+      source = "((juxt #(+ % 1) #(* % 2)) 5)"
+
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      assert result == [6, 10]
+    end
+
+    test "juxt with builtin functions" do
+      source = "((juxt first last) [1 2 3])"
+
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      assert result == [1, 3]
+    end
+
+    test "empty juxt returns empty vector" do
+      source = "((juxt) {:a 1})"
+
+      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      assert result == []
+    end
   end
 end

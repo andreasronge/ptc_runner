@@ -125,6 +125,8 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :"none-of"}, rest, _list),
     do: analyze_pred_comb(:none_of, rest)
 
+  defp dispatch_list_form({:symbol, :juxt}, rest, _list), do: analyze_juxt(rest)
+
   defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
   defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
   defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
@@ -424,6 +426,16 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_pred_comb(kind, args),
     do: Predicates.analyze_pred_comb(kind, args, &analyze_list/1)
+
+  # ============================================================
+  # Function combinator: juxt
+  # ============================================================
+
+  defp analyze_juxt(args) do
+    with {:ok, fns} <- analyze_list(args) do
+      {:ok, {:juxt, fns}}
+    end
+  end
 
   # ============================================================
   # Tool invocation: call

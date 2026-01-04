@@ -441,4 +441,101 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       assert {:ok, 6, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
   end
+
+  describe "juxt function combinator" do
+    test "empty juxt returns function producing empty vector" do
+      env = Env.initial()
+      juxt_ast = {:juxt, []}
+
+      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+      assert is_function(fun, 1)
+      assert fun.("anything") == []
+    end
+
+    test "single keyword juxt" do
+      env = Env.initial()
+      juxt_ast = {:juxt, [{:keyword, :name}]}
+
+      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+      assert is_function(fun, 1)
+      assert fun.(%{name: "Alice"}) == ["Alice"]
+    end
+
+    test "multiple keywords juxt extracts multiple values" do
+      env = Env.initial()
+      juxt_ast = {:juxt, [{:keyword, :name}, {:keyword, :age}]}
+
+      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+      assert is_function(fun, 1)
+      assert fun.(%{name: "Alice", age: 30}) == ["Alice", 30]
+    end
+
+    test "juxt with closures" do
+      env = Env.initial()
+
+      # (juxt #(+ % 1) #(* % 2))
+      add_one = {:fn, [{:var, :x}], {:call, {:var, :+}, [{:var, :x}, 1]}}
+      times_two = {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}
+      juxt_ast = {:juxt, [add_one, times_two]}
+
+      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+      assert is_function(fun, 1)
+      assert fun.(5) == [6, 10]
+    end
+
+    test "juxt with builtin functions first and last" do
+      env = Env.initial()
+      juxt_ast = {:juxt, [{:var, :first}, {:var, :last}]}
+
+      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+      assert is_function(fun, 1)
+      assert fun.([1, 2, 3]) == [1, 3]
+    end
+
+    test "juxt works with sort-by for multi-criteria sorting" do
+      env = Env.initial()
+
+      data = [
+        %{priority: 2, name: "Bob"},
+        %{priority: 1, name: "Charlie"},
+        %{priority: 1, name: "Alice"}
+      ]
+
+      # (sort-by (juxt :priority :name) data)
+      juxt_ast = {:juxt, [{:keyword, :priority}, {:keyword, :name}]}
+      call_ast = {:call, {:var, :"sort-by"}, [juxt_ast, {:var, :data}]}
+
+      assert {:ok, result, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{data: data}), &dummy_tool/2)
+
+      # Should sort by priority first, then by name
+      assert result == [
+               %{priority: 1, name: "Alice"},
+               %{priority: 1, name: "Charlie"},
+               %{priority: 2, name: "Bob"}
+             ]
+    end
+
+    test "juxt works with map for extracting multiple values" do
+      env = Env.initial()
+      points = [%{x: 1, y: 2}, %{x: 3, y: 4}]
+
+      # (map (juxt :x :y) points)
+      juxt_ast = {:juxt, [{:keyword, :x}, {:keyword, :y}]}
+      call_ast = {:call, {:var, :map}, [juxt_ast, {:var, :points}]}
+
+      assert {:ok, result, %{}} =
+               Eval.eval(call_ast, %{}, %{}, Map.merge(env, %{points: points}), &dummy_tool/2)
+
+      assert result == [[1, 2], [3, 4]]
+    end
+
+    test "juxt handles nil values from keywords" do
+      env = Env.initial()
+      juxt_ast = {:juxt, [{:keyword, :name}, {:keyword, :missing}]}
+
+      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+      assert fun.(%{name: "Alice"}) == ["Alice", nil]
+    end
+  end
 end

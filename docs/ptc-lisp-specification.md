@@ -1375,6 +1375,57 @@ Typical usage involves filtering valid parses from potentially invalid input:
      (reduce + 0))  ; => 7
 ```
 
+### 8.10 Function Combinators
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `juxt` | `(juxt f1 f2 ...)` | Returns a function that applies all functions and returns a vector of results |
+
+The `juxt` combinator creates a function that applies each of its argument functions to the same input and returns a vector containing all results. This is particularly useful for multi-criteria sorting and extracting multiple values at once.
+
+```clojure
+;; Basic usage: extract multiple values from a map
+((juxt :name :age) {:name "Alice" :age 30})
+; => ["Alice" 30]
+
+;; Multi-criteria sorting (primary: priority, secondary: name)
+(sort-by (juxt :priority :name) tasks)
+; Sorts first by priority, then by name for equal priorities
+
+;; Extracting coordinates from point maps
+(map (juxt :x :y) points)
+; => [[1 2] [3 4] ...]
+
+;; Using closures for computed values
+((juxt #(+ % 1) #(* % 2)) 5)
+; => [6 10]
+
+;; Using builtin functions
+((juxt first last) [1 2 3])
+; => [1 3]
+
+;; Empty juxt returns empty vector
+((juxt) {:a 1})
+; => []
+```
+
+**Comparison with explicit function:**
+
+```clojure
+;; These are equivalent:
+(sort-by (juxt :priority :name) tasks)
+(sort-by (fn [t] [(:priority t) (:name t)]) tasks)
+
+;; juxt is more concise for multiple key extraction
+(map (juxt :id :name :email) users)
+(map (fn [u] [(:id u) (:name u) (:email u)]) users)
+```
+
+**Supported function types:**
+- Keywords (used as map accessors)
+- Closures (`fn` and `#()` syntax)
+- Builtin functions (`first`, `last`, `count`, etc.)
+
 ---
 
 ## 9. Namespaces, Context, and Tools
@@ -1917,7 +1968,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 - Regex: `re-find`, `re-matches`, `re-seq`
 - `range` (infinite sequences)
 - `iterate`, `repeat`, `cycle` (infinite sequences)
-- `partial`, `comp`, `juxt` (function composition)
+- `partial`, `comp` (function composition)
 - Transducers
 
 ---
