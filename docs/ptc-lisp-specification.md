@@ -533,6 +533,54 @@ Evaluates expressions in order, returning the value of the last expression:
 
 ---
 
+### 5.7 `def` — User Namespace Binding
+
+Binds a name to a value in the user namespace, persisting across turns:
+
+```clojure
+(def name value)
+(def name docstring value)  ; docstring is optional and ignored
+```
+
+**Semantics:**
+- Returns the var (`#'name`), not the value (like Clojure)
+- Creates or overwrites the binding in user namespace
+- Value is evaluated before binding
+- Binding persists until session ends or redefined
+- Cannot shadow builtin function names (returns error)
+- Can shadow ctx names, but `ctx/` prefix still works
+
+```clojure
+(def x 42)                        ; => #'x (x = 42)
+(def threshold 5000)              ; => #'threshold
+(def results (ctx/search {}))     ; => #'results (stores tool result)
+
+; Redefinition
+(def x 1)                         ; x = 1
+(def x 2)                         ; x = 2 (overwrites)
+
+; Use in do block to see value
+(do
+  (def x 10)
+  x)                              ; => 10
+
+; Reference previous defs
+(do
+  (def a 1)
+  (def b (+ a 1))
+  b)                              ; => 2
+
+; Error: cannot shadow builtins
+(def map {})                      ; => error: cannot shadow builtin 'map'
+```
+
+**Differences from Clojure:**
+- No `^:dynamic`, `^:private`, or other metadata
+- No destructuring in def (use `let` then `def`)
+- Docstrings allowed but ignored (for Clojure compatibility)
+
+---
+
 ## 6. Threading Macros
 
 Threading macros transform nested function calls into linear pipelines.

@@ -17,8 +17,10 @@ defmodule PtcRunner.Lisp.Eval do
   """
 
   alias PtcRunner.Lisp.CoreAST
+  alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval.{Apply, Patterns, Where}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Format.Var
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -46,6 +48,7 @@ defmodule PtcRunner.Lisp.Eval do
           | {:invalid_keyword_call, atom(), [term()]}
           | {:arity_error, String.t()}
           | {:destructure_error, String.t()}
+          | {:cannot_shadow_builtin, atom()}
 
   @spec eval(CoreAST.t(), map(), map(), env(), tool_executor(), list()) ::
           {:ok, value(), map()} | {:error, runtime_error()}
@@ -134,10 +137,20 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   # Local/global variable from environment
+  # Resolution order: let bindings (env) → user namespace (def bindings) → builtins
   defp do_eval({:var, name}, %EvalContext{user_ns: user_ns, env: env}) do
-    case Map.fetch(env, name) do
-      {:ok, value} -> {:ok, value, user_ns}
-      :error -> {:error, {:unbound_var, name}}
+    cond do
+      Map.has_key?(env, name) ->
+        {:ok, Map.get(env, name), user_ns}
+
+      Map.has_key?(user_ns, name) ->
+        {:ok, Map.get(user_ns, name), user_ns}
+
+      Env.builtin?(name) ->
+        {:ok, Map.get(Env.initial(), name), user_ns}
+
+      true ->
+        {:error, {:unbound_var, name}}
     end
   end
 
@@ -161,6 +174,19 @@ defmodule PtcRunner.Lisp.Eval do
   # Memory get: (memory/get :key)
   defp do_eval({:memory_get, key}, %EvalContext{user_ns: user_ns}) do
     {:ok, flex_get(user_ns, key), user_ns}
+  end
+
+  # Define binding in user namespace: (def name value)
+  # Returns the var, not the value (Clojure semantics)
+  defp do_eval({:def, name, value_ast}, %EvalContext{} = eval_ctx) do
+    if Env.builtin?(name) do
+      {:error, {:cannot_shadow_builtin, name}}
+    else
+      with {:ok, value, user_ns2} <- do_eval(value_ast, eval_ctx) do
+        new_user_ns = Map.put(user_ns2, name, value)
+        {:ok, %Var{name: name}, new_user_ns}
+      end
+    end
   end
 
   # Sequential evaluation: do

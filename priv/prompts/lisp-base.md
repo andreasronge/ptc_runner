@@ -30,6 +30,7 @@ ctx/orders
 - `if` without else — use `(if cond then nil)` or `when`
 - Chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - `apply` on variadic math — `(apply max coll)` doesn't work
+- `def` cannot shadow builtins (e.g., `(def map {})` errors)
 
 ### PTC Extensions
 
@@ -65,6 +66,22 @@ ctx/orders
 (ctx/get-users)                     ; tool with no args
 (let [results (ctx/fetch {:id 123})]  ; store tool result
   (count results))
+```
+
+**State Persistence** — Use `def` to store values across turns:
+```clojure
+(def results (ctx/search {:query "budget"}))  ; => #'results (stored)
+results                                        ; => the search results
+
+; Multi-step with do
+(do
+  (def page1 (ctx/search {:page 1}))
+  (def page2 (ctx/search {:page 2}))
+  (concat page1 page2))
+
+; Redefine to update
+(def counter 0)
+(def counter (+ counter 1))
 ```
 
 ### Threading

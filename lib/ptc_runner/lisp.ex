@@ -264,8 +264,10 @@ defmodule PtcRunner.Lisp do
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
 
-  # Non-map result: no memory update
-  defp apply_memory_contract(value, memory, precision) when not is_map(value) do
+  # Non-map result or struct: no memory update
+  # Structs (like %Var{}) should not be merged into memory
+  defp apply_memory_contract(value, memory, precision)
+       when not is_map(value) or is_struct(value) do
     %Step{
       return: round_floats(value, precision),
       fail: nil,

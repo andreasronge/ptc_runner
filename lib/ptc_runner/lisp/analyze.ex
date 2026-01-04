@@ -130,6 +130,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
   defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
   defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
+  defp dispatch_list_form({:symbol, :def}, rest, _list), do: analyze_def(rest)
 
   # Memory operations
   defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
@@ -503,6 +504,41 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_fail(_) do
     {:error, {:invalid_arity, :fail, "expected (fail error)"}}
+  end
+
+  # ============================================================
+  # User namespace binding: def
+  # ============================================================
+
+  # (def name value)
+  defp analyze_def([{:symbol, name}, value_ast]) do
+    with {:ok, value} <- do_analyze(value_ast) do
+      {:ok, {:def, name, value}}
+    end
+  end
+
+  # (def name docstring value) - docstring is ignored but allowed for Clojure compat
+  defp analyze_def([{:symbol, name}, {:string, _docstring}, value_ast]) do
+    with {:ok, value} <- do_analyze(value_ast) do
+      {:ok, {:def, name, value}}
+    end
+  end
+
+  defp analyze_def([{:symbol, _name}]) do
+    {:error, {:invalid_arity, :def, "expected (def name value), got (def name) without value"}}
+  end
+
+  defp analyze_def([{:symbol, _name} | _]) do
+    # First arg is a symbol but wrong number of total args
+    {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
+  end
+
+  defp analyze_def([non_symbol | _]) do
+    {:error, {:invalid_form, "def name must be a symbol, got: #{inspect(non_symbol)}"}}
+  end
+
+  defp analyze_def(_) do
+    {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
   end
 
   # ============================================================

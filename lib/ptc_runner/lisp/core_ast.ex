@@ -53,6 +53,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:call_tool, String.t(), t()}
           # Tool invocation via ctx namespace: (ctx/tool-name args...)
           | {:ctx_call, atom(), [t()]}
+          # Define binding in user namespace: (def name value)
+          | {:def, atom(), t()}
 
   @type binding :: {:binding, pattern(), t()}
 
