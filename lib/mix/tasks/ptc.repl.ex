@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp loop(history, memory) do
     case read_expression("ptc> ", "") do
-      nil ->
+      :eof ->
         IO.puts("\nGoodbye!")
 
       "" ->
@@ -56,7 +56,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp read_expression(prompt, buffer) do
     case IO.gets(prompt) do
       :eof ->
-        nil
+        :eof
 
       line ->
         combined = buffer <> line
