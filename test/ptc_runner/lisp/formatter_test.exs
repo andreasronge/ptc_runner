@@ -92,8 +92,8 @@ defmodule PtcRunner.Lisp.FormatterTest do
       assert Formatter.format({:ns_symbol, :ctx, :input}) == "ctx/input"
     end
 
-    test "memory namespace" do
-      assert Formatter.format({:ns_symbol, :memory, :results}) == "memory/results"
+    test "generic namespace" do
+      assert Formatter.format({:ns_symbol, :foo, :bar}) == "foo/bar"
     end
   end
 
