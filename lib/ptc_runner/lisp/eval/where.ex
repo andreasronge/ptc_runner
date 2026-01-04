@@ -71,6 +71,20 @@ defmodule PtcRunner.Lisp.Eval.Where do
 
   @doc """
   Checks if a value is truthy (not nil or false).
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Eval.Where.truthy?(nil)
+      false
+
+      iex> PtcRunner.Lisp.Eval.Where.truthy?(false)
+      false
+
+      iex> PtcRunner.Lisp.Eval.Where.truthy?(0)
+      true
+
+      iex> PtcRunner.Lisp.Eval.Where.truthy?("hello")
+      true
   """
   @spec truthy?(term()) :: boolean()
   def truthy?(nil), do: false
