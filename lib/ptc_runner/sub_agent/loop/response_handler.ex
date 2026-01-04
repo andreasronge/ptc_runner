@@ -148,7 +148,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   def format_execution_result(result, opts \\ [])
 
   def format_execution_result(result, opts) when is_map(result) and map_size(result) > 0 do
-    result_str = Format.to_string(result, limit: :infinity, printable_limit: :infinity)
+    result_str = Format.to_clojure(result, limit: :infinity, printable_limit: :infinity)
     show_hints = Keyword.get(opts, :show_memory_hints, true)
 
     if show_hints do
@@ -173,7 +173,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   end
 
   def format_execution_result(result, _opts) do
-    "Result: #{Format.to_string(result, limit: :infinity, printable_limit: :infinity)}"
+    "Result: #{Format.to_clojure(result, limit: :infinity, printable_limit: :infinity)}"
   end
 
   # Default maximum size for turn history entries (1KB)
