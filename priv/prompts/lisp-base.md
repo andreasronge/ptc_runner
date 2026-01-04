@@ -59,6 +59,14 @@ ctx/orders
 (:salary (max-by :salary employees))
 ```
 
+**Tool Invocation** — Call external tools to fetch or transform data:
+```clojure
+(ctx/search {:query "budget"})      ; invoke search tool
+(ctx/get-users)                     ; tool with no args
+(let [results (ctx/fetch {:id 123})]  ; store tool result
+  (count results))
+```
+
 ### Threading
 ```clojure
 ; ->> thread-last: for collections (filter, map, take, sort-by)
