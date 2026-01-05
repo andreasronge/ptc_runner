@@ -1124,11 +1124,11 @@ SubAgent.new(
   signature: "...",
   format_options: [
     # Turn feedback (shown to LLM after each turn)
-    feedback_limit: 20,           # max collection items (default: 20)
-    feedback_max_chars: 2048,     # max chars (default: 2KB)
+    feedback_limit: 10,           # max collection items (default: 10)
+    feedback_max_chars: 512,      # max chars (default: 512)
 
     # REPL history (*1/*2/*3)
-    history_max_bytes: 1024,      # truncation limit (default: 1KB)
+    history_max_bytes: 512,       # truncation limit (default: 512 bytes)
 
     # Final result formatting
     result_limit: 50,             # inspect :limit for collections (default: 50)
@@ -1144,7 +1144,7 @@ SubAgent.new(
 (ctx/search {:query "budget"})
 
 ;; LLM sees truncated feedback:
-;; Result: {:results [{:id 1} {:id 2} ... {:id 20}] (500 total, showing first 20), :cursor "abc"}
+;; {:results [{:id 1} {:id 2} ... {:id 10}] (500 total, showing first 10), :cursor "abc"}
 ```
 
 The LLM sees enough to understand the shape and sample data, but not the full payload.
@@ -1321,7 +1321,7 @@ Current feedback shows "Memory Hints" like:
 results
 
 ;; Feedback (truncated for large data):
-[{:id 1 :name "Alice"} {:id 2 :name "Bob"} ...] (500 items, showing first 20)
+[{:id 1 :name "Alice"} {:id 2 :name "Bob"} ...] (500 items, showing first 10)
 ```
 
 **Key points:**

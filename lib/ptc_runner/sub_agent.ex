@@ -127,9 +127,9 @@ defmodule PtcRunner.SubAgent do
   Output format options for truncation and display.
 
   Fields:
-  - `feedback_limit` - Max collection items in turn feedback (default: 20)
-  - `feedback_max_chars` - Max chars in turn feedback (default: 2048)
-  - `history_max_bytes` - Truncation limit for `*1/*2/*3` history (default: 1024)
+  - `feedback_limit` - Max collection items in turn feedback (default: 10)
+  - `feedback_max_chars` - Max chars in turn feedback (default: 512)
+  - `history_max_bytes` - Truncation limit for `*1/*2/*3` history (default: 512)
   - `result_limit` - Inspect `:limit` for final result (default: 50)
   - `result_max_chars` - Final string truncation (default: 500)
   """
@@ -163,9 +163,9 @@ defmodule PtcRunner.SubAgent do
   alias PtcRunner.SubAgent.LLMResolver
 
   @default_format_options [
-    feedback_limit: 20,
-    feedback_max_chars: 2048,
-    history_max_bytes: 1024,
+    feedback_limit: 10,
+    feedback_max_chars: 512,
+    history_max_bytes: 512,
     result_limit: 50,
     result_max_chars: 500
   ]

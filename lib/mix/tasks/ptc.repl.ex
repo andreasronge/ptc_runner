@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   use Mix.Task
 
-  alias PtcRunner.Lisp.Format
+  alias PtcRunner.SubAgent.Loop.ResponseHandler
 
   @impl Mix.Task
   def run(_args) do
@@ -84,7 +84,8 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp evaluate(input, history, memory) do
     case PtcRunner.Lisp.run(input, turn_history: history, memory: memory) do
       {:ok, step} ->
-        IO.puts(Format.to_string(step.return, pretty: true))
+        # Show truncated output exactly like LLM feedback sees
+        IO.puts(ResponseHandler.format_execution_result(step.return))
         new_history = (history ++ [step.return]) |> Enum.take(-3)
         {new_history, step.memory}
 

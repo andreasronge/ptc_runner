@@ -601,19 +601,10 @@ defmodule PtcRunner.SubAgent.Loop do
 
   defp format_turn_feedback(agent, state, lisp_step) do
     turns_remaining = state.remaining_turns - 1
-    has_more_turns = turns_remaining > 0
-
-    base_result = ResponseHandler.format_execution_result(lisp_step.return)
+    base_result = ResponseHandler.format_execution_result(lisp_step.return, agent.format_options)
 
     # Add turn info for multi-turn agents
     if agent.max_turns > 1 do
-      history_hint =
-        if has_more_turns do
-          "\n(Access this result with *1 in next turn)"
-        else
-          ""
-        end
-
       turn_info =
         if turns_remaining == 1 do
           "\n\n⚠️ FINAL TURN - you must call (return result) or (fail reason) next."
@@ -621,7 +612,7 @@ defmodule PtcRunner.SubAgent.Loop do
           "\n\nTurn #{state.turn + 1} of #{agent.max_turns} (#{turns_remaining} remaining)"
         end
 
-      base_result <> history_hint <> turn_info
+      base_result <> turn_info
     else
       base_result
     end

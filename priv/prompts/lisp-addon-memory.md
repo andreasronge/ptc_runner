@@ -46,7 +46,9 @@ Use `defn` to define reusable functions:
 - **NEVER copy/paste result data into your code** - this doesn't work!
 - Your code can ONLY access: `ctx/*` (original data), stored values (via `def`), and `*1`/`*2`/`*3` (recent results)
 
-**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~1KB), so store important values with `def`.
+**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~512 bytes), so store important values with `def`.
+
+**Feedback truncation:** Large collections are truncated with a count indicator, e.g., `[{:id 1} {:id 2} ...] (500 items, showing first 10)`. Use `def` to store the full value if you need to process it.
 
 After observing a result:
 1. Analyze what you observed and draw a conclusion

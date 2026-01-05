@@ -129,7 +129,7 @@ defmodule PtcRunner.Lisp.Format do
       "[{:a 1} {:b 2}]"
 
       iex> PtcRunner.Lisp.Format.to_clojure([1, 2, 3, 4, 5], limit: 2)
-      "[1 2 ...]"
+      "[1 2 ...] (5 items, showing first 2)"
 
       iex> PtcRunner.Lisp.Format.to_clojure("very long string here", printable_limit: 10)
       ~s("very long ...")
@@ -160,7 +160,8 @@ defmodule PtcRunner.Lisp.Format do
     formatted = Enum.map_join(items, " ", &format_clojure(&1, opts))
 
     if truncated do
-      "[#{formatted} ...]"
+      total = length(list)
+      "[#{formatted} ...] (#{total} items, showing first #{limit})"
     else
       "[#{formatted}]"
     end
@@ -178,7 +179,8 @@ defmodule PtcRunner.Lisp.Format do
       end)
 
     if truncated do
-      "{#{formatted} ...}"
+      total = map_size(map)
+      "{#{formatted} ...} (#{total} entries, showing first #{limit})"
     else
       "{#{formatted}}"
     end
@@ -233,6 +235,11 @@ defmodule PtcRunner.Lisp.Format do
 
   # Var references - convert to Var struct for display
   defp sanitize({:var, name}) when is_atom(name), do: %Var{name: name}
+
+  # Pass through wrapper structs unchanged (they're already sanitized)
+  defp sanitize(%Var{} = v), do: v
+  defp sanitize(%Fn{} = f), do: f
+  defp sanitize(%Builtin{} = b), do: b
 
   defp sanitize(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {k, sanitize(v)} end)

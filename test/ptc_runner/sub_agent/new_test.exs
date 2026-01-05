@@ -310,9 +310,9 @@ defmodule PtcRunner.SubAgent.NewTest do
     test "format_options uses default values" do
       agent = SubAgent.new(prompt: "Test")
       assert agent.format_options == SubAgent.default_format_options()
-      assert agent.format_options[:feedback_limit] == 20
-      assert agent.format_options[:feedback_max_chars] == 2048
-      assert agent.format_options[:history_max_bytes] == 1024
+      assert agent.format_options[:feedback_limit] == 10
+      assert agent.format_options[:feedback_max_chars] == 512
+      assert agent.format_options[:history_max_bytes] == 512
       assert agent.format_options[:result_limit] == 50
       assert agent.format_options[:result_max_chars] == 500
     end
@@ -323,8 +323,8 @@ defmodule PtcRunner.SubAgent.NewTest do
       assert agent.format_options[:feedback_limit] == 5
       assert agent.format_options[:result_limit] == 100
       # Defaults preserved
-      assert agent.format_options[:feedback_max_chars] == 2048
-      assert agent.format_options[:history_max_bytes] == 1024
+      assert agent.format_options[:feedback_max_chars] == 512
+      assert agent.format_options[:history_max_bytes] == 512
       assert agent.format_options[:result_max_chars] == 500
     end
 
