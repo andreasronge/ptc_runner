@@ -96,16 +96,16 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
                Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
     end
 
-    test "vector destructuring: error on insufficient elements" do
-      # (fn [[a b c]] a) called with [1 2]
+    test "vector destructuring: binds nil for insufficient elements" do
+      # (fn [[a b c]] [a b c]) called with [1 2] - c binds to nil (Clojure behavior)
       params = [{:destructure, {:seq, [{:var, :a}, {:var, :b}, {:var, :c}]}}]
-      body = {:var, :a}
+      body = {:vector, [{:var, :a}, {:var, :b}, {:var, :c}]}
       closure_def = {:fn, params, body}
 
-      bindings = [{:binding, {:var, :bad_extract}, closure_def}]
-      call_ast = {:call, {:var, :bad_extract}, [{:vector, [1, 2]}]}
+      bindings = [{:binding, {:var, :extract}, closure_def}]
+      call_ast = {:call, {:var, :extract}, [{:vector, [1, 2]}]}
 
-      assert {:error, _} =
+      assert {:ok, [1, 2, nil], %{}} =
                Eval.eval({:let, bindings, call_ast}, %{}, %{}, Env.initial(), &dummy_tool/2)
     end
 
@@ -178,7 +178,7 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
 
     test "map destructuring: renaming bindings" do
       # (fn [{:keys [id] the-name :name} m] the-name) called with {:id 123 :name "Alice"}
-      params = [{:destructure, {:map, [:id], [{:the_name, :name}], []}}]
+      params = [{:destructure, {:map, [:id], [{{:var, :the_name}, :name}], []}}]
       body = {:var, :the_name}
       closure_def = {:fn, params, body}
 
@@ -195,7 +195,7 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
     test "map destructuring: renaming with default value" do
       # (fn [{:keys [id] the-name :name :or {the-name "Unknown"}}] the-name) called with {:id 123}
       params = [
-        {:destructure, {:map, [:id], [{:the_name, :name}], [the_name: "Unknown"]}}
+        {:destructure, {:map, [:id], [{{:var, :the_name}, :name}], [the_name: "Unknown"]}}
       ]
 
       body = {:var, :the_name}

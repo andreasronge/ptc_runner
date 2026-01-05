@@ -183,7 +183,8 @@ defmodule PtcRunner.Lisp.AnalyzeBindingsTest do
       assert {:ok,
               {:let,
                [
-                 {:binding, {:destructure, {:map, [:id], [{:the_name, :name}], []}}, {:var, :m}}
+                 {:binding, {:destructure, {:map, [:id], [{{:var, :the_name}, :name}], []}},
+                  {:var, :m}}
                ], {:var, :the_name}}} = Analyze.analyze(raw)
     end
 
@@ -198,7 +199,7 @@ defmodule PtcRunner.Lisp.AnalyzeBindingsTest do
                [
                  {{:keyword, :keys}, {:vector, [{:symbol, :id}]}},
                  {{:symbol, :full_name}, {:keyword, :name}},
-                 {{:keyword, :or}, {:map, [{{:symbol, :full_name}, "Unknown"}]}}
+                 {{:keyword, :or}, {:map, [{{:symbol, :full_name}, {:string, "Unknown"}}]}}
                ]},
               {:symbol, :m}
             ]},
@@ -209,7 +210,8 @@ defmodule PtcRunner.Lisp.AnalyzeBindingsTest do
               {:let,
                [
                  {:binding,
-                  {:destructure, {:map, [:id], [{:full_name, :name}], [full_name: "Unknown"]}},
+                  {:destructure,
+                   {:map, [:id], [{{:var, :full_name}, :name}], [full_name: "Unknown"]}},
                   {:var, :m}}
                ], {:var, :full_name}}} = Analyze.analyze(raw)
     end
@@ -237,7 +239,7 @@ defmodule PtcRunner.Lisp.AnalyzeBindingsTest do
                [
                  {:binding,
                   {:destructure,
-                   {:as, :m, {:destructure, {:map, [:id], [{:the_name, :name}], []}}}},
+                   {:as, :m, {:destructure, {:map, [:id], [{{:var, :the_name}, :name}], []}}}},
                   {:var, :obj}}
                ], {:var, :the_name}}} = Analyze.analyze(raw)
     end

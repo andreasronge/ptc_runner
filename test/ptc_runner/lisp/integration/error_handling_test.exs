@@ -173,13 +173,11 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert result == 1
     end
 
-    test "destructuring in fn params - vector pattern insufficient elements error" do
-      source = "((fn [[a b c]] a) [1 2])"
-
-      assert {:error, %Step{fail: %{reason: :destructure_error, message: message}}} =
-               Lisp.run(source)
-
-      assert message =~ "expected at least 3 elements, got 2"
+    test "destructuring in fn params - vector pattern binds nil for insufficient elements" do
+      # In Clojure, missing elements bind to nil instead of erroring
+      source = "((fn [[a b c]] [a b c]) [1 2])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 2, nil]
     end
   end
 end

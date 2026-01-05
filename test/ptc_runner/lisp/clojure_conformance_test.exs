@@ -80,6 +80,18 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(count {:a 1 :b 2})")
     end
 
+    test "count on strings" do
+      assert_clojure_equivalent("(count \"abc\")")
+      assert_clojure_equivalent("(count \"\")")
+      assert_clojure_equivalent("(count \"hello world\")")
+    end
+
+    test "empty? on strings" do
+      assert_clojure_equivalent("(empty? \"\")")
+      assert_clojure_equivalent("(empty? \"abc\")")
+      assert_clojure_equivalent("(empty? \" \")")
+    end
+
     test "first and last" do
       assert_clojure_equivalent("(first [1 2 3])")
       assert_clojure_equivalent("(last [1 2 3])")

@@ -69,12 +69,14 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
         _ -> false
       end)
 
-    # Extract rename pairs (symbol keys paired with keyword values)
+    # Extract rename/nested pattern pairs (pattern keys paired with keyword/symbol source keys)
+    special_keys = [:keys, :or, :as]
+
     rename_pairs =
       pairs
       |> Enum.filter(fn
-        {{:symbol, _}, {:keyword, _}} -> true
-        _ -> false
+        {{:keyword, k}, _} -> k not in special_keys
+        _ -> true
       end)
 
     with {:ok, keys} <- extract_keys_opt(keys_pair),
@@ -132,17 +134,26 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
 
   defp extract_renames(rename_pairs) do
     Enum.reduce_while(rename_pairs, {:ok, []}, fn
-      {{:symbol, bind_name}, {:keyword, source_key}}, {:ok, acc} ->
-        {:cont, {:ok, [{bind_name, source_key} | acc]}}
-
-      _other, _acc ->
-        {:halt, {:error, {:invalid_form, "rename pairs must be {symbol :keyword}"}}}
+      {pattern_ast, source_key_ast}, {:ok, acc} ->
+        with {:ok, pattern} <- analyze_pattern(pattern_ast),
+             {:ok, source_key} <- extract_source_key(source_key_ast) do
+          {:cont, {:ok, [{pattern, source_key} | acc]}}
+        else
+          {:error, _} = err -> {:halt, err}
+        end
     end)
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}
       other -> other
     end
   end
+
+  defp extract_source_key({:keyword, k}), do: {:ok, k}
+  defp extract_source_key({:symbol, k}), do: {:ok, k}
+  defp extract_source_key({:string, s}), do: {:ok, s}
+
+  defp extract_source_key(other),
+    do: {:error, {:invalid_form, "invalid source key: #{inspect(other)}"}}
 
   defp extract_defaults(or_pair) do
     case or_pair do
@@ -156,8 +167,13 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
 
   defp extract_default_pairs(default_pairs) do
     Enum.reduce_while(default_pairs, {:ok, []}, fn
-      {{:symbol, k}, v}, {:ok, acc} ->
-        {:cont, {:ok, [{k, v} | acc]}}
+      {{:symbol, k}, v_ast}, {:ok, acc} ->
+        # For now, we only support literal defaults to avoid recursive dependency on Analyze.analyze
+        # but we unwrap them so they don't return internal tuples.
+        case unwrap_literal(v_ast) do
+          {:ok, v} -> {:cont, {:ok, [{k, v} | acc]}}
+          {:error, _} = err -> {:halt, err}
+        end
 
       {_other_key, _v}, _acc ->
         {:halt, {:error, {:invalid_form, "default keys must be symbols"}}}
@@ -167,6 +183,19 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
       other -> other
     end
   end
+
+  defp unwrap_literal({:string, s}), do: {:ok, s}
+  defp unwrap_literal({:keyword, k}), do: {:ok, k}
+  defp unwrap_literal(n) when is_integer(n) or is_float(n), do: {:ok, n}
+  defp unwrap_literal(nil), do: {:ok, nil}
+  defp unwrap_literal(true), do: {:ok, true}
+  defp unwrap_literal(false), do: {:ok, false}
+
+  defp unwrap_literal(other),
+    do:
+      {:error,
+       {:invalid_form,
+        "only literal defaults are supported in :or for now, got #{inspect(other)}"}}
 
   defp maybe_wrap_as(base_pattern, as_pair) do
     case as_pair do
