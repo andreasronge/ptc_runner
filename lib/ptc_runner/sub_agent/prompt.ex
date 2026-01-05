@@ -53,7 +53,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   - `max_turns: 1` (single-shot) → `:single_shot` (base language reference)
   - `max_turns: > 1` (loop mode) → `:multi_turn` (includes memory documentation)
 
-  This ensures LLMs in multi-turn scenarios know how to use `memory/` for persistence.
+  This ensures LLMs in multi-turn scenarios know how to use memory for persistence.
 
   ### Prompt Assembly Order
 
@@ -631,7 +631,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     2. Do not include explanatory text outside the code block
     3. Use `(call "tool-name" args)` to invoke tools
     4. Use `ctx/key` to access context data
-    5. Use `memory/key` or `(memory/get :key)` for persistent state
+    5. Access stored values as plain symbols (values from previous turns)
     6. Call `(return result)` when the mission is complete
     7. Call `(fail {:reason :keyword :message "..."})` on unrecoverable errors
     """

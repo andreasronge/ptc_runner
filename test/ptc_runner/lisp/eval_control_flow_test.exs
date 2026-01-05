@@ -23,15 +23,6 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
     test "context access returns nil if key missing" do
       assert {:ok, nil, %{}} = Eval.eval({:ctx, :missing}, %{}, %{}, %{}, &dummy_tool/2)
     end
-
-    test "memory access" do
-      memory = %{count: 5}
-      assert {:ok, 5, %{count: 5}} = Eval.eval({:memory, :count}, %{}, memory, %{}, &dummy_tool/2)
-    end
-
-    test "memory access returns nil if key missing" do
-      assert {:ok, nil, %{}} = Eval.eval({:memory, :missing}, %{}, %{}, %{}, &dummy_tool/2)
-    end
   end
 
   describe "short-circuit logic: and" do

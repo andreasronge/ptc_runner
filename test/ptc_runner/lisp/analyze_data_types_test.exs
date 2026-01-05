@@ -127,14 +127,5 @@ defmodule PtcRunner.Lisp.AnalyzeDataTypesTest do
       assert {:ok, {:ctx, :data}} = Analyze.analyze({:ns_symbol, :ctx, :data})
       assert {:ok, {:ctx, :query}} = Analyze.analyze({:ns_symbol, :ctx, :query})
     end
-
-    test "memory namespace symbol" do
-      assert {:ok, {:memory, :results}} = Analyze.analyze({:ns_symbol, :memory, :results})
-    end
-
-    test "multiple memory symbols" do
-      assert {:ok, {:memory, :cache}} = Analyze.analyze({:ns_symbol, :memory, :cache})
-      assert {:ok, {:memory, :counter}} = Analyze.analyze({:ns_symbol, :memory, :counter})
-    end
   end
 end

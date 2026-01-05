@@ -25,7 +25,6 @@ defmodule PtcRunner.Lisp.SchemaTest do
     test "contains accessing data section" do
       prompt = Prompts.get(:multi_turn)
       assert String.contains?(prompt, "ctx/")
-      assert String.contains?(prompt, "memory/")
     end
 
     test "contains unsupported features section" do
@@ -64,7 +63,6 @@ defmodule PtcRunner.Lisp.SchemaTest do
     test "contains memory section" do
       prompt = Prompts.get(:multi_turn)
       assert String.contains?(prompt, "Memory Storage Rules")
-      assert String.contains?(prompt, "memory/")
     end
   end
 end

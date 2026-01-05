@@ -73,7 +73,7 @@ defmodule PtcRunner.Lisp do
 
   **Related modules:**
   - `PtcRunner.SubAgent.Loop` - Uses this contract to persist memory across turns
-  - `PtcRunner.Lisp.Eval` - Provides `memory/key` syntax for reading memory in programs
+  - `PtcRunner.Lisp.Eval` - Evaluates programs with user_ns (memory) symbol resolution
 
   ## Float Precision
 

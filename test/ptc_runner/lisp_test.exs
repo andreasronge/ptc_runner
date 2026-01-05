@@ -13,19 +13,10 @@ defmodule PtcRunner.LispTest do
     end
   end
 
-  describe "context and memory access" do
+  describe "context access" do
     test "accesses context variables" do
       assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
                Lisp.run("ctx/x", context: %{x: 10})
-    end
-
-    test "accesses memory variables" do
-      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} =
-               Lisp.run("memory/value", memory: %{value: 5})
-    end
-
-    test "memory access returns nil for missing keys" do
-      assert {:ok, %{return: nil, memory_delta: %{}, memory: %{}}} = Lisp.run("memory/missing")
     end
 
     test "context access returns nil for missing keys" do

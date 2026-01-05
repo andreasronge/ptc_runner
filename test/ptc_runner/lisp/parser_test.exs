@@ -54,7 +54,7 @@ defmodule PtcRunner.Lisp.ParserTest do
 
     test "namespaced symbols" do
       assert {:ok, {:ns_symbol, :ctx, :input}} = Parser.parse("ctx/input")
-      assert {:ok, {:ns_symbol, :memory, :results}} = Parser.parse("memory/results")
+      assert {:ok, {:ns_symbol, :foo, :bar}} = Parser.parse("foo/bar")
     end
 
     test "nil/true/false don't match as prefixes" do

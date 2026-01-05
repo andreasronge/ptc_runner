@@ -75,8 +75,8 @@ defmodule PtcDemo.Prompts do
 
     **Turn 2: Reference previous results**
     ```clojure
-    {:summary {:count (count memory/filtered-data)
-               :total (sum-by :amount memory/filtered-data)}
+    {:summary {:count (count filtered-data)
+               :total (sum-by :amount filtered-data)}
      :return "Analysis complete"}
     ```
 

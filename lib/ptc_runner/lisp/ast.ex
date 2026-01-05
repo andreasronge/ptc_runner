@@ -14,7 +14,7 @@ defmodule PtcRunner.Lisp.AST do
           | {:set, [t()]}
           # Symbols
           | {:symbol, atom()}
-          | {:ns_symbol, :ctx | :memory, atom()}
+          | {:ns_symbol, atom(), atom()}
           # Calls
           | {:list, [t()]}
 
@@ -36,10 +36,19 @@ defmodule PtcRunner.Lisp.AST do
 
       _ ->
         case String.split(name, "/", parts: 2) do
-          ["ctx", key] -> {:ns_symbol, :ctx, String.to_atom(key)}
-          ["memory", key] -> {:ns_symbol, :memory, String.to_atom(key)}
-          [name] -> {:symbol, String.to_atom(name)}
-          [_ns, _key] -> {:symbol, String.to_atom(name)}
+          [name] ->
+            {:symbol, String.to_atom(name)}
+
+          ["", _] ->
+            # Handles "/" operator (division) - empty namespace means not a namespaced symbol
+            {:symbol, String.to_atom(name)}
+
+          [ns, key] when ns != "" and key != "" ->
+            {:ns_symbol, String.to_atom(ns), String.to_atom(key)}
+
+          _ ->
+            # Fallback for edge cases
+            {:symbol, String.to_atom(name)}
         end
     end
   end
