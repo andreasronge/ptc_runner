@@ -92,6 +92,23 @@ In **single-shot mode**, the LLM's expression is evaluated and returned directly
 > `max_turns: 1` for single-shot execution, or ensure your prompt guides the LLM to
 > use `(return {:value ...})` when done.
 
+## Debugging Execution
+
+To see exactly what the agent is doing, enable debug mode and use `PtcRunner.SubAgent.Debug.print_trace/1`:
+
+```elixir
+{:ok, step} = SubAgent.run(prompt, llm: my_llm, debug: true)
+PtcRunner.SubAgent.Debug.print_trace(step)
+```
+
+For a detailed view including the system prompt (instructions and tool definitions) and raw conversation history, use the `messages: true` option:
+
+```elixir
+PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
+```
+
+This is essential for identifying why a model might be failing or ignoring tool instructions.
+
 ## Signatures (Optional)
 
 Signatures define a contract for inputs and outputs:

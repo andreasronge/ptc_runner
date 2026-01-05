@@ -203,10 +203,24 @@ defmodule PtcRunner.SubAgent.Debug do
     llm_feedback = Map.get(turn_entry, :llm_feedback)
 
     header = " Turn #{turn_num} "
+    system_prompt = Map.get(turn_entry, :system_prompt)
 
     IO.puts(
       "\n#{ansi(:cyan)}┌─#{header}#{String.duplicate("─", @box_width - 3 - String.length(header))}┐#{ansi(:reset)}"
     )
+
+    # Print System Prompt
+    if system_prompt do
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}System Prompt:#{ansi(:reset)}")
+
+      system_prompt
+      |> String.split("\n")
+      |> Enum.each(fn line ->
+        IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}#{line}#{ansi(:reset)}")
+      end)
+
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
+    end
 
     # Print LLM Response (assistant message in messages array)
     IO.puts(

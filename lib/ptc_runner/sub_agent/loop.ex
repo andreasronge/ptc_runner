@@ -260,12 +260,15 @@ defmodule PtcRunner.SubAgent.Loop do
       # Call LLM with telemetry and retry logic
       case call_llm_with_telemetry(llm, llm_input, state, agent) do
         {:ok, %{content: content, tokens: tokens}} ->
-          # Accumulate tokens from this LLM call
-          state_with_tokens = Metrics.accumulate_tokens(state, tokens)
+          # Accumulate tokens and store system prompt for debugging
+          state_with_metadata =
+            state
+            |> Metrics.accumulate_tokens(tokens)
+            |> Map.put(:current_system_prompt, llm_input.system)
 
-          result = handle_llm_response(content, agent, llm, state_with_tokens)
+          result = handle_llm_response(content, agent, llm, state_with_metadata)
           # Emit turn stop event (only for completed turns, not continuation)
-          Metrics.emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start)
+          Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start)
           result
 
         {:error, reason} ->
