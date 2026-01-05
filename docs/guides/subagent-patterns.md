@@ -36,6 +36,36 @@ SubAgent.run!(finder, llm: llm)
 
 `then!/2` automatically sets `context:` to the previous step.
 
+### Field Description Flow in Chains
+
+When agents are chained, `field_descriptions` from upstream agents automatically flow to downstream agents. This enables self-documenting chains:
+
+```elixir
+# Agent A defines output descriptions
+agent_a = SubAgent.new(
+  prompt: "Double {{n}}",
+  signature: "(n :int) -> {result :int}",
+  field_descriptions: %{result: "The doubled value"}
+)
+
+# Agent B receives those descriptions as input context
+agent_b = SubAgent.new(
+  prompt: "Add 10 to result",
+  signature: "(result :int) -> {final :int}",
+  field_descriptions: %{final: "The final computed value"}
+)
+
+# When chained, agent_b's LLM sees "The doubled value" description for ctx/result
+step_a = SubAgent.run!(agent_a, llm: llm, context: %{n: 5})
+step_b = SubAgent.then!(step_a, agent_b, llm: llm)
+
+# Each step carries its own field_descriptions for downstream use
+step_a.field_descriptions  #=> %{result: "The doubled value"}
+step_b.field_descriptions  #=> %{final: "The final computed value"}
+```
+
+This is useful when building multi-agent pipelines where each agent benefits from understanding what the previous agent produced.
+
 ### Parallel Execution
 
 For concurrent agents, use standard Elixir patterns:

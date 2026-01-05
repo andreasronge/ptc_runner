@@ -104,6 +104,8 @@ defmodule PtcRunner.SubAgent.Loop do
     debug = Keyword.get(opts, :debug, false)
     trace_mode = Keyword.get(opts, :trace, true)
     llm_retry = Keyword.get(opts, :llm_retry)
+    # Field descriptions received from upstream agent in a chain
+    received_field_descriptions = Keyword.get(opts, :_received_field_descriptions)
 
     # Extract runtime context for nesting depth and turn budget
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
@@ -141,7 +143,8 @@ defmodule PtcRunner.SubAgent.Loop do
           llm_registry: llm_registry,
           debug: debug,
           trace_mode: trace_mode,
-          llm_retry: llm_retry
+          llm_retry: llm_retry,
+          received_field_descriptions: received_field_descriptions
         }
 
         run_with_telemetry(agent, run_opts)
@@ -198,7 +201,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Tokens from current turn's LLM call (for telemetry)
       turn_tokens: nil,
       # Turn history for *1/*2/*3 access (last 3 results, most recent last)
-      turn_history: []
+      turn_history: [],
+      # Field descriptions received from upstream agent in a chain
+      received_field_descriptions: run_opts.received_field_descriptions
     }
 
     loop(agent, run_opts.llm, initial_state)
@@ -237,7 +242,13 @@ defmodule PtcRunner.SubAgent.Loop do
       }
 
       llm_input = %{
-        system: build_system_prompt(agent, state.context, resolution_context),
+        system:
+          build_system_prompt(
+            agent,
+            state.context,
+            resolution_context,
+            state.received_field_descriptions
+          ),
         messages: state.messages,
         turn: state.turn,
         tool_names: Map.keys(agent.tools)
@@ -440,7 +451,9 @@ defmodule PtcRunner.SubAgent.Loop do
                 Enum.reverse([trace_entry | state.trace]),
                 state.trace_mode,
                 false
-              )
+              ),
+            # Populate field_descriptions from agent for downstream chaining
+            field_descriptions: agent.field_descriptions
         }
 
         {:ok, final_step}
@@ -527,8 +540,12 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # System prompt generation with resolution context for language_spec callbacks
-  defp build_system_prompt(agent, context, resolution_context) do
-    Prompt.generate(agent, context: context, resolution_context: resolution_context)
+  defp build_system_prompt(agent, context, resolution_context, received_field_descriptions) do
+    Prompt.generate(agent,
+      context: context,
+      resolution_context: resolution_context,
+      received_field_descriptions: received_field_descriptions
+    )
   end
 
   # Calculate approximate memory size in bytes

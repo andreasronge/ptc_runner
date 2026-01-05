@@ -399,15 +399,26 @@ defmodule PtcRunner.SubAgent do
           updated_step = %{step | usage: %{duration_ms: duration_ms, memory_bytes: 0}}
           {:error, updated_step}
 
-        context ->
+        {context, received_field_descriptions} ->
           # Determine execution mode
           if agent.max_turns == 1 and map_size(agent.tools) == 0 do
             # Single-shot mode
-            run_single_shot(agent, llm, context, start_time, llm_registry)
+            run_single_shot(
+              agent,
+              llm,
+              context,
+              start_time,
+              llm_registry,
+              received_field_descriptions
+            )
           else
             # Loop mode - delegate to Loop.run/2
-            # Update opts with prepared context
-            updated_opts = Keyword.put(opts, :context, context)
+            # Update opts with prepared context and received field descriptions
+            updated_opts =
+              opts
+              |> Keyword.put(:context, context)
+              |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
+
             alias PtcRunner.SubAgent.Loop
             Loop.run(agent, updated_opts)
           end
@@ -513,29 +524,40 @@ defmodule PtcRunner.SubAgent do
   end
 
   # Prepares context for execution, handling Step auto-chaining
+  # Returns {:chained_failure, fail} | {context_map, field_descriptions | nil}
   defp prepare_context(%PtcRunner.Step{fail: fail} = _step) when fail != nil do
     {:chained_failure, fail}
   end
 
-  defp prepare_context(%PtcRunner.Step{fail: nil, return: return} = _step) when is_map(return) do
-    return
+  defp prepare_context(
+         %PtcRunner.Step{fail: nil, return: return, field_descriptions: descs} = _step
+       )
+       when is_map(return) do
+    {return, descs}
   end
 
-  defp prepare_context(%PtcRunner.Step{fail: nil, return: nil} = _step) do
-    %{}
+  defp prepare_context(%PtcRunner.Step{fail: nil, return: nil, field_descriptions: descs} = _step) do
+    {%{}, descs}
   end
 
-  defp prepare_context(%PtcRunner.Step{fail: nil} = _step) do
+  defp prepare_context(%PtcRunner.Step{fail: nil, field_descriptions: descs} = _step) do
     # Non-map return value - can't use as context directly
     # This will be caught by template expansion or signature validation
-    %{}
+    {%{}, descs}
   end
 
-  defp prepare_context(context) when is_map(context), do: context
-  defp prepare_context(nil), do: %{}
+  defp prepare_context(context) when is_map(context), do: {context, nil}
+  defp prepare_context(nil), do: {%{}, nil}
 
   # Single-shot execution: one LLM call, no tools, expression result returned
-  defp run_single_shot(agent, llm, context, start_time, llm_registry) do
+  defp run_single_shot(
+         agent,
+         llm,
+         context,
+         start_time,
+         llm_registry,
+         received_field_descriptions
+       ) do
     # Expand template in prompt
     expanded_prompt = expand_template(agent.prompt, context)
 
@@ -550,10 +572,15 @@ defmodule PtcRunner.SubAgent do
     }
 
     # Use Prompt.generate for consistency with loop mode
+    # Pass received field descriptions for rendering in prompt
     alias PtcRunner.SubAgent.Prompt
 
     system_prompt =
-      Prompt.generate(agent, context: context, resolution_context: resolution_context)
+      Prompt.generate(agent,
+        context: context,
+        resolution_context: resolution_context,
+        received_field_descriptions: received_field_descriptions
+      )
 
     # Build LLM input
     llm_input = %{
@@ -572,11 +599,16 @@ defmodule PtcRunner.SubAgent do
             # Execute via Lisp
             lisp_result = PtcRunner.Lisp.run(code, context: context, tools: %{})
 
-            # Add usage metrics from this execution
+            # Add usage metrics and field_descriptions from this execution
             case lisp_result do
               {:ok, step} ->
                 duration_ms = System.monotonic_time(:millisecond) - start_time
-                updated_step = update_step_usage(step, duration_ms, tokens)
+
+                updated_step =
+                  step
+                  |> update_step_usage(duration_ms, tokens)
+                  |> Map.put(:field_descriptions, agent.field_descriptions)
+
                 {:ok, updated_step}
 
               {:error, step} ->

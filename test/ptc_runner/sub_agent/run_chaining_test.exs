@@ -220,5 +220,160 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
 
       assert result.return.final == 25
     end
+
+    test "step.field_descriptions is populated from agent" do
+      agent =
+        SubAgent.new(
+          prompt: "Return 42",
+          signature: "() -> {answer :int}",
+          field_descriptions: %{answer: "The answer to everything"},
+          max_turns: 1
+        )
+
+      llm = fn _input -> {:ok, "```clojure\n{:answer 42}\n```"} end
+
+      step = SubAgent.run!(agent, llm: llm)
+
+      assert step.return == %{answer: 42}
+      assert step.field_descriptions == %{answer: "The answer to everything"}
+    end
+
+    test "then!/2 propagates field_descriptions from previous step" do
+      agent_a =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          field_descriptions: %{result: "The doubled value"},
+          max_turns: 1
+        )
+
+      agent_b =
+        SubAgent.new(
+          prompt: "Add 10",
+          signature: "(result :int) -> {final :int}",
+          field_descriptions: %{final: "The final computed value"},
+          max_turns: 1
+        )
+
+      # Track what agent_b sees in its prompt
+      mock_llm = fn %{messages: msgs, system: system} ->
+        content = msgs |> List.last() |> Map.get(:content)
+
+        if content =~ "Double" do
+          {:ok, "```clojure\n{:result (* 2 ctx/n)}\n```"}
+        else
+          # Verify description appears in system prompt (from agent_a's output)
+          assert system =~ "The doubled value",
+                 "Expected 'The doubled value' description in system prompt"
+
+          {:ok, "```clojure\n{:final (+ ctx/result 10)}\n```"}
+        end
+      end
+
+      step_a = SubAgent.run!(agent_a, llm: mock_llm, context: %{n: 5})
+      assert step_a.field_descriptions == %{result: "The doubled value"}
+
+      step_b = SubAgent.then!(step_a, agent_b, llm: mock_llm)
+      assert step_b.return.final == 20
+      assert step_b.field_descriptions == %{final: "The final computed value"}
+    end
+
+    test "descriptions flow through 3-agent chain" do
+      agent_a =
+        SubAgent.new(
+          prompt: "Return value",
+          signature: "() -> {x :int}",
+          field_descriptions: %{x: "Description from A"},
+          max_turns: 1
+        )
+
+      agent_b =
+        SubAgent.new(
+          prompt: "Double",
+          signature: "(x :int) -> {y :int}",
+          field_descriptions: %{y: "Description from B"},
+          max_turns: 1
+        )
+
+      agent_c =
+        SubAgent.new(
+          prompt: "Triple",
+          signature: "(y :int) -> {z :int}",
+          field_descriptions: %{z: "Description from C"},
+          max_turns: 1
+        )
+
+      descriptions_seen = :ets.new(:descriptions_seen, [:set, :public])
+
+      mock_llm = fn %{messages: msgs, system: system} ->
+        content = msgs |> List.last() |> Map.get(:content)
+
+        cond do
+          content =~ "Return value" ->
+            {:ok, "```clojure\n{:x 10}\n```"}
+
+          content =~ "Double" ->
+            if system =~ "Description from A" do
+              :ets.insert(descriptions_seen, {:b_saw_a, true})
+            end
+
+            {:ok, "```clojure\n{:y (* 2 ctx/x)}\n```"}
+
+          content =~ "Triple" ->
+            if system =~ "Description from B" do
+              :ets.insert(descriptions_seen, {:c_saw_b, true})
+            end
+
+            {:ok, "```clojure\n{:z (* 3 ctx/y)}\n```"}
+        end
+      end
+
+      result =
+        SubAgent.run!(agent_a, llm: mock_llm)
+        |> SubAgent.then!(agent_b, llm: mock_llm)
+        |> SubAgent.then!(agent_c, llm: mock_llm)
+
+      assert result.return.z == 60
+      assert result.field_descriptions == %{z: "Description from C"}
+      assert :ets.lookup(descriptions_seen, :b_saw_a) == [{:b_saw_a, true}]
+      assert :ets.lookup(descriptions_seen, :c_saw_b) == [{:c_saw_b, true}]
+
+      :ets.delete(descriptions_seen)
+    end
+
+    test "nil field_descriptions from upstream is handled gracefully" do
+      agent_a =
+        SubAgent.new(
+          prompt: "Return value",
+          signature: "() -> {x :int}",
+          # No field_descriptions
+          max_turns: 1
+        )
+
+      agent_b =
+        SubAgent.new(
+          prompt: "Double",
+          signature: "(x :int) -> {y :int}",
+          field_descriptions: %{y: "Double of x"},
+          max_turns: 1
+        )
+
+      mock_llm = fn %{messages: msgs} ->
+        content = msgs |> List.last() |> Map.get(:content)
+
+        if content =~ "Return value" do
+          {:ok, "```clojure\n{:x 5}\n```"}
+        else
+          {:ok, "```clojure\n{:y (* 2 ctx/x)}\n```"}
+        end
+      end
+
+      step_a = SubAgent.run!(agent_a, llm: mock_llm)
+      assert step_a.field_descriptions == nil
+
+      step_b = SubAgent.then!(step_a, agent_b, llm: mock_llm)
+      assert step_b.return.y == 10
+      assert step_b.field_descriptions == %{y: "Double of x"}
+    end
   end
 end
