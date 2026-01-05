@@ -94,6 +94,8 @@ defmodule PtcRunner.Lisp.Format do
   - Keywords: `:foo` (same as Clojure)
   - Strings/numbers/booleans: standard literals
 
+  Returns `{formatted_string, truncated?}` tuple.
+
   ## Options
 
   - `:limit` - Maximum items to show in collections (default: :infinity)
@@ -102,68 +104,78 @@ defmodule PtcRunner.Lisp.Format do
   ## Examples
 
       iex> PtcRunner.Lisp.Format.to_clojure(42)
-      "42"
+      {"42", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure([1, 2, 3])
-      "[1 2 3]"
+      {"[1 2 3]", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure(%{id: 101, count: 45})
-      "{:count 45 :id 101}"
+      {"{:count 45 :id 101}", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure(%{"name" => "Alice", "age" => 30})
-      ~s({"age" 30 "name" "Alice"})
+      {~s({"age" 30 "name" "Alice"}), false}
 
       iex> PtcRunner.Lisp.Format.to_clojure({:closure, [{:var, :x}], nil, %{}, []})
-      "#fn[x]"
+      {"#fn[x]", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure({:var, :x})
-      "#'x"
+      {"#'x", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure(nil)
-      "nil"
+      {"nil", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure(:keyword)
-      ":keyword"
+      {":keyword", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure([%{a: 1}, %{b: 2}])
-      "[{:a 1} {:b 2}]"
+      {"[{:a 1} {:b 2}]", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure([1, 2, 3, 4, 5], limit: 2)
-      "[1 2 ...] (5 items, showing first 2)"
+      {"[1 2 ...] (5 items, showing first 2)", true}
 
       iex> PtcRunner.Lisp.Format.to_clojure("very long string here", printable_limit: 10)
-      ~s("very long ...")
+      {~s("very long ..."), true}
   """
-  @spec to_clojure(term(), keyword()) :: String.t()
+  @spec to_clojure(term(), keyword()) :: {String.t(), boolean()}
   def to_clojure(value, opts \\ []) do
     value
     |> sanitize()
     |> format_clojure(opts)
   end
 
-  # Format a value as Clojure syntax
-  defp format_clojure(nil, _opts), do: "nil"
-  defp format_clojure(true, _opts), do: "true"
-  defp format_clojure(false, _opts), do: "false"
-  defp format_clojure(n, _opts) when is_integer(n), do: Integer.to_string(n)
-  defp format_clojure(f, _opts) when is_float(f), do: Float.to_string(f)
+  # Format a value as Clojure syntax - returns {string, truncated?}
+  defp format_clojure(nil, _opts), do: {"nil", false}
+  defp format_clojure(true, _opts), do: {"true", false}
+  defp format_clojure(false, _opts), do: {"false", false}
+  defp format_clojure(n, _opts) when is_integer(n), do: {Integer.to_string(n), false}
+  defp format_clojure(f, _opts) when is_float(f), do: {Float.to_string(f), false}
   defp format_clojure(s, opts) when is_binary(s), do: format_clojure_string(s, opts)
-  defp format_clojure(a, _opts) when is_atom(a), do: ":#{a}"
+  defp format_clojure(a, _opts) when is_atom(a), do: {":#{a}", false}
 
-  defp format_clojure(%Fn{params: params}, _opts), do: "#fn[#{params}]"
-  defp format_clojure(%Builtin{}, _opts), do: "#<builtin>"
-  defp format_clojure(%Var{name: name}, _opts), do: "#'#{name}"
+  defp format_clojure(%Fn{params: params}, _opts), do: {"#fn[#{params}]", false}
+  defp format_clojure(%Builtin{}, _opts), do: {"#<builtin>", false}
+  defp format_clojure(%Var{name: name}, _opts), do: {"#'#{name}", false}
+
+  # Structs (other than our wrapper types) pass through to inspect
+  defp format_clojure(%_{} = struct, _opts), do: {inspect(struct), false}
 
   defp format_clojure(list, opts) when is_list(list) do
     limit = Keyword.get(opts, :limit, :infinity)
-    {items, truncated} = apply_limit(list, limit)
-    formatted = Enum.map_join(items, " ", &format_clojure(&1, opts))
+    {items, list_truncated} = apply_limit(list, limit)
 
-    if truncated do
+    {formatted_items, any_child_truncated} =
+      Enum.map_reduce(items, false, fn item, acc ->
+        {str, truncated} = format_clojure(item, opts)
+        {str, acc or truncated}
+      end)
+
+    formatted = Enum.join(formatted_items, " ")
+
+    if list_truncated do
       total = length(list)
-      "[#{formatted} ...] (#{total} items, showing first #{limit})"
+      {"[#{formatted} ...] (#{total} items, showing first #{limit})", true}
     else
-      "[#{formatted}]"
+      {"[#{formatted}]", any_child_truncated}
     end
   end
 
@@ -171,18 +183,21 @@ defmodule PtcRunner.Lisp.Format do
     limit = Keyword.get(opts, :limit, :infinity)
     # Sort keys for consistent output
     entries = map |> Map.to_list() |> Enum.sort_by(&elem(&1, 0))
-    {items, truncated} = apply_limit(entries, limit)
+    {items, map_truncated} = apply_limit(entries, limit)
 
-    formatted =
-      Enum.map_join(items, " ", fn {k, v} ->
-        "#{format_clojure_key(k)} #{format_clojure(v, opts)}"
+    {formatted_items, any_child_truncated} =
+      Enum.map_reduce(items, false, fn {k, v}, acc ->
+        {v_str, v_truncated} = format_clojure(v, opts)
+        {"#{format_clojure_key(k)} #{v_str}", acc or v_truncated}
       end)
 
-    if truncated do
+    formatted = Enum.join(formatted_items, " ")
+
+    if map_truncated do
       total = map_size(map)
-      "{#{formatted} ...} (#{total} entries, showing first #{limit})"
+      {"{#{formatted} ...} (#{total} entries, showing first #{limit})", true}
     else
-      "{#{formatted}}"
+      {"{#{formatted}}", any_child_truncated}
     end
   end
 
@@ -195,20 +210,26 @@ defmodule PtcRunner.Lisp.Format do
   # Format map keys - atoms as keywords, strings as strings
   defp format_clojure_key(k) when is_atom(k), do: ":#{k}"
   defp format_clojure_key(k) when is_binary(k), do: inspect(k)
-  defp format_clojure_key(k), do: format_clojure(k, [])
 
-  # Format strings with printable_limit
+  defp format_clojure_key(k) do
+    {str, _truncated} = format_clojure(k, [])
+    str
+  end
+
+  # Format strings with printable_limit - returns {string, truncated?}
   defp format_clojure_string(s, opts) do
     limit = Keyword.get(opts, :printable_limit, :infinity)
 
-    truncated =
-      case limit do
-        :infinity -> s
-        n when byte_size(s) > n -> String.slice(s, 0, n) <> "..."
-        _ -> s
-      end
+    case limit do
+      :infinity ->
+        {inspect(s), false}
 
-    inspect(truncated)
+      n when byte_size(s) > n ->
+        {inspect(String.slice(s, 0, n) <> "..."), true}
+
+      _ ->
+        {inspect(s), false}
+    end
   end
 
   # Apply limit to a list, returning {kept_items, was_truncated?}

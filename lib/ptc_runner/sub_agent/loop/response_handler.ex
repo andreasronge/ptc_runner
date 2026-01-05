@@ -127,6 +127,8 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   REPL-style output: just the expression result, no prefix.
   Use `def` to explicitly store values that persist across turns.
 
+  Returns `{formatted_string, truncated?}` tuple.
+
   ## Options
 
   Uses `format_options` from SubAgent:
@@ -136,26 +138,29 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   ## Examples
 
       iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(42)
-      "42"
+      {"42", false}
 
       iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(%{count: 5})
-      "{:count 5}"
+      {"{:count 5}", false}
 
   """
-  @spec format_execution_result(term(), keyword()) :: String.t()
+  @spec format_execution_result(term(), keyword()) :: {String.t(), boolean()}
   def format_execution_result(result, format_options \\ []) do
     limit = Keyword.get(format_options, :feedback_limit, 10)
     max_chars = Keyword.get(format_options, :feedback_max_chars, 512)
 
-    formatted = Format.to_clojure(result, limit: limit, printable_limit: max_chars)
-    truncate_feedback(formatted, max_chars)
+    {formatted, format_truncated} =
+      Format.to_clojure(result, limit: limit, printable_limit: max_chars)
+
+    {final_str, char_truncated} = truncate_feedback(formatted, max_chars)
+    {final_str, format_truncated or char_truncated}
   end
 
   defp truncate_feedback(str, max_chars) when byte_size(str) > max_chars do
-    String.slice(str, 0, max_chars) <> "... (truncated)"
+    {String.slice(str, 0, max_chars) <> "... (truncated)", true}
   end
 
-  defp truncate_feedback(str, _max_chars), do: str
+  defp truncate_feedback(str, _max_chars), do: {str, false}
 
   @doc """
   Format final result for caller.

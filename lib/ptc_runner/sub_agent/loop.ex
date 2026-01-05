@@ -75,7 +75,10 @@ defmodule PtcRunner.SubAgent.Loop do
   - `opts` - Keyword list with:
     - `llm` - Required. LLM callback function
     - `context` - Initial context map (default: %{})
-    - `debug` - Enable verbose execution tracing (default: false)
+    - `debug` - Enable debug mode (default: false). When enabled, trace entries store exact message contents:
+      - `llm_response` - The assistant message (LLM output, stored as-is)
+      - `llm_feedback` - The user message (execution feedback, after truncation)
+      Use `SubAgent.Debug.print_trace(step, messages: true)` to view the conversation.
     - `trace` - Trace filtering: true (always), false (never), :on_error (only on failure) (default: true)
     - `llm_retry` - Optional retry configuration map with:
       - `max_attempts` - Maximum number of retry attempts (default: 1, meaning no retries unless explicitly configured)
@@ -322,6 +325,17 @@ defmodule PtcRunner.SubAgent.Loop do
         execute_code(code, response, agent, llm, state)
 
       {:error, :no_code_in_response} ->
+        # Log the response in debug mode so user can see what LLM returned
+        if state.debug do
+          IO.puts(
+            "[Turn #{state.turn}] No code found in LLM response (#{byte_size(response)} bytes):"
+          )
+
+          IO.puts("---")
+          IO.puts(response)
+          IO.puts("---")
+        end
+
         # Feed error back to LLM
         error_message =
           "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('."
@@ -405,12 +419,17 @@ defmodule PtcRunner.SubAgent.Loop do
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
 
       {:error, lisp_step} ->
-        # Build trace entry for failed execution (show error message, not nil)
-        error_result = {:error, lisp_step.fail.message}
-        trace_entry = Metrics.build_trace_entry(state, code, error_result, [])
-
         # Feed error back to LLM for next turn
         error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
+
+        # Build trace entry for failed execution (show error message, not nil)
+        error_result = {:error, lisp_step.fail.message}
+
+        trace_entry =
+          Metrics.build_trace_entry(state, code, error_result, [],
+            llm_response: response,
+            llm_feedback: error_message
+          )
 
         new_state = %{
           state
@@ -433,14 +452,16 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Handle successful Lisp execution
   defp handle_successful_execution(code, response, lisp_step, state, agent, llm) do
-    trace_entry = Metrics.build_trace_entry(state, code, lisp_step.return, [])
-
-    # Log turn execution if debug mode is enabled
-    Metrics.maybe_log_turn(state, response, lisp_step.return, state.debug)
-
     cond do
       # Explicit return or single-shot mode (expression result is the answer)
       ResponseHandler.contains_call?(code, "return") or agent.max_turns == 1 ->
+        # No feedback for terminating turns
+        trace_entry =
+          Metrics.build_trace_entry(state, code, lisp_step.return, [],
+            llm_response: response,
+            llm_feedback: nil
+          )
+
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
         final_step = %{
@@ -459,7 +480,13 @@ defmodule PtcRunner.SubAgent.Loop do
         {:ok, final_step}
 
       ResponseHandler.contains_call?(code, "fail") ->
-        # Explicit fail - complete with error
+        # Explicit fail - complete with error, no feedback
+        trace_entry =
+          Metrics.build_trace_entry(state, code, lisp_step.return, [],
+            llm_response: response,
+            llm_feedback: nil
+          )
+
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
         error_step = Step.error(:failed, inspect(lisp_step.return), lisp_step.memory)
@@ -482,7 +509,15 @@ defmodule PtcRunner.SubAgent.Loop do
         # Check memory limit before continuing
         case check_memory_limit(lisp_step.memory, agent.memory_limit) do
           {:ok, _size} ->
-            execution_result = format_turn_feedback(agent, state, lisp_step)
+            # Calculate feedback before building trace entry
+            {execution_result, feedback_truncated} = format_turn_feedback(agent, state, lisp_step)
+
+            trace_entry =
+              Metrics.build_trace_entry(state, code, lisp_step.return, [],
+                llm_response: response,
+                llm_feedback: execution_result,
+                feedback_truncated: feedback_truncated
+              )
 
             # Update turn history with truncated result (keep last 3)
             truncated_result = ResponseHandler.truncate_for_history(lisp_step.return)
@@ -509,6 +544,12 @@ defmodule PtcRunner.SubAgent.Loop do
 
           {:error, :memory_limit_exceeded, actual_size} ->
             # Memory limit exceeded - return error
+            trace_entry =
+              Metrics.build_trace_entry(state, code, lisp_step.return, [],
+                llm_response: response,
+                llm_feedback: nil
+              )
+
             duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
             error_msg =
@@ -599,22 +640,39 @@ defmodule PtcRunner.SubAgent.Loop do
     (history ++ [new_result]) |> Enum.take(-3)
   end
 
+  # Returns {feedback_string, truncated?}
   defp format_turn_feedback(agent, state, lisp_step) do
-    turns_remaining = state.remaining_turns - 1
-    base_result = ResponseHandler.format_execution_result(lisp_step.return, agent.format_options)
+    # Next turn number and how many remain including it
+    next_turn = state.turn + 1
+    turns_remaining = agent.max_turns - state.turn
+
+    {base_result, truncated?} =
+      ResponseHandler.format_execution_result(lisp_step.return, agent.format_options)
+
+    # Add truncation hint if result was truncated
+    result_with_hint =
+      if truncated? do
+        base_result <>
+          "\n\nHint: Result truncated. Write a program that filters or transforms data to return only what you need."
+      else
+        base_result
+      end
 
     # Add turn info for multi-turn agents
-    if agent.max_turns > 1 do
-      turn_info =
-        if turns_remaining == 1 do
-          "\n\n⚠️ FINAL TURN - you must call (return result) or (fail reason) next."
-        else
-          "\n\nTurn #{state.turn + 1} of #{agent.max_turns} (#{turns_remaining} remaining)"
-        end
+    feedback =
+      if agent.max_turns > 1 do
+        turn_info =
+          if turns_remaining == 1 do
+            "\n\n⚠️ FINAL TURN - you must call (return result) or (fail response) next."
+          else
+            "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_remaining} remaining)"
+          end
 
-      base_result <> turn_info
-    else
-      base_result
-    end
+        result_with_hint <> turn_info
+      else
+        result_with_hint
+      end
+
+    {feedback, truncated?}
   end
 end

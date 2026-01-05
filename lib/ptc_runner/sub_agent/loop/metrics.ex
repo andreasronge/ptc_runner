@@ -7,10 +7,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Final usage statistics (duration, memory, turns, tokens)
   - Trace entry construction with optional debug info
   - Trace filtering based on execution result
-  - Debug logging for turn execution
   """
 
-  alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
 
@@ -132,23 +130,30 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - `program` - The PTC-Lisp program that was executed
   - `result` - Execution result
   - `tool_calls` - List of tool calls made during execution
+  - `opts` - Optional keyword list with:
+    - `llm_response` - Raw LLM response text (debug mode only)
+    - `llm_feedback` - Formatted feedback sent back to LLM (debug mode only)
 
   ## Returns
 
   Trace entry map with turn number, program, result, and tool_calls.
-  In debug mode, also includes context_snapshot, memory_snapshot, and full_prompt.
+  In debug mode, also includes llm_response, llm_feedback, context_snapshot,
+  memory_snapshot, and full_prompt.
   """
-  @spec build_trace_entry(map(), String.t(), term(), list()) :: map()
-  def build_trace_entry(state, program, result, tool_calls) do
+  @spec build_trace_entry(map(), String.t(), term(), list(), keyword()) :: map()
+  def build_trace_entry(state, program, result, tool_calls, opts \\ []) do
     base = %{
       turn: state.turn,
       program: program,
       result: result,
-      tool_calls: tool_calls
+      tool_calls: tool_calls,
+      feedback_truncated: Keyword.get(opts, :feedback_truncated, false)
     }
 
     if state.debug do
       Map.merge(base, %{
+        llm_response: Keyword.get(opts, :llm_response),
+        llm_feedback: Keyword.get(opts, :llm_feedback),
         context_snapshot: state.context,
         memory_snapshot: state.memory,
         full_prompt: List.last(state.messages)
@@ -172,19 +177,4 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def apply_trace_filter(trace, true = _trace_mode, _is_error), do: trace
   def apply_trace_filter(trace, :on_error = _trace_mode, true = _is_error), do: trace
   def apply_trace_filter(_trace, :on_error = _trace_mode, false = _is_error), do: nil
-
-  @doc """
-  Log turn execution if debug mode is enabled.
-  """
-  @spec maybe_log_turn(map(), String.t(), term(), boolean()) :: :ok
-  def maybe_log_turn(_state, _response, _result, false = _debug), do: :ok
-
-  def maybe_log_turn(state, response, result, true = _debug) do
-    IO.puts("[Turn #{state.turn}] LLM response:")
-    IO.puts(response)
-    IO.puts("\n[Turn #{state.turn}] Execution result:")
-    IO.puts(Format.to_string(result, pretty: true, limit: :infinity))
-    IO.puts("\n")
-    :ok
-  end
 end

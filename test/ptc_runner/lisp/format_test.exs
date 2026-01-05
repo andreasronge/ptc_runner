@@ -113,19 +113,19 @@ defmodule PtcRunner.Lisp.FormatTest do
 
   describe "to_clojure/2 with vars" do
     test "formats simple var" do
-      assert Format.to_clojure({:var, :x}) == "#'x"
+      assert Format.to_clojure({:var, :x}) == {"#'x", false}
     end
 
     test "formats var with question mark" do
-      assert Format.to_clojure({:var, :suspicious?}) == "#'suspicious?"
+      assert Format.to_clojure({:var, :suspicious?}) == {"#'suspicious?", false}
     end
 
     test "formats var nested in list" do
-      assert Format.to_clojure([{:var, :x}, {:var, :y}]) == "[#'x #'y]"
+      assert Format.to_clojure([{:var, :x}, {:var, :y}]) == {"[#'x #'y]", false}
     end
 
     test "formats var nested in map" do
-      assert Format.to_clojure(%{result: {:var, :foo}}) == "{:result #'foo}"
+      assert Format.to_clojure(%{result: {:var, :foo}}) == {"{:result #'foo}", false}
     end
   end
 
@@ -146,7 +146,7 @@ defmodule PtcRunner.Lisp.FormatTest do
   describe "to_clojure/2 with structs" do
     test "handles MapSet" do
       # Structs pass through to inspect
-      result = Format.to_clojure(MapSet.new(["meals"]))
+      {result, _truncated} = Format.to_clojure(MapSet.new(["meals"]))
       assert result =~ "MapSet"
     end
   end
