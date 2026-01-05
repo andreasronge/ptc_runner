@@ -90,9 +90,14 @@ Common issues and solutions when working with SubAgents.
    ```
 
 3. **Verify the tool appears in the system prompt**:
+   You can preview the prompt before running:
    ```elixir
    preview = SubAgent.preview_prompt(agent, context: %{})
    IO.puts(preview.system)  # Should list available tools
+   ```
+   Or inspect it in the trace of an executed agent (requires `debug: true`):
+   ```elixir
+   SubAgent.Debug.print_trace(step, messages: true)
    ```
 
 ## Context Too Large
@@ -131,13 +136,13 @@ Common issues and solutions when working with SubAgents.
 
 **Solutions:**
 
-1. **Enable debug mode** to see exactly what the LLM is returning:
+1. **Enable debug mode** to see exactly what the LLM is receiving and returning:
    ```elixir
    {:error, step} = SubAgent.run(prompt, debug: true, llm: llm)
-   # Show full LLM messages
+   # Show full LLM messages including the system prompt
    SubAgent.Debug.print_trace(step, messages: true)
    ```
-   With `messages: true`, you'll see the actual LLM response and what feedback was sent back. This is especially useful when you get `MaxTurnsExceeded` but see empty traces.
+   With `messages: true`, you'll see the **System Prompt** (containing instructions and tool definitions), the actual LLM response, and what feedback was sent back. This is essential for verifying that the instructions and tool definitions are correctly formatted and sent to the LLM.
 
 2. **Ensure your LLM callback includes the system prompt**:
    ```elixir

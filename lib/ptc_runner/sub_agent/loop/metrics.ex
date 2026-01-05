@@ -154,6 +154,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       Map.merge(base, %{
         llm_response: Keyword.get(opts, :llm_response),
         llm_feedback: Keyword.get(opts, :llm_feedback),
+        system_prompt: Map.get(state, :current_system_prompt),
         context_snapshot: state.context,
         memory_snapshot: state.memory,
         full_prompt: List.last(state.messages)

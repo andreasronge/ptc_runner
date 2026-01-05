@@ -420,7 +420,8 @@ defmodule PtcRunner.SubAgent do
               context,
               start_time,
               llm_registry,
-              received_field_descriptions
+              received_field_descriptions,
+              opts
             )
           else
             # Loop mode - delegate to Loop.run/2
@@ -631,7 +632,8 @@ defmodule PtcRunner.SubAgent do
          context,
          start_time,
          llm_registry,
-         received_field_descriptions
+         received_field_descriptions,
+         opts
        ) do
     # Expand template in prompt
     expanded_prompt = expand_template(agent.prompt, context)
@@ -674,21 +676,49 @@ defmodule PtcRunner.SubAgent do
             # Execute via Lisp
             lisp_result = PtcRunner.Lisp.run(code, context: context, tools: %{})
 
-            # Add usage metrics and field_descriptions from this execution
+            # Add usage metrics, field_descriptions, and trace from this execution
             case lisp_result do
               {:ok, step} ->
                 duration_ms = System.monotonic_time(:millisecond) - start_time
+
+                trace =
+                  build_single_shot_trace(
+                    agent,
+                    system_prompt,
+                    llm_input,
+                    content,
+                    code,
+                    {:ok, step},
+                    opts
+                  )
 
                 updated_step =
                   step
                   |> update_step_usage(duration_ms, tokens)
                   |> Map.put(:field_descriptions, agent.field_descriptions)
+                  |> Map.put(:trace, trace)
 
                 {:ok, updated_step}
 
               {:error, step} ->
                 duration_ms = System.monotonic_time(:millisecond) - start_time
-                updated_step = update_step_usage(step, duration_ms, tokens)
+
+                trace =
+                  build_single_shot_trace(
+                    agent,
+                    system_prompt,
+                    llm_input,
+                    content,
+                    code,
+                    {:error, step},
+                    opts
+                  )
+
+                updated_step =
+                  step
+                  |> update_step_usage(duration_ms, tokens)
+                  |> Map.put(:trace, trace)
+
                 {:error, updated_step}
             end
 
@@ -765,6 +795,46 @@ defmodule PtcRunner.SubAgent do
       end
 
     %{step | usage: usage_with_tokens}
+  end
+
+  # Helper to build trace for single-shot execution
+  defp build_single_shot_trace(
+         _agent,
+         system_prompt,
+         llm_input,
+         response,
+         code,
+         lisp_result,
+         opts
+       ) do
+    alias PtcRunner.SubAgent.Loop.Metrics
+
+    trace_mode = Keyword.get(opts, :trace, true)
+    debug = Keyword.get(opts, :debug, false)
+
+    state = %{
+      turn: 1,
+      debug: debug,
+      trace_mode: trace_mode,
+      context: lisp_result |> elem(1) |> Map.get(:context, %{}),
+      memory: %{},
+      messages: llm_input.messages,
+      current_system_prompt: system_prompt
+    }
+
+    {status, lisp_step} = lisp_result
+
+    entry =
+      Metrics.build_trace_entry(
+        state,
+        code,
+        lisp_step.return || (lisp_step.fail && {:error, lisp_step.fail.message}),
+        [],
+        llm_response: response,
+        llm_feedback: nil
+      )
+
+    Metrics.apply_trace_filter([entry], trace_mode, status == :error)
   end
 
   @doc """

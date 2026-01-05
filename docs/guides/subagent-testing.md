@@ -175,6 +175,22 @@ end
 
 Other error scenarios follow the same pattern: validation errors (wrong return type), tool errors (`{:error, reason}`). The agent receives error feedback and can retry or fail gracefully.
 
+## Debugging with print_trace
+
+During development and testing, you can use `debug: true` and `SubAgent.Debug.print_trace/2` to see exactly what happened:
+
+```elixir
+{:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
+
+# Show a compact view of the execution
+SubAgent.Debug.print_trace(step)
+
+# Show a detailed view including full LLM messages and the system prompt
+SubAgent.Debug.print_trace(step, messages: true)
+```
+
+In the detailed view (`messages: true`), you'll see the **System Prompt** for each turn, the raw LLM output, and the feedback sent back to the LLM (if applicable). This is essential for debugging prompt issues or tool definition errors.
+
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
