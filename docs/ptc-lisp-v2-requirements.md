@@ -156,13 +156,13 @@
 
 | ID | Requirement | Section |
 |----|-------------|---------|
-| REQ-FMT-1 | `feedback_limit`: max collection items shown to LLM (default: 20) | §8.8 |
-| REQ-FMT-2 | `feedback_max_chars`: max chars for feedback (default: 2KB) | §8.8 |
-| REQ-FMT-3 | `history_max_bytes`: truncation limit for `*1`/`*2`/`*3` (default: 1KB) | §8.8 |
+| REQ-FMT-1 | `feedback_limit`: max collection items shown to LLM (default: 10) | §8.8 |
+| REQ-FMT-2 | `feedback_max_chars`: max chars for feedback (default: 512) | §8.8 |
+| REQ-FMT-3 | `history_max_bytes`: truncation limit for `*1`/`*2`/`*3` (default: 512 bytes) | §8.8 |
 | REQ-FMT-4 | `result_limit`: inspect `:limit` for collections (default: 50) | §8.8 |
 | REQ-FMT-5 | `result_max_chars`: final string truncation (default: 500) | §8.8 |
-| REQ-FMT-6 | Turn feedback (shown to LLM) should be truncated: 20 items, 2KB default | §2.4 |
-| REQ-FMT-7 | Large collections show count indicator (e.g., "500 items, showing first 20") | §8.8, §9.4 |
+| REQ-FMT-6 | Turn feedback (shown to LLM) should be truncated: 10 items, 512 chars default | §2.4 |
+| REQ-FMT-7 | Large collections show count indicator (e.g., "500 items, showing first 10") | §8.8, §9.4 |
 | REQ-FMT-8 | Move formatting logic from demo app to library (`ResponseHandler.format_result/2`) | §8.8 |
 
 ---

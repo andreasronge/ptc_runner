@@ -315,9 +315,9 @@ PtcRunner.SubAgent.new(
 
   # Output formatting options (shown with defaults)
   format_options: [
-    feedback_limit: 20,        # max collection items in turn feedback
-    feedback_max_chars: 2048,  # max chars in turn feedback
-    history_max_bytes: 1024,   # truncation limit for *1/*2/*3 history
+    feedback_limit: 10,        # max collection items in turn feedback
+    feedback_max_chars: 512,   # max chars in turn feedback
+    history_max_bytes: 512,    # truncation limit for *1/*2/*3 history
     result_limit: 50,          # inspect :limit for final result
     result_max_chars: 500      # final string truncation
   ]

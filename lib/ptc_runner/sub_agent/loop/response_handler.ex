@@ -121,22 +121,38 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   @doc """
   Format execution result for LLM feedback.
 
-  V2 simplified model: result is just displayed as-is. No implicit memory storage.
+  REPL-style output: just the expression result, no prefix.
   Use `def` to explicitly store values that persist across turns.
+
+  ## Options
+
+  Uses `format_options` from SubAgent:
+  - `:feedback_limit` - Max collection items (default: 10)
+  - `:feedback_max_chars` - Max chars in feedback (default: 512)
 
   ## Examples
 
       iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(42)
-      "Result: 42"
+      "42"
 
       iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_execution_result(%{count: 5})
-      "Result: {:count 5}"
+      "{:count 5}"
 
   """
-  @spec format_execution_result(term()) :: String.t()
-  def format_execution_result(result) do
-    "Result: #{Format.to_clojure(result, limit: :infinity, printable_limit: :infinity)}"
+  @spec format_execution_result(term(), keyword()) :: String.t()
+  def format_execution_result(result, format_options \\ []) do
+    limit = Keyword.get(format_options, :feedback_limit, 10)
+    max_chars = Keyword.get(format_options, :feedback_max_chars, 512)
+
+    formatted = Format.to_clojure(result, limit: limit, printable_limit: max_chars)
+    truncate_feedback(formatted, max_chars)
   end
+
+  defp truncate_feedback(str, max_chars) when byte_size(str) > max_chars do
+    String.slice(str, 0, max_chars) <> "... (truncated)"
+  end
+
+  defp truncate_feedback(str, _max_chars), do: str
 
   # Default maximum size for turn history entries (1KB)
   @default_max_history_bytes 1024
