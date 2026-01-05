@@ -59,32 +59,35 @@ defmodule PtcRunner.SubAgent.DebugTest do
   end
 
   describe "debug mode" do
-    test "captures execution with debug: true" do
+    test "captures llm_response and llm_feedback in trace with debug: true" do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
 
       llm = fn %{turn: t} ->
         case t do
-          1 -> {:ok, ~S|```clojure
+          1 ->
+            {:ok, ~S|```clojure
 {:intermediate "value"}
 ```|}
-          2 -> {:ok, ~S|```clojure
+
+          2 ->
+            {:ok, ~S|```clojure
 (return {:done true})
 ```|}
         end
       end
 
-      output =
-        capture_io(fn ->
-          {:ok, _step} = SubAgent.run(agent, llm: llm, context: %{}, debug: true)
-        end)
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, debug: true)
 
-      # Debug mode should print turn information
-      assert output =~ "[Turn 1]"
-      assert output =~ "LLM response"
-      assert output =~ "Execution result"
+      # Trace should contain llm_response and llm_feedback
+      [turn1, turn2] = step.trace
+      assert turn1.llm_response =~ "intermediate"
+      assert turn1.llm_feedback != nil
+      assert turn2.llm_response =~ "return"
+      # Last turn has no feedback (it's terminating)
+      assert turn2.llm_feedback == nil
     end
 
-    test "does not log when debug: false" do
+    test "does not capture llm_response when debug: false" do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
 
       llm = fn _ ->
@@ -93,33 +96,25 @@ defmodule PtcRunner.SubAgent.DebugTest do
 ```|}
       end
 
-      output =
-        capture_io(fn ->
-          {:ok, _step} = SubAgent.run(agent, llm: llm, context: %{}, debug: false)
-        end)
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, debug: false)
 
-      # Should not contain debug output
-      refute output =~ "[Turn"
+      # Trace entries should not have llm_response when debug is false
+      [turn1] = step.trace
+      refute Map.has_key?(turn1, :llm_response)
     end
 
     test "debug: true captures extra trace fields" do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
       llm = fn _ -> {:ok, ~S|(return {:done true})|} end
 
-      capture_io(fn ->
-        {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
-        send(self(), step)
-      end)
-
-      step =
-        receive do
-          step -> step
-        end
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
 
       [turn1] = step.trace
       assert Map.has_key?(turn1, :context_snapshot)
       assert Map.has_key?(turn1, :memory_snapshot)
       assert Map.has_key?(turn1, :full_prompt)
+      assert Map.has_key?(turn1, :llm_response)
+      assert Map.has_key?(turn1, :llm_feedback)
       assert turn1.context_snapshot == %{foo: 1}
     end
   end

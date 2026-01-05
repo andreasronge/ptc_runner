@@ -208,6 +208,7 @@ mix json [options]
 | `--test` | Run all automated tests and exit |
 | `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
+| `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 
@@ -239,6 +240,7 @@ mix lisp [options]
 | `--test` | Run all automated tests and exit |
 | `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
+| `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--validate-clojure` | Validate generated programs against Babashka |
@@ -253,6 +255,7 @@ mix lisp --model=gemini                   # Use Gemini via OpenRouter
 mix lisp --prompt=single_shot             # Use single-shot prompt explicitly
 mix lisp --test --model=deepseek -v       # Test with DeepSeek
 mix lisp --test --validate-clojure        # Validate syntax with Babashka
+mix lisp --debug                          # Debug mode to see full LLM responses
 ```
 
 ## Prompt Profiles
@@ -628,4 +631,28 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 │  • Generates natural language answer                        │
 └─────────────────────────────────────────────────────────────┘
 
+## Troubleshooting
 
+### MaxTurnsExceeded with No Programs
+
+**Symptom:** You get `MaxTurnsExceeded: Exceeded max_turns limit of 5` but `/context` shows "No conversation yet" and no programs are visible.
+
+**Cause:** The LLM is returning responses that don't contain valid PTC-Lisp code (e.g., prose explanations, wrong code fence format, or natural language instead of code).
+
+**Solution:** Use `--debug` or `-d` to enable debug mode, then inspect the trace:
+
+```bash
+mix lisp --debug --prompt=multi_turn
+```
+
+After an error, use `SubAgent.Debug.print_trace(step, messages: true)` to see:
+- The full LLM response (before code extraction)
+- What feedback was sent back to the LLM
+- How truncation affected the data
+
+This reveals why the code parser failed and helps diagnose whether:
+- The LLM is confused about the task
+- The system prompt isn't being sent correctly
+- The model doesn't support the code format
+
+See [SubAgent Troubleshooting](../docs/guides/subagent-troubleshooting.md) for more debugging tips.

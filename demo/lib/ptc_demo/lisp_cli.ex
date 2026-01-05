@@ -81,7 +81,7 @@ defmodule PtcDemo.LispCLI do
       )
 
       # Enter REPL loop
-      loop(debug: opts[:debug] || false)
+      loop(debug: opts[:debug] || false, verbose: opts[:verbose] || false)
     end
   end
 
@@ -325,7 +325,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input(question, opts) do
-    case PtcDemo.LispAgent.ask(question, debug: opts[:debug]) do
+    case PtcDemo.LispAgent.ask(question, debug: opts[:debug], verbose: opts[:verbose]) do
       {:ok, answer} ->
         IO.puts("\nassistant> #{answer}\n")
 

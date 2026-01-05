@@ -280,6 +280,14 @@ defmodule PtcRunner.SubAgent do
   - `llm` - Required. LLM callback function `(map() -> {:ok, String.t()} | {:error, term()})` or atom
   - `llm_registry` - Map of atom to LLM callback for atom-based LLM references (default: %{})
   - `context` - Map of input data (default: %{})
+  - `debug` - Enable debug mode (default: false). When enabled, trace entries store exact message contents:
+    - `llm_response` - The assistant message (LLM output, stored as-is)
+    - `llm_feedback` - The user message (execution feedback, after truncation)
+    Use `SubAgent.Debug.print_trace(step, messages: true)` to view the conversation.
+  - `trace` - Trace collection mode (default: true):
+    - `true` - Always collect trace in Step
+    - `false` - Never collect trace
+    - `:on_error` - Only include trace when execution fails
   - `llm_retry` - Optional map to configure retry behavior for transient LLM failures:
     - `max_attempts` - Maximum retry attempts (default: 1, meaning no retries unless explicitly configured)
     - `backoff` - Backoff strategy: `:exponential`, `:linear`, or `:constant` (default: `:exponential`)

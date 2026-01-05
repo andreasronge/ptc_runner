@@ -11,10 +11,12 @@ defmodule PtcRunner.SubAgent.Debug do
 
       {:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
 
-  When enabled, each turn logs:
-  - Turn number
-  - LLM response (truncated)
-  - Execution result (truncated)
+  When debug mode is enabled, trace entries store the exact message contents:
+  - `llm_response` - The assistant message (LLM output, stored as-is)
+  - `llm_feedback` - The user message (execution feedback, after truncation)
+
+  These are exactly what's in the messages array sent to the LLM.
+  Use `print_trace(step, messages: true)` to view this data.
 
   ## Trace Option
 
@@ -28,13 +30,15 @@ defmodule PtcRunner.SubAgent.Debug do
 
   ## Examples
 
-      iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{}, debug: true)
-      iex> PtcRunner.SubAgent.Debug.print_trace(step)
-      # Prints formatted trace to stdout
+      # Default compact view
+      {:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
+      SubAgent.Debug.print_trace(step)
 
-      iex> steps = [step1, step2, step3]
-      iex> PtcRunner.SubAgent.Debug.print_chain(steps)
-      # Prints chained execution flow
+      # Show full LLM messages (requires debug: true)
+      SubAgent.Debug.print_trace(step, messages: true)
+
+      # Print agent chain
+      SubAgent.Debug.print_chain([step1, step2, step3])
 
   """
 
@@ -46,33 +50,50 @@ defmodule PtcRunner.SubAgent.Debug do
   @doc """
   Pretty-print a SubAgent execution trace.
 
-  Displays each turn with its prompt, program, tool calls, and results
+  Displays each turn with its program, tool calls, and results
   in a formatted box-drawing style.
 
   ## Parameters
 
   - `step` - A `%Step{}` struct with trace data
+  - `opts` - Keyword list of options:
+    - `messages: true` - Show full LLM response and feedback (requires `debug: true` during execution)
 
   ## Examples
 
-      iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{user: "alice"})
+      # Default compact view
+      iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{})
       iex> PtcRunner.SubAgent.Debug.print_trace(step)
       :ok
 
+      # Show full LLM messages (requires debug: true during execution)
+      iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, debug: true)
+      iex> PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
+      :ok
+
   """
-  @spec print_trace(Step.t()) :: :ok
-  def print_trace(%Step{trace: nil}) do
+  @spec print_trace(Step.t(), keyword()) :: :ok
+  def print_trace(step, opts \\ [])
+
+  def print_trace(%Step{trace: nil}, _opts) do
     IO.puts("No trace available (trace disabled or not yet executed)")
     :ok
   end
 
-  def print_trace(%Step{trace: []}) do
+  def print_trace(%Step{trace: []}, _opts) do
     IO.puts("Empty trace")
     :ok
   end
 
-  def print_trace(%Step{trace: trace}) when is_list(trace) do
-    Enum.each(trace, &print_turn/1)
+  def print_trace(%Step{trace: trace}, opts) when is_list(trace) do
+    show_messages = Keyword.get(opts, :messages, false)
+
+    if show_messages do
+      Enum.each(trace, &print_turn_with_messages/1)
+    else
+      Enum.each(trace, &print_turn/1)
+    end
+
     :ok
   end
 
@@ -168,6 +189,104 @@ defmodule PtcRunner.SubAgent.Debug do
     Enum.each(result_lines, fn line ->
       IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{truncate_line(line, 80)}")
     end)
+
+    IO.puts("#{ansi(:cyan)}└#{String.duplicate("─", @box_width - 2)}┘#{ansi(:reset)}")
+  end
+
+  # Print turn with full LLM messages (for messages: true option)
+  defp print_turn_with_messages(turn_entry) do
+    turn_num = Map.get(turn_entry, :turn, 0)
+    program = Map.get(turn_entry, :program, "")
+    result = Map.get(turn_entry, :result, nil)
+    tool_calls = Map.get(turn_entry, :tool_calls, [])
+    llm_response = Map.get(turn_entry, :llm_response)
+    llm_feedback = Map.get(turn_entry, :llm_feedback)
+
+    header = " Turn #{turn_num} "
+
+    IO.puts(
+      "\n#{ansi(:cyan)}┌─#{header}#{String.duplicate("─", @box_width - 3 - String.length(header))}┐#{ansi(:reset)}"
+    )
+
+    # Print LLM Response (assistant message in messages array)
+    IO.puts(
+      "#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Assistant Message (LLM output):#{ansi(:reset)}"
+    )
+
+    if llm_response do
+      llm_response
+      |> String.split("\n")
+      |> Enum.each(fn line ->
+        IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}#{line}#{ansi(:reset)}")
+      end)
+    else
+      IO.puts(
+        "#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}(not captured - run with debug: true)#{ansi(:reset)}"
+      )
+    end
+
+    IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
+
+    # Print extracted program
+    IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
+
+    program
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:green)}#{line}#{ansi(:reset)}")
+    end)
+
+    # Print tool calls if any
+    unless Enum.empty?(tool_calls) do
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Tools:#{ansi(:reset)}")
+
+      Enum.each(tool_calls, fn call ->
+        tool_name = Map.get(call, :name, "unknown")
+        tool_args = Map.get(call, :args, %{})
+        tool_result = Map.get(call, :result, nil)
+
+        args_str = format_compact(tool_args)
+        result_str = format_compact(tool_result)
+
+        IO.puts(
+          "#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:green)}→#{ansi(:reset)} #{tool_name}(#{args_str})"
+        )
+
+        IO.puts(
+          "#{ansi(:cyan)}│#{ansi(:reset)}     #{ansi(:green)}←#{ansi(:reset)} #{result_str}"
+        )
+      end)
+    end
+
+    IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
+
+    # Print result (full, not truncated)
+    IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Result:#{ansi(:reset)}")
+    result_str = Format.to_string(result, pretty: true, limit: :infinity)
+
+    result_str
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{line}")
+    end)
+
+    IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
+
+    # Print feedback to LLM (user message in messages array - truncated)
+    IO.puts(
+      "#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}User Message (feedback, truncated):#{ansi(:reset)}"
+    )
+
+    if llm_feedback do
+      llm_feedback
+      |> String.split("\n")
+      |> Enum.each(fn line ->
+        IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:yellow)}#{line}#{ansi(:reset)}")
+      end)
+    else
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}(none - final turn)#{ansi(:reset)}")
+    end
 
     IO.puts("#{ansi(:cyan)}└#{String.duplicate("─", @box_width - 2)}┘#{ansi(:reset)}")
   end
@@ -311,6 +430,7 @@ defmodule PtcRunner.SubAgent.Debug do
   defp ansi(:cyan), do: IO.ANSI.cyan()
   defp ansi(:green), do: IO.ANSI.green()
   defp ansi(:red), do: IO.ANSI.red()
+  defp ansi(:yellow), do: IO.ANSI.yellow()
   defp ansi(:bold), do: IO.ANSI.bright()
   defp ansi(:dim), do: IO.ANSI.faint()
 end
