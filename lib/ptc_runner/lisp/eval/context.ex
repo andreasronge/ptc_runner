@@ -10,14 +10,26 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `turn_history`: Previous turn results for multi-turn loops
   """
 
-  defstruct [:ctx, :user_ns, :env, :tool_exec, :turn_history]
+  defstruct [
+    :ctx,
+    :user_ns,
+    :env,
+    :tool_exec,
+    :turn_history,
+    iteration_count: 0,
+    loop_limit: 1000
+  ]
+
+  @max_loop_limit 10_000
 
   @type t :: %__MODULE__{
           ctx: map(),
           user_ns: map(),
           env: map(),
           tool_exec: (String.t(), map() -> term()),
-          turn_history: list()
+          turn_history: list(),
+          iteration_count: integer(),
+          loop_limit: integer()
         }
 
   @doc """
@@ -47,6 +59,27 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec update_user_ns(t(), map()) :: t()
   def update_user_ns(%__MODULE__{} = context, new_user_ns) do
     %{context | user_ns: new_user_ns}
+  end
+
+  @doc """
+  Increments the iteration count and checks against the limit.
+  """
+  @spec increment_iteration(t()) :: {:ok, t()} | {:error, :loop_limit_exceeded}
+  def increment_iteration(%__MODULE__{iteration_count: count, loop_limit: limit} = context) do
+    if count >= limit do
+      {:error, :loop_limit_exceeded}
+    else
+      {:ok, %{context | iteration_count: count + 1}}
+    end
+  end
+
+  @doc """
+  Sets a new loop limit, respecting the hard maximum.
+  """
+  @spec set_loop_limit(t(), integer()) :: t()
+  def set_loop_limit(%__MODULE__{} = context, new_limit) do
+    limit = min(max(0, new_limit), @max_loop_limit)
+    %{context | loop_limit: limit}
   end
 
   @doc """

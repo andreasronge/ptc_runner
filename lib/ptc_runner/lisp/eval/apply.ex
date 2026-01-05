@@ -64,32 +64,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Closure application (5-element tuple format with turn_history)
   defp do_apply_fun(
-         {:closure, patterns, body, closure_env, closure_turn_history},
+         {:closure, patterns, _body, _env, _th} = closure,
          args,
-         %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec},
+         %EvalContext{} = eval_ctx,
          do_eval_fn
        ) do
     if length(patterns) != length(args) do
       {:error, {:arity_mismatch, length(patterns), length(args)}}
     else
-      result =
-        Enum.zip(patterns, args)
-        |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
-          case Patterns.match_pattern(pattern, arg) do
-            {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
-            {:error, _} = err -> {:halt, err}
-          end
-        end)
-
-      case result do
-        {:ok, bindings} ->
-          new_env = Map.merge(closure_env, bindings)
-          closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
-          do_eval_fn.(body, closure_ctx)
-
-        {:error, _} = err ->
-          err
-      end
+      execute_closure(closure, args, eval_ctx, do_eval_fn)
     end
   end
 
@@ -389,5 +372,56 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       {:ok, result, _} -> result
       {:error, reason} -> raise RuntimeError, Helpers.format_closure_error(reason)
     end
+  end
+
+  # ============================================================
+  # Closure Execution Helpers
+  # ============================================================
+
+  defp execute_closure(
+         {:closure, patterns, body, closure_env, closure_turn_history} = closure,
+         args,
+         %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
+         do_eval_fn
+       ) do
+    case bind_args(patterns, args) do
+      {:ok, bindings} ->
+        new_env = Map.merge(closure_env, bindings)
+        closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
+
+        # Use iteration limit from caller context
+        closure_ctx = %{closure_ctx | loop_limit: caller_ctx.loop_limit}
+
+        do_eval_fn.(body, closure_ctx)
+
+      {:error, _} = err ->
+        err
+    end
+  catch
+    {:recur_signal, new_args} ->
+      # Arity check for recur
+      if length(patterns) != length(new_args) do
+        {:error, {:arity_mismatch, length(patterns), length(new_args)}}
+      else
+        # Check iteration limit
+        case EvalContext.increment_iteration(caller_ctx) do
+          {:ok, updated_caller_ctx} ->
+            # Tail-recursive call
+            execute_closure(closure, new_args, updated_caller_ctx, do_eval_fn)
+
+          {:error, :loop_limit_exceeded} ->
+            {:error, {:loop_limit_exceeded, caller_ctx.loop_limit}}
+        end
+      end
+  end
+
+  defp bind_args(patterns, args) do
+    Enum.zip(patterns, args)
+    |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
+      case Patterns.match_pattern(pattern, arg) do
+        {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
   end
 end

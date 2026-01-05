@@ -415,8 +415,6 @@ defmodule PtcRunner.SubAgent.PromptTest do
       refute prompt =~ "Clojure-inspired"
     end
 
-    # TODO: Fix in #538 - prompt no longer contains "Core Functions"
-    @tag :skip
     test "language_spec atom resolves to prompt profile" do
       agent =
         SubAgent.new(

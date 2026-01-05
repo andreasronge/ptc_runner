@@ -771,6 +771,50 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ---
 
+### 5.9 `loop` and `recur` — Tail Recursion
+
+`loop` establishes a recursion point, and `recur` transfers control back to that point with new values.
+
+**`loop` syntax:**
+```clojure
+(loop [bindings] body)
+```
+
+**`recur` syntax:**
+```clojure
+(recur expr1 expr2 ...)
+```
+
+**Semantics:**
+- `loop` establishes bindings just like `let`.
+- `recur` can only appear in a **tail position** of a `loop` or `fn`.
+- When `recur` is evaluated, it re-binds the arguments and jumps back to the start of the `loop` or `fn` body.
+- Evaluation is **stack-safe** (no stack growth).
+- An iteration check is enforced to prevent infinite loops (default limit: 1000 iterations).
+
+**Examples:**
+```clojure
+;; Summing numbers 0 to 4
+(loop [i 0 acc 0]
+  (if (< i 5)
+    (recur (inc i) (+ acc i))
+    acc))
+; => 10
+
+;; Factorial with recur in fn
+((fn [n acc]
+   (if (> n 0)
+     (recur (dec n) (* acc n))
+     acc))
+ 5 1)
+; => 120
+```
+
+**Safety Mechanism:**
+To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive calls. If a loop exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error.
+
+---
+
 ## 6. Threading Macros
 
 Threading macros transform nested function calls into linear pipelines.
@@ -2302,7 +2346,6 @@ type-error at line 5:
 
 | Feature | Reason |
 |---------|--------|
-| `loop`, `recur` | No unbounded recursion |
 | `lazy-seq` | All operations are eager |
 | Macros | No metaprogramming |
 | Namespaces (user-defined) | Single expression, no modules |
@@ -2355,7 +2398,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 - `#()` accepts a single expression as the body
 - `%` and `%1`, `%2`, etc. are parameter placeholders (not regular symbols within `#()`)
 - Nested `#()` is not allowed
-- No recursion within `fn` or `#()` (no self-reference)
+- Recursion is supported via `recur` (no self-reference by name, see §5.9)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
 

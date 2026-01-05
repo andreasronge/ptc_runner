@@ -23,7 +23,6 @@ ctx/orders
 - Namespaced keywords (`:foo/bar`)
 - Lazy sequences (`lazy-seq`, `iterate`). `range` is supported but always finite.
 - Macros, `defmacro`
-- Recursion, `loop/recur`
 - Ratios (`1/3`), BigDecimals (`1.0M`)
 - Multi-line strings
 - `if` without else — use `(if cond then nil)` or `when`
@@ -102,6 +101,14 @@ results                                        ; => the search results
 
 ; Use with filter:
 (filter #(re-find (re-pattern "error") %) logs)
+```
+
+**Recursion** — stack-safe tail calls (limit: 1000 iterations):
+```clojure
+(loop [i 0 acc 0]
+  (if (< i 5)
+    (recur (inc i) (+ acc i))
+    acc))
 ```
 
 ### Threading

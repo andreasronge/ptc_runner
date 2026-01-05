@@ -69,7 +69,7 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
   describe "short-circuit logic" do
     test "empty and" do
       raw = {:list, [{:symbol, :and}]}
-      assert {:ok, {:and, []}} = Analyze.analyze(raw)
+      assert {:ok, true} = Analyze.analyze(raw)
     end
 
     test "and with expressions" do
@@ -79,7 +79,7 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
 
     test "empty or" do
       raw = {:list, [{:symbol, :or}]}
-      assert {:ok, {:or, []}} = Analyze.analyze(raw)
+      assert {:ok, nil} = Analyze.analyze(raw)
     end
 
     test "or with expressions" do

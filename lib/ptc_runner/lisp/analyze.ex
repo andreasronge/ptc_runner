@@ -28,14 +28,14 @@ defmodule PtcRunner.Lisp.Analyze do
 
   @spec analyze(term()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
   def analyze(raw_ast) do
-    do_analyze(raw_ast)
+    do_analyze(raw_ast, false)
   end
 
   # ============================================================
   # Multiple top-level expressions (implicit do)
   # ============================================================
 
-  defp do_analyze({:program, exprs}) when is_list(exprs) do
+  defp do_analyze({:program, exprs}, _tail?) when is_list(exprs) do
     with {:ok, analyzed} <- analyze_list(exprs) do
       {:ok, {:do, analyzed}}
     end
@@ -45,31 +45,31 @@ defmodule PtcRunner.Lisp.Analyze do
   # Literals and basic values
   # ============================================================
 
-  defp do_analyze(nil), do: {:ok, nil}
-  defp do_analyze(true), do: {:ok, true}
-  defp do_analyze(false), do: {:ok, false}
-  defp do_analyze(n) when is_integer(n) or is_float(n), do: {:ok, n}
+  defp do_analyze(nil, _tail?), do: {:ok, nil}
+  defp do_analyze(true, _tail?), do: {:ok, true}
+  defp do_analyze(false, _tail?), do: {:ok, false}
+  defp do_analyze(n, _tail?) when is_integer(n) or is_float(n), do: {:ok, n}
 
-  defp do_analyze({:string, s}), do: {:ok, {:string, s}}
-  defp do_analyze({:keyword, k}), do: {:ok, {:keyword, k}}
+  defp do_analyze({:string, s}, _tail?), do: {:ok, {:string, s}}
+  defp do_analyze({:keyword, k}, _tail?), do: {:ok, {:keyword, k}}
 
   # ============================================================
   # Collections
   # ============================================================
 
-  defp do_analyze({:vector, elems}) do
+  defp do_analyze({:vector, elems}, _tail?) do
     with {:ok, elems2} <- analyze_list(elems) do
       {:ok, {:vector, elems2}}
     end
   end
 
-  defp do_analyze({:map, pairs}) do
+  defp do_analyze({:map, pairs}, _tail?) do
     with {:ok, pairs2} <- analyze_pairs(pairs) do
       {:ok, {:map, pairs2}}
     end
   end
 
-  defp do_analyze({:set, elems}) do
+  defp do_analyze({:set, elems}, _tail?) do
     with {:ok, elems2} <- analyze_list(elems) do
       {:ok, {:set, elems2}}
     end
@@ -79,9 +79,9 @@ defmodule PtcRunner.Lisp.Analyze do
   # Short function syntax: #()
   # ============================================================
 
-  defp do_analyze({:short_fn, body_asts}) do
+  defp do_analyze({:short_fn, body_asts}, tail?) do
     with {:ok, desugared_ast} <- ShortFn.desugar(body_asts) do
-      do_analyze(desugared_ast)
+      do_analyze(desugared_ast, tail?)
     end
   end
 
@@ -89,7 +89,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Symbols and variables
   # ============================================================
 
-  defp do_analyze({:symbol, name}) do
+  defp do_analyze({:symbol, name}, _tail?) do
     if placeholder?(name) do
       {:error, {:invalid_placeholder, name}}
     else
@@ -97,97 +97,113 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp do_analyze({:ns_symbol, :ctx, key}), do: {:ok, {:ctx, key}}
+  defp do_analyze({:ns_symbol, :ctx, key}, _tail?), do: {:ok, {:ctx, key}}
 
   # Clojure-style namespaces: normalize to built-in or provide helpful error
-  defp do_analyze({:ns_symbol, ns, key}) do
+  defp do_analyze({:ns_symbol, ns, key}, _tail?) do
     normalize_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
   end
 
   # Turn history variables: *1, *2, *3
-  defp do_analyze({:turn_history, n}) when n in [1, 2, 3], do: {:ok, {:turn_history, n}}
+  defp do_analyze({:turn_history, n}, _tail?) when n in [1, 2, 3], do: {:ok, {:turn_history, n}}
 
   # ============================================================
   # List forms (special forms and function calls)
   # ============================================================
 
-  defp do_analyze({:list, [head | rest]} = list) do
-    dispatch_list_form(head, rest, list)
+  defp do_analyze({:list, [head | rest]} = list, tail?) do
+    dispatch_list_form(head, rest, list, tail?)
   end
 
-  defp do_analyze({:list, []}) do
+  defp do_analyze({:list, []}, _tail?) do
     {:error, {:invalid_form, "Empty list is not a valid expression"}}
   end
 
   # Dispatch special forms based on the head symbol
-  defp dispatch_list_form({:symbol, :let}, rest, _list), do: analyze_let(rest)
-  defp dispatch_list_form({:symbol, :if}, rest, _list), do: analyze_if(rest)
-  defp dispatch_list_form({:symbol, :fn}, rest, _list), do: analyze_fn(rest)
-  defp dispatch_list_form({:symbol, :when}, rest, _list), do: analyze_when(rest)
-  defp dispatch_list_form({:symbol, :"if-let"}, rest, _list), do: analyze_if_let(rest)
-  defp dispatch_list_form({:symbol, :"when-let"}, rest, _list), do: analyze_when_let(rest)
-  defp dispatch_list_form({:symbol, :cond}, rest, _list), do: analyze_cond(rest)
-  defp dispatch_list_form({:symbol, :->}, rest, _list), do: analyze_thread(:->, rest)
-  defp dispatch_list_form({:symbol, :"->>"}, rest, _list), do: analyze_thread(:"->>", rest)
-  defp dispatch_list_form({:symbol, :do}, rest, _list), do: analyze_do(rest)
-  defp dispatch_list_form({:symbol, :and}, rest, _list), do: analyze_and(rest)
-  defp dispatch_list_form({:symbol, :or}, rest, _list), do: analyze_or(rest)
-  defp dispatch_list_form({:symbol, :where}, rest, _list), do: analyze_where(rest)
-  defp dispatch_list_form({:symbol, :"all-of"}, rest, _list), do: analyze_pred_comb(:all_of, rest)
-  defp dispatch_list_form({:symbol, :"any-of"}, rest, _list), do: analyze_pred_comb(:any_of, rest)
+  defp dispatch_list_form({:symbol, :let}, rest, _list, tail?), do: analyze_let(rest, tail?)
+  defp dispatch_list_form({:symbol, :loop}, rest, _list, tail?), do: analyze_loop(rest, tail?)
+  defp dispatch_list_form({:symbol, :recur}, rest, _list, tail?), do: analyze_recur(rest, tail?)
+  defp dispatch_list_form({:symbol, :if}, rest, _list, tail?), do: analyze_if(rest, tail?)
+  defp dispatch_list_form({:symbol, :fn}, rest, _list, _tail?), do: analyze_fn(rest)
+  defp dispatch_list_form({:symbol, :when}, rest, _list, tail?), do: analyze_when(rest, tail?)
 
-  defp dispatch_list_form({:symbol, :"none-of"}, rest, _list),
-    do: analyze_pred_comb(:none_of, rest)
+  defp dispatch_list_form({:symbol, :"if-let"}, rest, _list, tail?),
+    do: analyze_if_let(rest, tail?)
 
-  defp dispatch_list_form({:symbol, :juxt}, rest, _list), do: analyze_juxt(rest)
-  defp dispatch_list_form({:symbol, :pmap}, rest, _list), do: analyze_pmap(rest)
-  defp dispatch_list_form({:symbol, :pcalls}, rest, _list), do: analyze_pcalls(rest)
+  defp dispatch_list_form({:symbol, :"when-let"}, rest, _list, tail?),
+    do: analyze_when_let(rest, tail?)
 
-  defp dispatch_list_form({:symbol, :call}, _rest, _list) do
+  defp dispatch_list_form({:symbol, :cond}, rest, _list, tail?), do: analyze_cond(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :->}, rest, _list, tail?),
+    do: analyze_thread(:->, rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"->>"}, rest, _list, tail?),
+    do: analyze_thread(:"->>", rest, tail?)
+
+  defp dispatch_list_form({:symbol, :do}, rest, _list, tail?), do: analyze_do(rest, tail?)
+  defp dispatch_list_form({:symbol, :and}, rest, _list, tail?), do: analyze_and(rest, tail?)
+  defp dispatch_list_form({:symbol, :or}, rest, _list, tail?), do: analyze_or(rest, tail?)
+  defp dispatch_list_form({:symbol, :where}, rest, _list, tail?), do: analyze_where(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"all-of"}, rest, _list, tail?),
+    do: analyze_pred_comb(:all_of, rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"any-of"}, rest, _list, tail?),
+    do: analyze_pred_comb(:any_of, rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"none-of"}, rest, _list, tail?),
+    do: analyze_pred_comb(:none_of, rest, tail?)
+
+  defp dispatch_list_form({:symbol, :juxt}, rest, _list, tail?), do: analyze_juxt(rest, tail?)
+  defp dispatch_list_form({:symbol, :pmap}, rest, _list, tail?), do: analyze_pmap(rest, tail?)
+  defp dispatch_list_form({:symbol, :pcalls}, rest, _list, tail?), do: analyze_pcalls(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :call}, _rest, _list, _tail?) do
     {:error,
      {:invalid_form,
       "(call \"tool\" args) is deprecated, use (ctx/tool-name args) instead. " <>
         "Example: (call \"search\" {:query \"foo\"}) becomes (ctx/search {:query \"foo\"})"}}
   end
 
-  defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
-  defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
-  defp dispatch_list_form({:symbol, :def}, rest, _list), do: analyze_def(rest)
-  defp dispatch_list_form({:symbol, :defn}, rest, _list), do: analyze_defn(rest)
+  defp dispatch_list_form({:symbol, :return}, rest, _list, tail?), do: analyze_return(rest, tail?)
+  defp dispatch_list_form({:symbol, :fail}, rest, _list, tail?), do: analyze_fail(rest, tail?)
+  defp dispatch_list_form({:symbol, :def}, rest, _list, tail?), do: analyze_def(rest, tail?)
+  defp dispatch_list_form({:symbol, :defn}, rest, _list, tail?), do: analyze_defn(rest, tail?)
 
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
-  defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list),
-    do: analyze_ctx_call(tool_name, rest)
+  defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list, tail?),
+    do: analyze_ctx_call(tool_name, rest, tail?)
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
-  defp dispatch_list_form({:ns_symbol, ns, func}, rest, list) do
+  defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
     normalize_clojure_namespace(ns, func, fn ->
-      dispatch_list_form({:symbol, func}, rest, list)
+      dispatch_list_form({:symbol, func}, rest, list, tail?)
     end)
   end
 
   # Comparison operators (strict 2-arity per spec section 8.4)
-  defp dispatch_list_form({:symbol, op}, rest, _list)
+  defp dispatch_list_form({:symbol, op}, rest, _list, tail?)
        when op in [:=, :"not=", :>, :<, :>=, :<=],
-       do: analyze_comparison(op, rest)
+       do: analyze_comparison(op, rest, tail?)
 
   # Generic function call
-  defp dispatch_list_form(_head, _rest, list), do: analyze_call(list)
+  defp dispatch_list_form(_head, _rest, list, tail?), do: analyze_call(list, tail?)
 
   # ============================================================
   # Special form: let
   # ============================================================
 
-  defp analyze_let([bindings_ast, first_body | rest_body]) do
+  defp analyze_let([bindings_ast, first_body | rest_body], tail?) do
     body_asts = [first_body | rest_body]
 
     with {:ok, bindings} <- analyze_bindings(bindings_ast),
-         {:ok, body} <- wrap_body(body_asts) do
+         {:ok, body} <- wrap_body(body_asts, tail?) do
       {:ok, {:let, bindings, body}}
     end
   end
 
-  defp analyze_let(_) do
+  defp analyze_let(_, _tail?) do
     {:error, {:invalid_arity, :let, "expected (let [bindings] body ...)"}}
   end
 
@@ -199,7 +215,7 @@ defmodule PtcRunner.Lisp.Analyze do
       |> Enum.chunk_every(2)
       |> Enum.reduce_while({:ok, []}, fn [pattern_ast, value_ast], {:ok, acc} ->
         with {:ok, pattern} <- analyze_pattern(pattern_ast),
-             {:ok, value} <- do_analyze(value_ast) do
+             {:ok, value} <- do_analyze(value_ast, false) do
           {:cont, {:ok, [{:binding, pattern, value} | acc]}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
@@ -217,6 +233,37 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
+  # Special form: loop
+  # ============================================================
+
+  defp analyze_loop([bindings_ast, first_body | rest_body], _tail?) do
+    body_asts = [first_body | rest_body]
+
+    with {:ok, bindings} <- analyze_bindings(bindings_ast),
+         {:ok, body} <- wrap_body(body_asts, true) do
+      {:ok, {:loop, bindings, body}}
+    end
+  end
+
+  defp analyze_loop(_, _tail?) do
+    {:error, {:invalid_arity, :loop, "expected (loop [bindings] body ...)"}}
+  end
+
+  # ============================================================
+  # Special form: recur
+  # ============================================================
+
+  defp analyze_recur(args, true) do
+    with {:ok, analyzed_args} <- analyze_list(args) do
+      {:ok, {:recur, analyzed_args}}
+    end
+  end
+
+  defp analyze_recur(_args, false) do
+    {:error, {:invalid_form, "recur must be in tail position"}}
+  end
+
+  # ============================================================
   # Pattern analysis (destructuring)
   # Delegated to PtcRunner.Lisp.Analyze.Patterns
   # ============================================================
@@ -227,28 +274,28 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: if and when
   # ============================================================
 
-  defp analyze_if([cond_ast, then_ast, else_ast]) do
-    with {:ok, c} <- do_analyze(cond_ast),
-         {:ok, t} <- do_analyze(then_ast),
-         {:ok, e} <- do_analyze(else_ast) do
+  defp analyze_if([cond_ast, then_ast, else_ast], tail?) do
+    with {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, t} <- do_analyze(then_ast, tail?),
+         {:ok, e} <- do_analyze(else_ast, tail?) do
       {:ok, {:if, c, t, e}}
     end
   end
 
-  defp analyze_if(_) do
+  defp analyze_if(_, _tail?) do
     {:error, {:invalid_arity, :if, "expected (if cond then else)"}}
   end
 
-  defp analyze_when([cond_ast, first_body | rest_body]) do
+  defp analyze_when([cond_ast, first_body | rest_body], tail?) do
     body_asts = [first_body | rest_body]
 
-    with {:ok, c} <- do_analyze(cond_ast),
-         {:ok, b} <- wrap_body(body_asts) do
+    with {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, b} <- wrap_body(body_asts, tail?) do
       {:ok, {:if, c, b, nil}}
     end
   end
 
-  defp analyze_when(_) do
+  defp analyze_when(_, _tail?) do
     {:error, {:invalid_arity, :when, "expected (when cond body ...)"}}
   end
 
@@ -257,41 +304,42 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # Desugar (if-let [x cond] then else) to (let [x cond] (if x then else))
-  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast]) do
+  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast], tail?) do
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast),
-         {:ok, t} <- do_analyze(then_ast),
-         {:ok, e} <- do_analyze(else_ast) do
+         {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, t} <- do_analyze(then_ast, tail?),
+         {:ok, e} <- do_analyze(else_ast, tail?) do
       binding = {:binding, name, c}
       {:ok, {:let, [binding], {:if, name, t, e}}}
     end
   end
 
-  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast]) when length(bindings) != 2 do
+  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast], _tail?)
+       when length(bindings) != 2 do
     {:error, {:invalid_form, "if-let requires exactly one binding pair [name expr]"}}
   end
 
-  defp analyze_if_let(_) do
+  defp analyze_if_let(_, _tail?) do
     {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
   end
 
   # Desugar (when-let [x cond] body ...) to (let [x cond] (if x body nil))
-  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, first_body | rest_body]) do
+  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, first_body | rest_body], tail?) do
     body_asts = [first_body | rest_body]
 
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast),
-         {:ok, b} <- wrap_body(body_asts) do
+         {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, b} <- wrap_body(body_asts, tail?) do
       binding = {:binding, name, c}
       {:ok, {:let, [binding], {:if, name, b, nil}}}
     end
   end
 
-  defp analyze_when_let([{:vector, bindings} | _body_asts]) when length(bindings) != 2 do
+  defp analyze_when_let([{:vector, bindings} | _body_asts], _tail?) when length(bindings) != 2 do
     {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
   end
 
-  defp analyze_when_let(_) do
+  defp analyze_when_let(_, _tail?) do
     {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body ...)"}}
   end
 
@@ -306,13 +354,13 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: cond → nested if
   # ============================================================
 
-  defp analyze_cond([]) do
+  defp analyze_cond([], _tail?) do
     {:error, {:invalid_cond_form, "cond requires at least one test/result pair"}}
   end
 
-  defp analyze_cond(args) do
+  defp analyze_cond(args, tail?) do
     with {:ok, pairs, default} <- split_cond_args(args) do
-      build_nested_if(pairs, default)
+      build_nested_if(pairs, default, tail?)
     end
   end
 
@@ -335,13 +383,13 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp build_nested_if(pairs, default_ast) do
-    with {:ok, default_core} <- maybe_analyze(default_ast) do
+  defp build_nested_if(pairs, default_ast, tail?) do
+    with {:ok, default_core} <- maybe_analyze(default_ast, tail?) do
       pairs
       |> Enum.reverse()
       |> Enum.reduce_while({:ok, default_core}, fn {c_ast, r_ast}, {:ok, acc} ->
-        with {:ok, c} <- do_analyze(c_ast),
-             {:ok, r} <- do_analyze(r_ast) do
+        with {:ok, c} <- do_analyze(c_ast, false),
+             {:ok, r} <- do_analyze(r_ast, tail?) do
           {:cont, {:ok, {:if, c, r, acc}}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
@@ -350,8 +398,8 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp maybe_analyze(nil), do: {:ok, nil}
-  defp maybe_analyze(ast), do: do_analyze(ast)
+  defp maybe_analyze(nil, _tail?), do: {:ok, nil}
+  defp maybe_analyze(ast, tail?), do: do_analyze(ast, tail?)
 
   # ============================================================
   # Special form: fn (anonymous functions)
@@ -361,7 +409,7 @@ defmodule PtcRunner.Lisp.Analyze do
     body_asts = [first_body | rest_body]
 
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts) do
+         {:ok, body} <- wrap_body(body_asts, true) do
       {:ok, {:fn, params, body}}
     end
   end
@@ -393,9 +441,15 @@ defmodule PtcRunner.Lisp.Analyze do
   # Sequential evaluation: do
   # ============================================================
 
-  defp analyze_do(args) do
-    with {:ok, exprs} <- analyze_list(args) do
-      {:ok, {:do, exprs}}
+  defp analyze_do(args, tail?) do
+    case args do
+      [] ->
+        {:ok, nil}
+
+      _ ->
+        with {:ok, exprs} <- analyze_list_with_tail(args, tail?) do
+          {:ok, {:do, exprs}}
+        end
     end
   end
 
@@ -403,15 +457,27 @@ defmodule PtcRunner.Lisp.Analyze do
   # Short-circuit logic: and/or
   # ============================================================
 
-  defp analyze_and(args) do
-    with {:ok, exprs} <- analyze_list(args) do
-      {:ok, {:and, exprs}}
+  defp analyze_and(args, tail?) do
+    case args do
+      [] ->
+        {:ok, true}
+
+      _ ->
+        with {:ok, exprs} <- analyze_list_with_tail(args, tail?) do
+          {:ok, {:and, exprs}}
+        end
     end
   end
 
-  defp analyze_or(args) do
-    with {:ok, exprs} <- analyze_list(args) do
-      {:ok, {:or, exprs}}
+  defp analyze_or(args, tail?) do
+    case args do
+      [] ->
+        {:ok, nil}
+
+      _ ->
+        with {:ok, exprs} <- analyze_list_with_tail(args, tail?) do
+          {:ok, {:or, exprs}}
+        end
     end
   end
 
@@ -419,26 +485,30 @@ defmodule PtcRunner.Lisp.Analyze do
   # Threading macros: -> and ->>
   # ============================================================
 
-  defp analyze_thread(kind, []) do
+  defp analyze_thread(kind, [], _tail?) do
     {:error, {:invalid_thread_form, kind, "requires at least one expression"}}
   end
 
-  defp analyze_thread(kind, [first | steps]) do
-    with {:ok, acc} <- do_analyze(first) do
-      thread_steps(kind, acc, steps)
+  defp analyze_thread(kind, [first | steps], tail?) do
+    with {:ok, acc} <- do_analyze(first, false) do
+      thread_steps(kind, acc, steps, tail?)
     end
   end
 
-  defp thread_steps(_kind, acc, []), do: {:ok, acc}
+  defp thread_steps(_kind, acc, [], _tail?), do: {:ok, acc}
 
-  defp thread_steps(kind, acc, [step | rest]) do
-    with {:ok, acc2} <- apply_thread_step(kind, acc, step) do
-      thread_steps(kind, acc2, rest)
+  defp thread_steps(kind, acc, [step | rest], tail?) do
+    # Only the very last step in a thread can be in a tail position
+    is_last? = rest == []
+    step_tail? = is_last? and tail?
+
+    with {:ok, acc2} <- apply_thread_step(kind, acc, step, step_tail?) do
+      thread_steps(kind, acc2, rest, tail?)
     end
   end
 
-  defp apply_thread_step(kind, acc, {:list, [f_ast | arg_asts]}) do
-    with {:ok, f} <- do_analyze(f_ast),
+  defp apply_thread_step(kind, acc, {:list, [f_ast | arg_asts]}, tail?) do
+    with {:ok, f} <- do_analyze(f_ast, false),
          {:ok, args} <- analyze_list(arg_asts) do
       new_args =
         case kind do
@@ -446,13 +516,33 @@ defmodule PtcRunner.Lisp.Analyze do
           :"->>" -> args ++ [acc]
         end
 
-      {:ok, {:call, f, new_args}}
+      case f do
+        {:var, :recur} ->
+          if tail? do
+            {:ok, {:recur, new_args}}
+          else
+            {:error, {:invalid_form, "recur must be in tail position"}}
+          end
+
+        _ ->
+          {:ok, {:call, f, new_args}}
+      end
     end
   end
 
-  defp apply_thread_step(_kind, acc, step_ast) do
-    with {:ok, f} <- do_analyze(step_ast) do
-      {:ok, {:call, f, [acc]}}
+  defp apply_thread_step(_kind, acc, step_ast, tail?) do
+    with {:ok, f} <- do_analyze(step_ast, false) do
+      case f do
+        {:var, :recur} ->
+          if tail? do
+            {:ok, {:recur, [acc]}}
+          else
+            {:error, {:invalid_form, "recur must be in tail position"}}
+          end
+
+        _ ->
+          {:ok, {:call, f, [acc]}}
+      end
     end
   end
 
@@ -461,16 +551,17 @@ defmodule PtcRunner.Lisp.Analyze do
   # Delegated to PtcRunner.Lisp.Analyze.Predicates
   # ============================================================
 
-  defp analyze_where(args), do: Predicates.analyze_where(args, &do_analyze/1)
+  defp analyze_where(args, _tail?),
+    do: Predicates.analyze_where(args, fn ast -> do_analyze(ast, false) end)
 
-  defp analyze_pred_comb(kind, args),
+  defp analyze_pred_comb(kind, args, _tail?),
     do: Predicates.analyze_pred_comb(kind, args, &analyze_list/1)
 
   # ============================================================
   # Function combinator: juxt
   # ============================================================
 
-  defp analyze_juxt(args) do
+  defp analyze_juxt(args, _tail?) do
     with {:ok, fns} <- analyze_list(args) do
       {:ok, {:juxt, fns}}
     end
@@ -481,14 +572,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # (pmap f coll) - parallel map, evaluates f for each element concurrently
-  defp analyze_pmap([fn_ast, coll_ast]) do
-    with {:ok, fn_core} <- do_analyze(fn_ast),
-         {:ok, coll_core} <- do_analyze(coll_ast) do
+  defp analyze_pmap([fn_ast, coll_ast], _tail?) do
+    with {:ok, fn_core} <- do_analyze(fn_ast, false),
+         {:ok, coll_core} <- do_analyze(coll_ast, false) do
       {:ok, {:pmap, fn_core, coll_core}}
     end
   end
 
-  defp analyze_pmap(_) do
+  defp analyze_pmap(_, _tail?) do
     {:error, {:invalid_arity, :pmap, "expected (pmap f coll)"}}
   end
 
@@ -497,7 +588,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # (pcalls f1 f2 ... fN) - parallel calls, executes N thunks concurrently
-  defp analyze_pcalls(fn_asts) do
+  defp analyze_pcalls(fn_asts, _tail?) do
     with {:ok, fn_cores} <- analyze_list(fn_asts) do
       {:ok, {:pcalls, fn_cores}}
     end
@@ -507,7 +598,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
   # ============================================================
 
-  defp analyze_ctx_call(tool_name, arg_asts) do
+  defp analyze_ctx_call(tool_name, arg_asts, _tail?) do
     with {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:ctx_call, tool_name, args}}
     end
@@ -517,23 +608,23 @@ defmodule PtcRunner.Lisp.Analyze do
   # Syntactic sugar: return and fail (desugar to call_tool)
   # ============================================================
 
-  defp analyze_return([value_ast]) do
-    with {:ok, value} <- do_analyze(value_ast) do
+  defp analyze_return([value_ast], _tail?) do
+    with {:ok, value} <- do_analyze(value_ast, false) do
       {:ok, {:call_tool, "return", value}}
     end
   end
 
-  defp analyze_return(_) do
+  defp analyze_return(_, _tail?) do
     {:error, {:invalid_arity, :return, "expected (return value)"}}
   end
 
-  defp analyze_fail([error_ast]) do
-    with {:ok, error} <- do_analyze(error_ast) do
+  defp analyze_fail([error_ast], _tail?) do
+    with {:ok, error} <- do_analyze(error_ast, false) do
       {:ok, {:call_tool, "fail", error}}
     end
   end
 
-  defp analyze_fail(_) do
+  defp analyze_fail(_, _tail?) do
     {:error, {:invalid_arity, :fail, "expected (fail error)"}}
   end
 
@@ -542,33 +633,33 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # (def name value)
-  defp analyze_def([{:symbol, name}, value_ast]) do
-    with {:ok, value} <- do_analyze(value_ast) do
+  defp analyze_def([{:symbol, name}, value_ast], _tail?) do
+    with {:ok, value} <- do_analyze(value_ast, false) do
       {:ok, {:def, name, value}}
     end
   end
 
   # (def name docstring value) - docstring is ignored but allowed for Clojure compat
-  defp analyze_def([{:symbol, name}, {:string, _docstring}, value_ast]) do
-    with {:ok, value} <- do_analyze(value_ast) do
+  defp analyze_def([{:symbol, name}, {:string, _docstring}, value_ast], _tail?) do
+    with {:ok, value} <- do_analyze(value_ast, false) do
       {:ok, {:def, name, value}}
     end
   end
 
-  defp analyze_def([{:symbol, _name}]) do
+  defp analyze_def([{:symbol, _name}], _tail?) do
     {:error, {:invalid_arity, :def, "expected (def name value), got (def name) without value"}}
   end
 
-  defp analyze_def([{:symbol, _name} | _]) do
+  defp analyze_def([{:symbol, _name} | _], _tail?) do
     # First arg is a symbol but wrong number of total args
     {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
   end
 
-  defp analyze_def([non_symbol | _]) do
+  defp analyze_def([non_symbol | _], _tail?) do
     {:error, {:invalid_form, "def name must be a symbol, got: #{inspect(non_symbol)}"}}
   end
 
-  defp analyze_def(_) do
+  defp analyze_def(_, _tail?) do
     {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
   end
 
@@ -577,52 +668,55 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # (defn name docstring [params] body ...) - with docstring
-  defp analyze_defn([
-         {:symbol, name},
-         {:string, _docstring},
-         {:vector, _} = params_ast,
-         first_body | rest_body
-       ]) do
+  defp analyze_defn(
+         [
+           {:symbol, name},
+           {:string, _docstring},
+           {:vector, _} = params_ast,
+           first_body | rest_body
+         ],
+         _tail?
+       ) do
     body_asts = [first_body | rest_body]
 
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts) do
+         {:ok, body} <- wrap_body(body_asts, true) do
       {:ok, {:def, name, {:fn, params, body}}}
     end
   end
 
   # (defn name [params] body ...) - without docstring
-  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, first_body | rest_body]) do
+  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, first_body | rest_body], _tail?) do
     body_asts = [first_body | rest_body]
 
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts) do
+         {:ok, body} <- wrap_body(body_asts, true) do
       {:ok, {:def, name, {:fn, params, body}}}
     end
   end
 
   # Error: (defn name [params]) - missing body
-  defp analyze_defn([{:symbol, _name}, {:vector, _params}]) do
+  defp analyze_defn([{:symbol, _name}, {:vector, _params}], _tail?) do
     {:error, {:invalid_arity, :defn, "expected (defn name [params] body), missing body"}}
   end
 
   # Error: (defn name) - missing params and body
-  defp analyze_defn([{:symbol, _name}]) do
+  defp analyze_defn([{:symbol, _name}], _tail?) do
     {:error, {:invalid_arity, :defn, "expected (defn name [params] body)"}}
   end
 
   # Error: multi-arity syntax (defn f ([x] ...) ([x y] ...))
-  defp analyze_defn([{:symbol, _name}, {:list, _} | _]) do
+  defp analyze_defn([{:symbol, _name}, {:list, _} | _], _tail?) do
     {:error,
      {:invalid_form, "multi-arity defn not supported, use separate defn forms for each arity"}}
   end
 
   # Error: non-symbol name
-  defp analyze_defn([non_symbol | _]) do
+  defp analyze_defn([non_symbol | _], _tail?) do
     {:error, {:invalid_form, "defn name must be a symbol, got: #{inspect(non_symbol)}"}}
   end
 
-  defp analyze_defn(_) do
+  defp analyze_defn(_, _tail?) do
     {:error, {:invalid_arity, :defn, "expected (defn name [params] body)"}}
   end
 
@@ -630,14 +724,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # Comparison operators (strict 2-arity)
   # ============================================================
 
-  defp analyze_comparison(op, [left_ast, right_ast]) do
-    with {:ok, left} <- do_analyze(left_ast),
-         {:ok, right} <- do_analyze(right_ast) do
+  defp analyze_comparison(op, [left_ast, right_ast], _tail?) do
+    with {:ok, left} <- do_analyze(left_ast, false),
+         {:ok, right} <- do_analyze(right_ast, false) do
       {:ok, {:call, {:var, op}, [left, right]}}
     end
   end
 
-  defp analyze_comparison(op, args) do
+  defp analyze_comparison(op, args, _tail?) do
     {:error,
      {:invalid_arity, op,
       "comparison operators require exactly 2 arguments, got #{length(args)}. " <>
@@ -648,8 +742,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # Generic function call
   # ============================================================
 
-  defp analyze_call({:list, [f_ast | arg_asts]}) do
-    with {:ok, f} <- do_analyze(f_ast),
+  defp analyze_call({:list, [f_ast | arg_asts]}, _tail?) do
+    with {:ok, f} <- do_analyze(f_ast, false),
          {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:call, f, args}}
     end
@@ -660,11 +754,11 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # Wrap multiple bodies in {:do, ...}, pass single body through (implicit do)
-  @spec wrap_body([term()]) :: {:ok, CoreAST.t()} | {:error, error_reason()}
-  defp wrap_body([single]), do: do_analyze(single)
+  @spec wrap_body([term()], boolean()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
+  defp wrap_body([single], tail?), do: do_analyze(single, tail?)
 
-  defp wrap_body(bodies) when length(bodies) > 1 do
-    with {:ok, analyzed} <- analyze_list(bodies) do
+  defp wrap_body(bodies, tail?) when length(bodies) > 1 do
+    with {:ok, analyzed} <- analyze_list_with_tail(bodies, tail?) do
       {:ok, {:do, analyzed}}
     end
   end
@@ -672,7 +766,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_list(xs) do
     xs
     |> Enum.reduce_while({:ok, []}, fn x, {:ok, acc} ->
-      case do_analyze(x) do
+      case do_analyze(x, false) do
         {:ok, x2} -> {:cont, {:ok, [x2 | acc]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -683,11 +777,20 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
+  defp analyze_list_with_tail(xs, tail?) do
+    {others, last} = Enum.split(xs, -1)
+
+    with {:ok, others2} <- analyze_list(others),
+         {:ok, last2} <- do_analyze(List.first(last), tail?) do
+      {:ok, others2 ++ [last2]}
+    end
+  end
+
   defp analyze_pairs(pairs) do
     pairs
     |> Enum.reduce_while({:ok, []}, fn {k, v}, {:ok, acc} ->
-      with {:ok, k2} <- do_analyze(k),
-           {:ok, v2} <- do_analyze(v) do
+      with {:ok, k2} <- do_analyze(k, false),
+           {:ok, v2} <- do_analyze(v, false) do
         {:cont, {:ok, [{k2, v2} | acc]}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
