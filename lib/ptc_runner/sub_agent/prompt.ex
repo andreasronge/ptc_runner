@@ -860,15 +860,8 @@ defmodule PtcRunner.SubAgent.Prompt do
        when is_map(field_descriptions) and map_size(field_descriptions) > 0 do
     descs =
       fields
-      |> Enum.filter(fn {name, _type} ->
-        # Only include fields that have descriptions
-        key_atom = String.to_atom(name)
-        Map.has_key?(field_descriptions, key_atom) or Map.has_key?(field_descriptions, name)
-      end)
-      |> Enum.map(fn {name, _type} ->
-        key_atom = String.to_atom(name)
-        desc = Map.get(field_descriptions, key_atom) || Map.get(field_descriptions, name)
-        "  - `#{name}`: #{desc}"
+      |> Enum.flat_map(fn {name, _type} ->
+        get_field_description_for_list(name, field_descriptions)
       end)
 
     if descs == [] do
@@ -879,6 +872,22 @@ defmodule PtcRunner.SubAgent.Prompt do
   end
 
   defp generate_output_field_descriptions(_return_type, _field_descriptions), do: ""
+
+  defp get_field_description_for_list(name, field_descriptions) do
+    # Try atom key first, then string key
+    key_atom = if is_atom(name), do: name, else: String.to_existing_atom(to_string(name))
+
+    case Map.get(field_descriptions, key_atom) || Map.get(field_descriptions, name) do
+      nil -> []
+      desc -> ["  - `#{name}`: #{desc}"]
+    end
+  rescue
+    ArgumentError ->
+      case Map.get(field_descriptions, name) do
+        nil -> []
+        desc -> ["  - `#{name}`: #{desc}"]
+      end
+  end
 
   defp generate_return_example_value(:int), do: "42"
   defp generate_return_example_value(:float), do: "3.14"
