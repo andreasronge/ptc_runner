@@ -37,7 +37,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 
 | Extension | Description |
 |-----------|-------------|
-| `ctx/path` and `memory/path` | Namespace-qualified access to context and memory (§9) |
+| `ctx/path` | Namespace-qualified access to context data (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
@@ -91,9 +91,9 @@ special-initial = + | - | * | / | < | > | = | ? | !
 special-rest    = special-initial | - | _ | /
 ```
 
-Note: `/` appears in both `special-initial` (for the division operator) and `special-rest` (for namespaced symbols like `memory/foo`).
+Note: `/` appears in both `special-initial` (for the division operator) and `special-rest` (for namespaced symbols like `ctx/bar`).
 
-Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `memory/foo`, `ctx/bar`
+Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `ctx/bar`
 
 Reserved symbols (cannot be redefined): `nil`, `true`, `false`
 
@@ -1572,28 +1572,28 @@ Programs have access to data and functions through **namespaced symbols** and **
 
 ### 9.1 Namespace Overview
 
-| Namespace | Access Pattern | Description |
-|-----------|----------------|-------------|
-| `memory/` | Read via symbol | Persistent state across turns |
-| `ctx/` | Read via symbol | Current request context (read-only) |
-| `*1`, `*2`, `*3` | Symbols | Recent turn results (for debugging) |
-| `(call ...)` | Function call | Tool invocation |
+| Access Pattern | Source | Description |
+|----------------|--------|-------------|
+| Plain symbols | Stored values | Values from map returns (defined via `def` form) |
+| `ctx/` | Current request context | Current request context (read-only) |
+| `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
+| `(call ...)` | Tool invocation | Call registered tools |
 
-### 9.2 Memory Access — `memory/`
+### 9.2 Stored Values — Plain Symbols
 
-Read from persistent memory using the `memory/` namespace prefix:
+Access stored values as plain symbols. When your program returns a map, its keys become available as symbols in subsequent turns:
 
 ```clojure
-memory/high-paid          ; get :high-paid from memory
-memory/orders             ; get :orders from memory
-memory/query-count        ; get :query-count from memory
+high-paid          ; access :high-paid from a previous map return
+orders             ; access :orders from a previous map return
+query-count        ; access :query-count from a previous map return
 ```
 
-Memory values are **read-only during execution**. To update memory, return a map (see Section 16).
+Stored values are **read-only during execution**. To update them, return a map (see Section 16).
 
 ```clojure
-;; Read previous results, compute new value, return delta
-(let [prev-orders memory/orders
+;; Read previous results, compute new value, return updated map
+(let [prev-orders orders
       new-orders (call "get-orders" {:since "2024-01-01"})]
   {:orders (concat prev-orders new-orders)})
 ```
@@ -1601,7 +1601,7 @@ Memory values are **read-only during execution**. To update memory, return a map
 With default values (using `or`):
 
 ```clojure
-(let [count (or memory/query-count 0)]
+(let [count (or query-count 0)]
   {:query-count (inc count)})
 ```
 
@@ -1637,7 +1637,7 @@ Access results from previous turns using the turn history symbols:
 - `*1` returns the result of the most recent turn
 - Returns `nil` if the turn doesn't exist (e.g., `*1` on turn 1)
 - Results are **truncated** to ~1KB to prevent memory bloat
-- Use `memory/` for persistent access to full values
+- Use stored values (plain symbols from map returns) for persistent access to full values
 
 **Use cases:**
 - Quick inspection of previous results during debugging
@@ -1653,7 +1653,7 @@ Access results from previous turns using the turn history symbols:
 (> (count ctx/items) (count *1))
 ```
 
-**Prefer memory/ for most use cases.** Turn history is primarily a debugging aid. For reliable multi-turn patterns, use `memory/` to store and access values.
+**For reliable multi-turn patterns**, return maps to store values as symbols. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
 
 ### 9.5 Tool Invocation — `call`
 
@@ -2196,7 +2196,7 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 ```
 
 **Grammar notes:**
-- `/` is allowed in symbols for namespaced access (`memory/foo`, `ctx/bar`)
+- `/` is allowed in symbols for namespaced access (`ctx/bar`)
 - `/` is NOT allowed in keywords (`:foo/bar` is invalid)
 - The operator position in `list-expr` accepts any expression, enabling:
   - `(:name user)` — keyword as function
@@ -2235,7 +2235,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1".
 
 Programs should produce identical results when run in:
 1. PTC-Lisp interpreter (Elixir)
-2. Clojure (with stub implementations for `memory/`, `ctx/`, `call`, `where`, etc.)
+2. Clojure (with stub implementations for `ctx/`, `call`, `where`, etc.)
 
 ---
 
@@ -2246,9 +2246,9 @@ This section specifies how PTC-Lisp programs interact with persistent memory acr
 ### 16.1 Core Principle: Functional Transactions
 
 Programs are **pure functions** that:
-- Read from `memory/` and `ctx/` namespaces
+- Read from stored values (plain symbols) and `ctx/` namespace
 - Return a result value
-- The result determines memory updates
+- The result determines stored value updates
 
 This provides **transactional semantics**: either the entire program succeeds and memory updates, or it fails and memory remains unchanged.
 
@@ -2286,29 +2286,29 @@ The host builds an execution environment for each program:
 
 ### 16.3 Result Contract
 
-The program's return value determines memory behavior:
+The program's return value determines symbol storage behavior:
 
-| Return Value | Memory Behavior | Use Case |
+| Return Value | Symbol Storage | Use Case |
 |--------------|-----------------|----------|
-| Non-map value | No memory change | Pure queries |
-| Map without `:return` | Entire map merged into memory | Update memory only |
-| Map with `:return` | Map (minus `:return`) merged into memory; `:return` returned to caller | Update memory AND return value |
+| Non-map value | No symbols stored | Pure queries |
+| Map without `:return` | Map keys become available as symbols next turn | Store values only |
+| Map with `:return` | Map keys (minus `:return`) become symbols; `:return` returned to caller | Store values AND return result |
 
-**Reserved key:** `:return` is reserved at the top level of return maps. It controls the return value and is never persisted to memory. Do not use `:return` as a memory key name—use alternatives like `:query-result`, `:computation-result`, or `:output`.
+**Reserved key:** `:return` is reserved at the top level of return maps. It controls the return value and is never stored as a symbol. Do not use `:return` as a symbol name—use alternatives like `:query-result`, `:computation-result`, or `:output`.
 
-#### Case 1: Pure Query (No Memory Update)
+#### Case 1: Pure Query (No Symbol Storage)
 
 ```clojure
-;; Returns a number - memory unchanged
+;; Returns a number - no symbols stored
 (->> ctx/expenses
      (filter (where :category = "travel"))
      (sum-by :amount))
 ```
 
-#### Case 2: Memory Update Only
+#### Case 2: Symbol Storage Only
 
 ```clojure
-;; Returns a map - merged into memory
+;; Returns a map - keys become available as symbols next turn
 (let [high-paid (->> (call "find-employees" {})
                      (filter (where :salary > 100000)))]
   {:high-paid high-paid
@@ -2316,53 +2316,53 @@ The program's return value determines memory behavior:
 ```
 
 After execution:
-- `memory/high-paid` = the filtered list
-- `memory/last-query` = `"employees"`
+- `high-paid` = the filtered list (available as symbol in next turn)
+- `last-query` = `"employees"` (available as symbol in next turn)
 - Return value to caller = the same map
 
-#### Case 3: Memory Update AND Return Value
+#### Case 3: Symbol Storage AND Return Value
 
 ```clojure
-;; Returns map with :return - memory updated, :return returned
+;; Returns map with :return - keys become symbols, :return returned
 (let [high-paid (->> (call "find-employees" {})
                      (filter (where :salary > 100000)))]
   {:return (pluck :email high-paid)   ; returned to caller
-   :high-paid high-paid})              ; merged into memory
+   :high-paid high-paid})              ; keys become symbols next turn
 ```
 
 After execution:
-- `memory/high-paid` = the filtered list
+- `high-paid` = the filtered list (available as symbol in next turn)
 - Return value to caller = `["alice@example.com", "bob@example.com", ...]`
 
 #### Returning a Map Without Memory Update
 
-If you want to return a map to the caller without updating memory, wrap it in `:return`:
+If you want to return a map to the caller without storing its keys as symbols, wrap it in `:return`:
 
 ```clojure
-;; Return a map structure but don't persist anything
+;; Return a map structure but don't store as symbols
 {:return {:summary "Query complete"
           :count (count ctx/items)
           :items ctx/items}}
 ```
 
 After execution:
-- Memory unchanged
+- No symbols stored
 - Return value = `{:summary "Query complete", :count 5, :items [...]}`
 
-### 16.4 Memory Merge Semantics
+### 16.4 Symbol Storage Semantics
 
-Memory updates use **shallow merge**:
+Stored values use **shallow merge**:
 
 ```clojure
-;; Before: memory = {:a 1, :b {:x 10}}
+;; Before: stored = {:a 1, :b {:x 10}}
 ;; Program returns: {:b {:y 20}, :c 3}
-;; After:  memory = {:a 1, :b {:y 20}, :c 3}
+;; After:  stored = {:a 1, :b {:y 20}, :c 3}
 ```
 
-- New keys are added
+- New keys are added as symbols
 - Existing keys are replaced (not deep-merged)
 - Keys not in the result are preserved
-- To delete a key, explicitly set it to `nil`
+- To delete a symbol, explicitly set it to `nil`
 
 ### 16.5 Execution Flow
 
@@ -2372,7 +2372,7 @@ Memory updates use **shallow merge**:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. HOST BUILDS ENVIRONMENT                                     │
-│     ├─ Load persistent memory from store                        │
+│     ├─ Load stored symbols from previous turns                  │
 │     ├─ Attach current request context                           │
 │     └─ Register available tools                                 │
 │                                                                 │
@@ -2388,17 +2388,17 @@ Memory updates use **shallow merge**:
 │     │                                                           │
 │     ├─ ON SUCCESS:                                              │
 │     │   ├─ Apply result contract (see 16.3)                     │
-│     │   ├─ Commit memory delta to persistent store              │
-│     │   ├─ Log: program, tool calls, memory delta, result       │
+│     │   ├─ Store result keys as symbols for next turn           │
+│     │   ├─ Log: program, tool calls, stored symbols, result     │
 │     │   └─ Return result to LLM/caller                          │
 │     │                                                           │
 │     └─ ON ERROR:                                                │
-│         ├─ NO memory changes (rollback)                         │
+│         ├─ NO symbol changes (rollback)                         │
 │         ├─ Log: program, error, partial trace                   │
 │         └─ Return error to LLM for retry                        │
 │                                                                 │
 │  5. NEXT TURN                                                   │
-│     ├─ Feed memory summary to LLM                               │
+│     ├─ Feed stored symbols to LLM                               │
 │     └─ LLM generates next program                               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -2406,46 +2406,46 @@ Memory updates use **shallow merge**:
 
 ### 16.6 Multi-Turn Example
 
-**Turn 1:** Find high-paid employees and store in memory
+**Turn 1:** Find high-paid employees and store as symbol
 
 ```clojure
 {:high-paid (->> (call "find-employees" {})
                  (filter (where :salary > 100000)))}
 ```
 
-*Memory after:* `{:high-paid [{:id 1, :name "Alice", :salary 150000}, ...]}`
+*Symbols available next turn:* `{:high-paid [{:id 1, :name "Alice", :salary 150000}, ...]}`
 
-**Turn 2:** Query stored data (no memory change)
+**Turn 2:** Query stored data (no symbol update)
 
 ```clojure
-{:return (count memory/high-paid)}
+{:return (count high-paid)}
 ```
 
 *Returns:* `5`
-*Memory unchanged*
+*Symbols unchanged*
 
-**Turn 3:** Fetch orders for stored employees, update memory
+**Turn 3:** Fetch orders for stored employees, update symbols
 
 ```clojure
-(let [ids (pluck :id memory/high-paid)
+(let [ids (pluck :id high-paid)
       orders (call "get-orders" {:employee-ids ids})]
   {:orders orders
    :order-count (count orders)})
 ```
 
-*Memory after:* `{:high-paid [...], :orders [...], :order-count 42}`
+*Symbols available next turn:* `{:high-paid [...], :orders [...], :order-count 42}`
 
 **Turn 4:** Return summary and update query count
 
 ```clojure
-(let [prev-count (or memory/query-count 0)]
-  {:return {:employee-count (count memory/high-paid)
-            :order-count memory/order-count}
+(let [prev-count (or query-count 0)]
+  {:return {:employee-count (count high-paid)
+            :order-count order-count}
    :query-count (inc prev-count)})
 ```
 
 *Returns:* `{:employee-count 5, :order-count 42}`
-*Memory after:* `{:high-paid [...], :orders [...], :order-count 42, :query-count 1}`
+*Symbols available next turn:* `{:high-paid [...], :orders [...], :order-count 42, :query-count 1}`
 
 ### 16.7 Logging and Audit Trail
 

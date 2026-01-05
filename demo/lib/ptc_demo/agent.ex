@@ -427,7 +427,7 @@ defmodule PtcDemo.Agent do
     **Turn 2 rules:**
     - You SEE Turn 1's result as feedback
     - You CANNOT embed it as literal data in Turn 2's code
-    - Turn 2 can only access: `ctx/*` (original data) and `memory/*` (stored values)
+    - Turn 2 can only access: `ctx/*` (original data) and stored values (plain symbols defined via def)
     - Use your observed conclusion to hardcode values in Turn 2
 
     ## Datasets (access via ctx/name):

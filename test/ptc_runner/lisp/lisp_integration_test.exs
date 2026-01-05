@@ -11,9 +11,11 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert mem1 == %{step1: 100}
     end
 
-    test "second call uses persisted memory" do
+    test "second call uses persisted memory via user_ns lookup" do
+      # Previous memory values become available in user_ns during evaluation.
+      # Use def to bind a value, which is then accessible as a bare symbol.
       mem = %{previous: 50}
-      source = "{:return memory/previous}"
+      source = "previous"
       {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, memory: mem)
       assert result == 50
     end

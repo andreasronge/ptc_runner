@@ -28,7 +28,7 @@ defmodule PtcRunner.Step do
 
   - **Type:** `map()`
   - **Always set:** Contains accumulated memory from all operations
-  - **Access in PTC-Lisp:** `memory/key` prefix
+  - **Access in PTC-Lisp:** values available as plain symbols
 
   ### `memory_delta`
 

@@ -28,9 +28,9 @@ Then you produce the next Thought/Action based on what you observed.
 
 - You SEE previous result as feedback
 - **NEVER copy/paste result data into your code** - this doesn't work!
-- Your code can ONLY access: `ctx/*` (original data), `memory/*` (stored values), and `*1`/`*2`/`*3` (recent results)
+- Your code can ONLY access: `ctx/*` (original data), stored values (as plain symbols), and `*1`/`*2`/`*3` (recent results)
 
-**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~1KB), so use `memory/` for large values.
+**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~1KB), so store important values in memory.
 
 After observing a result:
 1. Analyze what you observed and draw a conclusion
@@ -51,14 +51,14 @@ After observing a result:
 
 ### Memory Storage Rules
 
-**Only maps are stored in memory.** When your program returns a map, its keys become accessible via `memory/key`.
+**Only maps are stored in memory.** When your program returns a map, its keys become accessible as plain symbols in subsequent turns.
 
-- **Map result** `{:foo 1 :bar 2}` → stored as `memory/foo` and `memory/bar`
+- **Map result** `{:foo 1 :bar 2}` → stored as `foo` and `bar` symbols
 - **List/scalar result** `[...]` or `42` → NOT stored, only shown as feedback
 
 If you need to access a list in a later turn, wrap it in a map:
 ```clojure
-{:results (->> ctx/data (filter ...))}  ; → memory/results
+{:results (->> ctx/data (filter ...))}  ; → `results` available next turn
 ```
 
 ### Memory Accumulation
@@ -70,10 +70,10 @@ To accumulate results across multiple tool calls (e.g., pagination):
 **Wrong** (results get overwritten each turn):
 ```clojure
 ; Turn 1: (call "search" {:query "topic"})
-;   → memory/results = [doc1, doc2], memory/cursor = "5"
-; Turn 2: (call "search" {:query "topic" :cursor memory/cursor})
-;   → memory/results = [doc3] ← OVERWRITES Turn 1 results!
-; Turn 3: (return memory/results) → only [doc3], lost doc1 and doc2!
+;   → results = [doc1, doc2], cursor = "5"
+; Turn 2: (call "search" {:query "topic" :cursor cursor})
+;   → results = [doc3] ← OVERWRITES Turn 1 results!
+; Turn 3: (return results) → only [doc3], lost doc1 and doc2!
 ```
 
 **Right** (save results before next call overwrites):
@@ -82,11 +82,11 @@ To accumulate results across multiple tool calls (e.g., pagination):
 (call "search" {:query "topic"})
 
 ; Turn 2: Save current results, then fetch more
-{:all_results memory/results
- :next (call "search" {:query "topic" :cursor memory/cursor})}
+{:all-results results
+ :next (call "search" {:query "topic" :cursor cursor})}
 
 ; Turn 3: Combine and return
-(return (concat memory/all_results memory/results))
+(return (concat all-results results))
 ```
 
 ### Example

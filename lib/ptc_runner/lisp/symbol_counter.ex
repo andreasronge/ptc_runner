@@ -42,7 +42,6 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :<=,
                   # Namespaces
                   :ctx,
-                  :memory,
                   # Common keywords
                   :else
                 ])

@@ -88,7 +88,12 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp do_analyze({:ns_symbol, :ctx, key}), do: {:ok, {:ctx, key}}
-  defp do_analyze({:ns_symbol, :memory, key}), do: {:ok, {:memory, key}}
+
+  # Unknown namespace - provide helpful error
+  defp do_analyze({:ns_symbol, ns, key}) do
+    {:error,
+     {:invalid_form, "unknown namespace #{ns}/ in #{ns}/#{key}. Use ctx/ to access context"}}
+  end
 
   # Turn history variables: *1, *2, *3
   defp do_analyze({:turn_history, n}) when n in [1, 2, 3], do: {:ok, {:turn_history, n}}
@@ -132,10 +137,6 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
   defp dispatch_list_form({:symbol, :def}, rest, _list), do: analyze_def(rest)
   defp dispatch_list_form({:symbol, :defn}, rest, _list), do: analyze_defn(rest)
-
-  # Memory operations
-  defp dispatch_list_form({:ns_symbol, :memory, :put}, rest, _list), do: analyze_memory_put(rest)
-  defp dispatch_list_form({:ns_symbol, :memory, :get}, rest, _list), do: analyze_memory_get(rest)
 
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
   defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list),
@@ -637,37 +638,6 @@ defmodule PtcRunner.Lisp.Analyze do
          {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:call, f, args}}
     end
-  end
-
-  # ============================================================
-  # Memory operations: memory/put and memory/get
-  # ============================================================
-
-  defp analyze_memory_put([key_ast, value_ast]) do
-    with {:ok, key} <- extract_keyword(key_ast),
-         {:ok, value} <- do_analyze(value_ast) do
-      {:ok, {:memory_put, key, value}}
-    end
-  end
-
-  defp analyze_memory_put(_) do
-    {:error, {:invalid_arity, :"memory/put", "expected (memory/put :key value)"}}
-  end
-
-  defp analyze_memory_get([key_ast]) do
-    with {:ok, key} <- extract_keyword(key_ast) do
-      {:ok, {:memory_get, key}}
-    end
-  end
-
-  defp analyze_memory_get(_) do
-    {:error, {:invalid_arity, :"memory/get", "expected (memory/get :key)"}}
-  end
-
-  defp extract_keyword({:keyword, key}), do: {:ok, key}
-
-  defp extract_keyword(_) do
-    {:error, {:invalid_form, "memory operations require a keyword as key"}}
   end
 
   # ============================================================

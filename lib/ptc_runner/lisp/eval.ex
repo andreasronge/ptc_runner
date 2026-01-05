@@ -159,23 +159,6 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, flex_get(ctx, key), user_ns}
   end
 
-  # Memory access: memory/results → memory[:results]
-  defp do_eval({:memory, key}, %EvalContext{user_ns: user_ns}) do
-    {:ok, flex_get(user_ns, key), user_ns}
-  end
-
-  # Memory put: (memory/put :key value)
-  defp do_eval({:memory_put, key, value_ast}, %EvalContext{} = eval_ctx) do
-    with {:ok, value, user_ns2} <- do_eval(value_ast, eval_ctx) do
-      {:ok, value, Map.put(user_ns2, key, value)}
-    end
-  end
-
-  # Memory get: (memory/get :key)
-  defp do_eval({:memory_get, key}, %EvalContext{user_ns: user_ns}) do
-    {:ok, flex_get(user_ns, key), user_ns}
-  end
-
   # Define binding in user namespace: (def name value)
   # Returns the var, not the value (Clojure semantics)
   defp do_eval({:def, name, value_ast}, %EvalContext{} = eval_ctx) do
