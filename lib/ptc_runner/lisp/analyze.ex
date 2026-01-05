@@ -140,6 +140,7 @@ defmodule PtcRunner.Lisp.Analyze do
     do: analyze_pred_comb(:none_of, rest)
 
   defp dispatch_list_form({:symbol, :juxt}, rest, _list), do: analyze_juxt(rest)
+  defp dispatch_list_form({:symbol, :pmap}, rest, _list), do: analyze_pmap(rest)
 
   defp dispatch_list_form({:symbol, :call}, _rest, _list) do
     {:error,
@@ -472,6 +473,22 @@ defmodule PtcRunner.Lisp.Analyze do
     with {:ok, fns} <- analyze_list(args) do
       {:ok, {:juxt, fns}}
     end
+  end
+
+  # ============================================================
+  # Parallel map: pmap
+  # ============================================================
+
+  # (pmap f coll) - parallel map, evaluates f for each element concurrently
+  defp analyze_pmap([fn_ast, coll_ast]) do
+    with {:ok, fn_core} <- do_analyze(fn_ast),
+         {:ok, coll_core} <- do_analyze(coll_ast) do
+      {:ok, {:pmap, fn_core, coll_core}}
+    end
+  end
+
+  defp analyze_pmap(_) do
+    {:error, {:invalid_arity, :pmap, "expected (pmap f coll)"}}
   end
 
   # ============================================================

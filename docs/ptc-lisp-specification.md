@@ -1071,18 +1071,37 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `map` | `(map f coll)` | Apply f to each item |
+| `pmap` | `(pmap f coll)` | Apply f to each item in parallel |
 | `mapv` | `(mapv f coll)` | Like map, returns vector |
 | `select-keys` | `(select-keys map keys)` | Pick specific keys |
 | `pluck` | `(pluck key coll)` | Extract single field from each item |
 
 ```clojure
 (map :name users)                    ; extract :name from each
+(pmap :name users)                   ; same, but parallel execution
 (mapv :name users)                   ; same, ensures vector
 (select-keys user [:name :email])    ; pick keys from map
 (pluck :name users)                  ; shorthand for (map :name coll)
 ```
 
 **Note:** Since PTC-Lisp has no lazy sequences (see Section 13.1), `map` and `mapv` are functionally identical—both return vectors. `mapv` is provided for Clojure compatibility and to make intent explicit.
+
+**Parallel Map (`pmap`):** Executes the function for each element concurrently using BEAM processes. Useful when the mapping function involves I/O-bound operations (like tool calls) that can benefit from parallelism:
+
+```clojure
+;; Process multiple items in parallel - much faster for I/O-bound tasks
+(pmap #(ctx/fetch-data {:id %}) item-ids)
+
+;; Closures work - captures outer scope at evaluation time
+(let [factor 10]
+  (pmap #(* % factor) [1 2 3]))    ; => [10 20 30]
+```
+
+**pmap semantics:**
+- Order is preserved - results match input order
+- Each parallel branch gets a read-only snapshot of the user namespace
+- Writes within branches (via `def`) are isolated and discarded
+- Errors in any branch propagate to the caller
 
 #### Ordering
 
