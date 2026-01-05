@@ -3,20 +3,18 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
   alias PtcRunner.Lisp
 
-  describe "chained memory updates" do
-    test "first call stores in memory" do
-      source = "{:return 42, :step1 100}"
-      {:ok, %{return: result1, memory_delta: _, memory: mem1}} = Lisp.run(source)
-      assert result1 == 42
-      assert mem1 == %{step1: 100}
+  describe "explicit storage via def" do
+    test "def stores value in user_ns, accessible in same expression" do
+      source = "(do (def step1 100) step1)"
+      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} = Lisp.run(source)
+      assert result == 100
     end
 
-    test "second call uses persisted memory via user_ns lookup" do
+    test "memory values become available as user_ns symbols" do
       # Previous memory values become available in user_ns during evaluation.
-      # Use def to bind a value, which is then accessible as a bare symbol.
       mem = %{previous: 50}
       source = "previous"
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, memory: mem)
+      {:ok, %{return: result, memory_delta: %{}, memory: _}} = Lisp.run(source, memory: mem)
       assert result == 50
     end
   end
@@ -24,11 +22,12 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "full E2E pipeline with threading and tool calls" do
     test "high-paid employees example exercises complete pipeline" do
       # Exercises: tool call, threading (->>) filter, where predicate with comparison,
-      # let binding, map literal with pluck, and memory contract
+      # let binding, map literal with pluck
+      # V2: just returns the map, no implicit memory merge
       source = ~S"""
       (let [high-paid (->> (call "find-employees" {})
                            (filter (where :salary > 100000)))]
-        {:return (pluck :email high-paid)
+        {:emails (pluck :email high-paid)
          :high-paid high-paid
          :count (count high-paid)})
       """
@@ -45,27 +44,24 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
-      # Memory contract: :return is extracted, rest goes to delta
-      assert result == ["alice@ex.com"]
-
-      assert delta == %{
+      # V2: Map returns as-is, no implicit memory merge
+      assert result == %{
                :"high-paid" => [%{id: 1, name: "Alice", salary: 150_000, email: "alice@ex.com"}],
-               :count => 1
+               emails: ["alice@ex.com"],
+               count: 1
              }
 
-      assert new_memory == %{
-               :"high-paid" => [%{id: 1, name: "Alice", salary: 150_000, email: "alice@ex.com"}],
-               :count => 1
-             }
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
     test "tool returning empty list is handled correctly" do
       # Tests behavior when filter produces empty list
+      # V2: returns count directly, no implicit memory
       source = ~S"""
       (let [results (->> (call "search" {})
                          (filter (where :active = true)))]
-        {:return (count results)
-         :items results})
+        (count results))
       """
 
       tools = %{
@@ -81,35 +77,36 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         Lisp.run(source, tools: tools)
 
       assert result == 0
-      assert delta == %{items: []}
-      assert new_memory == %{items: []}
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
     test "nested let bindings with multiple levels" do
       # Tests complex let binding scenarios
+      # V2: returns map directly, no implicit memory
       source = ~S"""
       (let [x 10
             y 20
             z (+ x y)]
-        {:return z
+        {:result z
          :cached-x x
          :cached-y y})
       """
 
       {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
-      assert result == 30
-      assert delta == %{:"cached-x" => 10, :"cached-y" => 20}
-      assert new_memory == %{:"cached-x" => 10, :"cached-y" => 20}
+      assert result == %{:"cached-x" => 10, :"cached-y" => 20, result: 30}
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
     test "where predicate safely handles nil field values" do
       # Tests that comparison with nil doesn't error and filters correctly
+      # V2: returns count directly, no implicit memory
       source = ~S"""
       (let [filtered (->> ctx/items
                          (filter (where :age > 18)))]
-        {:return (count filtered)
-         :matches filtered})
+        (count filtered))
       """
 
       ctx = %{
@@ -125,15 +122,8 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       # Only Alice and Carol match (age > 18), Bob's nil is safely filtered
       assert result == 2
-
-      assert delta == %{
-               matches: [
-                 %{id: 1, name: "Alice", age: 25},
-                 %{id: 3, name: "Carol", age: 30}
-               ]
-             }
-
-      assert new_memory == delta
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
     test "thread-first with assoc chains" do
@@ -205,10 +195,10 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
 
     test "closure captures let-bound variable in filter" do
+      # V2: no :return special handling, just return filtered list directly
       source = ~S"""
       (let [threshold 100]
-        {:return (filter (fn [x] (> (:price x) threshold)) ctx/products)
-         :threshold threshold})
+        (filter (fn [x] (> (:price x) threshold)) ctx/products))
       """
 
       ctx = %{
@@ -226,7 +216,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                %{name: "keyboard", price: 150}
              ]
 
-      assert delta == %{threshold: 100}
+      assert delta == %{}
     end
 
     test "renaming bindings in fn destructuring works" do

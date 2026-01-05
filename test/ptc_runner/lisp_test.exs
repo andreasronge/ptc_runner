@@ -135,7 +135,8 @@ defmodule PtcRunner.LispTest do
     end
 
     test "map with keywords and numbers" do
-      assert {:ok, %{return: %{a: 1, b: 2}, memory_delta: %{a: 1, b: 2}, memory: %{a: 1, b: 2}}} =
+      # V2: maps pass through, no implicit memory merge
+      assert {:ok, %{return: %{a: 1, b: 2}, memory_delta: %{}, memory: %{}}} =
                Lisp.run("{:a 1 :b 2}")
     end
 

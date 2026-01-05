@@ -2284,85 +2284,79 @@ The host builds an execution environment for each program:
 }
 ```
 
-### 16.3 Result Contract
+### 16.3 Result Contract (V2 Simplified Model)
 
-The program's return value determines symbol storage behavior:
+The program's return value is passed through unchanged. Storage is explicit via `def`:
 
-| Return Value | Symbol Storage | Use Case |
-|--------------|-----------------|----------|
-| Non-map value | No symbols stored | Pure queries |
-| Map without `:return` | Map keys become available as symbols next turn | Store values only |
-| Map with `:return` | Map keys (minus `:return`) become symbols; `:return` returned to caller | Store values AND return result |
+| Behavior | How It Works |
+|----------|--------------|
+| **Return value** | Last expression result (standard REPL semantics) |
+| **Persistent storage** | Use `(def name value)` to store values |
+| **Access stored values** | Use plain symbols (e.g., `my-value`) |
 
-**Reserved key:** `:return` is reserved at the top level of return maps. It controls the return value and is never stored as a symbol. Do not use `:return` as a symbol name—use alternatives like `:query-result`, `:computation-result`, or `:output`.
+**No implicit map merge.** Unlike earlier versions, returning a map does NOT automatically store its keys. Use `def` for explicit storage.
 
-#### Case 1: Pure Query (No Symbol Storage)
+#### Pure Query (No Storage)
 
 ```clojure
-;; Returns a number - no symbols stored
+;; Returns a number - nothing stored
 (->> ctx/expenses
      (filter (where :category = "travel"))
      (sum-by :amount))
 ```
 
-#### Case 2: Symbol Storage Only
+#### Explicit Storage with def
 
 ```clojure
-;; Returns a map - keys become available as symbols next turn
-(let [high-paid (->> (call "find-employees" {})
-                     (filter (where :salary > 100000)))]
-  {:high-paid high-paid
-   :last-query "employees"})
+;; Store values explicitly, return a result
+(do
+  (def high-paid (->> (call "find-employees" {})
+                      (filter (where :salary > 100000))))
+  (def last-query "employees")
+  (pluck :email high-paid))
 ```
 
 After execution:
 - `high-paid` = the filtered list (available as symbol in next turn)
 - `last-query` = `"employees"` (available as symbol in next turn)
-- Return value to caller = the same map
+- Return value = `["alice@example.com", "bob@example.com", ...]`
 
-#### Case 3: Symbol Storage AND Return Value
+#### Return Map Without Storage
 
-```clojure
-;; Returns map with :return - keys become symbols, :return returned
-(let [high-paid (->> (call "find-employees" {})
-                     (filter (where :salary > 100000)))]
-  {:return (pluck :email high-paid)   ; returned to caller
-   :high-paid high-paid})              ; keys become symbols next turn
-```
-
-After execution:
-- `high-paid` = the filtered list (available as symbol in next turn)
-- Return value to caller = `["alice@example.com", "bob@example.com", ...]`
-
-#### Returning a Map Without Memory Update
-
-If you want to return a map to the caller without storing its keys as symbols, wrap it in `:return`:
+Maps return as-is, no special handling:
 
 ```clojure
-;; Return a map structure but don't store as symbols
-{:return {:summary "Query complete"
-          :count (count ctx/items)
-          :items ctx/items}}
+;; Returns a map - nothing stored unless you use def
+{:summary "Query complete"
+ :count (count ctx/items)
+ :items ctx/items}
 ```
 
-After execution:
-- No symbols stored
-- Return value = `{:summary "Query complete", :count 5, :items [...]}`
+Return value = `{:summary "Query complete", :count 5, :items [...]}`, no symbols stored.
 
 ### 16.4 Symbol Storage Semantics
 
-Stored values use **shallow merge**:
+Values stored via `def` persist across turns. Each `def` sets a single key:
 
 ```clojure
-;; Before: stored = {:a 1, :b {:x 10}}
-;; Program returns: {:b {:y 20}, :c 3}
-;; After:  stored = {:a 1, :b {:y 20}, :c 3}
+;; Turn 1: Store values
+(do
+  (def a 1)
+  (def b {:x 10})
+  "stored")
+
+;; Turn 2: Access and update
+(do
+  (def b {:y 20})  ; replaces previous value
+  (def c 3)        ; new value
+  {:a a, :b b, :c c})
 ```
 
-- New keys are added as symbols
-- Existing keys are replaced (not deep-merged)
-- Keys not in the result are preserved
-- To delete a symbol, explicitly set it to `nil`
+After Turn 2: `a=1, b={:y 20}, c=3`
+
+- New symbols are added
+- Existing symbols are replaced (not deep-merged)
+- Symbols not referenced remain unchanged
 
 ### 16.5 Execution Flow
 
@@ -2372,7 +2366,7 @@ Stored values use **shallow merge**:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. HOST BUILDS ENVIRONMENT                                     │
-│     ├─ Load stored symbols from previous turns                  │
+│     ├─ Load stored symbols from previous turns (def bindings)   │
 │     ├─ Attach current request context                           │
 │     └─ Register available tools                                 │
 │                                                                 │
@@ -2382,15 +2376,15 @@ Stored values use **shallow merge**:
 │  3. EXECUTE IN SANDBOX                                          │
 │     ├─ Validate AST                                             │
 │     ├─ Evaluate with resource limits                            │
+│     ├─ Track def bindings (become symbols for next turn)        │
 │     └─ Track tool calls for logging                             │
 │                                                                 │
 │  4. HANDLE RESULT                                               │
 │     │                                                           │
 │     ├─ ON SUCCESS:                                              │
-│     │   ├─ Apply result contract (see 16.3)                     │
-│     │   ├─ Store result keys as symbols for next turn           │
-│     │   ├─ Log: program, tool calls, stored symbols, result     │
-│     │   └─ Return result to LLM/caller                          │
+│     │   ├─ Return last expression value (standard REPL)         │
+│     │   ├─ Persist def bindings as symbols                      │
+│     │   └─ Log: program, tool calls, stored symbols, result     │
 │     │                                                           │
 │     └─ ON ERROR:                                                │
 │         ├─ NO symbol changes (rollback)                         │
@@ -2406,46 +2400,48 @@ Stored values use **shallow merge**:
 
 ### 16.6 Multi-Turn Example
 
-**Turn 1:** Find high-paid employees and store as symbol
+**Turn 1:** Find high-paid employees and store with def
 
 ```clojure
-{:high-paid (->> (call "find-employees" {})
-                 (filter (where :salary > 100000)))}
+(do
+  (def high-paid (->> (call "find-employees" {})
+                      (filter (where :salary > 100000))))
+  (count high-paid))
 ```
 
-*Symbols available next turn:* `{:high-paid [{:id 1, :name "Alice", :salary 150000}, ...]}`
+*Returns:* `5`
+*Symbols stored:* `{:high-paid [{:id 1, :name "Alice", :salary 150000}, ...]}`
 
 **Turn 2:** Query stored data (no symbol update)
 
 ```clojure
-{:return (count high-paid)}
+(count high-paid)
 ```
 
 *Returns:* `5`
 *Symbols unchanged*
 
-**Turn 3:** Fetch orders for stored employees, update symbols
+**Turn 3:** Fetch orders for stored employees, add new symbol
 
 ```clojure
-(let [ids (pluck :id high-paid)
-      orders (call "get-orders" {:employee-ids ids})]
-  {:orders orders
-   :order-count (count orders)})
+(do
+  (def orders (let [ids (pluck :id high-paid)]
+                (call "get-orders" {:employee-ids ids})))
+  {:orders-count (count orders)})
 ```
 
-*Symbols available next turn:* `{:high-paid [...], :orders [...], :order-count 42}`
+*Returns:* `{:orders-count 42}`
+*Symbols stored:* `{:high-paid [...], :orders [...]}`
 
-**Turn 4:** Return summary and update query count
+**Turn 4:** Return summary
 
 ```clojure
-(let [prev-count (or query-count 0)]
-  {:return {:employee-count (count high-paid)
-            :order-count order-count}
-   :query-count (inc prev-count)})
+{:employee-count (count high-paid)
+ :order-count (count orders)}
 ```
 
 *Returns:* `{:employee-count 5, :order-count 42}`
-*Symbols available next turn:* `{:high-paid [...], :orders [...], :order-count 42, :query-count 1}`
+*Symbols unchanged*
 
 ### 16.7 Logging and Audit Trail
 
@@ -2458,21 +2454,20 @@ Every execution produces a log entry:
   timestamp: ~U[2024-01-15 10:30:00Z],
 
   # Input
-  program_source: "(let [ids (pluck :id memory/high-paid)] ...)",
+  program_source: "(do (def orders (call \"get-orders\" {:ids (pluck :id high-paid)})) ...)",
   memory_before: %{high_paid: [...]},
   ctx: %{user_id: "user-123"},
 
   # Execution trace
   tool_calls: [
-    %{tool: "get-orders", args: %{employee_ids: [1, 2, 3]},
+    %{tool: "get-orders", args: %{ids: [1, 2, 3]},
       result_size: 42, duration_ms: 150}
   ],
 
   # Output
   status: :success,  # or :error
-  result: %{orders: [...], order_count: 42},
-  memory_delta: %{orders: [...], order_count: 42},
-  memory_after: %{high_paid: [...], orders: [...], order_count: 42},
+  result: {:orders-count 42},  # last expression value
+  memory_after: %{high_paid: [...], orders: [...]},  # includes def bindings
 
   # Metrics
   duration_ms: 180,

@@ -586,16 +586,12 @@ defmodule PtcRunner.SubAgent.Loop do
     turns_remaining = state.remaining_turns - 1
     has_more_turns = turns_remaining > 0
 
-    base_result =
-      ResponseHandler.format_execution_result(lisp_step.return,
-        show_memory_hints: has_more_turns
-      )
+    base_result = ResponseHandler.format_execution_result(lisp_step.return)
 
     # Add turn info for multi-turn agents
     if agent.max_turns > 1 do
-      # Only show *1 hint for non-maps (maps already get memory hints)
       history_hint =
-        if has_more_turns and not is_map(lisp_step.return) do
+        if has_more_turns do
           "\n(Access this result with *1 in next turn)"
         else
           ""

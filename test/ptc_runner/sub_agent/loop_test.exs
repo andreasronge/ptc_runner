@@ -591,12 +591,9 @@ defmodule PtcRunner.SubAgent.LoopTest do
       turn_counter = :counters.new(1, [:atomics])
 
       tools = %{
-        "store-large" => fn %{} ->
-          # Return a large map that will exceed 200 bytes when serialized
-          %{
-            data:
-              "this is a very long string designed to exceed the memory limit when stored in memory along with the erlang encoding overhead so we can test that the memory limit enforcement is working correctly"
-          }
+        "get-large" => fn %{} ->
+          # Return a large string that will exceed 200 bytes when stored via def
+          "this is a very long string designed to exceed the memory limit when stored in memory along with the erlang encoding overhead so we can test that the memory limit enforcement is working correctly"
         end
       }
 
@@ -613,10 +610,10 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
         case turn do
           1 ->
-            # Call tool that returns large data
-            # The returned map will be merged into context/memory, exceeding the limit
+            # V2: Use def to explicitly store data in memory
+            # This will exceed the memory limit
             {:ok, ~S|```clojure
-(call "store-large" {})
+(def large-data (call "get-large" {}))
 ```|}
 
           _ ->
