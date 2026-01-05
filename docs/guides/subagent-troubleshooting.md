@@ -194,34 +194,35 @@ Common issues and solutions when working with SubAgents.
    MyApp.Tools.get_user(%{id: 123})  # Test directly
    ```
 
-## Memory Not Persisting
+## State Not Persisting
 
-**Symptom:** `memory/key` returns nil in subsequent turns.
+**Symptom:** A stored value returns nil in subsequent turns.
 
-**Cause:** The program didn't return a map, or returned it incorrectly.
+**Cause:** The program didn't use `def` to store the value.
 
 **Solutions:**
 
-1. **Return a map to persist values**:
+1. **Use `def` to persist values**:
    ```clojure
-   ;; This persists :cached_data to memory
-   {:cached_data (call "fetch_data" {})}
+   ;; This persists cached-data for later access
+   (def cached-data (ctx/fetch-data {}))
    ```
 
-2. **Use :return to separate return value from memory**:
+2. **Store and return different values**:
    ```clojure
-   ;; Persists :cached_data, returns 42
-   {:cached_data (call "fetch_data" {})
-    :return 42}
+   ;; Persists cached-data, returns a summary
+   (do
+     (def cached-data (ctx/fetch-data {}))
+     (str "Stored " (count cached-data) " items"))
    ```
 
-3. **Non-maps don't update memory**:
+3. **Access stored values as plain symbols**:
    ```clojure
-   ;; This just returns the count, no memory update
-   (count ctx/items)
+   ;; Access previously stored value
+   cached-data
    ```
 
-See [Core Concepts](subagent-concepts.md) for the full memory result contract.
+See [Core Concepts](subagent-concepts.md) for the full state persistence documentation.
 
 ## See Also
 

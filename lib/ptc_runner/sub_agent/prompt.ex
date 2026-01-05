@@ -95,7 +95,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   Respond with a single ```clojure code block containing your program:
 
   ```clojure
-  (let [data (call "fetch" {:id ctx/user_id})]
+  (let [data (ctx/fetch {:id ctx/user_id})]
     (return {:result data}))
   ```
 
@@ -549,7 +549,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     Please ensure your response:
     1. Contains a ```clojure code block
     2. Uses valid s-expression syntax
-    3. Calls tools with (call "tool-name" {...})
+    3. Calls tools with (ctx/tool-name args)
 
     Please fix the issue and try again.
     """
@@ -629,7 +629,7 @@ defmodule PtcRunner.SubAgent.Prompt do
 
     1. Respond with EXACTLY ONE ```clojure code block
     2. Do not include explanatory text outside the code block
-    3. Use `(call "tool-name" args)` to invoke tools
+    3. Use `(ctx/tool-name args)` to invoke tools
     4. Use `ctx/key` to access context data
     5. Access stored values as plain symbols (values from previous turns)
     6. Call `(return result)` when the mission is complete
@@ -858,11 +858,11 @@ defmodule PtcRunner.SubAgent.Prompt do
     case Signature.parse(sig) do
       {:ok, {:signature, [], _return_type}} ->
         # No parameters
-        "Example: `(call \"#{name}\" {})`"
+        "Example: `(ctx/#{name})`"
 
       {:ok, {:signature, params, _return_type}} ->
         args = generate_example_args(params)
-        "Example: `(call \"#{name}\" {#{args}})`"
+        "Example: `(ctx/#{name} {#{args}})`"
 
       {:error, _} ->
         ""

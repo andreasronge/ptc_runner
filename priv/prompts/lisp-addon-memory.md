@@ -24,13 +24,29 @@ Then you produce the next Thought/Action based on what you observed.
 - If the next step depends on runtime values, do another step
 - When done, use `(return value)` to produce the final answer
 
+### State Persistence
+
+Use `def` to store values that persist across turns:
+
+```clojure
+(def results (ctx/search {:query "budget"}))  ; => #'results
+results                                        ; => the search results
+```
+
+Use `defn` to define reusable functions:
+
+```clojure
+(defn expensive? [item] (> (:price item) threshold))
+(filter expensive? ctx/items)
+```
+
 ### Turn 2+ Access Rules
 
 - You SEE previous result as feedback
 - **NEVER copy/paste result data into your code** - this doesn't work!
-- Your code can ONLY access: `ctx/*` (original data), stored values (as plain symbols), and `*1`/`*2`/`*3` (recent results)
+- Your code can ONLY access: `ctx/*` (original data), stored values (via `def`), and `*1`/`*2`/`*3` (recent results)
 
-**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~1KB), so store important values in memory.
+**Turn history:** `*1` is the previous turn's result, `*2` is two turns ago, `*3` is three turns ago. Returns `nil` if turn doesn't exist. Results are truncated (~1KB), so store important values with `def`.
 
 After observing a result:
 1. Analyze what you observed and draw a conclusion
@@ -49,44 +65,22 @@ After observing a result:
 ; OR filter ctx/* using your concluded key
 ```
 
-### Memory Storage Rules
+### Accumulating Results
 
-**Only maps are stored in memory.** When your program returns a map, its keys become accessible as plain symbols in subsequent turns.
+Use `def` to store values across turns. Each `def` overwrites the previous value:
 
-- **Map result** `{:foo 1 :bar 2}` → stored as `foo` and `bar` symbols
-- **List/scalar result** `[...]` or `42` → NOT stored, only shown as feedback
-
-If you need to access a list in a later turn, wrap it in a map:
 ```clojure
-{:results (->> ctx/data (filter ...))}  ; → `results` available next turn
-```
+;; Turn 1: Search
+(def page1 (ctx/search {:query "topic"}))
 
-### Memory Accumulation
+;; Turn 2: Save results, fetch more
+(do
+  (def all-results (:results page1))
+  (def page2 (ctx/search {:query "topic" :cursor (:cursor page1)}))
+  (count (:results page2)))
 
-**Important:** When you return a map, its keys **overwrite** any previous values with the same keys.
-
-To accumulate results across multiple tool calls (e.g., pagination):
-
-**Wrong** (results get overwritten each turn):
-```clojure
-; Turn 1: (call "search" {:query "topic"})
-;   → results = [doc1, doc2], cursor = "5"
-; Turn 2: (call "search" {:query "topic" :cursor cursor})
-;   → results = [doc3] ← OVERWRITES Turn 1 results!
-; Turn 3: (return results) → only [doc3], lost doc1 and doc2!
-```
-
-**Right** (save results before next call overwrites):
-```clojure
-; Turn 1: Call search
-(call "search" {:query "topic"})
-
-; Turn 2: Save current results, then fetch more
-{:all-results results
- :next (call "search" {:query "topic" :cursor cursor})}
-
-; Turn 3: Combine and return
-(return (concat all-results results))
+;; Turn 3: Combine and return
+(return (concat all-results (:results page2)))
 ```
 
 ### Example
