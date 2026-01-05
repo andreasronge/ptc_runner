@@ -87,6 +87,20 @@ defmodule PtcRunner.Lisp.Parser do
       utf8_char(not: ?\\, not: ?", not: ?\n, not: ?\r)
     ])
 
+  # Characters
+  char_literal =
+    ignore(string("\\"))
+    |> choice([
+      string("newline") |> replace("\n"),
+      string("space") |> replace(" "),
+      string("tab") |> replace("\t"),
+      string("return") |> replace("\r"),
+      string("backspace") |> replace("\b"),
+      string("formfeed") |> replace("\f"),
+      utf8_char([]) |> map({ParserHelpers, :char_to_string, []})
+    ])
+    |> map({ParserHelpers, :build_char, []})
+
   string_literal =
     ignore(string("\""))
     |> repeat(string_char)
@@ -186,6 +200,7 @@ defmodule PtcRunner.Lisp.Parser do
       float_literal,
       integer_literal,
       string_literal,
+      char_literal,
       keyword,
       symbol,
       parsec(:vector),
@@ -219,6 +234,24 @@ defmodule PtcRunner.Lisp.Parser do
   """
   @spec parse(String.t()) :: {:ok, AST.t()} | {:error, {:parse_error, String.t()}}
   def parse(source) when is_binary(source) do
+    # Check for unsupported syntax before parsing
+    with :ok <- check_unsupported_syntax(source) do
+      do_parse(source)
+    end
+  end
+
+  defp check_unsupported_syntax(source) do
+    # Regex literals: #"pattern"
+    if Regex.match?(~r/#"/, source) do
+      {:error,
+       {:parse_error,
+        "regex literals (#\"...\") are not supported in PTC-Lisp. Use (split str \" \") instead of (split str #\" \")"}}
+    else
+      :ok
+    end
+  end
+
+  defp do_parse(source) do
     case program(source) do
       # Empty program
       {:ok, [], "", _context, _position, _offset} ->

@@ -172,7 +172,58 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, and `replace`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.4 for details.
 
-### 3.5 Keywords
+**String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
+
+```clojure
+(first "hello")                    ; => "h"
+(filter #(= \e %) "hello")         ; => ["e"]
+(map identity "abc")               ; => ["a" "b" "c"]
+(take 2 "hello")                   ; => ["h" "e"]
+(count (filter #(= \r %) "raspberry"))  ; => 3
+```
+
+### 3.5 Character Literals
+
+Character literals provide a concise syntax for single-character strings, using Clojure's backslash notation:
+
+```clojure
+\a          ; => "a"
+\Z          ; => "Z"
+\5          ; => "5"
+\λ          ; => "λ" (Unicode supported)
+```
+
+**Special characters** use named escapes:
+
+| Literal | Value | Description |
+|---------|-------|-------------|
+| `\newline` | `"\n"` | Newline |
+| `\space` | `" "` | Space |
+| `\tab` | `"\t"` | Tab |
+| `\return` | `"\r"` | Carriage return |
+| `\backspace` | `"\b"` | Backspace |
+| `\formfeed` | `"\f"` | Form feed |
+
+**Important:** Character literals are represented as single-character strings internally. This means `\r` produces the string `"r"`, while `\return` produces `"\r"` (carriage return). Character equality with strings works naturally:
+
+```clojure
+(= \a "a")           ; => true
+(= \newline "\n")    ; => true
+(char? \a)           ; => true
+(char? "ab")         ; => false
+```
+
+**Use case:** Character literals are particularly useful with collection operations on strings:
+
+```clojure
+;; Count occurrences of 'r' in a string
+(count (filter #(= \r %) "raspberry"))  ; => 3
+
+;; Find vowels
+(filter #(contains? #{\a \e \i \o \u} %) "hello")  ; => ["e" "o"]
+```
+
+### 3.6 Keywords
 
 Self-evaluating symbolic identifiers:
 
@@ -202,7 +253,7 @@ Keywords also work as predicates in higher-order functions, checking if the fiel
 (map :name [{:name "Alice"} {:name "Bob"}])        ; => ["Alice" "Bob"]
 ```
 
-### 3.6 Vectors
+### 3.7 Vectors
 
 Ordered, indexed collections:
 
@@ -214,7 +265,7 @@ Ordered, indexed collections:
 [[1 2] [3 4]]  ; nested
 ```
 
-### 3.7 Maps
+### 3.8 Maps
 
 Key-value associations:
 
@@ -235,7 +286,7 @@ Key-value associations:
 {[:a :b] "nested"}        ; VALIDATION ERROR - vector key
 ```
 
-### 3.8 Sets
+### 3.9 Sets
 
 Unordered collections of unique values:
 
@@ -271,7 +322,7 @@ Sets are **unordered** - iteration order is not guaranteed.
 
 **Not supported:** Lists (`'()`)
 
-### 3.9 Vars
+### 3.10 Vars
 
 Vars are references to bindings created by the `def` form. They allow you to create references to named values that can be stored in collections and passed around.
 
@@ -1510,6 +1561,7 @@ The `seq` function converts a collection to a sequence:
 | `boolean?` | Is boolean? |
 | `number?` | Is number? |
 | `string?` | Is string? |
+| `char?` | Is single-character string? (See §3.5) |
 | `keyword?` | Is keyword? |
 | `vector?` | Is vector? |
 | `map?` | Is map? |
@@ -1520,20 +1572,37 @@ The `seq` function converts a collection to a sequence:
 
 **Collection Functions on Maps and Strings:**
 
-Although maps and strings are not "collections" per `coll?`, some collection functions still work on them:
+Although maps and strings are not "collections" per `coll?`, many collection functions work on them:
 
 | Function | Maps | Strings | Notes |
 |----------|------|---------|-------|
 | `count` | ✓ | ✓ | Returns key count / character count |
 | `empty?` | ✓ | ✓ | True if no keys / no characters |
-| `first` | ✗ | ✗ | Use `(first (keys m))` or `(first (vals m))` |
-| `last` | ✗ | ✗ | Use `(last (keys m))` or `(last (vals m))` |
-| `map` | ✓ | ✗ | Iterates over `[key value]` pairs (Clojure-compatible) |
-| `filter` | ✓ | ✗ | Returns list of `[key value]` pairs matching predicate |
-| `remove` | ✓ | ✗ | Returns list of `[key value]` pairs not matching predicate |
-| `sort-by` | ✓ | ✗ | Returns sorted list of `[key value]` pairs |
+| `first` | ✗ | ✓ | Maps: use `(first (keys m))`. Strings: returns first character |
+| `second` | ✗ | ✓ | Maps: use `(second (keys m))`. Strings: returns second character |
+| `last` | ✗ | ✓ | Maps: use `(last (keys m))`. Strings: returns last character |
+| `nth` | ✗ | ✓ | Maps: not supported. Strings: returns character at index |
+| `rest` | ✗ | ✓ | Strings: returns list of remaining characters |
+| `next` | ✗ | ✓ | Strings: returns list of remaining characters or nil |
+| `take` | ✗ | ✓ | Strings: returns list of first n characters |
+| `drop` | ✗ | ✓ | Strings: returns list of characters after dropping n |
+| `take-while` | ✗ | ✓ | Strings: returns list of characters while predicate is true |
+| `drop-while` | ✗ | ✓ | Strings: returns list of characters after predicate becomes false |
+| `map` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |
+| `mapv` | ✓ | ✓ | Same as `map`, returns vector |
+| `filter` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
+| `remove` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
+| `find` | ✗ | ✓ | Strings: returns first character matching predicate |
+| `sort` | ✗ | ✓ | Strings: returns sorted list of characters |
+| `sort-by` | ✓ | ✓ | Maps: returns sorted list of `[key value]` pairs. Strings: sorted list of characters |
+| `reverse` | ✗ | ✓ | Strings: returns reversed list of characters |
+| `distinct` | ✗ | ✓ | Strings: returns list of unique characters |
+| `some` | ✗ | ✓ | Strings: returns first truthy result of predicate |
+| `every?` | ✗ | ✓ | Strings: true if predicate is truthy for all characters |
+| `not-any?` | ✗ | ✓ | Strings: true if predicate is false for all characters |
 | `entries` | ✓ | ✗ | Explicit conversion to list of `[key value]` pairs |
-| `nth` | ✗ | ✗ | String indexing not supported |
+
+**Note:** String operations that return characters return lists of single-character strings, not a string. Use `(join "" result)` to convert back to a string if needed.
 
 **Mapping over maps:** When you call `map` on a map, each entry is passed as a `[key value]` vector. Use destructuring to extract the key and value:
 
@@ -2306,7 +2375,7 @@ expression  = literal
             | map
             | list-expr ;
 
-literal     = nil | boolean | number | string ;
+literal     = nil | boolean | number | string | char ;
 
 nil         = "nil" ;
 boolean     = "true" | "false" ;
@@ -2317,6 +2386,9 @@ exponent    = ("e" | "E") ["+" | "-"] digit+ ;
 string      = '"' string-char* '"' ;
 string-char = escape-seq | (any char except '"', '\', and newline) ;
 escape-seq  = '\\' ('"' | '\\' | 'n' | 't' | 'r') ;
+char        = '\\' (char-name | any-char) ;
+char-name   = "newline" | "space" | "tab" | "return" | "backspace" | "formfeed" ;
+any-char    = (any single Unicode grapheme) ;
 
 symbol      = symbol-first symbol-rest* ;
 symbol-first = letter | special-initial ;
@@ -2355,9 +2427,10 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 1. `nil`, `true`, `false` → reserved literals (not symbols)
 2. `-123`, `3.14` → numbers (not symbols starting with `-` or digits)
 3. `:foo` → keyword
-4. Everything else → symbol
+4. `\a`, `\newline` → character literal
+5. Everything else → symbol
 
-This means `-1` is always the integer negative one, never a symbol named "-1".
+This means `-1` is always the integer negative one, never a symbol named "-1". Similarly, `\r` is the character "r", not a symbol.
 
 ---
 

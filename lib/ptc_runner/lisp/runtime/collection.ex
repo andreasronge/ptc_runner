@@ -7,6 +7,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
+  # Convert string to list of graphemes for sequence operations
+  defp graphemes(s), do: String.graphemes(s)
+
   defp truthy_key_pred(key), do: fn item -> !!FlexAccess.flex_get(item, key) end
 
   # Set-as-predicate: returns element if member, nil if not (used with filter/some/etc)
@@ -23,6 +26,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
+  def filter(pred, coll) when is_binary(coll), do: Enum.filter(graphemes(coll), pred)
 
   def filter(pred, coll) when is_map(coll) do
     # When filtering a map, each entry is passed as [key, value] pair
@@ -43,6 +47,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
+  def remove(pred, coll) when is_binary(coll), do: Enum.reject(graphemes(coll), pred)
 
   def remove(pred, coll) when is_map(coll) do
     # When removing from a map, each entry is passed as [key, value] pair
@@ -61,11 +66,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
+  def find(pred, coll) when is_binary(coll), do: Enum.find(graphemes(coll), pred)
 
   def map(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
+  def map(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), f)
 
   def map(f, %MapSet{} = set), do: Enum.map(set, f)
 
@@ -78,6 +85,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
   def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
+  def mapv(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), f)
 
   def mapv(f, %MapSet{} = set), do: Enum.map(set, f)
 
@@ -86,10 +94,15 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
+  def sort(coll) when is_binary(coll), do: Enum.sort(graphemes(coll))
 
   # sort_by with 2 args: (keyfn/key, coll)
   def sort_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     Enum.sort_by(coll, keyfn)
+  end
+
+  def sort_by(keyfn, coll) when is_binary(coll) and is_function(keyfn, 1) do
+    Enum.sort_by(graphemes(coll), keyfn)
   end
 
   def sort_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
@@ -125,18 +138,34 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
+  def reverse(coll) when is_binary(coll), do: Enum.reverse(graphemes(coll))
 
   def first(coll) when is_list(coll), do: List.first(coll)
+  def first(coll) when is_binary(coll), do: String.at(coll, 0)
+
   def second(coll) when is_list(coll), do: Enum.at(coll, 1)
+  def second(coll) when is_binary(coll), do: String.at(coll, 1)
+
   def last(coll) when is_list(coll), do: List.last(coll)
+  def last(coll) when is_binary(coll), do: String.at(coll, -1)
+
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
+  def nth(coll, idx) when is_binary(coll), do: String.at(coll, idx)
 
   # rest - always returns list (empty list for empty/single-element collections)
   def rest(coll) when is_list(coll), do: Enum.drop(coll, 1)
+  def rest(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), 1)
 
   # next - returns nil for empty/single-element collections
   def next(coll) when is_list(coll) do
     case Enum.drop(coll, 1) do
+      [] -> nil
+      tail -> tail
+    end
+  end
+
+  def next(coll) when is_binary(coll) do
+    case Enum.drop(graphemes(coll), 1) do
       [] -> nil
       tail -> tail
     end
@@ -149,13 +178,23 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def nnext(coll) when is_list(coll), do: next(next(coll))
 
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
+  def take(n, coll) when is_binary(coll), do: Enum.take(graphemes(coll), n)
+
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
+  def drop(n, coll) when is_binary(coll), do: Enum.drop(graphemes(coll), n)
 
   def take_while(key, coll) when is_list(coll) and is_atom(key) do
     Enum.take_while(coll, truthy_key_pred(key))
   end
 
+  def take_while(key, coll) when is_binary(coll) and is_atom(key) do
+    Enum.take_while(graphemes(coll), truthy_key_pred(key))
+  end
+
   def take_while(pred, coll) when is_list(coll), do: Enum.take_while(coll, pred)
+
+  def take_while(pred, coll) when is_binary(coll),
+    do: Enum.take_while(graphemes(coll), pred)
 
   def drop_while(key, coll) when is_list(coll) and is_atom(key) do
     Enum.drop_while(coll, truthy_key_pred(key))
@@ -163,7 +202,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def drop_while(pred, coll) when is_list(coll), do: Enum.drop_while(coll, pred)
 
+  def drop_while(pred, coll) when is_binary(coll),
+    do: Enum.drop_while(graphemes(coll), pred)
+
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
+  def distinct(coll) when is_binary(coll), do: Enum.uniq(graphemes(coll))
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
 
@@ -214,7 +257,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def seq(s) when is_binary(s) do
     case s do
       "" -> nil
-      _ -> String.graphemes(s)
+      _ -> graphemes(s)
     end
   end
 
@@ -325,6 +368,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, pred)
+  def some(pred, coll) when is_binary(coll), do: Enum.find_value(graphemes(coll), pred)
 
   def every?(key, coll) when is_list(coll) and is_atom(key) do
     Enum.all?(coll, truthy_key_pred(key))
@@ -335,6 +379,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
+  def every?(pred, coll) when is_binary(coll), do: Enum.all?(graphemes(coll), pred)
 
   def not_any?(key, coll) when is_list(coll) and is_atom(key) do
     not Enum.any?(coll, truthy_key_pred(key))
@@ -345,6 +390,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)
+  def not_any?(pred, coll) when is_binary(coll), do: not Enum.any?(graphemes(coll), pred)
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 

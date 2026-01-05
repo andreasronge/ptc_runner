@@ -320,6 +320,89 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
   end
 
+  describe "character literals and string-as-sequence" do
+    test "filter characters in string - the main use case" do
+      source = ~S|(count (filter #(= \r %) "raspberry"))|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == 3
+    end
+
+    test "character literal equals single-char string" do
+      {:ok, %{return: true}} = Lisp.run(~S|(= \r "r")|)
+      {:ok, %{return: true}} = Lisp.run(~S|(= \newline "\n")|)
+      {:ok, %{return: true}} = Lisp.run(~S|(= \space " ")|)
+      {:ok, %{return: true}} = Lisp.run(~S|(= \tab "\t")|)
+    end
+
+    test "char? predicate returns true for single characters" do
+      {:ok, %{return: true}} = Lisp.run(~S|(char? \a)|)
+      {:ok, %{return: true}} = Lisp.run(~S|(char? \newline)|)
+      {:ok, %{return: true}} = Lisp.run(~S|(char? "x")|)
+    end
+
+    test "char? predicate returns false for multi-char strings" do
+      {:ok, %{return: false}} = Lisp.run(~S|(char? "ab")|)
+      {:ok, %{return: false}} = Lisp.run(~S|(char? "hello")|)
+    end
+
+    test "char? predicate returns false for empty string" do
+      {:ok, %{return: false}} = Lisp.run(~S|(char? "")|)
+    end
+
+    test "char? handles Unicode characters" do
+      {:ok, %{return: true}} = Lisp.run(~S|(char? \λ)|)
+      {:ok, %{return: true}} = Lisp.run(~S|(char? (first "👍"))|)
+    end
+
+    test "first/last/nth work on strings" do
+      {:ok, %{return: "h"}} = Lisp.run(~S|(first "hello")|)
+      {:ok, %{return: "o"}} = Lisp.run(~S|(last "hello")|)
+      {:ok, %{return: "l"}} = Lisp.run(~S|(nth "hello" 2)|)
+    end
+
+    test "first on empty string returns nil" do
+      {:ok, %{return: nil}} = Lisp.run(~S|(first "")|)
+    end
+
+    test "map on string returns list of characters" do
+      {:ok, %{return: ["a", "b", "c"]}} = Lisp.run(~S|(map identity "abc")|)
+    end
+
+    test "filter on string returns matching characters" do
+      {:ok, %{return: ["e", "o"]}} =
+        Lisp.run(~S|(filter #(contains? #{"a" "e" "i" "o" "u"} %) "hello")|)
+    end
+
+    test "take/drop work on strings" do
+      {:ok, %{return: ["h", "e"]}} = Lisp.run(~S|(take 2 "hello")|)
+      {:ok, %{return: ["l", "l", "o"]}} = Lisp.run(~S|(drop 2 "hello")|)
+    end
+
+    test "reverse on string returns reversed list" do
+      {:ok, %{return: ["c", "b", "a"]}} = Lisp.run(~S|(reverse "abc")|)
+    end
+
+    test "distinct on string removes duplicates" do
+      {:ok, %{return: result}} = Lisp.run(~S|(distinct "aabbcc")|)
+      assert Enum.sort(result) == ["a", "b", "c"]
+    end
+
+    test "some/every?/not-any? work on strings" do
+      {:ok, %{return: true}} = Lisp.run(~S|(some #(= % \l) "hello")|)
+      {:ok, %{return: true}} = Lisp.run(~S|(every? char? "abc")|)
+      {:ok, %{return: true}} = Lisp.run(~S|(not-any? #(= % \z) "hello")|)
+    end
+
+    test "sort on string returns sorted list" do
+      {:ok, %{return: ["a", "b", "c", "d"]}} = Lisp.run(~S|(sort "dcba")|)
+    end
+
+    test "count on string returns character count" do
+      {:ok, %{return: 5}} = Lisp.run(~S|(count "hello")|)
+      {:ok, %{return: 4}} = Lisp.run(~S|(count "café")|)
+    end
+  end
+
   describe "implicit do (multiple expressions)" do
     test "top-level multiple expressions" do
       source = "(def x 1) (def y 2) (+ x y)"

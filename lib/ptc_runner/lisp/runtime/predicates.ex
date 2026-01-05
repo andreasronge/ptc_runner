@@ -33,6 +33,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def string?(x), do: is_binary(x)
   def keyword?(x), do: is_atom(x) and not is_nil(x) and not is_boolean(x)
   def vector?(x), do: is_list(x)
+  def char?(x), do: is_binary(x) and String.length(x) == 1
 
   def set?(x), do: is_struct(x, MapSet)
 

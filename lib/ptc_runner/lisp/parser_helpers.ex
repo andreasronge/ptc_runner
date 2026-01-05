@@ -23,8 +23,13 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   defp to_string_part(part) when is_binary(part), do: part
 
   # ============================================================
-  # String building
+  # Character/String building
   # ============================================================
+
+  def build_char(s) when is_binary(s), do: {:string, s}
+  def build_char([s]) when is_binary(s), do: {:string, s}
+
+  def char_to_string(char), do: <<char::utf8>>
 
   def build_string(chars) do
     str = Enum.map_join(chars, &to_string_part/1)
