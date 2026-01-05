@@ -201,12 +201,14 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
     end
   end
 
-  describe "Level 4 - memory_contract" do
-    test "stores high-value orders in memory and returns count" do
+  describe "Level 4 - explicit_storage" do
+    test "returns high-value orders with count using let bindings" do
+      # V2: maps return as-is, no implicit memory merge
+      # Use def for explicit storage if needed across turns
       source = ~S"""
       (let [high-value (->> (call "get-orders" {})
                             (filter (where :amount > 1000)))]
-        {:return (count high-value)
+        {:count (count high-value)
          :high_value_orders high-value})
       """
 
@@ -224,10 +226,11 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       {:ok, %Step{return: result, memory_delta: delta, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
-      assert result == 2
-      assert length(delta.high_value_orders) == 2
-      assert Enum.all?(delta.high_value_orders, fn o -> o.amount > 1000 end)
-      assert new_memory == delta
+      assert result.count == 2
+      assert length(result.high_value_orders) == 2
+      assert Enum.all?(result.high_value_orders, fn o -> o.amount > 1000 end)
+      assert delta == %{}
+      assert new_memory == %{}
     end
   end
 

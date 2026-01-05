@@ -40,13 +40,13 @@ defmodule PtcRunner.Lisp.OptionsTest do
                Lisp.run("42", float_precision: 2)
     end
 
-    test "only rounds result, not memory delta" do
+    test "rounds result including nested floats" do
+      # V2: no implicit memory merge, map returns as-is with floats rounded
       {:ok, %{return: result, memory_delta: delta, memory: _}} =
-        Lisp.run("{:return (/ 10 3), :pi 3.14159}", float_precision: 2)
+        Lisp.run("{:value (/ 10 3), :pi 3.14159}", float_precision: 2)
 
-      assert result == 3.33
-      # Memory delta retains full precision (intentional - memory stores original values)
-      assert delta == %{pi: 3.14159}
+      assert result == %{value: 3.33, pi: 3.14}
+      assert delta == %{}
     end
   end
 
@@ -178,11 +178,12 @@ defmodule PtcRunner.Lisp.OptionsTest do
       assert {:ok, %{return: true}} = Lisp.run(source, signature: ":bool")
     end
 
-    test "validation works with memory contract" do
-      source = "{:return 42, :stored 100}"
+    test "validation works with map results" do
+      # V2: :return is just a regular key, map returns as-is
+      source = "{:value 42, :stored 100}"
 
-      assert {:ok, %{return: 42, memory_delta: %{stored: 100}, signature: _}} =
-               Lisp.run(source, signature: ":int")
+      assert {:ok, %{return: %{value: 42, stored: 100}, memory_delta: %{}, signature: _}} =
+               Lisp.run(source, signature: "{value :int, stored :int}")
     end
   end
 
@@ -266,15 +267,16 @@ defmodule PtcRunner.Lisp.OptionsTest do
                Lisp.run("(/ 10 3)", float_precision: 2, timeout: 1000)
     end
 
-    test "memory contract works with sandbox execution" do
-      source = "{:return 42, :stored 100}"
+    test "map results work with sandbox execution" do
+      # V2: maps pass through unchanged, no implicit memory merge
+      source = "{:value 42, :stored 100}"
 
       {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
         Lisp.run(source, timeout: 1000)
 
-      assert result == 42
-      assert delta == %{stored: 100}
-      assert new_memory == %{stored: 100}
+      assert result == %{value: 42, stored: 100}
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
     test "context and tools still work with sandbox" do
@@ -293,19 +295,20 @@ defmodule PtcRunner.Lisp.OptionsTest do
                Lisp.run(source, context: ctx, tools: tools)
     end
 
-    test "tool results work with memory updates" do
+    test "tool results work in map literals" do
+      # V2: maps return as-is, no implicit memory merge
       tools = %{
         "get-data" => fn _args -> "success" end
       }
 
-      source = "{:return (call \"get-data\" {}), :status \"done\"}"
+      source = "{:result (call \"get-data\" {}), :status \"done\"}"
 
       {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
-      assert result == "success"
-      assert delta == %{status: "done"}
-      assert new_memory == %{status: "done"}
+      assert result == %{result: "success", status: "done"}
+      assert delta == %{}
+      assert new_memory == %{}
     end
   end
 end
