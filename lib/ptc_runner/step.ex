@@ -32,11 +32,11 @@ defmodule PtcRunner.Step do
 
   ### `memory_delta`
 
-  Keys that changed during execution.
+  Keys that changed during execution (V2: always empty `%{}`).
 
-  - **Type:** `map() | nil`
-  - **Set when:** Lisp execution modifies memory
-  - **Nil when:** SubAgent execution (use `trace` instead)
+  - **Type:** `map()`
+  - **Set when:** Always set to `%{}` in V2 simplified model
+  - **Note:** V2 removed implicit map-to-memory merge. Use `def` for explicit storage.
 
   ### `signature`
 

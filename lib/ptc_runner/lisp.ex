@@ -264,10 +264,10 @@ defmodule PtcRunner.Lisp do
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
 
-  # Non-map result or struct: no memory update
-  # Structs (like %Var{}) should not be merged into memory
-  defp apply_memory_contract(value, memory, precision)
-       when not is_map(value) or is_struct(value) do
+  # V2 simplified memory contract: pass through all values unchanged.
+  # Storage is explicit via `def` (values persist in user_ns).
+  # No implicit map merge or :return key handling.
+  defp apply_memory_contract(value, memory, precision) do
     %Step{
       return: round_floats(value, precision),
       fail: nil,
@@ -277,40 +277,6 @@ defmodule PtcRunner.Lisp do
       usage: nil,
       trace: nil
     }
-  end
-
-  # Map result: check for :return key
-  defp apply_memory_contract(value, memory, precision) when is_map(value) do
-    if Map.has_key?(value, :return) do
-      # Map with :return → merge rest into memory, :return value returned
-      return_value = Map.fetch!(value, :return)
-      rest = Map.delete(value, :return)
-      new_memory = Map.merge(memory, rest)
-
-      %Step{
-        return: round_floats(return_value, precision),
-        fail: nil,
-        memory: new_memory,
-        memory_delta: rest,
-        signature: nil,
-        usage: nil,
-        trace: nil
-      }
-    else
-      # Map without :return → merge into memory, map is returned
-      new_memory = Map.merge(memory, value)
-      rounded_value = round_floats(value, precision)
-
-      %Step{
-        return: rounded_value,
-        fail: nil,
-        memory: new_memory,
-        memory_delta: value,
-        signature: nil,
-        usage: nil,
-        trace: nil
-      }
-    end
   end
 
   # Round floats recursively in nested structures

@@ -4,6 +4,13 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Step
 
+  @moduledoc """
+  Tests for V2 simplified memory contract.
+
+  V2 model: No implicit map-to-memory merge. Storage is explicit via `def`.
+  All values pass through unchanged. Memory only changes via user_ns bindings.
+  """
+
   describe "non-map results" do
     test "non-map result leaves memory unchanged" do
       assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 1 2)")
@@ -33,17 +40,17 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
     end
   end
 
-  describe "map without :return key" do
-    test "map without :return merges into memory and returns map" do
+  describe "map results (no implicit merge)" do
+    test "map returns as-is, memory unchanged" do
       source = "{:cached-count 3}"
       {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
       assert result == %{:"cached-count" => 3}
-      assert delta == %{:"cached-count" => 3}
-      assert new_memory == %{:"cached-count" => 3}
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
-    test "map merge preserves existing memory keys" do
+    test "map does not affect initial memory" do
       initial_memory = %{x: 10}
       source = "{:y 20}"
 
@@ -51,23 +58,21 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
         Lisp.run(source, memory: initial_memory)
 
       assert result == %{y: 20}
-      assert delta == %{y: 20}
-      assert new_memory == %{x: 10, y: 20}
+      assert delta == %{}
+      assert new_memory == %{x: 10}
     end
 
-    test "map update overwrites memory keys" do
-      initial_memory = %{counter: 5}
-      source = "{:counter 10}"
+    test "map with :return key passes through unchanged (no special handling)" do
+      source = "{:return 42, :stored 100}"
+      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
-        Lisp.run(source, memory: initial_memory)
-
-      assert result == %{counter: 10}
-      assert delta == %{counter: 10}
-      assert new_memory == %{counter: 10}
+      # :return is just a regular key now, no special extraction
+      assert result == %{return: 42, stored: 100}
+      assert delta == %{}
+      assert new_memory == %{}
     end
 
-    test "empty map merges with memory but returns empty map" do
+    test "empty map returns empty, memory unchanged" do
       initial_memory = %{x: 10}
       source = "{}"
 
@@ -78,90 +83,28 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       assert delta == %{}
       assert new_memory == %{x: 10}
     end
-
-    test "map result without :result merges entire map to memory" do
-      initial_memory = %{}
-
-      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
-        Lisp.run(~S|{:foo "bar" :baz "qux"}|, memory: initial_memory)
-
-      assert result == %{foo: "bar", baz: "qux"}
-      assert memory_delta == %{foo: "bar", baz: "qux"}
-      assert new_memory == %{foo: "bar", baz: "qux"}
-    end
   end
 
-  describe "map with :return key" do
-    test "map with :return extracts return value" do
-      source = "{:return 42, :stored 100}"
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
+  describe "explicit storage via def" do
+    test "def stores value in user_ns, accessible in same expression" do
+      source = "(do (def x 42) x)"
+      {:ok, %{return: result}} = Lisp.run(source)
 
       assert result == 42
-      assert delta == %{stored: 100}
-      assert new_memory == %{stored: 100}
     end
 
-    test "map with :return key and multiple updates" do
-      source = "{:return \"done\", :count 5, :status \"ok\"}"
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
+    test "def with complex value" do
+      source = ~S|(do (def results {:count 5, :items [1 2 3]}) (:count results))|
+      {:ok, %{return: result}} = Lisp.run(source)
 
-      assert result == "done"
-      assert delta == %{count: 5, status: "ok"}
-      assert new_memory == %{count: 5, status: "ok"}
+      assert result == 5
     end
 
-    test "map with only :return key" do
-      source = "{:return \"return-value\"}"
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
+    test "multiple defs in sequence" do
+      source = "(do (def a 1) (def b 2) (+ a b))"
+      {:ok, %{return: result}} = Lisp.run(source)
 
-      assert result == "return-value"
-      assert delta == %{}
-      assert new_memory == %{}
-    end
-
-    test "map with :return merges with initial memory" do
-      initial_memory = %{x: 10}
-      source = "{:return \"ok\", :y 20}"
-
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
-        Lisp.run(source, memory: initial_memory)
-
-      assert result == "ok"
-      assert delta == %{y: 20}
-      assert new_memory == %{x: 10, y: 20}
-    end
-
-    test "map with :return key set to nil returns nil" do
-      source = "{:return nil, :stored 100}"
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
-
-      assert result == nil
-      assert delta == %{stored: 100}
-      assert new_memory == %{stored: 100}
-    end
-
-    test "map result with :return returns return value and merges rest" do
-      initial_memory = %{existing: "value"}
-
-      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
-        Lisp.run(~S|{:return 42 :computed "data"}|, memory: initial_memory)
-
-      assert result == 42
-      assert memory_delta == %{computed: "data"}
-      assert new_memory == %{existing: "value", computed: "data"}
-    end
-  end
-
-  describe "memory merge behavior" do
-    test "memory merge overwrites existing keys" do
-      initial_memory = %{foo: 1, baz: 3}
-
-      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
-        Lisp.run(~S|{:foo 2 :new_key "added"}|, memory: initial_memory)
-
-      assert result == %{foo: 2, new_key: "added"}
-      assert memory_delta == %{foo: 2, new_key: "added"}
-      assert new_memory == %{foo: 2, baz: 3, new_key: "added"}
+      assert result == 3
     end
   end
 end
