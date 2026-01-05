@@ -26,43 +26,41 @@ defmodule PtcRunner.Lisp.Analyze do
           | {:unsupported_pattern, term()}
           | {:invalid_placeholder, atom()}
 
-  @type scope :: :top_level | :lexical
-
   @spec analyze(term()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
   def analyze(raw_ast) do
-    do_analyze(raw_ast, :top_level)
+    do_analyze(raw_ast)
   end
 
   # ============================================================
   # Literals and basic values
   # ============================================================
 
-  defp do_analyze(nil, _scope), do: {:ok, nil}
-  defp do_analyze(true, _scope), do: {:ok, true}
-  defp do_analyze(false, _scope), do: {:ok, false}
-  defp do_analyze(n, _scope) when is_integer(n) or is_float(n), do: {:ok, n}
+  defp do_analyze(nil), do: {:ok, nil}
+  defp do_analyze(true), do: {:ok, true}
+  defp do_analyze(false), do: {:ok, false}
+  defp do_analyze(n) when is_integer(n) or is_float(n), do: {:ok, n}
 
-  defp do_analyze({:string, s}, _scope), do: {:ok, {:string, s}}
-  defp do_analyze({:keyword, k}, _scope), do: {:ok, {:keyword, k}}
+  defp do_analyze({:string, s}), do: {:ok, {:string, s}}
+  defp do_analyze({:keyword, k}), do: {:ok, {:keyword, k}}
 
   # ============================================================
   # Collections
   # ============================================================
 
-  defp do_analyze({:vector, elems}, scope) do
-    with {:ok, elems2} <- analyze_list(elems, scope) do
+  defp do_analyze({:vector, elems}) do
+    with {:ok, elems2} <- analyze_list(elems) do
       {:ok, {:vector, elems2}}
     end
   end
 
-  defp do_analyze({:map, pairs}, scope) do
-    with {:ok, pairs2} <- analyze_pairs(pairs, scope) do
+  defp do_analyze({:map, pairs}) do
+    with {:ok, pairs2} <- analyze_pairs(pairs) do
       {:ok, {:map, pairs2}}
     end
   end
 
-  defp do_analyze({:set, elems}, scope) do
-    with {:ok, elems2} <- analyze_list(elems, scope) do
+  defp do_analyze({:set, elems}) do
+    with {:ok, elems2} <- analyze_list(elems) do
       {:ok, {:set, elems2}}
     end
   end
@@ -71,9 +69,9 @@ defmodule PtcRunner.Lisp.Analyze do
   # Short function syntax: #()
   # ============================================================
 
-  defp do_analyze({:short_fn, body_asts}, scope) do
+  defp do_analyze({:short_fn, body_asts}) do
     with {:ok, desugared_ast} <- ShortFn.desugar(body_asts) do
-      do_analyze(desugared_ast, scope)
+      do_analyze(desugared_ast)
     end
   end
 
@@ -81,7 +79,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Symbols and variables
   # ============================================================
 
-  defp do_analyze({:symbol, name}, _scope) do
+  defp do_analyze({:symbol, name}) do
     if placeholder?(name) do
       {:error, {:invalid_placeholder, name}}
     else
@@ -89,118 +87,85 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp do_analyze({:ns_symbol, :ctx, key}, _scope), do: {:ok, {:ctx, key}}
+  defp do_analyze({:ns_symbol, :ctx, key}), do: {:ok, {:ctx, key}}
 
   # Unknown namespace - provide helpful error
-  defp do_analyze({:ns_symbol, ns, key}, _scope) do
+  defp do_analyze({:ns_symbol, ns, key}) do
     {:error,
      {:invalid_form, "unknown namespace #{ns}/ in #{ns}/#{key}. Use ctx/ to access context"}}
   end
 
   # Turn history variables: *1, *2, *3
-  defp do_analyze({:turn_history, n}, _scope) when n in [1, 2, 3], do: {:ok, {:turn_history, n}}
+  defp do_analyze({:turn_history, n}) when n in [1, 2, 3], do: {:ok, {:turn_history, n}}
 
   # ============================================================
   # List forms (special forms and function calls)
   # ============================================================
 
-  defp do_analyze({:list, [head | rest]} = list, scope) do
-    dispatch_list_form(head, rest, list, scope)
+  defp do_analyze({:list, [head | rest]} = list) do
+    dispatch_list_form(head, rest, list)
   end
 
-  defp do_analyze({:list, []}, _scope) do
+  defp do_analyze({:list, []}) do
     {:error, {:invalid_form, "Empty list is not a valid expression"}}
   end
 
   # Dispatch special forms based on the head symbol
-  defp dispatch_list_form({:symbol, :let}, rest, _list, scope), do: analyze_let(rest, scope)
-  defp dispatch_list_form({:symbol, :if}, rest, _list, scope), do: analyze_if(rest, scope)
-  defp dispatch_list_form({:symbol, :fn}, rest, _list, scope), do: analyze_fn(rest, scope)
-  defp dispatch_list_form({:symbol, :when}, rest, _list, scope), do: analyze_when(rest, scope)
+  defp dispatch_list_form({:symbol, :let}, rest, _list), do: analyze_let(rest)
+  defp dispatch_list_form({:symbol, :if}, rest, _list), do: analyze_if(rest)
+  defp dispatch_list_form({:symbol, :fn}, rest, _list), do: analyze_fn(rest)
+  defp dispatch_list_form({:symbol, :when}, rest, _list), do: analyze_when(rest)
+  defp dispatch_list_form({:symbol, :"if-let"}, rest, _list), do: analyze_if_let(rest)
+  defp dispatch_list_form({:symbol, :"when-let"}, rest, _list), do: analyze_when_let(rest)
+  defp dispatch_list_form({:symbol, :cond}, rest, _list), do: analyze_cond(rest)
+  defp dispatch_list_form({:symbol, :->}, rest, _list), do: analyze_thread(:->, rest)
+  defp dispatch_list_form({:symbol, :"->>"}, rest, _list), do: analyze_thread(:"->>", rest)
+  defp dispatch_list_form({:symbol, :do}, rest, _list), do: analyze_do(rest)
+  defp dispatch_list_form({:symbol, :and}, rest, _list), do: analyze_and(rest)
+  defp dispatch_list_form({:symbol, :or}, rest, _list), do: analyze_or(rest)
+  defp dispatch_list_form({:symbol, :where}, rest, _list), do: analyze_where(rest)
+  defp dispatch_list_form({:symbol, :"all-of"}, rest, _list), do: analyze_pred_comb(:all_of, rest)
+  defp dispatch_list_form({:symbol, :"any-of"}, rest, _list), do: analyze_pred_comb(:any_of, rest)
 
-  defp dispatch_list_form({:symbol, :"if-let"}, rest, _list, scope),
-    do: analyze_if_let(rest, scope)
+  defp dispatch_list_form({:symbol, :"none-of"}, rest, _list),
+    do: analyze_pred_comb(:none_of, rest)
 
-  defp dispatch_list_form({:symbol, :"when-let"}, rest, _list, scope),
-    do: analyze_when_let(rest, scope)
+  defp dispatch_list_form({:symbol, :juxt}, rest, _list), do: analyze_juxt(rest)
 
-  defp dispatch_list_form({:symbol, :cond}, rest, _list, scope), do: analyze_cond(rest, scope)
-
-  defp dispatch_list_form({:symbol, :->}, rest, _list, scope),
-    do: analyze_thread(:->, rest, scope)
-
-  defp dispatch_list_form({:symbol, :"->>"}, rest, _list, scope),
-    do: analyze_thread(:"->>", rest, scope)
-
-  defp dispatch_list_form({:symbol, :do}, rest, _list, scope), do: analyze_do(rest, scope)
-  defp dispatch_list_form({:symbol, :and}, rest, _list, scope), do: analyze_and(rest, scope)
-  defp dispatch_list_form({:symbol, :or}, rest, _list, scope), do: analyze_or(rest, scope)
-  defp dispatch_list_form({:symbol, :where}, rest, _list, scope), do: analyze_where(rest, scope)
-
-  defp dispatch_list_form({:symbol, :"all-of"}, rest, _list, scope),
-    do: analyze_pred_comb(:all_of, rest, scope)
-
-  defp dispatch_list_form({:symbol, :"any-of"}, rest, _list, scope),
-    do: analyze_pred_comb(:any_of, rest, scope)
-
-  defp dispatch_list_form({:symbol, :"none-of"}, rest, _list, scope),
-    do: analyze_pred_comb(:none_of, rest, scope)
-
-  defp dispatch_list_form({:symbol, :juxt}, rest, _list, scope), do: analyze_juxt(rest, scope)
-
-  defp dispatch_list_form({:symbol, :call}, rest, _list, scope),
-    do: analyze_call_tool(rest, scope)
-
-  defp dispatch_list_form({:symbol, :return}, rest, _list, scope),
-    do: analyze_return(rest, scope)
-
-  defp dispatch_list_form({:symbol, :fail}, rest, _list, scope), do: analyze_fail(rest, scope)
-
-  # def/defn: check scope - only allowed at top level or inside do
-  defp dispatch_list_form({:symbol, :def}, _rest, _list, :lexical) do
-    {:error,
-     {:invalid_form, "def creates global bindings; use let for local, or move def outside"}}
-  end
-
-  defp dispatch_list_form({:symbol, :def}, rest, _list, :top_level), do: analyze_def(rest)
-
-  defp dispatch_list_form({:symbol, :defn}, _rest, _list, :lexical) do
-    {:error,
-     {:invalid_form, "defn creates global bindings; use let for local, or move defn outside"}}
-  end
-
-  defp dispatch_list_form({:symbol, :defn}, rest, _list, :top_level), do: analyze_defn(rest)
+  defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
+  defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
+  defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
+  defp dispatch_list_form({:symbol, :def}, rest, _list), do: analyze_def(rest)
+  defp dispatch_list_form({:symbol, :defn}, rest, _list), do: analyze_defn(rest)
 
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
-  defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list, scope),
-    do: analyze_ctx_call(tool_name, rest, scope)
+  defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list),
+    do: analyze_ctx_call(tool_name, rest)
 
   # Comparison operators (strict 2-arity per spec section 8.4)
-  defp dispatch_list_form({:symbol, op}, rest, _list, scope)
+  defp dispatch_list_form({:symbol, op}, rest, _list)
        when op in [:=, :"not=", :>, :<, :>=, :<=],
-       do: analyze_comparison(op, rest, scope)
+       do: analyze_comparison(op, rest)
 
   # Generic function call
-  defp dispatch_list_form(_head, _rest, list, scope), do: analyze_call(list, scope)
+  defp dispatch_list_form(_head, _rest, list), do: analyze_call(list)
 
   # ============================================================
   # Special form: let
   # ============================================================
 
-  defp analyze_let([bindings_ast, body_ast], scope) do
-    # Bindings are analyzed in the current scope
-    # Body is analyzed in :lexical scope (def/defn not allowed)
-    with {:ok, bindings} <- analyze_bindings(bindings_ast, scope),
-         {:ok, body} <- do_analyze(body_ast, :lexical) do
+  defp analyze_let([bindings_ast, body_ast]) do
+    with {:ok, bindings} <- analyze_bindings(bindings_ast),
+         {:ok, body} <- do_analyze(body_ast) do
       {:ok, {:let, bindings, body}}
     end
   end
 
-  defp analyze_let(_, _scope) do
+  defp analyze_let(_) do
     {:error, {:invalid_arity, :let, "expected (let [bindings] body)"}}
   end
 
-  defp analyze_bindings({:vector, elems}, scope) do
+  defp analyze_bindings({:vector, elems}) do
     if rem(length(elems), 2) != 0 do
       {:error, {:invalid_form, "let bindings require even number of forms"}}
     else
@@ -208,7 +173,7 @@ defmodule PtcRunner.Lisp.Analyze do
       |> Enum.chunk_every(2)
       |> Enum.reduce_while({:ok, []}, fn [pattern_ast, value_ast], {:ok, acc} ->
         with {:ok, pattern} <- analyze_pattern(pattern_ast),
-             {:ok, value} <- do_analyze(value_ast, scope) do
+             {:ok, value} <- do_analyze(value_ast) do
           {:cont, {:ok, [{:binding, pattern, value} | acc]}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
@@ -221,7 +186,7 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp analyze_bindings(_, _scope) do
+  defp analyze_bindings(_) do
     {:error, {:invalid_form, "let bindings must be a vector"}}
   end
 
@@ -236,26 +201,26 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: if and when
   # ============================================================
 
-  defp analyze_if([cond_ast, then_ast, else_ast], scope) do
-    with {:ok, c} <- do_analyze(cond_ast, scope),
-         {:ok, t} <- do_analyze(then_ast, scope),
-         {:ok, e} <- do_analyze(else_ast, scope) do
+  defp analyze_if([cond_ast, then_ast, else_ast]) do
+    with {:ok, c} <- do_analyze(cond_ast),
+         {:ok, t} <- do_analyze(then_ast),
+         {:ok, e} <- do_analyze(else_ast) do
       {:ok, {:if, c, t, e}}
     end
   end
 
-  defp analyze_if(_, _scope) do
+  defp analyze_if(_) do
     {:error, {:invalid_arity, :if, "expected (if cond then else)"}}
   end
 
-  defp analyze_when([cond_ast, body_ast], scope) do
-    with {:ok, c} <- do_analyze(cond_ast, scope),
-         {:ok, b} <- do_analyze(body_ast, scope) do
+  defp analyze_when([cond_ast, body_ast]) do
+    with {:ok, c} <- do_analyze(cond_ast),
+         {:ok, b} <- do_analyze(body_ast) do
       {:ok, {:if, c, b, nil}}
     end
   end
 
-  defp analyze_when(_, _scope) do
+  defp analyze_when(_) do
     {:error, {:invalid_arity, :when, "expected (when cond body)"}}
   end
 
@@ -264,42 +229,39 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # Desugar (if-let [x cond] then else) to (let [x cond] (if x then else))
-  # The then/else branches are in lexical scope
-  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast], scope) do
+  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast]) do
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast, scope),
-         {:ok, t} <- do_analyze(then_ast, :lexical),
-         {:ok, e} <- do_analyze(else_ast, :lexical) do
+         {:ok, c} <- do_analyze(cond_ast),
+         {:ok, t} <- do_analyze(then_ast),
+         {:ok, e} <- do_analyze(else_ast) do
       binding = {:binding, name, c}
       {:ok, {:let, [binding], {:if, name, t, e}}}
     end
   end
 
-  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast], _scope)
-       when length(bindings) != 2 do
+  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast]) when length(bindings) != 2 do
     {:error, {:invalid_form, "if-let requires exactly one binding pair [name expr]"}}
   end
 
-  defp analyze_if_let(_, _scope) do
+  defp analyze_if_let(_) do
     {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
   end
 
   # Desugar (when-let [x cond] body) to (let [x cond] (if x body nil))
-  # The body is in lexical scope
-  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, body_ast], scope) do
+  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, body_ast]) do
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast, scope),
-         {:ok, b} <- do_analyze(body_ast, :lexical) do
+         {:ok, c} <- do_analyze(cond_ast),
+         {:ok, b} <- do_analyze(body_ast) do
       binding = {:binding, name, c}
       {:ok, {:let, [binding], {:if, name, b, nil}}}
     end
   end
 
-  defp analyze_when_let([{:vector, bindings}, _body_ast], _scope) when length(bindings) != 2 do
+  defp analyze_when_let([{:vector, bindings}, _body_ast]) when length(bindings) != 2 do
     {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
   end
 
-  defp analyze_when_let(_, _scope) do
+  defp analyze_when_let(_) do
     {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body)"}}
   end
 
@@ -314,13 +276,13 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: cond → nested if
   # ============================================================
 
-  defp analyze_cond([], _scope) do
+  defp analyze_cond([]) do
     {:error, {:invalid_cond_form, "cond requires at least one test/result pair"}}
   end
 
-  defp analyze_cond(args, scope) do
+  defp analyze_cond(args) do
     with {:ok, pairs, default} <- split_cond_args(args) do
-      build_nested_if(pairs, default, scope)
+      build_nested_if(pairs, default)
     end
   end
 
@@ -343,13 +305,13 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp build_nested_if(pairs, default_ast, scope) do
-    with {:ok, default_core} <- maybe_analyze(default_ast, scope) do
+  defp build_nested_if(pairs, default_ast) do
+    with {:ok, default_core} <- maybe_analyze(default_ast) do
       pairs
       |> Enum.reverse()
       |> Enum.reduce_while({:ok, default_core}, fn {c_ast, r_ast}, {:ok, acc} ->
-        with {:ok, c} <- do_analyze(c_ast, scope),
-             {:ok, r} <- do_analyze(r_ast, scope) do
+        with {:ok, c} <- do_analyze(c_ast),
+             {:ok, r} <- do_analyze(r_ast) do
           {:cont, {:ok, {:if, c, r, acc}}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
@@ -358,22 +320,21 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp maybe_analyze(nil, _scope), do: {:ok, nil}
-  defp maybe_analyze(ast, scope), do: do_analyze(ast, scope)
+  defp maybe_analyze(nil), do: {:ok, nil}
+  defp maybe_analyze(ast), do: do_analyze(ast)
 
   # ============================================================
   # Special form: fn (anonymous functions)
   # ============================================================
 
-  defp analyze_fn([params_ast, body_ast], _scope) do
-    # fn body is always in lexical scope (def/defn not allowed)
+  defp analyze_fn([params_ast, body_ast]) do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast, :lexical) do
+         {:ok, body} <- do_analyze(body_ast) do
       {:ok, {:fn, params, body}}
     end
   end
 
-  defp analyze_fn(_, _scope) do
+  defp analyze_fn(_) do
     {:error, {:invalid_arity, :fn, "expected (fn [params] body)"}}
   end
 
@@ -400,9 +361,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # Sequential evaluation: do
   # ============================================================
 
-  defp analyze_do(args, scope) do
-    # do preserves the current scope - def/defn inside (do ...) at top level is allowed
-    with {:ok, exprs} <- analyze_list(args, scope) do
+  defp analyze_do(args) do
+    with {:ok, exprs} <- analyze_list(args) do
       {:ok, {:do, exprs}}
     end
   end
@@ -411,14 +371,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # Short-circuit logic: and/or
   # ============================================================
 
-  defp analyze_and(args, scope) do
-    with {:ok, exprs} <- analyze_list(args, scope) do
+  defp analyze_and(args) do
+    with {:ok, exprs} <- analyze_list(args) do
       {:ok, {:and, exprs}}
     end
   end
 
-  defp analyze_or(args, scope) do
-    with {:ok, exprs} <- analyze_list(args, scope) do
+  defp analyze_or(args) do
+    with {:ok, exprs} <- analyze_list(args) do
       {:ok, {:or, exprs}}
     end
   end
@@ -427,27 +387,27 @@ defmodule PtcRunner.Lisp.Analyze do
   # Threading macros: -> and ->>
   # ============================================================
 
-  defp analyze_thread(kind, [], _scope) do
+  defp analyze_thread(kind, []) do
     {:error, {:invalid_thread_form, kind, "requires at least one expression"}}
   end
 
-  defp analyze_thread(kind, [first | steps], scope) do
-    with {:ok, acc} <- do_analyze(first, scope) do
-      thread_steps(kind, acc, steps, scope)
+  defp analyze_thread(kind, [first | steps]) do
+    with {:ok, acc} <- do_analyze(first) do
+      thread_steps(kind, acc, steps)
     end
   end
 
-  defp thread_steps(_kind, acc, [], _scope), do: {:ok, acc}
+  defp thread_steps(_kind, acc, []), do: {:ok, acc}
 
-  defp thread_steps(kind, acc, [step | rest], scope) do
-    with {:ok, acc2} <- apply_thread_step(kind, acc, step, scope) do
-      thread_steps(kind, acc2, rest, scope)
+  defp thread_steps(kind, acc, [step | rest]) do
+    with {:ok, acc2} <- apply_thread_step(kind, acc, step) do
+      thread_steps(kind, acc2, rest)
     end
   end
 
-  defp apply_thread_step(kind, acc, {:list, [f_ast | arg_asts]}, scope) do
-    with {:ok, f} <- do_analyze(f_ast, scope),
-         {:ok, args} <- analyze_list(arg_asts, scope) do
+  defp apply_thread_step(kind, acc, {:list, [f_ast | arg_asts]}) do
+    with {:ok, f} <- do_analyze(f_ast),
+         {:ok, args} <- analyze_list(arg_asts) do
       new_args =
         case kind do
           :-> -> [acc | args]
@@ -458,8 +418,8 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp apply_thread_step(_kind, acc, step_ast, scope) do
-    with {:ok, f} <- do_analyze(step_ast, scope) do
+  defp apply_thread_step(_kind, acc, step_ast) do
+    with {:ok, f} <- do_analyze(step_ast) do
       {:ok, {:call, f, [acc]}}
     end
   end
@@ -469,18 +429,17 @@ defmodule PtcRunner.Lisp.Analyze do
   # Delegated to PtcRunner.Lisp.Analyze.Predicates
   # ============================================================
 
-  defp analyze_where(args, scope),
-    do: Predicates.analyze_where(args, &do_analyze(&1, scope))
+  defp analyze_where(args), do: Predicates.analyze_where(args, &do_analyze/1)
 
-  defp analyze_pred_comb(kind, args, scope),
-    do: Predicates.analyze_pred_comb(kind, args, &analyze_list(&1, scope))
+  defp analyze_pred_comb(kind, args),
+    do: Predicates.analyze_pred_comb(kind, args, &analyze_list/1)
 
   # ============================================================
   # Function combinator: juxt
   # ============================================================
 
-  defp analyze_juxt(args, scope) do
-    with {:ok, fns} <- analyze_list(args, scope) do
+  defp analyze_juxt(args) do
+    with {:ok, fns} <- analyze_list(args) do
       {:ok, {:juxt, fns}}
     end
   end
@@ -489,12 +448,12 @@ defmodule PtcRunner.Lisp.Analyze do
   # Tool invocation: call
   # ============================================================
 
-  defp analyze_call_tool([{:string, name}], _scope) do
+  defp analyze_call_tool([{:string, name}]) do
     {:ok, {:call_tool, name, {:map, []}}}
   end
 
-  defp analyze_call_tool([{:string, name}, args_ast], scope) do
-    with {:ok, args_core} <- do_analyze(args_ast, scope) do
+  defp analyze_call_tool([{:string, name}, args_ast]) do
+    with {:ok, args_core} <- do_analyze(args_ast) do
       case args_core do
         {:map, _} = args_map ->
           {:ok, {:call_tool, name, args_map}}
@@ -505,12 +464,12 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp analyze_call_tool([other | _], _scope) do
+  defp analyze_call_tool([other | _]) do
     {:error,
      {:invalid_call_tool_name, "tool name must be string literal, got: #{inspect(other)}"}}
   end
 
-  defp analyze_call_tool(_, _scope) do
+  defp analyze_call_tool(_) do
     {:error,
      {:invalid_arity, :call, "expected (call \"tool-name\") or (call \"tool-name\" args)"}}
   end
@@ -519,8 +478,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
   # ============================================================
 
-  defp analyze_ctx_call(tool_name, arg_asts, scope) do
-    with {:ok, args} <- analyze_list(arg_asts, scope) do
+  defp analyze_ctx_call(tool_name, arg_asts) do
+    with {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:ctx_call, tool_name, args}}
     end
   end
@@ -529,41 +488,40 @@ defmodule PtcRunner.Lisp.Analyze do
   # Syntactic sugar: return and fail (desugar to call_tool)
   # ============================================================
 
-  defp analyze_return([value_ast], scope) do
-    with {:ok, value} <- do_analyze(value_ast, scope) do
+  defp analyze_return([value_ast]) do
+    with {:ok, value} <- do_analyze(value_ast) do
       {:ok, {:call_tool, "return", value}}
     end
   end
 
-  defp analyze_return(_, _scope) do
+  defp analyze_return(_) do
     {:error, {:invalid_arity, :return, "expected (return value)"}}
   end
 
-  defp analyze_fail([error_ast], scope) do
-    with {:ok, error} <- do_analyze(error_ast, scope) do
+  defp analyze_fail([error_ast]) do
+    with {:ok, error} <- do_analyze(error_ast) do
       {:ok, {:call_tool, "fail", error}}
     end
   end
 
-  defp analyze_fail(_, _scope) do
+  defp analyze_fail(_) do
     {:error, {:invalid_arity, :fail, "expected (fail error)"}}
   end
 
   # ============================================================
   # User namespace binding: def
-  # Note: def is only reachable at top level, so we analyze values at top level.
   # ============================================================
 
   # (def name value)
   defp analyze_def([{:symbol, name}, value_ast]) do
-    with {:ok, value} <- do_analyze(value_ast, :top_level) do
+    with {:ok, value} <- do_analyze(value_ast) do
       {:ok, {:def, name, value}}
     end
   end
 
   # (def name docstring value) - docstring is ignored but allowed for Clojure compat
   defp analyze_def([{:symbol, name}, {:string, _docstring}, value_ast]) do
-    with {:ok, value} <- do_analyze(value_ast, :top_level) do
+    with {:ok, value} <- do_analyze(value_ast) do
       {:ok, {:def, name, value}}
     end
   end
@@ -587,14 +545,12 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # ============================================================
   # Named function definition: defn (desugars to def + fn)
-  # Note: defn is only reachable at top level.
-  # The body is analyzed with :lexical scope (it's a function body).
   # ============================================================
 
   # (defn name docstring [params] body) - docstring variant (4 args, must be checked first)
   defp analyze_defn([{:symbol, name}, {:string, _docstring}, {:vector, _} = params_ast, body_ast]) do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast, :lexical) do
+         {:ok, body} <- do_analyze(body_ast) do
       {:ok, {:def, name, {:fn, params, body}}}
     end
   end
@@ -607,7 +563,7 @@ defmodule PtcRunner.Lisp.Analyze do
        ])
        when is_list(body_asts) and length(body_asts) > 1 do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, bodies} <- analyze_list(body_asts, :lexical) do
+         {:ok, bodies} <- analyze_list(body_asts) do
       {:ok, {:def, name, {:fn, params, {:do, bodies}}}}
     end
   end
@@ -615,7 +571,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # (defn name [params] body) - standard 3 args
   defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, body_ast]) do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast, :lexical) do
+         {:ok, body} <- do_analyze(body_ast) do
       # Desugar: (defn name [params] body) → (def name (fn [params] body))
       {:ok, {:def, name, {:fn, params, body}}}
     end
@@ -625,7 +581,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast | body_asts])
        when is_list(body_asts) and length(body_asts) > 1 do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, bodies} <- analyze_list(body_asts, :lexical) do
+         {:ok, bodies} <- analyze_list(body_asts) do
       {:ok, {:def, name, {:fn, params, {:do, bodies}}}}
     end
   end
@@ -659,14 +615,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # Comparison operators (strict 2-arity)
   # ============================================================
 
-  defp analyze_comparison(op, [left_ast, right_ast], scope) do
-    with {:ok, left} <- do_analyze(left_ast, scope),
-         {:ok, right} <- do_analyze(right_ast, scope) do
+  defp analyze_comparison(op, [left_ast, right_ast]) do
+    with {:ok, left} <- do_analyze(left_ast),
+         {:ok, right} <- do_analyze(right_ast) do
       {:ok, {:call, {:var, op}, [left, right]}}
     end
   end
 
-  defp analyze_comparison(op, args, _scope) do
+  defp analyze_comparison(op, args) do
     {:error,
      {:invalid_arity, op,
       "comparison operators require exactly 2 arguments, got #{length(args)}. " <>
@@ -677,9 +633,9 @@ defmodule PtcRunner.Lisp.Analyze do
   # Generic function call
   # ============================================================
 
-  defp analyze_call({:list, [f_ast | arg_asts]}, scope) do
-    with {:ok, f} <- do_analyze(f_ast, scope),
-         {:ok, args} <- analyze_list(arg_asts, scope) do
+  defp analyze_call({:list, [f_ast | arg_asts]}) do
+    with {:ok, f} <- do_analyze(f_ast),
+         {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:call, f, args}}
     end
   end
@@ -688,10 +644,10 @@ defmodule PtcRunner.Lisp.Analyze do
   # Helper functions
   # ============================================================
 
-  defp analyze_list(xs, scope) do
+  defp analyze_list(xs) do
     xs
     |> Enum.reduce_while({:ok, []}, fn x, {:ok, acc} ->
-      case do_analyze(x, scope) do
+      case do_analyze(x) do
         {:ok, x2} -> {:cont, {:ok, [x2 | acc]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -702,11 +658,11 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp analyze_pairs(pairs, scope) do
+  defp analyze_pairs(pairs) do
     pairs
     |> Enum.reduce_while({:ok, []}, fn {k, v}, {:ok, acc} ->
-      with {:ok, k2} <- do_analyze(k, scope),
-           {:ok, v2} <- do_analyze(v, scope) do
+      with {:ok, k2} <- do_analyze(k),
+           {:ok, v2} <- do_analyze(v) do
         {:cont, {:ok, [{k2, v2} | acc]}}
       else
         {:error, reason} -> {:halt, {:error, reason}}

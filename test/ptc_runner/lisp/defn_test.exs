@@ -307,14 +307,11 @@ defmodule PtcRunner.Lisp.DefnTest do
     end
 
     test "defn with multiple body expressions (implicit do)" do
-      # defn body supports implicit do with multiple expressions
-      # Note: def inside defn body is now disallowed (def inside fn creates global state)
-      # So we test with expressions that don't involve def
-      source = "(do (defn process [x] (+ x 1) (* x 2)) (process 5))"
-      {:ok, %{return: result}} = Lisp.run(source)
+      source = "(do (defn with-side-effect [x] (def last-x x) x) (with-side-effect 42))"
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      # Last expression in implicit do is returned
-      assert result == 10
+      assert result == 42
+      assert user_ns[:"last-x"] == 42
     end
 
     test "real-world: expense filter across turns" do
