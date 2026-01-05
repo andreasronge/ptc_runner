@@ -1,143 +1,101 @@
 ;; Smoke test: Definitions and sequential evaluation
-;; Demonstrates: def, defn, do, multiple expressions, persistence patterns
+;; Demonstrates: def, defn, multiple expressions, persistence
+;; Note: Only the LAST expression's result is compared
 
-;; === Part 1: Basic def ===
+;; === def basics ===
+(def counter 0)
+(def threshold 100)
+(def multiplier 2.5)
+(def scaled-threshold (* threshold multiplier))
 
-;; def returns a var, not the value
-(do
-  (def counter 0)
-  (def threshold 100)
-  (def multiplier 2.5)
+;; Chain of defs
+(def a 1)
+(def b (+ a 1))
+(def c (+ b 1))
 
-  ;; Can reference previous defs
-  (def scaled-threshold (* threshold multiplier))
+;; === defn basics ===
+(defn twice [x] (* x 2))
+(defn add [a b] (+ a b))
+(defn quadruple [x] (twice (twice x)))
 
-  ;; Chain of defs
-  (def a 1)
-  (def b (+ a 1))
-  (def c (+ b 1))
+(defn distance [x1 y1 x2 y2]
+  (let [dx (- x2 x1)
+        dy (- y2 y1)]
+    (+ (* dx dx) (* dy dy))))
 
-  {:counter counter
-   :threshold threshold
-   :scaled-threshold scaled-threshold
-   :chain [a b c]})
+;; === defn with implicit do (multiple body expressions) ===
+(def call-log [])
 
-;; === Part 2: defn basics ===
+(defn tracked-twice [x]
+  (def call-log (conj call-log x))
+  (* x 2))
 
-(do
-  ;; Simple function
-  (defn double [x] (* x 2))
+(tracked-twice 1)
+(tracked-twice 2)
+(tracked-twice 3)
 
-  ;; Function with multiple params
-  (defn add [a b] (+ a b))
+;; === defn referencing other defs ===
+(def tax-rate 0.08)
+(def discount-threshold 100)
 
-  ;; Function calling another function
-  (defn quadruple [x] (double (double x)))
+(defn apply-tax [amount]
+  (* amount (+ 1 tax-rate)))
 
-  ;; Function with expression body
-  (defn distance [x1 y1 x2 y2]
-    (let [dx (- x2 x1)
-          dy (- y2 y1)]
-      (+ (* dx dx) (* dy dy))))  ; squared distance
+(defn apply-discount [amount]
+  (if (> amount discount-threshold)
+    (* amount 0.9)
+    amount))
 
-  {:double-5 (double 5)
-   :add-3-4 (add 3 4)
-   :quadruple-3 (quadruple 3)
-   :distance (distance 0 0 3 4)})
+(defn calculate-total [subtotal]
+  (-> subtotal
+      apply-discount
+      apply-tax))
 
-;; === Part 3: defn with implicit do ===
+;; === Higher-order functions ===
+(defn make-adder [n]
+  (fn [x] (+ x n)))
 
-(do
-  ;; defn body can have multiple expressions
-  (def call-log [])
+(defn make-multiplier [n]
+  (fn [x] (* x n)))
 
-  (defn tracked-double [x]
-    (def call-log (conj call-log x))  ; side effect
-    (* x 2))                           ; return value
+(def add-10 (make-adder 10))
+(def times-3 (make-multiplier 3))
 
-  ;; Call multiple times
-  (tracked-double 1)
-  (tracked-double 2)
-  (tracked-double 3)
+(defn compose [f g]
+  (fn [x] (f (g x))))
 
-  {:results [(tracked-double 10) (tracked-double 20)]
-   :log call-log})
+(def add-then-multiply (compose times-3 add-10))
 
-;; === Part 4: defn referencing ctx and other defs ===
+;; === Data processing ===
+(def items [{:id 1 :value 100}
+            {:id 2 :value 200}
+            {:id 3 :value 50}])
 
-(do
-  (def tax-rate 0.08)
-  (def discount-threshold 100)
+(defn process-item [item]
+  {:id (:id item)
+   :original (:value item)
+   :processed (* (:value item) 1.1)})
 
-  (defn apply-tax [amount]
-    (* amount (+ 1 tax-rate)))
+(def processed (map process-item items))
+(def total (reduce + (map :processed processed)))
+(def avg (/ total (count processed)))
 
-  (defn apply-discount [amount]
-    (if (> amount discount-threshold)
-      (* amount 0.9)
-      amount))
-
-  (defn calculate-total [subtotal]
-    (-> subtotal
-        apply-discount
-        apply-tax))
-
-  {:raw-50 (calculate-total 50)
-   :raw-150 (calculate-total 150)})
-
-;; === Part 5: do with mixed expressions ===
-
-(do
-  ;; do evaluates all, returns last
-  (def step1 "init")
-  (def step2 "process")
-  (def step3 "complete")
-
-  ;; Nested do blocks
-  (do
-    (def outer "outer")
-    (do
-      (def inner "inner")
-      {:outer outer :inner inner})))
-
-;; === Part 6: defn as higher-order functions ===
-
-(do
-  (defn make-adder [n]
-    (fn [x] (+ x n)))
-
-  (defn make-multiplier [n]
-    (fn [x] (* x n)))
-
-  (def add-10 (make-adder 10))
-  (def times-3 (make-multiplier 3))
-
-  (defn compose [f g]
-    (fn [x] (f (g x))))
-
-  (def add-then-multiply (compose times-3 add-10))
-
-  {:add-10-of-5 (add-10 5)
-   :times-3-of-4 (times-3 4)
-   :composed-5 (add-then-multiply 5)})
-
-;; === Part 7: Complex multi-expression flow ===
-
-(do
-  ;; Simulate a data processing pipeline with state
-  (def items [{:id 1 :value 100}
-              {:id 2 :value 200}
-              {:id 3 :value 50}])
-
-  (defn process-item [item]
-    {:id (:id item)
-     :original (:value item)
-     :processed (* (:value item) 1.1)})
-
-  (def processed (map process-item items))
-  (def total (reduce + (map :processed processed)))
-  (def avg (/ total (count processed)))
-
-  {:processed processed
-   :total total
-   :avg avg})
+;; === Final result (this is what gets compared) ===
+{:counter counter
+ :threshold threshold
+ :scaled-threshold scaled-threshold
+ :chain [a b c]
+ :twice-5 (twice 5)
+ :add-3-4 (add 3 4)
+ :quadruple-3 (quadruple 3)
+ :distance (distance 0 0 3 4)
+ :tracked-results [(tracked-twice 10) (tracked-twice 20)]
+ :call-log call-log
+ :tax-50 (calculate-total 50)
+ :tax-150 (calculate-total 150)
+ :add-10-of-5 (add-10 5)
+ :times-3-of-4 (times-3 4)
+ :composed-5 (add-then-multiply 5)
+ :processed processed
+ :total total
+ :avg avg}
