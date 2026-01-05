@@ -167,6 +167,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate boolean?(x), to: Predicates
   defdelegate number?(x), to: Predicates
   defdelegate string?(x), to: Predicates
+  defdelegate char?(x), to: Predicates
   defdelegate keyword?(x), to: Predicates
   defdelegate vector?(x), to: Predicates
   defdelegate set?(x), to: Predicates

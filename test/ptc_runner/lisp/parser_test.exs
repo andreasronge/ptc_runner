@@ -37,6 +37,20 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:keyword, :empty?}} = Parser.parse(":empty?")
       assert {:ok, {:keyword, :valid!}} = Parser.parse(":valid!")
     end
+
+    test "characters" do
+      assert {:ok, {:string, "r"}} = Parser.parse("\\r")
+      assert {:ok, {:string, "\n"}} = Parser.parse("\\newline")
+      assert {:ok, {:string, " "}} = Parser.parse("\\space")
+      assert {:ok, {:string, "\t"}} = Parser.parse("\\tab")
+      assert {:ok, {:string, "\r"}} = Parser.parse("\\return")
+      assert {:ok, {:string, "\b"}} = Parser.parse("\\backspace")
+      assert {:ok, {:string, "\f"}} = Parser.parse("\\formfeed")
+      assert {:ok, {:string, "a"}} = Parser.parse("\\a")
+      assert {:ok, {:string, "A"}} = Parser.parse("\\A")
+      assert {:ok, {:string, "3"}} = Parser.parse("\\3")
+      assert {:ok, {:string, "λ"}} = Parser.parse("\\λ")
+    end
   end
 
   describe "symbols" do
