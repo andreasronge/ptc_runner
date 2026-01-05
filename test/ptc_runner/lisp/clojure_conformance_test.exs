@@ -257,6 +257,9 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(reduce + [1 2 3])")
       assert_clojure_equivalent("(reduce + 10 [1 2 3])")
       assert_clojure_equivalent("(reduce * [1 2 3 4])")
+      # Non-commutative operations verify correct argument order
+      assert_clojure_equivalent("(reduce - [10 1 2 3])")
+      assert_clojure_equivalent("(reduce - 10 [1 2 3])")
     end
 
     test "every?" do
