@@ -383,6 +383,9 @@ defmodule PtcRunner.SubAgent do
       # Get and prepare context (handles Step auto-chaining)
       raw_context = Keyword.get(opts, :context, %{})
 
+      # Validate tool/data name conflicts
+      validate_tool_data_conflict!(agent.tools, raw_context)
+
       case prepare_context(raw_context) do
         {:chained_failure, upstream_fail} ->
           # Short-circuit: upstream agent failed
@@ -491,7 +494,34 @@ defmodule PtcRunner.SubAgent do
   """
   @spec then!(PtcRunner.Step.t(), t() | String.t(), keyword()) :: PtcRunner.Step.t()
   def then!(step, agent, opts \\ []) do
+    validate_chain_keys!(step, agent)
     run!(agent, Keyword.put(opts, :context, step))
+  end
+
+  # Validates that step output keys satisfy the next agent's signature requirements.
+  defp validate_chain_keys!(%PtcRunner.Step{}, %__MODULE__{signature: nil}), do: :ok
+  defp validate_chain_keys!(%PtcRunner.Step{fail: fail}, _agent) when fail != nil, do: :ok
+
+  defp validate_chain_keys!(%PtcRunner.Step{return: return}, %__MODULE__{signature: sig}) do
+    alias PtcRunner.SubAgent.Template
+
+    required_keys = Template.extract_signature_params(sig)
+
+    # Handle non-map return values (no keys available)
+    provided_keys =
+      case return do
+        map when is_map(map) -> map |> Map.keys() |> Enum.map(&to_string/1)
+        _ -> []
+      end
+
+    missing = required_keys -- provided_keys
+
+    if missing != [] do
+      raise ArgumentError,
+            "Chain mismatch: agent requires #{inspect(Enum.sort(missing))} but previous step doesn't output them"
+    end
+
+    :ok
   end
 
   defp validate_llm_presence(nil, start_time) do
@@ -522,6 +552,43 @@ defmodule PtcRunner.SubAgent do
   defp validate_llm_registry(_registry, start_time) do
     return_error(:invalid_llm_registry, "llm_registry must be a map", %{}, start_time)
   end
+
+  # Validates that tool names don't conflict with context data keys.
+  # Conflicts would cause undefined behavior in the ctx/ namespace.
+  defp validate_tool_data_conflict!(tools, _raw_context) when map_size(tools) == 0 do
+    # No tools, no conflict possible
+    :ok
+  end
+
+  defp validate_tool_data_conflict!(tools, %PtcRunner.Step{} = step) do
+    # Extract context map from Step
+    context_map =
+      case step do
+        %{fail: fail} when fail != nil -> %{}
+        %{return: return} when is_map(return) -> return
+        _ -> %{}
+      end
+
+    validate_tool_data_conflict!(tools, context_map)
+  end
+
+  defp validate_tool_data_conflict!(tools, context) when is_map(context) do
+    # Convert tool names to strings for comparison
+    tool_names = Map.keys(tools) |> Enum.map(&to_string/1) |> MapSet.new()
+    # Convert context keys to strings for comparison
+    context_keys = Map.keys(context) |> Enum.map(&to_string/1) |> MapSet.new()
+
+    conflicts = MapSet.intersection(tool_names, context_keys)
+
+    if MapSet.size(conflicts) > 0 do
+      conflict_name = conflicts |> MapSet.to_list() |> List.first()
+      raise ArgumentError, "ctx/#{conflict_name} is both a tool and data - rename one"
+    end
+
+    :ok
+  end
+
+  defp validate_tool_data_conflict!(_tools, _context), do: :ok
 
   # Prepares context for execution, handling Step auto-chaining
   # Returns {:chained_failure, fail} | {context_map, field_descriptions | nil}
@@ -702,8 +769,16 @@ defmodule PtcRunner.SubAgent do
   ## Options
 
   - `:llm` - Bind specific LLM (atom or function). Overrides parent inheritance.
-  - `:description` - Override auto-derived description from agent's prompt
+  - `:description` - Override agent's description (falls back to `agent.description`)
   - `:name` - Suggested tool name (informational, not enforced by the struct)
+
+  ## Description Requirement
+
+  A description is required for tools. It can be provided either:
+  - On the SubAgent via `new(description: "...")`, or
+  - Via the `:description` option when calling `as_tool/2`
+
+  Raises `ArgumentError` if neither is provided.
 
   ## LLM Resolution
 
@@ -716,36 +791,48 @@ defmodule PtcRunner.SubAgent do
 
       iex> child = PtcRunner.SubAgent.new(
       ...>   prompt: "Double {{n}}",
-      ...>   signature: "(n :int) -> {result :int}"
+      ...>   signature: "(n :int) -> {result :int}",
+      ...>   description: "Doubles a number"
       ...> )
       iex> tool = PtcRunner.SubAgent.as_tool(child)
       iex> tool.signature
       "(n :int) -> {result :int}"
-      iex> tool.bound_llm
-      nil
+      iex> tool.description
+      "Doubles a number"
 
-      iex> child = PtcRunner.SubAgent.new(prompt: "Process data")
+      iex> child = PtcRunner.SubAgent.new(prompt: "Process data", description: "Default desc")
       iex> tool = PtcRunner.SubAgent.as_tool(child, llm: :haiku, description: "Processes data")
       iex> tool.bound_llm
       :haiku
       iex> tool.description
       "Processes data"
 
-      iex> child = PtcRunner.SubAgent.new(prompt: "Analyze {{text}}", signature: "(text :string) -> :string")
+      iex> child = PtcRunner.SubAgent.new(prompt: "Analyze {{text}}", signature: "(text :string) -> :string", description: "Analyzes text")
       iex> tool = PtcRunner.SubAgent.as_tool(child, name: "analyzer")
       iex> tool.signature
       "(text :string) -> :string"
+
+      iex> child = PtcRunner.SubAgent.new(prompt: "No description")
+      iex> PtcRunner.SubAgent.as_tool(child)
+      ** (ArgumentError) as_tool requires description to be set - pass description: option or set description on the SubAgent
 
   """
   @spec as_tool(t(), keyword()) :: PtcRunner.SubAgent.SubAgentTool.t()
   def as_tool(%__MODULE__{} = agent, opts \\ []) do
     alias PtcRunner.SubAgent.SubAgentTool
 
+    description = Keyword.get(opts, :description) || agent.description
+
+    unless description do
+      raise ArgumentError,
+            "as_tool requires description to be set - pass description: option or set description on the SubAgent"
+    end
+
     %SubAgentTool{
       agent: agent,
       bound_llm: Keyword.get(opts, :llm),
       signature: agent.signature,
-      description: Keyword.get(opts, :description)
+      description: description
     }
   end
 

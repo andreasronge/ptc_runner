@@ -376,4 +376,89 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
       assert step_b.field_descriptions == %{y: "Double of x"}
     end
   end
+
+  describe "then!/2 chain key validation" do
+    test "raises when required input key missing from previous step output" do
+      step = %PtcRunner.Step{return: %{x: 1}, fail: nil, memory: %{}}
+      agent = SubAgent.new(prompt: "test", signature: "(y :int) -> :int")
+
+      assert_raise ArgumentError, ~r/Chain mismatch.*\["y"\]/, fn ->
+        SubAgent.then!(step, agent, llm: fn _ -> {:ok, "42"} end)
+      end
+    end
+
+    test "succeeds when output keys are superset of input keys" do
+      step = %PtcRunner.Step{return: %{x: 1, y: 2, extra: 3}, fail: nil, memory: %{}}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use {{x}} and {{y}}",
+          signature: "(x :int, y :int) -> :int",
+          max_turns: 1
+        )
+
+      mock_llm = fn _ -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+
+      # Should not raise
+      result = SubAgent.then!(step, agent, llm: mock_llm)
+      assert result.return == 3
+    end
+
+    test "skips validation when agent has no signature" do
+      step = %PtcRunner.Step{return: %{anything: 1}, fail: nil, memory: %{}}
+      agent = SubAgent.new(prompt: "Process", max_turns: 1)
+
+      mock_llm = fn _ -> {:ok, "```clojure\n42\n```"} end
+
+      # Should not raise - no signature means no key requirements
+      result = SubAgent.then!(step, agent, llm: mock_llm)
+      assert result.return == 42
+    end
+
+    test "skips validation when previous step failed" do
+      step = %PtcRunner.Step{
+        return: nil,
+        fail: %{reason: :test_failure, message: "Test failed"},
+        memory: %{}
+      }
+
+      agent = SubAgent.new(prompt: "test", signature: "(y :int) -> :int")
+
+      # Should not raise for key validation - the chained failure
+      # is detected during run/2 and results in :chained_failure
+      assert_raise PtcRunner.SubAgentError, ~r/chained_failure/, fn ->
+        SubAgent.then!(step, agent, llm: fn _ -> {:ok, "42"} end)
+      end
+    end
+
+    test "raises with all missing keys listed" do
+      step = %PtcRunner.Step{return: %{}, fail: nil, memory: %{}}
+      agent = SubAgent.new(prompt: "test", signature: "(a :int, b :int, c :int) -> :int")
+
+      assert_raise ArgumentError, ~r/Chain mismatch.*\["a", "b", "c"\]/, fn ->
+        SubAgent.then!(step, agent, llm: fn _ -> {:ok, "42"} end)
+      end
+    end
+
+    test "handles non-map return value from previous step" do
+      step = %PtcRunner.Step{return: 42, fail: nil, memory: %{}}
+      agent = SubAgent.new(prompt: "test", signature: "(x :int) -> :int")
+
+      assert_raise ArgumentError, ~r/Chain mismatch.*\["x"\]/, fn ->
+        SubAgent.then!(step, agent, llm: fn _ -> {:ok, "42"} end)
+      end
+    end
+
+    test "handles atom vs string key normalization" do
+      # Step has atom keys, signature has string param names
+      step = %PtcRunner.Step{return: %{foo: 1, bar: 2}, fail: nil, memory: %{}}
+      agent = SubAgent.new(prompt: "Use {{foo}}", signature: "(foo :int) -> :int", max_turns: 1)
+
+      mock_llm = fn _ -> {:ok, "```clojure\nctx/foo\n```"} end
+
+      # Should work - atom :foo should match signature param "foo"
+      result = SubAgent.then!(step, agent, llm: mock_llm)
+      assert result.return == 1
+    end
+  end
 end

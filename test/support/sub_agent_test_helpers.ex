@@ -74,7 +74,8 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
     tool_opts = Keyword.get(opts, :tool, [])
     tool_name = Keyword.get(opts, :tool_name, "child")
 
-    child = test_agent(Keyword.merge([max_turns: 1], child_opts))
+    # Ensure child has a description for as_tool requirement
+    child = test_agent(Keyword.merge([max_turns: 1, description: "Child agent"], child_opts))
     child_tool = SubAgent.as_tool(child, tool_opts)
 
     parent =

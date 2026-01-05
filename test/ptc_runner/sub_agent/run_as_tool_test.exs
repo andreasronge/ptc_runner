@@ -11,7 +11,8 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       agent =
         SubAgent.new(
           prompt: "Double {{n}}",
-          signature: "(n :int) -> {result :int}"
+          signature: "(n :int) -> {result :int}",
+          description: "Doubles a number"
         )
 
       tool = SubAgent.as_tool(agent)
@@ -20,18 +21,18 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       assert tool.agent == agent
       assert tool.signature == "(n :int) -> {result :int}"
       assert tool.bound_llm == nil
-      assert tool.description == nil
+      assert tool.description == "Doubles a number"
     end
 
     test "returns SubAgentTool with nil signature when agent has no signature" do
-      agent = SubAgent.new(prompt: "Process data")
+      agent = SubAgent.new(prompt: "Process data", description: "Processes data")
       tool = SubAgent.as_tool(agent)
 
       assert tool.signature == nil
     end
 
     test "binds LLM when :llm option is provided" do
-      agent = SubAgent.new(prompt: "Analyze {{text}}")
+      agent = SubAgent.new(prompt: "Analyze {{text}}", description: "Analyzes text")
 
       mock_llm = fn _input -> {:ok, "result"} end
       tool = SubAgent.as_tool(agent, llm: mock_llm)
@@ -40,25 +41,40 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
     end
 
     test "binds LLM atom when :llm option is atom" do
-      agent = SubAgent.new(prompt: "Analyze {{text}}")
+      agent = SubAgent.new(prompt: "Analyze {{text}}", description: "Analyzes text")
       tool = SubAgent.as_tool(agent, llm: :haiku)
 
       assert tool.bound_llm == :haiku
     end
 
     test "sets description when :description option is provided" do
-      agent = SubAgent.new(prompt: "Process data")
+      agent = SubAgent.new(prompt: "Process data", description: "Default desc")
       tool = SubAgent.as_tool(agent, description: "Custom description")
 
       assert tool.description == "Custom description"
     end
 
     test "accepts :name option (informational only)" do
-      agent = SubAgent.new(prompt: "Analyze {{text}}")
+      agent = SubAgent.new(prompt: "Analyze {{text}}", description: "Analyzes text")
       # :name is informational and doesn't affect the struct
       tool = SubAgent.as_tool(agent, name: "analyzer")
 
       assert %SubAgentTool{} = tool
+    end
+
+    test "raises when description not provided" do
+      agent = SubAgent.new(prompt: "No description")
+
+      assert_raise ArgumentError, ~r/as_tool requires description/, fn ->
+        SubAgent.as_tool(agent)
+      end
+    end
+
+    test "uses agent description when opts not provided" do
+      agent = SubAgent.new(prompt: "Test", description: "Agent desc")
+      tool = SubAgent.as_tool(agent)
+
+      assert tool.description == "Agent desc"
     end
 
     test "tool execution via parent agent - child inherits parent LLM" do
@@ -198,7 +214,9 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
     test "nested agents respect nesting depth limit" do
       # Create a deeply nested structure: parent -> child -> grandchild
-      grandchild = test_agent(prompt: "Return 1", max_turns: 1, max_depth: 3)
+      grandchild =
+        test_agent(prompt: "Return 1", max_turns: 1, max_depth: 3, description: "Returns 1")
+
       grandchild_tool = SubAgent.as_tool(grandchild)
 
       %{parent: parent} =
@@ -241,7 +259,9 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
     test "nested agents exceed depth limit" do
       # Set max_depth to 1 to actually exceed it with 3 levels
-      grandchild = test_agent(prompt: "Return 1", max_turns: 1, max_depth: 1)
+      grandchild =
+        test_agent(prompt: "Return 1", max_turns: 1, max_depth: 1, description: "Returns 1")
+
       grandchild_tool = SubAgent.as_tool(grandchild)
 
       %{parent: parent} =
