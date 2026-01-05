@@ -223,9 +223,29 @@ defmodule PtcRunner.Lisp.Parser do
       {:ok, [ast], "", _context, _position, _offset} ->
         {:ok, ast}
 
-      {:ok, _result, rest, _context, {line, _}, _offset} ->
-        {:error,
-         {:parse_error, "Unexpected input at line #{line}: #{inspect(String.slice(rest, 0, 20))}"}}
+      {:ok, _result, rest, _context, _position, _offset} ->
+        # Check if the remaining input looks like another expression
+        trimmed = String.trim(rest)
+
+        if looks_like_expression?(trimmed) do
+          {:error,
+           {:parse_error,
+            "Each turn is a single expression. Use (do expr1 expr2 ...) for multiple."}}
+        else
+          {:error, {:parse_error, "Unexpected input: #{inspect(String.slice(trimmed, 0, 20))}"}}
+        end
+
+      {:error, "expected end of string", rest, _context, _position, _offset} ->
+        # eos() failed - check if remaining input looks like another expression
+        trimmed = String.trim(rest)
+
+        if looks_like_expression?(trimmed) do
+          {:error,
+           {:parse_error,
+            "Each turn is a single expression. Use (do expr1 expr2 ...) for multiple."}}
+        else
+          {:error, {:parse_error, "Unexpected input: #{inspect(String.slice(trimmed, 0, 20))}"}}
+        end
 
       {:error, reason, rest, _context, {line, line_offset}, offset} ->
         column = offset - line_offset + 1
@@ -236,5 +256,16 @@ defmodule PtcRunner.Lisp.Parser do
     end
   rescue
     e in ArgumentError -> {:error, {:parse_error, e.message}}
+  end
+
+  # Check if input looks like the start of a valid expression
+  defp looks_like_expression?(str) do
+    String.starts_with?(str, "(") or
+      String.starts_with?(str, "[") or
+      String.starts_with?(str, "{") or
+      String.starts_with?(str, "#") or
+      String.starts_with?(str, ":") or
+      String.starts_with?(str, "\"") or
+      Regex.match?(~r/^[a-zA-Z0-9+\-*\/<>=?!_]/, str)
   end
 end
