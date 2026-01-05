@@ -87,6 +87,7 @@ Wrap a SubAgent so other agents can call it:
 main_tools = %{
   "customer-finder" => SubAgent.as_tool(
     SubAgent.new(
+      description: "Finds customer by description",
       prompt: "Find customer matching: {{description}}",
       signature: "(description :string) -> {customer_id :int}",
       tools: %{"search" => &MyApp.CRM.search/1}
@@ -95,6 +96,7 @@ main_tools = %{
 
   "order-fetcher" => SubAgent.as_tool(
     SubAgent.new(
+      description: "Fetches recent orders for customer",
       prompt: "Get recent orders for customer {{customer_id}}",
       signature: "(customer_id :int) -> {orders [:map]}",
       tools: %{"list_orders" => &MyApp.Orders.list/1}

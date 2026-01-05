@@ -295,6 +295,8 @@ defmodule PtcRunner.SubAgent.SubAgentTool do
 end
 ```
 
+**Note**: A description is required when using `as_tool/2`. Provide it either via `SubAgent.new(description: "...")` or `as_tool(agent, description: "...")`.
+
 When called:
 1. Resolves LLM (agent.llm → bound llm → parent's llm)
 2. Executes `run(agent, llm: resolved_llm, context: args)`
