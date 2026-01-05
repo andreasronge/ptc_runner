@@ -203,8 +203,7 @@ defmodule PtcRunner.Lisp.Parser do
   defparsec(
     :program,
     parsec(:ws)
-    |> concat(parsec(:expr))
-    |> concat(parsec(:ws))
+    |> repeat(parsec(:expr) |> concat(parsec(:ws)))
     |> eos()
   )
 
@@ -220,8 +219,17 @@ defmodule PtcRunner.Lisp.Parser do
   @spec parse(String.t()) :: {:ok, AST.t()} | {:error, {:parse_error, String.t()}}
   def parse(source) when is_binary(source) do
     case program(source) do
+      # Empty program
+      {:ok, [], "", _context, _position, _offset} ->
+        {:ok, nil}
+
+      # Single expression (backward compatible)
       {:ok, [ast], "", _context, _position, _offset} ->
         {:ok, ast}
+
+      # Multiple expressions -> wrap in {:program, [...]}
+      {:ok, asts, "", _context, _position, _offset} when is_list(asts) ->
+        {:ok, {:program, asts}}
 
       {:ok, _result, rest, _context, {line, _}, _offset} ->
         {:error,

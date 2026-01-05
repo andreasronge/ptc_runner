@@ -126,6 +126,11 @@ defmodule PtcRunner.Lisp.SymbolCounter do
     Enum.reduce(body_asts, acc, fn elem, inner_acc -> collect_symbols(elem, inner_acc) end)
   end
 
+  # Multiple top-level expressions
+  defp collect_symbols({:program, exprs}, acc) do
+    Enum.reduce(exprs, acc, fn elem, inner_acc -> collect_symbols(elem, inner_acc) end)
+  end
+
   # Literals and strings don't create atoms
   defp collect_symbols({:string, _}, acc), do: acc
   defp collect_symbols(n, acc) when is_number(n), do: acc

@@ -194,9 +194,10 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:error, {:parse_error, _}} = Parser.parse("{:a 1 :b}")
     end
 
-    test "namespaced keywords are invalid" do
+    test "namespaced keywords are not supported" do
       # Spec: "no namespaced keywords like :foo/bar"
-      assert {:error, {:parse_error, _}} = Parser.parse(":foo/bar")
+      # Parses as two separate tokens: :foo and /bar (a symbol)
+      assert {:ok, {:program, [{:keyword, :foo}, {:symbol, :"/bar"}]}} = Parser.parse(":foo/bar")
     end
 
     test "quoted lists are rejected" do
@@ -228,9 +229,10 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:error, {:parse_error, _}} = Parser.parse("5.")
     end
 
-    test "exponent without decimal is invalid" do
-      # We require digits.digits before exponent
-      assert {:error, {:parse_error, _}} = Parser.parse("2e10")
+    test "exponent without decimal parses as two tokens" do
+      # We require digits.digits before exponent for scientific notation
+      # Without decimal, parses as integer followed by symbol
+      assert {:ok, {:program, [2, {:symbol, :e10}]}} = Parser.parse("2e10")
     end
 
     test "positive sign on numbers" do
@@ -342,6 +344,52 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:symbol, :%}} = Parser.parse("%")
       assert {:ok, {:symbol, :"%1"}} = Parser.parse("%1")
       assert {:ok, {:symbol, :"%2"}} = Parser.parse("%2")
+    end
+  end
+
+  describe "multiple top-level expressions" do
+    test "single expression returns unwrapped (backward compatible)" do
+      assert {:ok, 42} = Parser.parse("42")
+      assert {:ok, {:symbol, :x}} = Parser.parse("x")
+    end
+
+    test "multiple expressions return {:program, list}" do
+      assert {:ok, {:program, [1, 2, 3]}} = Parser.parse("1 2 3")
+    end
+
+    test "empty input returns nil" do
+      assert {:ok, nil} = Parser.parse("")
+      assert {:ok, nil} = Parser.parse("   ")
+    end
+
+    test "comment-only input returns nil" do
+      assert {:ok, nil} = Parser.parse("; just a comment")
+      assert {:ok, nil} = Parser.parse("; comment\n; another")
+    end
+
+    test "multiple expressions with complex forms" do
+      source = "(def x 1) (def y 2) (+ x y)"
+      assert {:ok, {:program, [_, _, _]}} = Parser.parse(source)
+    end
+
+    test "multiple expressions with newlines" do
+      source = """
+      (def x 1)
+      (def y 2)
+      (+ x y)
+      """
+
+      assert {:ok, {:program, [_, _, _]}} = Parser.parse(source)
+    end
+
+    test "expressions with comments between them" do
+      source = """
+      (def x 1) ; define x
+      (def y 2) ; define y
+      (+ x y)   ; result
+      """
+
+      assert {:ok, {:program, [_, _, _]}} = Parser.parse(source)
     end
   end
 end

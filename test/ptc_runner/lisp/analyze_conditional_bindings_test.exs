@@ -130,5 +130,35 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalBindingsTest do
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
       assert msg =~ "one binding"
     end
+
+    test "implicit do with multiple body expressions" do
+      # (when-let [x 42] (println x) x)
+      raw =
+        {:list,
+         [
+           {:symbol, :"when-let"},
+           {:vector, [{:symbol, :x}, 42]},
+           {:list, [{:symbol, :println}, {:symbol, :x}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:let, [{:binding, {:var, :x}, 42}], {:if, {:var, :x}, {:do, [_, _]}, nil}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "implicit do with three body expressions" do
+      # (when-let [x 42] (def a x) (def b x) x)
+      raw =
+        {:list,
+         [
+           {:symbol, :"when-let"},
+           {:vector, [{:symbol, :x}, 42]},
+           {:list, [{:symbol, :def}, {:symbol, :a}, {:symbol, :x}]},
+           {:list, [{:symbol, :def}, {:symbol, :b}, {:symbol, :x}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:let, _, {:if, _, {:do, [_, _, _]}, nil}}} = Analyze.analyze(raw)
+    end
   end
 end

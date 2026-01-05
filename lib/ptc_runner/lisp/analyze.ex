@@ -32,6 +32,16 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
+  # Multiple top-level expressions (implicit do)
+  # ============================================================
+
+  defp do_analyze({:program, exprs}) when is_list(exprs) do
+    with {:ok, analyzed} <- analyze_list(exprs) do
+      {:ok, {:do, analyzed}}
+    end
+  end
+
+  # ============================================================
   # Literals and basic values
   # ============================================================
 
@@ -154,15 +164,17 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: let
   # ============================================================
 
-  defp analyze_let([bindings_ast, body_ast]) do
+  defp analyze_let([bindings_ast, first_body | rest_body]) do
+    body_asts = [first_body | rest_body]
+
     with {:ok, bindings} <- analyze_bindings(bindings_ast),
-         {:ok, body} <- do_analyze(body_ast) do
+         {:ok, body} <- wrap_body(body_asts) do
       {:ok, {:let, bindings, body}}
     end
   end
 
   defp analyze_let(_) do
-    {:error, {:invalid_arity, :let, "expected (let [bindings] body)"}}
+    {:error, {:invalid_arity, :let, "expected (let [bindings] body ...)"}}
   end
 
   defp analyze_bindings({:vector, elems}) do
@@ -213,15 +225,17 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error, {:invalid_arity, :if, "expected (if cond then else)"}}
   end
 
-  defp analyze_when([cond_ast, body_ast]) do
+  defp analyze_when([cond_ast, first_body | rest_body]) do
+    body_asts = [first_body | rest_body]
+
     with {:ok, c} <- do_analyze(cond_ast),
-         {:ok, b} <- do_analyze(body_ast) do
+         {:ok, b} <- wrap_body(body_asts) do
       {:ok, {:if, c, b, nil}}
     end
   end
 
   defp analyze_when(_) do
-    {:error, {:invalid_arity, :when, "expected (when cond body)"}}
+    {:error, {:invalid_arity, :when, "expected (when cond body ...)"}}
   end
 
   # ============================================================
@@ -247,22 +261,24 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
   end
 
-  # Desugar (when-let [x cond] body) to (let [x cond] (if x body nil))
-  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, body_ast]) do
+  # Desugar (when-let [x cond] body ...) to (let [x cond] (if x body nil))
+  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, first_body | rest_body]) do
+    body_asts = [first_body | rest_body]
+
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
          {:ok, c} <- do_analyze(cond_ast),
-         {:ok, b} <- do_analyze(body_ast) do
+         {:ok, b} <- wrap_body(body_asts) do
       binding = {:binding, name, c}
       {:ok, {:let, [binding], {:if, name, b, nil}}}
     end
   end
 
-  defp analyze_when_let([{:vector, bindings}, _body_ast]) when length(bindings) != 2 do
+  defp analyze_when_let([{:vector, bindings} | _body_asts]) when length(bindings) != 2 do
     {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
   end
 
   defp analyze_when_let(_) do
-    {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body)"}}
+    {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body ...)"}}
   end
 
   # Helper: only allow simple symbol bindings (no destructuring)
@@ -327,15 +343,17 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: fn (anonymous functions)
   # ============================================================
 
-  defp analyze_fn([params_ast, body_ast]) do
+  defp analyze_fn([params_ast, first_body | rest_body]) do
+    body_asts = [first_body | rest_body]
+
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast) do
+         {:ok, body} <- wrap_body(body_asts) do
       {:ok, {:fn, params, body}}
     end
   end
 
   defp analyze_fn(_) do
-    {:error, {:invalid_arity, :fn, "expected (fn [params] body)"}}
+    {:error, {:invalid_arity, :fn, "expected (fn [params] body ...)"}}
   end
 
   defp analyze_fn_params({:vector, param_asts}) do
@@ -547,42 +565,28 @@ defmodule PtcRunner.Lisp.Analyze do
   # Named function definition: defn (desugars to def + fn)
   # ============================================================
 
-  # (defn name docstring [params] body) - docstring variant (4 args, must be checked first)
-  defp analyze_defn([{:symbol, name}, {:string, _docstring}, {:vector, _} = params_ast, body_ast]) do
-    with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast) do
-      {:ok, {:def, name, {:fn, params, body}}}
-    end
-  end
-
-  # (defn name docstring [params] body1 body2 ...) - docstring + multiple bodies
+  # (defn name docstring [params] body ...) - with docstring
   defp analyze_defn([
          {:symbol, name},
          {:string, _docstring},
-         {:vector, _} = params_ast | body_asts
-       ])
-       when is_list(body_asts) and length(body_asts) > 1 do
-    with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, bodies} <- analyze_list(body_asts) do
-      {:ok, {:def, name, {:fn, params, {:do, bodies}}}}
-    end
-  end
+         {:vector, _} = params_ast,
+         first_body | rest_body
+       ]) do
+    body_asts = [first_body | rest_body]
 
-  # (defn name [params] body) - standard 3 args
-  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, body_ast]) do
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- do_analyze(body_ast) do
-      # Desugar: (defn name [params] body) → (def name (fn [params] body))
+         {:ok, body} <- wrap_body(body_asts) do
       {:ok, {:def, name, {:fn, params, body}}}
     end
   end
 
-  # (defn name [params] body1 body2 ...) - multiple body expressions → implicit do
-  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast | body_asts])
-       when is_list(body_asts) and length(body_asts) > 1 do
+  # (defn name [params] body ...) - without docstring
+  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, first_body | rest_body]) do
+    body_asts = [first_body | rest_body]
+
     with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, bodies} <- analyze_list(body_asts) do
-      {:ok, {:def, name, {:fn, params, {:do, bodies}}}}
+         {:ok, body} <- wrap_body(body_asts) do
+      {:ok, {:def, name, {:fn, params, body}}}
     end
   end
 
@@ -643,6 +647,16 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
   # Helper functions
   # ============================================================
+
+  # Wrap multiple bodies in {:do, ...}, pass single body through (implicit do)
+  @spec wrap_body([term()]) :: {:ok, CoreAST.t()} | {:error, error_reason()}
+  defp wrap_body([single]), do: do_analyze(single)
+
+  defp wrap_body(bodies) when length(bodies) > 1 do
+    with {:ok, analyzed} <- analyze_list(bodies) do
+      {:ok, {:do, analyzed}}
+    end
+  end
 
   defp analyze_list(xs) do
     xs

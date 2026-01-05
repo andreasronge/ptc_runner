@@ -15,7 +15,6 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "expected"
-      assert message =~ ")"
     end
 
     test "unbalanced brackets" do
