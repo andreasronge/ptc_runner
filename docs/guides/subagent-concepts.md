@@ -5,13 +5,13 @@ This guide covers the foundational concepts of SubAgents: context management, th
 A typical SubAgent program calls a tool and returns the result:
 
 ```clojure
-(let [data (call "fetch_items" {:category ctx/category})]
+(let [data (ctx/fetch-items {:category ctx/category})]
   (return (filter (where :price < 100) data)))
 ```
 
 Key points:
 - `ctx/category`: Accesses the input context.
-- `call`: Invokes a tool with an argument map.
+- `ctx/fetch-items`: Invokes a tool with an argument map.
 - `return`: Completes the mission with the final value.
 
 ## The Context Firewall
@@ -99,9 +99,9 @@ Values passed to `context:` are available via the `ctx/` prefix in PTC-Lisp:
 The LLM can reference these in its programs:
 
 ```clojure
-(call "get_order" {:id ctx/order_id})
+(ctx/get-order {:id ctx/order_id})
 (if (= ctx/customer_tier "gold")
-  (call "apply_discount" {:rate 0.1})
+  (ctx/apply-discount {:rate 0.1})
   nil)
 ```
 
@@ -201,11 +201,11 @@ The `ctx/fail` structure:
 When the agent determines it cannot complete the mission, it calls `fail`:
 
 ```clojure
-(let [user (call "get_user" {:id 123})]
+(let [user (ctx/get-user {:id 123})]
   (if (nil? user)
     (fail {:reason :not_found
            :message "User 123 does not exist"})
-    (call "process" user)))
+    (ctx/process user)))
 ```
 
 Result: `{:error, step}` where `step.fail` contains the error.

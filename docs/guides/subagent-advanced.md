@@ -31,8 +31,8 @@ Turn 3: LLM calls return with final answer
 
 **Turn 1: Discovery**
 ```clojure
-;; Return a map to merge into ctx/
-{:results (call "search_emails" {:query "Acme Corp"})}
+;; Store results in user namespace
+(def results (ctx/search-emails {:query "Acme Corp"}))
 ```
 
 The LLM sees in its next prompt:
