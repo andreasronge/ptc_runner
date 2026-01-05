@@ -2189,6 +2189,49 @@ The `#()` syntax desugars to the equivalent `fn`:
 - `partial`, `comp` (function composition)
 - Transducers
 
+### 13.4 Clojure Compatibility Issues
+
+The following behaviors differ from standard Clojure/Babashka:
+
+| Issue | PTC-Lisp Behavior | Clojure Behavior | Workaround |
+|-------|-------------------|------------------|------------|
+| `:or` defaults in `fn`/`defn` params | May return internal `{:string, "value"}` tuples | Returns the actual value | Use `(or param default)` in body |
+| `empty?` on strings | Error (not enumerable) | Returns `true` for `""` | Use `(= s "")` |
+| `count` on strings | Error (not enumerable) | Returns string length | Not available |
+| Nested map destructuring | Not supported: `{{:keys [a]} :b}` | Supported | Step-by-step: extract outer, then inner |
+| Empty vector destructuring | Error when vector has fewer elements | Binds `nil` for missing | Use `(first vec)` or check length |
+| Destructuring `nil` | Error: expected map/vector | Returns `nil` for all bindings | Check for nil before destructuring |
+| `keys` return type | Returns keywords (atoms) | Returns keywords | Use `(count (keys m))` for comparison |
+
+**Example workarounds:**
+
+```clojure
+;; Instead of :or defaults in fn params
+;; BAD: (fn [{:keys [host] :or {host "localhost"}}] ...)
+;; GOOD:
+(fn [{:keys [host]}]
+  (let [h (or host "localhost")]
+    ...))
+
+;; Instead of empty? on strings
+;; BAD: (empty? some-string)
+;; GOOD:
+(= some-string "")
+
+;; Instead of nested map destructuring
+;; BAD: (let [{{:keys [name]} :user} data] ...)
+;; GOOD:
+(let [{:keys [user]} data
+      {:keys [name]} user]
+  ...)
+
+;; Instead of destructuring possibly-nil values
+;; BAD: (let [{:keys [a]} maybe-nil] ...)
+;; GOOD:
+(let [{:keys [a]} (or maybe-nil {})]
+  ...)
+```
+
 ---
 
 ## 14. Grammar (EBNF)
