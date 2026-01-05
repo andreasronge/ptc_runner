@@ -25,7 +25,6 @@ ctx/orders
 - Macros, `defmacro`
 - Recursion, `loop/recur`
 - Ratios (`1/3`), BigDecimals (`1.0M`)
-- Regex literals (`#"pattern"`)
 - Multi-line strings
 - `if` without else — use `(if cond then nil)` or `when`
 - Chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
@@ -92,6 +91,17 @@ results                                        ; => the search results
 ; Example: Fetch multiple documents by ID concurrently
 (let [ids ["doc-1" "doc-2" "doc-3"]]
   (pmap (fn [id] (ctx/fetch {:id id})) ids))
+```
+
+**Regex** — validation and extraction (uses standard strings for safety):
+```clojure
+(re-pattern "^\\d+$")             ; compiles pattern string to regex object
+(re-find (re-pattern "\\d+") "v1") ; returns "1" (first match)
+(re-matches (re-pattern "\\d+") "1") ; returns "1" (full match only)
+(re-find (re-pattern "(\\d+)-(\\d+)") "10-20") ; returns ["10-20" "10" "20"]
+
+; Use with filter:
+(filter #(re-find (re-pattern "error") %) logs)
 ```
 
 ### Threading

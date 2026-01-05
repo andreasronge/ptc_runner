@@ -58,7 +58,8 @@ defmodule PtcRunner.Lisp.Env do
     :"clojure.core" => :core,
     :core => :core,
     :"clojure.set" => :set,
-    :set => :set
+    :set => :set,
+    :regex => :regex
   }
 
   @doc """
@@ -132,9 +133,15 @@ defmodule PtcRunner.Lisp.Env do
     [:set, :set?, :contains?]
   end
 
+  def builtins_by_category(:regex) do
+    [:"re-pattern", :"re-find", :"re-matches", :regex?]
+  end
+
   def builtins_by_category(:core) do
     # All other builtins (collection, arithmetic, logic, etc.)
-    excluded = builtins_by_category(:string) ++ builtins_by_category(:set)
+    excluded =
+      builtins_by_category(:string) ++ builtins_by_category(:set) ++ builtins_by_category(:regex)
+
     Map.keys(initial()) -- excluded
   end
 
@@ -152,6 +159,7 @@ defmodule PtcRunner.Lisp.Env do
   @spec category_name(atom()) :: String.t()
   def category_name(:string), do: "String"
   def category_name(:set), do: "Set"
+  def category_name(:regex), do: "Regex"
   def category_name(:core), do: "Core"
 
   defp builtin_bindings do
@@ -297,6 +305,14 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       {:"parse-long", {:normal, &Runtime.parse_long/1}},
       {:"parse-double", {:normal, &Runtime.parse_double/1}},
+
+      # ============================================================
+      # Regex operations
+      # ============================================================
+      {:"re-pattern", {:normal, &Runtime.re_pattern/1}},
+      {:"re-find", {:normal, &Runtime.re_find/2}},
+      {:"re-matches", {:normal, &Runtime.re_matches/2}},
+      {:regex?, {:normal, &Runtime.regex?/1}},
 
       # ============================================================
       # Numeric predicates

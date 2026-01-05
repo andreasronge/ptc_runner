@@ -42,6 +42,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
+| `re-pattern` | Compile string to regex without literal syntax (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding (returns int, not double) |
 | `call` | Tool invocation special form (§9) |
@@ -168,9 +169,9 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Single-line only:** Strings must not contain literal newline characters (`\n`, `\r`). Use escape sequences (`\n`, `\r`) for newlines within string content.
 
-**Not supported:** Multi-line strings, regex literals
+**Not supported:** Multi-line strings, regex literals (use `re-pattern` instead).
 
-**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, and `replace`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.4 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
 
 **String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
 
@@ -1667,6 +1668,37 @@ String parsing functions provide safe conversion from strings to numbers, compat
 (parse-double "3.14")      ; => 3.14
 (parse-double "-0.5")      ; => -0.5
 (parse-double "1.23e-4")   ; => 1.23e-4
+```
+
+### 8.10 Regex Functions
+
+Regex functions provide validation and extraction capabilities. To ensure system stability, PTC-Lisp uses a "Safety-First" regex engine with forced backtracking and recursion limits.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `re-pattern` | `(re-pattern s)` | Compile string `s` into an opaque regex object |
+| `re-find` | `(re-find re s)` | Returns the first match of `re` in `s` |
+| `re-matches` | `(re-matches re s)` | Returns match if `re` matches the **entire** string `s` |
+| `regex?` | `(regex? x)` | Returns true if `x` is a regex object |
+
+**Opaque Regex Type:** Regexes do not have a literal syntax. They must be created using `re-pattern`. Internally, they are opaque objects that can be passed to functions but not inspected directly.
+
+**Return Value Semantics:**
+- If no match is found, returns `nil`.
+- If the regex has no capture groups, returns the matching string.
+- If the regex contains capture groups, returns a **vector** where the first element is the full match and subsequent elements are the groups.
+
+```clojure
+(re-find (re-pattern "\\d+") "v1")              ; => "1"
+(re-matches (re-pattern "\\d+") "123")          ; => "123"
+(re-matches (re-pattern "\\d+") "123abc")       ; => nil (not entire string)
+(re-find (re-pattern "(\\d+)-(\\d+)") "10-20")  ; => ["10-20" "10" "20"]
+```
+
+**Safety Constraints:**
+- **Match Limit:** Regex execution is restricted to 100,000 backtracking steps. Exceeding this limit (e.g., due to ReDoS) terminates evaluation with an error.
+- **Input Truncation:** To prevent super-linear scaling on massive inputs, regex functions only scan the first 32KB of any input string.
+- **Pattern Complexity:** Patterns are limited to 256 bytes in length.
 
 ;; Failed parses
 (parse-long "abc")         ; => nil
