@@ -1651,31 +1651,35 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 | `(ctx/tool-name ...)` | Tool invocation | Call registered tools |
 
-### 9.2 Stored Values — Plain Symbols
+### 9.2 Persistent Values — User Namespace symbols
 
-Access stored values as plain symbols. When your program returns a map, its keys become available as symbols in subsequent turns:
+Access values stored in the User Namespace as plain symbols. These values are defined using the `def` or `defn` forms and persist across turns within a session:
 
 ```clojure
-high-paid          ; access :high-paid from a previous map return
-orders             ; access :orders from a previous map return
-query-count        ; access :query-count from a previous map return
+high-paid          ; access symbol defined via (def high-paid ...)
+orders             ; access symbol defined via (def orders ...)
+query-count        ; access symbol defined via (def query-count ...)
 ```
 
-Stored values are **read-only during execution**. To update them, return a map (see Section 16).
+Stored values are **read-only during evaluation** unless redefined via `def`. To update a value for the next turn, use `def` in your program (see Section 16).
 
 ```clojure
-;; Read previous results, compute new value, return updated map
-(let [prev-orders orders
-      new-orders (ctx/get-orders {:since "2024-01-01"})]
-  {:orders (concat prev-orders new-orders)})
+;; Read previous results, compute new value, update for next turn
+(do
+  (def new-orders (ctx/get-orders {:since "2024-01-01"}))
+  (def orders (concat orders new-orders))
+  orders) ; return current total
 ```
 
 With default values (using `or`):
 
 ```clojure
-(let [count (or query-count 0)]
-  {:query-count (inc count)})
+(do
+  (def current-count (or query-count 0))
+  (def query-count (inc current-count))
+  query-count)
 ```
+
 
 ### 9.3 Context Access — `ctx/`
 
@@ -1725,7 +1729,7 @@ Access results from previous turns using the turn history symbols:
 (> (count ctx/items) (count *1))
 ```
 
-**For reliable multi-turn patterns**, return maps to store values as symbols. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
+**For reliable multi-turn patterns**, use `(def name value)` to store values in the User Namespace. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
 
 ### 9.5 Tool Invocation — `ctx/tool-name`
 
