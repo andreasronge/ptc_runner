@@ -57,6 +57,12 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:ns_symbol, :foo, :bar}} = Parser.parse("foo/bar")
     end
 
+    test "Clojure-style namespaced symbols with dots" do
+      assert {:ok, {:ns_symbol, :"clojure.string", :join}} = Parser.parse("clojure.string/join")
+      assert {:ok, {:ns_symbol, :"clojure.core", :map}} = Parser.parse("clojure.core/map")
+      assert {:ok, {:ns_symbol, :"clojure.set", :union}} = Parser.parse("clojure.set/union")
+    end
+
     test "nil/true/false don't match as prefixes" do
       # "nilly" should be a symbol, not nil + "ly"
       assert {:ok, {:symbol, :nilly}} = Parser.parse("nilly")

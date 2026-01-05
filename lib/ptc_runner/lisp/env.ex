@@ -46,6 +46,114 @@ defmodule PtcRunner.Lisp.Env do
     Map.has_key?(initial(), name)
   end
 
+  # ============================================================
+  # Clojure namespace compatibility
+  # ============================================================
+
+  # Map Clojure-style namespaces to function categories for suggestions
+  @clojure_namespaces %{
+    :"clojure.string" => :string,
+    :str => :string,
+    :string => :string,
+    :"clojure.core" => :core,
+    :core => :core,
+    :"clojure.set" => :set,
+    :set => :set
+  }
+
+  @doc """
+  Check if a namespace is a known Clojure-style namespace.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Env.clojure_namespace?(:"clojure.string")
+      true
+
+      iex> PtcRunner.Lisp.Env.clojure_namespace?(:str)
+      true
+
+      iex> PtcRunner.Lisp.Env.clojure_namespace?(:my_ns)
+      false
+  """
+  @spec clojure_namespace?(atom()) :: boolean()
+  def clojure_namespace?(ns), do: Map.has_key?(@clojure_namespaces, ns)
+
+  @doc """
+  Get the category for a Clojure-style namespace.
+
+  Returns `:string`, `:set`, or `:core`.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Env.namespace_category(:"clojure.string")
+      :string
+
+      iex> PtcRunner.Lisp.Env.namespace_category(:str)
+      :string
+  """
+  @spec namespace_category(atom()) :: atom() | nil
+  def namespace_category(ns), do: Map.get(@clojure_namespaces, ns)
+
+  @doc """
+  Get the list of builtin functions for a category.
+
+  Used to provide helpful error messages when a function is not available.
+
+  ## Examples
+
+      iex> :join in PtcRunner.Lisp.Env.builtins_by_category(:string)
+      true
+
+      iex> :set in PtcRunner.Lisp.Env.builtins_by_category(:set)
+      true
+  """
+  @spec builtins_by_category(atom()) :: [atom()]
+  def builtins_by_category(:string) do
+    [
+      :str,
+      :subs,
+      :join,
+      :split,
+      :trim,
+      :replace,
+      :upcase,
+      :"upper-case",
+      :downcase,
+      :"lower-case",
+      :"starts-with?",
+      :"ends-with?",
+      :includes?,
+      :"parse-long",
+      :"parse-double"
+    ]
+  end
+
+  def builtins_by_category(:set) do
+    [:set, :set?, :contains?]
+  end
+
+  def builtins_by_category(:core) do
+    # All other builtins (collection, arithmetic, logic, etc.)
+    excluded = builtins_by_category(:string) ++ builtins_by_category(:set)
+    Map.keys(initial()) -- excluded
+  end
+
+  @doc """
+  Get a human-readable name for a category.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Env.category_name(:string)
+      "String"
+
+      iex> PtcRunner.Lisp.Env.category_name(:core)
+      "Core"
+  """
+  @spec category_name(atom()) :: String.t()
+  def category_name(:string), do: "String"
+  def category_name(:set), do: "Set"
+  def category_name(:core), do: "Core"
+
   defp builtin_bindings do
     [
       # ============================================================
