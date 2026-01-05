@@ -424,12 +424,12 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
     test "passing > as comparator to reduce" do
       env = Env.initial()
 
-      # (reduce > 0 [1 5 3]) - should find max using > as comparison function
-      # This tests that {:normal, &Kernel.>/2} gets unwrapped to &Kernel.>/2
+      # Tests that {:normal, &Kernel.>/2} gets unwrapped to &Kernel.>/2
       call_ast = {:call, {:var, :reduce}, [{:var, :>}, 0, {:vector, [1, 5, 3]}]}
 
-      # > will act as reducer: (> (> (> 0 1) 5) 3) = (> (> false 5) 3) = (> false 3) = false
-      assert {:ok, false, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+      # With Clojure argument order (f acc elem):
+      # (> 0 1) = false, (> false 5) = true, (> true 3) = true
+      assert {:ok, true, %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "passing + as accumulator function to reduce" do

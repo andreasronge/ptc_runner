@@ -1233,6 +1233,7 @@ The `seq` function converts a collection to a sequence:
 ```clojure
 (count [1 2 3])                   ; => 3
 (reduce + 0 [1 2 3])              ; => 6
+(reduce - 10 [1 2 3])             ; => 4 (10 - 1 - 2 - 3, Clojure style: f receives (acc, elem))
 (sum-by :amount expenses)         ; sum of :amount fields
 (avg-by :price products)          ; average of :price fields
 (min-by :price products)          ; item with lowest price
