@@ -237,7 +237,7 @@ defmodule PtcRunner.Lisp.DefTest do
     end
 
     test "def with tool call result" do
-      source = "(def results (call \"search\" {:query \"test\"}))"
+      source = "(def results (ctx/search {:query \"test\"}))"
       tools = %{"search" => fn _args -> [%{id: 1}, %{id: 2}] end}
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source, tools: tools)
 

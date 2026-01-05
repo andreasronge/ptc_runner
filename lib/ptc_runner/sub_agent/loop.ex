@@ -91,7 +91,7 @@ defmodule PtcRunner.SubAgent.Loop do
   ## Examples
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Add {{x}} and {{y}}", tools: %{}, max_turns: 2)
-      iex> llm = fn %{messages: _} -> {:ok, "```clojure\\n(call \\"return\\" {:result (+ ctx/x ctx/y)})\\n```"} end
+      iex> llm = fn %{messages: _} -> {:ok, "```clojure\\n(return {:result (+ ctx/x ctx/y)})\\n```"} end
       iex> {:ok, step} = PtcRunner.SubAgent.Loop.run(agent, llm: llm, context: %{x: 5, y: 3})
       iex> step.return
       %{result: 8}

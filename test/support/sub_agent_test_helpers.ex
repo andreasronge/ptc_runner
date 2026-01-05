@@ -40,13 +40,13 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
       iex> {:ok, response} = llm.(%{})
       iex> response
       ~S|```clojure
-  (call "return" {:value 42})
+  (return {:value 42})
   ```|
   """
   def simple_return_llm do
     fn _ ->
       {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
     end
   end
@@ -99,7 +99,7 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
 
       iex> llm = PtcRunner.TestSupport.SubAgentTestHelpers.routing_llm([
       ...>   {"Double", "```clojure\\n(* 2 ctx/n)\\n```"},
-      ...>   {{:turn, 1}, "```clojure\\n(call \\"double\\" {:n 5})\\n```"}
+      ...>   {{:turn, 1}, "```clojure\\n(ctx/double {:n 5})\\n```"}
       ...> ])
       iex> {:ok, response} = llm.(%{messages: [%{content: "Double 5"}], turn: 1})
       iex> response
@@ -122,7 +122,7 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
         end)
 
       {:ok, response || ~S|```clojure
-(call "return" {:value nil})
+(return {:value nil})
 ```|}
     end
   end

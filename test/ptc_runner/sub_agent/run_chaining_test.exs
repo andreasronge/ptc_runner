@@ -18,7 +18,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
     test "raises SubAgentError on failure" do
       agent = SubAgent.new(prompt: "Fail", max_turns: 2)
       llm = fn _input -> {:ok, ~S|```clojure
-(call "fail" {:reason :test_failure :message "Intentional failure"})
+(fail {:reason :test_failure :message "Intentional failure"})
 ```|} end
 
       assert_raise PtcRunner.SubAgentError, ~r/failed/, fn ->
@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
     test "SubAgentError contains step for inspection" do
       agent = SubAgent.new(prompt: "Fail", max_turns: 2)
       llm = fn _input -> {:ok, ~S|```clojure
-(call "fail" {:reason :custom_error :message "Test error"})
+(fail {:reason :custom_error :message "Test error"})
 ```|} end
 
       try do
@@ -130,7 +130,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
 
       mock_llm = fn _input ->
         {:ok, ~S|```clojure
-(call "fail" {:reason :test_failure :message "Intentional"})
+(fail {:reason :test_failure :message "Intentional"})
 ```|}
       end
 
@@ -148,7 +148,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
 
       mock_llm = fn _input ->
         {:ok, ~S|```clojure
-(call "fail" {:reason :upstream_error :message "First agent failed"})
+(fail {:reason :upstream_error :message "First agent failed"})
 ```|}
       end
 

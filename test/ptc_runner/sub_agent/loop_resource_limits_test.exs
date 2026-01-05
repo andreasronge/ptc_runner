@@ -63,7 +63,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
         case turn do
           1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
           2 -> {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
         end
       end
@@ -92,7 +92,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
         case turn do
           1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
           _ -> {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
         end
       end

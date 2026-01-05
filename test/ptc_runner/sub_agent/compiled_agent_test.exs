@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
@@ -94,12 +94,12 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "triple" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/triple {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
 
-      assert compiled.source =~ "call"
+      assert compiled.source =~ "ctx/"
       assert compiled.source =~ "triple"
     end
 
@@ -115,7 +115,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "add_ten" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/add_ten {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
@@ -150,7 +150,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "log_and_double" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/log_and_double {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
@@ -172,7 +172,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
           max_turns: 1
         )
 
-      mock_llm = fn _ -> {:ok, ~S|(call "return" {:status "done"})|} end
+      mock_llm = fn _ -> {:ok, ~S|(return {:status "done"})|} end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
 
@@ -189,7 +189,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       agent = SubAgent.new(prompt: "Test", max_turns: 1, tools: tools)
 
       mock_registry = %{
-        test_model: fn _ -> {:ok, ~S|(call "return" {:status "done"})|} end
+        test_model: fn _ -> {:ok, ~S|(return {:status "done"})|} end
       }
 
       {:ok, compiled} = SubAgent.compile(agent, llm: :test_model, llm_registry: mock_registry)
@@ -200,7 +200,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
     test "metadata.llm_model is nil for function llm" do
       tools = %{"noop" => fn _ -> :ok end}
       agent = SubAgent.new(prompt: "Test", max_turns: 1, tools: tools)
-      mock_llm = fn _ -> {:ok, ~S|(call "return" {:status "done"})|} end
+      mock_llm = fn _ -> {:ok, ~S|(return {:status "done"})|} end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
 
@@ -218,7 +218,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
           max_turns: 1
         )
 
-      mock_llm = fn _ -> {:ok, ~S|(call "return" {:value 42})|} end
+      mock_llm = fn _ -> {:ok, ~S|(return {:value 42})|} end
 
       assert {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
       result = compiled.execute.(%{})
@@ -240,7 +240,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       mock_llm = fn %{messages: messages} ->
         user_msg = Enum.find(messages, fn m -> m.role == :user end)
         assert user_msg.content =~ "sample text"
-        {:ok, ~S|(call "return" {:result (call "process" {:data ctx/data})})|}
+        {:ok, ~S|(return {:result (ctx/process {:data ctx/data})})|}
       end
 
       {:ok, _compiled} =
@@ -261,7 +261,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
@@ -287,7 +287,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:sum (call "add" {:a ctx/a :b ctx/b})})|}
+        {:ok, ~S|(return {:sum (ctx/add {:a ctx/a :b ctx/b})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{a: 1, b: 1})
@@ -316,7 +316,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
@@ -337,7 +337,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "double" {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
@@ -364,7 +364,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       mock_llm = fn _ ->
         {:ok,
-         ~S|(call "return" {:score (call "calculate_score" {:value ctx/value :threshold ctx/threshold}) :anomalous (> (call "calculate_score" {:value ctx/value :threshold ctx/threshold}) 0.5)})|}
+         ~S|(return {:score (ctx/calculate_score {:value ctx/value :threshold ctx/threshold}) :anomalous (> (ctx/calculate_score {:value ctx/value :threshold ctx/threshold}) 0.5)})|}
       end
 
       # Compile once
@@ -401,7 +401,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(call "return" {:result (call "divide" {:a ctx/a :b ctx/b})})|}
+        {:ok, ~S|(return {:result (ctx/divide {:a ctx/a :b ctx/b})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{a: 10, b: 2})

@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(call "return" {:result (+ ctx/x ctx/y)})
+(return {:result (+ ctx/x ctx/y)})
 ```|}
       end
 
@@ -49,7 +49,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         case turn do
           1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
           2 -> {:ok, ~S|```clojure
-(call "return" {:result 42})
+(return {:result 42})
 ```|}
           _ -> {:ok, "```clojure\n99\n```"}
         end
@@ -75,7 +75,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         assert first_message.role == :user
         assert first_message.content =~ "Process alice with 42"
         {:ok, ~S|```clojure
-(call "return" {:value 100})
+(return {:value 100})
 ```|}
       end
 
@@ -126,12 +126,12 @@ defmodule PtcRunner.SubAgent.LoopTest do
       llm = fn _ ->
         {:ok, ~S|Here is the code:
 ```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.trace |> hd() |> Map.get(:program) == ~S|(call "return" {:value 42})|
+      assert step.trace |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
     end
 
     test "extracts code from lisp code block" do
@@ -139,21 +139,21 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```lisp
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.trace |> hd() |> Map.get(:program) == ~S|(call "return" {:value 42})|
+      assert step.trace |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
     end
 
     test "falls back to raw s-expression" do
       agent = test_agent()
 
-      llm = fn _ -> {:ok, ~S|(call "return" {:value 42})|} end
+      llm = fn _ -> {:ok, ~S|(return {:value 42})|} end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.trace |> hd() |> Map.get(:program) == ~S|(call "return" {:value 42})|
+      assert step.trace |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
     end
   end
 
@@ -182,7 +182,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
             assert last_message.content =~ "Error:"
 
             {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
         end
       end
@@ -217,7 +217,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
             assert last_message.content =~ "No valid PTC-Lisp code found"
 
             {:ok, ~S|```clojure
-(call "return" {:value 100})
+(return {:value 100})
 ```|}
         end
       end
@@ -249,10 +249,10 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
         case turn do
           1 -> {:ok, ~S|```clojure
-(call "get-value" {:key "x"})
+(ctx/get-value {:key "x"})
 ```|}
           2 -> {:ok, ~S|```clojure
-(call "return" {:result {:value 42}})
+(return {:result {:value 42}})
 ```|}
           _ -> {:ok, "Should not reach here"}
         end
@@ -276,7 +276,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "return" {:value (get ctx/data "key")})
+(return {:value (get ctx/data "key")})
 ```|}
       end
 
@@ -305,7 +305,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
           2 ->
             # On turn 2, ctx/fail should be available
             {:ok, ~S|```clojure
-(call "return" {:fail ctx/fail})
+(return {:fail ctx/fail})
 ```|}
         end
       end
@@ -346,7 +346,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
             # Turn 2 should have: user, assistant, user (error feedback)
             assert length(messages) == 3
             {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
         end
       end
@@ -374,7 +374,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "return" {:value (+ 1 2)})
+(return {:value (+ 1 2)})
 ```|}
       end
 
@@ -384,7 +384,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       trace_entry = hd(step.trace)
       assert trace_entry.turn == 1
-      assert trace_entry.program == ~S|(call "return" {:value (+ 1 2)})|
+      assert trace_entry.program == ~S|(return {:value (+ 1 2)})|
       assert trace_entry.result == %{value: 3}
       assert trace_entry.tool_calls == []
     end
@@ -419,7 +419,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         assert is_binary(system)
         assert system =~ "PTC-Lisp"
         {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
@@ -433,7 +433,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         assert is_integer(turn)
         assert turn >= 1
         {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
@@ -453,7 +453,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         assert "get-value" in tool_names
         assert "set-value" in tool_names
         {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
@@ -613,7 +613,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
             # V2: Use def to explicitly store data in memory
             # This will exceed the memory limit
             {:ok, ~S|```clojure
-(def large-data (call "get-large" {}))
+(def large-data (ctx/get-large {}))
 ```|}
 
           _ ->

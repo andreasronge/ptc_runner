@@ -180,7 +180,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 4 - tool_call_transform" do
     test "fetches premium users and returns emails" do
       source = ~S"""
-      (->> (call "get-users" {})
+      (->> (ctx/get-users {})
            (filter (where :tier = "premium"))
            (pluck :email))
       """
@@ -206,7 +206,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       # V2: maps return as-is, no implicit memory merge
       # Use def for explicit storage if needed across turns
       source = ~S"""
-      (let [high-value (->> (call "get-orders" {})
+      (let [high-value (->> (ctx/get-orders {})
                             (filter (where :amount > 1000)))]
         {:count (count high-value)
          :high_value_orders high-value})

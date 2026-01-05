@@ -68,7 +68,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 {:intermediate "value"}
 ```|}
           2 -> {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
         end
       end
@@ -89,7 +89,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
       end
 
@@ -104,7 +104,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
     test "debug: true captures extra trace fields" do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
-      llm = fn _ -> {:ok, ~S|(call "return" {:done true})|} end
+      llm = fn _ -> {:ok, ~S|(return {:done true})|} end
 
       capture_io(fn ->
         {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
@@ -130,7 +130,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
@@ -145,7 +145,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
@@ -159,7 +159,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|}
       end
 
@@ -174,7 +174,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(call "fail" {:reason :test :message "Test error"})
+(fail {:reason :test :message "Test error"})
 ```|}
       end
 

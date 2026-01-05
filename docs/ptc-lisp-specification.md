@@ -561,7 +561,7 @@ Evaluates expressions in order, returning the value of the last expression:
 
 ```clojure
 (do 1 2 3)                        ; => 3
-(do (call "log" {:msg "hi"}))     ; => result of log call
+(do (ctx/log {:msg "hi"}))        ; => result of log call
 (do)                              ; => nil
 ```
 
@@ -1611,7 +1611,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | Plain symbols | Stored values | Values from map returns (defined via `def` form) |
 | `ctx/` | Current request context | Current request context (read-only) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
-| `(call ...)` | Tool invocation | Call registered tools |
+| `(ctx/tool-name ...)` | Tool invocation | Call registered tools |
 
 ### 9.2 Stored Values — Plain Symbols
 
@@ -1628,7 +1628,7 @@ Stored values are **read-only during execution**. To update them, return a map (
 ```clojure
 ;; Read previous results, compute new value, return updated map
 (let [prev-orders orders
-      new-orders (call "get-orders" {:since "2024-01-01"})]
+      new-orders (ctx/get-orders {:since "2024-01-01"})]
   {:orders (concat prev-orders new-orders)})
 ```
 
@@ -1689,30 +1689,31 @@ Access results from previous turns using the turn history symbols:
 
 **For reliable multi-turn patterns**, return maps to store values as symbols. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
 
-### 9.5 Tool Invocation — `call`
+### 9.5 Tool Invocation — `ctx/tool-name`
 
-Call registered tools using the `call` function:
+Invoke registered tools using the `ctx/` namespace:
 
 ```clojure
-(call tool-name)
-(call tool-name args-map)
+(ctx/tool-name)                    ; no arguments
+(ctx/tool-name args-map)           ; with arguments
 ```
 
-**Important:** `tool-name` MUST be a string literal. Using symbols, keywords, or other types is a type error:
+**Syntax:**
+- Tool names become atoms in `ctx/` namespace: `ctx/tool-name`
+- Arguments follow these rules:
+  - No arguments: `(ctx/get-users)`
+  - Single map argument is passed through: `(ctx/fetch {:id 123})`
+  - Multiple arguments are wrapped: `(ctx/transform arg1 arg2)` → `{:args [arg1 arg2]}`
 
+**Examples:**
 ```clojure
-(call "get-users")                       ; OK - string literal
-(call get-users)                         ; TYPE ERROR - symbol not allowed
-(call :get-users)                        ; TYPE ERROR - keyword not allowed
-```
-
-```clojure
-(call "get-users")                       ; no arguments
-(call "get-expenses" {:year 2024})       ; with arguments
-(call "search" {:query "foo" :limit 10})
+(ctx/get-users)                    ; no arguments
+(ctx/search {:query "budget"})     ; single map argument
+(ctx/fetch {:id 123})              ; with parameters
+(ctx/search {:query "foo" :limit 10})
 
 ;; Store tool result for later use
-(let [users (call "get-users")]
+(let [users (ctx/get-users)]
   (->> users
        (filter (where :active))
        (count)))
@@ -1723,41 +1724,6 @@ Call registered tools using the `call` function:
 - Tools may have side effects (external API calls, database queries)
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
-
-### 9.6 Alternative Tool Invocation — `ctx/tool-name`
-
-As an alternative to `call`, tools can be invoked using the `ctx/` namespace directly (see §9.3):
-
-```clojure
-(ctx/search {:query "foo"})                    ; v2 syntax
-(call "search" {:query "foo"})                 ; legacy syntax - equivalent
-```
-
-**Syntax:**
-- Tool names become atoms in `ctx/` namespace: `ctx/tool-name`
-- Arguments follow the same rules as `call`:
-  - No arguments: `(ctx/get-users)`
-  - Single map argument is passed through: `(ctx/fetch {:id 123})`
-  - Multiple arguments are wrapped: `(ctx/transform arg1 arg2)` → `{:args [arg1 arg2]}`
-
-**Examples:**
-```clojure
-(ctx/get-users)                                ; no arguments
-(ctx/search {:query "budget"})                 ; single map argument
-(ctx/fetch {:id 123})                         ; with parameters
-(let [results (ctx/fetch {:id 123})]          ; store result
-  (count results))
-```
-
-**Comparison with legacy `call` syntax:**
-
-| New Syntax | Legacy Syntax | Notes |
-|-----------|---------------|-------|
-| `(ctx/search {:query "x"})` | `(call "search" {:query "x"})` | Semantically equivalent |
-| `(ctx/get-users)` | `(call "get-users")` | Both invoke the same tool |
-| `(ctx/transform a b)` | `(call "transform" a b)` | Both wrap multiple args |
-
-Both syntaxes are fully supported and produce identical results.
 
 ---
 
@@ -1848,8 +1814,8 @@ Get names and emails of active users:
 Join orders with user information:
 
 ```clojure
-(let [users (call "get-users")
-      orders (call "get-orders")]
+(let [users (ctx/get-users)
+      orders (ctx/get-orders)]
   (->> orders
        (filter (where :total > 100))
        (mapv (fn [order]
@@ -1984,8 +1950,8 @@ Aggregation functions require numeric field values:
 `and` and `or` short-circuit:
 
 ```clojure
-(and false (call "expensive"))  ; "expensive" not called
-(or true (call "expensive"))    ; "expensive" not called
+(and false (ctx/expensive))  ; "expensive" not called
+(or true (ctx/expensive))    ; "expensive" not called
 ```
 
 ### 11.7 Keyword as Function with Default
@@ -2014,8 +1980,8 @@ Aggregation functions require numeric field values:
 Tool calls are evaluated in left-to-right order and never reordered:
 
 ```clojure
-(let [a (call "tool-1")    ; called first
-      b (call "tool-2")]   ; called second
+(let [a (ctx/tool-1)    ; called first
+      b (ctx/tool-2)]   ; called second
   [a b])
 ```
 
@@ -2243,7 +2209,7 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 - The operator position in `list-expr` accepts any expression, enabling:
   - `(:name user)` — keyword as function
   - `((fn [x] x) 42)` — anonymous function application
-  - `(call "tool" args)` — normal function calls
+  - `(ctx/tool args)` — tool invocation
 
 **Tokenization precedence:** When a token could match multiple grammar rules, literals take precedence over symbols:
 1. `nil`, `true`, `false` → reserved literals (not symbols)
@@ -2352,7 +2318,7 @@ The program's return value is passed through unchanged. Storage is explicit via 
 ```clojure
 ;; Store values explicitly, return a result
 (do
-  (def high-paid (->> (call "find-employees" {})
+  (def high-paid (->> (ctx/find-employees {})
                       (filter (where :salary > 100000))))
   (def last-query "employees")
   (pluck :email high-paid))
@@ -2446,7 +2412,7 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 
 ```clojure
 (do
-  (def high-paid (->> (call "find-employees" {})
+  (def high-paid (->> (ctx/find-employees {})
                       (filter (where :salary > 100000))))
   (count high-paid))
 ```
@@ -2468,7 +2434,7 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 ```clojure
 (do
   (def orders (let [ids (pluck :id high-paid)]
-                (call "get-orders" {:employee-ids ids})))
+                (ctx/get-orders {:employee-ids ids})))
   {:orders-count (count orders)})
 ```
 
@@ -2583,7 +2549,7 @@ The LLM receives this error and can generate a corrected program.
 | `{"op": "get", "path": ["a", "b"]}` | `(get-in m [:a :b])` |
 | `{"op": "let", "name": "x", ...}` | `(let [x ...] ...)` |
 | `{"op": "if", ...}` | `(if cond then else)` |
-| `{"op": "call", "tool": "t"}` | `(call "t")` |
+| `{"op": "call", "tool": "t"}` | `(ctx/t)` |
 | `{"op": "and", "conditions": [...]}` | `(and ...)` |
 | `{"op": "merge", "objects": [...]}` | `(merge ...)` |
 

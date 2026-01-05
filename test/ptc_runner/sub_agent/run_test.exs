@@ -46,7 +46,7 @@ defmodule PtcRunner.SubAgent.RunTest do
     test "executes loop mode with max_turns > 1" do
       agent = SubAgent.new(prompt: "Test", max_turns: 5)
       llm = fn _input -> {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|} end
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
@@ -59,7 +59,7 @@ defmodule PtcRunner.SubAgent.RunTest do
     test "executes loop mode with tools" do
       agent = SubAgent.new(prompt: "Test", tools: %{"test" => fn _ -> :ok end})
       llm = fn _input -> {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|} end
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
@@ -90,7 +90,7 @@ defmodule PtcRunner.SubAgent.RunTest do
     test "accepts tools in opts for string form (triggers loop mode)" do
       tools = %{"test" => fn _ -> :ok end}
       llm = fn _input -> {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|} end
 
       # This triggers loop mode
@@ -101,7 +101,7 @@ defmodule PtcRunner.SubAgent.RunTest do
 
     test "accepts max_turns in opts for string form" do
       llm = fn _input -> {:ok, ~S|```clojure
-(call "return" {:value 42})
+(return {:value 42})
 ```|} end
 
       # max_turns: 2 triggers loop mode

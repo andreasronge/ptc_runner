@@ -445,7 +445,7 @@ defmodule PtcDemo.LispCLI do
       (->> ctx/orders (filter (where :status = "delivered")) (sum-by :total))
       (avg-by :salary (filter (where :department = "engineering") ctx/employees))
       (count (distinct (pluck :product_id ctx/orders)))
-      (call "search" {:query "remote work"})
+      (ctx/search {:query "remote work"})
 
     """
   end

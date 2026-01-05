@@ -46,7 +46,7 @@ defmodule PtcRunner.SubAgent.Compiler do
       ...>   tools: tools,
       ...>   max_turns: 1
       ...> )
-      iex> mock_llm = fn _ -> {:ok, ~S|(return {:result (call "double" {:n ctx/n})})|} end
+      iex> mock_llm = fn _ -> {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|} end
       iex> {:ok, compiled} = PtcRunner.SubAgent.Compiler.compile(agent, llm: mock_llm, sample: %{n: 5})
       iex> compiled.signature
       "(n :int) -> {result :int}"

@@ -29,7 +29,7 @@ step.return.total  #=> 2450.00
 The SubAgent doesn't answer directly - it writes a program that computes the answer:
 
 ```clojure
-(->> (call "get_orders" {})
+(->> (ctx/get_orders)
      (filter (where :amount > 100))
      (sum-by :amount))
 ```

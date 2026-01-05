@@ -55,14 +55,14 @@ defmodule PtcRunner.Lisp.OptionsTest do
       tools = %{"greet" => fn _args -> "hello" end}
 
       assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
-               Lisp.run("(call \"greet\" {})", tools: tools)
+               Lisp.run("(ctx/greet)", tools: tools)
     end
 
     test "accepts function with explicit signature" do
       tools = %{"greet" => {fn _args -> "hello" end, "() -> :string"}}
 
       assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
-               Lisp.run("(call \"greet\" {})", tools: tools)
+               Lisp.run("(ctx/greet)", tools: tools)
     end
 
     test "accepts function with signature and description" do
@@ -72,21 +72,21 @@ defmodule PtcRunner.Lisp.OptionsTest do
       }
 
       assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
-               Lisp.run("(call \"greet\" {})", tools: tools)
+               Lisp.run("(ctx/greet)", tools: tools)
     end
 
     test "accepts function with :skip validation" do
       tools = %{"greet" => {fn _args -> "hello" end, :skip}}
 
       assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
-               Lisp.run("(call \"greet\" {})", tools: tools)
+               Lisp.run("(ctx/greet)", tools: tools)
     end
 
     test "returns error for invalid tool format" do
       tools = %{"bad" => :not_a_function}
 
       assert {:error, %{fail: %{reason: :invalid_tool, message: message}}} =
-               Lisp.run("(call \"bad\" {})", tools: tools)
+               Lisp.run("(ctx/bad)", tools: tools)
 
       assert message =~ "Tool 'bad'"
     end
@@ -289,7 +289,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       }
 
       ctx = %{value: 5}
-      source = "(call \"double\" {:x ctx/value})"
+      source = "(ctx/double {:x ctx/value})"
 
       assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
                Lisp.run(source, context: ctx, tools: tools)
@@ -301,7 +301,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
         "get-data" => fn _args -> "success" end
       }
 
-      source = "{:result (call \"get-data\" {}), :status \"done\"}"
+      source = "{:result (ctx/get-data), :status \"done\"}"
 
       {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
         Lisp.run(source, tools: tools)

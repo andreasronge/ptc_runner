@@ -81,7 +81,7 @@ tools = %{
   end
 }
 
-program_lisp = ~S|(->> (call "get-expenses" {}) (filter (where :category = "travel")) (sum-by :amount))|
+program_lisp = ~S|(->> (ctx/get-expenses) (filter (where :category = "travel")) (sum-by :amount))|
 
 {:ok, result, _memory_delta, _new_memory} = PtcRunner.Lisp.run(program_lisp, tools: tools)
 

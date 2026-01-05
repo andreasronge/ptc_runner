@@ -50,13 +50,24 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
     @tag :capture_log
     test "unknown tool returns execution error" do
       # Tool calls to unregistered tools return error tuple
-      source = ~S|(call "unknown-tool" {})|
+      source = ~S|(ctx/unknown-tool {})|
 
       assert {:error, %Step{fail: %{reason: :execution_error, message: message}}} =
                Lisp.run(source)
 
       assert message =~ "Unknown tool"
       assert message =~ "unknown-tool"
+    end
+
+    test "deprecated call syntax returns clear error message" do
+      # The (call "tool" args) syntax is deprecated, use (ctx/tool-name args) instead
+      source = ~S|(call "search" {:query "foo"})|
+
+      assert {:error, %Step{fail: %{reason: :invalid_form, message: message}}} =
+               Lisp.run(source)
+
+      assert message =~ "deprecated"
+      assert message =~ "ctx/"
     end
   end
 

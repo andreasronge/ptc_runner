@@ -40,12 +40,12 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       ...>   tools: tools,
       ...>   max_turns: 1
       ...> )
-      iex> mock_llm = fn _ -> {:ok, ~S|(return {:result (call "double" {:n ctx/n})})|} end
+      iex> mock_llm = fn _ -> {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|} end
       iex> {:ok, compiled} = PtcRunner.SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
       iex> compiled.signature
       "(n :int) -> {result :int}"
       iex> compiled.source
-      ~S|(return {:result (call "double" {:n ctx/n})})|
+      ~S|(return {:result (ctx/double {:n ctx/n})})|
       iex> result = compiled.execute.(%{n: 10})
       iex> result.return.result
       20
@@ -102,7 +102,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       ...>   tools: tools,
       ...>   max_turns: 1
       ...> )
-      iex> mock_llm = fn _ -> {:ok, ~S|(return {:result (call "double" {:n ctx/n})})|} end
+      iex> mock_llm = fn _ -> {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|} end
       iex> {:ok, compiled} = PtcRunner.SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
       iex> tool = PtcRunner.SubAgent.CompiledAgent.as_tool(compiled)
       iex> tool.type

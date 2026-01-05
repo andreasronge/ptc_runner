@@ -116,8 +116,8 @@ main_tools = %{
 The main agent sees typed tool signatures and can compose them:
 
 ```clojure
-(let [customer (call "customer-finder" {:description "highest revenue"})
-      orders (call "order-fetcher" {:customer_id (:customer_id customer)})]
+(let [customer (ctx/customer-finder {:description "highest revenue"})
+      orders (ctx/order-fetcher {:customer_id (:customer_id customer)})]
   (return {:summary (str "Found " (count orders) " orders")}))
 ```
 
@@ -201,10 +201,10 @@ tools = %{
 The main agent calls it like any other tool:
 
 ```clojure
-(let [emails (call "list_emails" {:limit 10})]
+(let [emails (ctx/list_emails {:limit 10})]
   (mapv (fn [e]
           (assoc e :eval
-            (call "evaluate_importance"
+            (ctx/evaluate_importance
               {:email e :customer_tier "Silver"})))
         emails))
 ```
@@ -293,11 +293,11 @@ tools = %{
 The LLM decides which tool sets each child needs:
 
 ```clojure
-(let [emails (call "spawn_agent" {:prompt "Find urgent emails"
-                                  :tools ["email"]})
-      meetings (call "spawn_agent" {:prompt "Schedule follow-ups"
-                                    :tools ["calendar"]
-                                    :context emails})]
+(let [emails (ctx/spawn_agent {:prompt "Find urgent emails"
+                                :tools ["email"]})
+      meetings (ctx/spawn_agent {:prompt "Schedule follow-ups"
+                                  :tools ["calendar"]
+                                  :context emails})]
   (return {:scheduled (count meetings)}))
 ```
 

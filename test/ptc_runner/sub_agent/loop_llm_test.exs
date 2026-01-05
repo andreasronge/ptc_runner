@@ -11,7 +11,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       registry = %{
         test_llm: fn %{messages: _} ->
           {:ok, ~S|```clojure
-(call "return" {:result "from_registry"})
+(return {:result "from_registry"})
 ```|}
         end
       }
@@ -26,7 +26,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(call "return" {:result "direct"})
+(return {:result "direct"})
 ```|}
       end
 
@@ -84,14 +84,14 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       registry = %{
         child_llm: fn %{messages: _} ->
           {:ok, ~S|```clojure
-(call "return" {:from "child"})
+(return {:from "child"})
 ```|}
         end
       }
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(call "return" (call "child" {}))
+(return (ctx/child {}))
 ```|}
       end
 
@@ -118,12 +118,12 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       registry = %{
         haiku: fn %{messages: _} ->
           {:ok, ~S|```clojure
-(call "return" {:model "haiku"})
+(return {:model "haiku"})
 ```|}
         end,
         sonnet: fn %{messages: _} ->
           {:ok, ~S|```clojure
-(call "return" (call "child" {}))
+(return (ctx/child {}))
 ```|}
         end
       }
@@ -153,7 +153,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(call "catalog_tool" {})
+(ctx/catalog_tool {})
 ```|}
 
           2 ->
@@ -165,7 +165,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
                    end)
 
             {:ok, ~S|```clojure
-(call "return" {:corrected true})
+(return {:corrected true})
 ```|}
         end
       end
@@ -188,7 +188,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(call "return" (call "shared" {}))
+(return (ctx/shared {}))
 ```|}
       end
 
@@ -213,12 +213,12 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(call "ok_tool" {})
+(ctx/ok_tool {})
 ```|}
 
           2 ->
             {:ok, ~S|```clojure
-(call "return" mem/data)
+(return mem/data)
 ```|}
         end
       end
@@ -242,12 +242,12 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(call "raw_tool" {})
+(ctx/raw_tool {})
 ```|}
 
           2 ->
             {:ok, ~S|```clojure
-(call "return" mem/raw)
+(return mem/raw)
 ```|}
         end
       end
@@ -273,7 +273,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(call "error_tool" {})
+(ctx/error_tool {})
 ```|}
 
           2 ->
@@ -284,7 +284,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
                    end)
 
             {:ok, ~S|```clojure
-(call "return" {:recovered true})
+(return {:recovered true})
 ```|}
         end
       end
@@ -313,7 +313,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(call "crash_tool" {})
+(ctx/crash_tool {})
 ```|}
 
           2 ->
@@ -323,7 +323,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
                    end)
 
             {:ok, ~S|```clojure
-(call "return" {:handled true})
+(return {:handled true})
 ```|}
         end
       end
@@ -344,16 +344,16 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       registry = %{
         haiku: fn input ->
           Agent.update(calls, &[{:haiku, input.turn} | &1])
-          {:ok, ~S|(call "return" {:from "haiku"})|}
+          {:ok, ~S|(return {:from "haiku"})|}
         end,
         sonnet: fn input ->
           Agent.update(calls, &[{:sonnet, input.turn} | &1])
 
           # Sonnet calls child on first turn
           if input.turn == 1 do
-            {:ok, ~S|(call "child_tool" {})|}
+            {:ok, ~S|(ctx/child_tool {})|}
           else
-            {:ok, ~S|(call "return" {:from "sonnet"})|}
+            {:ok, ~S|(return {:from "sonnet"})|}
           end
         end
       }
@@ -423,7 +423,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, {:http_error, 429, "Rate limited"}}
         else
           {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
         end
       end
@@ -451,7 +451,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, :timeout}
         else
           {:ok, ~S|```clojure
-(call "return" {:success true})
+(return {:success true})
 ```|}
         end
       end
@@ -479,7 +479,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, {:http_error, 503, "Service unavailable"}}
         else
           {:ok, ~S|```clojure
-(call "return" {:ok true})
+(return {:ok true})
 ```|}
         end
       end
@@ -572,7 +572,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, {:http_error, 503, "Unavailable"}}
         else
           {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
         end
       end
@@ -609,7 +609,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, {:http_error, 503, "Unavailable"}}
         else
           {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
         end
       end
@@ -646,7 +646,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, {:http_error, 503, "Unavailable"}}
         else
           {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
         end
       end
@@ -680,7 +680,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           {:error, :timeout}
         else
           {:ok, ~S|```clojure
-(call "return" {:done true})
+(return {:done true})
 ```|}
         end
       end
@@ -742,7 +742,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
             2 ->
               {:ok, ~S|```clojure
-(call "return" {:result 2})
+(return {:result 2})
 ```|}
           end
         end
