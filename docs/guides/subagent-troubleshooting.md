@@ -125,13 +125,21 @@ Common issues and solutions when working with SubAgents.
 
 ## LLM Returns Prose Instead of Code
 
-**Symptom:** The LLM explains what it would do instead of writing PTC-Lisp.
+**Symptom:** The LLM explains what it would do instead of writing PTC-Lisp. You may see `MaxTurnsExceeded` errors with empty traces and no programs generated.
 
-**Cause:** System prompt not being sent or model confusion.
+**Cause:** System prompt not being sent, model confusion, or using wrong code fence format.
 
 **Solutions:**
 
-1. **Ensure your LLM callback includes the system prompt**:
+1. **Enable debug mode** to see exactly what the LLM is returning:
+   ```elixir
+   {:error, step} = SubAgent.run(prompt, debug: true, llm: llm)
+   # Show full LLM messages
+   SubAgent.Debug.print_trace(step, messages: true)
+   ```
+   With `messages: true`, you'll see the actual LLM response and what feedback was sent back. This is especially useful when you get `MaxTurnsExceeded` but see empty traces.
+
+2. **Ensure your LLM callback includes the system prompt**:
    ```elixir
    llm = fn %{system: system, messages: messages} ->
      # system MUST be included - it contains PTC-Lisp instructions
@@ -140,13 +148,13 @@ Common issues and solutions when working with SubAgents.
    end
    ```
 
-2. **Preview the prompt** to verify it contains PTC-Lisp instructions:
+3. **Preview the prompt** to verify it contains PTC-Lisp instructions:
    ```elixir
    preview = SubAgent.preview_prompt(agent, context: %{})
    String.contains?(preview.system, "PTC-Lisp")  #=> true
    ```
 
-3. **Try a different model** - some models follow PTC-Lisp instructions better than others. See [Benchmark Evaluation](../benchmark-eval.md) for model comparisons.
+4. **Try a different model** - some models follow PTC-Lisp instructions better than others. See [Benchmark Evaluation](../benchmark-eval.md) for model comparisons.
 
 ## Parse Errors in Generated Code
 

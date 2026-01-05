@@ -117,16 +117,30 @@ step.usage.total_tokens
 
 ### Debug Mode
 
-Enable verbose tracing:
+Enable debug mode to capture full LLM messages:
 
 ```elixir
 {:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
 
-# Pretty-print execution
+# Default compact view
 SubAgent.Debug.print_trace(step)
+
+# Show full LLM messages (what was sent/received)
+SubAgent.Debug.print_trace(step, messages: true)
 ```
 
-Debug mode captures additional data: context snapshots, memory snapshots, full prompts, and execution results.
+With `messages: true`, each turn shows the exact contents of the messages array:
+- **Assistant Message** - The LLM output (stored as-is in messages array)
+- **Program** - The extracted PTC-Lisp code
+- **Result** - The full execution result (before truncation)
+- **User Message** - The feedback after truncation (exactly what's sent to LLM)
+
+This is particularly useful for understanding:
+- Exactly what the LLM sees in its conversation history
+- How `format_options` truncation affects the feedback
+- Why `MaxTurnsExceeded` errors occur (LLM not generating valid code)
+
+Debug mode also captures: context snapshots, memory snapshots, and full prompts.
 
 ### Prompt Preview
 
@@ -167,6 +181,36 @@ SubAgent emits telemetry events for observability integration:
 Events: `run:start/stop`, `turn:start/stop`, `llm:start/stop`, `tool:start/stop/exception`.
 
 > **Full details:** See `PtcRunner.SubAgent.Debug` for trace inspection functions.
+
+### Output Truncation
+
+Large results are automatically truncated at different stages to manage context size and memory:
+
+| Option | Default | Used For |
+|--------|---------|----------|
+| `feedback_limit` | 10 | Max collection items shown to LLM in turn feedback |
+| `feedback_max_chars` | 512 | Max chars in turn feedback message |
+| `history_max_bytes` | 512 | Truncation limit for `*1/*2/*3` history access |
+| `result_limit` | 50 | Inspect `:limit` for final result formatting |
+| `result_max_chars` | 500 | Max chars in final result string |
+
+Configure via `format_options`:
+
+```elixir
+SubAgent.new(
+  prompt: "Analyze large dataset",
+  format_options: [
+    feedback_limit: 20,       # Show more items to LLM
+    feedback_max_chars: 1024  # Allow longer feedback
+  ]
+)
+```
+
+When data is truncated in turn feedback, the system appends:
+> *"... (truncated)"*
+
+When lists are truncated in prompts, the system appends:
+> *"[98 more items omitted. Full data available in ctx/results]"*
 
 ## Compile Pattern
 
