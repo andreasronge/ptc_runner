@@ -351,7 +351,10 @@ defmodule PtcDemo.Agent do
              "{results [{id :string, title :string, topics [:string], department :string}], " <>
              "cursor :string?, has_more :bool, total :int}",
          description:
-           "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."}
+           "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."},
+      "fetch" =>
+        {&SearchTool.fetch/1, signature: "(id :string) -> :any",
+         description: "Fetch a single policy document by its ID to see its full content."}
     }
   end
 

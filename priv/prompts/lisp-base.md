@@ -84,6 +84,16 @@ results                                        ; => the search results
 (def counter (+ counter 1))
 ```
 
+**Parallel Execution** — used for concurrent tool calls or processing:
+```clojure
+(pmap f coll)               ; apply f to each item in parallel (preserving order)
+(pcalls f1 f2 ... fN)       ; execute N zero-arity thunks concurrently
+
+; Example: Fetch multiple documents by ID concurrently
+(let [ids ["doc-1" "doc-2" "doc-3"]]
+  (pmap (fn [id] (ctx/fetch {:id id})) ids))
+```
+
 ### Threading
 ```clojure
 ; ->> thread-last: for collections (filter, map, take, sort-by)

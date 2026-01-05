@@ -54,6 +54,27 @@ defmodule PtcDemo.SearchTool do
     end
   end
 
+  @doc """
+  Fetch a single policy document by its ID.
+
+  ## Arguments
+
+    * `"id"` - The document ID (required)
+
+  ## Returns
+
+  The full document map or nil if not found.
+  """
+  @spec fetch(map()) :: map() | nil
+  def fetch(args) do
+    args = normalize_keys(args)
+
+    case Map.get(args, "id") do
+      nil -> nil
+      id -> Enum.find(SampleData.documents(), fn doc -> doc["id"] == id end)
+    end
+  end
+
   defp do_search(query, args) do
     limit = Map.get(args, "limit", 5)
     cursor = Map.get(args, "cursor")
