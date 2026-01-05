@@ -29,8 +29,8 @@ defmodule PtcRunner.Lisp.PromptsTest do
     test "returns addon_memory snippet" do
       prompt = Prompts.get(:addon_memory)
       assert is_binary(prompt)
-      # addon should reference memory storage rules
-      assert String.contains?(prompt, "Memory Storage Rules")
+      # addon should reference state persistence
+      assert String.contains?(prompt, "State Persistence")
     end
 
     test "returns nil for unknown prompt" do

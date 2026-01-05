@@ -60,9 +60,9 @@ defmodule PtcRunner.Lisp.SchemaTest do
       assert String.contains?(prompt, "Right")
     end
 
-    test "contains memory section" do
+    test "contains state persistence section" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "Memory Storage Rules")
+      assert String.contains?(prompt, "State Persistence")
     end
   end
 end

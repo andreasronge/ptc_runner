@@ -22,7 +22,7 @@ ctx/orders
 ### NOT Supported
 - Namespaced keywords (`:foo/bar`)
 - Lazy sequences, `lazy-seq`, `iterate`
-- Macros, `defmacro`, `defn`
+- Macros, `defmacro`
 - Recursion, `loop/recur`
 - Ratios (`1/3`), BigDecimals (`1.0M`)
 - Regex literals (`#"pattern"`)

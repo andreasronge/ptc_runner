@@ -200,7 +200,7 @@ SubAgent.new(
 ```
 
 The `:multi_turn` profile documents:
-- Memory persistence with `memory/key`
+- State persistence with `def`/`defn`
 - The `:return` key for output firewalling
 - Multi-turn workflow patterns
 

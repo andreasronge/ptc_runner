@@ -166,7 +166,7 @@ defmodule PtcRunner.Lisp.Prompts do
       true
 
       iex> prompt = PtcRunner.Lisp.Prompts.get(:multi_turn)
-      iex> String.contains?(prompt, "memory")
+      iex> String.contains?(prompt, "State Persistence")
       true
 
   """

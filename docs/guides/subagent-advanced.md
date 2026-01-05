@@ -31,8 +31,8 @@ Turn 3: LLM calls return with final answer
 
 **Turn 1: Discovery**
 ```clojure
-;; Return a map to merge into ctx/
-{:results (call "search_emails" {:query "Acme Corp"})}
+;; Store results in user namespace
+(def results (ctx/search-emails {:query "Acme Corp"}))
 ```
 
 The LLM sees in its next prompt:
@@ -278,11 +278,11 @@ If the LLM provides text without a code block or terminal tool call:
 ### Core
 
 ```clojure
-(call "tool" {:arg value})     ; Call tool
+(ctx/tool {:arg value})        ; Call tool
 ctx/key                        ; Access context
-(memory/put :key value)        ; Store in memory
-(memory/get :key)              ; Retrieve from memory
-memory/key                     ; Memory shorthand
+(def key value)                ; Store value
+key                            ; Access stored value
+(defn name [args] body)        ; Define function
 ```
 
 ### Control Flow
