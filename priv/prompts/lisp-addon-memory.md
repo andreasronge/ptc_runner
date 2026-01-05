@@ -23,6 +23,15 @@ Then you produce the next Thought/Action based on what you observed.
 - Do not assume results - wait for the Observation
 - If the next step depends on runtime values, do another step
 - When done, use `(return value)` to produce the final answer
+- **Every turn MUST include a code block** - if ready to answer, the code is `(return value)`
+
+### Answer Recognition
+
+**BEFORE calling another tool**, analyze what you have:
+1. Read through ALL fields of each result from the previous turn
+2. Check if any result already answers the question - look for partial/related matches
+3. If you have enough information → `(return answer)` immediately
+4. Only proceed with more tool calls if the answer isn't already in your results
 
 ### State Persistence
 
