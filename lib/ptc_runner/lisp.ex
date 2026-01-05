@@ -20,7 +20,7 @@ defmodule PtcRunner.Lisp do
         "search" => fn %{"query" => q} -> MyApp.Search.run(q) end
       }
 
-      PtcRunner.Lisp.run(~S|(call "get-user" {:id 123})|, tools: tools)
+      PtcRunner.Lisp.run(~S|(ctx/get-user {:id 123})|, tools: tools)
 
   **Contract:**
   - Receives: `map()` of arguments (may be empty `%{}`)

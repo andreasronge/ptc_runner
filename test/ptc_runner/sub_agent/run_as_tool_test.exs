@@ -98,9 +98,9 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       mock_llm =
         routing_llm([
           {"Double", "```clojure\n{:result (* 2 ctx/n)}\n```"},
-          {{:turn, 1}, "```clojure\n(call \"double\" {:n ctx/value})\n```"},
-          {{:turn, 2}, "```clojure\n(call \"return\" {:result 42})\n```"},
-          {{:turn, 3}, "```clojure\n(call \"return\" {:result 42})\n```"}
+          {{:turn, 1}, "```clojure\n(ctx/double {:n ctx/value})\n```"},
+          {{:turn, 2}, "```clojure\n(return {:result 42})\n```"},
+          {{:turn, 3}, "```clojure\n(return {:result 42})\n```"}
         ])
 
       # Wrap to track calls
@@ -131,8 +131,8 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       # Different parent LLM - on first turn call child, on second turn return result
       parent_llm =
         routing_llm([
-          {{:turn, 1}, "```clojure\n(call \"child\" {:x 99})\n```"},
-          {{:turn, 2}, "```clojure\n(call \"return\" {:value 99})\n```"}
+          {{:turn, 1}, "```clojure\n(ctx/child {:x 99})\n```"},
+          {{:turn, 2}, "```clojure\n(return {:value 99})\n```"}
         ])
 
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
@@ -157,8 +157,8 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       parent_llm =
         routing_llm([
-          {{:turn, 1}, "```clojure\n(call \"child\" {})\n```"},
-          {{:turn, 2}, "```clojure\n(call \"return\" {:value 100})\n```"}
+          {{:turn, 1}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 2}, "```clojure\n(return {:value 100})\n```"}
         ])
 
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
@@ -178,9 +178,9 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       parent_llm =
         routing_llm([
           {"Return 42", "```clojure\n42\n```"},
-          {{:turn, 1}, "```clojure\n(call \"child\" {})\n```"},
-          {{:turn, 2}, "```clojure\n(call \"return\" {:value 42})\n```"},
-          {{:turn, 3}, "```clojure\n(call \"return\" {:value 42})\n```"}
+          {{:turn, 1}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 2}, "```clojure\n(return {:value 42})\n```"},
+          {{:turn, 3}, "```clojure\n(return {:value 42})\n```"}
         ])
 
       # This should work because parent has LLM which child inherits
@@ -199,9 +199,9 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       llm =
         routing_llm([
           {"Always return nothing", "```clojure\n(+ 1 1)\n```"},
-          {{:turn, 1}, "```clojure\n(call \"child\" {})\n```"},
-          {{:turn, 2}, "```clojure\n(call \"child\" {})\n```"},
-          {{:turn, 3}, "```clojure\n(call \"return\" {:error \"child_failed\"})\n```"}
+          {{:turn, 1}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 2}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 3}, "```clojure\n(return {:error \"child_failed\"})\n```"}
         ])
 
       # Parent should successfully handle child error by trying again and eventually returning
@@ -241,14 +241,14 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
             {:ok, "```clojure\n1\n```"}
 
           content =~ "Call grandchild" ->
-            {:ok, "```clojure\n(call \"grandchild\" {})\n```"}
+            {:ok, "```clojure\n(ctx/grandchild {})\n```"}
 
           content =~ "Call child" ->
-            {:ok, "```clojure\n(call \"child\" {})\n```"}
+            {:ok, "```clojure\n(ctx/child {})\n```"}
 
           true ->
             # For any other input, return the value via return call
-            {:ok, "```clojure\n(call \"return\" {:value 1})\n```"}
+            {:ok, "```clojure\n(return {:value 1})\n```"}
         end
       end
 
@@ -282,13 +282,13 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
         cond do
           content =~ "Call grandchild" and turn == 1 ->
-            {:ok, "```clojure\n(call \"grandchild\" {})\n```"}
+            {:ok, "```clojure\n(ctx/grandchild {})\n```"}
 
           content =~ "Call child" and turn == 1 ->
-            {:ok, "```clojure\n(call \"child\" {})\n```"}
+            {:ok, "```clojure\n(ctx/child {})\n```"}
 
           true ->
-            {:ok, "```clojure\n(call \"return\" {:value 1})\n```"}
+            {:ok, "```clojure\n(return {:value 1})\n```"}
         end
       end
 

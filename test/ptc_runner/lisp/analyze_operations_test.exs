@@ -313,46 +313,12 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
     end
   end
 
-  describe "call tool invocation" do
-    test "call with just tool name" do
+  describe "call tool invocation (deprecated)" do
+    test "call syntax returns deprecation error" do
       raw = {:list, [{:symbol, :call}, {:string, "get-users"}]}
-      assert {:ok, {:call_tool, "get-users", {:map, []}}} = Analyze.analyze(raw)
-    end
-
-    test "call with args" do
-      raw = {:list, [{:symbol, :call}, {:string, "filter-data"}, {:map, []}]}
-      assert {:ok, {:call_tool, "filter-data", {:map, []}}} = Analyze.analyze(raw)
-    end
-
-    test "call with args containing data" do
-      raw =
-        {:list,
-         [
-           {:symbol, :call},
-           {:string, "search"},
-           {:map, [{{:keyword, :query}, {:string, "test"}}]}
-         ]}
-
-      assert {:ok, {:call_tool, "search", {:map, [{{:keyword, :query}, {:string, "test"}}]}}} =
-               Analyze.analyze(raw)
-    end
-
-    test "call with non-string name fails" do
-      raw = {:list, [{:symbol, :call}, {:symbol, :"get-users"}]}
-      assert {:error, {:invalid_call_tool_name, msg}} = Analyze.analyze(raw)
-      assert msg =~ "string literal"
-    end
-
-    test "call with non-map args fails" do
-      raw = {:list, [{:symbol, :call}, {:string, "get"}, {:vector, [1, 2]}]}
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "map"
-    end
-
-    test "call with wrong arity fails" do
-      raw = {:list, [{:symbol, :call}]}
-      assert {:error, {:invalid_arity, :call, msg}} = Analyze.analyze(raw)
-      assert msg =~ "expected"
+      assert msg =~ "deprecated"
+      assert msg =~ "ctx/"
     end
   end
 

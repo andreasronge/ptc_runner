@@ -119,7 +119,7 @@ expenses = [
   %{"id" => 10, "category" => "software", "amount" => 99.00, "date" => "2024-01-24", "vendor" => "SaaS Corp"}
 ]
 
-# Define tools - LLM calls these with (call "tool-name" {})
+# Define tools - LLM calls these with (ctx/tool-name)
 tools = %{
   "get-expenses" => fn _args -> expenses end
 }
@@ -145,7 +145,7 @@ Tool: get-expenses
   - date: string (YYYY-MM-DD)
   - vendor: string
 
-  Usage: (call "get-expenses" {})
+  Usage: (ctx/get-expenses)
 """
 
 operations = PtcRunner.Lisp.Schema.to_prompt()
@@ -384,7 +384,7 @@ Tool: get-employees
   - city: string
   - department: string
 
-  Usage: (call "get-employees" {})
+  Usage: (ctx/get-employees)
 """
 
 my_system_prompt = """
@@ -394,7 +394,7 @@ To query data, output a PTC-Lisp program in a ```clojure code block.
 
 Example - count by department:
 ```clojure
-(update-vals (group-by :department (call "get-employees" {})) count)
+(update-vals (group-by :department (ctx/get-employees)) count)
 ```
 
 Available data:

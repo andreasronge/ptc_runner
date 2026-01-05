@@ -340,11 +340,12 @@ defmodule PtcRunner.TestSupport.LispGenerators do
     gen_leaf_expr([])
   end
 
-  @doc "Generate tool call with mocked tool"
+  @doc "Generate tool call with mocked tool using ctx/ syntax"
   def gen_tool_call(depth, scope) do
     bind(gen_identifier(), fn tool_name ->
       bind(gen_map(depth, scope), fn args_map ->
-        constant({:list, [{:symbol, :call}, {:string, tool_name}, args_map]})
+        # Use ctx/ namespace syntax: (ctx/tool-name args-map)
+        constant({:list, [{:ns_symbol, :ctx, String.to_atom(tool_name)}, args_map]})
       end)
     end)
   end
