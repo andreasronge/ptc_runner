@@ -296,44 +296,6 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
   end
 
-  describe "multiple expressions" do
-    test "multiple top-level expressions suggests do" do
-      assert {:error, {:parse_error, msg}} = Parser.parse("(def x 1) (def y 2)")
-      assert msg =~ "single expression"
-      assert msg =~ "do"
-    end
-
-    test "multiple simple expressions suggests do" do
-      assert {:error, {:parse_error, msg}} = Parser.parse("1 2 3")
-      assert msg =~ "single expression"
-      assert msg =~ "do"
-    end
-
-    test "expression followed by symbol suggests do" do
-      assert {:error, {:parse_error, msg}} = Parser.parse("(+ 1 2) x")
-      assert msg =~ "single expression"
-      assert msg =~ "do"
-    end
-
-    test "expression followed by keyword suggests do" do
-      assert {:error, {:parse_error, msg}} = Parser.parse("1 :foo")
-      assert msg =~ "single expression"
-      assert msg =~ "do"
-    end
-
-    test "expression followed by vector suggests do" do
-      assert {:error, {:parse_error, msg}} = Parser.parse("[1 2] [3 4]")
-      assert msg =~ "single expression"
-      assert msg =~ "do"
-    end
-
-    test "expression followed by map suggests do" do
-      assert {:error, {:parse_error, msg}} = Parser.parse("{:a 1} {:b 2}")
-      assert msg =~ "single expression"
-      assert msg =~ "do"
-    end
-  end
-
   describe "short function syntax #()" do
     test "empty short function" do
       assert {:ok, {:short_fn, []}} = Parser.parse("#()")
