@@ -531,4 +531,33 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       assert Runtime.includes?("hello", "ell") == true
     end
   end
+
+  describe "filter - set as predicate on string" do
+    test "filters string characters using set predicate" do
+      result = Runtime.filter(MapSet.new(["r"]), "raspberry")
+      assert result == ["r", "r", "r"]
+    end
+
+    test "filters string with multiple characters in set" do
+      result = Runtime.filter(MapSet.new(["r", "a"]), "raspberry")
+      assert result == ["r", "a", "r", "r"]
+    end
+
+    test "returns empty list when no characters match" do
+      result = Runtime.filter(MapSet.new(["x", "z"]), "raspberry")
+      assert result == []
+    end
+  end
+
+  describe "remove - set as predicate on string" do
+    test "removes string characters using set predicate" do
+      result = Runtime.remove(MapSet.new(["r"]), "raspberry")
+      assert result == ["a", "s", "p", "b", "e", "y"]
+    end
+
+    test "removes multiple characters from string" do
+      result = Runtime.remove(MapSet.new(["r", "a"]), "raspberry")
+      assert result == ["s", "p", "b", "e", "y"]
+    end
+  end
 end

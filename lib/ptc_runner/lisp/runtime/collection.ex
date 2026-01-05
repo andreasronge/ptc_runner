@@ -25,6 +25,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.filter(coll, set_pred(set))
   end
 
+  def filter(%MapSet{} = set, coll) when is_binary(coll) do
+    Enum.filter(graphemes(coll), set_pred(set))
+  end
+
   def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
   def filter(pred, coll) when is_binary(coll), do: Enum.filter(graphemes(coll), pred)
 
@@ -44,6 +48,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def remove(%MapSet{} = set, coll) when is_list(coll) do
     Enum.reject(coll, set_pred(set))
+  end
+
+  def remove(%MapSet{} = set, coll) when is_binary(coll) do
+    Enum.reject(graphemes(coll), set_pred(set))
   end
 
   def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)

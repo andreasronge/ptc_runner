@@ -1,74 +1,33 @@
-# PTC Runner Playground
+# PTC-Lisp Playground
 
 ```elixir
+# For local dev: run `mix deps.get` in the project root first
 repo_root = Path.expand("..", __DIR__)
 
 deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
-    # Local clone (dev)
     [{:ptc_runner, path: repo_root}]
   else
-    # Opened from URL / badge (public)
     [{:ptc_runner, "~> 0.3.3"}]
   end
 
-Mix.install(deps)
+Mix.install(deps, consolidate_protocols: false)
 ```
 
 ## Introduction
 
-This notebook lets you explore the two PTC (Programmatic Tool Calling) DSLs:
+PTC-Lisp is a small, safe subset of Clojure designed for Programmatic Tool Calling. Programs run in sandboxed BEAM processes with resource limits (1s timeout, 10MB memory).
 
-* **PTC-JSON** - Verbose but easy to parse and validate
-* **PTC-Lisp** - Compact (8x fewer tokens), Clojure-compatible syntax
+**Key concepts:**
 
-Both DSLs run the same operations in sandboxed BEAM processes with resource limits.
+* `->>` threads data through a pipeline (like Elixir's `|>`)
+* `:keyword` accesses map fields (converted to string keys internally)
+* `where` builds predicates for filtering
+* `ctx/tool-name` calls external tools
 
-## PTC-JSON Playground
+## Basic Example
 
-Define some sample tools and run a pipeline that filters and sums expenses:
-
-```elixir
-tools = %{
-  "get_expenses" => fn _args ->
-    [
-      %{"category" => "travel", "amount" => 500},
-      %{"category" => "food", "amount" => 50},
-      %{"category" => "travel", "amount" => 200}
-    ]
-  end
-}
-
-program_json = ~S"""
-{
-  "program": {
-    "op": "pipe",
-    "steps": [
-      {"op": "call", "tool": "get_expenses"},
-      {"op": "filter", "where": {"op": "eq", "field": "category", "value": "travel"}},
-      {"op": "sum", "field": "amount"}
-    ]
-  }
-}
-"""
-
-{:ok, result, _memory_delta, _new_memory} = PtcRunner.Json.run(program_json, tools: tools)
-
-IO.puts("Travel expenses total: #{result}")
-result
-```
-
-### How it works
-
-1. `call` invokes the `get_expenses` tool, returning a list of expense maps
-2. `filter` keeps only items where `category == "travel"`
-3. `sum` adds up the `amount` field
-
-The result is `700` (500 + 200).
-
-## PTC-Lisp Playground
-
-The same logic in Lisp syntax (note: tool names use kebab-case):
+Filter expenses and sum amounts:
 
 ```elixir
 tools = %{
@@ -81,24 +40,129 @@ tools = %{
   end
 }
 
-program_lisp = ~S|(->> (ctx/get-expenses) (filter (where :category = "travel")) (sum-by :amount))|
+program = ~S|(->> (ctx/get-expenses) (filter (where :category = "travel")) (sum-by :amount))|
 
-{:ok, result, _memory_delta, _new_memory} = PtcRunner.Lisp.run(program_lisp, tools: tools)
+{:ok, step} = PtcRunner.Lisp.run(program, tools: tools)
 
-IO.puts("Travel expenses total: #{result}")
-result
+IO.puts("Travel expenses: #{step.return}")
 ```
 
-### Lisp syntax highlights
+### Step-by-step breakdown
 
-* `->>` is a threading macro (like Elixir's `|>`)
-* `:category` is a keyword (converted to string key internally)
-* `where` creates a predicate for filtering
-* `sum-by` is the Lisp equivalent of JSON's `{"op": "sum", "field": "amount"}`
+1. `(ctx/get-expenses)` - calls the tool, returns list of expense maps
+2. `(filter (where :category = "travel"))` - keeps only travel expenses
+3. `(sum-by :amount)` - sums the amount field
+
+## Working with Variables
+
+Use `let` to bind intermediate results:
+
+```elixir
+program = ~S"""
+(let [expenses (ctx/get-expenses)
+      travel (filter (where :category = "travel") expenses)]
+  {:count (count travel)
+   :total (sum-by :amount travel)
+   :avg (avg-by :amount travel)})
+"""
+
+{:ok, step} = PtcRunner.Lisp.run(program, tools: tools)
+step.return
+```
+
+## Error Handling
+
+PTC-Lisp provides helpful error messages with hints:
+
+```elixir
+# Missing operator in where clause
+bad_program = ~S|(filter (where :status "active") items)|
+
+case PtcRunner.Lisp.run(bad_program, tools: %{}) do
+  {:error, error} -> IO.puts("Error: #{inspect(error)}")
+  {:ok, step} -> step.return
+end
+```
+
+```elixir
+# Type error - sum-by needs a collection
+bad_program = ~S|(sum-by :amount "not a list")|
+
+case PtcRunner.Lisp.run(bad_program, tools: %{}) do
+  {:error, error} -> IO.puts("Error: #{inspect(error)}")
+  {:ok, step} -> step.return
+end
+```
+
+## Advanced: Data Transformation
+
+Transform and join data from multiple sources:
+
+```elixir
+tools = %{
+  "get-users" => fn _args ->
+    [
+      %{"id" => 1, "name" => "Alice", "email" => "alice@example.com"},
+      %{"id" => 2, "name" => "Bob", "email" => "bob@example.com"}
+    ]
+  end,
+  "get-orders" => fn _args ->
+    [
+      %{"user-id" => 1, "product" => "Laptop", "total" => 1200},
+      %{"user-id" => 2, "product" => "Mouse", "total" => 25},
+      %{"user-id" => 1, "product" => "Keyboard", "total" => 150}
+    ]
+  end
+}
+
+program = ~S"""
+(let [users (ctx/get-users)
+      orders (ctx/get-orders)
+      high-value (filter (where :total > 100) orders)]
+  (->> high-value
+       (mapv (fn [order]
+               (let [user (find (where :id = (:user-id order)) users)]
+                 {:customer (:name user)
+                  :product (:product order)
+                  :total (:total order)})))))
+"""
+
+{:ok, step} = PtcRunner.Lisp.run(program, tools: tools)
+step.return
+```
+
+## Advanced: Grouping and Aggregation
+
+Group expenses by category and compute totals:
+
+```elixir
+expenses_tools = %{
+  "get-expenses" => fn _args ->
+    [
+      %{"category" => "travel", "amount" => 500},
+      %{"category" => "food", "amount" => 50},
+      %{"category" => "travel", "amount" => 200},
+      %{"category" => "food", "amount" => 75}
+    ]
+  end
+}
+
+program = ~S"""
+(let [expenses (ctx/get-expenses)
+      by-category (group-by :category expenses)]
+  (->> (keys by-category)
+       (mapv (fn [cat]
+               {:category cat
+                :total (sum-by :amount (get by-category cat))
+                :count (count (get by-category cat))}))))
+"""
+
+{:ok, step} = PtcRunner.Lisp.run(program, tools: expenses_tools)
+step.return
+```
 
 ## Learn More
 
-* [LLM Agent Livebook](ptc_runner_llm_agent.livemd) - Build an LLM-powered data analyst with retry loop
-* [PTC-JSON Specification](https://hexdocs.pm/ptc_runner/ptc-json-specification.html) - Complete JSON DSL reference
-* [PTC-Lisp Specification](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html) - Lisp DSL reference
-* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html) - Build your first agent
+* [PTC-Lisp Specification](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html) - Complete language reference
+* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html) - Build LLM-powered agents
+* [LLM Agent Livebook](ptc_runner_llm_agent.livemd) - Interactive agent example
