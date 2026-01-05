@@ -339,6 +339,40 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # ============================================================
+  # Parallel map: pmap
+  # ============================================================
+
+  defp do_eval({:pmap, fn_ast, coll_ast}, %EvalContext{} = eval_ctx) do
+    with {:ok, fn_val, user_ns1} <- do_eval(fn_ast, eval_ctx),
+         {:ok, coll_val, user_ns2} <-
+           do_eval(coll_ast, EvalContext.update_user_ns(eval_ctx, user_ns1)) do
+      # Convert the function value to an Erlang function
+      # The closure captures a read-only snapshot of the environment at creation time
+      erlang_fn = pmap_fn_to_erlang(fn_val, eval_ctx)
+
+      # Execute in parallel using Task.async_stream
+      results =
+        coll_val
+        |> Task.async_stream(
+          fn elem ->
+            try do
+              {:ok, erlang_fn.(elem)}
+            rescue
+              e ->
+                {:error, {:pmap_error, Exception.message(e)}}
+            end
+          end,
+          timeout: :infinity,
+          ordered: true
+        )
+        |> Enum.to_list()
+
+      # Collect results, stopping at first error
+      collect_pmap_results(results, [], user_ns2)
+    end
+  end
+
   # Tool calls
   defp do_eval({:call_tool, tool_name, args_ast}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     with {:ok, args_map, user_ns2} <- do_eval(args_ast, eval_ctx) do
@@ -472,5 +506,34 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp juxt_fn_to_erlang(value, %EvalContext{} = eval_ctx) do
     Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
+  end
+
+  # ============================================================
+  # Pmap helpers
+  # ============================================================
+
+  # Convert a value to an Erlang function for use in pmap
+  # Keywords need special handling as map accessors
+  defp pmap_fn_to_erlang(k, %EvalContext{}) when is_atom(k) and not is_boolean(k) do
+    fn m -> flex_get(m, k) end
+  end
+
+  defp pmap_fn_to_erlang(value, %EvalContext{} = eval_ctx) do
+    Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
+  end
+
+  # Helper to collect pmap results, preserving order and detecting errors
+  defp collect_pmap_results([], acc, user_ns), do: {:ok, Enum.reverse(acc), user_ns}
+
+  defp collect_pmap_results([{:ok, {:ok, val}} | rest], acc, user_ns) do
+    collect_pmap_results(rest, [val | acc], user_ns)
+  end
+
+  defp collect_pmap_results([{:ok, {:error, reason}} | _rest], _acc, _user_ns) do
+    {:error, reason}
+  end
+
+  defp collect_pmap_results([{:exit, reason} | _rest], _acc, _user_ns) do
+    {:error, {:pmap_error, "parallel task failed: #{inspect(reason)}"}}
   end
 end
