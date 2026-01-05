@@ -178,6 +178,16 @@ defmodule PtcDemo.TestRunner.TestCase do
         constraint: {:has_keys, [:highest, :breakdown]},
         description:
           "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
+      },
+
+      # 2. Parallel processing (pmap) with tool calls
+      %{
+        query:
+          "Search for 'security' policies, then fetch the full content for ALL found documents in parallel. " <>
+            "Return a list of the full content of these documents.",
+        expect: :list,
+        constraint: {:gt_length, 0},
+        description: "pmap + tool calls: search for multiple items then fetch details in parallel"
       }
     ]
   end

@@ -100,6 +100,11 @@ defmodule PtcDemo.TestRunner.Base do
     if actual == expected, do: true, else: "Expected length #{expected}, got #{actual}"
   end
 
+  def check_constraint(value, {:gt_length, threshold}) when is_list(value) do
+    actual = length(value)
+    if actual > threshold, do: true, else: "Expected length > #{threshold}, got #{actual}"
+  end
+
   def check_constraint(value, {:starts_with, prefix}) when is_binary(value) do
     if String.starts_with?(value, prefix) do
       true

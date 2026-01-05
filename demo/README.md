@@ -192,6 +192,11 @@ The Lisp DSL generates more compact, readable programs:
   (->> ctx/expenses
        (filter (fn [e] (contains? eng-ids (:employee_id e))))
        (sum-by :amount)))
+
+;; Parallel Fetch: search then fetch full content concurrently
+(let [results (ctx/search {:query "security"})
+      ids (pluck :id (:results results))]
+  (pmap (fn [id] (ctx/fetch {:id id})) ids))
 ```
 
 ## JSON CLI Options
