@@ -141,6 +141,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :juxt}, rest, _list), do: analyze_juxt(rest)
   defp dispatch_list_form({:symbol, :pmap}, rest, _list), do: analyze_pmap(rest)
+  defp dispatch_list_form({:symbol, :pcalls}, rest, _list), do: analyze_pcalls(rest)
 
   defp dispatch_list_form({:symbol, :call}, _rest, _list) do
     {:error,
@@ -489,6 +490,17 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_pmap(_) do
     {:error, {:invalid_arity, :pmap, "expected (pmap f coll)"}}
+  end
+
+  # ============================================================
+  # Parallel calls: pcalls
+  # ============================================================
+
+  # (pcalls f1 f2 ... fN) - parallel calls, executes N thunks concurrently
+  defp analyze_pcalls(fn_asts) do
+    with {:ok, fn_cores} <- analyze_list(fn_asts) do
+      {:ok, {:pcalls, fn_cores}}
+    end
   end
 
   # ============================================================

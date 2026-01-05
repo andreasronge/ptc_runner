@@ -221,4 +221,96 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert result == []
     end
   end
+
+  describe "pcalls parallel calls" do
+    test "pcalls basic functionality" do
+      program = "(pcalls #(+ 1 1) #(* 2 3) #(- 10 5))"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [2, 6, 5]
+    end
+
+    test "pcalls with closures capturing let bindings" do
+      program = "(let [x 10 y 20] (pcalls #(+ x 1) #(* y 2)))"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [11, 40]
+    end
+
+    test "pcalls with empty arguments" do
+      program = "(pcalls)"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == []
+    end
+
+    test "pcalls preserves order" do
+      # Create 10 thunks that each return their position
+      program =
+        "(pcalls #(identity 0) #(identity 1) #(identity 2) #(identity 3) #(identity 4) #(identity 5) #(identity 6) #(identity 7) #(identity 8) #(identity 9))"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    end
+
+    test "pcalls with tool calls provides speedup" do
+      # Simulate slow tool calls - 50ms each
+      # Sequential: 3 * 50ms = 150ms minimum
+      # Parallel: ~50ms minimum (all run concurrently)
+
+      slow_user = fn %{id: id} ->
+        Process.sleep(50)
+        %{name: "User#{id}"}
+      end
+
+      slow_stats = fn %{id: id} ->
+        Process.sleep(50)
+        %{count: id * 10}
+      end
+
+      slow_config = fn %{} ->
+        Process.sleep(50)
+        %{theme: "dark"}
+      end
+
+      program = """
+      (pcalls
+        #(ctx/get-user {:id 1})
+        #(ctx/get-stats {:id 2})
+        #(ctx/get-config {}))
+      """
+
+      {time_us, {:ok, %Step{return: result}}} =
+        :timer.tc(fn ->
+          PtcRunner.Lisp.run(program,
+            tools: [
+              {"get-user", slow_user},
+              {"get-stats", slow_stats},
+              {"get-config", slow_config}
+            ]
+          )
+        end)
+
+      time_ms = div(time_us, 1000)
+
+      # Result should be correct
+      assert result == [%{name: "User1"}, %{count: 20}, %{theme: "dark"}]
+
+      # Should be significantly faster than sequential (150ms)
+      # Allow some overhead, but should be under 120ms
+      assert time_ms < 120,
+             "pcalls should run in parallel (took #{time_ms}ms, expected <120ms)"
+    end
+
+    test "pcalls destructuring result" do
+      # Common pattern: fetch multiple things and destructure
+      program = """
+      (let [[a b c] (pcalls #(+ 1 1) #(+ 2 2) #(+ 3 3))]
+        {:sum (+ a b c) :items [a b c]})
+      """
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == %{sum: 12, items: [2, 4, 6]}
+    end
+  end
 end
