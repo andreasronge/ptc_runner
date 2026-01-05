@@ -144,6 +144,15 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(nth [1 2 3] 0)")
       assert_clojure_equivalent("(nth [1 2 3] 2)")
     end
+
+    test "range" do
+      assert_clojure_equivalent("(range 5)")
+      assert_clojure_equivalent("(range 5 10)")
+      assert_clojure_equivalent("(range 0 10 2)")
+      assert_clojure_equivalent("(range 10 0 -1)")
+      assert_clojure_equivalent("(range 0 10 -1)")
+      assert_clojure_equivalent("(range 10 0 1)")
+    end
   end
 
   describe "Clojure conformance - map operations" do

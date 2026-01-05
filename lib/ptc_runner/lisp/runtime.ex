@@ -81,6 +81,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate every?(pred, coll), to: Collection
   defdelegate not_any?(pred, coll), to: Collection
   defdelegate contains?(coll, val), to: Collection
+  defdelegate range(end_val), to: Collection
+  defdelegate range(start, end_val), to: Collection
+  defdelegate range(start, end_val, step), to: Collection
 
   # ============================================================
   # Map Operations

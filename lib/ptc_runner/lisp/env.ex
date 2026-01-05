@@ -211,6 +211,7 @@ defmodule PtcRunner.Lisp.Env do
       {:every?, {:normal, &Runtime.every?/2}},
       {:"not-any?", {:normal, &Runtime.not_any?/2}},
       {:contains?, {:normal, &Runtime.contains?/2}},
+      {:range, {:multi_arity, {&Runtime.range/1, &Runtime.range/2, &Runtime.range/3}}},
 
       # ============================================================
       # Map operations
