@@ -103,7 +103,8 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp run_source(source, memory \\ %{}) do
     case PtcRunner.Lisp.run(source, memory: memory) do
       {:ok, step} ->
-        IO.puts(Format.to_clojure(step.return))
+        {output, _truncated?} = Format.to_clojure(step.return)
+        IO.puts(output)
         {:ok, step.memory}
 
       {:error, step} ->
@@ -165,7 +166,8 @@ defmodule Mix.Tasks.Ptc.Repl do
     case PtcRunner.Lisp.run(input, turn_history: history, memory: memory) do
       {:ok, step} ->
         # Show truncated output exactly like LLM feedback sees
-        IO.puts(ResponseHandler.format_execution_result(step.return))
+        {output, _truncated?} = ResponseHandler.format_execution_result(step.return)
+        IO.puts(output)
         new_history = (history ++ [step.return]) |> Enum.take(-3)
         {new_history, step.memory}
 

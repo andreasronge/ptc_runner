@@ -247,12 +247,14 @@ defmodule PtcRunner.Step do
   - `program`: PTC-Lisp program executed
   - `result`: Result of executing the program
   - `tool_calls`: List of tool calls made during this turn
+  - `feedback_truncated`: Whether feedback to LLM was truncated
   """
   @type trace_entry :: %{
           turn: pos_integer(),
           program: String.t(),
           result: term(),
-          tool_calls: [tool_call()]
+          tool_calls: [tool_call()],
+          feedback_truncated: boolean()
         }
 
   @typedoc """

@@ -628,4 +628,108 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.usage.turns == 1
     end
   end
+
+  describe "turn feedback format" do
+    test "shows correct turn number and remaining count" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 5
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            {:ok, "```clojure\n(+ 1 2)\n```"}
+
+          2 ->
+            # After turn 1, feedback should say "Turn 2 of 5 (4 remaining)"
+            last_message = List.last(messages)
+            assert last_message.content =~ "Turn 2 of 5 (4 remaining)"
+            {:ok, "```clojure\n(+ 3 4)\n```"}
+
+          3 ->
+            # After turn 2, feedback should say "Turn 3 of 5 (3 remaining)"
+            last_message = List.last(messages)
+            assert last_message.content =~ "Turn 3 of 5 (3 remaining)"
+            {:ok, "```clojure\n(return 42)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return 99)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == 42
+      assert step.usage.turns == 3
+    end
+
+    test "shows FINAL TURN warning on last turn" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 3
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            {:ok, "```clojure\n(+ 1 2)\n```"}
+
+          2 ->
+            {:ok, "```clojure\n(+ 3 4)\n```"}
+
+          3 ->
+            # After turn 2 with max_turns=3, should show FINAL TURN warning
+            last_message = List.last(messages)
+            assert last_message.content =~ "FINAL TURN"
+            {:ok, "```clojure\n(return 42)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return 99)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == 42
+    end
+
+    test "shows truncation hint when result exceeds limit" do
+      agent =
+        SubAgent.new(
+          prompt: "Search task",
+          tools: %{},
+          max_turns: 3,
+          # Small limit to trigger truncation
+          format_options: [feedback_limit: 2, feedback_max_chars: 100]
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            # Return a large list that will be truncated
+            {:ok, "```clojure\n[1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]\n```"}
+
+          2 ->
+            # After turn 1, feedback should contain truncation hint
+            last_message = List.last(messages)
+            assert last_message.content =~ "Hint:"
+            assert last_message.content =~ "filters or transforms"
+            {:ok, "```clojure\n(return :done)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == :done
+
+      # Verify feedback_truncated is set in trace
+      [turn1, _turn2] = step.trace
+      assert turn1.feedback_truncated == true
+    end
+  end
 end
