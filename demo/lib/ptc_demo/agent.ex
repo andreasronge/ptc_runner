@@ -22,6 +22,7 @@ defmodule PtcDemo.Agent do
   alias PtcDemo.SampleData
   alias PtcDemo.SearchTool
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Loop.ResponseHandler
 
   @model_env "PTC_DEMO_MODEL"
   @timeout 60_000
@@ -220,9 +221,11 @@ defmodule PtcDemo.Agent do
         new_programs = state.programs_history ++ all_programs
 
         # Format answer - if it's the raw value, format it nicely
-        answer = format_answer(result)
+        answer = ResponseHandler.format_result(result)
 
-        if verbose, do: IO.puts("   [Result] #{truncate(inspect(result), 80)}")
+        if verbose,
+          do:
+            IO.puts("   [Result] #{ResponseHandler.format_result(result, result_max_chars: 80)}")
 
         {:reply, {:ok, answer},
          %{
@@ -513,20 +516,6 @@ defmodule PtcDemo.Agent do
     |> Enum.reject(&is_nil/1)
   end
 
-  defp format_answer(result) when is_number(result) do
-    if is_float(result) do
-      :erlang.float_to_binary(result, decimals: 2)
-    else
-      Integer.to_string(result)
-    end
-  end
-
-  defp format_answer(result) do
-    result
-    |> inspect(limit: 50, pretty: false)
-    |> truncate(500)
-  end
-
   defp format_error(%{reason: reason, message: message}) do
     reason_str =
       reason
@@ -539,14 +528,6 @@ defmodule PtcDemo.Agent do
   end
 
   defp format_error(other), do: "Error: #{inspect(other, limit: 5)}"
-
-  defp truncate(str, max_len) do
-    if String.length(str) > max_len do
-      String.slice(str, 0, max_len) <> "..."
-    else
-      str
-    end
-  end
 
   # --- Usage Tracking ---
 
