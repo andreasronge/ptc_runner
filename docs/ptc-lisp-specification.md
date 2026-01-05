@@ -627,7 +627,7 @@ Syntactic sugar for defining named functions in the user namespace:
 **Multiple body expressions (implicit do):**
 ```clojure
 (defn with-logging [x]
-  (def last-input x)                  ; side effect
+  (println "Processing" x)            ; side effect
   (* x 2))                            ; return value
 ```
 
