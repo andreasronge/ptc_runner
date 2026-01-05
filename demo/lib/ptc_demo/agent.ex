@@ -204,10 +204,11 @@ defmodule PtcDemo.Agent do
     case SubAgent.run(agent,
            llm: llm_callback(state.model),
            context: context,
-           max_turns: max_turns
+           max_turns: max_turns,
+           debug: debug
          ) do
       {:ok, step} ->
-        if debug, do: SubAgent.Debug.print_trace(step)
+        if debug, do: SubAgent.Debug.print_trace(step, messages: true)
 
         result = step.return
         new_memory = step.memory || %{}
@@ -238,8 +239,8 @@ defmodule PtcDemo.Agent do
          }}
 
       {:error, step} ->
-        # Print trace on error for debugging when verbose
-        if verbose, do: SubAgent.Debug.print_trace(step)
+        # Print trace on error for debugging (use messages: true if debug mode)
+        if debug or verbose, do: SubAgent.Debug.print_trace(step, messages: debug)
 
         error_msg = format_error(step.fail)
         if verbose, do: IO.puts("   [Error] #{error_msg}")
@@ -349,7 +350,8 @@ defmodule PtcDemo.Agent do
            "(query :string, limit :int?, cursor :string?) -> " <>
              "{results [{id :string, title :string, topics [:string], department :string}], " <>
              "cursor :string?, has_more :bool, total :int}",
-         description: "Search policy documents by keyword. Returns paginated results."}
+         description:
+           "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."}
     }
   end
 
