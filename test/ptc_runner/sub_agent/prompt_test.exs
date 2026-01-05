@@ -319,8 +319,8 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert schemas =~ "### search"
       # The signature should be rendered, not just "User-defined tool"
       assert schemas =~ "search(query :string, limit :int) -> [{id :int}]"
-      # Should include usage example
-      assert schemas =~ "Example: `(call \"search\" {:query \"...\" :limit 10})`"
+      # Should include usage example with ctx/ prefix
+      assert schemas =~ "Example: `(ctx/search {:query \"...\" :limit 10})`"
     end
 
     test "renders tool with keyword options signature and description" do
@@ -634,8 +634,8 @@ defmodule PtcRunner.SubAgent.PromptTest do
       # Mission with expanded template
       assert prompt =~ "Find urgent emails for Alice"
 
-      # PTC-Lisp reference
-      assert prompt =~ "(call \"tool-name\""
+      # PTC-Lisp reference (updated to ctx/tool-name syntax)
+      assert prompt =~ "(ctx/tool-name"
 
       # Output format
       assert prompt =~ "```clojure"

@@ -278,11 +278,11 @@ If the LLM provides text without a code block or terminal tool call:
 ### Core
 
 ```clojure
-(call "tool" {:arg value})     ; Call tool
+(ctx/tool {:arg value})        ; Call tool
 ctx/key                        ; Access context
-(memory/put :key value)        ; Store in memory
-(memory/get :key)              ; Retrieve from memory
-memory/key                     ; Memory shorthand
+(def key value)                ; Store value
+key                            ; Access stored value
+(defn name [args] body)        ; Define function
 ```
 
 ### Control Flow

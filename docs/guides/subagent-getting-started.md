@@ -336,17 +336,23 @@ signature: "{summary :string, count :int, _email_ids [:int]}"
 
 This keeps parent agent context lean while preserving full data access. See [Core Concepts](subagent-concepts.md) for details.
 
-## Memory
+## State Persistence
 
-Each agent has private memory persisting across turns within a single `run`:
+Use `def` to store values that persist across turns within a single `run`:
 
 ```clojure
-(memory/put :cache result)   ; store
-(memory/get :cache)          ; retrieve
-memory/cache                 ; shorthand
+(def cache result)   ; store
+cache                ; access as plain symbol
 ```
 
-Memory is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-concepts.md) for details.
+Use `defn` to define reusable functions:
+
+```clojure
+(defn expensive? [item] (> (:price item) 1000))
+(filter expensive? ctx/items)
+```
+
+State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-concepts.md) for details.
 
 ## See Also
 

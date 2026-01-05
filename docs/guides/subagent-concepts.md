@@ -127,61 +127,48 @@ run(prompt, context: step1.return, context_signature: step1.signature)
 run(prompt, context: step1)  # Auto-extraction
 ```
 
-## Memory (`memory/`)
+## State Persistence (`def`/`defn`)
 
-Each agent has private memory persisting across turns within a single `run`:
+Each agent has private state persisting across turns within a single `run`. Use `def` to store values and `defn` to define functions:
 
 ```clojure
 ;; Store intermediate results
-(memory/put :processed_ids [1 2 3])
+(def processed-ids [1 2 3])
 
-;; Retrieve later
-(memory/get :processed_ids)
+;; Access as plain symbol
+processed-ids
 
-;; Shorthand access
-memory/processed_ids
+;; Define reusable functions
+(defn suspicious? [expense]
+  (> (:amount expense) 5000))
 ```
 
-Memory is:
-- **Scoped per-agent** - SubAgents don't share memory with parents or siblings
+State is:
+- **Scoped per-agent** - SubAgents don't share state with parents or siblings
 - **Turn-persistent** - Survives across turns within one `run` call
 - **Hidden from prompts** - Not shown in LLM conversation history
 
-Use memory for:
+Use state for:
 - Caching expensive computations
 - Tracking state across turns
 - Storing data too large for context
 
-### Result Contract (Output Firewall)
+### Result Feedback
 
-The program's return value determines what the LLM sees in subsequent turns:
+The program's return value determines what the LLM sees in subsequent turns. Use `def` to store large data while showing only a summary as feedback:
 
-| Return Value | LLM Sees | Memory Update |
-|--------------|----------|---------------|
-| Non-map (number, vector) | The value | None |
-| Map without `:return` | Entire map | Entire map merged |
-| Map with `:return` | Only `:return` value | Rest of map merged |
-
-The `:return` key acts as an **output firewall** - it controls what flows back into the LLM's context while keeping full data accessible in BEAM memory.
-
-**Without `:return`** - LLM sees full dataset:
+**Store and summarize:**
 ```clojure
-{:all-users (call "fetch-users" {})}
-;; LLM context gets: {:all-users [{:id 1, :name "Alice"}, ...500 items]}
-;; memory/all-users = same data
+(do
+  (def all-users (ctx/fetch-users {}))
+  (str "Stored " (count all-users) " users"))
+;; LLM sees: "Stored 500 users"
+;; all-users = full dataset (accessible via programs)
 ```
 
-**With `:return`** - LLM sees only summary:
-```clojure
-{:all-users (call "fetch-users" {})
- :return "Stored 500 users"}
-;; LLM context gets: "Stored 500 users"
-;; memory/all-users = full dataset (accessible via programs)
-```
+This is the core value of PTC: large datasets stay in BEAM memory via `def`, LLM only sees compact summaries as the expression result. The `_` prefix firewalls *input* data; explicit `def` storage and expression results control *output* data.
 
-This is the core value of PTC: large datasets stay in BEAM memory, LLM only sees compact summaries. The `_` prefix firewalls *input* data; the `:return` key firewalls *output* data.
-
-> **See also:** `PtcRunner.Lisp` module docs for the full memory contract specification.
+> **See also:** `PtcRunner.Lisp` module docs for the full state specification.
 
 ## Error Handling
 
@@ -194,8 +181,8 @@ Syntax errors, tool failures, and validation errors are fed back to the LLM. It 
 ```clojure
 ;; Check if previous turn failed
 (if ctx/fail
-  (call "cleanup" {:failed_op (:op ctx/fail)})
-  (call "proceed" ctx/items))
+  (ctx/cleanup {:failed_op (:op ctx/fail)})
+  (ctx/proceed ctx/items))
 ```
 
 The `ctx/fail` structure:
