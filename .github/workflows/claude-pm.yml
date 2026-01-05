@@ -8,11 +8,12 @@ on:
 
 jobs:
   pm:
-    # Run on: manual, closed issues, or relevant labels
-    if: |
+    # TEMPORARILY DISABLED - remove 'false &&' to re-enable
+    if: false && (
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issues' && github.event.action == 'closed') ||
       (github.event_name == 'issues' && github.event.action == 'labeled' && contains(fromJSON('["ready-for-implementation", "needs-clarification", "needs-breakdown", "from-pr-review"]'), github.event.label.name))
+      )
 
     runs-on: ubuntu-latest
 
