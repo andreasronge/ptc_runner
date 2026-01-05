@@ -24,6 +24,35 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalsTest do
       assert {:error, {:invalid_arity, :when, msg}} = Analyze.analyze(raw)
       assert msg =~ "expected"
     end
+
+    test "implicit do with multiple body expressions" do
+      # (when true (println x) 42)
+      raw =
+        {:list,
+         [
+           {:symbol, :when},
+           true,
+           {:list, [{:symbol, :println}, {:symbol, :x}]},
+           42
+         ]}
+
+      assert {:ok, {:if, true, {:do, [_, _]}, nil}} = Analyze.analyze(raw)
+    end
+
+    test "implicit do with three body expressions" do
+      # (when true (def a 1) (def b 2) 42)
+      raw =
+        {:list,
+         [
+           {:symbol, :when},
+           true,
+           {:list, [{:symbol, :def}, {:symbol, :a}, 1]},
+           {:list, [{:symbol, :def}, {:symbol, :b}, 2]},
+           42
+         ]}
+
+      assert {:ok, {:if, true, {:do, [_, _, _]}, nil}} = Analyze.analyze(raw)
+    end
   end
 
   describe "cond desugars to nested if" do

@@ -286,4 +286,71 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert result == []
     end
   end
+
+  describe "implicit do (multiple expressions)" do
+    test "top-level multiple expressions" do
+      source = "(def x 1) (def y 2) (+ x y)"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 3
+      assert mem[:x] == 1
+      assert mem[:y] == 2
+    end
+
+    test "let with multiple bodies" do
+      source = "(let [x 1] (def saved x) (* x 2))"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 2
+      assert mem[:saved] == 1
+    end
+
+    test "fn with multiple bodies via defn" do
+      source = "(do (defn f [x] (def last-x x) x) (f 42))"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 42
+      assert mem[:"last-x"] == 42
+    end
+
+    test "fn with multiple bodies directly" do
+      source = "(do (def f (fn [x] (def captured x) (* x 2))) (f 10))"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 20
+      assert mem[:captured] == 10
+    end
+
+    test "when with multiple bodies" do
+      source = "(when true (def side 1) 42)"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 42
+      assert mem[:side] == 1
+    end
+
+    test "when-let with multiple bodies" do
+      source = "(when-let [x 5] (def found x) (* x 2))"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 10
+      assert mem[:found] == 5
+    end
+
+    test "when-let with nil binding skips body" do
+      source = "(when-let [x nil] (def should-not-run true) 42)"
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == nil
+      assert mem[:"should-not-run"] == nil
+    end
+
+    test "nested implicit do forms" do
+      source = """
+      (let [x 1]
+        (def a x)
+        (let [y 2]
+          (def b y)
+          (+ x y)))
+      """
+
+      {:ok, %{return: result, memory: mem}} = Lisp.run(source)
+      assert result == 3
+      assert mem[:a] == 1
+      assert mem[:b] == 2
+    end
+  end
 end

@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-PTC-Lisp is a small, safe, deterministic subset of Clojure designed for Programmatic Tool Calling. Programs are **single expressions** that transform data through pipelines of operations.
+PTC-Lisp is a small, safe, deterministic subset of Clojure designed for Programmatic Tool Calling. Programs are expressions that transform data through pipelines of operations. Multiple top-level expressions are supported with implicit `do` semantics.
 
 ### Execution Model
 
@@ -37,6 +37,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 
 | Extension | Description |
 |-----------|-------------|
+| Implicit `do` | Multiple expressions in `fn`, `let`, `when`, `when-let` bodies (§5, §13.2) |
 | `ctx/path` | Namespace-qualified access to context data (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
@@ -362,6 +363,23 @@ Binds names to values for use in the body expression:
     x))             ; => 2
 ```
 
+#### Implicit `do` (Clojure Extension)
+
+Multiple body expressions are supported without explicit `do`:
+
+```clojure
+;; Multiple expressions - last value is returned
+(let [x 10]
+  (def saved x)     ; side effect: store in memory
+  (* x 2))          ; => 20, saved = 10
+
+;; Equivalent to explicit do
+(let [x 10]
+  (do
+    (def saved x)
+    (* x 2)))
+```
+
 #### Map Destructuring
 
 Extract values from maps:
@@ -426,6 +444,14 @@ Returns body if condition is truthy, otherwise `nil`:
 (when false "yes")                ; => nil
 (when (> 5 3) "bigger")           ; => "bigger"
 (when (< 5 3) "smaller")          ; => nil
+```
+
+**Implicit `do` (Clojure Extension):** Multiple body expressions are supported:
+
+```clojure
+(when (> x 0)
+  (def positive x)    ; side effect
+  (* x 2))            ; return value
 ```
 
 ### 5.4 `cond` — Multi-way Conditional
@@ -503,6 +529,14 @@ Binds a value from an expression and evaluates the body only if the value is tru
 
 (when-let [x false]
   (do-something))                 ; => nil
+```
+
+**Implicit `do` (Clojure Extension):** `when-let` supports multiple body expressions:
+
+```clojure
+(when-let [x (find-value)]
+  (def found x)     ; side effect
+  (* x 2))          ; return value
 ```
 
 **Limitations:**
@@ -2086,6 +2120,14 @@ Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
 (fn [{:keys [x]}] body) ; map destructuring in params
 ```
 
+**Implicit `do` (Clojure Extension):** Multiple body expressions are supported:
+
+```clojure
+(fn [x]
+  (def last-input x)   ; side effect
+  (* x 2))             ; return value
+```
+
 #### Short `#()` Syntax
 
 The `#()` shorthand syntax provides concise lambdas (like Clojure):
@@ -2148,7 +2190,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 ## 14. Grammar (EBNF)
 
 ```ebnf
-program     = expression ;
+program     = expression* ;  (* Multiple top-level expressions with implicit do *)
 
 expression  = literal
             | symbol

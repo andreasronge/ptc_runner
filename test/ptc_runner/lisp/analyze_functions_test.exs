@@ -124,6 +124,35 @@ defmodule PtcRunner.Lisp.AnalyzeFunctionsTest do
       assert {:ok, {:fn, [pattern], 100}} = Analyze.analyze(raw)
       assert {:destructure, {:seq, []}} = pattern
     end
+
+    test "implicit do with multiple body expressions" do
+      # (fn [x] (println x) x)
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:symbol, :x}]},
+           {:list, [{:symbol, :println}, {:symbol, :x}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:fn, [{:var, :x}], {:do, [_, _]}}} = Analyze.analyze(raw)
+    end
+
+    test "implicit do with three body expressions" do
+      # (fn [x] (def a x) (def b x) x)
+      raw =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:symbol, :x}]},
+           {:list, [{:symbol, :def}, {:symbol, :a}, {:symbol, :x}]},
+           {:list, [{:symbol, :def}, {:symbol, :b}, {:symbol, :x}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:fn, [{:var, :x}], {:do, [_, _, _]}}} = Analyze.analyze(raw)
+    end
   end
 
   describe "short function syntax #()" do

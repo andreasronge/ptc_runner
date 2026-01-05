@@ -241,5 +241,34 @@ defmodule PtcRunner.Lisp.AnalyzeBindingsTest do
                   {:var, :obj}}
                ], {:var, :the_name}}} = Analyze.analyze(raw)
     end
+
+    test "implicit do with multiple body expressions" do
+      # (let [x 1] (println x) x)
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector, [{:symbol, :x}, 1]},
+           {:list, [{:symbol, :println}, {:symbol, :x}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:let, [{:binding, {:var, :x}, 1}], {:do, [_, _]}}} = Analyze.analyze(raw)
+    end
+
+    test "implicit do with three body expressions" do
+      # (let [x 1] (def a x) (def b x) x)
+      raw =
+        {:list,
+         [
+           {:symbol, :let},
+           {:vector, [{:symbol, :x}, 1]},
+           {:list, [{:symbol, :def}, {:symbol, :a}, {:symbol, :x}]},
+           {:list, [{:symbol, :def}, {:symbol, :b}, {:symbol, :x}]},
+           {:symbol, :x}
+         ]}
+
+      assert {:ok, {:let, _, {:do, [_, _, _]}}} = Analyze.analyze(raw)
+    end
   end
 end
