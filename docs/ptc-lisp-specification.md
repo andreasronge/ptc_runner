@@ -380,12 +380,31 @@ Multiple body expressions are supported without explicit `do`:
     (* x 2)))
 ```
 
-#### Map Destructuring
+#### Destructuring
+Destructuring allows you to bind names to values within collections.
 
-Extract values from maps:
+**Sequential (Vector) Destructuring:**
+Extract values from vectors by position.
 
 ```clojure
-; Basic destructuring
+; Basic sequential destructuring
+(let [[a b] [1 2]]
+  (+ a b))  ; => 3
+
+; Use _ to skip elements
+(let [[_ b] [1 2]]
+  b)        ; => 2
+
+; Nested sequential destructuring
+(let [[a [b c]] [1 [2 3]]]
+  (+ a b c)) ; => 6
+```
+
+**Map Destructuring:**
+Extract values from maps by key. Supports both keyword and string keys.
+
+```clojure
+; Basic map destructuring
 (let [{:keys [name age]} {:name "Alice" :age 30}]
   name)  ; => "Alice"
 
@@ -393,21 +412,22 @@ Extract values from maps:
 (let [{:keys [name age] :or {age 0}} {:name "Bob"}]
   age)   ; => 0
 
-; Renaming
+; Renaming bindings
 (let [{the-name :name} {:name "Carol"}]
   the-name)  ; => "Carol"
 
-; Nested destructuring
-(let [{:keys [user]} {:user {:name "Dan"}}
-      {:keys [name]} user]
-  name)  ; => "Dan"
+; Binding the whole map with :as
+(let [{:keys [id] :as user} {:id 123 :name "Alice"}]
+  (:name user)) ; => "Alice"
 ```
 
 **Supported destructuring forms:**
-- `{:keys [a b c]}` — extract keyword keys
-- `{:keys [a] :or {a default}}` — with defaults
-- `{new-name :old-key}` — rename binding
-- `{:keys [a] :as m}` — bind whole map to `m`
+- `[a b]` — sequential (vector)
+- `{:keys [a b]}` — map keyword keys
+- `{:keys [a] :or {a default}}` — map with defaults
+- `{new-name :old-key}` — map renaming
+- `{:as symbol}` — bind collection to symbol
+
 
 ### 5.2 `if` — Conditional
 
@@ -587,7 +607,7 @@ Binds a name to a value in the user namespace, persisting across turns:
 ```clojure
 (def x 42)                        ; => #'x (x = 42)
 (def threshold 5000)              ; => #'threshold
-(def results (ctx/search {}))     ; => #'results (stores tool result)
+(def results (ctx/search {}))     ; => ...
 
 ; Redefinition
 (def x 1)                         ; x = 1
@@ -674,10 +694,27 @@ Syntactic sugar for defining named functions in the user namespace:
 (filter expensive? ctx/expenses)
 ```
 
+**Destructuring in parameters:**
+`defn` supports the same destructuring patterns as `fn` and `let`:
+
+```clojure
+; Vector destructuring
+(do (defn first-name [[first last]] first)
+    (first-name ["Alice" "Smith"]))  ; => "Alice"
+
+; Map destructuring
+(do (defn greet [{:keys [name]}] (str "Hello " name))
+    (greet {:name "World"}))  ; => "Hello World"
+
+; Nested destructuring
+(do (defn process [[id {:keys [status]}]] (str id ":" status))
+    (process [42 {:status "ok"}]))  ; => "42:ok"
+```
+
+
 **Not supported:**
 - Multi-arity: `(defn f ([x] ...) ([x y] ...))` — use separate `defn` forms
 - Variadic args: `(defn f [& args] ...)` — not supported
-- Destructuring in params: `(defn f [{:keys [a]}] ...)` — not supported
 - Pre/post conditions
 
 ---

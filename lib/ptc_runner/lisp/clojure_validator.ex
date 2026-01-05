@@ -352,12 +352,22 @@ defmodule PtcRunner.Lisp.ClojureValidator do
     set |> MapSet.to_list() |> Enum.sort() |> Enum.map(&normalize_value/1)
   end
 
-  defp normalize_value(value) when is_map(value) do
+  defp normalize_value(%PtcRunner.Lisp.Format.Var{name: name}) do
+    "#'#{name}"
+  end
+
+  defp normalize_value(value) when is_map(value) and not is_struct(value) do
     Map.new(value, fn {k, v} ->
       # Convert atom keys to strings for comparison
       key = if is_atom(k), do: Atom.to_string(k), else: k
       {key, normalize_value(v)}
     end)
+  end
+
+  defp normalize_value(["var", name]) when is_binary(name) do
+    # Clojure Vars are represented as ["var", "ns/name"] in Cheshire JSON
+    short_name = name |> String.split("/") |> List.last()
+    "#'#{short_name}"
   end
 
   defp normalize_value(value) when is_list(value) do
