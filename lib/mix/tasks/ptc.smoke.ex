@@ -1,11 +1,12 @@
 defmodule Mix.Tasks.Ptc.Smoke do
-  @shortdoc "Run smoke tests comparing PTC-Lisp with Babashka"
+  @shortdoc "Run smoke tests comparing PTC-Lisp with Babashka/Clojure"
   @moduledoc """
-  Runs .clj files through both PTC-Lisp and Babashka, comparing results.
+  Runs .clj files through both PTC-Lisp and Babashka/Clojure, comparing results.
 
   ## Usage
 
-      mix ptc.smoke              # Run all smoke tests
+      mix ptc.smoke              # Run all smoke tests (using Babashka)
+      mix ptc.smoke --clj        # Use Clojure CLI instead of Babashka
       mix ptc.smoke --verbose    # Show detailed output
 
   ## Test Files
@@ -25,7 +26,7 @@ defmodule Mix.Tasks.Ptc.Smoke do
 
   - 0: All tests passed
   - 1: Some tests failed
-  - 2: Setup error (Babashka not found, etc.)
+  - 2: Setup error (Babashka/Clojure not found, etc.)
   """
 
   use Mix.Task
@@ -39,10 +40,17 @@ defmodule Mix.Tasks.Ptc.Smoke do
     Mix.Task.run("app.start")
 
     verbose = "--verbose" in args
+    use_clj = "--clj" in args
 
-    unless ClojureValidator.available?() do
-      Mix.shell().error("Babashka not found. Run: mix ptc.install_babashka")
-      System.halt(2)
+    runner = if use_clj, do: :clj, else: :bb
+
+    case check_runner(runner) do
+      :ok ->
+        :ok
+
+      {:error, msg} ->
+        Mix.shell().error(msg)
+        System.halt(2)
     end
 
     case list_smoke_files() do
@@ -51,7 +59,24 @@ defmodule Mix.Tasks.Ptc.Smoke do
         System.halt(2)
 
       files ->
-        run_smoke_tests(files, verbose)
+        run_smoke_tests(files, verbose, runner)
+    end
+  end
+
+  defp check_runner(:bb) do
+    if ClojureValidator.available?() do
+      :ok
+    else
+      {:error, "Babashka not found. Run: mix ptc.install_babashka"}
+    end
+  end
+
+  defp check_runner(:clj) do
+    if System.find_executable("clj") do
+      :ok
+    else
+      {:error,
+       "Clojure CLI (clj) not found. Install from https://clojure.org/guides/install_clojure"}
     end
   end
 
@@ -60,14 +85,16 @@ defmodule Mix.Tasks.Ptc.Smoke do
     |> Enum.sort()
   end
 
-  defp run_smoke_tests(files, verbose) do
+  defp run_smoke_tests(files, verbose, runner) do
+    runner_name = if runner == :clj, do: "Clojure", else: "Babashka"
+
     Mix.shell().info("")
-    Mix.shell().info("=== PTC-Lisp Smoke Tests ===")
+    Mix.shell().info("=== PTC-Lisp Smoke Tests (vs #{runner_name}) ===")
     Mix.shell().info("")
 
     results =
       Enum.map(files, fn file ->
-        run_single_test(file, verbose)
+        run_single_test(file, verbose, runner)
       end)
 
     passed = Enum.count(results, &(&1 == :pass))
@@ -81,16 +108,18 @@ defmodule Mix.Tasks.Ptc.Smoke do
     end
   end
 
-  defp run_single_test(file, verbose) do
+  defp run_single_test(file, verbose, runner) do
     basename = Path.basename(file)
     source = File.read!(file)
 
     ptc_result = run_ptc(source)
-    bb_result = run_babashka(source)
+    clj_result = run_clojure(source, runner)
 
-    case {ptc_result, bb_result} do
-      {{:ok, ptc_val}, {:ok, bb_val}} ->
-        if values_equal?(ptc_val, bb_val) do
+    runner_label = if runner == :clj, do: "CLJ", else: "BB"
+
+    case {ptc_result, clj_result} do
+      {{:ok, ptc_val}, {:ok, clj_val}} ->
+        if values_equal?(ptc_val, clj_val) do
           Mix.shell().info("✓ #{basename}")
 
           if verbose do
@@ -101,7 +130,7 @@ defmodule Mix.Tasks.Ptc.Smoke do
         else
           Mix.shell().error("✗ #{basename}")
           Mix.shell().error("  PTC: #{inspect(ptc_val)}")
-          Mix.shell().error("  BB:  #{inspect(bb_val)}")
+          Mix.shell().error("  #{runner_label}:  #{inspect(clj_val)}")
           :fail
         end
 
@@ -110,15 +139,15 @@ defmodule Mix.Tasks.Ptc.Smoke do
         Mix.shell().error("  PTC error: #{ptc_err}")
         :fail
 
-      {{:ok, _}, {:error, bb_err}} ->
+      {{:ok, _}, {:error, clj_err}} ->
         Mix.shell().error("✗ #{basename}")
-        Mix.shell().error("  BB error: #{bb_err}")
+        Mix.shell().error("  #{runner_label} error: #{clj_err}")
         :fail
 
-      {{:error, ptc_err}, {:error, bb_err}} ->
+      {{:error, ptc_err}, {:error, clj_err}} ->
         Mix.shell().error("✗ #{basename}")
         Mix.shell().error("  PTC error: #{ptc_err}")
-        Mix.shell().error("  BB error: #{bb_err}")
+        Mix.shell().error("  #{runner_label} error: #{clj_err}")
         :fail
     end
   end
@@ -130,8 +159,74 @@ defmodule Mix.Tasks.Ptc.Smoke do
     end
   end
 
-  defp run_babashka(source) do
+  defp run_clojure(source, :bb) do
     ClojureValidator.execute(source)
+  end
+
+  defp run_clojure(source, :clj) do
+    run_clj(source)
+  end
+
+  # Run source using Clojure CLI
+  defp run_clj(source) do
+    wrapped = ClojureValidator.wrap_with_stubs(source)
+
+    # Use clj -M -e to evaluate the expression
+    case System.cmd("clj", ["-M", "-e", wrapped], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.trim()
+        |> strip_clj_warnings()
+        |> parse_clj_output()
+
+      {output, _exit_code} ->
+        {:error, String.trim(output)}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # Strip Clojure warning lines from output
+  defp strip_clj_warnings(output) do
+    output
+    |> String.split("\n")
+    |> Enum.reject(&String.starts_with?(&1, "WARNING:"))
+    |> Enum.join("\n")
+    |> String.trim()
+  end
+
+  # Parse Clojure output (EDN format)
+  defp parse_clj_output(""), do: {:ok, nil}
+  defp parse_clj_output("nil"), do: {:ok, nil}
+  defp parse_clj_output("true"), do: {:ok, true}
+  defp parse_clj_output("false"), do: {:ok, false}
+
+  defp parse_clj_output(output) do
+    # For complex output, use bb to convert EDN to JSON for parsing
+    case ClojureValidator.bb_path() do
+      nil ->
+        # Fallback: try simple parsing
+        {:ok, output}
+
+      bb ->
+        escaped = output |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
+
+        json_convert = """
+        (require '[cheshire.core :as json])
+        (println (json/generate-string (read-string "#{escaped}")))
+        """
+
+        case System.cmd(bb, ["-e", json_convert], stderr_to_stdout: true) do
+          {json_output, 0} ->
+            case Jason.decode(String.trim(json_output)) do
+              {:ok, value} -> {:ok, value}
+              {:error, _} -> {:ok, output}
+            end
+
+          {_, _} ->
+            {:ok, output}
+        end
+    end
   end
 
   # Compare values with normalization for expected differences
