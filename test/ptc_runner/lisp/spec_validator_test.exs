@@ -614,7 +614,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       # Filter out examples that:
       # - use ctx/ (needs special handling)
       # - reference undefined functions like do-something (Clojure analyzes dead code)
-      # - use PTC-Lisp extension functions (floor, ceil, round, trunc are not standard Clojure)
+      # - use PTC-Lisp extension functions (floor, ceil, round, trunc, pmap, pcalls are not standard Clojure)
       testable_examples =
         result.examples
         |> Enum.reject(fn {code, _expected, _section} ->
@@ -623,7 +623,9 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
             Regex.match?(~r/\(floor\s/, code) or
             Regex.match?(~r/\(ceil\s/, code) or
             Regex.match?(~r/\(round\s/, code) or
-            Regex.match?(~r/\(trunc\s/, code)
+            Regex.match?(~r/\(trunc\s/, code) or
+            Regex.match?(~r/\(pmap\s/, code) or
+            Regex.match?(~r/\(pcalls[\s)]/, code)
         end)
 
       failures =
