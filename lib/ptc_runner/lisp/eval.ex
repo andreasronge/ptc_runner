@@ -228,6 +228,57 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Tail recursion: loop
+  defp do_eval({:loop, bindings, body}, %EvalContext{} = eval_ctx) do
+    # 1. Initial bindings evaluation (like let)
+    result =
+      Enum.reduce_while(bindings, {:ok, eval_ctx}, fn {:binding, pattern, value_ast},
+                                                      {:ok, acc_ctx} ->
+        case do_eval(value_ast, acc_ctx) do
+          {:ok, value, ns2} ->
+            case Patterns.match_pattern(pattern, value) do
+              {:ok, new_bindings} ->
+                {:cont,
+                 {:ok,
+                  acc_ctx
+                  |> EvalContext.update_user_ns(ns2)
+                  |> EvalContext.merge_env(new_bindings)}}
+
+              {:error, _} = err ->
+                {:halt, err}
+            end
+
+          {:error, _} = err ->
+            {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, loop_ctx} -> execute_loop(body, loop_ctx, bindings)
+      {:error, _} = err -> err
+    end
+  end
+
+  # Tail recursion: recur signal
+  defp do_eval({:recur, arg_asts}, %EvalContext{} = eval_ctx) do
+    # Evaluate arguments in current context
+    result =
+      Enum.reduce_while(arg_asts, {:ok, [], eval_ctx.user_ns}, fn arg_ast, {:ok, acc, ns} ->
+        case do_eval(arg_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
+          {:ok, v, ns2} -> {:cont, {:ok, [v | acc], ns2}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, values, _ns} ->
+        throw({:recur_signal, Enum.reverse(values)})
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   # ============================================================
   # Function definition: fn
   # ============================================================
@@ -644,5 +695,44 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp collect_pcalls_results([{:exit, reason} | _rest], _acc, _user_ns) do
     {:error, {:pcalls_error, "parallel task failed: #{inspect(reason)}"}}
+  end
+
+  # ============================================================
+  # Loop Execution
+  # ============================================================
+
+  defp execute_loop(body, %EvalContext{} = ctx, bindings) do
+    do_eval(body, ctx)
+  catch
+    {:recur_signal, new_values} ->
+      patterns = Enum.map(bindings, fn {:binding, p, _} -> p end)
+
+      if length(patterns) != length(new_values) do
+        {:error, {:arity_mismatch, length(patterns), length(new_values)}}
+      else
+        case bind_recur_values(patterns, new_values) do
+          {:ok, new_bindings} ->
+            case EvalContext.increment_iteration(ctx) do
+              {:ok, ctx2} ->
+                execute_loop(body, EvalContext.merge_env(ctx2, new_bindings), bindings)
+
+              {:error, :loop_limit_exceeded} ->
+                {:error, {:loop_limit_exceeded, ctx.loop_limit}}
+            end
+
+          {:error, _} = err ->
+            err
+        end
+      end
+  end
+
+  defp bind_recur_values(patterns, values) do
+    Enum.zip(patterns, values)
+    |> Enum.reduce_while({:ok, %{}}, fn {p, v}, {:ok, acc} ->
+      case Patterns.match_pattern(p, v) do
+        {:ok, b} -> {:cont, {:ok, Map.merge(acc, b)}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
   end
 end

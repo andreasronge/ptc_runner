@@ -51,6 +51,9 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:ctx_call, atom(), [t()]}
           # Define binding in user namespace: (def name value)
           | {:def, atom(), t()}
+          # Tail recursion: loop and recur
+          | {:loop, [binding()], t()}
+          | {:recur, [t()]}
 
   @type binding :: {:binding, pattern(), t()}
 

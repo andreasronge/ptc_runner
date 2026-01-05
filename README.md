@@ -36,12 +36,58 @@ The SubAgent doesn't answer directly - it writes a program that computes the ans
 
 This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanced-tool-use): instead of the LLM being the computer, it programs the computer.
 
-## Why SubAgents?
+## Why PtcRunner?
 
-- **Precise computation**: LLMs reason and generate code; computation runs deterministically in a sandbox
-- **Context-efficient**: Process large datasets locally instead of sending everything to the LLM
-- **Multi-turn capable**: Agents can call tools, store results in memory, and iterate until done
-- **Type-safe**: Validate return structures with signatures; agents auto-retry on mismatch
+**LLMs as programmers, not computers.** Most agent frameworks treat LLMs as the runtime. PtcRunner inverts this: LLMs generate programs that execute deterministically in a sandbox.
+
+### BEAM-Native Advantages
+
+- **Parallel tool calling**: `pmap`/`pcalls` execute I/O concurrently using lightweight BEAM processes
+- **Process isolation**: Each execution runs in a sandboxed process with timeout and heap limits
+- **Fault tolerance**: Crashes don't propagate; built-in supervision patterns
+
+### Safe Lisp DSL
+
+- **LLM-friendly**: Minimal syntax, easy to generate correctly
+- **Safe by construction**: No side effects, no system access, bounded iteration
+- **Inspectable**: Debug by examining generated programs
+
+### Unique Features
+
+- **Context firewall**: `_` prefixed fields stay in BEAM memory, hidden from LLM prompts
+- **Transactional memory**: `def` persists data across turns without bloating context
+- **Composable SubAgents**: Nest agents as tools with isolated state and turn budgets
+- **Type-driven retry**: Signatures validate outputs; agents auto-correct on mismatch
+
+### Examples
+
+**Parallel tool calling** - fetch data concurrently:
+
+```clojure
+;; LLM generates this - executes in parallel automatically
+(let [[user orders stats] (pcalls #(ctx/get_user {:id ctx/user_id})
+                                   #(ctx/get_orders {:id ctx/user_id})
+                                   #(ctx/get_stats {:id ctx/user_id}))]
+  {:user user :order_count (count orders) :stats stats})
+```
+
+**Context firewall** - keep large data out of LLM prompts:
+
+```elixir
+# The LLM sees: %{summary: "Found 3 urgent emails"}
+# Elixir gets: %{summary: "...", _email_ids: [101, 102, 103]}
+signature: "{summary :string, _email_ids [:int]}"
+```
+
+**Compile SubAgents** - LLM called once, execute many times:
+
+```elixir
+# LLM derives the program once during compilation
+{:ok, compiled} = SubAgent.compile(classifier_agent, llm: my_llm, sample: %{text: "example"})
+
+# Execute without LLM calls - deterministic and fast
+compiled.execute.(%{text: "new input"})  #=> %Step{return: %{category: "support"}}
+```
 
 ## Installation
 

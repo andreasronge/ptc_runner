@@ -79,6 +79,15 @@ Debug.print_trace(step)
 step.return
 ```
 
+### Tracing Options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `trace` | `true` | Whether trace is collected (`true`, `false`, or `:on_error`) |
+| `debug` | `false` | Stores extra data: raw LLM response, feedback messages, system prompt |
+
+Use `Debug.print_trace(step, messages: true)` to view the extra debug data (requires `debug: true`).
+
 ## With Signatures
 
 Use `context` to pass data. Signatures validate the output structure:
@@ -88,8 +97,8 @@ Use `context` to pass data. Signatures validate the output structure:
   "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
   context: %{review: "Great product, fast shipping! Would buy again."},
   signature: "(review :string) -> {sentiment :string, confidence :float}",
-  max_turns: 1,
-  llm: my_llm
+  llm: my_llm,
+  debug: true
 )
 Debug.print_trace(step)
 step.return

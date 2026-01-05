@@ -32,8 +32,6 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert system_prompt =~ "# Mission"
     end
 
-    # TODO: Fix in #538 - prompt no longer contains "Core Functions"
-    @tag :skip
     test "single-shot with language_spec: :single_shot gets base prompt" do
       agent =
         SubAgent.new(
