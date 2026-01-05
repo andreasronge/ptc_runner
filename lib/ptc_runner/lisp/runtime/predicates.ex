@@ -37,6 +37,8 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def set?(x), do: is_struct(x, MapSet)
 
+  def regex?(x), do: is_tuple(x) and elem(x, 0) == :re_mp
+
   def map?(x), do: is_map(x) and not is_struct(x, MapSet)
 
   def coll?(x), do: is_list(x)

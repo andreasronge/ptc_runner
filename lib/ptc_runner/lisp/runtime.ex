@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.Runtime do
   alias PtcRunner.Lisp.Runtime.MapOps
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
+  alias PtcRunner.Lisp.Runtime.Regex
   alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
 
   # ============================================================
@@ -159,6 +160,13 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate parse_double(s), to: RuntimeString
 
   # ============================================================
+  # Regex Operations
+  # ============================================================
+  defdelegate re_pattern(s), to: Regex
+  defdelegate re_find(re, s), to: Regex
+  defdelegate re_matches(re, s), to: Regex
+
+  # ============================================================
   # Type Predicates
   # ============================================================
 
@@ -168,6 +176,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate number?(x), to: Predicates
   defdelegate string?(x), to: Predicates
   defdelegate char?(x), to: Predicates
+  defdelegate regex?(x), to: Predicates
   defdelegate keyword?(x), to: Predicates
   defdelegate vector?(x), to: Predicates
   defdelegate set?(x), to: Predicates

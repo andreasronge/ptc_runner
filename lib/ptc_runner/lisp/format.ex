@@ -281,6 +281,7 @@ defmodule PtcRunner.Lisp.Format do
     |> List.to_tuple()
   end
 
+  defp sanitize({:re_mp, _mp, _anchored, source}), do: "#\"#{source}\""
   defp sanitize(value), do: value
 
   # Extract parameter name from pattern AST
