@@ -193,30 +193,26 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg =~ "expected list"
     end
 
-    test "seq pattern with fewer elements than required returns error" do
-      # Destructure [a b c] with only 2-element list
+    test "seq pattern with fewer elements binds nil for missing (Clojure behavior)" do
+      # Destructure [a b c] with only 2-element list - c binds to nil
       pattern = {:destructure, {:seq, [{:var, :a}, {:var, :b}, {:var, :c}]}}
       bindings = [{:binding, pattern, {:vector, [1, 2]}}]
-      body = {:var, :a}
+      body = {:vector, [{:var, :a}, {:var, :b}, {:var, :c}]}
 
-      assert {:error, {:destructure_error, msg}} =
+      assert {:ok, [1, 2, nil], %{}} =
                Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
-
-      assert msg =~ "expected at least 3 elements"
     end
 
-    test "nested destructuring failure propagates" do
-      # Destructure [[a b]] where inner value is not a list
+    test "nested destructuring with insufficient elements binds nil (Clojure behavior)" do
+      # Destructure [[a b]] where inner list has only 1 element - b binds to nil
       inner_pattern = {:destructure, {:seq, [{:var, :a}, {:var, :b}]}}
       pattern = {:destructure, {:seq, [inner_pattern]}}
-      # [[1]] - inner has only 1 element but pattern expects 2
+      # [[1]] - inner has only 1 element, b binds to nil
       bindings = [{:binding, pattern, {:vector, [{:vector, [1]}]}}]
-      body = {:var, :a}
+      body = {:vector, [{:var, :a}, {:var, :b}]}
 
-      assert {:error, {:destructure_error, msg}} =
+      assert {:ok, [1, nil], %{}} =
                Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
-
-      assert msg =~ "expected at least 2 elements"
     end
 
     test ":as binding with failing inner pattern returns error" do

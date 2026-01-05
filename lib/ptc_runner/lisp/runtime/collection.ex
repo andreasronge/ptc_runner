@@ -196,15 +196,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def count(%MapSet{} = set), do: MapSet.size(set)
 
-  def count(coll) when is_list(coll) or is_map(coll) or is_binary(coll) do
-    Enum.count(coll)
-  end
+  def count(coll) when is_binary(coll), do: String.length(coll)
+  def count(coll) when is_list(coll) or is_map(coll), do: Enum.count(coll)
 
   def empty?(%MapSet{} = set), do: MapSet.size(set) == 0
 
-  def empty?(coll) when is_list(coll) or is_map(coll) or is_binary(coll) do
-    Enum.empty?(coll)
-  end
+  def empty?(coll) when is_binary(coll), do: coll == ""
+  def empty?(coll) when is_list(coll) or is_map(coll), do: Enum.empty?(coll)
 
   def seq(coll) when is_list(coll) do
     case coll do
