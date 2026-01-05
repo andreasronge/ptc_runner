@@ -490,6 +490,10 @@ defmodule PtcRunner.Lisp.ClojureValidator do
     (defn pluck [key coll]
       (map #(get % key) coll))
 
+    ;; Parallel execution stubs (run sequentially in BB/Clojure for validation)
+    (defn pmap [f coll] (map f coll))
+    (defn pcalls [& fns] (mapv #(%) fns))
+
     ;; Tool call stub (returns nil by default)
     (defn call [tool-name args]
       nil)
