@@ -5,7 +5,16 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   ## Usage
 
-      mix ptc.repl
+      mix ptc.repl                      # Interactive REPL (default)
+      mix ptc.repl -e "(+ 1 2)"         # Eval and print result
+      mix ptc.repl -e "(def x 1)" -e "(* x 2)"  # Chain evals (memory persists)
+      mix ptc.repl script.clj           # Run script file
+      mix ptc.repl -                    # Run from stdin
+
+  ## Options
+
+    * `-e, --eval` - Evaluate expression and print result (can be repeated)
+    * `-h, --help` - Print this help
 
   ## Features
 
@@ -27,12 +36,83 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   use Mix.Task
 
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.Loop.ResponseHandler
 
+  @switches [eval: :keep, help: :boolean]
+  @aliases [e: :eval, h: :help]
+
   @impl Mix.Task
-  def run(_args) do
+  def run(args) do
     Mix.Task.run("app.start")
 
+    {opts, rest, _invalid} = OptionParser.parse(args, switches: @switches, aliases: @aliases)
+
+    cond do
+      opts[:help] ->
+        print_help()
+
+      rest == ["-"] ->
+        run_stdin()
+
+      rest != [] ->
+        run_file(hd(rest))
+
+      opts[:eval] ->
+        run_evals(Keyword.get_values(opts, :eval))
+
+      true ->
+        interactive_repl()
+    end
+  end
+
+  defp print_help do
+    IO.puts(@moduledoc)
+  end
+
+  defp run_stdin do
+    case IO.read(:stdio, :eof) do
+      {:error, reason} ->
+        IO.puts(:stderr, "Error reading stdin: #{reason}")
+        System.halt(1)
+
+      source ->
+        run_source(source)
+    end
+  end
+
+  defp run_file(path) do
+    case File.read(path) do
+      {:ok, source} ->
+        run_source(source)
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Error reading #{path}: #{:file.format_error(reason)}")
+        System.halt(1)
+    end
+  end
+
+  defp run_evals(exprs) do
+    # run_source halts on error, so we can use simple reduce
+    Enum.reduce(exprs, %{}, fn expr, memory ->
+      {:ok, new_memory} = run_source(expr, memory)
+      new_memory
+    end)
+  end
+
+  defp run_source(source, memory \\ %{}) do
+    case PtcRunner.Lisp.run(source, memory: memory) do
+      {:ok, step} ->
+        IO.puts(Format.to_clojure(step.return))
+        {:ok, step.memory}
+
+      {:error, step} ->
+        IO.puts(:stderr, format_error(step.fail))
+        System.halt(1)
+    end
+  end
+
+  defp interactive_repl do
     IO.puts("PTC-Lisp REPL (Ctrl+D or empty line to exit)")
     IO.puts("Turn history: *1, *2, *3 reference last 3 results\n")
 
