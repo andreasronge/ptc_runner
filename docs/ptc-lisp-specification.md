@@ -1072,6 +1072,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 |----------|-----------|-------------|
 | `map` | `(map f coll)` | Apply f to each item |
 | `pmap` | `(pmap f coll)` | Apply f to each item in parallel |
+| `pcalls` | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
 | `mapv` | `(mapv f coll)` | Like map, returns vector |
 | `select-keys` | `(select-keys map keys)` | Pick specific keys |
 | `pluck` | `(pluck key coll)` | Extract single field from each item |
@@ -1079,6 +1080,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ```clojure
 (map :name users)                    ; extract :name from each
 (pmap :name users)                   ; same, but parallel execution
+(pcalls #(ctx/get-user) #(ctx/get-stats))  ; parallel heterogeneous calls
 (mapv :name users)                   ; same, ensures vector
 (select-keys user [:name :email])    ; pick keys from map
 (pluck :name users)                  ; shorthand for (map :name coll)
@@ -1102,6 +1104,27 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 - Each parallel branch gets a read-only snapshot of the user namespace
 - Writes within branches (via `def`) are isolated and discarded
 - Errors in any branch propagate to the caller
+
+**Parallel Calls (`pcalls`):** Executes multiple zero-arity functions (thunks) concurrently and returns their results as a vector. Unlike `pmap` which applies one function to many items, `pcalls` runs multiple different functions in parallel:
+
+```clojure
+;; Fetch multiple pieces of data in parallel
+(let [[user stats config] (pcalls
+                            #(ctx/get-user {:id ctx/user-id})
+                            #(ctx/get-stats {:id ctx/user-id})
+                            #(ctx/get-config {}))]
+  {:user user :stats stats :config config})
+
+;; Simple parallel computations
+(pcalls #(+ 1 1) #(* 2 3) #(- 10 5))    ; => [2 6 5]
+```
+
+**pcalls semantics:**
+- Order is preserved - results match argument order
+- All functions must be zero-arity thunks (use `#()` syntax)
+- If any function fails, entire `pcalls` expression fails (atomic)
+- Errors include the failed function index and error details
+- Each parallel branch gets a read-only snapshot of the user namespace
 
 #### Ordering
 

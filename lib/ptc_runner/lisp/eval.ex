@@ -373,6 +373,62 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # ============================================================
+  # Parallel calls: pcalls
+  # ============================================================
+
+  defp do_eval({:pcalls, fn_asts}, %EvalContext{} = eval_ctx) do
+    # First evaluate all function expressions to get function values
+    result =
+      Enum.reduce_while(fn_asts, {:ok, [], eval_ctx.user_ns}, fn fn_ast, {:ok, acc, ns} ->
+        case do_eval(fn_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
+          {:ok, fn_val, ns2} -> {:cont, {:ok, [fn_val | acc], ns2}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, fn_vals, user_ns2} ->
+        # Convert each function value to an Erlang function (zero-arity thunk)
+        # Use a try/rescue to catch validation errors (wrong arity, non-callable)
+        try do
+          erlang_fns =
+            fn_vals
+            |> Enum.reverse()
+            |> Enum.with_index()
+            |> Enum.map(fn {fn_val, idx} ->
+              {pcalls_fn_to_erlang(fn_val, eval_ctx), idx}
+            end)
+
+          # Execute all thunks in parallel using Task.async_stream
+          results =
+            erlang_fns
+            |> Task.async_stream(
+              fn {erlang_fn, idx} ->
+                try do
+                  {:ok, erlang_fn.(), idx}
+                rescue
+                  e ->
+                    {:error, {:pcalls_error, idx, Exception.message(e)}}
+                end
+              end,
+              timeout: :infinity,
+              ordered: true
+            )
+            |> Enum.to_list()
+
+          # Collect results, stopping at first error
+          collect_pcalls_results(results, [], user_ns2)
+        rescue
+          e in RuntimeError ->
+            {:error, {:pcalls_error, Exception.message(e)}}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   # Tool calls
   defp do_eval({:call_tool, tool_name, args_ast}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     with {:ok, args_map, user_ns2} <- do_eval(args_ast, eval_ctx) do
@@ -535,5 +591,64 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp collect_pmap_results([{:exit, reason} | _rest], _acc, _user_ns) do
     {:error, {:pmap_error, "parallel task failed: #{inspect(reason)}"}}
+  end
+
+  # ============================================================
+  # Pcalls helpers
+  # ============================================================
+
+  # Convert a closure to a zero-arity Erlang function for use in pcalls
+  defp pcalls_fn_to_erlang(
+         {:closure, [], body, closure_env, turn_history},
+         %EvalContext{} = eval_ctx
+       ) do
+    fn ->
+      ctx =
+        EvalContext.new(
+          eval_ctx.ctx,
+          eval_ctx.user_ns,
+          closure_env,
+          eval_ctx.tool_exec,
+          turn_history
+        )
+
+      case do_eval(body, ctx) do
+        {:ok, result, _ns} -> result
+        {:error, reason} -> raise "pcalls function failed: #{inspect(reason)}"
+      end
+    end
+  end
+
+  defp pcalls_fn_to_erlang({:closure, params, _body, _closure_env, _turn_history}, %EvalContext{}) do
+    arity = length(params)
+    raise "pcalls requires zero-arity thunks, got function with arity #{arity}"
+  end
+
+  defp pcalls_fn_to_erlang(f, %EvalContext{}) when is_function(f, 0) do
+    f
+  end
+
+  defp pcalls_fn_to_erlang(f, %EvalContext{}) when is_function(f) do
+    {:arity, arity} = Function.info(f, :arity)
+    raise "pcalls requires zero-arity thunks, got function with arity #{arity}"
+  end
+
+  defp pcalls_fn_to_erlang(value, %EvalContext{}) do
+    raise "pcalls requires callable thunks, got: #{inspect(value)}"
+  end
+
+  # Helper to collect pcalls results, preserving order and detecting errors
+  defp collect_pcalls_results([], acc, user_ns), do: {:ok, Enum.reverse(acc), user_ns}
+
+  defp collect_pcalls_results([{:ok, {:ok, val, _idx}} | rest], acc, user_ns) do
+    collect_pcalls_results(rest, [val | acc], user_ns)
+  end
+
+  defp collect_pcalls_results([{:ok, {:error, reason}} | _rest], _acc, _user_ns) do
+    {:error, reason}
+  end
+
+  defp collect_pcalls_results([{:exit, reason} | _rest], _acc, _user_ns) do
+    {:error, {:pcalls_error, "parallel task failed: #{inspect(reason)}"}}
   end
 end
