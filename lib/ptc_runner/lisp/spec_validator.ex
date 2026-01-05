@@ -646,6 +646,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
       String.starts_with?(str, ":") -> parse_keyword(str)
       collection?(str) -> parse_collection(str)
       map?(str) -> parse_map(str)
+      String.starts_with?(str, "#'") -> parse_var(str)
       true -> :error
     end
   end
@@ -702,6 +703,14 @@ defmodule PtcRunner.Lisp.SpecValidator do
   defp parse_keyword(str) do
     keyword_name = String.slice(str, 1..-1//1)
     {:ok, String.to_atom(keyword_name)}
+  end
+
+  # Parse vars like #'name (optionally followed by comments)
+  defp parse_var(str) do
+    # Only take the part until the first space
+    var_part = str |> String.split(" ") |> hd()
+    var_name = String.slice(var_part, 2..-1//1)
+    {:ok, %PtcRunner.Lisp.Format.Var{name: String.to_atom(var_name)}}
   end
 
   # Unescape string literals
