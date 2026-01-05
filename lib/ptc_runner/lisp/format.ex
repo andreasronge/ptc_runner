@@ -241,9 +241,13 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize(%Fn{} = f), do: f
   defp sanitize(%Builtin{} = b), do: b
 
-  defp sanitize(map) when is_map(map) do
+  # Exclude structs (MapSet, DateTime, etc.) - they enumerate differently
+  defp sanitize(map) when is_map(map) and not is_struct(map) do
     Map.new(map, fn {k, v} -> {k, sanitize(v)} end)
   end
+
+  # Structs pass through unchanged (let Inspect handle them)
+  defp sanitize(%_{} = struct), do: struct
 
   defp sanitize(list) when is_list(list) do
     Enum.map(list, &sanitize/1)

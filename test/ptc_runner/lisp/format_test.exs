@@ -129,6 +129,28 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
+  describe "to_string/2 with structs" do
+    test "handles MapSet without crashing" do
+      # Regression test: MapSet passes is_map/1 but enumerates as elements, not tuples
+      result = Format.to_string(MapSet.new(["meals", "travel"]))
+      assert result =~ "MapSet"
+    end
+
+    test "handles MapSet nested in map" do
+      result = Format.to_string(%{categories: MapSet.new(["a", "b"])})
+      assert result =~ "categories"
+      assert result =~ "MapSet"
+    end
+  end
+
+  describe "to_clojure/2 with structs" do
+    test "handles MapSet" do
+      # Structs pass through to inspect
+      result = Format.to_clojure(MapSet.new(["meals"]))
+      assert result =~ "MapSet"
+    end
+  end
+
   describe "to_string/2 with options" do
     test "respects limit option" do
       assert Format.to_string([1, 2, 3, 4, 5], limit: 2) == "[1, 2, ...]"

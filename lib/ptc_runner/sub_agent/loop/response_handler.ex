@@ -154,6 +154,51 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
   defp truncate_feedback(str, _max_chars), do: str
 
+  @doc """
+  Format final result for caller.
+
+  Uses `format_options` from SubAgent:
+  - `:result_limit` - Inspect limit for collections (default: 50)
+  - `:result_max_chars` - Max chars in result (default: 500)
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_result(42)
+      "42"
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_result(3.14159)
+      "3.14"
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.format_result([1, 2, 3])
+      "[1, 2, 3]"
+
+  """
+  @spec format_result(term(), keyword()) :: String.t()
+  def format_result(result, format_options \\ [])
+
+  def format_result(result, _opts) when is_float(result) do
+    :erlang.float_to_binary(result, decimals: 2)
+  end
+
+  def format_result(result, _opts) when is_integer(result) do
+    Integer.to_string(result)
+  end
+
+  def format_result(result, format_options) do
+    limit = Keyword.get(format_options, :result_limit, 50)
+    max_chars = Keyword.get(format_options, :result_max_chars, 500)
+
+    result
+    |> inspect(limit: limit, pretty: false)
+    |> truncate_result(max_chars)
+  end
+
+  defp truncate_result(str, max_chars) when byte_size(str) > max_chars do
+    String.slice(str, 0, max_chars) <> "..."
+  end
+
+  defp truncate_result(str, _max_chars), do: str
+
   # Default maximum size for turn history entries (1KB)
   @default_max_history_bytes 1024
 
