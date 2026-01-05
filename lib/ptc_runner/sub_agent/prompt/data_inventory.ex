@@ -96,18 +96,7 @@ defmodule PtcRunner.SubAgent.Prompt.DataInventory do
     header <> rows <> note
   end
 
-  @doc """
-  Get description for a field, trying both atom and string keys.
-
-  ## Parameters
-
-  - `key` - The field key (atom or string)
-  - `descriptions` - Map of field descriptions
-
-  ## Returns
-
-  The description string or nil if not found.
-  """
+  @doc false
   @spec get_field_description(atom() | String.t(), map() | nil) :: String.t() | nil
   def get_field_description(_key, nil), do: nil
 
