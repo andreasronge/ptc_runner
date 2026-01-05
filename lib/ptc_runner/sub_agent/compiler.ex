@@ -90,10 +90,17 @@ defmodule PtcRunner.SubAgent.Compiler do
 
         all_tools = Map.merge(agent.tools, system_tools)
 
+        # Capture field_descriptions for populating in the returned step
+        field_descs = agent.field_descriptions
+
         execute = fn args ->
           case PtcRunner.Lisp.run(source, context: args, tools: all_tools) do
-            {:ok, step} -> step
-            {:error, step} -> step
+            {:ok, step} ->
+              # Populate field_descriptions for downstream chaining
+              %{step | field_descriptions: field_descs}
+
+            {:error, step} ->
+              step
           end
         end
 
