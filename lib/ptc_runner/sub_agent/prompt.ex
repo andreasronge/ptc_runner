@@ -134,9 +134,12 @@ defmodule PtcRunner.SubAgent.Prompt do
     context = Keyword.get(opts, :context, %{})
     error_context = Keyword.get(opts, :error_context)
     resolution_context = Keyword.get(opts, :resolution_context, %{})
+    # Field descriptions received from upstream agent in a chain
+    received_field_descriptions = Keyword.get(opts, :received_field_descriptions)
 
     # Generate base prompt with resolution context for language_spec callbacks
-    base_prompt = generate_base_prompt(agent, context, resolution_context)
+    base_prompt =
+      generate_base_prompt(agent, context, resolution_context, received_field_descriptions)
 
     # Add error recovery prompt if needed
     base_prompt_with_error =
@@ -213,7 +216,12 @@ defmodule PtcRunner.SubAgent.Prompt do
     spec.(context)
   end
 
-  defp generate_base_prompt(%SubAgent{} = agent, context, resolution_context) do
+  defp generate_base_prompt(
+         %SubAgent{} = agent,
+         context,
+         resolution_context,
+         received_field_descriptions
+       ) do
     # Parse signature if present
     context_signature =
       case agent.signature do
@@ -250,9 +258,15 @@ defmodule PtcRunner.SubAgent.Prompt do
     # Generate sections
     role_section = generate_role_section()
     rules_section = generate_rules_section()
-    data_inventory = generate_data_inventory(context, context_signature)
+    # Pass received field descriptions for rendering in the data inventory
+    data_inventory =
+      generate_data_inventory(context, context_signature, received_field_descriptions)
+
     tool_schemas = generate_tool_schemas(agent.tools, agent.tool_catalog)
-    expected_output = generate_expected_output_section(context_signature)
+
+    expected_output =
+      generate_expected_output_section(context_signature, agent.field_descriptions)
+
     mission = expand_mission(agent.prompt, context)
 
     # Combine all sections
@@ -275,11 +289,14 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   Shows available context variables with their inferred types and sample values.
   Handles nested maps, lists, and firewalled fields (prefixed with `_`).
+  When field descriptions are provided (from upstream agent chaining), they are
+  rendered as Clojure-style comments below each field.
 
   ## Parameters
 
   - `context` - Context map
   - `context_signature` - Optional parsed signature for type information
+  - `field_descriptions` - Optional map of field name atoms to description strings
 
   ## Returns
 
@@ -295,10 +312,11 @@ defmodule PtcRunner.SubAgent.Prompt do
       true
 
   """
-  @spec generate_data_inventory(map(), Signature.signature() | nil) :: String.t()
-  def generate_data_inventory(context, context_signature \\ nil)
+  @spec generate_data_inventory(map(), Signature.signature() | nil, map() | nil) :: String.t()
+  def generate_data_inventory(context, context_signature \\ nil, field_descriptions \\ nil)
 
-  def generate_data_inventory(context, _context_signature) when map_size(context) == 0 do
+  def generate_data_inventory(context, _context_signature, _field_descriptions)
+      when map_size(context) == 0 do
     """
     # Data Inventory
 
@@ -306,7 +324,7 @@ defmodule PtcRunner.SubAgent.Prompt do
     """
   end
 
-  def generate_data_inventory(context, context_signature) do
+  def generate_data_inventory(context, context_signature, field_descriptions) do
     # Get parameter types from signature if available
     param_types =
       case context_signature do
@@ -326,8 +344,11 @@ defmodule PtcRunner.SubAgent.Prompt do
         is_firewalled = String.starts_with?(key_str, "_")
         sample = if is_firewalled, do: "[Hidden]", else: format_sample(value)
         firewalled_note = if is_firewalled, do: " [Firewalled]", else: ""
+        # Add field description if available
+        desc = get_field_description(key, field_descriptions)
+        desc_note = if desc, do: " — #{desc}", else: ""
 
-        "| `ctx/#{key_str}` | `#{type_str}` | #{sample}#{firewalled_note} |"
+        "| `ctx/#{key_str}` | `#{type_str}` | #{sample}#{firewalled_note}#{desc_note} |"
       end)
 
     header = """
@@ -347,6 +368,19 @@ defmodule PtcRunner.SubAgent.Prompt do
       end
 
     header <> rows <> note
+  end
+
+  # Get description for a field, trying both atom and string keys
+  defp get_field_description(_key, nil), do: nil
+
+  defp get_field_description(key, descriptions) when is_map(descriptions) do
+    # Try atom key first, then string key
+    key_atom = if is_atom(key), do: key, else: String.to_existing_atom(to_string(key))
+    key_str = to_string(key)
+
+    Map.get(descriptions, key_atom) || Map.get(descriptions, key_str)
+  rescue
+    ArgumentError -> Map.get(descriptions, to_string(key))
   end
 
   @doc """
@@ -803,19 +837,56 @@ defmodule PtcRunner.SubAgent.Prompt do
     format_tool(name)
   end
 
-  defp generate_expected_output_section(nil), do: ""
+  defp generate_expected_output_section(nil, _field_descriptions), do: ""
 
-  defp generate_expected_output_section({:signature, _params, return_type}) do
+  defp generate_expected_output_section({:signature, _params, return_type}, field_descriptions) do
     type_str = Renderer.render_type(return_type)
     example_val = generate_return_example_value(return_type)
+
+    # Add field descriptions for output fields if available
+    field_descs = generate_output_field_descriptions(return_type, field_descriptions)
 
     """
     # Expected Output
 
-    Your final answer must match this format: `#{type_str}`
+    Your final answer must match this format: `#{type_str}`#{field_descs}
 
     Call `(return #{example_val})` when complete.
     """
+  end
+
+  # Generate field descriptions for output fields
+  defp generate_output_field_descriptions({:map, fields}, field_descriptions)
+       when is_map(field_descriptions) and map_size(field_descriptions) > 0 do
+    descs =
+      fields
+      |> Enum.flat_map(fn {name, _type} ->
+        get_field_description_for_list(name, field_descriptions)
+      end)
+
+    if descs == [] do
+      ""
+    else
+      "\n\nField descriptions:\n" <> Enum.join(descs, "\n")
+    end
+  end
+
+  defp generate_output_field_descriptions(_return_type, _field_descriptions), do: ""
+
+  defp get_field_description_for_list(name, field_descriptions) do
+    # Try atom key first, then string key
+    key_atom = if is_atom(name), do: name, else: String.to_existing_atom(to_string(name))
+
+    case Map.get(field_descriptions, key_atom) || Map.get(field_descriptions, name) do
+      nil -> []
+      desc -> ["  - `#{name}`: #{desc}"]
+    end
+  rescue
+    ArgumentError ->
+      case Map.get(field_descriptions, name) do
+        nil -> []
+        desc -> ["  - `#{name}`: #{desc}"]
+      end
   end
 
   defp generate_return_example_value(:int), do: "42"
