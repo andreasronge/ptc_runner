@@ -141,7 +141,7 @@ signature: "[{id :int, title :string}]"
 
 ```elixir
 signature: "(user_id :int) -> {name :string, orders [:map]}"
-# Called as: (call "agent" {:user_id 123})
+# Called as: (ctx/agent {:user_id 123})
 # Returns: {:name "Alice" :orders [...]}
 ```
 
@@ -172,7 +172,7 @@ When a tool is called, inputs are validated against signature parameters:
 
 ```elixir
 # Signature: (id :int, name :string) -> :bool
-# Tool call: (call "check" {:id "42" :name "Alice"})
+# Tool call: (ctx/check {:id "42" :name "Alice"})
 
 # Behavior:
 # 1. Coerce "42" -> 42 (string to int, with warning)

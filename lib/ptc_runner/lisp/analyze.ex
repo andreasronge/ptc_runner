@@ -20,7 +20,6 @@ defmodule PtcRunner.Lisp.Analyze do
           | {:invalid_arity, atom(), String.t()}
           | {:invalid_where_form, String.t()}
           | {:invalid_where_operator, atom()}
-          | {:invalid_call_tool_name, any()}
           | {:invalid_cond_form, String.t()}
           | {:invalid_thread_form, atom(), String.t()}
           | {:unsupported_pattern, term()}
@@ -142,7 +141,13 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :juxt}, rest, _list), do: analyze_juxt(rest)
 
-  defp dispatch_list_form({:symbol, :call}, rest, _list), do: analyze_call_tool(rest)
+  defp dispatch_list_form({:symbol, :call}, _rest, _list) do
+    {:error,
+     {:invalid_form,
+      "(call \"tool\" args) is deprecated, use (ctx/tool-name args) instead. " <>
+        "Example: (call \"search\" {:query \"foo\"}) becomes (ctx/search {:query \"foo\"})"}}
+  end
+
   defp dispatch_list_form({:symbol, :return}, rest, _list), do: analyze_return(rest)
   defp dispatch_list_form({:symbol, :fail}, rest, _list), do: analyze_fail(rest)
   defp dispatch_list_form({:symbol, :def}, rest, _list), do: analyze_def(rest)
@@ -460,36 +465,6 @@ defmodule PtcRunner.Lisp.Analyze do
     with {:ok, fns} <- analyze_list(args) do
       {:ok, {:juxt, fns}}
     end
-  end
-
-  # ============================================================
-  # Tool invocation: call
-  # ============================================================
-
-  defp analyze_call_tool([{:string, name}]) do
-    {:ok, {:call_tool, name, {:map, []}}}
-  end
-
-  defp analyze_call_tool([{:string, name}, args_ast]) do
-    with {:ok, args_core} <- do_analyze(args_ast) do
-      case args_core do
-        {:map, _} = args_map ->
-          {:ok, {:call_tool, name, args_map}}
-
-        other ->
-          {:error, {:invalid_form, "call args must be a map, got: #{inspect(other)}"}}
-      end
-    end
-  end
-
-  defp analyze_call_tool([other | _]) do
-    {:error,
-     {:invalid_call_tool_name, "tool name must be string literal, got: #{inspect(other)}"}}
-  end
-
-  defp analyze_call_tool(_) do
-    {:error,
-     {:invalid_arity, :call, "expected (call \"tool-name\") or (call \"tool-name\" args)"}}
   end
 
   # ============================================================

@@ -25,7 +25,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # let binding, map literal with pluck
       # V2: just returns the map, no implicit memory merge
       source = ~S"""
-      (let [high-paid (->> (call "find-employees" {})
+      (let [high-paid (->> (ctx/find-employees {})
                            (filter (where :salary > 100000)))]
         {:emails (pluck :email high-paid)
          :high-paid high-paid
@@ -59,7 +59,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Tests behavior when filter produces empty list
       # V2: returns count directly, no implicit memory
       source = ~S"""
-      (let [results (->> (call "search" {})
+      (let [results (->> (ctx/search {})
                          (filter (where :active = true)))]
         (count results))
       """
@@ -136,7 +136,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     test "thread-last with multiple transformations" do
       # Thread-last: value goes as last argument
       source = ~S"""
-      (->> (call "get-numbers" {})
+      (->> (ctx/get-numbers {})
            (filter (where :value > 1))
            first
            (:name))

@@ -1184,7 +1184,7 @@ SubAgent.Debug.print_trace(step)
 # ┌─ Turn 1 ─────────────────────────────────────
 # │ Prompt: Find urgent emails for alice@example.com
 # │ Program:
-# │   (let [emails (call "list_emails" {:user ctx/user})]
+# │   (let [emails (ctx/list_emails {:user ctx/user})]
 # │     (return {:count (count emails) :ids (map :id emails)}))
 # │ Tools:
 # │   → list_emails({user: "alice@example.com"})
