@@ -330,7 +330,7 @@ defmodule PtcRunner.Lisp.Eval do
     case result do
       {:ok, fns, user_ns2} ->
         # Convert each fn to Erlang function (handles closures, keywords, builtins)
-        erlang_fns = Enum.map(Enum.reverse(fns), &juxt_fn_to_erlang(&1, eval_ctx))
+        erlang_fns = Enum.map(Enum.reverse(fns), &value_to_erlang_fn(&1, eval_ctx))
         fun = build_juxt_fn(erlang_fns)
         {:ok, fun, user_ns2}
 
@@ -349,7 +349,7 @@ defmodule PtcRunner.Lisp.Eval do
            do_eval(coll_ast, EvalContext.update_user_ns(eval_ctx, user_ns1)) do
       # Convert the function value to an Erlang function
       # The closure captures a read-only snapshot of the environment at creation time
-      erlang_fn = pmap_fn_to_erlang(fn_val, eval_ctx)
+      erlang_fn = value_to_erlang_fn(fn_val, eval_ctx)
 
       # Execute in parallel using Task.async_stream
       results =
@@ -492,35 +492,29 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # ============================================================
+  # Shared helpers
+  # ============================================================
+
+  # Convert a value to an Erlang function for use in juxt, pmap, etc.
+  # Keywords need special handling as map accessors
+  defp value_to_erlang_fn(k, %EvalContext{}) when is_atom(k) and not is_boolean(k) do
+    fn m -> flex_get(m, k) end
+  end
+
+  defp value_to_erlang_fn(value, %EvalContext{} = eval_ctx) do
+    Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
+  end
+
+  # ============================================================
   # Juxt helpers
   # ============================================================
 
   # Build juxt function that applies all functions and returns vector of results
   defp build_juxt_fn(fns), do: fn arg -> Enum.map(fns, & &1.(arg)) end
 
-  # Convert a value to an Erlang function for use in juxt
-  # Keywords need special handling as map accessors
-  defp juxt_fn_to_erlang(k, %EvalContext{}) when is_atom(k) and not is_boolean(k) do
-    fn m -> flex_get(m, k) end
-  end
-
-  defp juxt_fn_to_erlang(value, %EvalContext{} = eval_ctx) do
-    Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
-  end
-
   # ============================================================
   # Pmap helpers
   # ============================================================
-
-  # Convert a value to an Erlang function for use in pmap
-  # Keywords need special handling as map accessors
-  defp pmap_fn_to_erlang(k, %EvalContext{}) when is_atom(k) and not is_boolean(k) do
-    fn m -> flex_get(m, k) end
-  end
-
-  defp pmap_fn_to_erlang(value, %EvalContext{} = eval_ctx) do
-    Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
-  end
 
   # Helper to collect pmap results, preserving order and detecting errors
   defp collect_pmap_results([], acc, user_ns), do: {:ok, Enum.reverse(acc), user_ns}
