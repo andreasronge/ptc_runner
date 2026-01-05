@@ -66,7 +66,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
     end
 
     test "raises ArgumentError if agent has SubAgentTool" do
-      child = SubAgent.new(prompt: "Child agent")
+      child = SubAgent.new(prompt: "Child agent", description: "A child agent")
       sub_agent_tool = SubAgent.as_tool(child)
       tools = %{"child" => sub_agent_tool}
 
