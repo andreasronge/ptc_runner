@@ -147,6 +147,31 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       assert result == 120
     end
 
+    # Issue #586: reduce argument order must match Clojure (f acc elem)
+    test "reduce with - uses Clojure argument order (3-arg)" do
+      # (reduce (fn [acc x] (- acc x)) 10 [1 2 3])
+      # = (- (- (- 10 1) 2) 3) = (- (- 9 2) 3) = (- 7 3) = 4
+      source = ~S"""
+      (reduce (fn [acc x] (- acc x)) 10 [1 2 3])
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == 4
+    end
+
+    test "reduce with - uses Clojure argument order (2-arg)" do
+      # (reduce - [10 1 2 3])
+      # = (- (- (- 10 1) 2) 3) = 4
+      source = ~S"""
+      (reduce - [10 1 2 3])
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == 4
+    end
+
     # Issue #245: Fix `or` to track last evaluated value
     test "or with all falsy values returns last evaluated value" do
       source = ~S"""

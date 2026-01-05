@@ -237,15 +237,19 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def seq(nil), do: nil
 
   # reduce with 2 args: (reduce f coll) - uses first element as initial value
+  # Clojure: (f acc elem), Elixir: fn elem, acc -> ... end
   def reduce(f, coll) when is_list(coll) do
     case coll do
       [] -> nil
-      [h | t] -> Enum.reduce(t, h, f)
+      [h | t] -> Enum.reduce(t, h, fn elem, acc -> f.(acc, elem) end)
     end
   end
 
   # reduce with 3 args: (reduce f init coll)
-  def reduce(f, init, coll) when is_list(coll), do: Enum.reduce(coll, init, f)
+  # Clojure: (f acc elem), Elixir: fn elem, acc -> ... end
+  def reduce(f, init, coll) when is_list(coll) do
+    Enum.reduce(coll, init, fn elem, acc -> f.(acc, elem) end)
+  end
 
   def sum_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     coll
