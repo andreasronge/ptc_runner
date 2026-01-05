@@ -308,6 +308,7 @@ When called:
 finder = SubAgent.new(
   prompt: "Find customer by {{description}}",
   signature: "(description :string) -> {id :int, name :string}",
+  description: "Find customer by description",
   tools: crm_tools
 )
 
@@ -448,6 +449,7 @@ registry = %{haiku: &MyApp.LLM.haiku/1, sonnet: &MyApp.LLM.sonnet/1}
 classifier = SubAgent.new(
   prompt: "Classify {{text}}",
   signature: "(text :string) -> {category :string}",
+  description: "Classify text into categories",
   llm: :haiku  # Always uses haiku
 )
 
@@ -455,8 +457,16 @@ classifier = SubAgent.new(
 finder = SubAgent.new(
   prompt: "Find {{item}}",
   signature: "(item :string) -> {id :int}",
+  description: "Find item by criteria",
   tools: search_tools
   # llm: nil - will inherit
+)
+
+# Agent that summarizes
+summarizer = SubAgent.new(
+  prompt: "Summarize {{text}}",
+  signature: "(text :string) -> {summary :string}",
+  description: "Summarize text concisely"
 )
 
 # Tools with different inheritance
@@ -526,9 +536,9 @@ registry = %{
 }
 
 # Level 3 agents
-classifier = SubAgent.new(prompt: "Classify", signature: "...")  # No llm
-scorer = SubAgent.new(prompt: "Score", signature: "...")         # No llm
-expert = SubAgent.new(prompt: "Expert analysis", signature: "...", llm: :opus)
+classifier = SubAgent.new(prompt: "Classify", signature: "...", description: "Classify data")  # No llm
+scorer = SubAgent.new(prompt: "Score", signature: "...", description: "Score data")         # No llm
+expert = SubAgent.new(prompt: "Expert analysis", signature: "...", description: "Expert analysis", llm: :opus)
 
 # Level 2 analyzer with nested tools
 analyzer = SubAgent.new(
@@ -702,7 +712,8 @@ Tools in the `:tools` map can be:
 
 **6. SubAgent-as-tool:**
 ```elixir
-"researcher" => SubAgent.as_tool(prompt: "...", signature: "...", tools: ...)
+researcher = SubAgent.new(prompt: "...", signature: "...", description: "...", tools: ...)
+"researcher" => SubAgent.as_tool(researcher)
 ```
 
 ### Tool Format Summary
@@ -1409,7 +1420,7 @@ The registry flows down to child SubAgents automatically. You only need to pass 
 
 ```elixir
 # Child agents with llm: :haiku resolve using parent's registry
-classifier = SubAgent.new(prompt: "Classify", llm: :haiku)
+classifier = SubAgent.new(prompt: "Classify", description: "Classify input", llm: :haiku)
 
 tools = %{"classify" => SubAgent.as_tool(classifier)}
 
