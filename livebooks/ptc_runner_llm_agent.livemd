@@ -1,432 +1,243 @@
-# PTC Runner - LLM Agent (Lisp)
+# PTC-Lisp SubAgent
 
 ```elixir
+# For local dev: run `mix deps.get` in the project root first
 repo_root = Path.expand("..", __DIR__)
 
 deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
-    # Local development - includes llm_client for model presets
+    # Local dev includes LLMClient for model presets
     [
       {:ptc_runner, path: repo_root},
       {:llm_client, path: Path.join(repo_root, "llm_client")}
     ]
   else
-    # Public/URL mode
     [{:ptc_runner, "~> 0.3.3"}]
   end
 
-Mix.install(deps ++ [
-  {:req_llm, "~> 1.0"},
-  {:kino, "~> 0.14"}
-])
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
 ```
 
 ## Introduction
 
-This notebook demonstrates **LLM-powered data analysis** using PTC-Lisp (Programmatic Tool Calling).
-
-The pattern:
-
-1. You ask a natural language question
-2. LLM generates a PTC-Lisp program to query your data
-3. Program executes in the BEAM (data never leaves your machine)
-4. Result returns to LLM for interpretation
-5. If there's an error, LLM retries with a corrected program
-
-**Why PTC-Lisp?** It has `group-by` and `update-vals` for aggregations, and is 8x more token-efficient than JSON.
+SubAgents are LLM-powered agents that write PTC-Lisp programs to compute answers. Instead of the LLM answering directly, it generates code that runs in a sandboxed interpreter - giving you deterministic, verifiable results.
 
 ## Configuration
 
-We'll use [OpenRouter](https://openrouter.ai/) which provides access to many models with a single API key.
-
-**To set up your API key:**
-
-1. Click "Secrets" in the left sidebar (or press `ss`)
-2. Add a secret named `OPENROUTER_API_KEY`
-3. Paste your OpenRouter API key as the value
-
-The secret will persist across sessions.
+For cloud models, add your API key in the Secrets panel (left sidebar, `ss`). Local models (Ollama) work without a key.
 
 ```elixir
-# Try Livebook secret first, fall back to environment variable
+# Try Livebook secret first, fall back to environment
 api_key =
   case System.get_env("LB_OPENROUTER_API_KEY") do
     nil -> System.get_env("OPENROUTER_API_KEY")
     key -> key
   end
 
-if is_nil(api_key) or api_key == "" do
-  Kino.interrupt!(:error, """
-  OpenRouter API key not found.
+if api_key, do: System.put_env("OPENROUTER_API_KEY", api_key)
 
-  Please add a secret named OPENROUTER_API_KEY in the Secrets panel (left sidebar, or press 'ss').
-  """)
+if api_key do
+  "OpenRouter API key configured"
+else
+  "No API key - local models (Ollama) only"
 end
-
-System.put_env("OPENROUTER_API_KEY", api_key)
-"API key configured from #{if System.get_env("LB_OPENROUTER_API_KEY"), do: "Livebook secret", else: "environment"}"
 ```
 
-Select a model:
-
 ```elixir
-# Build model options from LLMClient if available, otherwise use fallback
+# Build model options from LLMClient if available
 model_options =
   if Code.ensure_loaded?(LLMClient) do
-    # Use LLMClient presets for local development
-    LLMClient.presets()
-    |> Enum.map(fn {alias_name, model_id} ->
-      info = LLMClient.get_model_info(alias_name)
-      label = if info, do: info.description, else: alias_name
-      {model_id, label}
-    end)
+    LLMClient.list_models()
+    |> Enum.filter(fn m -> m.available end)
+    |> Enum.map(fn m -> {m.model_id, "#{m.alias} - #{m.description}"} end)
     |> Enum.sort_by(fn {_, label} -> label end)
   else
-    # Fallback for public mode (when llm_client is not installed)
+    # Fallback for public mode
     [
-      {"openrouter:mistralai/devstral-2512:free", "Devstral 2512 (free)"},
-      {"openrouter:deepseek/deepseek-chat-v3-0324", "DeepSeek Chat V3"},
-      {"openrouter:google/gemini-2.5-flash", "Gemini 2.5 Flash"},
-      {"openrouter:anthropic/claude-haiku-4.5", "Claude Haiku 4.5"},
-      {"openrouter:moonshotai/kimi-k2", "Kimi K2"},
-      {"openrouter:openai/gpt-4.1-mini", "GPT-4.1 Mini"}
+      {"openrouter:anthropic/claude-haiku-4.5", "haiku - Claude Haiku 4.5"},
+      {"openrouter:google/gemini-2.5-flash", "gemini - Gemini 2.5 Flash"},
+      {"openrouter:deepseek/deepseek-chat-v3-0324", "deepseek - DeepSeek Chat V3"},
+      {"openrouter:mistralai/devstral-2512:free", "devstral - Devstral (free)"}
     ]
   end
 
+IO.puts("Available models: #{length(model_options)}")
 model_input = Kino.Input.select("Model", model_options)
 ```
 
 ```elixir
 model = Kino.Input.read(model_input)
-IO.puts("Selected: #{model}")
+
+# Create LLM callback - uses LLMClient if available (supports Ollama), else ReqLLM
+my_llm =
+  if Code.ensure_loaded?(LLMClient) do
+    fn %{system: system, messages: messages} ->
+      full_messages = [%{role: :system, content: system} | messages]
+
+      case LLMClient.generate_text(model, full_messages, receive_timeout: 60_000) do
+        {:ok, response} -> {:ok, response.content}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  else
+    fn %{system: system, messages: messages} ->
+      full_messages = [%{role: :system, content: system} | messages]
+
+      case ReqLLM.generate_text(model, full_messages, receive_timeout: 30_000) do
+        {:ok, response} -> {:ok, ReqLLM.Response.text(response)}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+IO.puts("LLM ready: #{model}")
 ```
 
-## Sample Data
+## Basic Example
 
-Let's create a small dataset of expenses. In a real application, this could be thousands of records.
+The simplest SubAgent - no tools, no validation:
+
+```elixir
+alias PtcRunner.SubAgent.Debug
+
+{:ok, step} = PtcRunner.SubAgent.run(
+  "What is the sum of the first 5 prime numbers?",
+  llm: my_llm,
+  debug: true
+)
+
+# Show the program the LLM generated
+
+#Debug.print_trace(step)
+
+IO.puts("\nResult: #{step.return}")
+```
+
+The agent doesn't answer from memory - it writes a program like `(+ 2 3 5 7 11)` and executes it. The result is computed, not recalled.
+
+## With Type Signatures
+
+Signatures validate the output structure. Use `context` to pass data and `max_turns: 1` for single-shot (no tools needed):
+
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "Classify this review as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
+  context: %{review: "Great product, fast shipping! Would definitely buy again."},
+  signature: "(review :string) -> {sentiment :string, confidence :float}",
+  max_turns: 1,
+  llm: my_llm,
+  debug: true
+)
+
+Debug.print_trace(step)
+IO.puts("\nSentiment: #{step.return.sentiment}, Confidence: #{step.return.confidence}")
+```
+
+## With Tools
+
+Tools let the agent call functions to gather data:
 
 ```elixir
 expenses = [
-  %{"id" => 1, "category" => "travel", "amount" => 450.00, "date" => "2024-01-15", "vendor" => "Airlines Inc"},
-  %{"id" => 2, "category" => "food", "amount" => 32.50, "date" => "2024-01-16", "vendor" => "Cafe Luna"},
-  %{"id" => 3, "category" => "travel", "amount" => 189.00, "date" => "2024-01-17", "vendor" => "Hotel Central"},
-  %{"id" => 4, "category" => "office", "amount" => 299.99, "date" => "2024-01-18", "vendor" => "Tech Store"},
-  %{"id" => 5, "category" => "food", "amount" => 28.00, "date" => "2024-01-19", "vendor" => "Deli Express"},
-  %{"id" => 6, "category" => "travel", "amount" => 75.00, "date" => "2024-01-20", "vendor" => "Taxi Co"},
-  %{"id" => 7, "category" => "office", "amount" => 149.00, "date" => "2024-01-21", "vendor" => "Office Depot"},
-  %{"id" => 8, "category" => "food", "amount" => 45.00, "date" => "2024-01-22", "vendor" => "Restaurant XYZ"},
-  %{"id" => 9, "category" => "travel", "amount" => 520.00, "date" => "2024-01-23", "vendor" => "Airlines Inc"},
-  %{"id" => 10, "category" => "software", "amount" => 99.00, "date" => "2024-01-24", "vendor" => "SaaS Corp"}
+  %{"id" => 1, "category" => "travel", "amount" => 450.00, "vendor" => "Airlines Inc"},
+  %{"id" => 2, "category" => "food", "amount" => 32.50, "vendor" => "Cafe Luna"},
+  %{"id" => 3, "category" => "travel", "amount" => 189.00, "vendor" => "Hotel Central"},
+  %{"id" => 4, "category" => "office", "amount" => 299.99, "vendor" => "Tech Store"},
+  %{"id" => 5, "category" => "food", "amount" => 28.00, "vendor" => "Deli Express"}
 ]
 
-# Define tools - LLM calls these with (ctx/tool-name)
 tools = %{
-  "get-expenses" => fn _args -> expenses end
+  "list-expenses" => {fn _args -> expenses end,
+    signature: "() -> [{id :int, category :string, amount :float, vendor :string}]",
+    description: "Returns all expense records"
+  }
 }
 
-IO.puts("Loaded #{length(expenses)} expense records")
-Kino.DataTable.new(expenses)
+{:ok, step} = PtcRunner.SubAgent.run(
+  "What is the total travel expense?",
+  tools: tools,
+  signature: "{total :float}",
+  llm: my_llm
+)
+
+step.return
 ```
 
-## The System Prompt
+## Debug: Viewing the Trace
 
-The LLM needs to know:
+Enable `debug: true` to capture full trace data. Here's a query with tools:
 
-1. What data is available (schema, not raw data)
-2. How to write PTC-Lisp programs
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "What is the average expense amount?",
+  tools: tools,
+  signature: "{average :float}",
+  llm: my_llm,
+  debug: true
+)
 
-````elixir
-schema = """
-Tool: get-expenses
-  Returns a list of expense records with fields:
-  - id: integer
-  - category: string ("travel", "food", "office", "software")
-  - amount: float
-  - date: string (YYYY-MM-DD)
-  - vendor: string
+# Print execution trace
+Debug.print_trace(step)
 
-  Usage: (ctx/get-expenses)
-"""
+step.return
+```
 
-operations = PtcRunner.Lisp.Schema.to_prompt()
+Show full LLM messages with `messages: true`:
 
-system_prompt = """
-You are a data analyst. Answer questions about data by querying datasets.
+```elixir
+Debug.print_trace(step, messages: true)
+```
 
-To query data, output a PTC-Lisp program in a ```clojure code block. The result will be returned to you.
-Note: Large results (200+ chars) are truncated. Use count, first, or take to limit output.
+## Interactive Query
 
-Available data:
-
-#{schema}
-
-#{operations}
-"""
-
-IO.puts("System prompt length: #{String.length(system_prompt)} chars")
-
-# Collapsible viewer for the full prompt
-Kino.HTML.new("""
-<details>
-  <summary style="cursor: pointer; padding: 8px; background: #f0f0f0; border-radius: 4px;">
-    📋 View Full System Prompt
-  </summary>
-  <pre style="white-space: pre-wrap; background: #1e1e1e; color: #d4d4d4; padding: 1em; border-radius: 4px; margin-top: 8px; overflow-x: auto;">#{system_prompt |> String.replace("&", "&amp;") |> String.replace("<", "&lt;") |> String.replace(">", "&gt;")}</pre>
-</details>
-""")
-````
-
-## Single Query (Step by Step)
-
-Let's walk through a single query to see how the pieces fit together.
+Try your own questions:
 
 ```elixir
 question_input = Kino.Input.textarea("Your question",
-  default: "What is the total amount spent on travel?"
+  default: "Show spending by category with count and total for each"
 )
 ```
 
-### Step 1: Send to LLM
-
 ```elixir
-import ReqLLM.Context
-
 question = Kino.Input.read(question_input)
-llm_context = ReqLLM.Context.new([system(system_prompt)])
-llm_context = ReqLLM.Context.append(llm_context, user(question))
 
-IO.puts("Sending to LLM...")
-{:ok, response} = ReqLLM.generate_text(model, llm_context.messages, receive_timeout: 30_000)
-llm_text = ReqLLM.Response.text(response)
+case PtcRunner.SubAgent.run(question, tools: tools, llm: my_llm, debug: true) do
+  {:ok, step} ->
+    Debug.print_trace(step)
+    IO.puts("\nResult:")
+    IO.inspect(step.return, pretty: true)
 
-IO.puts("\n--- LLM Response ---")
-IO.puts(llm_text)
-```
-
-### Step 2: Extract PTC-Lisp Program
-
-````elixir
-# Extract the LAST clojure/lisp code block (LLM often corrects itself)
-extract_program = fn text ->
-  case Regex.scan(~r/```(?:clojure|lisp)\s*(.*?)\s*```/s, text) do
-    [] -> :none
-    matches -> {:ok, matches |> List.last() |> Enum.at(1) |> String.trim()}
-  end
-end
-
-case extract_program.(llm_text) do
-  {:ok, program} ->
-    IO.puts("--- Extracted Program ---")
-    IO.puts(program)
-    {:ok, program}
-
-  :none ->
-    IO.puts("No program found - LLM gave a direct answer")
-    :none
-end
-````
-
-### Step 3: Execute Program
-
-```elixir
-# Only run if we extracted a program
-program =
-  case extract_program.(llm_text) do
-    {:ok, p} -> p
-    :none -> nil
-  end
-
-if program do
-  case PtcRunner.Lisp.run(program, tools: tools) do
-    {:ok, result, _mem_delta, _mem} ->
-      IO.puts("--- Result ---")
-      IO.inspect(result, label: "Value")
-
-    {:error, reason} ->
-      IO.puts("--- Error ---")
-      IO.inspect(reason)
-  end
-else
-  IO.puts("No program to execute")
+  {:error, step} ->
+    IO.puts("Failed: #{step.fail.message}")
 end
 ```
 
-## Agent Loop (Full Implementation)
+## Error Handling
 
-Now let's implement the full agent loop with retry on errors.
-
-**Note:** It's normal for the agent to take multiple iterations to produce a correct program. LLMs sometimes use functions that don't exist in PTC-Lisp (like Clojure's `second`) or get argument order wrong. The error messages help the LLM self-correct, and most queries succeed within 2-3 attempts. Complex aggregations may take more iterations.
-
-````elixir
-defmodule PtcLispAgent do
-  @moduledoc "Simple PTC-Lisp agent with retry loop"
-
-  import ReqLLM.Context
-
-  @max_iterations 5
-  @timeout 30_000
-
-  def ask(question, model, system_prompt, tools) do
-    llm_context =
-      ReqLLM.Context.new([system(system_prompt)])
-      |> ReqLLM.Context.append(user(question))
-
-    agent_loop(model, llm_context, tools, @max_iterations, %{})
-  end
-
-  defp agent_loop(_model, _llm_context, _tools, 0, _memory) do
-    {:error, "Max iterations reached"}
-  end
-
-  defp agent_loop(model, llm_context, tools, remaining, memory) do
-    IO.puts("\n[Agent] Iteration #{@max_iterations - remaining + 1}/#{@max_iterations}")
-
-    case ReqLLM.generate_text(model, llm_context.messages, receive_timeout: @timeout) do
-      {:ok, response} ->
-        text = ReqLLM.Response.text(response)
-
-        case extract_program(text) do
-          {:ok, program} ->
-            IO.puts("[Program] #{program}")
-
-            case PtcRunner.Lisp.run(program, tools: tools, memory: memory, float_precision: 2) do
-              {:ok, result, _delta, new_memory} ->
-                result_str = inspect(result)
-                IO.puts("[Result] #{result_str}")
-
-                new_llm_context =
-                  llm_context
-                  |> ReqLLM.Context.append(assistant(text))
-                  |> ReqLLM.Context.append(user("[Tool Result]\n#{result_str}"))
-
-                agent_loop(model, new_llm_context, tools, remaining - 1, new_memory)
-
-              {:error, reason} ->
-                error_msg = PtcRunner.Lisp.format_error(reason)
-                IO.puts("[Error] #{error_msg}")
-
-                new_llm_context =
-                  llm_context
-                  |> ReqLLM.Context.append(assistant(text))
-                  |> ReqLLM.Context.append(user("[Tool Error]\n#{error_msg}"))
-
-                agent_loop(model, new_llm_context, tools, remaining - 1, memory)
-            end
-
-          :none ->
-            IO.puts("[Answer] Final response")
-            {:ok, text}
-        end
-
-      {:error, reason} ->
-        {:error, "LLM error: #{inspect(reason)}"}
-    end
-  end
-
-  # Extract the LAST clojure/lisp code block (LLM often corrects itself)
-  defp extract_program(text) do
-    case Regex.scan(~r/```(?:clojure|lisp)\s*(.*?)\s*```/s, text) do
-      [] -> :none
-      matches -> {:ok, matches |> List.last() |> Enum.at(1) |> String.trim()}
-    end
-  end
-end
-
-IO.puts("PtcLispAgent module defined")
-````
-
-### Try the Agent
-
-The default question involves grouping and aggregation, which some models find tricky on the first attempt. Don't be surprised if you see 1-4 errors before the agent succeeds — that's the retry loop working as intended.
+When things go wrong, check `step.fail`:
 
 ```elixir
-agent_question_input = Kino.Input.textarea("Ask the agent",
-  default: "Show total spending by category with count and average for each, sorted by total descending."
-)
-```
+# Force an error with impossible signature
+case PtcRunner.SubAgent.run(
+  "Return the number 42",
+  signature: "{impossible_field :unicorn}",  # invalid type
+  llm: my_llm,
+  max_turns: 2
+) do
+  {:ok, step} ->
+    IO.puts("Success: #{inspect(step.return)}")
 
-```elixir
-agent_question = Kino.Input.read(agent_question_input)
-
-IO.puts("Question: #{agent_question}\n")
-
-case PtcLispAgent.ask(agent_question, model, system_prompt, tools) do
-  {:ok, answer} ->
-    Kino.Markdown.new("## Answer\n\n#{answer}")
-
-  {:error, reason} ->
-    Kino.Markdown.new("## Error\n\n#{reason}")
-end
-```
-
-## Try Your Own Data
-
-Define your own dataset and ask questions about it:
-
-````elixir
-# Example: Define your own data and tools
-my_data = [
-  %{"name" => "Alice", "age" => 30, "city" => "NYC", "department" => "engineering"},
-  %{"name" => "Bob", "age" => 25, "city" => "LA", "department" => "sales"},
-  %{"name" => "Carol", "age" => 35, "city" => "NYC", "department" => "engineering"},
-  %{"name" => "Dave", "age" => 28, "city" => "NYC", "department" => "sales"}
-]
-
-my_tools = %{
-  "get-employees" => fn _args -> my_data end
-}
-
-my_schema = """
-Tool: get-employees
-  Returns a list of employee records with fields:
-  - name: string
-  - age: integer
-  - city: string
-  - department: string
-
-  Usage: (ctx/get-employees)
-"""
-
-my_system_prompt = """
-You are a data analyst. Answer questions by querying datasets.
-
-To query data, output a PTC-Lisp program in a ```clojure code block.
-
-Example - count by department:
-```clojure
-(update-vals (group-by :department (ctx/get-employees)) count)
-```
-
-Available data:
-
-#{my_schema}
-
-#{PtcRunner.Lisp.Schema.to_prompt()}
-"""
-
-IO.puts("Custom dataset ready with #{length(my_data)} records")
-````
-
-```elixir
-my_question_input = Kino.Input.textarea("Question about your data",
-  default: "How many employees are in each department?"
-)
-```
-
-```elixir
-my_question = Kino.Input.read(my_question_input)
-
-case PtcLispAgent.ask(my_question, model, my_system_prompt, my_tools) do
-  {:ok, answer} -> Kino.Markdown.new("## Answer\n\n#{answer}")
-  {:error, reason} -> Kino.Markdown.new("## Error\n\n#{reason}")
+  {:error, step} ->
+    IO.puts("Failed!")
+    IO.puts("Reason: #{step.fail.reason}")
+    IO.puts("Message: #{step.fail.message}")
 end
 ```
 
 ## Learn More
 
-* [Playground Livebook](ptc_runner_playground.livemd) - Explore PTC-JSON and PTC-Lisp basics
-* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html) - Build your first agent
-* [PTC-Lisp Specification](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html) - Lisp DSL reference
-* [OpenRouter](https://openrouter.ai/) - Multi-model API provider
+* [Playground Livebook](ptc_runner_playground.livemd) - PTC-Lisp basics without LLM
+* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html) - Full guide
+* [PTC-Lisp Specification](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html) - Language reference
 
-<!-- livebook:{"offset":12396,"stamp":{"token":"XCP.u2Q8K9Bm9y1GUPZBLhBzbcWXZOGLFdVrBEZD5l0bsnzDlhAwag7yoXTb1I5WJ-ACpApaZkjCaskQraUAjGSZRdCEgvvsyWqT5UXYUvAKaFbwsnnoSfpl5yEeJXe0","version":2}} -->
+<!-- livebook:{"offset":6613,"stamp":{"token":"XCP.6gZ0V_cpTNLLLN7bsCIJUrjkGO5iKIdLCSxY08xBufZ6lKXSAvSJ4ZmoNC913mlhbPyrLiBZ5z8qi2SEFAHTAMsr5lPGmNlYArQR7YnFqTFOOopzG9l1qiyT565v","version":2}} -->

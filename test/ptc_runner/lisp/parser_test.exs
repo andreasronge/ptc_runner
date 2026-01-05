@@ -238,6 +238,12 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "space between # and { is invalid" do
       assert {:error, {:parse_error, _}} = Parser.parse("# {1 2}")
     end
+
+    test "regex literals are rejected with helpful error" do
+      assert {:error, {:parse_error, message}} = Parser.parse(~S|(split "a b" #" ")|)
+      assert message =~ "regex literals"
+      assert message =~ "not supported"
+    end
   end
 
   describe "numeric edge cases" do
