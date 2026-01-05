@@ -148,4 +148,77 @@ defmodule PtcRunner.Lisp.E2ETest do
       assert result == [6, 10]
     end
   end
+
+  describe "pmap parallel map" do
+    test "pmap basic functionality" do
+      program = "(pmap inc [1 2 3 4 5])"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [2, 3, 4, 5, 6]
+    end
+
+    test "pmap with anonymous function" do
+      program = "(pmap #(* % 2) [1 2 3])"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [2, 4, 6]
+    end
+
+    test "pmap with keyword accessor" do
+      program = "(pmap :name [{:name \"Alice\"} {:name \"Bob\"}])"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == ["Alice", "Bob"]
+    end
+
+    test "pmap preserves order" do
+      program = "(pmap identity [1 2 3 4 5 6 7 8 9 10])"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    end
+
+    test "pmap with closure capturing let binding" do
+      program = "(let [factor 10] (pmap #(* % factor) [1 2 3]))"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == [10, 20, 30]
+    end
+
+    test "pmap with tool calls provides speedup" do
+      # Simulate slow tool calls - 50ms each
+      # Sequential: 5 * 50ms = 250ms minimum
+      # Parallel: ~50ms minimum (all run concurrently)
+      # We check that parallel is significantly faster
+
+      slow_tool = fn %{value: v} ->
+        Process.sleep(50)
+        v * 2
+      end
+
+      program = "(pmap #(ctx/slow-process {:value %}) [1 2 3 4 5])"
+
+      {time_us, {:ok, %Step{return: result}}} =
+        :timer.tc(fn ->
+          PtcRunner.Lisp.run(program, tools: [{"slow-process", slow_tool}])
+        end)
+
+      time_ms = div(time_us, 1000)
+
+      # Result should be correct
+      assert result == [2, 4, 6, 8, 10]
+
+      # Should be significantly faster than sequential (250ms)
+      # Allow some overhead, but should be under 200ms
+      assert time_ms < 200,
+             "pmap should run in parallel (took #{time_ms}ms, expected <200ms)"
+    end
+
+    test "pmap with empty collection" do
+      program = "(pmap inc [])"
+
+      assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
+      assert result == []
+    end
+  end
 end
