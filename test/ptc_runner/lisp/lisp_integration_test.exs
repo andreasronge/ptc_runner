@@ -287,6 +287,39 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
   end
 
+  describe "Clojure namespace compatibility" do
+    test "clojure.string/join works end-to-end" do
+      source = ~S|(clojure.string/join "," ["a" "b" "c"])|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == "a,b,c"
+    end
+
+    test "str/split works end-to-end" do
+      source = ~S|(str/split "a,b,c" ",")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "core/map works end-to-end" do
+      source = "(core/map inc [1 2 3])"
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == [2, 3, 4]
+    end
+
+    test "Clojure namespaces work in threading" do
+      source = ~S|(->> ["a" "b"] (str/join "-"))|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == "a-b"
+    end
+
+    test "unknown function in known namespace gives helpful error" do
+      source = ~S|(clojure.string/capitalize "hello")|
+      {:error, %{fail: %{message: msg}}} = Lisp.run(source)
+      assert msg =~ "capitalize is not available"
+      assert msg =~ "String functions:"
+    end
+  end
+
   describe "implicit do (multiple expressions)" do
     test "top-level multiple expressions" do
       source = "(def x 1) (def y 2) (+ x y)"

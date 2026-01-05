@@ -1767,6 +1767,45 @@ Invoke registered tools using the `ctx/` namespace:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
+### 9.6 Clojure Namespace Compatibility
+
+LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normalizes these to built-in functions at analysis time.
+
+**Supported namespaces:**
+
+| Namespace | Shorthand | Category |
+|-----------|-----------|----------|
+| `clojure.string` | `str`, `string` | String functions |
+| `clojure.core` | `core` | Core functions |
+| `clojure.set` | `set` | Set functions |
+
+**Examples of normalization:**
+
+```clojure
+;; These all normalize to the same built-in function:
+(clojure.string/join "," items)   ; → (join "," items)
+(str/join "," items)               ; → (join "," items)
+(join "," items)                   ; (no change)
+
+;; Core functions work too:
+(clojure.core/map inc xs)          ; → (map inc xs)
+(core/filter even? xs)             ; → (filter even? xs)
+```
+
+**Error handling:**
+
+When a namespaced function doesn't exist as a built-in, the analyzer provides helpful error messages with available alternatives:
+
+```clojure
+(clojure.string/capitalize s)
+;; Error: capitalize is not available. String functions: str, subs, join, split, trim, ...
+
+(clojure.set/union a b)
+;; Error: union is not available. Set functions: set, set?, contains?
+```
+
+**Note:** The `ctx/` namespace is reserved for context access and tool invocation. Clojure-style namespaces cannot be used for these purposes.
+
 ---
 
 ## 10. Complete Examples

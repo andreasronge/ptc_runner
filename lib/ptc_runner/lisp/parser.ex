@@ -30,7 +30,8 @@ defmodule PtcRunner.Lisp.Parser do
   # ============================================================
 
   # Character classes for lookahead
-  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%]
+  # Note: . is allowed for Clojure-style namespaces like clojure.string/join
+  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?.]
 
   nil_literal =
     string("nil")

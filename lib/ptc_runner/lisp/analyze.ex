@@ -14,6 +14,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Analyze.Predicates
   alias PtcRunner.Lisp.Analyze.ShortFn
   alias PtcRunner.Lisp.CoreAST
+  alias PtcRunner.Lisp.Env
 
   @type error_reason ::
           {:invalid_form, String.t()}
@@ -98,10 +99,9 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp do_analyze({:ns_symbol, :ctx, key}), do: {:ok, {:ctx, key}}
 
-  # Unknown namespace - provide helpful error
+  # Clojure-style namespaces: normalize to built-in or provide helpful error
   defp do_analyze({:ns_symbol, ns, key}) do
-    {:error,
-     {:invalid_form, "unknown namespace #{ns}/ in #{ns}/#{key}. Use ctx/ to access context"}}
+    normalize_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
   end
 
   # Turn history variables: *1, *2, *3
@@ -156,6 +156,13 @@ defmodule PtcRunner.Lisp.Analyze do
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
   defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list),
     do: analyze_ctx_call(tool_name, rest)
+
+  # Clojure-style namespaces in call position: (clojure.string/join "," items)
+  defp dispatch_list_form({:ns_symbol, ns, func}, rest, list) do
+    normalize_clojure_namespace(ns, func, fn ->
+      dispatch_list_form({:symbol, func}, rest, list)
+    end)
+  end
 
   # Comparison operators (strict 2-arity per spec section 8.4)
   defp dispatch_list_form({:symbol, op}, rest, _list)
@@ -660,6 +667,30 @@ defmodule PtcRunner.Lisp.Analyze do
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}
       other -> other
+    end
+  end
+
+  # ============================================================
+  # Clojure namespace normalization
+  # ============================================================
+
+  # Normalize Clojure-style namespaces to builtins or provide helpful errors.
+  # Takes a success callback to allow different behavior for symbol vs call position.
+  defp normalize_clojure_namespace(ns, func, on_success) do
+    cond do
+      Env.clojure_namespace?(ns) and Env.builtin?(func) ->
+        on_success.()
+
+      Env.clojure_namespace?(ns) ->
+        category = Env.namespace_category(ns)
+        available = Env.builtins_by_category(category) |> Enum.map_join(", ", &to_string/1)
+        category_name = Env.category_name(category)
+
+        {:error,
+         {:invalid_form, "#{func} is not available. #{category_name} functions: #{available}"}}
+
+      true ->
+        {:error, {:invalid_form, "unknown namespace #{ns}/ in #{ns}/#{func}. Use ctx/ for tools"}}
     end
   end
 
