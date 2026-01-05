@@ -21,7 +21,7 @@ ctx/orders
 
 ### NOT Supported
 - Namespaced keywords (`:foo/bar`)
-- Lazy sequences, `lazy-seq`, `iterate`
+- Lazy sequences (`lazy-seq`, `iterate`). `range` is supported but always finite.
 - Macros, `defmacro`
 - Recursion, `loop/recur`
 - Ratios (`1/3`), BigDecimals (`1.0M`)

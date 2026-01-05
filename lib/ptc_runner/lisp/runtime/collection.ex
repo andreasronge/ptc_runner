@@ -415,4 +415,27 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def contains?(coll, val) when is_list(coll), do: val in coll
+
+  # Range implementation
+  def range(end_val), do: range(0, end_val, 1)
+  def range(start, end_val), do: range(start, end_val, 1)
+
+  def range(start, end_val, step)
+      when is_number(start) and is_number(end_val) and is_number(step) do
+    if step == 0 do
+      []
+    else
+      generate_range(start, end_val, step, [])
+    end
+  end
+
+  def range(_, _, _), do: []
+
+  defp generate_range(curr, end_val, step, acc) do
+    if (step > 0 and curr < end_val) or (step < 0 and curr > end_val) do
+      generate_range(curr + step, end_val, step, [curr | acc])
+    else
+      Enum.reverse(acc)
+    end
+  end
 end

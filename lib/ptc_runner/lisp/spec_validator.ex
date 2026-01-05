@@ -196,7 +196,6 @@ defmodule PtcRunner.Lisp.SpecValidator do
       {"loop/recur", "(loop [x 0] x)", :validation_error},
       {"lazy-seq", "(lazy-seq [1])", :unbound_var},
       {"str", "(str \"a\" \"b\")", :unbound_var},
-      {"range", "(range 10)", :unbound_var},
       {"partial", "(partial + 1)", :unbound_var},
       {"comp", "(comp inc inc)", :unbound_var},
       {"eval", "(eval (+ 1 2))", :unbound_var},

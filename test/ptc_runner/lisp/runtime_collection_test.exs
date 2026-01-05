@@ -560,4 +560,36 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       assert result == ["s", "p", "b", "e", "y"]
     end
   end
+
+  describe "range" do
+    test "range(end) returns sequence from 0 to end (exclusive)" do
+      assert Runtime.range(5) == [0, 1, 2, 3, 4]
+      assert Runtime.range(0) == []
+      assert Runtime.range(-1) == []
+    end
+
+    test "range(start, end) returns sequence from start to end (exclusive)" do
+      assert Runtime.range(5, 10) == [5, 6, 7, 8, 9]
+      assert Runtime.range(10, 5) == []
+      assert Runtime.range(5, 5) == []
+    end
+
+    test "range(start, end, step) returns sequence with step" do
+      assert Runtime.range(0, 10, 2) == [0, 2, 4, 6, 8]
+      assert Runtime.range(0, 10, 3) == [0, 3, 6, 9]
+      assert Runtime.range(10, 0, -2) == [10, 8, 6, 4, 2]
+      assert Runtime.range(10, 0, -3) == [10, 7, 4, 1]
+    end
+
+    test "range(start, end, step) with empty results" do
+      assert Runtime.range(0, 10, -1) == []
+      assert Runtime.range(10, 0, 1) == []
+      assert Runtime.range(0, 1, 0) == []
+    end
+
+    test "range handles non-integer numbers (floats)" do
+      assert Runtime.range(0, 2.5, 1) == [0, 1, 2]
+      assert Runtime.range(0.5, 2.5, 0.5) == [0.5, 1.0, 1.5, 2.0]
+    end
+  end
 end

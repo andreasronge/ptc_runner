@@ -1363,6 +1363,22 @@ The `seq` function converts a collection to a sequence:
 (contains? {:a 1} :b)              ; => false
 ```
 
+#### Sequence Generation
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `range` | `(range end)` | Returns sequence from 0 to end (exclusive) |
+| `range` | `(range start end)` | Returns sequence from start to end (exclusive) |
+| `range` | `(range start end step)` | Returns sequence with specific step |
+
+```clojure
+(range 5)                          ; => [0 1 2 3 4]
+(range 5 10)                       ; => [5 6 7 8 9]
+(range 0 10 2)                     ; => [0 2 4 6 8]
+(range 10 0 -2)                    ; => [10 8 6 4 2]
+(range 5 5)                        ; => []
+```
+
 ### 8.2 Map Operations
 
 | Function | Signature | Description |
@@ -2370,8 +2386,8 @@ The `#()` syntax desugars to the equivalent `fn`:
 ### 13.3 Functions Excluded from Core
 
 - Regex: `re-find`, `re-matches`, `re-seq`
-- `range` (infinite sequences)
 - `iterate`, `repeat`, `cycle` (infinite sequences)
+- Infinite `(range)` (standard finite `range` is supported: see §8.1)
 - `partial`, `comp` (function composition)
 - Transducers
 
