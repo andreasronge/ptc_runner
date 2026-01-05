@@ -119,4 +119,73 @@ defmodule PtcRunner.SubAgent.RunTest do
       assert step.return == 7
     end
   end
+
+  describe "run/2 - tool/data conflict validation" do
+    test "raises when tool name conflicts with context data key" do
+      agent = SubAgent.new(prompt: "test", tools: %{"search" => fn _ -> :ok end})
+
+      assert_raise ArgumentError, ~r/ctx\/search is both a tool and data/, fn ->
+        SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: %{search: "data"})
+      end
+    end
+
+    test "raises when tool name conflicts with context data key (atom key)" do
+      agent = SubAgent.new(prompt: "test", tools: %{"query" => fn _ -> :ok end})
+
+      assert_raise ArgumentError, ~r/ctx\/query is both a tool and data/, fn ->
+        SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: %{query: "value"})
+      end
+    end
+
+    test "succeeds when tool names don't conflict with context data" do
+      agent =
+        SubAgent.new(prompt: "Use {{data}}", max_turns: 1, tools: %{"search" => fn _ -> :ok end})
+
+      llm = fn _ -> {:ok, "```clojure\n42\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{data: "value"})
+      assert step.return == 42
+    end
+
+    test "succeeds with empty tools (no conflict possible)" do
+      agent = SubAgent.new(prompt: "Use {{search}}", max_turns: 1)
+      llm = fn _ -> {:ok, "```clojure\nctx/search\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{search: "data"})
+      assert step.return == "data"
+    end
+
+    test "succeeds with empty context (no conflict possible)" do
+      agent = SubAgent.new(prompt: "test", max_turns: 1, tools: %{"search" => fn _ -> :ok end})
+      llm = fn _ -> {:ok, "```clojure\n42\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{})
+      assert step.return == 42
+    end
+
+    test "raises on conflict when context is a Step" do
+      agent = SubAgent.new(prompt: "test", tools: %{"result" => fn _ -> :ok end})
+      step_context = %PtcRunner.Step{return: %{result: 42}, fail: nil, memory: %{}}
+
+      assert_raise ArgumentError, ~r/ctx\/result is both a tool and data/, fn ->
+        SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: step_context)
+      end
+    end
+
+    test "skips validation for failed Step context" do
+      agent = SubAgent.new(prompt: "test", tools: %{"result" => fn _ -> :ok end})
+
+      step_context = %PtcRunner.Step{
+        return: nil,
+        fail: %{reason: :test_failure, message: "Test failed"},
+        memory: %{}
+      }
+
+      # Should not raise for tool/data conflict - the chained failure is detected later
+      {:error, error_step} =
+        SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: step_context)
+
+      assert error_step.fail.reason == :chained_failure
+    end
+  end
 end

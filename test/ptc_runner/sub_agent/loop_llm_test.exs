@@ -71,7 +71,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
     @tag :skip
     test "registry is inherited by child agents" do
       # Child agent uses atom LLM
-      child = SubAgent.new(prompt: "Child", max_turns: 1)
+      child = SubAgent.new(prompt: "Child", max_turns: 1, description: "Child agent")
 
       # Parent agent calls child
       parent =
@@ -105,7 +105,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
     @tag :skip
     test "child agent with bound LLM atom uses parent's registry" do
       # Child with bound atom LLM
-      child = SubAgent.new(prompt: "Child", max_turns: 1)
+      child = SubAgent.new(prompt: "Child", max_turns: 1, description: "Child agent")
       child_tool = SubAgent.as_tool(child, llm: :haiku)
 
       parent =
@@ -359,7 +359,9 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       }
 
       # Level 3: uses haiku (bound at as_tool)
-      grandchild = SubAgent.new(prompt: "Grandchild", max_turns: 1)
+      grandchild =
+        SubAgent.new(prompt: "Grandchild", max_turns: 1, description: "Grandchild agent")
+
       grandchild_tool = SubAgent.as_tool(grandchild, llm: :haiku)
 
       # Level 2: inherits from parent (will be sonnet)
@@ -367,7 +369,8 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         SubAgent.new(
           prompt: "Child",
           tools: %{"grandchild_tool" => grandchild_tool},
-          max_turns: 1
+          max_turns: 1,
+          description: "Child agent"
         )
 
       child_tool = SubAgent.as_tool(child)
