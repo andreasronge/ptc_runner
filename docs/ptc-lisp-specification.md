@@ -1839,6 +1839,41 @@ The `juxt` combinator creates a function that applies each of its argument funct
 - Closures (`fn` and `#()` syntax)
 - Builtin functions (`first`, `last`, `count`, etc.)
 
+### 8.11 Functional Tools: apply
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `apply` | `(apply f coll)` | Applies function `f` to the argument sequence `coll` |
+| | `(apply f x y ... coll)` | Applies function `f` to `x`, `y`, ... and the argument sequence `coll` |
+
+The `apply` function invokes a function `f` with the provided arguments. The last argument must be a collection (vector or set), which is "unrolled" into individual arguments. Any arguments between `f` and the collection are passed as fixed prefix arguments.
+
+```clojure
+;; Basic usage
+(apply + [1 2 3])              ; => 6
+(apply str ["a" "b" "c"])      ; => "abc"
+
+;; Spreading with fixed arguments
+(apply + 1 2 [3 4])            ; => 10
+(apply merge {:a 1} [{:b 2} {:c 3}]) ; => {:a 1 :b 2 :c 3}
+
+;; With Keywords as functions
+(apply :name [{:name "Alice"}]) ; => "Alice"
+
+;; With Sets as functions
+(apply #{1 2 3} [2])           ; => 2
+
+;; With filtering (passing apply as a value)
+(map #(apply + %) [[1 2] [3 4]]) ; => [3 7]
+```
+
+**Edge Cases:**
+- **Empty collection:** `(apply + [])` is equivalent to `(+)`, returning `0`.
+- **Nil as last argument:** `(apply + 1 2 nil)` returns a `type-error`. PTC-Lisp requires an explicit collection.
+- **Sets as last argument:** `(apply + 1 #{2 3})` is allowed, but since sets are unordered, the application order is undefined (not an issue for commutative operations like `+`).
+- **Non-callable first argument:** Raises a `not-callable` error.
+- **Non-collection last argument:** Raises a `type_error`.
+
 ---
 
 ## 9. Namespaces, Context, and Tools

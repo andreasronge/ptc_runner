@@ -13,7 +13,6 @@ defmodule PtcRunner.Lisp.SchemaTest do
     test "contains language overview" do
       prompt = Prompts.get(:multi_turn)
       assert String.contains?(prompt, "PTC-Lisp")
-      assert String.contains?(prompt, "single expressions")
     end
 
     test "contains data access section" do

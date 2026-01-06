@@ -158,6 +158,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :juxt}, rest, _list, tail?), do: analyze_juxt(rest, tail?)
   defp dispatch_list_form({:symbol, :pmap}, rest, _list, tail?), do: analyze_pmap(rest, tail?)
   defp dispatch_list_form({:symbol, :pcalls}, rest, _list, tail?), do: analyze_pcalls(rest, tail?)
+  defp dispatch_list_form({:symbol, :apply}, rest, _list, tail?), do: analyze_apply(rest, tail?)
 
   defp dispatch_list_form({:symbol, :call}, _rest, _list, _tail?) do
     {:error,
@@ -591,6 +592,20 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_pcalls(fn_asts, _tail?) do
     with {:ok, fn_cores} <- analyze_list(fn_asts) do
       {:ok, {:pcalls, fn_cores}}
+    end
+  end
+
+  # ============================================================
+  # Functional: apply
+  # ============================================================
+
+  defp analyze_apply(args, _tail?) do
+    if length(args) < 2 do
+      {:error, {:invalid_arity, :apply, "expected (apply f coll) or (apply f x y coll)"}}
+    else
+      with {:ok, analyzed} <- analyze_list(args) do
+        {:ok, {:call, {:var, :apply}, analyzed}}
+      end
     end
   end
 
