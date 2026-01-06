@@ -236,6 +236,10 @@ defmodule PtcDemo.LispTestRunner do
 
       written_path = Report.write(actual_path, aggregate_summary, "Lisp")
       IO.puts("\nReport written to: #{written_path}")
+
+      # Regenerate aggregate summary of all reports
+      reports_dir = Path.dirname(written_path)
+      generate_aggregate_summary(reports_dir)
     end
 
     # Return the aggregate summary, include individual runs for reference
@@ -591,6 +595,20 @@ defmodule PtcDemo.LispTestRunner do
       true ->
         # Not specified - don't enable by default in demo
         false
+    end
+  end
+
+  # Generate aggregate summary of all reports in directory
+  defp generate_aggregate_summary(reports_dir) do
+    case Mix.Tasks.Aggregate.aggregate_reports(reports_dir) do
+      {:ok, report} ->
+        summary_path = Path.join(reports_dir, "SUMMARY.md")
+        File.write!(summary_path, report)
+        IO.puts("Summary updated: #{summary_path}")
+
+      {:error, _reason} ->
+        # Silently skip if aggregation fails (e.g., only one report)
+        :ok
     end
   end
 end
