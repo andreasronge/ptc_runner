@@ -20,26 +20,26 @@ defmodule PtcRunner.Lisp.DefnTest do
 
   describe "analyzer: defn" do
     test "(defn name [params] body) desugars to def + fn" do
-      # (defn double [x] (* x 2))
+      # (defn twice [x] (* x 2))
       raw =
-        {:list, [{:symbol, :defn}, {:symbol, :double}, {:vector, [{:symbol, :x}]}, {:symbol, :x}]}
+        {:list, [{:symbol, :defn}, {:symbol, :twice}, {:vector, [{:symbol, :x}]}, {:symbol, :x}]}
 
-      assert {:ok, {:def, :double, {:fn, [{:var, :x}], {:var, :x}}}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :twice, {:fn, [{:var, :x}], {:var, :x}}}} = Analyze.analyze(raw)
     end
 
     test "(defn name docstring [params] body) ignores docstring" do
-      # (defn double "Doubles a number" [x] (* x 2))
+      # (defn twice "Doubles a number" [x] (* x 2))
       raw =
         {:list,
          [
            {:symbol, :defn},
-           {:symbol, :double},
+           {:symbol, :twice},
            {:string, "Doubles a number"},
            {:vector, [{:symbol, :x}]},
            {:symbol, :x}
          ]}
 
-      assert {:ok, {:def, :double, {:fn, [{:var, :x}], {:var, :x}}}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :twice, {:fn, [{:var, :x}], {:var, :x}}}} = Analyze.analyze(raw)
     end
 
     test "defn with zero params works" do
@@ -155,14 +155,14 @@ defmodule PtcRunner.Lisp.DefnTest do
 
   describe "evaluator: defn via def" do
     test "defined function can be called" do
-      # (defn double [x] (* x 2)) desugars to (def double (fn [x] (* x 2)))
-      ast = {:def, :double, {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}}
+      # (defn twice [x] (* x 2)) desugars to (def twice (fn [x] (* x 2)))
+      ast = {:def, :twice, {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}}
       env = %{*: {:variadic, &*/2, 1}}
       {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
-      assert result == %Var{name: :double}
+      assert result == %Var{name: :twice}
       # Functions are stored as closures, not native Elixir functions
-      assert {:closure, _, _, _, _} = user_ns[:double]
+      assert {:closure, _, _, _, _} = user_ns[:twice]
     end
 
     test "function persists in user_ns" do
@@ -202,17 +202,17 @@ defmodule PtcRunner.Lisp.DefnTest do
   # ============================================================
 
   describe "defn integration" do
-    test "(defn double [x] (* x 2)) defines and stores function" do
-      source = "(defn double [x] (* x 2))"
+    test "(defn twice [x] (* x 2)) defines and stores function" do
+      source = "(defn twice [x] (* x 2))"
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :double}
+      assert result == %Var{name: :twice}
       # Functions are stored as closures, not native Elixir functions
-      assert {:closure, _, _, _, _} = user_ns[:double]
+      assert {:closure, _, _, _, _} = user_ns[:twice]
     end
 
     test "defined function can be called" do
-      source = "(do (defn double [x] (* x 2)) (double 21))"
+      source = "(do (defn twice [x] (* x 2)) (twice 21))"
       {:ok, %{return: result}} = Lisp.run(source)
 
       assert result == 42
@@ -233,7 +233,7 @@ defmodule PtcRunner.Lisp.DefnTest do
     end
 
     test "defn with docstring is ignored" do
-      source = ~S|(do (defn double "Doubles a number" [x] (* x 2)) (double 5))|
+      source = ~S|(do (defn twice "Doubles a number" [x] (* x 2)) (twice 5))|
       {:ok, %{return: result}} = Lisp.run(source)
 
       assert result == 10
@@ -241,11 +241,11 @@ defmodule PtcRunner.Lisp.DefnTest do
 
     test "defn persists across turns (via memory param)" do
       # Turn 1: define function
-      source1 = "(defn double [x] (* x 2))"
+      source1 = "(defn twice [x] (* x 2))"
       {:ok, %{memory: user_ns1}} = Lisp.run(source1)
 
       # Turn 2: use the function
-      source2 = "(double 21)"
+      source2 = "(twice 21)"
       {:ok, %{return: result}} = Lisp.run(source2, memory: user_ns1)
 
       assert result == 42
