@@ -34,7 +34,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
            "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}
 
       _ ->
-        {:type_error, "invalid argument types: #{Enum.join(type_descriptions, ", ")}", args}
+        {:type_error,
+         "#{fun_name}: invalid argument types: #{Enum.join(type_descriptions, ", ")}", args}
     end
   end
 
