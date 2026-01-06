@@ -44,7 +44,8 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
 | `re-pattern` | Compile string to regex without literal syntax (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
-| `floor`, `ceil`, `round`, `trunc` | Integer rounding (returns int, not double) |
+| `floor`, `ceil`, `round`, `trunc` | Integer rounding |
+| `double`, `int` | Type coercion (to float / to integer) |
 | `call` | Tool invocation special form (§9) |
 | Keyword/string coercion in `where` | `:status = :active` matches `"active"` (§7.6) |
 | Path-based `where` | `(where [:user :role] = :admin)` for nested access (§7.1) |
@@ -749,13 +750,14 @@ Syntactic sugar for defining named functions in the user namespace:
 - Cannot shadow builtin function names (returns error)
 
 ```clojure
-(defn double [x] (* x 2))             ; => #'double
+; Note: using `twice` not `double` since `double` is a builtin (§8.4)
+(defn twice [x] (* x 2))              ; => #'twice
 (defn greet [name] (str "Hello, " name))  ; => #'greet
 
 ; Use defined function
 (do
-  (defn double [x] (* x 2))
-  (double 21))                        ; => 42
+  (defn twice [x] (* x 2))
+  (twice 21))                         ; => 42
 
 ; Reference ctx/ data
 (defn expensive? [e] (> (:amount e) ctx/threshold))
@@ -1591,6 +1593,8 @@ The `seq` function converts a collection to a sequence:
 | `ceil` | `(ceil x)` | Round toward +∞ |
 | `round` | `(round x)` | Round to nearest integer |
 | `trunc` | `(trunc x)` | Truncate toward zero |
+| `double` | `(double x)` | Coerce to float |
+| `int` | `(int x)` | Coerce to integer (truncates) |
 
 **Division behavior:** The `/` operator always returns a float, even for exact divisions. Integer division (`quot`) is not supported. Division by zero raises an execution error.
 
@@ -1610,6 +1614,8 @@ The `seq` function converts a collection to a sequence:
 (ceil 3.2)      ; => 4
 (round 3.5)     ; => 4
 (trunc -3.7)    ; => -3
+(double 5)      ; => 5.0
+(int 3.7)       ; => 3
 ```
 
 ### 8.5 Comparison

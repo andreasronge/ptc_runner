@@ -23,6 +23,8 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def ceil(x), do: Kernel.ceil(x)
   def round(x), do: Kernel.round(x)
   def trunc(x), do: Kernel.trunc(x)
+  def double(x) when is_number(x), do: x / 1
+  def int(x) when is_number(x), do: Kernel.trunc(x)
   def sqrt(x), do: :math.sqrt(x)
   def pow(x, y), do: :math.pow(x, y)
 

@@ -123,6 +123,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate ceil(x), to: Math
   defdelegate round(x), to: Math
   defdelegate trunc(x), to: Math
+  defdelegate double(x), to: Math
+  defdelegate int(x), to: Math
   defdelegate sqrt(x), to: Math
   defdelegate pow(x, y), to: Math
 
