@@ -251,8 +251,11 @@ defmodule PtcRunner.Lisp.Format do
 
   defp sanitize({:normal, fun}) when is_function(fun), do: %Builtin{}
   defp sanitize({:variadic, fun, _identity}) when is_function(fun), do: %Builtin{}
-  defp sanitize({:variadic_nonempty, fun}) when is_function(fun), do: %Builtin{}
-  defp sanitize({:multi_arity, funs}) when is_tuple(funs), do: %Builtin{}
+
+  defp sanitize({:variadic_nonempty, name, fun}) when is_atom(name) and is_function(fun),
+    do: %Builtin{}
+
+  defp sanitize({:multi_arity, name, funs}) when is_atom(name) and is_tuple(funs), do: %Builtin{}
 
   # Var references - convert to Var struct for display
   defp sanitize({:var, name}) when is_atom(name), do: %Var{name: name}

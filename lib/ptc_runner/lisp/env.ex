@@ -7,8 +7,8 @@ defmodule PtcRunner.Lisp.Env do
 
   - `{:normal, fun}` - Fixed-arity function
   - `{:variadic, fun, identity}` - Variadic function with identity value for 0-arg case
-  - `{:variadic_nonempty, fun}` - Variadic function requiring at least 1 argument
-  - `{:multi_arity, tuple_of_funs}` - Multiple arities where tuple index = arity - min_arity
+  - `{:variadic_nonempty, name, fun}` - Variadic function requiring at least 1 argument
+  - `{:multi_arity, name, tuple_of_funs}` - Multiple arities where tuple index = arity - min_arity
   """
 
   alias PtcRunner.Lisp.Runtime
@@ -16,8 +16,8 @@ defmodule PtcRunner.Lisp.Env do
   @type binding ::
           {:normal, function()}
           | {:variadic, function(), term()}
-          | {:variadic_nonempty, function()}
-          | {:multi_arity, tuple()}
+          | {:variadic_nonempty, atom(), function()}
+          | {:multi_arity, atom(), tuple()}
   @type env :: %{atom() => binding()}
 
   @spec initial() :: env()
@@ -185,7 +185,7 @@ defmodule PtcRunner.Lisp.Env do
       {:pluck, {:normal, &Runtime.pluck/2}},
       {:sort, {:normal, &Runtime.sort/1}},
       # sort-by: 2-arity (key, coll) or 3-arity (key, comparator, coll)
-      {:"sort-by", {:multi_arity, {&Runtime.sort_by/2, &Runtime.sort_by/3}}},
+      {:"sort-by", {:multi_arity, :"sort-by", {&Runtime.sort_by/2, &Runtime.sort_by/3}}},
       {:reverse, {:normal, &Runtime.reverse/1}},
       {:first, {:normal, &Runtime.first/1}},
       {:second, {:normal, &Runtime.second/1}},
@@ -203,7 +203,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"drop-while", {:normal, &Runtime.drop_while/2}},
       {:distinct, {:normal, &Runtime.distinct/1}},
       {:concat, {:variadic, &Runtime.concat2/2, []}},
-      {:conj, {:variadic_nonempty, &Runtime.conj/2}},
+      {:conj, {:variadic_nonempty, :conj, &Runtime.conj/2}},
       {:into, {:normal, &Runtime.into/2}},
       {:flatten, {:normal, &Runtime.flatten/1}},
       {:zip, {:normal, &Runtime.zip/2}},
@@ -211,7 +211,7 @@ defmodule PtcRunner.Lisp.Env do
       {:count, {:normal, &Runtime.count/1}},
       {:empty?, {:normal, &Runtime.empty?/1}},
       {:seq, {:normal, &Runtime.seq/1}},
-      {:reduce, {:multi_arity, {&Runtime.reduce/2, &Runtime.reduce/3}}},
+      {:reduce, {:multi_arity, :reduce, {&Runtime.reduce/2, &Runtime.reduce/3}}},
       {:"sum-by", {:normal, &Runtime.sum_by/2}},
       {:"avg-by", {:normal, &Runtime.avg_by/2}},
       {:"min-by", {:normal, &Runtime.min_by/2}},
@@ -221,13 +221,13 @@ defmodule PtcRunner.Lisp.Env do
       {:every?, {:normal, &Runtime.every?/2}},
       {:"not-any?", {:normal, &Runtime.not_any?/2}},
       {:contains?, {:normal, &Runtime.contains?/2}},
-      {:range, {:multi_arity, {&Runtime.range/1, &Runtime.range/2, &Runtime.range/3}}},
+      {:range, {:multi_arity, :range, {&Runtime.range/1, &Runtime.range/2, &Runtime.range/3}}},
 
       # ============================================================
       # Map operations
       # ============================================================
-      {:get, {:multi_arity, {&Runtime.get/2, &Runtime.get/3}}},
-      {:"get-in", {:multi_arity, {&Runtime.get_in/2, &Runtime.get_in/3}}},
+      {:get, {:multi_arity, :get, {&Runtime.get/2, &Runtime.get/3}}},
+      {:"get-in", {:multi_arity, :"get-in", {&Runtime.get_in/2, &Runtime.get_in/3}}},
       {:assoc, {:normal, &Runtime.assoc/3}},
       {:"assoc-in", {:normal, &Runtime.assoc_in/3}},
       {:update, {:normal, &Runtime.update/3}},
@@ -251,13 +251,13 @@ defmodule PtcRunner.Lisp.Env do
       {:+, {:variadic, &Kernel.+/2, 0}},
       {:-, {:variadic, &Kernel.-/2, 0}},
       {:*, {:variadic, &Kernel.*/2, 1}},
-      {:/, {:variadic_nonempty, &Kernel.//2}},
+      {:/, {:variadic_nonempty, :/, &Kernel.//2}},
       {:mod, {:normal, &Runtime.mod/2}},
       {:inc, {:normal, &Runtime.inc/1}},
       {:dec, {:normal, &Runtime.dec/1}},
       {:abs, {:normal, &Runtime.abs/1}},
-      {:max, {:variadic_nonempty, &Runtime.max/2}},
-      {:min, {:variadic_nonempty, &Runtime.min/2}},
+      {:max, {:variadic_nonempty, :max, &Runtime.max/2}},
+      {:min, {:variadic_nonempty, :min, &Runtime.min/2}},
       {:floor, {:normal, &Runtime.floor/1}},
       {:ceil, {:normal, &Runtime.ceil/1}},
       {:round, {:normal, &Runtime.round/1}},
@@ -300,8 +300,8 @@ defmodule PtcRunner.Lisp.Env do
       # String manipulation
       # ============================================================
       {:str, {:variadic, &Runtime.str2/2, ""}},
-      {:subs, {:multi_arity, {&Runtime.subs/2, &Runtime.subs/3}}},
-      {:join, {:multi_arity, {&Runtime.join/1, &Runtime.join/2}}},
+      {:subs, {:multi_arity, :subs, {&Runtime.subs/2, &Runtime.subs/3}}},
+      {:join, {:multi_arity, :join, {&Runtime.join/1, &Runtime.join/2}}},
       {:split, {:normal, &Runtime.split/2}},
       {:trim, {:normal, &Runtime.trim/1}},
       {:replace, {:normal, &Runtime.replace/3}},

@@ -152,7 +152,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert {:error, %Step{fail: %{reason: :arity_error, message: message}}} =
                Lisp.run(source)
 
-      assert message =~ "expected arity [1, 2, 3]"
+      assert message =~ "range expects 1, 2, 3 argument(s)"
       assert message =~ "got 0"
     end
 

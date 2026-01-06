@@ -37,11 +37,12 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
 
     test "formats :variadic_nonempty builtin" do
-      assert Format.to_string({:variadic_nonempty, &Kernel.//2}) == "#<builtin>"
+      assert Format.to_string({:variadic_nonempty, :/, &Kernel.//2}) == "#<builtin>"
     end
 
     test "formats :multi_arity builtin" do
-      assert Format.to_string({:multi_arity, {&String.slice/2, &String.slice/3}}) == "#<builtin>"
+      assert Format.to_string({:multi_arity, :subs, {&String.slice/2, &String.slice/3}}) ==
+               "#<builtin>"
     end
   end
 
