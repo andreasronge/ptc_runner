@@ -33,6 +33,14 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
          "update-vals expects (map, function) but got (function, map). " <>
            "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}
 
+      # sort-by with swapped arguments: (key, collection, comparator) instead of (key, comparator, collection)
+      {:sort_by, [key, coll, comp]}
+      when (is_atom(key) or is_binary(key) or is_function(key, 1)) and is_list(coll) and
+             (is_function(comp) or comp in [:asc, :desc, :>, :<]) ->
+        {:type_error,
+         "sort-by expects (key, comparator, collection) but got (key, collection, comparator). " <>
+           "Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)", args}
+
       _ ->
         {:type_error,
          "#{fun_name}: invalid argument types: #{Enum.join(type_descriptions, ", ")}", args}

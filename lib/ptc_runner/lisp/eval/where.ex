@@ -111,27 +111,17 @@ defmodule PtcRunner.Lisp.Eval.Where do
 
   # `in` operator: field value is member of collection
   defp safe_in(nil, _coll), do: false
+  defp safe_in(value, %MapSet{} = set), do: member_of_set?(set, value)
 
-  defp safe_in(value, coll) when is_list(coll) do
-    normalized_value = normalize_for_comparison(value)
-
-    Enum.any?(coll, fn item ->
-      normalize_for_comparison(item) == normalized_value
-    end)
-  end
+  defp safe_in(value, coll) when is_list(coll), do: member_of_list?(coll, value)
 
   defp safe_in(_, _), do: false
 
   # `includes` operator: collection includes value
   defp safe_includes(nil, _value), do: false
+  defp safe_includes(%MapSet{} = set, value), do: member_of_set?(set, value)
 
-  defp safe_includes(coll, value) when is_list(coll) do
-    normalized_value = normalize_for_comparison(value)
-
-    Enum.any?(coll, fn item ->
-      normalize_for_comparison(item) == normalized_value
-    end)
-  end
+  defp safe_includes(coll, value) when is_list(coll), do: member_of_list?(coll, value)
 
   defp safe_includes(coll, value) when is_binary(coll) and is_binary(value) do
     String.contains?(coll, value)
@@ -146,4 +136,18 @@ defmodule PtcRunner.Lisp.Eval.Where do
   end
 
   defp normalize_for_comparison(value), do: value
+
+  # Shared helpers for collection membership with normalization
+  defp member_of_set?(set, value) do
+    MapSet.member?(set, value) or
+      MapSet.member?(set, normalize_for_comparison(value))
+  end
+
+  defp member_of_list?(list, value) do
+    normalized_value = normalize_for_comparison(value)
+
+    Enum.any?(list, fn item ->
+      normalize_for_comparison(item) == normalized_value
+    end)
+  end
 end
