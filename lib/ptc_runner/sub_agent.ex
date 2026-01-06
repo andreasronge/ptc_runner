@@ -144,6 +144,7 @@ defmodule PtcRunner.SubAgent do
   @type t :: %__MODULE__{
           prompt: String.t(),
           signature: String.t() | nil,
+          parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
           max_turns: pos_integer(),
           tool_catalog: map() | nil,
@@ -173,6 +174,7 @@ defmodule PtcRunner.SubAgent do
   defstruct [
     :prompt,
     :signature,
+    :parsed_signature,
     :tool_catalog,
     :prompt_limit,
     :mission_timeout,
@@ -248,8 +250,20 @@ defmodule PtcRunner.SubAgent do
   """
   @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
-    alias PtcRunner.SubAgent.Validator
+    alias PtcRunner.SubAgent.{Signature, Validator}
     Validator.validate!(opts)
+
+    # Parse signature if provided (cached for loop return validation)
+    # Note: Validator.validate! already ensures signature parses correctly
+    opts =
+      case Keyword.fetch(opts, :signature) do
+        {:ok, sig_str} when is_binary(sig_str) ->
+          {:ok, parsed} = Signature.parse(sig_str)
+          Keyword.put(opts, :parsed_signature, parsed)
+
+        _ ->
+          opts
+      end
 
     # Merge format_options with defaults (user values override)
     opts =
