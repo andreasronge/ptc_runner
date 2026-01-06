@@ -204,4 +204,12 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate neg?(x), to: Predicates
   defdelegate even?(x), to: Predicates
   defdelegate odd?(x), to: Predicates
+
+  # ============================================================
+  # Set Operations
+  # ============================================================
+
+  defdelegate intersection(s1, s2), to: Collection
+  defdelegate union(s1, s2), to: Collection
+  defdelegate difference(s1, s2), to: Collection
 end

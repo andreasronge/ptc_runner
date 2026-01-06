@@ -312,6 +312,9 @@ Sets are **unordered** - iteration order is not guaranteed.
 | `count` | `(count #{1 2})` | Returns element count |
 | `empty?` | `(empty? #{})` | Returns true if empty |
 | `contains?` | `(contains? #{1 2} 1)` | Membership test (O(1)) |
+| `intersection` | `(clojure.set/intersection & sets)` | Returns the intersection of one or more sets |
+| `union` | `(clojure.set/union & sets)` | Returns the union of zero or more sets |
+| `difference` | `(clojure.set/difference & sets)` | Returns the difference of one or more sets |
 
 **Sets as predicates:** Sets can be invoked as functions to check membership:
 
@@ -2099,8 +2102,8 @@ When a namespaced function doesn't exist as a built-in, the analyzer provides he
 (clojure.string/capitalize s)
 ;; Error: capitalize is not available. String functions: str, subs, join, split, trim, ...
 
-(clojure.set/union a b)
-;; Error: union is not available. Set functions: set, set?, contains?
+(clojure.set/project relations [:id])
+;; Error: project is not available. Set functions: set, set?, vec, vector, contains?, intersection, union, difference
 ```
 
 **Note:** The `ctx/` namespace is reserved for context access and tool invocation. Clojure-style namespaces cannot be used for these purposes.

@@ -475,4 +475,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       Enum.reverse(acc)
     end
   end
+
+  # ============================================================
+  # Set Operations
+  # ============================================================
+
+  def intersection(%MapSet{} = s1, %MapSet{} = s2), do: MapSet.intersection(s1, s2)
+  def union(%MapSet{} = s1, %MapSet{} = s2), do: MapSet.union(s1, s2)
+  def difference(%MapSet{} = s1, %MapSet{} = s2), do: MapSet.difference(s1, s2)
 end
