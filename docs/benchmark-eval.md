@@ -1,97 +1,140 @@
 # Benchmark Evaluation
 
-Benchmark results comparing LLM accuracy on PTC-Lisp and PTC-JSON DSLs.
+Benchmark results for PTC-Lisp with guidance on interpreting and improving reliability.
+
+## Results Summary
+
+| Model | Pass Rate | Speed | Cost | Notes |
+|-------|-----------|-------|------|-------|
+| Gemini 2.5 Flash | 100% | Fastest (48s) | $0.004 | Best default performance |
+| DeepSeek v3 | 98% | Slowest (3.2m) | $0.002 | Most cost-effective |
+| Claude Haiku 4.5 | 96% | Medium (2.2m) | $0.067 | May need higher turn limits |
+
+*Configuration: 17 tests, 3 runs per model, default settings (January 2026)*
+
+## Interpreting Results
+
+**Take these numbers with a grain of salt.** The pass rates reflect how well each model fits the test constraints, not absolute capability.
+
+For example, Haiku's lower score doesn't mean it's "worse" - analysis of failures shows it often:
+- Explores data more thoroughly before answering
+- Attempts to verify results before returning
+- Runs out of turns while being cautious
+
+A model that gives quick, simple answers passes easily. A model that investigates may timeout. Both behaviors have value depending on your use case.
+
+### What the Tests Measure
+
+| Aspect | What's Tested |
+|--------|---------------|
+| Syntax | Can the model generate valid PTC-Lisp? |
+| Constraints | Can it solve queries within turn limits? |
+| Blind analysis | Can it work with heavily truncated results? |
+
+The tests do NOT measure general reasoning ability or which model is "smarter".
 
 ## Test Configuration
 
-- **Models**: Gemini 2.5 Flash, Claude Haiku 4.5, DeepSeek v3.2 (via OpenRouter)
-- **Dataset**: 2500 records (500 products, 1000 orders, 500 employees, 500 expenses)
-- **Tests**: 15-16 queries across 3 difficulty levels
-- **Data mode**: Schema-only (LLM sees field names/types, not actual data)
-- **Runs**: 5 runs per model
-- **Date**: December 2025
-
 ### Test Categories
 
-| Level | Tests | Description |
-|-------|-------|-------------|
-| 1 | 1-5 | Basic: count, filter, sum, avg |
-| 2 | 6-10 | Intermediate: compound filters, sort, OR logic |
-| 3 | 11-16 | Advanced: cross-dataset joins, multi-turn memory |
+| Level | Tests | Turn Limit | Description |
+|-------|-------|------------|-------------|
+| Basic | 1-5 | 1 | count, filter, sum, avg |
+| Intermediate | 6-10 | 1 | compound filters, sort, find extremes |
+| Advanced | 11-15 | 1-6 | cross-dataset joins, tool calls, pmap |
+| Multi-turn | 16-17 | 4-6 | iterative reasoning with memory |
 
-## Results
+Single-shot tests (turn limit 1) are unforgiving - no recovery from errors. Multi-turn tests allow iteration but can timeout if the model explores too much.
 
-### PTC-Lisp (16 tests)
+### Truncation Settings
 
-| Model | Pass Rate | Perfect Runs | Avg Duration | Total Cost |
-|-------|-----------|--------------|--------------|------------|
-| Gemini 2.5 Flash | **100%** | 5/5 | 11.4s | $0.0050 |
-| DeepSeek v3.2 | 98.8% | 4/5 | 76s | $0.0089 |
-| Haiku 4.5 | 98.8% | 4/5 | 34s | $0.0318 |
+The LLM sees very little of execution results:
 
-### PTC-JSON (15 tests)
+| Setting | Default | Impact |
+|---------|---------|--------|
+| Feedback to LLM | ~512 chars | Only 5-10 records visible from 800 |
+| Result display | ~500 chars | Forces code-based analysis |
 
-| Model | Pass Rate | Perfect Runs | Avg Duration | Total Cost |
-|-------|-----------|--------------|--------------|------------|
-| Haiku 4.5 | **100%** | 5/5 | 50.6s | $0.0624 |
-| DeepSeek v3.2 | **100%** | 5/5 | 2.2m | $0.0095 |
-| Gemini 2.5 Flash | 98.7% | 4/5 | 25.8s | $0.0197 |
+This is intentional. With 2500 records in the dataset, the LLM cannot "eyeball" the data - it must write programs to filter, aggregate, and analyze. Lower truncation limits make tests harder but more realistic.
 
-### Comparison
+When results are truncated, the LLM receives a hint:
+```
+Hint: Result truncated. Write a program that filters or transforms data to return only what you need.
+```
 
-| Model | Lisp | JSON |
-|-------|------|------|
-| Gemini 2.5 Flash | **100%** | 98.7% |
-| DeepSeek v3.2 | 98.8% | **100%** |
-| Haiku 4.5 | 98.8% | **100%** |
+## Improving Reliability
 
-## Token Efficiency
+Several factors can improve pass rates beyond the defaults:
 
-| Metric | JSON | Lisp |
-|--------|------|------|
-| System prompt | ~1,500 tokens | ~2,100 tokens |
-| Output per query | ~44 tokens | ~20 tokens |
+### 1. Increase Turn Limits
 
-Lisp has a larger system prompt (+40%) but generates smaller programs (2.2x fewer tokens).
-After ~23 queries per session, Lisp's smaller outputs offset its larger prompt.
+For complex analytical queries, allow more iterations:
 
-## Conclusions
+```elixir
+SubAgent.run(agent, context, max_turns: 8)  # default is 5
+```
 
-1. **Both DSLs achieve 98%+ accuracy** across all models after prompt improvements
-2. **Gemini + Lisp now achieves 100%** - the best performing combination
-3. **Lisp is more token-efficient for multi-query sessions** (smaller output offsets larger prompt)
-4. **Speed**: Gemini is fastest (~11s), DeepSeek is slowest (~76s)
-5. **Cost**: DeepSeek is 3-6x cheaper than alternatives
+This helps models that verify results or explore data incrementally.
 
-### Recommendations
+### 2. Adjust Truncation
 
-| Priority | Model + DSL | Accuracy | Speed | Cost |
-|----------|-------------|----------|-------|------|
-| **Best overall** | Gemini + Lisp | 100% | Fast | Low |
-| **Highest accuracy** | Gemini + Lisp or Haiku/DeepSeek + JSON | 100% | Varies | Varies |
-| **Budget** | DeepSeek + either | 98.8-100% | Slow | Lowest |
+Lower truncation forces more programmatic analysis. Higher truncation lets the LLM see more data directly. See [SubAgent configuration](guides/subagent-configuration.md) for options.
+
+### 3. Prompt Customization
+
+The base prompt includes a "NOT Supported" section that prevents common errors (e.g., using `into` instead of `set`). Domain-specific examples can further improve reliability.
+
+## Hardest Tests
+
+Two tests cause most failures across all models:
+
+**Test 16: Fraud Detection** (multi-turn, limit 4)
+- Open-ended: must define what "suspicious" means
+- Requires exploring patterns, then making a judgment
+- Models often run out of turns while investigating
+
+**Test 14: Expense Category Analysis** (single-shot, limit 1)
+- Complex aggregation with multiple derived fields
+- Must get it right on first attempt
+- No room for syntax errors or refinement
+
+## Practical Recommendations
+
+| Use Case | Recommendation |
+|----------|----------------|
+| Production, reliability matters | Gemini - highest pass rate |
+| Cost-sensitive, batch processing | DeepSeek - 30x cheaper than Haiku |
+| Anthropic ecosystem | Haiku - increase `max_turns` for complex queries |
+
+**Key insight**: All models achieve 96%+ with default settings. Choose based on cost, speed, and ecosystem fit rather than small benchmark differences.
 
 ## Running Benchmarks
 
 ```bash
 cd demo
 
-# Run Lisp benchmark (5 runs)
-mix lisp --test --runs=5 --report
+# Basic benchmark (default model)
+mix lisp --test --runs=3 --report
 
-# Run JSON benchmark
-mix json --test --runs=5 --report
-
-# With specific model
+# Specific model
 mix lisp --test --model=gemini --runs=5
+
+# Verbose output to see failures
+mix lisp --test --model=haiku -v
 
 # With Clojure syntax validation
 mix lisp --test --validate-clojure
 ```
 
-Or via GitHub Actions:
+Via GitHub Actions:
 ```bash
-gh workflow run "Benchmark Tests" -f runs=5 -f dsl=both
+gh workflow run benchmark.yml -f runs=3 -f dsl=lisp
 ```
 
 Reports are saved to `demo/reports/`.
+
+## Further Reading
+
+- [SubAgent Getting Started](guides/subagent-getting-started.md) - Basic usage
+- [SubAgent Configuration](guides/subagent-configuration.md) - Turn limits, truncation
+- [SubAgent Troubleshooting](guides/subagent-troubleshooting.md) - Debugging failures
