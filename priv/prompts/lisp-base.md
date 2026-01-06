@@ -31,6 +31,8 @@ ctx/orders
 - `into` — use `(set coll)` or `(vec coll)` instead
 - `some` — use `(find pred coll)` or `(first (filter pred coll))`
 - `frequencies` — use `(->> coll (group-by identity) (update-vals count))`
+- `float` — use `(double x)` for float coercion
+- `for` — use `map` or `->>` threading instead
 
 ### PTC Extensions
 
