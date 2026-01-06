@@ -1,3 +1,5 @@
+# Core Concepts
+
 This guide covers the foundational concepts of SubAgents: context management, the firewall convention, memory, and error handling.
 
 ## Quick Example

@@ -1824,7 +1824,10 @@ Regex functions provide validation and extraction capabilities. To ensure system
 - **Input Truncation:** To prevent super-linear scaling on massive inputs, regex functions only scan the first 32KB of any input string.
 - **Pattern Complexity:** Patterns are limited to 256 bytes in length.
 
+
+```clojure
 ;; Failed parses
+
 (parse-long "abc")         ; => nil
 (parse-double "invalid")   ; => nil
 (parse-long "42abc")       ; => nil (partial parse rejected - must consume entire string)
@@ -3044,6 +3047,7 @@ For examples that cannot be automatically validated, use these markers:
 # - bugs: list of {code, description, section} tuples
 # - skipped: count of illustrative examples (using ...)
 ```
+
 
 ### Supported Expected Values
 

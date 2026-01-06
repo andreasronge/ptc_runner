@@ -78,7 +78,7 @@ This helps models that verify results or explore data incrementally.
 
 ### 2. Adjust Truncation
 
-Lower truncation forces more programmatic analysis. Higher truncation lets the LLM see more data directly. See [SubAgent configuration](guides/subagent-configuration.md) for options.
+Lower truncation forces more programmatic analysis. Higher truncation lets the LLM see more data directly. See [SubAgent configuration](guides/subagent-advanced.md) for options.
 
 ### 3. Prompt Customization
 
@@ -136,5 +136,5 @@ Reports are saved to `demo/reports/`.
 ## Further Reading
 
 - [SubAgent Getting Started](guides/subagent-getting-started.md) - Basic usage
-- [SubAgent Configuration](guides/subagent-configuration.md) - Turn limits, truncation
+- [SubAgent Configuration](guides/subagent-advanced.md) - Turn limits, truncation
 - [SubAgent Troubleshooting](guides/subagent-troubleshooting.md) - Debugging failures
