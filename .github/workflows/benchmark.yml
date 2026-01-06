@@ -106,6 +106,12 @@ jobs:
     name: Aggregate Reports
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
       - name: Download all reports
         uses: actions/download-artifact@v4
         with:
@@ -113,20 +119,33 @@ jobs:
           path: all-reports
           merge-multiple: true
 
-      - name: Create combined summary
-        run: |
-          echo "# Benchmark Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**DSL:** ${{ inputs.dsl }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Runs:** ${{ inputs.runs }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Models:** deepseek, gemini, haiku" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+      - name: Install demo dependencies
+        working-directory: demo
+        run: mix deps.get
 
-          echo "## Reports" >> $GITHUB_STEP_SUMMARY
+      - name: Compile demo
+        working-directory: demo
+        run: mix compile
+
+      - name: Generate aggregate report
+        working-directory: demo
+        run: |
+          mix aggregate ../all-reports --output ../all-reports/SUMMARY.md
+
+      - name: Add summary to GitHub Actions
+        run: |
+          if [ -f "all-reports/SUMMARY.md" ]; then
+            cat all-reports/SUMMARY.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Individual Reports" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           for report in all-reports/*.md; do
-            if [ -f "$report" ]; then
+            if [ -f "$report" ] && [ "$(basename "$report")" != "SUMMARY.md" ]; then
               echo "<details>" >> $GITHUB_STEP_SUMMARY
               echo "<summary>$(basename "$report")</summary>" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY

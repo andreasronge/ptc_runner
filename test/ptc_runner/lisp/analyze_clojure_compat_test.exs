@@ -156,10 +156,10 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
       assert msg =~ "filter"
     end
 
-    test "clojure.set/union gives helpful error with set functions" do
-      raw = {:ns_symbol, :"clojure.set", :union}
+    test "clojure.set/select gives helpful error with set functions" do
+      raw = {:ns_symbol, :"clojure.set", :select}
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "union is not available"
+      assert msg =~ "select is not available"
       assert msg =~ "Set functions:"
       assert msg =~ "set"
       assert msg =~ "contains?"
