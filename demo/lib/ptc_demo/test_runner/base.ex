@@ -379,6 +379,76 @@ defmodule PtcDemo.TestRunner.Base do
     }
   end
 
+  @doc """
+  Build an aggregate summary from multiple run summaries.
+
+  Combines statistics from multiple runs into a single summary for reporting.
+  Failed tests from all runs are collected with run numbers for identification.
+
+  ## Parameters
+
+    - `summaries` - list of summary maps from multiple runs
+
+  ## Returns
+
+  An aggregate summary map with combined statistics.
+  """
+  @spec build_aggregate_summary(list()) :: map()
+  def build_aggregate_summary([single]), do: single
+
+  def build_aggregate_summary(summaries) when is_list(summaries) do
+    first = hd(summaries)
+    num_runs = length(summaries)
+
+    # Aggregate counts
+    total_passed = Enum.sum(Enum.map(summaries, & &1.passed))
+    total_failed = Enum.sum(Enum.map(summaries, & &1.failed))
+    total_tests = Enum.sum(Enum.map(summaries, & &1.total))
+    total_attempts = Enum.sum(Enum.map(summaries, & &1.total_attempts))
+    total_duration = Enum.sum(Enum.map(summaries, & &1.duration_ms))
+
+    # Aggregate stats (tokens, cost)
+    aggregate_stats = %{
+      input_tokens: Enum.sum(Enum.map(summaries, & &1.stats.input_tokens)),
+      output_tokens: Enum.sum(Enum.map(summaries, & &1.stats.output_tokens)),
+      total_tokens: Enum.sum(Enum.map(summaries, & &1.stats.total_tokens)),
+      system_prompt_tokens: Enum.sum(Enum.map(summaries, & &1.stats.system_prompt_tokens)),
+      total_runs: num_runs,
+      total_cost: Enum.sum(Enum.map(summaries, & &1.stats.total_cost)),
+      requests: Enum.sum(Enum.map(summaries, &Map.get(&1.stats, :requests, 0)))
+    }
+
+    # Collect all results with run numbers, marking failures with their run
+    all_results =
+      summaries
+      |> Enum.with_index(1)
+      |> Enum.flat_map(fn {summary, run_num} ->
+        Enum.map(summary.results, fn result ->
+          if result.passed do
+            result
+          else
+            Map.put(result, :failed_in_run, run_num)
+          end
+        end)
+      end)
+
+    %{
+      passed: total_passed,
+      failed: total_failed,
+      total: total_tests,
+      total_attempts: total_attempts,
+      duration_ms: total_duration,
+      model: first.model,
+      data_mode: first.data_mode,
+      results: all_results,
+      stats: aggregate_stats,
+      timestamp: DateTime.utc_now(),
+      version: first[:version] || "unknown",
+      commit: first[:commit] || "unknown",
+      num_runs: num_runs
+    }
+  end
+
   defp apply_cost_fallback(stats, model) do
     case stats do
       %{total_cost: cost} when cost == nil or cost == 0.0 ->

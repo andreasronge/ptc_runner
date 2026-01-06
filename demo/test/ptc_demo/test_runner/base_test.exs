@@ -457,4 +457,158 @@ defmodule PtcDemo.TestRunner.BaseTest do
       assert String.contains?(captured, "ERROR: fail")
     end
   end
+
+  describe "build_aggregate_summary/1" do
+    test "single summary returns as-is" do
+      summary = %{
+        passed: 5,
+        failed: 2,
+        total: 7,
+        total_attempts: 10,
+        duration_ms: 1000,
+        model: "test-model",
+        data_mode: :schema,
+        results: [%{passed: true}],
+        stats: %{
+          input_tokens: 100,
+          output_tokens: 50,
+          total_tokens: 150,
+          system_prompt_tokens: 20,
+          total_runs: 1,
+          total_cost: 0.01
+        },
+        timestamp: DateTime.utc_now(),
+        version: "1.0",
+        commit: "abc123"
+      }
+
+      assert Base.build_aggregate_summary([summary]) == summary
+    end
+
+    test "multiple summaries are aggregated correctly" do
+      summary1 = %{
+        passed: 15,
+        failed: 2,
+        total: 17,
+        total_attempts: 20,
+        duration_ms: 1000,
+        model: "test-model",
+        data_mode: :schema,
+        results: [
+          %{passed: true, index: 1},
+          %{passed: false, index: 2, error: "fail1"}
+        ],
+        stats: %{
+          input_tokens: 100,
+          output_tokens: 50,
+          total_tokens: 150,
+          system_prompt_tokens: 20,
+          total_runs: 1,
+          total_cost: 0.01,
+          requests: 5
+        },
+        timestamp: DateTime.utc_now(),
+        version: "1.0",
+        commit: "abc123"
+      }
+
+      summary2 = %{
+        passed: 16,
+        failed: 1,
+        total: 17,
+        total_attempts: 18,
+        duration_ms: 900,
+        model: "test-model",
+        data_mode: :schema,
+        results: [
+          %{passed: true, index: 1},
+          %{passed: false, index: 3, error: "fail2"}
+        ],
+        stats: %{
+          input_tokens: 80,
+          output_tokens: 40,
+          total_tokens: 120,
+          system_prompt_tokens: 20,
+          total_runs: 1,
+          total_cost: 0.008,
+          requests: 4
+        },
+        timestamp: DateTime.utc_now(),
+        version: "1.0",
+        commit: "abc123"
+      }
+
+      aggregate = Base.build_aggregate_summary([summary1, summary2])
+
+      assert aggregate.passed == 31
+      assert aggregate.failed == 3
+      assert aggregate.total == 34
+      assert aggregate.total_attempts == 38
+      assert aggregate.duration_ms == 1900
+      assert aggregate.model == "test-model"
+      assert aggregate.num_runs == 2
+      assert aggregate.stats.total_runs == 2
+      assert aggregate.stats.input_tokens == 180
+      assert aggregate.stats.output_tokens == 90
+      assert aggregate.stats.total_tokens == 270
+      assert aggregate.stats.requests == 9
+      assert_in_delta aggregate.stats.total_cost, 0.018, 0.001
+    end
+
+    test "failed tests are tagged with run number" do
+      summary1 = %{
+        passed: 1,
+        failed: 1,
+        total: 2,
+        total_attempts: 2,
+        duration_ms: 500,
+        model: "test-model",
+        data_mode: :schema,
+        results: [
+          %{passed: true, index: 1},
+          %{passed: false, index: 2, error: "fail"}
+        ],
+        stats: %{
+          input_tokens: 50,
+          output_tokens: 25,
+          total_tokens: 75,
+          system_prompt_tokens: 10,
+          total_runs: 1,
+          total_cost: 0.005
+        },
+        version: "1.0",
+        commit: "abc123"
+      }
+
+      summary2 = %{
+        passed: 2,
+        failed: 0,
+        total: 2,
+        total_attempts: 2,
+        duration_ms: 400,
+        model: "test-model",
+        data_mode: :schema,
+        results: [
+          %{passed: true, index: 1},
+          %{passed: true, index: 2}
+        ],
+        stats: %{
+          input_tokens: 50,
+          output_tokens: 25,
+          total_tokens: 75,
+          system_prompt_tokens: 10,
+          total_runs: 1,
+          total_cost: 0.005
+        },
+        version: "1.0",
+        commit: "abc123"
+      }
+
+      aggregate = Base.build_aggregate_summary([summary1, summary2])
+
+      # Find the failed result and check it's tagged with run 1
+      failed_result = Enum.find(aggregate.results, &(!&1.passed))
+      assert failed_result.failed_in_run == 1
+    end
+  end
 end
