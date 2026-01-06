@@ -79,15 +79,6 @@ Debug.print_trace(step)
 step.return
 ```
 
-### Tracing Options
-
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `trace` | `true` | Whether trace is collected (`true`, `false`, or `:on_error`) |
-| `debug` | `false` | Stores extra data: raw LLM response, feedback messages, system prompt |
-
-Use `Debug.print_trace(step, messages: true)` to view the extra debug data (requires `debug: true`).
-
 ## With Signatures
 
 Use `context` to pass data. Signatures validate the output structure:
@@ -100,7 +91,7 @@ Use `context` to pass data. Signatures validate the output structure:
   llm: my_llm,
   debug: true
 )
-Debug.print_trace(step)
+Debug.print_trace(step, messages: true)
 step.return
 ```
 

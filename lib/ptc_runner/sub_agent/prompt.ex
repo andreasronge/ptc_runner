@@ -322,10 +322,8 @@ defmodule PtcRunner.SubAgent.Prompt do
     You are a PTC-Lisp program generator. Your task is to write programs that accomplish
     the user's mission by calling tools and processing data.
 
-    You MUST respond with a single PTC-Lisp program in a ```clojure code block.
+    You MUST respond with a PTC-Lisp program in a ```clojure code block.
     The program will be executed, and you may see results in subsequent turns.
-
-    Your mission ends ONLY when you call the `return` or `fail` tool.
     """
   end
 
