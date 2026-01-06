@@ -117,12 +117,14 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate inc(x), to: Math
   defdelegate dec(x), to: Math
   defdelegate abs(x), to: Math
-  defdelegate max(args), to: Math
-  defdelegate min(args), to: Math
+  defdelegate max(x, y), to: Math
+  defdelegate min(x, y), to: Math
   defdelegate floor(x), to: Math
   defdelegate ceil(x), to: Math
   defdelegate round(x), to: Math
   defdelegate trunc(x), to: Math
+  defdelegate sqrt(x), to: Math
+  defdelegate pow(x, y), to: Math
 
   # ============================================================
   # Comparison

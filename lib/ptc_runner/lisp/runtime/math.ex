@@ -17,12 +17,14 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def inc(x), do: x + 1
   def dec(x), do: x - 1
   def abs(x), do: Kernel.abs(x)
-  def max(args), do: Enum.max(args)
-  def min(args), do: Enum.min(args)
+  def max(x, y), do: Kernel.max(x, y)
+  def min(x, y), do: Kernel.min(x, y)
   def floor(x), do: Kernel.floor(x)
   def ceil(x), do: Kernel.ceil(x)
   def round(x), do: Kernel.round(x)
   def trunc(x), do: Kernel.trunc(x)
+  def sqrt(x), do: :math.sqrt(x)
+  def pow(x, y), do: :math.pow(x, y)
 
   # Comparison (for direct use, not inside where)
   def not_eq(x, y), do: x != y
