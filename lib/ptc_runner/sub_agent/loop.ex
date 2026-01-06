@@ -398,9 +398,13 @@ defmodule PtcRunner.SubAgent.Loop do
 
         # Merge system tools (return/fail) with user tools
         # System tools must come second to take precedence
+        # Both return sentinel tuples so we can detect actual execution vs.
+        # presence in unevaluated conditional branches (static code analysis fails)
+        # Note: Sentinel collision with user data is theoretically possible but
+        # extremely unlikely - these tuples are internal implementation details
         system_tools = %{
-          "return" => fn args -> args end,
-          "fail" => fn args -> args end
+          "return" => fn args -> {:__ptc_return__, args} end,
+          "fail" => fn args -> {:__ptc_fail__, args} end
         }
 
         all_tools = Map.merge(normalized_tools, system_tools)
@@ -456,17 +460,21 @@ defmodule PtcRunner.SubAgent.Loop do
   # Handle successful Lisp execution
   defp handle_successful_execution(code, response, lisp_step, state, agent, llm) do
     cond do
-      # Explicit return - validate against signature before accepting
-      ResponseHandler.contains_call?(code, "return") ->
-        case validate_return_type(agent, lisp_step.return) do
+      # Explicit return was actually executed - validate against signature before accepting
+      match?({:__ptc_return__, _}, lisp_step.return) ->
+        {:__ptc_return__, return_value} = lisp_step.return
+        # Update lisp_step with unwrapped value for downstream use
+        unwrapped_step = %{lisp_step | return: return_value}
+
+        case validate_return_type(agent, return_value) do
           :ok ->
-            build_success_step(code, response, lisp_step, state, agent)
+            build_success_step(code, response, unwrapped_step, state, agent)
 
           {:error, validation_errors} ->
             handle_return_validation_error(
               code,
               response,
-              lisp_step,
+              unwrapped_step,
               state,
               agent,
               llm,
@@ -478,17 +486,19 @@ defmodule PtcRunner.SubAgent.Loop do
       agent.max_turns == 1 ->
         build_success_step(code, response, lisp_step, state, agent)
 
-      ResponseHandler.contains_call?(code, "fail") ->
-        # Explicit fail - complete with error, no feedback
+      match?({:__ptc_fail__, _}, lisp_step.return) ->
+        # Explicit fail was actually executed - complete with error, no feedback
+        {:__ptc_fail__, fail_args} = lisp_step.return
+
         trace_entry =
-          Metrics.build_trace_entry(state, code, lisp_step.return, [],
+          Metrics.build_trace_entry(state, code, fail_args, [],
             llm_response: response,
             llm_feedback: nil
           )
 
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-        error_step = Step.error(:failed, inspect(lisp_step.return), lisp_step.memory)
+        error_step = Step.error(:failed, inspect(fail_args), lisp_step.memory)
 
         final_step = %{
           error_step
