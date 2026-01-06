@@ -4,7 +4,7 @@ defmodule PtcRunner.MixProject do
   def project do
     [
       app: :ptc_runner,
-      version: "0.3.4",
+      version: "0.4.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -90,6 +90,7 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-testing.md",
         "docs/guides/subagent-troubleshooting.md",
         "docs/guides/subagent-advanced.md",
+        "docs/guides/subagent-prompts.md",
         # Reference
         "docs/signature-syntax.md",
         "docs/benchmark-eval.md",

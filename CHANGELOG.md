@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add `juxt` function combinator for multi-criteria sorting and multi-value extraction (#548)
 
+## [0.4.0] - 2026-01-06
+
+### Added
+
+- Add SubAgent API for high-level agent definition with type-safe signatures, auto-chaining, and resource limits
+- Add Tracer system for immutable recording and visualization of agent execution
+- Implement loop and recur support for iterative computation in PTC-Lisp
+- Add character literals and string-as-sequence support for more flexible data handling
+- Add `pcalls` for parallel execution of heterogeneous thunks
+- Add `pmap` for parallel map evaluation
+- Support vector paths in collection extraction functions for nested data access
+- Add Clojure namespace normalization to improve LLM resilience
+
+### Fixed
+
+- Correct argument order for sort-by function to match Clojure semantics
+- Fix update-vals argument order to match Clojure 1.11
+- Update supported functions list (add frequencies, add float and for)
+- Improve multi-turn agent guidance and system prompts
+- Add specific error messages for predicate functions
+- Fix Clojure compatibility for destructuring, count, and empty?
+
 ## [0.3.4] - 2025-12-25
 
 ### Added
@@ -243,6 +265,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.4.0]: https://github.com/andreasronge/ptc_runner/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/andreasronge/ptc_runner/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/andreasronge/ptc_runner/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/andreasronge/ptc_runner/compare/v0.3.1...v0.3.2
