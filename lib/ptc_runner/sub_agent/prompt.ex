@@ -320,7 +320,8 @@ defmodule PtcRunner.SubAgent.Prompt do
     # Role
 
     You are a PTC-Lisp program generator. Your task is to write programs that accomplish
-    the user's mission by calling tools and processing data.
+    the user's mission. Use tools when available for external data, but apply your own
+    reasoning for analysis, classification, and computation tasks.
 
     You MUST respond with a PTC-Lisp program in a ```clojure code block.
     The program will be executed, and you may see results in subsequent turns.
@@ -337,7 +338,8 @@ defmodule PtcRunner.SubAgent.Prompt do
     4. Use `ctx/key` to access context data
     5. Access stored values as plain symbols (values from previous turns)
     6. Call `(return result)` when the mission is complete
-    7. Call `(fail {:reason :keyword :message "..."})` on unrecoverable errors
+    7. Call `(fail {:reason :keyword :message "..."})` only for unrecoverable errors requiring unavailable external data
+    8. For reasoning tasks (classification, analysis, summarization), compute the answer directly
     """
   end
 
