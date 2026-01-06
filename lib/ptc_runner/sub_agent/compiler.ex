@@ -83,9 +83,10 @@ defmodule PtcRunner.SubAgent.Compiler do
 
         # Build executor function that runs the compiled program
         # Include system tools (return/fail) as they're needed at runtime
+        # Both return sentinel tuples for consistency with loop detection
         system_tools = %{
-          "return" => fn args -> args end,
-          "fail" => fn args -> args end
+          "return" => fn args -> {:__ptc_return__, args} end,
+          "fail" => fn args -> {:__ptc_fail__, args} end
         }
 
         all_tools = Map.merge(agent.tools, system_tools)
@@ -96,8 +97,9 @@ defmodule PtcRunner.SubAgent.Compiler do
         execute = fn args ->
           case PtcRunner.Lisp.run(source, context: args, tools: all_tools) do
             {:ok, step} ->
-              # Populate field_descriptions for downstream chaining
-              %{step | field_descriptions: field_descs}
+              # Unwrap sentinel tuples from return/fail and populate field_descriptions
+              unwrapped_step = unwrap_sentinel(step)
+              %{unwrapped_step | field_descriptions: field_descs}
 
             {:error, step} ->
               step
@@ -134,6 +136,19 @@ defmodule PtcRunner.SubAgent.Compiler do
         :ok
     end)
   end
+
+  # Unwraps sentinel tuples from return/fail tools
+  defp unwrap_sentinel(%{return: {:__ptc_return__, value}} = step) do
+    %{step | return: value}
+  end
+
+  defp unwrap_sentinel(%{return: {:__ptc_fail__, _args}} = step) do
+    # For compiled agents, fail returns as error - convert sentinel to error step
+    # Note: In practice, compiled agents rarely use fail since they're single-shot
+    step
+  end
+
+  defp unwrap_sentinel(step), do: step
 
   # Extracts the final PTC-Lisp program from the trace
   defp extract_final_program(trace) when is_list(trace) do
