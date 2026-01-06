@@ -502,7 +502,30 @@ Two-branch conditional (else is **required**):
 
 **Single-branch `if` is not allowed.** Use `when` instead.
 
-### 5.3 `when` — Single-branch Conditional
+### 5.3 `if-not` — Negative Conditional
+
+Swapped branch conditional. Evaluates `else` if condition is truthy, otherwise evaluates `then`.
+
+```clojure
+(if-not condition
+  then-expression
+  else-expression?)
+```
+
+**Semantics:**
+- Desugars at analysis time to `if`:
+  - `(if-not cond then else)` → `(if cond else then)`
+  - `(if-not cond then)` → `(if cond nil then)`
+
+```clojure
+(if-not true "yes" "no")           ; => "no"
+(if-not false "yes" "no")          ; => "yes"
+(if-not (> 3 5) "smaller" "bigger") ; => "smaller"
+(if-not true "yes")                ; => nil
+(if-not false "yes")               ; => "yes"
+```
+
+### 5.4 `when` — Single-branch Conditional
 
 Returns body if condition is truthy, otherwise `nil`:
 
@@ -526,7 +549,26 @@ Returns body if condition is truthy, otherwise `nil`:
   (* x 2))            ; return value
 ```
 
-### 5.4 `cond` — Multi-way Conditional
+### 5.5 `when-not` — Negative Single-branch Conditional
+
+Returns body if condition is falsy, otherwise `nil`:
+
+```clojure
+(when-not condition
+  body)
+```
+
+**Semantics:**
+- Desugars at analysis time to `if`: `(when-not cond body ...)` → `(if cond nil (do body ...))`
+- Supports implicit `do` for multiple body expressions.
+
+```clojure
+(when-not false "yes")            ; => "yes"
+(when-not true "yes")             ; => nil
+(when-not (> x 0) (log "neg"))    ; => result of log, or nil
+```
+
+### 5.6 `cond` — Multi-way Conditional
 
 Tests conditions in order, returns first matching result:
 
@@ -559,7 +601,7 @@ Tests conditions in order, returns first matching result:
 (cond false "only")                           ; => nil
 ```
 
-### 5.5 `if-let` and `when-let` — Conditional Binding
+### 5.7 `if-let` and `when-let` — Conditional Binding
 
 Binds a value from an expression and evaluates the body only if the value is truthy.
 
@@ -617,7 +659,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
 
 ---
 
-### 5.6 `do` — Sequential Evaluation
+### 5.8 `do` — Sequential Evaluation
 
 Evaluates expressions in order, returning the value of the last expression:
 
@@ -639,7 +681,7 @@ Evaluates expressions in order, returning the value of the last expression:
 
 ---
 
-### 5.7 `def` — User Namespace Binding
+### 5.9 `def` — User Namespace Binding
 
 Binds a name to a value in the user namespace, persisting across turns:
 
@@ -687,7 +729,7 @@ Binds a name to a value in the user namespace, persisting across turns:
 
 ---
 
-### 5.8 `defn` — Named Function Definition
+### 5.10 `defn` — Named Function Definition
 
 Syntactic sugar for defining named functions in the user namespace:
 
@@ -771,7 +813,7 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ---
 
-### 5.9 `loop` and `recur` — Tail Recursion
+### 5.11 `loop` and `recur` — Tail Recursion
 
 `loop` establishes a recursion point, and `recur` transfers control back to that point with new values.
 

@@ -152,4 +152,63 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalsTest do
       assert msg =~ "expected"
     end
   end
+
+  describe "if-not special form" do
+    test "if-not with then and else" do
+      # (if-not true 1 2) -> (if true 2 1)
+      raw = {:list, [{:symbol, :"if-not"}, true, 1, 2]}
+      assert {:ok, {:if, true, 2, 1}} = Analyze.analyze(raw)
+    end
+
+    test "if-not with only then" do
+      # (if-not true 1) -> (if true nil 1)
+      raw = {:list, [{:symbol, :"if-not"}, true, 1]}
+      assert {:ok, {:if, true, nil, 1}} = Analyze.analyze(raw)
+    end
+
+    test "if-not with expression" do
+      # (if-not (= 1 1) "no" "yes") -> (if (= 1 1) "yes" "no")
+      raw =
+        {:list,
+         [{:symbol, :"if-not"}, {:list, [{:symbol, :=}, 1, 1]}, {:string, "no"}, {:string, "yes"}]}
+
+      assert {:ok, {:if, {:call, {:var, :=}, [1, 1]}, {:string, "yes"}, {:string, "no"}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "error case: if-not too many args" do
+      raw = {:list, [{:symbol, :"if-not"}, true, 1, 2, 3]}
+      assert {:error, {:invalid_arity, :"if-not", _}} = Analyze.analyze(raw)
+    end
+
+    test "error case: if-not too few args" do
+      raw = {:list, [{:symbol, :"if-not"}, true]}
+      assert {:error, {:invalid_arity, :"if-not", _}} = Analyze.analyze(raw)
+    end
+  end
+
+  describe "when-not special form" do
+    test "when-not with truthy condition" do
+      # (when-not true 1) -> (if true nil 1)
+      raw = {:list, [{:symbol, :"when-not"}, true, 1]}
+      assert {:ok, {:if, true, nil, 1}} = Analyze.analyze(raw)
+    end
+
+    test "when-not with falsy condition" do
+      # (when-not false 1) -> (if false nil 1)
+      raw = {:list, [{:symbol, :"when-not"}, false, 1]}
+      assert {:ok, {:if, false, nil, 1}} = Analyze.analyze(raw)
+    end
+
+    test "when-not with multiple body expressions" do
+      # (when-not false (println 1) 2) -> (if false nil (do (println 1) 2))
+      raw = {:list, [{:symbol, :"when-not"}, false, {:list, [{:symbol, :println}, 1]}, 2]}
+      assert {:ok, {:if, false, nil, {:do, [_, _]}}} = Analyze.analyze(raw)
+    end
+
+    test "error case: when-not too few args" do
+      raw = {:list, [{:symbol, :"when-not"}, true]}
+      assert {:error, {:invalid_arity, :"when-not", _}} = Analyze.analyze(raw)
+    end
+  end
 end

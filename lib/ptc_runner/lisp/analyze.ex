@@ -123,16 +123,28 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :let}, rest, _list, tail?), do: analyze_let(rest, tail?)
   defp dispatch_list_form({:symbol, :loop}, rest, _list, tail?), do: analyze_loop(rest, tail?)
   defp dispatch_list_form({:symbol, :recur}, rest, _list, tail?), do: analyze_recur(rest, tail?)
-  defp dispatch_list_form({:symbol, :if}, rest, _list, tail?), do: analyze_if(rest, tail?)
   defp dispatch_list_form({:symbol, :fn}, rest, _list, _tail?), do: analyze_fn(rest)
+
+  # Conditionals: if variants
+  defp dispatch_list_form({:symbol, :if}, rest, _list, tail?), do: analyze_if(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"if-not"}, rest, _list, tail?),
+    do: analyze_if_not(rest, tail?)
+
+  # Conditionals: when variants
   defp dispatch_list_form({:symbol, :when}, rest, _list, tail?), do: analyze_when(rest, tail?)
 
+  defp dispatch_list_form({:symbol, :"when-not"}, rest, _list, tail?),
+    do: analyze_when_not(rest, tail?)
+
+  # Conditionals: binding variants
   defp dispatch_list_form({:symbol, :"if-let"}, rest, _list, tail?),
     do: analyze_if_let(rest, tail?)
 
   defp dispatch_list_form({:symbol, :"when-let"}, rest, _list, tail?),
     do: analyze_when_let(rest, tail?)
 
+  # Conditionals: multi-way
   defp dispatch_list_form({:symbol, :cond}, rest, _list, tail?), do: analyze_cond(rest, tail?)
 
   defp dispatch_list_form({:symbol, :->}, rest, _list, tail?),
@@ -287,6 +299,31 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error, {:invalid_arity, :if, "expected (if cond then else)"}}
   end
 
+  # ============================================================
+  # Special form: if-not
+  # ============================================================
+
+  # Desugar (if-not test then else) -> (if test else then)
+  defp analyze_if_not([cond_ast, then_ast, else_ast], tail?) do
+    with {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, t} <- do_analyze(then_ast, tail?),
+         {:ok, e} <- do_analyze(else_ast, tail?) do
+      {:ok, {:if, c, e, t}}
+    end
+  end
+
+  # Desugar (if-not test then) -> (if test nil then)
+  defp analyze_if_not([cond_ast, then_ast], tail?) do
+    with {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, t} <- do_analyze(then_ast, tail?) do
+      {:ok, {:if, c, nil, t}}
+    end
+  end
+
+  defp analyze_if_not(_, _tail?) do
+    {:error, {:invalid_arity, :"if-not", "expected (if-not cond then else?)"}}
+  end
+
   defp analyze_when([cond_ast, first_body | rest_body], tail?) do
     body_asts = [first_body | rest_body]
 
@@ -342,6 +379,24 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_when_let(_, _tail?) do
     {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body ...)"}}
+  end
+
+  # ============================================================
+  # Special form: when-not
+  # ============================================================
+
+  # Desugar (when-not cond body ...) -> (if cond nil (do body ...))
+  defp analyze_when_not([cond_ast, first_body | rest_body], tail?) do
+    body_asts = [first_body | rest_body]
+
+    with {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, b} <- wrap_body(body_asts, tail?) do
+      {:ok, {:if, c, nil, b}}
+    end
+  end
+
+  defp analyze_when_not(_, _tail?) do
+    {:error, {:invalid_arity, :"when-not", "expected (when-not cond body ...)"}}
   end
 
   # Helper: only allow simple symbol bindings (no destructuring)
