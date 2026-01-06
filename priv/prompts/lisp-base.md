@@ -112,7 +112,7 @@ results                                        ; => the search results
 ### Threading
 ```clojure
 ; ->> thread-last: for collections (filter, map, take, sort-by)
-(->> ctx/users (filter :active) (map :name) (take 5))
+(->> ctx/users (filter :active) (map :name) (sort-by identity :desc) (take 5))
 
 ; -> thread-first: for maps (assoc, dissoc, update, get-in)
 (-> user (assoc :updated true) (dissoc :temp))

@@ -15,6 +15,22 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Set-as-predicate: returns element if member, nil if not (used with filter/some/etc)
   defp set_pred(set), do: fn item -> if MapSet.member?(set, item), do: item, else: nil end
 
+  defp wrap_comparator(:asc), do: :asc
+  defp wrap_comparator(:desc), do: :desc
+
+  defp wrap_comparator(comp) when is_function(comp, 2) do
+    fn a, b ->
+      case comp.(a, b) do
+        n when is_integer(n) -> n <= 0
+        bool -> bool
+      end
+    end
+  end
+
+  defp wrap_comparator(other) do
+    raise "type_error: invalid comparator: #{inspect(other)}. Expected :asc, :desc, or a function of 2 arguments."
+  end
+
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
 
   def filter(key, coll) when is_list(coll) and is_atom(key) do
@@ -114,6 +130,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
   def sort(coll) when is_binary(coll), do: Enum.sort(graphemes(coll))
 
+  def sort(comp, coll) when is_list(coll) do
+    Enum.sort(coll, wrap_comparator(comp))
+  end
+
+  def sort(comp, coll) when is_binary(coll) do
+    Enum.sort(graphemes(coll), wrap_comparator(comp))
+  end
+
   # sort_by with 2 args: (keyfn/key, coll)
   def sort_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     Enum.sort_by(coll, keyfn)
@@ -137,21 +161,21 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   # sort_by with 3 args: (keyfn/key, comparator, coll)
   def sort_by(keyfn, comp, coll)
-      when is_list(coll) and is_function(keyfn, 1) and is_function(comp) do
-    Enum.sort_by(coll, keyfn, comp)
+      when is_list(coll) and is_function(keyfn, 1) do
+    Enum.sort_by(coll, keyfn, wrap_comparator(comp))
   end
 
   def sort_by(key, comp, coll)
-      when is_list(coll) and (is_atom(key) or is_binary(key)) and is_function(comp) do
-    Enum.sort_by(coll, &FlexAccess.flex_get(&1, key), comp)
+      when is_list(coll) and (is_atom(key) or is_binary(key)) do
+    Enum.sort_by(coll, &FlexAccess.flex_get(&1, key), wrap_comparator(comp))
   end
 
   def sort_by(keyfn, comp, coll)
-      when is_map(coll) and is_function(keyfn, 1) and is_function(comp) do
+      when is_map(coll) and is_function(keyfn, 1) do
     # When sorting a map with custom comparator, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
-    |> Enum.sort_by(fn {k, v} -> keyfn.([k, v]) end, comp)
+    |> Enum.sort_by(fn {k, v} -> keyfn.([k, v]) end, wrap_comparator(comp))
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 

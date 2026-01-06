@@ -185,7 +185,7 @@ defmodule PtcRunner.Lisp.Env do
       {:map, {:normal, &Runtime.map/2}},
       {:mapv, {:normal, &Runtime.mapv/2}},
       {:pluck, {:normal, &Runtime.pluck/2}},
-      {:sort, {:normal, &Runtime.sort/1}},
+      {:sort, {:multi_arity, :sort, {&Runtime.sort/1, &Runtime.sort/2}}},
       # sort-by: 2-arity (key, coll) or 3-arity (key, comparator, coll)
       {:"sort-by", {:multi_arity, :"sort-by", {&Runtime.sort_by/2, &Runtime.sort_by/3}}},
       {:reverse, {:normal, &Runtime.reverse/1}},
@@ -279,6 +279,7 @@ defmodule PtcRunner.Lisp.Env do
       {:<, {:normal, &Kernel.</2}},
       {:>=, {:normal, &Kernel.>=/2}},
       {:<=, {:normal, &Kernel.<=/2}},
+      {:compare, {:normal, &Runtime.compare/2}},
 
       # ============================================================
       # Logic
