@@ -31,11 +31,26 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise "type_error: invalid comparator: #{inspect(other)}. Expected :asc, :desc, or a function of 2 arguments."
   end
 
+  defp vector_arg_error(v, type) when is_list(v) do
+    msg =
+      case v do
+        [_] ->
+          "expected #{type}, got vector #{inspect(v)} - use #{inspect(List.first(v))} instead"
+
+        _ ->
+          "expected #{type}, got path #{inspect(v)} - paths require a function or data-extraction variant"
+      end
+
+    raise "type_error: #{msg}"
+  end
+
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
 
   def filter(key, coll) when is_list(coll) and is_atom(key) do
     Enum.filter(coll, truthy_key_pred(key))
   end
+
+  def filter(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
 
   def filter(%MapSet{} = set, coll) when is_list(coll) do
     Enum.filter(coll, set_pred(set))
@@ -62,6 +77,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.reject(coll, truthy_key_pred(key))
   end
 
+  def remove(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
+
   def remove(%MapSet{} = set, coll) when is_list(coll) do
     Enum.reject(coll, set_pred(set))
   end
@@ -85,6 +102,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find(coll, truthy_key_pred(key))
   end
 
+  def find(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
+
   def find(%MapSet{} = set, coll) when is_list(coll) do
     Enum.find(coll, fn item -> MapSet.member?(set, item) end)
   end
@@ -94,6 +113,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def map(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
+
+  def map(key, _coll) when is_list(key), do: vector_arg_error(key, "function or key")
 
   def map(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
 
@@ -113,6 +134,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def mapv(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
+  def mapv(key, _coll) when is_list(key), do: vector_arg_error(key, "function or key")
+
   def mapv(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
 
   def mapv(%MapSet{} = set, coll) when is_binary(coll),
@@ -125,6 +148,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def mapv(f, coll) when is_map(coll), do: Enum.map(coll, fn {k, v} -> f.([k, v]) end)
 
+  def pluck(_key, nil), do: []
   def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
@@ -138,6 +162,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.sort(graphemes(coll), wrap_comparator(comp))
   end
 
+  def sort_by(_keyfn, nil), do: []
+
   # sort_by with 2 args: (keyfn/key, coll)
   def sort_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     Enum.sort_by(coll, keyfn)
@@ -147,7 +173,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.sort_by(graphemes(coll), keyfn)
   end
 
-  def sort_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
+  def sort_by(key, coll)
+      when is_list(coll) and (is_atom(key) or is_binary(key) or is_list(key)) do
     Enum.sort_by(coll, &FlexAccess.flex_get(&1, key))
   end
 
@@ -166,7 +193,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def sort_by(key, comp, coll)
-      when is_list(coll) and (is_atom(key) or is_binary(key)) do
+      when is_list(coll) and (is_atom(key) or is_binary(key) or is_list(key)) do
     Enum.sort_by(coll, &FlexAccess.flex_get(&1, key), wrap_comparator(comp))
   end
 
@@ -229,6 +256,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.take_while(coll, truthy_key_pred(key))
   end
 
+  def take_while(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
+
   def take_while(key, coll) when is_binary(coll) and is_atom(key) do
     Enum.take_while(graphemes(coll), truthy_key_pred(key))
   end
@@ -241,6 +270,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def drop_while(key, coll) when is_list(coll) and is_atom(key) do
     Enum.drop_while(coll, truthy_key_pred(key))
   end
+
+  def drop_while(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
 
   def drop_while(pred, coll) when is_list(coll), do: Enum.drop_while(coll, pred)
 
@@ -348,6 +379,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.sum()
   end
 
+  def sum_by(_key, nil), do: 0
+
   def avg_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     values = coll |> Enum.map(keyfn) |> Enum.reject(&is_nil/1)
 
@@ -366,6 +399,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def avg_by(_key, nil), do: nil
+
   def min_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     case Enum.reject(coll, &is_nil(keyfn.(&1))) do
       [] -> nil
@@ -379,6 +414,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       filtered -> Enum.min_by(filtered, &FlexAccess.flex_get(&1, key))
     end
   end
+
+  def min_by(_key, nil), do: nil
 
   def max_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     case Enum.reject(coll, &is_nil(keyfn.(&1))) do
@@ -394,6 +431,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def max_by(_key, nil), do: nil
+
   def group_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     Enum.group_by(coll, keyfn)
   end
@@ -401,12 +440,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def group_by(key, coll) when is_list(coll),
     do: Enum.group_by(coll, &FlexAccess.flex_get(&1, key))
 
+  def group_by(_key, nil), do: %{}
+
   def frequencies(coll) when is_list(coll), do: Enum.frequencies(coll)
   def frequencies(coll) when is_binary(coll), do: Enum.frequencies(graphemes(coll))
 
   def some(key, coll) when is_list(coll) and is_atom(key) do
     Enum.find_value(coll, truthy_key_pred(key))
   end
+
+  def some(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
 
   def some(%MapSet{} = set, coll) when is_list(coll) do
     Enum.find_value(coll, set_pred(set))
@@ -419,6 +462,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.all?(coll, truthy_key_pred(key))
   end
 
+  def every?(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
+
   def every?(%MapSet{} = set, coll) when is_list(coll) do
     Enum.all?(coll, set_pred(set))
   end
@@ -429,6 +474,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def not_any?(key, coll) when is_list(coll) and is_atom(key) do
     not Enum.any?(coll, truthy_key_pred(key))
   end
+
+  def not_any?(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
 
   def not_any?(%MapSet{} = set, coll) when is_list(coll) do
     not Enum.any?(coll, set_pred(set))

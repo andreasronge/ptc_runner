@@ -35,6 +35,8 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     end
   end
 
+  def flex_get(nil, path) when is_list(path), do: nil
+  def flex_get(map, path) when is_map(map) and is_list(path), do: flex_get_in(map, path)
   def flex_get(map, key) when is_map(map), do: Map.get(map, key)
   def flex_get(nil, _key), do: nil
 
@@ -66,6 +68,8 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     end
   end
 
+  def flex_fetch(nil, path) when is_list(path), do: :error
+  def flex_fetch(map, path) when is_map(map) and is_list(path), do: flex_fetch_in(map, path)
   def flex_fetch(map, key) when is_map(map), do: Map.fetch(map, key)
   def flex_fetch(nil, _key), do: :error
 
@@ -83,6 +87,22 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   end
 
   def flex_get_in(_data, _path), do: nil
+
+  @doc """
+  Flexible nested key fetch: try both atom and string versions at each level.
+  Returns {:ok, value} if found, :error if missing.
+  """
+  def flex_fetch_in(data, []), do: {:ok, data}
+  def flex_fetch_in(nil, _path), do: :error
+
+  def flex_fetch_in(data, [key | rest]) when is_map(data) do
+    case flex_fetch(data, key) do
+      {:ok, value} -> flex_fetch_in(value, rest)
+      :error -> :error
+    end
+  end
+
+  def flex_fetch_in(_data, _path), do: :error
 
   @doc """
   Flexible nested key insertion: creates intermediate maps as needed at each level.
