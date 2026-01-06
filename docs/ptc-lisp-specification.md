@@ -1282,8 +1282,12 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ```clojure
 (sort [3 1 2])                ; => [1 2 3]
 (sort ["b" "a" "c"])          ; => ["a" "b" "c"]
+(sort :desc [1 3 2])          ; => [3 2 1] (Clojure extension)
+(sort :asc [3 1 2])           ; => [1 2 3] (Clojure extension)
 (sort-by :price products)     ; ascending by price
-(sort-by :price > products)   ; descending by price
+(sort-by :price > products)   ; descending by price (boolean comparator)
+(sort-by :price :desc products) ; descending by price (simplified keyword)
+(sort-by :price (fn [a b] (compare b a)) products) ; descending by price (Clojure-style)
 (sort-by :name products)      ; alphabetical by name
 (sort-by first [["b" 2] ["a" 1] ["c" 3]])  ; => [["a" 1] ["b" 2] ["c" 3]]
 (sort-by (fn [x] (nth x 1)) > [["a" 2] ["b" 1] ["c" 3]])  ; descending by second element
@@ -1593,6 +1597,7 @@ The `seq` function converts a collection to a sequence:
 | `inc` | `(inc x)` | Add 1 |
 | `dec` | `(dec x)` | Subtract 1 |
 | `abs` | `(abs x)` | Absolute value |
+| `compare` | `(compare x y)` | Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp. |
 | `max` | `(max x y ...)` | Maximum value |
 | `min` | `(min x y ...)` | Minimum value |
 | `floor` | `(floor x)` | Round toward -∞ |

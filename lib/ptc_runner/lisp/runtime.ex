@@ -43,6 +43,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate mapv(f, coll), to: Collection
   defdelegate pluck(key, coll), to: Collection
   defdelegate sort(coll), to: Collection
+  defdelegate sort(comp, coll), to: Collection
   defdelegate sort_by(keyfn, coll), to: Collection
   defdelegate sort_by(keyfn, comp, coll), to: Collection
   defdelegate reverse(coll), to: Collection
@@ -134,6 +135,7 @@ defmodule PtcRunner.Lisp.Runtime do
   # ============================================================
 
   defdelegate not_eq(x, y), to: Math
+  defdelegate compare(x, y), to: Math
 
   # ============================================================
   # Logic
