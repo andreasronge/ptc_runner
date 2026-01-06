@@ -216,10 +216,16 @@ defmodule PtcRunner.Lisp.Parser do
   # Entry Point
   # ============================================================
 
+  defcombinatorp(
+    :inter_expr,
+    parsec(:ws)
+    |> ignore(repeat(choice([ascii_char([?), ?], ?}]), whitespace_char, comment])))
+  )
+
   defparsec(
     :program,
-    parsec(:ws)
-    |> repeat(parsec(:expr) |> concat(parsec(:ws)))
+    parsec(:inter_expr)
+    |> repeat(parsec(:expr) |> concat(parsec(:inter_expr)))
     |> eos()
   )
 

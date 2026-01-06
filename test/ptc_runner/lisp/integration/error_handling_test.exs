@@ -145,6 +145,17 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert message =~ "got 3"
     end
 
+    test "range with 0 arguments returns arity error" do
+      # range requires at least 1 argument in PTC-Lisp
+      source = "(range)"
+
+      assert {:error, %Step{fail: %{reason: :arity_error, message: message}}} =
+               Lisp.run(source)
+
+      assert message =~ "expected arity [1, 2, 3]"
+      assert message =~ "got 0"
+    end
+
     test "destructuring in fn params - map pattern with wrong argument type" do
       # Analyzer now accepts destructuring patterns in fn parameters
       # Evaluator supports map destructuring patterns

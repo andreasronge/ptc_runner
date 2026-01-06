@@ -197,7 +197,7 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
     test "returns Lisp-only test cases" do
       cases = TestCase.lisp_specific_cases()
       assert is_list(cases)
-      assert length(cases) == 1
+      assert length(cases) == 2
     end
   end
 

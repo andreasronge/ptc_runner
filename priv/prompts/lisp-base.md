@@ -21,7 +21,7 @@ ctx/orders
 
 ### NOT Supported
 - Namespaced keywords (`:foo/bar`)
-- Lazy sequences (`lazy-seq`, `iterate`). `range` is supported but always finite.
+- Lazy sequences (`lazy-seq`, `iterate`). `range` is supported but always finite and **requires at least one argument** (e.g., `(range 10)`). `(range)` with no arguments is NOT supported.
 - Macros, `defmacro`
 - Ratios (`1/3`), BigDecimals (`1.0M`)
 - Multi-line strings
@@ -127,6 +127,7 @@ results                                        ; => the search results
 | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
 | `(-> coll (filter f))` | `(->> coll (filter f))` — collections use `->>` |
 | `(max [1 2 3])` | `(apply max [1 2 3])` — max needs spread args |
+| `(range)` | `(range 10)` — range needs a limit |
 
 ### Return Values
 Return raw values directly:
