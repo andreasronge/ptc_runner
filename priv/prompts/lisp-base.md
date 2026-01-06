@@ -30,7 +30,7 @@ ctx/orders
 - `def` cannot shadow builtins (e.g., `(def map {})` errors)
 - `into` — use `(set coll)` or `(vec coll)` instead
 - `some` — use `(find pred coll)` or `(first (filter pred coll))`
-- `frequencies` — use `(->> coll (group-by identity) (map-vals count))`
+- `frequencies` — use `(->> coll (group-by identity) (update-vals count))`
 
 ### PTC Extensions
 
