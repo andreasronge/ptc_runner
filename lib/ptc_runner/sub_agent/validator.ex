@@ -81,10 +81,21 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   defp validate_signature!(opts) do
+    alias PtcRunner.SubAgent.Signature
+
     case Keyword.fetch(opts, :signature) do
-      {:ok, sig} when is_binary(sig) -> :ok
-      {:ok, _} -> raise ArgumentError, "signature must be a string"
-      :error -> :ok
+      {:ok, sig} when is_binary(sig) ->
+        # Validate that signature parses correctly (fail fast)
+        case Signature.parse(sig) do
+          {:ok, _} -> :ok
+          {:error, reason} -> raise ArgumentError, "invalid signature: #{reason}"
+        end
+
+      {:ok, _} ->
+        raise ArgumentError, "signature must be a string"
+
+      :error ->
+        :ok
     end
   end
 
