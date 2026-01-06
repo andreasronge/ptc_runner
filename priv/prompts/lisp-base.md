@@ -28,6 +28,9 @@ ctx/orders
 - `if` without else — use `(if cond then nil)` or `when`
 - Chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - `def` cannot shadow builtins (e.g., `(def map {})` errors)
+- `into` — use `(set coll)` or `(vec coll)` instead
+- `some` — use `(find pred coll)` or `(first (filter pred coll))`
+- `frequencies` — use `(->> coll (group-by identity) (map-vals count))`
 
 ### PTC Extensions
 
@@ -128,6 +131,8 @@ results                                        ; => the search results
 | `(-> coll (filter f))` | `(->> coll (filter f))` — collections use `->>` |
 | `(max [1 2 3])` | `(apply max [1 2 3])` — max needs spread args |
 | `(range)` | `(range 10)` — range needs a limit |
+| `(sort-by :price coll >)` | `(sort-by :price > coll)` — comparator before collection |
+| `(into #{} coll)` | `(set coll)` — into not supported |
 
 ### Return Values
 Return raw values directly:
