@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   ## Usage
 
       mix ptc.repl                      # Interactive REPL (default)
+      mix ptc.repl -l prelude.clj       # Load file, then interactive
       mix ptc.repl -e "(+ 1 2)"         # Eval and print result
       mix ptc.repl -e "(def x 1)" -e "(* x 2)"  # Chain evals (memory persists)
       mix ptc.repl script.clj           # Run script file
@@ -14,6 +15,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   ## Options
 
     * `-e, --eval` - Evaluate expression and print result (can be repeated)
+    * `-l, --load` - Load file before entering interactive mode
     * `-h, --help` - Print this help
 
   ## Features
@@ -22,7 +24,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   - Multi-line input: continues prompting until parens are balanced
   - Turn history: `*1`, `*2`, `*3` reference last 3 results
   - Memory persists between evaluations
-  - Exit with Ctrl+D or empty line
+  - Exit with Ctrl+D
 
   ## Example Session
 
@@ -39,8 +41,8 @@ defmodule Mix.Tasks.Ptc.Repl do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.Loop.ResponseHandler
 
-  @switches [eval: :keep, help: :boolean]
-  @aliases [e: :eval, h: :help]
+  @switches [eval: :keep, load: :string, help: :boolean]
+  @aliases [e: :eval, l: :load, h: :help]
 
   @impl Mix.Task
   def run(args) do
@@ -60,6 +62,9 @@ defmodule Mix.Tasks.Ptc.Repl do
 
       opts[:eval] ->
         run_evals(Keyword.get_values(opts, :eval))
+
+      opts[:load] ->
+        load_and_repl(opts[:load])
 
       true ->
         interactive_repl()
@@ -114,10 +119,31 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp interactive_repl do
-    IO.puts("PTC-Lisp REPL (Ctrl+D or empty line to exit)")
+    IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
     IO.puts("Turn history: *1, *2, *3 reference last 3 results\n")
 
     loop([], %{})
+  end
+
+  defp load_and_repl(path) do
+    case File.read(path) do
+      {:ok, source} ->
+        case PtcRunner.Lisp.run(source) do
+          {:ok, step} ->
+            IO.puts("Loaded #{path}")
+            IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
+            IO.puts("Turn history: *1, *2, *3 reference last 3 results\n")
+            loop([], step.memory)
+
+          {:error, step} ->
+            IO.puts(:stderr, format_error(step.fail))
+            System.halt(1)
+        end
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Error reading #{path}: #{:file.format_error(reason)}")
+        System.halt(1)
+    end
   end
 
   defp loop(history, memory) do
@@ -126,7 +152,8 @@ defmodule Mix.Tasks.Ptc.Repl do
         IO.puts("\nGoodbye!")
 
       "" ->
-        IO.puts("Goodbye!")
+        # Ignore empty lines, only Ctrl+D exits
+        loop(history, memory)
 
       input ->
         {history, memory} = evaluate(input, history, memory)

@@ -6,7 +6,7 @@ defmodule PtcDemo.LispTestRunnerTest do
   alias PtcDemo.{LispTestRunner, MockAgent}
 
   setup do
-    # LispTestRunner: 13 common + 1 lisp_specific + 2 multi_turn = 16 tests
+    # LispTestRunner: 13 common + 2 lisp_specific + 2 multi_turn = 17 tests
     responses = Map.merge(common_mock_responses(), lisp_specific_mock_responses())
 
     start_supervised!({MockAgent, responses})
@@ -47,8 +47,8 @@ defmodule PtcDemo.LispTestRunnerTest do
     test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
       result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
 
-      # LispTestRunner: 13 common + 1 lisp_specific + 2 multi_turn = 16 test cases
-      assert result.total == 16
+      # LispTestRunner: 13 common + 2 lisp_specific + 2 multi_turn = 17 test cases
+      assert result.total == 17
     end
   end
 

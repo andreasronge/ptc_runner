@@ -1423,6 +1423,8 @@ The `seq` function converts a collection to a sequence:
 (range 5 5)                        ; => []
 ```
 
+**Note:** Unlike Clojure, `range` in PTC-Lisp is always finite and **requires at least one argument**. The zero-arity `(range)` which produces an infinite sequence is not supported because PTC-Lisp does not support lazy sequences.
+
 ### 8.2 Map Operations
 
 | Function | Signature | Description |

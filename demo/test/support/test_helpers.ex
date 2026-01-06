@@ -65,7 +65,9 @@ defmodule PtcDemo.TestHelpers do
              %{category: "travel", total: 25000, count: 50, avg: 500},
              %{category: "equipment", total: 15000, count: 30, avg: 500}
            ]
-         }}
+         }},
+      "Search for 'security' policies, then fetch the full content for ALL found documents in parallel. Return a list of the full content of these documents." =>
+        {:ok, "Found 3 docs", nil, ["Content 1", "Content 2", "Content 3"]}
     }
   end
 end
