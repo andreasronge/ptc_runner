@@ -178,12 +178,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
   end
 
-  # Variadic requiring at least one arg: {:variadic_nonempty, fun2}
-  defp do_apply_fun({:variadic_nonempty, _fun2}, [], %EvalContext{}, _do_eval_fn) do
-    {:error, {:arity_error, "requires at least 1 argument"}}
+  # Variadic requiring at least one arg: {:variadic_nonempty, name, fun2}
+  defp do_apply_fun({:variadic_nonempty, name, _fun2}, [], %EvalContext{}, _do_eval_fn) do
+    {:error, {:arity_error, "#{name} requires at least 1 argument, got 0"}}
   end
 
-  defp do_apply_fun({:variadic_nonempty, fun2}, args, %EvalContext{user_ns: user_ns}, _do_eval_fn)
+  defp do_apply_fun(
+         {:variadic_nonempty, _name, fun2},
+         args,
+         %EvalContext{user_ns: user_ns},
+         _do_eval_fn
+       )
        when is_function(fun2, 2) do
     result =
       case args do
@@ -213,8 +218,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Multi-arity builtins: select function based on argument count
   # Tuple {fun2, fun3} means index 0 = arity 2, index 1 = arity 3, etc.
-  defp do_apply_fun({:multi_arity, funs}, args, %EvalContext{} = eval_ctx, do_eval_fn)
-       when is_tuple(funs) do
+  defp do_apply_fun({:multi_arity, name, funs}, args, %EvalContext{} = eval_ctx, do_eval_fn)
+       when is_atom(name) and is_tuple(funs) do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
     arity = length(args)
@@ -239,7 +244,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
-      {:error, {:arity_error, "expected arity #{inspect(arities)}, got #{arity}"}}
+
+      {:error,
+       {:arity_error, "#{name} expects #{format_arities(arities)} argument(s), got #{arity}"}}
     end
   end
 
@@ -335,7 +342,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     fun
   end
 
-  def closure_to_fun({:variadic_nonempty, fun}, %EvalContext{}, _do_eval_fn)
+  def closure_to_fun({:variadic_nonempty, _name, fun}, %EvalContext{}, _do_eval_fn)
       when is_function(fun) do
     fun
   end
@@ -459,4 +466,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
     end)
   end
+
+  # Format arities list for human-readable error messages
+  defp format_arities([n]), do: "#{n}"
+  defp format_arities([a, b]), do: "#{a} or #{b}"
+  defp format_arities(arities), do: Enum.join(arities, ", ")
 end
