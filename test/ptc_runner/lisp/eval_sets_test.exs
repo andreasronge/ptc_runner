@@ -206,6 +206,51 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
     end
   end
 
+  describe "clojure.set operations" do
+    test "intersection returns intersection of sets" do
+      {:ok, result, _} = run(~S"(clojure.set/intersection #{1 2} #{2 3})")
+      assert MapSet.equal?(result, MapSet.new([2]))
+
+      {:ok, result, _} = run(~S"(clojure.set/intersection #{1 2} #{2 3} #{2 4})")
+      assert MapSet.equal?(result, MapSet.new([2]))
+
+      {:ok, result, _} = run(~S"(clojure.set/intersection #{1 2})")
+      assert MapSet.equal?(result, MapSet.new([1, 2]))
+    end
+
+    test "union returns union of sets" do
+      {:ok, result, _} = run(~S"(clojure.set/union #{1} #{2})")
+      assert MapSet.equal?(result, MapSet.new([1, 2]))
+
+      {:ok, result, _} = run(~S"(clojure.set/union #{1} #{2} #{3})")
+      assert MapSet.equal?(result, MapSet.new([1, 2, 3]))
+
+      {:ok, result, _} = run(~S"(clojure.set/union)")
+      assert MapSet.equal?(result, MapSet.new([]))
+    end
+
+    test "difference returns difference of sets" do
+      {:ok, result, _} = run(~S"(clojure.set/difference #{1 2 3} #{2})")
+      assert MapSet.equal?(result, MapSet.new([1, 3]))
+
+      {:ok, result, _} = run(~S"(clojure.set/difference #{1 2 3} #{2} #{3})")
+      assert MapSet.equal?(result, MapSet.new([1]))
+
+      {:ok, result, _} = run(~S"(clojure.set/difference #{1 2})")
+      assert MapSet.equal?(result, MapSet.new([1, 2]))
+    end
+
+    test "intersection/difference require at least 1 arg" do
+      {:error, %Step{fail: %{reason: :arity_error}}} = run("(clojure.set/intersection)")
+      {:error, %Step{fail: %{reason: :arity_error}}} = run("(clojure.set/difference)")
+    end
+
+    test "set operations work with set/ alias" do
+      {:ok, result, _} = run(~S"(set/intersection #{1 2} #{2 3})")
+      assert MapSet.equal?(result, MapSet.new([2]))
+    end
+  end
+
   defp run(source) do
     case PtcRunner.Lisp.run(source) do
       {:ok, %Step{return: result}} -> {:ok, result, %{}}

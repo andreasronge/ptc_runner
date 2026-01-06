@@ -133,7 +133,7 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:set) do
-    [:set, :set?, :vec, :vector, :contains?]
+    [:set, :set?, :vec, :vector, :contains?, :intersection, :union, :difference]
   end
 
   def builtins_by_category(:regex) do
@@ -342,7 +342,14 @@ defmodule PtcRunner.Lisp.Env do
       {:pos?, {:normal, fn x -> x > 0 end}},
       {:neg?, {:normal, fn x -> x < 0 end}},
       {:even?, {:normal, fn x -> rem(x, 2) == 0 end}},
-      {:odd?, {:normal, fn x -> rem(x, 2) != 0 end}}
+      {:odd?, {:normal, fn x -> rem(x, 2) != 0 end}},
+
+      # ============================================================
+      # Set Operations
+      # ============================================================
+      {:intersection, {:variadic_nonempty, :intersection, &Runtime.intersection/2}},
+      {:union, {:variadic, &Runtime.union/2, MapSet.new()}},
+      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}}
     ]
   end
 end
