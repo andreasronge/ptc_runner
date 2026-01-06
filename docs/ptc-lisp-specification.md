@@ -1413,6 +1413,7 @@ The `seq` function converts a collection to a sequence:
 | `min-by` | `(min-by key coll)` | Item with minimum field |
 | `max-by` | `(max-by key coll)` | Item with maximum field |
 | `group-by` | `(group-by keyfn coll)` | Group items by key |
+| `frequencies` | `(frequencies coll)` | Count occurrences of each item |
 
 ```clojure
 (count [1 2 3])                   ; => 3
@@ -1423,6 +1424,9 @@ The `seq` function converts a collection to a sequence:
 (min-by :price products)          ; item with lowest price
 (max-by :years employees)         ; item with highest years
 (group-by :category products)     ; map of category -> items
+(frequencies [:a :b :a :c :b :a]) ; => {:a 3, :b 2, :c 1}
+(frequencies "hello")                 ; => {"h" 1, "e" 1, "l" 2, "o" 1}
+(frequencies (pluck :status orders))  ; count orders by status
 (min-by first [["b" 2] ["a" 1]])  ; => ["a" 1] (item with minimum first element)
 (max-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; item with maximum second element
 (sum-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; => 5 (sum second elements)
