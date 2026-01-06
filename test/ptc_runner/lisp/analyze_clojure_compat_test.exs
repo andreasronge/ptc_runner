@@ -93,6 +93,23 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     end
   end
 
+  describe "Math namespace normalization" do
+    test "Math/sqrt normalizes to sqrt" do
+      raw = {:ns_symbol, :Math, :sqrt}
+      assert {:ok, {:var, :sqrt}} = Analyze.analyze(raw)
+    end
+
+    test "Math/pow normalizes to pow" do
+      raw = {:ns_symbol, :Math, :pow}
+      assert {:ok, {:var, :pow}} = Analyze.analyze(raw)
+    end
+
+    test "Math/abs normalizes to abs" do
+      raw = {:ns_symbol, :Math, :abs}
+      assert {:ok, {:var, :abs}} = Analyze.analyze(raw)
+    end
+  end
+
   describe "call position normalization" do
     test "(clojure.string/join) works in call position" do
       raw = {:list, [{:ns_symbol, :"clojure.string", :join}, {:string, ","}, {:vector, []}]}

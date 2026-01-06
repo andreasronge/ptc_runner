@@ -59,7 +59,8 @@ defmodule PtcRunner.Lisp.Env do
     :core => :core,
     :"clojure.set" => :set,
     :set => :set,
-    :regex => :regex
+    :regex => :regex,
+    :Math => :math
   }
 
   @doc """
@@ -137,10 +138,17 @@ defmodule PtcRunner.Lisp.Env do
     [:"re-pattern", :"re-find", :"re-matches", :regex?]
   end
 
+  def builtins_by_category(:math) do
+    [:sqrt, :pow, :abs, :floor, :ceil, :round, :trunc, :max, :min]
+  end
+
   def builtins_by_category(:core) do
     # All other builtins (collection, arithmetic, logic, etc.)
     excluded =
-      builtins_by_category(:string) ++ builtins_by_category(:set) ++ builtins_by_category(:regex)
+      builtins_by_category(:string) ++
+        builtins_by_category(:set) ++
+        builtins_by_category(:regex) ++
+        builtins_by_category(:math)
 
     Map.keys(initial()) -- excluded
   end
@@ -160,6 +168,7 @@ defmodule PtcRunner.Lisp.Env do
   def category_name(:string), do: "String"
   def category_name(:set), do: "Set"
   def category_name(:regex), do: "Regex"
+  def category_name(:math), do: "Math"
   def category_name(:core), do: "Core"
 
   defp builtin_bindings do
@@ -247,12 +256,14 @@ defmodule PtcRunner.Lisp.Env do
       {:inc, {:normal, &Runtime.inc/1}},
       {:dec, {:normal, &Runtime.dec/1}},
       {:abs, {:normal, &Runtime.abs/1}},
-      {:max, {:variadic_nonempty, &Kernel.max/2}},
-      {:min, {:variadic_nonempty, &Kernel.min/2}},
+      {:max, {:variadic_nonempty, &Runtime.max/2}},
+      {:min, {:variadic_nonempty, &Runtime.min/2}},
       {:floor, {:normal, &Runtime.floor/1}},
       {:ceil, {:normal, &Runtime.ceil/1}},
       {:round, {:normal, &Runtime.round/1}},
       {:trunc, {:normal, &Runtime.trunc/1}},
+      {:sqrt, {:normal, &Runtime.sqrt/1}},
+      {:pow, {:normal, &Runtime.pow/2}},
 
       # ============================================================
       # Comparison — normal (binary)

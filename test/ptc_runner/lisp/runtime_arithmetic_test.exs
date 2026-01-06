@@ -77,6 +77,26 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "sqrt - square root" do
+    test "perfect square" do
+      assert_lisp("(sqrt 16)", 4.0)
+    end
+
+    test "Math namespace shorthand" do
+      assert_lisp("(Math/sqrt 25)", 5.0)
+    end
+  end
+
+  describe "pow - exponentiation" do
+    test "square" do
+      assert_lisp("(pow 2 3)", 8.0)
+    end
+
+    test "Math namespace shorthand" do
+      assert_lisp("(Math/pow 3 2)", 9.0)
+    end
+  end
+
   defp assert_lisp(source, expected) do
     {:ok, %{return: result}} = PtcRunner.Lisp.run(source)
     assert result == expected

@@ -70,7 +70,7 @@ ctx/orders
 (def results (ctx/search {:query "budget"}))  ; => #'results (stored)
 results                                        ; => the search results
 
-; Multi-step example
+; You can run multiple tools in a single turn or even in parallel
 (def page1 (ctx/search {:page 1}))
 (def page2 (ctx/search {:page 2}))
 (concat page1 page2)
