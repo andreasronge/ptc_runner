@@ -106,8 +106,8 @@ defmodule PtcDemo.JsonTestRunner do
       print_aggregate_summary(summaries)
     end
 
-    # Write report for last run if requested
-    last_summary = List.last(summaries)
+    # Build aggregate summary for report and return value
+    aggregate_summary = Base.build_aggregate_summary(summaries)
 
     if report_path do
       actual_path =
@@ -117,12 +117,12 @@ defmodule PtcDemo.JsonTestRunner do
           report_path
         end
 
-      written_path = Report.write(actual_path, last_summary, "JSON")
+      written_path = Report.write(actual_path, aggregate_summary, "JSON")
       IO.puts("\nReport written to: #{written_path}")
     end
 
-    # Return the last summary for CLI exit code, but include all summaries
-    Map.put(last_summary, :all_runs, summaries)
+    # Return the aggregate summary, include individual runs for reference
+    Map.put(aggregate_summary, :all_runs, summaries)
   end
 
   defp run_single_batch(run_num, total_runs, data_mode, verbose, agent_mod, current_model) do

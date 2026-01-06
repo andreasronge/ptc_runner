@@ -67,6 +67,7 @@ defmodule PtcDemo.TestRunner.Report do
     |--------|-------|
     | Passed | #{summary.passed}/#{summary.total} |
     | Failed | #{summary.failed} |
+    | Pass Rate | #{if summary.total > 0, do: Float.round(summary.passed / summary.total * 100, 1), else: 0.0}% |
     | Total Attempts | #{summary.total_attempts} |
     | Avg Attempts/Test | #{if summary.total > 0, do: Float.round(summary.total_attempts / summary.total, 2), else: 0.0} |
     | Duration | #{Base.format_duration(summary.duration_ms)} |
@@ -183,8 +184,10 @@ defmodule PtcDemo.TestRunner.Report do
               ""
             end
 
+          run_info = if r[:failed_in_run], do: " (Run #{r.failed_in_run})", else: ""
+
           """
-          ### #{r.index}. #{r.query}
+          ### #{r.index}. #{r.query}#{run_info}
 
           - **Error:** #{r.error}
           - **Expected:** #{r.description}
