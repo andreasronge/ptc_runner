@@ -47,6 +47,13 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def set(coll) when is_list(coll), do: MapSet.new(coll)
   def set(%MapSet{} = set), do: set
 
+  @doc "Convert collection to vector (list)"
+  def vec(nil), do: nil
+  def vec(coll) when is_list(coll), do: coll
+  def vec(%MapSet{} = set), do: MapSet.to_list(set)
+  def vec(s) when is_binary(s), do: String.graphemes(s)
+  def vec(m) when is_map(m), do: Enum.map(m, fn {k, v} -> [k, v] end)
+
   # ============================================================
   # Numeric Predicates
   # ============================================================

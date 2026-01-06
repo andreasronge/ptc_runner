@@ -9,6 +9,7 @@ defmodule PtcRunner.Lisp.Env do
   - `{:variadic, fun, identity}` - Variadic function with identity value for 0-arg case
   - `{:variadic_nonempty, name, fun}` - Variadic function requiring at least 1 argument
   - `{:multi_arity, name, tuple_of_funs}` - Multiple arities where tuple index = arity - min_arity
+  - `{:collect, fun}` - Collects all args into a list and passes to unary function
   """
 
   alias PtcRunner.Lisp.Runtime
@@ -18,6 +19,7 @@ defmodule PtcRunner.Lisp.Env do
           | {:variadic, function(), term()}
           | {:variadic_nonempty, atom(), function()}
           | {:multi_arity, atom(), tuple()}
+          | {:collect, function()}
   @type env :: %{atom() => binding()}
 
   @spec initial() :: env()
@@ -131,7 +133,7 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:set) do
-    [:set, :set?, :contains?]
+    [:set, :set?, :vec, :vector, :contains?]
   end
 
   def builtins_by_category(:regex) do
@@ -295,6 +297,8 @@ defmodule PtcRunner.Lisp.Env do
       {:vector?, {:normal, &is_list/1}},
       {:set?, {:normal, &Runtime.set?/1}},
       {:set, {:normal, &Runtime.set/1}},
+      {:vec, {:normal, &Runtime.vec/1}},
+      {:vector, {:collect, &Function.identity/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &is_list/1}},
 

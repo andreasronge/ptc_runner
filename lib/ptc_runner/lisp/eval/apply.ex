@@ -216,6 +216,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
   end
 
+  # Collect builtins: pass all args as a list to unary function
+  defp do_apply_fun({:collect, fun}, args, %EvalContext{user_ns: user_ns}, _do_eval_fn)
+       when is_function(fun, 1) do
+    {:ok, fun.(args), user_ns}
+  end
+
   # Multi-arity builtins: select function based on argument count
   # Tuple {fun2, fun3} means index 0 = arity 2, index 1 = arity 3, etc.
   defp do_apply_fun({:multi_arity, name, funs}, args, %EvalContext{} = eval_ctx, do_eval_fn)
@@ -343,6 +349,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   def closure_to_fun({:variadic_nonempty, _name, fun}, %EvalContext{}, _do_eval_fn)
+      when is_function(fun) do
+    fun
+  end
+
+  def closure_to_fun({:collect, fun}, %EvalContext{}, _do_eval_fn)
       when is_function(fun) do
     fun
   end

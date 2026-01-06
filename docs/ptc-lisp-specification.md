@@ -307,6 +307,8 @@ Sets are **unordered** - iteration order is not guaranteed.
 |----------|-----------|-------------|
 | `set?` | `(set? x)` | Returns true if x is a set |
 | `set` | `(set coll)` | Convert collection to set |
+| `vec` | `(vec coll)` | Convert collection to vector |
+| `vector` | `(vector & args)` | Create vector from arguments |
 | `count` | `(count #{1 2})` | Returns element count |
 | `empty?` | `(empty? #{})` | Returns true if empty |
 | `contains?` | `(contains? #{1 2} 1)` | Membership test (O(1)) |
