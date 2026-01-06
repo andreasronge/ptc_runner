@@ -79,6 +79,21 @@ Debug.print_trace(step)
 step.return
 ```
 
+## The Raspberry Problem
+
+LLMs often fail at simple counting tasks. Using PTC-Lisp, the agent can solve this accurately:
+
+```elixir
+{_, step} = PtcRunner.SubAgent.run(
+  "How many r's are in raspberry?",
+  llm: my_llm,
+  debug: true
+)
+
+Debug.print_trace(step)
+step.return
+```
+
 ## With Signatures
 
 Use `context` to pass data. Signatures validate the output structure:
@@ -91,7 +106,7 @@ Use `context` to pass data. Signatures validate the output structure:
   llm: my_llm,
   debug: true
 )
-Debug.print_trace(step, messages: true)
+Debug.print_trace(step, messages: false)
 step.return
 ```
 
@@ -153,3 +168,5 @@ end
 * [Playground](ptc_runner_playground.livemd) - PTC-Lisp basics
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [PTC-Lisp Spec](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html)
+
+<!-- livebook:{"offset":4364,"stamp":{"token":"XCP.T8MrVRWBNmkmqgH-jqALE3FEnc-Wlx0hPFg5oprbhNoX6pNr_nC1OJTslCRQ5pnTK8FVS5xu5jwNkPHF1n2P69QgMrfnMPAq1ud0RRBhA5R2qSitkV6VTyaUyEt5","version":2}} -->
