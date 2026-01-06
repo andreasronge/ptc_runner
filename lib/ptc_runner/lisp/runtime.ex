@@ -190,6 +190,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate map?(x), to: Predicates
   defdelegate coll?(x), to: Predicates
   defdelegate set(coll), to: Predicates
+  defdelegate vec(coll), to: Predicates
 
   # ============================================================
   # Numeric Predicates

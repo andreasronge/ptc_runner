@@ -256,6 +256,7 @@ defmodule PtcRunner.Lisp.Format do
     do: %Builtin{}
 
   defp sanitize({:multi_arity, name, funs}) when is_atom(name) and is_tuple(funs), do: %Builtin{}
+  defp sanitize({:collect, fun}) when is_function(fun), do: %Builtin{}
 
   # Var references - convert to Var struct for display
   defp sanitize({:var, name}) when is_atom(name), do: %Var{name: name}

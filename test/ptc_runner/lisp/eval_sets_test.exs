@@ -27,6 +27,66 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
     end
   end
 
+  describe "vec constructor" do
+    test "vec from set converts to vector" do
+      {:ok, result, _} = run(~S"(vec #{1 2 3})")
+      assert is_list(result)
+      assert Enum.sort(result) == [1, 2, 3]
+    end
+
+    test "vec from vector is identity" do
+      {:ok, result, _} = run("(vec [1 2 3])")
+      assert result == [1, 2, 3]
+    end
+
+    test "vec from string returns graphemes" do
+      {:ok, result, _} = run(~S|(vec "abc")|)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "vec from map returns key-value pairs" do
+      {:ok, result, _} = run("(vec {:a 1 :b 2})")
+      assert Enum.sort(result) == [[:a, 1], [:b, 2]]
+    end
+
+    test "vec from nil returns nil" do
+      {:ok, result, _} = run("(vec nil)")
+      assert result == nil
+    end
+
+    test "vec from empty set returns empty vector" do
+      {:ok, result, _} = run(~S"(vec #{})")
+      assert result == []
+    end
+
+    test "vec from empty string returns empty vector" do
+      {:ok, result, _} = run(~S|(vec "")|)
+      assert result == []
+    end
+
+    test "vec from empty map returns empty vector" do
+      {:ok, result, _} = run("(vec {})")
+      assert result == []
+    end
+  end
+
+  describe "vector constructor" do
+    test "vector creates vector from args" do
+      {:ok, result, _} = run("(vector 1 2 3)")
+      assert result == [1, 2, 3]
+    end
+
+    test "vector with single arg wraps in vector" do
+      {:ok, result, _} = run("(vector 1)")
+      assert result == [1]
+    end
+
+    test "vector with no args returns empty vector" do
+      {:ok, result, _} = run("(vector)")
+      assert result == []
+    end
+  end
+
   describe "set as predicate" do
     test "set returns element when found" do
       {:ok, result, _} = run(~S"(#{1 2 3} 2)")
