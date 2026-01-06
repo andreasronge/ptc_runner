@@ -79,15 +79,6 @@ Debug.print_trace(step)
 step.return
 ```
 
-### Tracing Options
-
-| Option | Default | Purpose |
-|--------|---------|---------|
-| `trace` | `true` | Whether trace is collected (`true`, `false`, or `:on_error`) |
-| `debug` | `false` | Stores extra data: raw LLM response, feedback messages, system prompt |
-
-Use `Debug.print_trace(step, messages: true)` to view the extra debug data (requires `debug: true`).
-
 ## With Signatures
 
 Use `context` to pass data. Signatures validate the output structure:
@@ -100,7 +91,7 @@ Use `context` to pass data. Signatures validate the output structure:
   llm: my_llm,
   debug: true
 )
-Debug.print_trace(step)
+Debug.print_trace(step, messages: true)
 step.return
 ```
 
@@ -163,4 +154,4 @@ end
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [PTC-Lisp Spec](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html)
 
-<!-- livebook:{"offset":4070,"stamp":{"token":"XCP.srJrBqeY0-Uhz_opjO9ybnLWHFWTCGENOKmLvHaLTOu8tMO_b1rS9kYE0RpGqWOhzcb22ZSfbOBBWt-2WxQaLVH5AAC8EeLJ4clMPPflb1eBBPaOafORGIfKbwn2","version":2}} -->
+<!-- livebook:{"offset":4086,"stamp":{"token":"XCP.Er0VQHjcPzBR7Hcfo1mhLUkv6PWWJoPVfyu-S3jfi--loZbUYtKydgXQRrCkEuGhnLOMX61QN6XNmXrFzbt7ZO0OsEHHJZUtsMkZuwu4Nti3InV39Efzqi2dMvls","version":2}} -->
