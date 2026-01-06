@@ -70,11 +70,10 @@ ctx/orders
 (def results (ctx/search {:query "budget"}))  ; => #'results (stored)
 results                                        ; => the search results
 
-; Multi-step with do
-(do
-  (def page1 (ctx/search {:page 1}))
-  (def page2 (ctx/search {:page 2}))
-  (concat page1 page2))
+; Multi-step example
+(def page1 (ctx/search {:page 1}))
+(def page2 (ctx/search {:page 2}))
+(concat page1 page2)
 
 ; Redefine to update
 (def counter 0)
