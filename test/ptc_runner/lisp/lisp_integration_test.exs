@@ -469,4 +469,32 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert mem[:b] == 2
     end
   end
+
+  describe "apply function E2E" do
+    test "apply with max spreads collection" do
+      source = "(apply max [3 1 4 1 5])"
+      {:ok, %{return: 5}} = Lisp.run(source)
+    end
+
+    test "apply with reduce (multi-arity)" do
+      source = "(apply reduce [+ 0 [1 2 3]])"
+      {:ok, %{return: 6}} = Lisp.run(source)
+    end
+
+    test "apply in thread-last" do
+      source = "(->> [1 2 3 4] (apply +))"
+      {:ok, %{return: 10}} = Lisp.run(source)
+    end
+
+    test "apply with get (multi-arity 3-arg)" do
+      source = ~S|(apply get [{:a 1} :b "default"])|
+      {:ok, %{return: "default"}} = Lisp.run(source)
+    end
+
+    test "apply with closure arity error E2E" do
+      source = "(apply (fn [x y] (+ x y)) [1])"
+      {:error, %{fail: %{message: msg}}} = Lisp.run(source)
+      assert msg =~ "arity_mismatch"
+    end
+  end
 end

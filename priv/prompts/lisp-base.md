@@ -10,7 +10,7 @@ Core language reference for PTC-Lisp.
 
 ## PTC-Lisp
 
-Safe Clojure subset for data queries. Programs are **single expressions**.
+Safe Clojure subset for data queries.
 Standard Clojure functions work. This documents PTC-specific extensions and restrictions.
 
 ### Data Access
@@ -27,7 +27,6 @@ ctx/orders
 - Multi-line strings
 - `if` without else — use `(if cond then nil)` or `when`
 - Chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
-- `apply` on variadic math — `(apply max coll)` doesn't work
 - `def` cannot shadow builtins (e.g., `(def map {})` errors)
 
 ### PTC Extensions
@@ -127,9 +126,8 @@ results                                        ; => the search results
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
 | `(<= 1 x 10)` | `(and (>= x 1) (<= x 10))` |
 | `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
-| `(apply max salaries)` | `(:salary (max-by :salary items))` |
-| `(reduce max 0 nums)` | `(:field (max-by :field items))` |
 | `(-> coll (filter f))` | `(->> coll (filter f))` — collections use `->>` |
+| `(max [1 2 3])` | `(apply max [1 2 3])` — max needs spread args |
 
 ### Return Values
 Return raw values directly:

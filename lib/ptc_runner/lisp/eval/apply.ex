@@ -76,6 +76,25 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
+  # Special builtin: apply
+  defp do_apply_fun({:special, :apply}, args, eval_ctx, do_eval_fn) do
+    case args do
+      [fun | rest] when rest != [] ->
+        {fixed_args, [last_arg]} = Enum.split(rest, -1)
+
+        case last_arg_to_list(last_arg) do
+          {:ok, expanded_list} ->
+            apply_fun(fun, fixed_args ++ expanded_list, eval_ctx, do_eval_fn)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:error, {:arity_error, "apply expects at least 2 arguments, got #{length(args)}"}}
+    end
+  end
+
   # Normal builtins: {:normal, fun}
   # Special handling for closures - convert them to Erlang functions
   defp do_apply_fun({:normal, fun}, args, %EvalContext{} = eval_ctx, do_eval_fn)
@@ -325,6 +344,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   def closure_to_fun(value, %EvalContext{}, _do_eval_fn) do
     value
   end
+
+  # ============================================================
+  # Internal Helpers
+  # ============================================================
+
+  defp last_arg_to_list(nil),
+    do: {:error, {:type_error, "apply expects collection as last argument, got nil", nil}}
+
+  defp last_arg_to_list(list) when is_list(list), do: {:ok, list}
+  defp last_arg_to_list(%MapSet{} = s), do: {:ok, MapSet.to_list(s)}
+
+  defp last_arg_to_list(other),
+    do:
+      {:error,
+       {:type_error,
+        "apply expects collection as last argument, got #{Helpers.describe_type(other)}", other}}
 
   # Helper to evaluate closure with multiple arguments.
   # This function is used inside Erlang functions passed to builtins like Enum.map/reduce,

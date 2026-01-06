@@ -79,6 +79,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def map(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
+  def map(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
+
+  def map(%MapSet{} = set, coll) when is_binary(coll),
+    do: Enum.map(graphemes(coll), set_pred(set))
+
   def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
   def map(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), f)
 
@@ -91,6 +96,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def mapv(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
+
+  def mapv(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
+
+  def mapv(%MapSet{} = set, coll) when is_binary(coll),
+    do: Enum.map(graphemes(coll), set_pred(set))
 
   def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
   def mapv(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), f)

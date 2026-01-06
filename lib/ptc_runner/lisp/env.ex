@@ -164,6 +164,7 @@ defmodule PtcRunner.Lisp.Env do
 
   defp builtin_bindings do
     [
+      {:apply, {:special, :apply}},
       # ============================================================
       # Collection operations (normal arity)
       # ============================================================
