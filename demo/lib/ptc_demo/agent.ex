@@ -192,9 +192,11 @@ defmodule PtcDemo.Agent do
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
     debug = Keyword.get(opts, :debug, false)
     verbose = Keyword.get(opts, :verbose, false)
+    # Signature for return type validation (explicit or inferred from expect)
+    signature = Keyword.get(opts, :signature) || infer_signature(Keyword.get(opts, :expect))
 
-    # Build the SubAgent with requested max_turns
-    agent = build_agent(state.data_mode, state.prompt_profile, max_turns)
+    # Build the SubAgent with requested max_turns and signature
+    agent = build_agent(state.data_mode, state.prompt_profile, max_turns, signature)
 
     # Build context with datasets (memory is handled internally by SubAgent)
     context = Map.merge(state.datasets, %{"question" => question})
@@ -247,7 +249,18 @@ defmodule PtcDemo.Agent do
 
         new_usage = add_usage(state.usage, step.usage)
 
-        {:reply, {:error, error_msg}, %{state | usage: new_usage}}
+        # Extract programs from trace for debugging - same as success path
+        all_programs = extract_all_programs_from_trace(step.trace)
+        program = extract_program_from_trace(step.trace)
+        new_programs = state.programs_history ++ all_programs
+
+        {:reply, {:error, error_msg},
+         %{
+           state
+           | usage: new_usage,
+             programs_history: new_programs,
+             last_program: program
+         }}
     end
   end
 
@@ -332,15 +345,25 @@ defmodule PtcDemo.Agent do
 
   # --- Private Functions ---
 
-  defp build_agent(data_mode, prompt_profile, max_turns \\ @max_turns) do
+  defp build_agent(data_mode, prompt_profile, max_turns \\ @max_turns, signature \\ nil) do
     SubAgent.new(
       prompt: "{{question}}",
-      signature: "(question :string) -> :any",
+      signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
       tools: build_tools(),
       system_prompt: build_system_prompt(data_mode, prompt_profile, max_turns)
     )
   end
+
+  # Infer signature from expect type (for backward compatibility)
+  defp infer_signature(nil), do: nil
+  defp infer_signature(:integer), do: "(question :string) -> :int"
+  defp infer_signature(:number), do: "(question :string) -> :float"
+  defp infer_signature(:string), do: "(question :string) -> :string"
+  defp infer_signature(:boolean), do: "(question :string) -> :bool"
+  defp infer_signature(:list), do: "(question :string) -> [:any]"
+  defp infer_signature(:map), do: "(question :string) -> :map"
+  defp infer_signature(_), do: nil
 
   defp build_tools do
     %{
@@ -353,7 +376,8 @@ defmodule PtcDemo.Agent do
          description:
            "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."},
       "fetch" =>
-        {&SearchTool.fetch/1, signature: "(id :string) -> :any",
+        {&SearchTool.fetch/1,
+         signature: "(id :string) -> :any",
          description: "Fetch a single policy document by its ID to see its full content."}
     }
   end

@@ -417,6 +417,8 @@ defmodule PtcDemo.LispTestRunner do
   defp run_test(test_case, index, total, verbose, agent_mod, clojure_available) do
     query = test_case.query
     max_turns = Map.get(test_case, :max_turns, 1)
+    expect = Map.get(test_case, :expect)
+    signature = Map.get(test_case, :signature)
 
     if verbose do
       prefix = if max_turns > 1, do: "[MULTI-TURN] ", else: ""
@@ -425,8 +427,12 @@ defmodule PtcDemo.LispTestRunner do
       IO.write(if max_turns > 1, do: "M", else: ".")
     end
 
+    # Build ask options - signature takes precedence over expect for type validation
+    ask_opts = [max_turns: max_turns, expect: expect]
+    ask_opts = if signature, do: Keyword.put(ask_opts, :signature, signature), else: ask_opts
+
     result =
-      case agent_mod.ask(query, max_turns: max_turns) do
+      case agent_mod.ask(query, ask_opts) do
         {:ok, _answer} ->
           # Get all programs attempted during this query
           all_programs = agent_mod.programs()
