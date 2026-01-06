@@ -377,6 +377,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def group_by(key, coll) when is_list(coll),
     do: Enum.group_by(coll, &FlexAccess.flex_get(&1, key))
 
+  def frequencies(coll) when is_list(coll), do: Enum.frequencies(coll)
+  def frequencies(coll) when is_binary(coll), do: Enum.frequencies(graphemes(coll))
+
   def some(key, coll) when is_list(coll) and is_atom(key) do
     Enum.find_value(coll, truthy_key_pred(key))
   end

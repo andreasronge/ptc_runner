@@ -592,4 +592,38 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       assert Runtime.range(0.5, 2.5, 0.5) == [0.5, 1.0, 1.5, 2.0]
     end
   end
+
+  describe "frequencies" do
+    test "counts occurrences of each element" do
+      assert Runtime.frequencies([1, 2, 1, 3, 2, 1]) == %{1 => 3, 2 => 2, 3 => 1}
+    end
+
+    test "handles empty list" do
+      assert Runtime.frequencies([]) == %{}
+    end
+
+    test "handles strings" do
+      assert Runtime.frequencies(["a", "b", "a", "c", "b", "a"]) == %{
+               "a" => 3,
+               "b" => 2,
+               "c" => 1
+             }
+    end
+
+    test "handles atoms" do
+      assert Runtime.frequencies([:pending, :done, :pending]) == %{pending: 2, done: 1}
+    end
+
+    test "handles mixed types" do
+      assert Runtime.frequencies([1, "1", 1, :one]) == %{1 => 2, "1" => 1, :one => 1}
+    end
+
+    test "handles strings as graphemes" do
+      assert Runtime.frequencies("hello") == %{"h" => 1, "e" => 1, "l" => 2, "o" => 1}
+    end
+
+    test "handles empty string" do
+      assert Runtime.frequencies("") == %{}
+    end
+  end
 end

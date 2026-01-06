@@ -219,6 +219,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"min-by", {:normal, &Runtime.min_by/2}},
       {:"max-by", {:normal, &Runtime.max_by/2}},
       {:"group-by", {:normal, &Runtime.group_by/2}},
+      {:frequencies, {:normal, &Runtime.frequencies/1}},
       {:some, {:normal, &Runtime.some/2}},
       {:every?, {:normal, &Runtime.every?/2}},
       {:"not-any?", {:normal, &Runtime.not_any?/2}},
