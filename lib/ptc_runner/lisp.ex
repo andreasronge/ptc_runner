@@ -29,6 +29,7 @@ defmodule PtcRunner.Lisp do
   """
 
   alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser, SymbolCounter}
+  alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
@@ -169,7 +170,7 @@ defmodule PtcRunner.Lisp do
 
       # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
       eval_fn = fn _ast, sandbox_context ->
-        Eval.eval(
+        Eval.eval_with_context(
           core_ast,
           sandbox_context.ctx,
           sandbox_context.memory,
@@ -186,8 +187,8 @@ defmodule PtcRunner.Lisp do
       ]
 
       case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
-        {:ok, value, metrics, eval_memory} ->
-          step = apply_memory_contract(value, eval_memory, float_precision)
+        {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
+          step = apply_memory_contract(value, eval_ctx.user_ns, float_precision, eval_ctx.prints)
           step_with_usage = %{step | usage: metrics}
 
           # Validate signature if provided
@@ -266,14 +267,15 @@ defmodule PtcRunner.Lisp do
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
-  defp apply_memory_contract(value, memory, precision) do
+  defp apply_memory_contract(value, memory, precision, prints) do
     %Step{
       return: round_floats(value, precision),
       fail: nil,
       memory: memory,
       signature: nil,
       usage: nil,
-      trace: nil
+      trace: nil,
+      prints: Enum.reverse(prints)
     }
   end
 

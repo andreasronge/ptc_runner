@@ -17,7 +17,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :tool_exec,
     :turn_history,
     iteration_count: 0,
-    loop_limit: 1000
+    loop_limit: 1000,
+    prints: []
   ]
 
   @max_loop_limit 10_000
@@ -29,7 +30,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_exec: (String.t(), map() -> term()),
           turn_history: list(),
           iteration_count: integer(),
-          loop_limit: integer()
+          loop_limit: integer(),
+          prints: [String.t()]
         }
 
   @doc """
@@ -49,8 +51,17 @@ defmodule PtcRunner.Lisp.Eval.Context do
       user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
-      turn_history: turn_history
+      turn_history: turn_history,
+      prints: []
     }
+  end
+
+  @doc """
+  Appends a print message to the context.
+  """
+  @spec append_print(t(), String.t()) :: t()
+  def append_print(%__MODULE__{prints: prints} = context, message) do
+    %{context | prints: [message | prints]}
   end
 
   @doc """

@@ -169,7 +169,8 @@ defmodule PtcRunner.Step do
     :trace,
     :trace_id,
     :parent_trace_id,
-    :field_descriptions
+    :field_descriptions,
+    :prints
   ]
 
   @typedoc """
@@ -267,7 +268,8 @@ defmodule PtcRunner.Step do
           trace: [trace_entry()] | nil,
           trace_id: String.t() | nil,
           parent_trace_id: String.t() | nil,
-          field_descriptions: map() | nil
+          field_descriptions: map() | nil,
+          prints: [String.t()]
         }
 
   @doc """
@@ -293,7 +295,8 @@ defmodule PtcRunner.Step do
       trace: nil,
       trace_id: nil,
       parent_trace_id: nil,
-      field_descriptions: nil
+      field_descriptions: nil,
+      prints: []
     }
   end
 
@@ -344,7 +347,8 @@ defmodule PtcRunner.Step do
       trace: nil,
       trace_id: nil,
       parent_trace_id: nil,
-      field_descriptions: nil
+      field_descriptions: nil,
+      prints: []
     }
   end
 end
