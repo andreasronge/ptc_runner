@@ -145,10 +145,9 @@ defmodule PtcRunner.Lisp.FormatTest do
   end
 
   describe "to_clojure/2 with structs" do
-    test "handles MapSet" do
-      # Structs pass through to inspect
+    test "handles MapSet as Clojure set syntax" do
       {result, _truncated} = Format.to_clojure(MapSet.new(["meals"]))
-      assert result =~ "MapSet"
+      assert result == ~S|#{"meals"}|
     end
   end
 
