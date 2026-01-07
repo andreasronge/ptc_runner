@@ -422,6 +422,44 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
     end
   end
 
+  describe "empty? and not_empty" do
+    test "empty? returns true for empty collections" do
+      assert Runtime.empty?([]) == true
+      assert Runtime.empty?("") == true
+      assert Runtime.empty?(%{}) == true
+      assert Runtime.empty?(MapSet.new()) == true
+    end
+
+    test "empty? returns true for nil" do
+      assert Runtime.empty?(nil) == true
+    end
+
+    test "empty? returns false for non-empty collections" do
+      assert Runtime.empty?([1]) == false
+      assert Runtime.empty?("a") == false
+      assert Runtime.empty?(%{a: 1}) == false
+      assert Runtime.empty?(MapSet.new([1])) == false
+    end
+
+    test "not_empty returns collection for non-empty collections" do
+      assert Runtime.not_empty([1, 2]) == [1, 2]
+      assert Runtime.not_empty("abc") == "abc"
+      assert Runtime.not_empty(%{a: 1}) == %{a: 1}
+      assert Runtime.not_empty(MapSet.new([1])) == MapSet.new([1])
+    end
+
+    test "not_empty returns nil for empty collections" do
+      assert Runtime.not_empty([]) == nil
+      assert Runtime.not_empty("") == nil
+      assert Runtime.not_empty(%{}) == nil
+      assert Runtime.not_empty(MapSet.new()) == nil
+    end
+
+    test "not_empty returns nil for nil" do
+      assert Runtime.not_empty(nil) == nil
+    end
+  end
+
   describe "subs" do
     test "returns substring from start index" do
       assert Runtime.subs("hello", 1) == "ello"
