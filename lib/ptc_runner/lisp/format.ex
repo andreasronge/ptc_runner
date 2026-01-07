@@ -157,6 +157,27 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(%Var{name: name}, _opts), do: {"#'#{name}", false}
 
   # Structs (other than our wrapper types) pass through to inspect
+  defp format_clojure(%MapSet{} = set, opts) do
+    limit = Keyword.get(opts, :limit, :infinity)
+    items = MapSet.to_list(set)
+    {to_show, set_truncated} = apply_limit(items, limit)
+
+    {formatted_items, any_child_truncated} =
+      Enum.map_reduce(to_show, false, fn item, acc ->
+        {str, truncated} = format_clojure(item, opts)
+        {str, acc or truncated}
+      end)
+
+    formatted = Enum.join(formatted_items, " ")
+
+    if set_truncated do
+      total = MapSet.size(set)
+      {"\#{#{formatted} ...} (#{total} items, showing first #{limit})", true}
+    else
+      {"\#{#{formatted}}", any_child_truncated}
+    end
+  end
+
   defp format_clojure(%_{} = struct, _opts), do: {inspect(struct), false}
 
   defp format_clojure(list, opts) when is_list(list) do
