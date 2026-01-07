@@ -16,35 +16,38 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
+  alias PtcRunner.Lisp.Format
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
 
   @doc """
   Applies a function value to a list of arguments.
   """
-  @spec apply_fun(term(), [term()], EvalContext.t(), (term(), EvalContext.t() -> term())) ::
-          {:ok, term(), map()} | {:error, term()}
+  @spec apply_fun(term(), [term()], EvalContext.t(), (term(), EvalContext.t() ->
+                                                        {:ok, term(), EvalContext.t()}
+                                                        | {:error, term()})) ::
+          {:ok, term(), EvalContext.t()} | {:error, term()}
   def apply_fun(fun_val, args, eval_ctx, do_eval_fn) do
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
   end
 
   # Keyword as function: (:key map) → Map.get(map, :key)
-  defp do_apply_fun(k, args, %EvalContext{user_ns: user_ns}, _do_eval_fn) when is_atom(k) do
+  defp do_apply_fun(k, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_atom(k) do
     case args do
       [m] when is_map(m) ->
-        {:ok, flex_get(m, k), user_ns}
+        {:ok, flex_get(m, k), eval_ctx}
 
       [m, default] when is_map(m) ->
         case flex_fetch(m, k) do
-          {:ok, val} -> {:ok, val, user_ns}
-          :error -> {:ok, default, user_ns}
+          {:ok, val} -> {:ok, val, eval_ctx}
+          :error -> {:ok, default, eval_ctx}
         end
 
       [nil] ->
-        {:ok, nil, user_ns}
+        {:ok, nil, eval_ctx}
 
       [nil, default] ->
-        {:ok, default, user_ns}
+        {:ok, default, eval_ctx}
 
       _ ->
         {:error, {:invalid_keyword_call, k, args}}
@@ -52,9 +55,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Set as function: (#{1 2 3} x) → checks membership, returns element or nil
-  defp do_apply_fun(set, [arg], %EvalContext{user_ns: user_ns}, _do_eval_fn)
+  defp do_apply_fun(set, [arg], %EvalContext{} = eval_ctx, _do_eval_fn)
        when is_struct(set, MapSet) do
-    {:ok, if(MapSet.member?(set, arg), do: arg, else: nil), user_ns}
+    {:ok, if(MapSet.member?(set, arg), do: arg, else: nil), eval_ctx}
   end
 
   defp do_apply_fun(set, args, %EvalContext{}, _do_eval_fn)
@@ -95,6 +98,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
+  # Special builtin: println
+  defp do_apply_fun({:special, :println}, args, eval_ctx, _do_eval_fn) do
+    message =
+      Enum.map_join(args, " ", fn
+        s when is_binary(s) -> s
+        v -> Format.to_clojure(v) |> elem(0)
+      end)
+
+    {:ok, nil, EvalContext.append_print(eval_ctx, message)}
+  end
+
   # Normal builtins: {:normal, fun}
   # Special handling for closures - convert them to Erlang functions
   defp do_apply_fun({:normal, fun}, args, %EvalContext{} = eval_ctx, do_eval_fn)
@@ -102,7 +116,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
     try do
-      {:ok, apply(fun, converted_args), eval_ctx.user_ns}
+      {:ok, apply(fun, converted_args), eval_ctx}
     rescue
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
@@ -137,14 +151,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp do_apply_fun(
          {:variadic, fun2, _identity},
          [x],
-         %EvalContext{user_ns: user_ns},
+         %EvalContext{} = eval_ctx,
          _do_eval_fn
        ) do
     if fun2 == (&Kernel.-/2) do
-      {:ok, -x, user_ns}
+      {:ok, -x, eval_ctx}
     else
       # For other variadic functions like *, single arg returns the arg itself
-      {:ok, x, user_ns}
+      {:ok, x, eval_ctx}
     end
   rescue
     ArithmeticError ->
@@ -155,7 +169,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp do_apply_fun(
          {:variadic, fun2, identity},
          args,
-         %EvalContext{user_ns: user_ns},
+         %EvalContext{} = eval_ctx,
          _do_eval_fn
        )
        when is_function(fun2, 2) do
@@ -167,7 +181,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
 
-    {:ok, result, user_ns}
+    {:ok, result, eval_ctx}
   rescue
     ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
@@ -186,7 +200,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp do_apply_fun(
          {:variadic_nonempty, _name, fun2},
          args,
-         %EvalContext{user_ns: user_ns},
+         %EvalContext{} = eval_ctx,
          _do_eval_fn
        )
        when is_function(fun2, 2) do
@@ -197,7 +211,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
 
-    {:ok, result, user_ns}
+    {:ok, result, eval_ctx}
   rescue
     ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors
@@ -217,9 +231,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Collect builtins: pass all args as a list to unary function
-  defp do_apply_fun({:collect, fun}, args, %EvalContext{user_ns: user_ns}, _do_eval_fn)
+  defp do_apply_fun({:collect, fun}, args, %EvalContext{} = eval_ctx, _do_eval_fn)
        when is_function(fun, 1) do
-    {:ok, fun.(args), user_ns}
+    {:ok, fun.(args), eval_ctx}
   end
 
   # Multi-arity builtins: select function based on argument count
@@ -238,7 +252,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       fun = elem(funs, idx)
 
       try do
-        {:ok, apply(fun, converted_args), eval_ctx.user_ns}
+        {:ok, apply(fun, converted_args), eval_ctx}
       rescue
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
@@ -256,10 +270,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  # Plain function value (from user code or closures that escape)
-  defp do_apply_fun(fun, args, %EvalContext{user_ns: user_ns}, _do_eval_fn)
+  defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, _do_eval_fn)
        when is_function(fun) do
-    {:ok, apply(fun, args), user_ns}
+    {:ok, apply(fun, args), eval_ctx}
   end
 
   # Fallback: not callable
@@ -358,6 +371,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     fun
   end
 
+  # Special forms like println - convert to a function
+  # Note: println side effects are lost when used in HOFs like map (same as pmap)
+  def closure_to_fun({:special, :println}, %EvalContext{}, _do_eval_fn) do
+    fn arg ->
+      # Side effect is lost, but at least it doesn't error
+      # User should use doseq pattern instead: (doseq [x coll] (println x))
+      # For now, just return nil like println does
+      _ = arg
+      nil
+    end
+  end
+
   # Non-closures pass through unchanged
   def closure_to_fun(value, %EvalContext{}, _do_eval_fn) do
     value
@@ -442,8 +467,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         new_env = Map.merge(closure_env, bindings)
         closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
 
-        # Use iteration limit from caller context
-        closure_ctx = %{closure_ctx | loop_limit: caller_ctx.loop_limit}
+        # Use iteration limit and prints from caller context
+        closure_ctx = %{
+          closure_ctx
+          | loop_limit: caller_ctx.loop_limit,
+            prints: caller_ctx.prints
+        }
 
         do_eval_fn.(body, closure_ctx)
 
@@ -451,7 +480,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         err
     end
   catch
-    {:recur_signal, new_args} ->
+    {:recur_signal, new_args, prints} ->
       # Arity check for recur
       if length(patterns) != length(new_args) do
         {:error, {:arity_mismatch, length(patterns), length(new_args)}}
@@ -459,7 +488,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Check iteration limit
         case EvalContext.increment_iteration(caller_ctx) do
           {:ok, updated_caller_ctx} ->
-            # Tail-recursive call
+            # Preserve prints from this iteration and recurse
+            updated_caller_ctx = %{updated_caller_ctx | prints: prints}
             execute_closure(closure, new_args, updated_caller_ctx, do_eval_fn)
 
           {:error, :loop_limit_exceeded} ->
