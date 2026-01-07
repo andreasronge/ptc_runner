@@ -1933,6 +1933,48 @@ The `apply` function invokes a function `f` with the provided arguments. The las
 - **Non-callable first argument:** Raises a `not-callable` error.
 - **Non-collection last argument:** Raises a `type_error`.
 
+### 8.12 Debugging with println
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `println` | `(println ...)` | Prints arguments to the execution trace, separated by spaces. Returns `nil`. |
+
+The `println` function is the **only way to inspect values** during multi-turn SubAgent execution. Expression results are NOT shown to the LLM — only explicit `println` output appears in feedback.
+
+**Behavior:**
+- Arguments are converted to Clojure syntax strings.
+- Multiple arguments are separated by single spaces.
+- Each `println` call results in a new line in the output buffer.
+- Returns `nil`.
+
+```clojure
+(def results (ctx/search {:q "test"}))
+(println "Found:" (count results))      ; shown in feedback
+(println "First:" (first results))      ; shown in feedback
+results                                  ; NOT shown - use println to inspect
+```
+
+**Multi-Turn Feedback:**
+In SubAgent multi-turn loops, the LLM only sees:
+1. `println` output from the current turn
+2. Stored symbol names (from `def`)
+3. Turn information
+
+Expression results are intentionally hidden to encourage explicit inspection and reduce token waste.
+
+**Trace Output:**
+Programs that call `println` will have their output available in the `prints` list of the result:
+
+```elixir
+# Result of Lisp.run(...)
+{:ok, %Step{
+  return: [...],
+  prints: ["Found: 42", "First: {:id 1}"]
+}}
+```
+
+**Note:** In parallel operations like `pmap`, `println` output from parallel branches is NOT captured. Only the main execution thread's output is captured.
+
 ---
 
 ## 9. Namespaces, Context, and Tools
@@ -2443,9 +2485,11 @@ type-error at line 5:
 | Java interop | Security |
 | Atoms, refs, agents | No mutable state |
 | `eval`, `read-string` | Security |
-| I/O (`println`, `slurp`) | Security |
-| Regex | Complexity (use tools) |
+| File I/O (`slurp`, `spit`) | Security |
+| Regex literals | Complexity (use `re-pattern`) |
 | Multi-methods, protocols | Complexity |
+
+**Note:** `println` IS supported — see section 8.12. It writes to an internal trace buffer, not stdout.
 
 ### 13.2 Anonymous Functions
 
