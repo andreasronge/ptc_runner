@@ -1369,6 +1369,10 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (concat [1 2] [3 4])       ; => [1 2 3 4]
 (into [] [1 2 3])          ; => [1 2 3]
 (into [] {:a 1 :b 2})       ; => [[:a 1] [:b 2]]
+(into #{} [1 2 2 3])       ; => #{1 2 3}
+(into {} [[:a 1] [:b 2]])  ; => {:a 1 :b 2}
+(into #{} {:a 1})          ; => #{[:a 1]}
+(into {} #{[:a 1]})        ; => {:a 1}
 (flatten [[1 2] [3 [4]]])  ; => [1 2 3 4]
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
 ```

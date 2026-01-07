@@ -310,6 +310,38 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def conj(%MapSet{} = set, x), do: MapSet.put(set, x)
   def conj(map, [k, v]) when is_map(map) and not is_struct(map), do: Map.put(map, k, v)
 
+  def into(%MapSet{} = to, from) when is_map(from) and not is_struct(from) do
+    # When collecting from a map to a set, convert entries to [key, value] pairs
+    Enum.into(Enum.map(from, fn {k, v} -> [k, v] end), to)
+  end
+
+  def into(%MapSet{} = to, from) do
+    # Handles nil from gracefully (Enum.into(nil, set) works)
+    Enum.into(from || [], to)
+  end
+
+  def into(to, from) when is_map(to) and not is_struct(to) do
+    source =
+      case from do
+        nil ->
+          []
+
+        %MapSet{} ->
+          Enum.map(from, &entry_to_tuple/1)
+
+        m when is_map(m) ->
+          m
+
+        l when is_list(l) ->
+          Enum.map(l, &entry_to_tuple/1)
+
+        _ ->
+          from |> Enum.to_list() |> Enum.map(&entry_to_tuple/1)
+      end
+
+    Enum.into(source, to)
+  end
+
   def into(to, from) when is_list(to) and is_map(from) do
     # When collecting from a map, each entry is converted to [key, value] pair
     # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists
@@ -318,7 +350,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def into(to, from) when is_list(to) do
     # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists
-    to ++ Enum.to_list(from)
+    to ++ Enum.to_list(from || [])
+  end
+
+  defp entry_to_tuple([k, v]), do: {k, v}
+
+  defp entry_to_tuple(item) do
+    raise "type_error: into: invalid map entry: #{inspect(item)}. Expected [key, value] vector."
   end
 
   def flatten(coll) when is_list(coll), do: List.flatten(coll)

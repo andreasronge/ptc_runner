@@ -2,8 +2,8 @@
 
 Core language reference for PTC-Lisp.
 
-<!-- version: 2 -->
-<!-- date: 2026-01-03 -->
+<!-- version: 3 -->
+<!-- date: 2026-01-07 -->
 <!-- changes: Simplified to hybrid approach - document PTC extensions and restrictions only, leverage LLM Clojure knowledge -->
 
 <!-- PTC_PROMPT_START -->
@@ -28,7 +28,6 @@ ctx/orders
 - `if` without else — use `(if cond then nil)` or `when`
 - Chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - `def` cannot shadow builtins (e.g., `(def map {})` errors)
-- `into` — use `(set coll)` or `(vec coll)` instead
 - `some` — use `(find pred coll)` or `(first (filter pred coll))`
 - `float` — use `(double x)` for float coercion
 - `for` — use `map` or `->>` threading instead
@@ -133,7 +132,6 @@ results                                        ; => the search results
 | `(max [1 2 3])` | `(apply max [1 2 3])` — max needs spread args |
 | `(range)` | `(range 10)` — range needs a limit |
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` — comparator before collection |
-| `(into #{} coll)` | `(set coll)` — into not supported |
 | `(includes s "x")` | `(includes? s "x")` — predicates end in `?` |
 
 ### Return Values
