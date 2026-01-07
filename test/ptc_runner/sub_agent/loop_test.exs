@@ -739,27 +739,72 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.return == 42
     end
 
-    test "shows truncation hint when result exceeds limit" do
+    test "feedback shows only println output, not expression results" do
       agent =
         SubAgent.new(
           prompt: "Search task",
           tools: %{},
-          max_turns: 3,
-          # Small limit to trigger truncation
-          format_options: [feedback_limit: 2, feedback_max_chars: 100]
+          max_turns: 3
         )
 
       llm = fn %{turn: turn, messages: messages} ->
         case turn do
           1 ->
-            # Return a large list that will be truncated
-            {:ok, "```clojure\n[1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]\n```"}
+            # Return a large list without println - should NOT appear in feedback
+            {:ok, "```clojure\n[1 2 3 4 5 6 7 8 9 10]\n```"}
 
           2 ->
-            # After turn 1, feedback should contain truncation hint
+            # After turn 1, feedback should NOT contain the list result
             last_message = List.last(messages)
-            assert last_message.content =~ "Hint:"
-            assert last_message.content =~ "filters or transforms"
+            refute last_message.content =~ "[1 2 3"
+            # Use println to see output
+            {:ok, "```clojure\n(println \"count:\" 42)\n:done\n```"}
+
+          3 ->
+            # After turn 2, feedback should contain println output but not :done
+            last_message = List.last(messages)
+            assert last_message.content =~ "count: 42"
+            refute last_message.content =~ ":done"
+            {:ok, "```clojure\n(return :finished)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == :finished
+    end
+
+    test "println output is truncated when exceeding feedback_max_chars" do
+      agent =
+        SubAgent.new(
+          prompt: "Test task",
+          tools: %{},
+          max_turns: 3,
+          # Small limit to trigger truncation
+          format_options: [feedback_max_chars: 50]
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            # Print a lot of output that exceeds 50 chars
+            {:ok,
+             ~S"""
+             ```clojure
+             (println "Line 1: some text here")
+             (println "Line 2: more text here")
+             (println "Line 3: even more text")
+             :done
+             ```
+             """}
+
+          2 ->
+            # Verify truncation hint appears
+            last_message = List.last(messages)
+            assert last_message.content =~ "Line 1"
+            assert last_message.content =~ "truncated"
             {:ok, "```clojure\n(return :done)\n```"}
 
           _ ->
@@ -769,10 +814,6 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
       assert step.return == :done
-
-      # Verify feedback_truncated is set in trace
-      [turn1, _turn2] = step.trace
-      assert turn1.feedback_truncated == true
     end
   end
 end

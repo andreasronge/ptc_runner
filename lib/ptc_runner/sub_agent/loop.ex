@@ -673,21 +673,23 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Returns {feedback_string, truncated?}
+  # Only shows explicit println output - LLM must be intentional about what it inspects
   defp format_turn_feedback(agent, state, lisp_step) do
-    {base_result, truncated?} =
-      ResponseHandler.format_execution_result(lisp_step.return, agent.format_options)
+    max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
 
-    # Add truncation hint if result was truncated
-    result_with_hint =
-      if truncated? do
-        base_result <>
-          "\n\nHint: Result truncated. Write a program that filters or transforms data to return only what you need."
-      else
-        base_result
+    # Only show println output (no implicit last-expression result)
+    {prints_output, truncated?} =
+      case lisp_step.prints do
+        [_ | _] = prints ->
+          joined = Enum.join(prints, "\n")
+          truncate_prints(joined, max_chars)
+
+        _ ->
+          {nil, false}
       end
 
     # Add stored values hint for multi-turn agents (shows def bindings available as symbols)
-    result_with_stored =
+    stored_hint =
       if agent.max_turns > 1 and map_size(lisp_step.memory) > 0 do
         stored_symbols =
           lisp_step.memory
@@ -696,16 +698,36 @@ defmodule PtcRunner.SubAgent.Loop do
           |> Enum.sort()
           |> Enum.join(", ")
 
-        result_with_hint <> "\n\nStored (access as symbols): #{stored_symbols}"
+        "Stored (access as symbols): #{stored_symbols}"
       else
-        result_with_hint
+        nil
       end
 
+    # Add truncation hint if needed
+    prints_with_hint =
+      if truncated? do
+        prints_output <> "\n... (truncated, use println selectively)"
+      else
+        prints_output
+      end
+
+    # Combine parts
+    feedback =
+      [prints_with_hint, stored_hint]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n\n")
+
     # Add turn info for multi-turn agents
-    feedback = append_turn_info(result_with_stored, agent, state)
+    feedback = append_turn_info(feedback, agent, state)
 
     {feedback, truncated?}
   end
+
+  defp truncate_prints(str, max_chars) when byte_size(str) > max_chars do
+    {String.slice(str, 0, max_chars), true}
+  end
+
+  defp truncate_prints(str, _max_chars), do: {str, false}
 
   # ============================================================
   # Return Type Validation
