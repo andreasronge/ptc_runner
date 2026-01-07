@@ -337,7 +337,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert is_integer(stop_measurements.duration)
       assert stop_meta.agent == agent
       assert stop_meta.tool_name == "helper"
-      assert stop_meta.result == 10
+      # Result is summarized to avoid memory bloat in telemetry metadata
+      assert stop_meta.result == "10"
     end
 
     test "emits :tool :exception on tool crash", %{table: table} do
@@ -362,6 +363,67 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert meta.tool_name == "crasher"
       assert meta.kind == :error
       assert meta.reason.__struct__ == RuntimeError
+    end
+
+    test "summarizes large tool arguments in telemetry metadata", %{table: table} do
+      large_list = Enum.to_list(1..1000)
+      large_string = String.duplicate("x", 500)
+      large_map = Map.new(1..20, fn i -> {i, i} end)
+
+      helper_fn = fn args -> args end
+
+      agent = SubAgent.new(prompt: "Test", tools: %{"helper" => helper_fn}, max_turns: 2)
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 ->
+            {:ok,
+             %{
+               content:
+                 ~S|(ctx/helper {:list ctx/list :string ctx/string :map ctx/map :small 42})|,
+               tokens: %{}
+             }}
+
+          _ ->
+            {:ok, ~S|(return {:done true})|}
+        end
+      end
+
+      {:ok, _step} =
+        SubAgent.run(agent,
+          llm: llm,
+          context: %{list: large_list, string: large_string, map: large_map}
+        )
+
+      tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
+
+      [{_, _, start_meta, _}] = tool_starts
+
+      assert start_meta.tool_name == "helper"
+      assert start_meta.args.small == 42
+      assert start_meta.args.list == "List(1000)"
+      assert start_meta.args.string == "String(500 bytes)"
+      assert start_meta.args.map == "Map(20)"
+    end
+
+    test "summarizes arbitrary results using fallback inspect settings", %{table: table} do
+      # A moderately complex structure that isn't a list/map/binary
+      result = {:complex, %{a: 1, b: 2, c: 3, d: 4}, [1, 2, 3, 4]}
+      helper_fn = fn _ -> result end
+
+      agent = SubAgent.new(prompt: "Test", tools: %{"helper" => helper_fn}, max_turns: 1)
+      llm = fn _ -> {:ok, ~S|(ctx/helper {})|} end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
+      [{_, _, stop_meta, _}] = tool_stops
+
+      # limit: 3 should cap the map keys and list elements
+      # result = {:complex, %{a: 1, b: 2, c: 3, ...}, [1, 2, 3, ...]}
+      assert stop_meta.result =~ "..."
+      # Allow small buffer for delimiters
+      assert byte_size(stop_meta.result) <= 100 + 10
     end
   end
 
