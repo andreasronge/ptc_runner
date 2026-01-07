@@ -51,6 +51,94 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       result = Runtime.into([99], [1, 2])
       assert result == [99, 1, 2]
     end
+
+    test "into with nil list source returns original list" do
+      result = Runtime.into([1, 2], nil)
+      assert result == [1, 2]
+    end
+  end
+
+  describe "into - collecting into MapSets" do
+    test "into #{} with list adds elements to set" do
+      result = Runtime.into(MapSet.new(), [1, 2, 3])
+      assert result == MapSet.new([1, 2, 3])
+    end
+
+    test "into #{1} with list adds new elements" do
+      result = Runtime.into(MapSet.new([1]), [2, 3])
+      assert result == MapSet.new([1, 2, 3])
+    end
+
+    test "into #{} with another MapSet unions them" do
+      result = Runtime.into(MapSet.new([1]), MapSet.new([2, 3]))
+      assert result == MapSet.new([1, 2, 3])
+    end
+
+    test "into #{} with map converts to list of entries" do
+      result = Runtime.into(MapSet.new(), %{a: 1})
+      assert result == MapSet.new([[:a, 1]])
+    end
+
+    test "into #{} with nil returns empty set (or original set)" do
+      result = Runtime.into(MapSet.new([1]), nil)
+      assert result == MapSet.new([1])
+    end
+
+    test "into #{} with empty map returns original set" do
+      result = Runtime.into(MapSet.new([1]), %{})
+      assert result == MapSet.new([1])
+    end
+  end
+
+  describe "into - collecting into Maps" do
+    test "into {} with list of pairs creates map" do
+      result = Runtime.into(%{}, [[:a, 1], [:b, 2]])
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "into {:a 1} with list of pairs merges them" do
+      result = Runtime.into(%{a: 1}, [[:b, 2]])
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "into {} with MapSet of pairs creates map" do
+      result = Runtime.into(%{}, MapSet.new([[:a, 1], [:b, 2]]))
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "into {} with another map merges them" do
+      result = Runtime.into(%{a: 1}, %{b: 2})
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "into {} with nil returns original map" do
+      result = Runtime.into(%{a: 1}, nil)
+      assert result == %{a: 1}
+    end
+
+    test "into {} with empty set returns original map" do
+      result = Runtime.into(%{a: 1}, MapSet.new())
+      assert result == %{a: 1}
+    end
+
+    test "into {:a 1} with list of pairs [[:a 2]] overwrites existing key" do
+      result = Runtime.into(%{a: 1}, [[:a, 2]])
+      assert result == %{a: 2}
+    end
+
+    test "into {} with invalid entries raises type_error" do
+      assert_raise RuntimeError, ~r/type_error: into: invalid map entry: 1/, fn ->
+        Runtime.into(%{}, [1, 2, 3])
+      end
+
+      assert_raise RuntimeError, ~r/type_error: into: invalid map entry: \[:a\]/, fn ->
+        Runtime.into(%{}, [[:a]])
+      end
+
+      assert_raise RuntimeError, ~r/type_error: into: invalid map entry: \[:a, 1, 2\]/, fn ->
+        Runtime.into(%{}, [[:a, 1, 2]])
+      end
+    end
   end
 
   describe "filter - seqable map support" do
