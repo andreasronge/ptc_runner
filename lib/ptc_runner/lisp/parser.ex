@@ -251,7 +251,7 @@ defmodule PtcRunner.Lisp.Parser do
     if Regex.match?(~r/#"/, source) do
       {:error,
        {:parse_error,
-        "regex literals (#\"...\") are not supported in PTC-Lisp. Use (split str \" \") instead of (split str #\" \")"}}
+        "regex literals (#\"...\") are not supported in PTC-Lisp. Use (re-pattern \"...\") with re-find/re-matches instead"}}
     else
       :ok
     end
