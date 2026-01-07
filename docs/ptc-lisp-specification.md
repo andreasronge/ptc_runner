@@ -680,8 +680,8 @@ Evaluates expressions in order, returning the value of the last expression:
 - Unlike `and`/`or`, there is no short-circuiting
 
 ```clojure
-(do 1 2 3)                        ; => 3
-(do (ctx/log {:msg "hi"}))        ; => result of log call
+1 2 3                             ; => 3 (not needed at top level)
+(ctx/log {:msg "hi"})             ; => result of log call
 (do)                              ; => nil
 ```
 
@@ -713,16 +713,14 @@ Binds a name to a value in the user namespace, persisting across turns:
 (def x 1)                         ; x = 1
 (def x 2)                         ; x = 2 (overwrites)
 
-; Use in do block to see value
-(do
-  (def x 10)
-  x)                              ; => 10
+; Define and return
+(def x 10)
+x                              ; => 10
 
 ; Reference previous defs
-(do
-  (def a 1)
-  (def b (+ a 1))
-  b)                              ; => 2
+(def a 1)
+(def b (+ a 1))
+b                                 ; => 2
 
 ; Error: cannot shadow builtins
 (def map {})                      ; => error: cannot shadow builtin 'map'
@@ -760,23 +758,20 @@ Syntactic sugar for defining named functions in the user namespace:
 (defn greet [name] (str "Hello, " name))  ; => #'greet
 
 ; Use defined function
-(do
-  (defn twice [x] (* x 2))
-  (twice 21))                         ; => 42
+(defn twice [x] (* x 2))
+(twice 21)                         ; => 42
 
 ; Reference ctx/ data
 (defn expensive? [e] (> (:amount e) ctx/threshold))
 
 ; Reference other defs
-(do
-  (def rate 0.1)
-  (defn apply-rate [x] (* x rate))
-  (apply-rate 100))                   ; => 10.0
+(def rate 0.1)
+(defn apply-rate [x] (* x rate))
+(apply-rate 100)                      ; => 10.0
 
 ; With higher-order functions
-(do
-  (defn expensive? [e] (> (:amount e) 5000))
-  (filter expensive? ctx/expenses))   ; => filtered list
+(defn expensive? [e] (> (:amount e) 5000))
+(filter expensive? ctx/expenses)   ; => filtered list
 ```
 
 **Multiple body expressions (implicit do):**
@@ -800,16 +795,16 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ```clojure
 ; Vector destructuring
-(do (defn first-name [[first last]] first)
-    (first-name ["Alice" "Smith"]))  ; => "Alice"
+(defn first-name [[first last]] first)
+(first-name ["Alice" "Smith"])  ; => "Alice"
 
 ; Map destructuring
-(do (defn greet [{:keys [name]}] (str "Hello " name))
-    (greet {:name "World"}))  ; => "Hello World"
+(defn greet [{:keys [name]}] (str "Hello " name))
+(greet {:name "World"})  ; => "Hello World"
 
 ; Nested destructuring
-(do (defn process [[id {:keys [status]}]] (str id ":" status))
-    (process [42 {:status "ok"}]))  ; => "42:ok"
+(defn process [[id {:keys [status]}]] (str id ":" status))
+(process [42 {:status "ok"}])  ; => "42:ok"
 ```
 
 
@@ -1359,8 +1354,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (take-while :active [{:active true} {:active true} {:active false}])
 ;; => [{:active true} {:active true}]
 
-(drop-while :pending [{:pending true} {:pending false} {:pending true}])
-;; => [{:pending false} {:pending true}]
+(drop-while :pending [{:pending true} {:pending true} {:pending false}])
+;; => [{:pending false}]
 ```
 
 #### Combining
@@ -1969,20 +1964,17 @@ query-count        ; access symbol defined via (def query-count ...)
 Stored values are **read-only during evaluation** unless redefined via `def`. To update a value for the next turn, use `def` in your program (see Section 16).
 
 ```clojure
-;; Read previous results, compute new value, update for next turn
-(do
-  (def new-orders (ctx/get-orders {:since "2024-01-01"}))
-  (def orders (concat orders new-orders))
-  orders) ; return current total
+(def new-orders (ctx/get-orders {:since "2024-01-01"}))
+(def orders (concat orders new-orders))
+orders ; return current total
 ```
 
 With default values (using `or`):
 
 ```clojure
-(do
-  (def current-count (or query-count 0))
-  (def query-count (inc current-count))
-  query-count)
+(def current-count (or query-count 0))
+(def query-count (inc current-count))
+query-count
 ```
 
 
@@ -2450,7 +2442,7 @@ type-error at line 5:
 |---------|--------|
 | `lazy-seq` | All operations are eager |
 | Macros | No metaprogramming |
-| Namespaces (user-defined) | Single expression, no modules |
+| Namespaces (user-defined) | No modules |
 | Java interop | Security |
 | Atoms, refs, agents | No mutable state |
 | `eval`, `read-string` | Security |
@@ -2631,7 +2623,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 
 ### 15.1 Evaluation Model
 
-- Programs are single expressions
+- Programs can contain multiple expressions (evaluated sequentially, last value returned)
 - Evaluation is strict (eager), not lazy
 - No side effects except tool calls
 - Tools may have side effects (external)
@@ -2723,11 +2715,10 @@ The program's return value is passed through unchanged. Storage is explicit via 
 
 ```clojure
 ;; Store values explicitly, return a result
-(do
-  (def high-paid (->> (ctx/find-employees {})
-                      (filter (where :salary > 100000))))
-  (def last-query "employees")
-  (pluck :email high-paid))
+(def high-paid (->> (ctx/find-employees {})
+                    (filter (where :salary > 100000))))
+(def last-query "employees")
+(pluck :email high-paid)
 ```
 
 After execution:
@@ -2754,16 +2745,14 @@ Values stored via `def` persist across turns. Each `def` sets a single key:
 
 ```clojure
 ;; Turn 1: Store values
-(do
-  (def a 1)
-  (def b {:x 10})
-  "stored")
+(def a 1)
+(def b {:x 10})
+"stored"
 
 ;; Turn 2: Access and update
-(do
-  (def b {:y 20})  ; replaces previous value
-  (def c 3)        ; new value
-  {:a a, :b b, :c c})
+(def b {:y 20})  ; replaces previous value
+(def c 3)        ; new value
+{:a a, :b b, :c c}
 ```
 
 After Turn 2: `a=1, b={:y 20}, c=3`
@@ -2817,10 +2806,9 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 **Turn 1:** Find high-paid employees and store with def
 
 ```clojure
-(do
-  (def high-paid (->> (ctx/find-employees {})
-                      (filter (where :salary > 100000))))
-  (count high-paid))
+(def high-paid (->> (ctx/find-employees {})
+                    (filter (where :salary > 100000))))
+(count high-paid)
 ```
 
 *Returns:* `5`
@@ -2838,10 +2826,9 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 **Turn 3:** Fetch orders for stored employees, add new symbol
 
 ```clojure
-(do
-  (def orders (let [ids (pluck :id high-paid)]
-                (ctx/get-orders {:employee-ids ids})))
-  {:orders-count (count orders)})
+(def orders (let [ids (pluck :id high-paid)]
+              (ctx/get-orders {:employee-ids ids})))
+{:orders-count (count orders)}
 ```
 
 *Returns:* `{:orders-count 42}`

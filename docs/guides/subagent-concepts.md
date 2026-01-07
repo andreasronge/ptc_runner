@@ -161,9 +161,8 @@ The program's return value determines what the LLM sees in subsequent turns. Use
 
 **Store and summarize:**
 ```clojure
-(do
-  (def all-users (ctx/fetch-users {}))
-  (str "Stored " (count all-users) " users"))
+(def all-users (ctx/fetch-users {}))
+(str "Stored " (count all-users) " users")
 ;; LLM sees: "Stored 500 users"
 ;; all-users = full dataset (accessible via programs)
 ```
@@ -258,7 +257,7 @@ For classification or mapping tasks with one LLM call:
 )
 ```
 
-The LLM provides a single expression; no `return` call needed.
+The LLM provides one or more expressions; no `return` call needed.
 
 ### Agentic Loop
 
