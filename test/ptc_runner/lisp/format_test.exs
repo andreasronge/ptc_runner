@@ -152,6 +152,40 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
+  describe "to_clojure/2 with printable_limit on maps" do
+    test "auto-reduces entry limit when budget is too small for all keys" do
+      map = %{
+        key1: String.duplicate("a", 100),
+        key2: String.duplicate("b", 100),
+        key3: String.duplicate("c", 100),
+        key4: String.duplicate("d", 100),
+        key5: String.duplicate("e", 100)
+      }
+
+      # Budget of 90 chars can fit ~3 entries (30 chars each)
+      {result, truncated} = Format.to_clojure(map, printable_limit: 90)
+
+      # Should show truncation indicator
+      assert truncated
+      assert result =~ "(5 entries, showing first 3)"
+
+      # Should show some keys but not all
+      refute result =~ ":key4"
+      refute result =~ ":key5"
+    end
+
+    test "shows all keys when budget is sufficient" do
+      map = %{a: "short", b: "values", c: "here"}
+
+      {result, _truncated} = Format.to_clojure(map, printable_limit: 200)
+
+      assert result =~ ":a"
+      assert result =~ ":b"
+      assert result =~ ":c"
+      refute result =~ "entries, showing"
+    end
+  end
+
   describe "to_string/2 with options" do
     test "respects limit option" do
       assert Format.to_string([1, 2, 3, 4, 5], limit: 2) == "[1, 2, ...]"

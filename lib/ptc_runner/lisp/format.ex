@@ -181,13 +181,48 @@ defmodule PtcRunner.Lisp.Format do
 
   defp format_clojure(map, opts) when is_map(map) do
     limit = Keyword.get(opts, :limit, :infinity)
+    printable_limit = Keyword.get(opts, :printable_limit, :infinity)
     # Sort keys for consistent output
     entries = map |> Map.to_list() |> Enum.sort_by(&elem(&1, 0))
-    {items, map_truncated} = apply_limit(entries, limit)
+
+    # Auto-reduce entry limit when printable_limit is too small for all entries
+    # Each entry needs ~30 chars minimum (key ~10 + value preview ~20)
+    effective_limit =
+      case {printable_limit, limit} do
+        {:infinity, l} ->
+          l
+
+        {total, :infinity} ->
+          min_per_entry = 30
+          max(div(total, min_per_entry), 1)
+
+        {total, l} ->
+          min_per_entry = 30
+          min(l, max(div(total, min_per_entry), 1))
+      end
+
+    {items, map_truncated} = apply_limit(entries, effective_limit)
+
+    # Distribute printable_limit across values
+    # Reserve ~10 chars per key for key name + formatting overhead
+    value_opts =
+      case {printable_limit, length(items)} do
+        {:infinity, _} ->
+          opts
+
+        {total_limit, n} when n > 0 ->
+          overhead_per_entry = 10
+          available = max(total_limit - n * overhead_per_entry, 0)
+          per_value_limit = max(div(available, n), 10)
+          Keyword.put(opts, :printable_limit, per_value_limit)
+
+        _ ->
+          opts
+      end
 
     {formatted_items, any_child_truncated} =
       Enum.map_reduce(items, false, fn {k, v}, acc ->
-        {v_str, v_truncated} = format_clojure(v, opts)
+        {v_str, v_truncated} = format_clojure(v, value_opts)
         {"#{format_clojure_key(k)} #{v_str}", acc or v_truncated}
       end)
 
@@ -195,7 +230,7 @@ defmodule PtcRunner.Lisp.Format do
 
     if map_truncated do
       total = map_size(map)
-      {"{#{formatted} ...} (#{total} entries, showing first #{limit})", true}
+      {"{#{formatted} ...} (#{total} entries, showing first #{length(items)})", true}
     else
       {"{#{formatted}}", any_child_truncated}
     end
