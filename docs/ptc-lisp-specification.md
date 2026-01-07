@@ -1526,6 +1526,7 @@ The `seq` function converts a collection to a sequence:
 | `subs` | `(subs s start)` | Substring from index to end |
 | `subs` | `(subs s start end)` | Substring from start to end |
 | `split` | `(split s separator)` | Split string by separator |
+| `split-lines` | `(split-lines s)` | Split string into lines (\n or \r\n) |
 | `join` | `(join separator coll)` | Join collection elements with separator |
 | `join` | `(join coll)` | Join collection elements (no separator) |
 | `trim` | `(trim s)` | Remove leading/trailing whitespace |
@@ -1561,6 +1562,8 @@ The `seq` function converts a collection to a sequence:
 - `(split "a,b,c" ",")` → `["a" "b" "c"]` (split by separator)
 - `(split "hello" "")` → `["h" "e" "l" "l" "o"]` (split into characters)
 - `(split "a,,b" ",")` → `["a" "" "b"]` (preserves empty elements)
+- `(split-lines "a\nb\r\nc")` → `["a" "b" "c"]` (split by line endings)
+- `(split-lines "a\n\n\n")` → `["a"]` (discards trailing empty lines)
 - `(join ", " ["a" "b" "c"])` → `"a, b, c"` (join with separator)
 - `(join "-" [1 2 3])` → `"1-2-3"` (numeric types converted)
 - `(trim "\n\tworld\r\n")` → `"world"` (remove all whitespace)
