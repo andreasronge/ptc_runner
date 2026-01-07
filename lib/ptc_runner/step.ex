@@ -30,14 +30,6 @@ defmodule PtcRunner.Step do
   - **Always set:** Contains accumulated memory from all operations
   - **Access in PTC-Lisp:** values available as plain symbols
 
-  ### `memory_delta`
-
-  Keys that changed during execution (V2: always empty `%{}`).
-
-  - **Type:** `map()`
-  - **Set when:** Always set to `%{}` in V2 simplified model
-  - **Note:** V2 removed implicit map-to-memory merge. Use `def` for explicit storage.
-
   ### `signature`
 
   The contract used for validation.
@@ -172,7 +164,6 @@ defmodule PtcRunner.Step do
     :return,
     :fail,
     :memory,
-    :memory_delta,
     :signature,
     :usage,
     :trace,
@@ -271,7 +262,6 @@ defmodule PtcRunner.Step do
           return: term() | nil,
           fail: fail() | nil,
           memory: map(),
-          memory_delta: map() | nil,
           signature: String.t() | nil,
           usage: usage() | nil,
           trace: [trace_entry()] | nil,
@@ -298,7 +288,6 @@ defmodule PtcRunner.Step do
       return: return,
       fail: nil,
       memory: memory,
-      memory_delta: nil,
       signature: nil,
       usage: nil,
       trace: nil,
@@ -335,7 +324,6 @@ defmodule PtcRunner.Step do
         return: nil,
         fail: %{reason: :validation_failed, message: "Invalid input", details: %{field: "name"}},
         memory: %{},
-        memory_delta: nil,
         signature: nil,
         usage: nil,
         trace: nil,
@@ -351,7 +339,6 @@ defmodule PtcRunner.Step do
       return: nil,
       fail: %{reason: reason, message: message, details: details},
       memory: memory,
-      memory_delta: nil,
       signature: nil,
       usage: nil,
       trace: nil,

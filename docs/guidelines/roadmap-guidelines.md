@@ -71,7 +71,7 @@ Create `docs/<feature>/implementation_plan.md`:
 | CORE-01 | Define Step struct | [step.md](step.md) | lib/ptc_runner/step.ex |
 
 <!-- BAD: Duplicate -->
-| CORE-01 | Define Step struct with fields: return, fail, memory, memory_delta... |
+| CORE-01 | Define Step struct with fields: return, fail, memory, signature... |
 ```
 
 ### 2. One REQ = One Issue
