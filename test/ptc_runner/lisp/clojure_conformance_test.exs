@@ -153,6 +153,14 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(range 0 10 -1)")
       assert_clojure_equivalent("(range 10 0 1)")
     end
+
+    test "not-empty" do
+      assert_clojure_equivalent("(not-empty [1 2])")
+      assert_clojure_equivalent("(not-empty [])")
+      assert_clojure_equivalent("(not-empty nil)")
+      assert_clojure_equivalent("(not-empty \"\")")
+      assert_clojure_equivalent("(not-empty \"abc\")")
+    end
   end
 
   describe "Clojure conformance - map operations" do

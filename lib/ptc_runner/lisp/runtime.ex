@@ -71,6 +71,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate interleave(c1, c2), to: Collection
   defdelegate count(coll), to: Collection
   defdelegate empty?(coll), to: Collection
+  defdelegate not_empty(coll), to: Collection
   defdelegate seq(coll), to: Collection
   defdelegate reduce(f, coll), to: Collection
   defdelegate reduce(f, init, coll), to: Collection

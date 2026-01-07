@@ -1436,7 +1436,8 @@ The `seq` function converts a collection to a sequence:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `empty?` | `(empty? coll)` | True if empty |
+| `empty?` | `(empty? coll)` | True if empty or nil |
+| `not-empty` | `(not-empty coll)` | `coll` if not empty, else `nil` |
 | `some` | `(some pred coll)` | First truthy result of pred, or nil |
 | `some` | `(some :key coll)` | First truthy `:key` value, or nil |
 | `every?` | `(every? pred coll)` | True if all match |
@@ -1447,6 +1448,10 @@ The `seq` function converts a collection to a sequence:
 
 ```clojure
 (empty? [])                        ; => true
+(empty? nil)                       ; => true
+(not-empty [1 2])                  ; => [1 2]
+(not-empty [])                     ; => nil
+(not-empty nil)                    ; => nil
 (some (where :admin) users)        ; any admins? (with predicate)
 (some :admin users)                ; any admins? (keyword shorthand)
 (every? (where :active) users)     ; all active? (with predicate)
@@ -1697,7 +1702,8 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | Function | Maps | Strings | Notes |
 |----------|------|---------|-------|
 | `count` | ✓ | ✓ | Returns key count / character count |
-| `empty?` | ✓ | ✓ | True if no keys / no characters |
+| `empty?` | ✓ | ✓ | True if no keys / no characters (or nil) |
+| `not-empty` | ✓ | ✓ | Returns map/string if not empty, else nil |
 | `first` | ✗ | ✓ | Maps: use `(first (keys m))`. Strings: returns first character |
 | `second` | ✗ | ✓ | Maps: use `(second (keys m))`. Strings: returns second character |
 | `last` | ✗ | ✓ | Maps: use `(last (keys m))`. Strings: returns last character |

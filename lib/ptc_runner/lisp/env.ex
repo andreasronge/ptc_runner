@@ -215,6 +215,7 @@ defmodule PtcRunner.Lisp.Env do
       {:interleave, {:normal, &Runtime.interleave/2}},
       {:count, {:normal, &Runtime.count/1}},
       {:empty?, {:normal, &Runtime.empty?/1}},
+      {:"not-empty", {:normal, &Runtime.not_empty/1}},
       {:seq, {:normal, &Runtime.seq/1}},
       {:reduce, {:multi_arity, :reduce, {&Runtime.reduce/2, &Runtime.reduce/3}}},
       {:"sum-by", {:normal, &Runtime.sum_by/2}},
