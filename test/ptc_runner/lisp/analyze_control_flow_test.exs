@@ -4,21 +4,21 @@ defmodule PtcRunner.Lisp.AnalyzeControlFlowTest do
   alias PtcRunner.Lisp.Analyze
 
   describe "(return value) syntactic sugar" do
-    test "desugars to call_tool for return" do
+    test "desugars to builtin_call for return" do
       raw = {:list, [{:symbol, :return}, {:map, [{{:keyword, :result}, 42}]}]}
 
-      assert {:ok, {:call_tool, "return", {:map, [{{:keyword, :result}, 42}]}}} =
+      assert {:ok, {:builtin_call, "return", {:map, [{{:keyword, :result}, 42}]}}} =
                Analyze.analyze(raw)
     end
 
     test "return with expression value" do
       raw = {:list, [{:symbol, :return}, {:list, [{:symbol, :+}, 1, 2]}]}
-      assert {:ok, {:call_tool, "return", {:call, {:var, :+}, [1, 2]}}} = Analyze.analyze(raw)
+      assert {:ok, {:builtin_call, "return", {:call, {:var, :+}, [1, 2]}}} = Analyze.analyze(raw)
     end
 
     test "return with variable" do
       raw = {:list, [{:symbol, :return}, {:symbol, :x}]}
-      assert {:ok, {:call_tool, "return", {:var, :x}}} = Analyze.analyze(raw)
+      assert {:ok, {:builtin_call, "return", {:var, :x}}} = Analyze.analyze(raw)
     end
 
     test "return without argument fails" do
@@ -35,10 +35,10 @@ defmodule PtcRunner.Lisp.AnalyzeControlFlowTest do
   end
 
   describe "(fail error) syntactic sugar" do
-    test "desugars to call_tool for fail" do
+    test "desugars to builtin_call for fail" do
       raw = {:list, [{:symbol, :fail}, {:map, [{{:keyword, :reason}, {:keyword, :bad}}]}]}
 
-      assert {:ok, {:call_tool, "fail", {:map, [{{:keyword, :reason}, {:keyword, :bad}}]}}} =
+      assert {:ok, {:builtin_call, "fail", {:map, [{{:keyword, :reason}, {:keyword, :bad}}]}}} =
                Analyze.analyze(raw)
     end
 
@@ -48,13 +48,13 @@ defmodule PtcRunner.Lisp.AnalyzeControlFlowTest do
          [{:symbol, :fail}, {:list, [{:symbol, :str}, {:string, "error: "}, {:symbol, :x}]}]}
 
       assert {:ok,
-              {:call_tool, "fail", {:call, {:var, :str}, [{:string, "error: "}, {:var, :x}]}}} =
+              {:builtin_call, "fail", {:call, {:var, :str}, [{:string, "error: "}, {:var, :x}]}}} =
                Analyze.analyze(raw)
     end
 
     test "fail with variable" do
       raw = {:list, [{:symbol, :fail}, {:symbol, :err}]}
-      assert {:ok, {:call_tool, "fail", {:var, :err}}} = Analyze.analyze(raw)
+      assert {:ok, {:builtin_call, "fail", {:var, :err}}} = Analyze.analyze(raw)
     end
 
     test "fail without argument fails" do

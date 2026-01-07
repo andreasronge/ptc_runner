@@ -480,8 +480,11 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Tool calls
-  defp do_eval({:call_tool, tool_name, args_ast}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
+  # Builtin calls (return, fail)
+  defp do_eval(
+         {:builtin_call, tool_name, args_ast},
+         %EvalContext{tool_exec: tool_exec} = eval_ctx
+       ) do
     with {:ok, args_map, user_ns2} <- do_eval(args_ast, eval_ctx) do
       # Call the tool executor provided by the host
       result = tool_exec.(tool_name, args_map)
