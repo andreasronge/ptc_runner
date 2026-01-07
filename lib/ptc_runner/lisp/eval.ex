@@ -53,6 +53,15 @@ defmodule PtcRunner.Lisp.Eval do
   @spec eval(CoreAST.t(), map(), map(), env(), tool_executor(), list()) ::
           {:ok, value(), map()} | {:error, runtime_error()}
   def eval(ast, ctx, memory, env, tool_executor, turn_history \\ []) do
+    case eval_with_context(ast, ctx, memory, env, tool_executor, turn_history) do
+      {:ok, result, %EvalContext{user_ns: user_ns}} -> {:ok, result, user_ns}
+      {:error, _} = err -> err
+    end
+  end
+
+  @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list()) ::
+          {:ok, value(), EvalContext.t()} | {:error, runtime_error()}
+  def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ []) do
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history)
     do_eval(ast, eval_ctx)
   end
@@ -63,25 +72,25 @@ defmodule PtcRunner.Lisp.Eval do
 
   # *1 returns the most recent result (index -1), *2 the second-most-recent (index -2), etc.
   # Returns nil if the turn doesn't exist (e.g., *1 on turn 1)
-  defp do_eval({:turn_history, n}, %EvalContext{user_ns: user_ns, turn_history: turn_history})
+  defp do_eval({:turn_history, n}, %EvalContext{turn_history: turn_history} = eval_ctx)
        when n in [1, 2, 3] do
     value = Enum.at(turn_history, -n, nil)
-    {:ok, value, user_ns}
+    {:ok, value, eval_ctx}
   end
 
   # ============================================================
   # Literals
   # ============================================================
 
-  defp do_eval(nil, %EvalContext{user_ns: user_ns}), do: {:ok, nil, user_ns}
-  defp do_eval(true, %EvalContext{user_ns: user_ns}), do: {:ok, true, user_ns}
-  defp do_eval(false, %EvalContext{user_ns: user_ns}), do: {:ok, false, user_ns}
+  defp do_eval(nil, %EvalContext{} = eval_ctx), do: {:ok, nil, eval_ctx}
+  defp do_eval(true, %EvalContext{} = eval_ctx), do: {:ok, true, eval_ctx}
+  defp do_eval(false, %EvalContext{} = eval_ctx), do: {:ok, false, eval_ctx}
 
-  defp do_eval(n, %EvalContext{user_ns: user_ns}) when is_number(n),
-    do: {:ok, n, user_ns}
+  defp do_eval(n, %EvalContext{} = eval_ctx) when is_number(n),
+    do: {:ok, n, eval_ctx}
 
-  defp do_eval({:string, s}, %EvalContext{user_ns: user_ns}), do: {:ok, s, user_ns}
-  defp do_eval({:keyword, k}, %EvalContext{user_ns: user_ns}), do: {:ok, k, user_ns}
+  defp do_eval({:string, s}, %EvalContext{} = eval_ctx), do: {:ok, s, eval_ctx}
+  defp do_eval({:keyword, k}, %EvalContext{} = eval_ctx), do: {:ok, k, eval_ctx}
 
   # ============================================================
   # Collections
@@ -89,45 +98,26 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Vectors: evaluate all elements
   defp do_eval({:vector, elems}, %EvalContext{} = eval_ctx) do
-    result =
-      Enum.reduce_while(elems, {:ok, [], eval_ctx.user_ns}, fn elem, {:ok, acc, ns} ->
-        case do_eval(elem, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, v, ns2} -> {:cont, {:ok, [v | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, values, user_ns2} -> {:ok, Enum.reverse(values), user_ns2}
-      {:error, _} = err -> err
-    end
+    eval_all(elems, eval_ctx)
   end
 
   # Maps: evaluate all keys and values
   defp do_eval({:map, pairs}, %EvalContext{} = eval_ctx) do
     result =
-      Enum.reduce_while(pairs, {:ok, [], eval_ctx.user_ns}, fn {k_ast, v_ast}, {:ok, acc, ns} ->
-        eval_map_pair(k_ast, v_ast, EvalContext.update_user_ns(eval_ctx, ns), acc)
+      Enum.reduce_while(pairs, {:ok, [], eval_ctx}, fn {k_ast, v_ast}, {:ok, acc, ctx} ->
+        eval_map_pair(k_ast, v_ast, ctx, acc)
       end)
 
     case result do
-      {:ok, evaluated_pairs, user_ns2} -> {:ok, Map.new(evaluated_pairs), user_ns2}
+      {:ok, evaluated_pairs, eval_ctx2} -> {:ok, Map.new(evaluated_pairs), eval_ctx2}
       {:error, _} = err -> err
     end
   end
 
   # Sets: evaluate all elements, then create MapSet
   defp do_eval({:set, elems}, %EvalContext{} = eval_ctx) do
-    result =
-      Enum.reduce_while(elems, {:ok, [], eval_ctx.user_ns}, fn elem, {:ok, acc, ns} ->
-        case do_eval(elem, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, v, ns2} -> {:cont, {:ok, [v | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, values, user_ns2} -> {:ok, MapSet.new(values), user_ns2}
+    case eval_all(elems, eval_ctx) do
+      {:ok, values, eval_ctx2} -> {:ok, MapSet.new(values), eval_ctx2}
       {:error, _} = err -> err
     end
   end
@@ -138,16 +128,16 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Local/global variable from environment
   # Resolution order: let bindings (env) → user namespace (def bindings) → builtins
-  defp do_eval({:var, name}, %EvalContext{user_ns: user_ns, env: env}) do
+  defp do_eval({:var, name}, %EvalContext{user_ns: user_ns, env: env} = eval_ctx) do
     cond do
       Map.has_key?(env, name) ->
-        {:ok, Map.get(env, name), user_ns}
+        {:ok, Map.get(env, name), eval_ctx}
 
       Map.has_key?(user_ns, name) ->
-        {:ok, Map.get(user_ns, name), user_ns}
+        {:ok, Map.get(user_ns, name), eval_ctx}
 
       Env.builtin?(name) ->
-        {:ok, Map.get(Env.initial(), name), user_ns}
+        {:ok, Map.get(Env.initial(), name), eval_ctx}
 
       true ->
         {:error, {:unbound_var, name}}
@@ -155,8 +145,8 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Context access: ctx/input → ctx[:input]
-  defp do_eval({:ctx, key}, %EvalContext{ctx: ctx, user_ns: user_ns}) do
-    {:ok, flex_get(ctx, key), user_ns}
+  defp do_eval({:ctx, key}, %EvalContext{ctx: ctx} = eval_ctx) do
+    {:ok, flex_get(ctx, key), eval_ctx}
   end
 
   # Define binding in user namespace: (def name value)
@@ -165,9 +155,9 @@ defmodule PtcRunner.Lisp.Eval do
     if Env.builtin?(name) do
       {:error, {:cannot_shadow_builtin, name}}
     else
-      with {:ok, value, user_ns2} <- do_eval(value_ast, eval_ctx) do
-        new_user_ns = Map.put(user_ns2, name, value)
-        {:ok, %Var{name: name}, new_user_ns}
+      with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+        new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+        {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
       end
     end
   end
@@ -189,11 +179,11 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Conditional: if
   defp do_eval({:if, cond_ast, then_ast, else_ast}, %EvalContext{} = eval_ctx) do
-    with {:ok, cond_val, user_ns2} <- do_eval(cond_ast, eval_ctx) do
+    with {:ok, cond_val, eval_ctx2} <- do_eval(cond_ast, eval_ctx) do
       if Where.truthy?(cond_val) do
-        do_eval(then_ast, EvalContext.update_user_ns(eval_ctx, user_ns2))
+        do_eval(then_ast, eval_ctx2)
       else
-        do_eval(else_ast, EvalContext.update_user_ns(eval_ctx, user_ns2))
+        do_eval(else_ast, eval_ctx2)
       end
     end
   end
@@ -204,13 +194,12 @@ defmodule PtcRunner.Lisp.Eval do
       Enum.reduce_while(bindings, {:ok, eval_ctx}, fn {:binding, pattern, value_ast},
                                                       {:ok, acc_ctx} ->
         case do_eval(value_ast, acc_ctx) do
-          {:ok, value, ns2} ->
+          {:ok, value, eval_ctx2} ->
             case Patterns.match_pattern(pattern, value) do
               {:ok, new_bindings} ->
                 {:cont,
                  {:ok,
-                  acc_ctx
-                  |> EvalContext.update_user_ns(ns2)
+                  eval_ctx2
                   |> EvalContext.merge_env(new_bindings)}}
 
               {:error, _} = err ->
@@ -223,8 +212,18 @@ defmodule PtcRunner.Lisp.Eval do
       end)
 
     case result do
-      {:ok, new_ctx} -> do_eval(body, new_ctx)
-      {:error, _} = err -> err
+      {:ok, new_ctx} ->
+        case do_eval(body, new_ctx) do
+          {:ok, value, final_ctx} ->
+            # Restore the original environment from before the let block
+            {:ok, value, %{final_ctx | env: eval_ctx.env}}
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -235,14 +234,10 @@ defmodule PtcRunner.Lisp.Eval do
       Enum.reduce_while(bindings, {:ok, eval_ctx}, fn {:binding, pattern, value_ast},
                                                       {:ok, acc_ctx} ->
         case do_eval(value_ast, acc_ctx) do
-          {:ok, value, ns2} ->
+          {:ok, value, eval_ctx2} ->
             case Patterns.match_pattern(pattern, value) do
               {:ok, new_bindings} ->
-                {:cont,
-                 {:ok,
-                  acc_ctx
-                  |> EvalContext.update_user_ns(ns2)
-                  |> EvalContext.merge_env(new_bindings)}}
+                {:cont, {:ok, EvalContext.merge_env(eval_ctx2, new_bindings)}}
 
               {:error, _} = err ->
                 {:halt, err}
@@ -254,25 +249,28 @@ defmodule PtcRunner.Lisp.Eval do
       end)
 
     case result do
-      {:ok, loop_ctx} -> execute_loop(body, loop_ctx, bindings)
-      {:error, _} = err -> err
+      {:ok, loop_ctx} ->
+        case execute_loop(body, loop_ctx, bindings) do
+          {:ok, value, final_ctx} ->
+            # Restore the original environment from before the loop
+            {:ok, value, %{final_ctx | env: eval_ctx.env}}
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
   # Tail recursion: recur signal
   defp do_eval({:recur, arg_asts}, %EvalContext{} = eval_ctx) do
     # Evaluate arguments in current context
-    result =
-      Enum.reduce_while(arg_asts, {:ok, [], eval_ctx.user_ns}, fn arg_ast, {:ok, acc, ns} ->
-        case do_eval(arg_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, v, ns2} -> {:cont, {:ok, [v | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, values, _ns} ->
-        throw({:recur_signal, Enum.reverse(values)})
+    case eval_all(arg_asts, eval_ctx) do
+      {:ok, values, ctx} ->
+        # Include prints in signal so they're preserved across iterations
+        throw({:recur_signal, values, ctx.prints})
 
       {:error, _} = err ->
         err
@@ -283,13 +281,10 @@ defmodule PtcRunner.Lisp.Eval do
   # Function definition: fn
   # ============================================================
 
-  defp do_eval({:fn, params, body}, %EvalContext{
-         user_ns: user_ns,
-         env: env,
-         turn_history: turn_history
-       }) do
+  defp do_eval({:fn, params, body}, %EvalContext{} = eval_ctx) do
     # Capture the current environment and turn history (lexical scoping)
-    {:ok, {:closure, params, body, env, turn_history}, user_ns}
+    # We also capture the user_ns snapshot as before.
+    {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history}, eval_ctx}
   end
 
   # ============================================================
@@ -297,27 +292,14 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:call, fun_ast, arg_asts}, %EvalContext{} = eval_ctx) do
-    with {:ok, fun_val, user_ns1} <- do_eval(fun_ast, eval_ctx) do
-      result =
-        Enum.reduce_while(arg_asts, {:ok, [], user_ns1}, fn arg_ast, {:ok, acc, ns} ->
-          case do_eval(arg_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
-            {:ok, v, ns2} -> {:cont, {:ok, [v | acc], ns2}}
-            {:error, _} = err -> {:halt, err}
-          end
-        end)
-
-      case result do
-        {:ok, arg_vals, user_ns2} ->
-          Apply.apply_fun(
-            fun_val,
-            Enum.reverse(arg_vals),
-            EvalContext.update_user_ns(eval_ctx, user_ns2),
-            &do_eval/2
-          )
-
-        {:error, _} = err ->
-          err
-      end
+    with {:ok, fun_val, eval_ctx1} <- do_eval(fun_ast, eval_ctx),
+         {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx1) do
+      Apply.apply_fun(
+        fun_val,
+        arg_vals,
+        eval_ctx2,
+        &do_eval/2
+      )
     end
   end
 
@@ -325,19 +307,19 @@ defmodule PtcRunner.Lisp.Eval do
   # Where predicates
   # ============================================================
 
-  defp do_eval({:where, field_path, op, value_ast}, %EvalContext{user_ns: user_ns} = eval_ctx) do
+  defp do_eval({:where, field_path, op, value_ast}, %EvalContext{} = eval_ctx) do
     # Evaluate the comparison value (if not truthy check)
     case value_ast do
       nil ->
         accessor = Where.build_field_accessor(field_path)
         fun = Where.build_where_predicate(op, accessor, nil)
-        {:ok, fun, user_ns}
+        {:ok, fun, eval_ctx}
 
       _ ->
-        with {:ok, value, user_ns2} <- do_eval(value_ast, eval_ctx) do
+        with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
           accessor = Where.build_field_accessor(field_path)
           fun = Where.build_where_predicate(op, accessor, value)
-          {:ok, fun, user_ns2}
+          {:ok, fun, eval_ctx2}
         end
     end
   end
@@ -347,18 +329,10 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pred_combinator, kind, pred_asts}, %EvalContext{} = eval_ctx) do
-    result =
-      Enum.reduce_while(pred_asts, {:ok, [], eval_ctx.user_ns}, fn p_ast, {:ok, acc, ns} ->
-        case do_eval(p_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, f, ns2} -> {:cont, {:ok, [f | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, pred_fns, user_ns2} ->
-        fun = Where.build_pred_combinator(kind, Enum.reverse(pred_fns))
-        {:ok, fun, user_ns2}
+    case eval_all(pred_asts, eval_ctx) do
+      {:ok, pred_fns, eval_ctx2} ->
+        fun = Where.build_pred_combinator(kind, pred_fns)
+        {:ok, fun, eval_ctx2}
 
       {:error, _} = err ->
         err
@@ -370,20 +344,12 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:juxt, func_asts}, %EvalContext{} = eval_ctx) do
-    result =
-      Enum.reduce_while(func_asts, {:ok, [], eval_ctx.user_ns}, fn f_ast, {:ok, acc, ns} ->
-        case do_eval(f_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, f, ns2} -> {:cont, {:ok, [f | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, fns, user_ns2} ->
+    case eval_all(func_asts, eval_ctx) do
+      {:ok, fns, eval_ctx2} ->
         # Convert each fn to Erlang function (handles closures, keywords, builtins)
-        erlang_fns = Enum.map(Enum.reverse(fns), &value_to_erlang_fn(&1, eval_ctx))
+        erlang_fns = Enum.map(fns, &value_to_erlang_fn(&1, eval_ctx2))
         fun = build_juxt_fn(erlang_fns)
-        {:ok, fun, user_ns2}
+        {:ok, fun, eval_ctx2}
 
       {:error, _} = err ->
         err
@@ -395,12 +361,11 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pmap, fn_ast, coll_ast}, %EvalContext{} = eval_ctx) do
-    with {:ok, fn_val, user_ns1} <- do_eval(fn_ast, eval_ctx),
-         {:ok, coll_val, user_ns2} <-
-           do_eval(coll_ast, EvalContext.update_user_ns(eval_ctx, user_ns1)) do
+    with {:ok, fn_val, eval_ctx1} <- do_eval(fn_ast, eval_ctx),
+         {:ok, coll_val, eval_ctx2} <- do_eval(coll_ast, eval_ctx1) do
       # Convert the function value to an Erlang function
       # The closure captures a read-only snapshot of the environment at creation time
-      erlang_fn = value_to_erlang_fn(fn_val, eval_ctx)
+      erlang_fn = value_to_erlang_fn(fn_val, eval_ctx2)
 
       # Execute in parallel using Task.async_stream
       results =
@@ -420,7 +385,7 @@ defmodule PtcRunner.Lisp.Eval do
         |> Enum.to_list()
 
       # Collect results, stopping at first error
-      collect_pmap_results(results, [], user_ns2)
+      collect_pmap_results(results, [], eval_ctx2)
     end
   end
 
@@ -430,25 +395,16 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:pcalls, fn_asts}, %EvalContext{} = eval_ctx) do
     # First evaluate all function expressions to get function values
-    result =
-      Enum.reduce_while(fn_asts, {:ok, [], eval_ctx.user_ns}, fn fn_ast, {:ok, acc, ns} ->
-        case do_eval(fn_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, fn_val, ns2} -> {:cont, {:ok, [fn_val | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, fn_vals, user_ns2} ->
+    case eval_all(fn_asts, eval_ctx) do
+      {:ok, fn_vals, eval_ctx2} ->
         # Convert each function value to an Erlang function (zero-arity thunk)
         # Use a try/rescue to catch validation errors (wrong arity, non-callable)
         try do
           erlang_fns =
             fn_vals
-            |> Enum.reverse()
             |> Enum.with_index()
             |> Enum.map(fn {fn_val, idx} ->
-              {pcalls_fn_to_erlang(fn_val, eval_ctx), idx}
+              {pcalls_fn_to_erlang(fn_val, eval_ctx2), idx}
             end)
 
           # Execute all thunks in parallel using Task.async_stream
@@ -469,7 +425,7 @@ defmodule PtcRunner.Lisp.Eval do
             |> Enum.to_list()
 
           # Collect results, stopping at first error
-          collect_pcalls_results(results, [], user_ns2)
+          collect_pcalls_results(results, [], eval_ctx2)
         rescue
           e in RuntimeError ->
             {:error, {:pcalls_error, Exception.message(e)}}
@@ -485,31 +441,23 @@ defmodule PtcRunner.Lisp.Eval do
          {:builtin_call, tool_name, args_ast},
          %EvalContext{tool_exec: tool_exec} = eval_ctx
        ) do
-    with {:ok, args_map, user_ns2} <- do_eval(args_ast, eval_ctx) do
+    with {:ok, args_map, eval_ctx2} <- do_eval(args_ast, eval_ctx) do
       # Call the tool executor provided by the host
       result = tool_exec.(tool_name, args_map)
-      {:ok, result, user_ns2}
+      {:ok, result, eval_ctx2}
     end
   end
 
   # Tool invocation via ctx namespace: (ctx/tool-name args...)
   defp do_eval({:ctx_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     # Evaluate all arguments
-    result =
-      Enum.reduce_while(arg_asts, {:ok, [], eval_ctx.user_ns}, fn arg_ast, {:ok, acc, ns} ->
-        case do_eval(arg_ast, EvalContext.update_user_ns(eval_ctx, ns)) do
-          {:ok, v, ns2} -> {:cont, {:ok, [v | acc], ns2}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case result do
-      {:ok, arg_vals, user_ns2} ->
+    case eval_all(arg_asts, eval_ctx) do
+      {:ok, arg_vals, eval_ctx2} ->
         # Convert args list to map for tool executor
-        args_map = build_args_map(Enum.reverse(arg_vals))
+        args_map = build_args_map(arg_vals)
         # Convert atom to string for backward compatibility with tool_exec
         tool_result = tool_exec.(Atom.to_string(tool_name), args_map)
-        {:ok, tool_result, user_ns2}
+        {:ok, tool_result, eval_ctx2}
 
       {:error, _} = err ->
         err
@@ -530,11 +478,27 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do
-    with {:ok, k, ns2} <- do_eval(k_ast, eval_ctx),
-         {:ok, v, ns3} <- do_eval(v_ast, EvalContext.update_user_ns(eval_ctx, ns2)) do
-      {:cont, {:ok, [{k, v} | acc], ns3}}
+    with {:ok, k, eval_ctx2} <- do_eval(k_ast, eval_ctx),
+         {:ok, v, eval_ctx3} <- do_eval(v_ast, eval_ctx2) do
+      {:cont, {:ok, [{k, v} | acc], eval_ctx3}}
     else
       {:error, _} = err -> {:halt, err}
+    end
+  end
+
+  # Evaluate all expressions in order, returning results in original order
+  defp eval_all(asts, eval_ctx) do
+    result =
+      Enum.reduce_while(asts, {:ok, [], eval_ctx}, fn ast, {:ok, acc, ctx} ->
+        case do_eval(ast, ctx) do
+          {:ok, v, ctx2} -> {:cont, {:ok, [v | acc], ctx2}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, vals, ctx} -> {:ok, Enum.reverse(vals), ctx}
+      {:error, _} = err -> err
     end
   end
 
@@ -542,15 +506,15 @@ defmodule PtcRunner.Lisp.Eval do
   # Sequential evaluation helpers
   # ============================================================
 
-  defp do_eval_do([], %EvalContext{user_ns: user_ns}), do: {:ok, nil, user_ns}
+  defp do_eval_do([], %EvalContext{} = eval_ctx), do: {:ok, nil, eval_ctx}
 
   defp do_eval_do([e], %EvalContext{} = eval_ctx) do
     do_eval(e, eval_ctx)
   end
 
   defp do_eval_do([e | rest], %EvalContext{} = eval_ctx) do
-    with {:ok, _value, user_ns2} <- do_eval(e, eval_ctx) do
-      do_eval_do(rest, EvalContext.update_user_ns(eval_ctx, user_ns2))
+    with {:ok, _value, eval_ctx2} <- do_eval(e, eval_ctx) do
+      do_eval_do(rest, eval_ctx2)
     end
   end
 
@@ -558,45 +522,45 @@ defmodule PtcRunner.Lisp.Eval do
   # Short-circuit logic helpers
   # ============================================================
 
-  defp do_eval_and([], %EvalContext{user_ns: user_ns}), do: {:ok, true, user_ns}
+  defp do_eval_and([], %EvalContext{} = eval_ctx), do: {:ok, true, eval_ctx}
 
   defp do_eval_and([e | rest], %EvalContext{} = eval_ctx) do
-    with {:ok, value, user_ns2} <- do_eval(e, eval_ctx) do
+    with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
       if Where.truthy?(value) do
-        do_eval_and(rest, EvalContext.update_user_ns(eval_ctx, user_ns2))
+        do_eval_and(rest, eval_ctx2)
       else
         # Short-circuit: return falsy value
-        {:ok, value, user_ns2}
+        {:ok, value, eval_ctx2}
       end
     end
   end
 
-  defp do_eval_or([], %EvalContext{user_ns: user_ns}), do: {:ok, nil, user_ns}
+  defp do_eval_or([], %EvalContext{} = eval_ctx), do: {:ok, nil, eval_ctx}
 
   defp do_eval_or([e | rest], %EvalContext{} = eval_ctx) do
-    with {:ok, value, user_ns2} <- do_eval(e, eval_ctx) do
+    with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
       if Where.truthy?(value) do
         # Short-circuit: return truthy value
-        {:ok, value, user_ns2}
+        {:ok, value, eval_ctx2}
       else
         # Continue evaluating, tracking this value as last evaluated
-        do_eval_or_rest(rest, value, EvalContext.update_user_ns(eval_ctx, user_ns2))
+        do_eval_or_rest(rest, value, eval_ctx2)
       end
     end
   end
 
-  defp do_eval_or_rest([], last_value, %EvalContext{user_ns: user_ns}) do
-    {:ok, last_value, user_ns}
+  defp do_eval_or_rest([], last_value, %EvalContext{} = eval_ctx) do
+    {:ok, last_value, eval_ctx}
   end
 
   defp do_eval_or_rest([e | rest], _last_value, %EvalContext{} = eval_ctx) do
-    with {:ok, value, user_ns2} <- do_eval(e, eval_ctx) do
+    with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
       if Where.truthy?(value) do
         # Short-circuit: return truthy value
-        {:ok, value, user_ns2}
+        {:ok, value, eval_ctx2}
       else
         # Continue evaluating, tracking this value as last evaluated
-        do_eval_or_rest(rest, value, EvalContext.update_user_ns(eval_ctx, user_ns2))
+        do_eval_or_rest(rest, value, eval_ctx2)
       end
     end
   end
@@ -627,17 +591,17 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   # Helper to collect pmap results, preserving order and detecting errors
-  defp collect_pmap_results([], acc, user_ns), do: {:ok, Enum.reverse(acc), user_ns}
+  defp collect_pmap_results([], acc, eval_ctx), do: {:ok, Enum.reverse(acc), eval_ctx}
 
-  defp collect_pmap_results([{:ok, {:ok, val}} | rest], acc, user_ns) do
-    collect_pmap_results(rest, [val | acc], user_ns)
+  defp collect_pmap_results([{:ok, {:ok, val}} | rest], acc, eval_ctx) do
+    collect_pmap_results(rest, [val | acc], eval_ctx)
   end
 
-  defp collect_pmap_results([{:ok, {:error, reason}} | _rest], _acc, _user_ns) do
+  defp collect_pmap_results([{:ok, {:error, reason}} | _rest], _acc, _eval_ctx) do
     {:error, reason}
   end
 
-  defp collect_pmap_results([{:exit, reason} | _rest], _acc, _user_ns) do
+  defp collect_pmap_results([{:exit, reason} | _rest], _acc, _eval_ctx) do
     {:error, {:pmap_error, "parallel task failed: #{inspect(reason)}"}}
   end
 
@@ -660,8 +624,10 @@ defmodule PtcRunner.Lisp.Eval do
           turn_history
         )
 
+      ctx = %{ctx | loop_limit: eval_ctx.loop_limit, prints: eval_ctx.prints}
+
       case do_eval(body, ctx) do
-        {:ok, result, _ns} -> result
+        {:ok, result, _ctx2} -> result
         {:error, reason} -> raise "pcalls function failed: #{inspect(reason)}"
       end
     end
@@ -686,17 +652,17 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Helper to collect pcalls results, preserving order and detecting errors
-  defp collect_pcalls_results([], acc, user_ns), do: {:ok, Enum.reverse(acc), user_ns}
+  defp collect_pcalls_results([], acc, eval_ctx), do: {:ok, Enum.reverse(acc), eval_ctx}
 
-  defp collect_pcalls_results([{:ok, {:ok, val, _idx}} | rest], acc, user_ns) do
-    collect_pcalls_results(rest, [val | acc], user_ns)
+  defp collect_pcalls_results([{:ok, {:ok, val, _idx}} | rest], acc, eval_ctx) do
+    collect_pcalls_results(rest, [val | acc], eval_ctx)
   end
 
-  defp collect_pcalls_results([{:ok, {:error, reason}} | _rest], _acc, _user_ns) do
+  defp collect_pcalls_results([{:ok, {:error, reason}} | _rest], _acc, _eval_ctx) do
     {:error, reason}
   end
 
-  defp collect_pcalls_results([{:exit, reason} | _rest], _acc, _user_ns) do
+  defp collect_pcalls_results([{:exit, reason} | _rest], _acc, _eval_ctx) do
     {:error, {:pcalls_error, "parallel task failed: #{inspect(reason)}"}}
   end
 
@@ -707,7 +673,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp execute_loop(body, %EvalContext{} = ctx, bindings) do
     do_eval(body, ctx)
   catch
-    {:recur_signal, new_values} ->
+    {:recur_signal, new_values, prints} ->
       patterns = Enum.map(bindings, fn {:binding, p, _} -> p end)
 
       if length(patterns) != length(new_values) do
@@ -717,7 +683,9 @@ defmodule PtcRunner.Lisp.Eval do
           {:ok, new_bindings} ->
             case EvalContext.increment_iteration(ctx) do
               {:ok, ctx2} ->
-                execute_loop(body, EvalContext.merge_env(ctx2, new_bindings), bindings)
+                # Preserve prints from this iteration
+                ctx3 = %{ctx2 | prints: prints}
+                execute_loop(body, EvalContext.merge_env(ctx3, new_bindings), bindings)
 
               {:error, :loop_limit_exceeded} ->
                 {:error, {:loop_limit_exceeded, ctx.loop_limit}}

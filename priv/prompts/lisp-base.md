@@ -2,143 +2,66 @@
 
 Core language reference for PTC-Lisp.
 
-<!-- version: 3 -->
+<!-- version: 4 -->
 <!-- date: 2026-01-07 -->
-<!-- changes: Simplified to hybrid approach - document PTC extensions and restrictions only, leverage LLM Clojure knowledge -->
+<!-- changes: Condensed to focus on PTC extensions and LLM blind spots only -->
 
 <!-- PTC_PROMPT_START -->
 
 ## PTC-Lisp
 
-Safe Clojure subset for data queries.
-Standard Clojure functions work. This documents PTC-specific extensions and restrictions.
+Safe Clojure subset. Standard functions work — this documents PTC extensions and restrictions only.
 
-### Data Access
+### Context & Tools
 ```clojure
-ctx/products          ; context data (read-only)
-ctx/orders
+ctx/products                      ; read-only context data
+(ctx/search {:query "budget"})    ; tool invocation
 ```
 
-### NOT Supported
-- Namespaced keywords (`:foo/bar`)
-- Lazy sequences (`lazy-seq`, `iterate`). `range` is supported but always finite and **requires at least one argument** (e.g., `(range 10)`). `(range)` with no arguments is NOT supported.
-- Macros, `defmacro`
-- Ratios (`1/3`), BigDecimals (`1.0M`)
-- Multi-line strings
-- `if` without else — use `(if cond then nil)` or `when`
-- Chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
-- `def` cannot shadow builtins (e.g., `(def map {})` errors)
-- `some` — use `(find pred coll)` or `(first (filter pred coll))`
-- `float` — use `(double x)` for float coercion
-- `for` — use `map` or `->>` threading instead
+**Tip:** `(pmap #(ctx/tool {:id %}) ids)` runs tool calls concurrently.
 
 ### PTC Extensions
 
-**Predicate Builders** — use with `filter`, `remove`, `find`:
+**Predicate Builders** — for `filter`, `remove`, `find`:
 ```clojure
-(where :field = value)            ; operator REQUIRED: = not= > < >= <= in includes
-(where :field > 10)               ; comparison
-(where :field)                    ; truthy check
-(where :status in ["a" "b"])      ; membership
+(where :status = "active")        ; operator REQUIRED: = not= > < >= <= in includes
+(where :amount > 100)             ; comparison
+(where :deleted)                  ; truthy check
 (where [:user :role] = "admin")   ; nested path
-
-; Combine predicates (NOT and/or):
-(filter (all-of (where :a = 1) (where :b = 2)) coll)
-(filter (any-of (where :x) (where :y)) coll)
-(filter (none-of (where :deleted)) coll)
+(all-of pred1 pred2)              ; combine predicates (NOT and/or)
+(any-of pred1 pred2)
+(none-of pred)
 ```
 
-**Aggregation** — return item (min-by/max-by) or value (sum-by/avg-by):
+**Aggregation:**
 ```clojure
-(sum-by :amount expenses)         ; sum of field values
-(avg-by :price products)          ; average of field values
-(min-by :price products)          ; item with lowest price
-(max-by :salary employees)        ; item with highest salary
-(pluck :name users)               ; extract field from each item
-
-; Get max VALUE (not item):
-(:salary (max-by :salary employees))
+(sum-by :amount items)            ; sum of field values
+(avg-by :price items)             ; average
+(min-by :price items)             ; item with min (not value!)
+(max-by :salary items)            ; item with max
+(pluck :name items)               ; extract field from each
 ```
 
-**Tool Invocation** — Call external tools to fetch or transform data:
-```clojure
-(ctx/search {:query "budget"})      ; invoke search tool
-(ctx/get-users)                     ; tool with no args
-(let [results (ctx/fetch {:id 123})]  ; store tool result
-  (count results))
-```
+### Restrictions
 
-**State Persistence** — Use `def` to store values across turns:
-```clojure
-(def results (ctx/search {:query "budget"}))  ; => #'results (stored)
-results                                        ; => the search results
-
-; You can run multiple tools in a single turn or even in parallel
-(def page1 (ctx/search {:page 1}))
-(def page2 (ctx/search {:page 2}))
-(concat page1 page2)
-
-; Redefine to update
-(def counter 0)
-(def counter (+ counter 1))
-```
-
-**Parallel Execution** — used for concurrent tool calls or processing:
-```clojure
-(pmap f coll)               ; apply f to each item in parallel (preserving order)
-(pcalls f1 f2 ... fN)       ; execute N zero-arity thunks concurrently
-
-; Example: Fetch multiple documents by ID concurrently
-(let [ids ["doc-1" "doc-2" "doc-3"]]
-  (pmap (fn [id] (ctx/fetch {:id id})) ids))
-```
-
-**Regex** — validation and extraction (uses standard strings for safety):
-```clojure
-(re-pattern "^\\d+$")             ; compiles pattern string to regex object
-(re-find (re-pattern "\\d+") "v1") ; returns "1" (first match)
-(re-matches (re-pattern "\\d+") "1") ; returns "1" (full match only)
-(re-find (re-pattern "(\\d+)-(\\d+)") "10-20") ; returns ["10-20" "10" "20"]
-
-; Use with filter:
-(filter #(re-find (re-pattern "error") %) logs)
-```
-
-**Recursion** — stack-safe tail calls (limit: 1000 iterations):
-```clojure
-(loop [i 0 acc 0]
-  (if (< i 5)
-    (recur (inc i) (+ acc i))
-    acc))
-```
-
-### Threading
-```clojure
-; ->> thread-last: for collections (filter, map, take, sort-by)
-(->> ctx/users (filter :active) (map :name) (sort-by identity :desc) (take 5))
-
-; -> thread-first: for maps (assoc, dissoc, update, get-in)
-(-> user (assoc :updated true) (dissoc :temp))
-```
+- No namespaced keywords (`:foo/bar`)
+- No `(range)` without args — use `(range 10)`
+- No `if` without else — use `(if x y nil)` or `when`
+- No chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
+- No `some` — use `(first (filter pred coll))`
+- No `for` — use `map` or `->>`
+- No regex literals (`#"..."`) — use `(re-pattern "\\d+")` then `re-find`/`re-matches`
+- `loop/recur` limited to 1000 iterations
 
 ### Common Mistakes
+
 | Wrong | Right |
 |-------|-------|
 | `(where :status "active")` | `(where :status = "active")` |
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
-| `(<= 1 x 10)` | `(and (>= x 1) (<= x 10))` |
-| `(if cond then)` | `(if cond then nil)` or `(when cond then)` |
-| `(-> coll (filter f))` | `(->> coll (filter f))` — collections use `->>` |
-| `(max [1 2 3])` | `(apply max [1 2 3])` — max needs spread args |
-| `(range)` | `(range 10)` — range needs a limit |
-| `(sort-by :price coll >)` | `(sort-by :price > coll)` — comparator before collection |
-| `(includes s "x")` | `(includes? s "x")` — predicates end in `?` |
-
-### Return Values
-Return raw values directly:
-```clojure
-(avg-by :price ctx/products)        ; GOOD - raw number
-{:avg (avg-by :price ctx/products)} ; BAD - unnecessary wrapper
-```
+| `(max [1 2 3])` | `(apply max [1 2 3])` |
+| `(sort-by :price coll >)` | `(sort-by :price > coll)` |
+| `(includes s "x")` | `(includes? s "x")` |
+| `(-> coll (filter f))` | `(->> coll (filter f))` |
 
 <!-- PTC_PROMPT_END -->

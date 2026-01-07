@@ -428,8 +428,9 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == nil
     end
 
-    test "errors when outer collection is empty (first returns nil which is not a list)" do
-      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(ffirst [])")
+    test "returns nil when outer collection is empty" do
+      {:ok, %Step{return: result}} = Lisp.run("(ffirst [])")
+      assert result == nil
     end
   end
 
@@ -439,14 +440,14 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == 2
     end
 
-    test "errors when next returns nil (single-element list)" do
-      # next([1]) returns nil, first(nil) errors because nil is not a list
-      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(fnext [1])")
+    test "returns nil when next returns nil (single-element list)" do
+      {:ok, %Step{return: result}} = Lisp.run("(fnext [1])")
+      assert result == nil
     end
 
-    test "errors when next returns nil (empty list)" do
-      # next([]) returns nil, first(nil) errors because nil is not a list
-      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(fnext [])")
+    test "returns nil when next returns nil (empty list)" do
+      {:ok, %Step{return: result}} = Lisp.run("(fnext [])")
+      assert result == nil
     end
   end
 
@@ -465,6 +466,11 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} = Lisp.run("(nfirst [[] [3 4]])")
       assert result == nil
     end
+
+    test "returns nil when outer collection is empty" do
+      {:ok, %Step{return: result}} = Lisp.run("(nfirst [])")
+      assert result == nil
+    end
   end
 
   describe "nnext" do
@@ -478,14 +484,14 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == nil
     end
 
-    test "errors when next returns nil (single-element list)" do
-      # next([1]) returns nil, next(nil) errors because nil is not a list
-      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(nnext [1])")
+    test "returns nil when next returns nil (single-element list)" do
+      {:ok, %Step{return: result}} = Lisp.run("(nnext [1])")
+      assert result == nil
     end
 
-    test "errors when next returns nil (empty list)" do
-      # next([]) returns nil, next(nil) errors because nil is not a list
-      {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(nnext [])")
+    test "returns nil when next returns nil (empty list)" do
+      {:ok, %Step{return: result}} = Lisp.run("(nnext [])")
+      assert result == nil
     end
   end
 
