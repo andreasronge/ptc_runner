@@ -223,13 +223,12 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
         end
       }
 
-      {:ok, %Step{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %Step{return: result, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
       assert result.count == 2
       assert length(result.high_value_orders) == 2
       assert Enum.all?(result.high_value_orders, fn o -> o.amount > 1000 end)
-      assert delta == %{}
       assert new_memory == %{}
     end
   end

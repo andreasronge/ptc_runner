@@ -6,7 +6,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "explicit storage via def" do
     test "def stores value in user_ns, accessible in same expression" do
       source = "(do (def step1 100) step1)"
-      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} = Lisp.run(source)
+      {:ok, %{return: result, memory: %{}}} = Lisp.run(source)
       assert result == 100
     end
 
@@ -14,7 +14,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Previous memory values become available in user_ns during evaluation.
       mem = %{previous: 50}
       source = "previous"
-      {:ok, %{return: result, memory_delta: %{}, memory: _}} = Lisp.run(source, memory: mem)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source, memory: mem)
       assert result == 50
     end
   end
@@ -41,7 +41,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         end
       }
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
       # V2: Map returns as-is, no implicit memory merge
@@ -51,7 +51,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
                count: 1
              }
 
-      assert delta == %{}
       assert new_memory == %{}
     end
 
@@ -73,11 +72,10 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         end
       }
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
       assert result == 0
-      assert delta == %{}
       assert new_memory == %{}
     end
 
@@ -93,10 +91,9 @@ defmodule PtcRunner.Lisp.IntegrationTest do
          :cached-y y})
       """
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
+      {:ok, %{return: result, memory: new_memory}} = Lisp.run(source)
 
       assert result == %{:"cached-x" => 10, :"cached-y" => 20, result: 30}
-      assert delta == %{}
       assert new_memory == %{}
     end
 
@@ -117,19 +114,18 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, context: ctx)
 
       # Only Alice and Carol match (age > 18), Bob's nil is safely filtered
       assert result == 2
-      assert delta == %{}
       assert new_memory == %{}
     end
 
     test "thread-first with assoc chains" do
       # Thread-first: value goes as first argument
       source = "(-> {:a 1} (assoc :b 2) (assoc :c 3))"
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source)
       assert result == %{a: 1, b: 2, c: 3}
     end
 
@@ -152,7 +148,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         end
       }
 
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, tools: tools)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source, tools: tools)
       assert result == "two"
     end
 
@@ -165,13 +161,13 @@ defmodule PtcRunner.Lisp.IntegrationTest do
           :else "small"))
       """
 
-      {:ok, %{return: result1, memory_delta: _, memory: _}} = Lisp.run(source, context: %{x: 15})
+      {:ok, %{return: result1, memory: _}} = Lisp.run(source, context: %{x: 15})
       assert result1 == "big"
 
-      {:ok, %{return: result2, memory_delta: _, memory: _}} = Lisp.run(source, context: %{x: 7})
+      {:ok, %{return: result2, memory: _}} = Lisp.run(source, context: %{x: 7})
       assert result2 == "medium"
 
-      {:ok, %{return: result3, memory_delta: _, memory: _}} = Lisp.run(source, context: %{x: 3})
+      {:ok, %{return: result3, memory: _}} = Lisp.run(source, context: %{x: 3})
       assert result3 == "small"
     end
 
@@ -183,14 +179,14 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       """
 
       ctx = %{user: %{name: "Alice", age: 30}}
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
       assert result == %{name: "Alice", age: 30}
     end
 
     test "underscore in vector destructuring skips positions" do
-      assert {:ok, %{return: 2, memory_delta: _, memory: _}} = Lisp.run("(let [[_ b] [1 2]] b)")
+      assert {:ok, %{return: 2, memory: _}} = Lisp.run("(let [[_ b] [1 2]] b)")
 
-      assert {:ok, %{return: 3, memory_delta: _, memory: _}} =
+      assert {:ok, %{return: 3, memory: _}} =
                Lisp.run("(let [[_ _ c] [1 2 3]] c)")
     end
 
@@ -209,14 +205,12 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, %{return: result, memory_delta: delta, memory: _}} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
 
       assert result == [
                %{name: "laptop", price: 1200},
                %{name: "keyboard", price: 150}
              ]
-
-      assert delta == %{}
     end
 
     test "renaming bindings in fn destructuring works" do
@@ -229,7 +223,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       ctx = %{items: [%{id: 1}, %{id: 2}]}
 
       # Should work and return the extracted values
-      assert {:ok, %{return: [1, 2], memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: [1, 2], memory: %{}}} =
                Lisp.run(source, context: ctx)
     end
 
@@ -246,7 +240,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         ]
       }
 
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
 
       # Should sort by priority first, then by name
       assert result == [
@@ -261,28 +255,28 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       ctx = %{points: [%{x: 1, y: 2}, %{x: 3, y: 4}]}
 
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source, context: ctx)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
       assert result == [[1, 2], [3, 4]]
     end
 
     test "juxt with closures applies multiple transformations" do
       source = "((juxt #(+ % 1) #(* % 2)) 5)"
 
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source)
       assert result == [6, 10]
     end
 
     test "juxt with builtin functions" do
       source = "((juxt first last) [1 2 3])"
 
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source)
       assert result == [1, 3]
     end
 
     test "empty juxt returns empty vector" do
       source = "((juxt) {:a 1})"
 
-      {:ok, %{return: result, memory_delta: _, memory: _}} = Lisp.run(source)
+      {:ok, %{return: result, memory: _}} = Lisp.run(source)
       assert result == []
     end
   end

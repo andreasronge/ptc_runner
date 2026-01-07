@@ -543,7 +543,7 @@ defmodule PtcRunner.SubAgent.Loop do
                     ],
                 trace: [trace_entry | state.trace],
                 memory: lisp_step.memory,
-                # Context stays immutable - memory_delta becomes available as symbols
+                # Context stays immutable - memory values become available as symbols
                 last_fail: nil,
                 remaining_turns: state.remaining_turns - 1,
                 turn_history: updated_history

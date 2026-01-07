@@ -54,8 +54,7 @@ defmodule PtcRunner.Lisp do
   On success, returns:
   - `{:ok, Step.t()}` with:
     - `step.return`: The value returned to the caller
-    - `step.memory_delta`: Map of keys that changed
-    - `step.memory`: Complete memory state after merge
+    - `step.memory`: Complete memory state after execution
     - `step.usage`: Execution metrics (duration_ms, memory_bytes)
 
   On error, returns:
@@ -272,7 +271,6 @@ defmodule PtcRunner.Lisp do
       return: round_floats(value, precision),
       fail: nil,
       memory: memory,
-      memory_delta: %{},
       signature: nil,
       usage: nil,
       trace: nil

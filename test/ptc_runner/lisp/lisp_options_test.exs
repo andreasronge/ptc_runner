@@ -5,48 +5,47 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
   describe "float_precision option" do
     test "rounds floats in result to specified precision" do
-      assert {:ok, %{return: 3.33, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 3.33, memory: %{}}} =
                Lisp.run("(/ 10 3)", float_precision: 2)
     end
 
     test "full precision when not specified" do
-      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} = Lisp.run("(/ 10 3)")
+      {:ok, %{return: result, memory: %{}}} = Lisp.run("(/ 10 3)")
       assert result == 10 / 3
     end
 
     test "rounds floats in nested structures" do
-      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} =
+      {:ok, %{return: result, memory: %{}}} =
         Lisp.run("[1.12345 2.67891]", float_precision: 2)
 
       assert result == [1.12, 2.68]
     end
 
     test "rounds floats in map values" do
-      {:ok, %{return: result, memory_delta: _, memory: _}} =
+      {:ok, %{return: result, memory: _}} =
         Lisp.run("{:value (/ 10 3)}", float_precision: 1)
 
       assert result == %{value: 3.3}
     end
 
     test "precision 0 rounds to integers" do
-      {:ok, %{return: result, memory_delta: %{}, memory: %{}}} =
+      {:ok, %{return: result, memory: %{}}} =
         Lisp.run("(/ 10 3)", float_precision: 0)
 
       assert result == 3.0
     end
 
     test "does not affect integers" do
-      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 42, memory: %{}}} =
                Lisp.run("42", float_precision: 2)
     end
 
     test "rounds result including nested floats" do
       # V2: no implicit memory merge, map returns as-is with floats rounded
-      {:ok, %{return: result, memory_delta: delta, memory: _}} =
+      {:ok, %{return: result, memory: _}} =
         Lisp.run("{:value (/ 10 3), :pi 3.14159}", float_precision: 2)
 
       assert result == %{value: 3.33, pi: 3.14}
-      assert delta == %{}
     end
   end
 
@@ -54,14 +53,14 @@ defmodule PtcRunner.Lisp.OptionsTest do
     test "accepts bare function" do
       tools = %{"greet" => fn _args -> "hello" end}
 
-      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: "hello", memory: %{}}} =
                Lisp.run("(ctx/greet)", tools: tools)
     end
 
     test "accepts function with explicit signature" do
       tools = %{"greet" => {fn _args -> "hello" end, "() -> :string"}}
 
-      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: "hello", memory: %{}}} =
                Lisp.run("(ctx/greet)", tools: tools)
     end
 
@@ -71,14 +70,14 @@ defmodule PtcRunner.Lisp.OptionsTest do
           {fn _args -> "hello" end, signature: "() -> :string", description: "Returns a greeting"}
       }
 
-      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: "hello", memory: %{}}} =
                Lisp.run("(ctx/greet)", tools: tools)
     end
 
     test "accepts function with :skip validation" do
       tools = %{"greet" => {fn _args -> "hello" end, :skip}}
 
-      assert {:ok, %{return: "hello", memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: "hello", memory: %{}}} =
                Lisp.run("(ctx/greet)", tools: tools)
     end
 
@@ -92,7 +91,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
     end
 
     test "empty tools map works correctly" do
-      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 42, memory: %{}}} =
                Lisp.run("42", tools: %{})
     end
   end
@@ -182,7 +181,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       # V2: :return is just a regular key, map returns as-is
       source = "{:value 42, :stored 100}"
 
-      assert {:ok, %{return: %{value: 42, stored: 100}, memory_delta: %{}, signature: _}} =
+      assert {:ok, %{return: %{value: 42, stored: 100}, signature: _}} =
                Lisp.run(source, signature: "{value :int, stored :int}")
     end
   end
@@ -226,44 +225,44 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
   describe "sandbox - timeout" do
     test "simple expression completes within default timeout" do
-      assert {:ok, %{return: 6, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 1 2 3)")
+      assert {:ok, %{return: 6, memory: %{}}} = Lisp.run("(+ 1 2 3)")
     end
 
     test "respects custom timeout option" do
       # Simple fast operation should complete within generous timeout
-      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 5, memory: %{}}} =
                Lisp.run("(+ 2 3)", timeout: 5000)
     end
 
     test "timeout option is accepted without error" do
       # Just verify that timeout option doesn't cause errors
       # Actual timeout behavior is hard to test without expensive computations
-      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 3, memory: %{}}} =
                Lisp.run("(+ 1 2)", timeout: 100)
     end
   end
 
   describe "sandbox - memory limits" do
     test "simple expression stays within memory limit" do
-      assert {:ok, %{return: 42, memory_delta: %{}, memory: %{}}} = Lisp.run("42")
+      assert {:ok, %{return: 42, memory: %{}}} = Lisp.run("42")
     end
 
     test "respects custom max_heap option" do
       # Small computation should complete with larger heap
-      assert {:ok, %{return: _result, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: _result, memory: %{}}} =
                Lisp.run("[1 2 3 4 5]", max_heap: 5_000_000)
     end
 
     test "max_heap option is accepted without error" do
       # Just verify that max_heap option doesn't cause errors
-      assert {:ok, %{return: 5, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 5, memory: %{}}} =
                Lisp.run("(+ 2 3)", max_heap: 100_000)
     end
   end
 
   describe "sandbox - integration with existing features" do
     test "float_precision still works with sandbox" do
-      assert {:ok, %{return: 3.33, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 3.33, memory: %{}}} =
                Lisp.run("(/ 10 3)", float_precision: 2, timeout: 1000)
     end
 
@@ -271,11 +270,10 @@ defmodule PtcRunner.Lisp.OptionsTest do
       # V2: maps pass through unchanged, no implicit memory merge
       source = "{:value 42, :stored 100}"
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, timeout: 1000)
 
       assert result == %{value: 42, stored: 100}
-      assert delta == %{}
       assert new_memory == %{}
     end
 
@@ -291,7 +289,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       ctx = %{value: 5}
       source = "(ctx/double {:x ctx/value})"
 
-      assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 10, memory: %{}}} =
                Lisp.run(source, context: ctx, tools: tools)
     end
 
@@ -303,11 +301,10 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
       source = "{:result (ctx/get-data), :status \"done\"}"
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
       assert result == %{result: "success", status: "done"}
-      assert delta == %{}
       assert new_memory == %{}
     end
   end

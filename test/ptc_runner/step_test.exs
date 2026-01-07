@@ -7,7 +7,6 @@ defmodule PtcRunner.StepTest do
         return: %{count: 5},
         fail: nil,
         memory: %{"processed" => true},
-        memory_delta: nil,
         signature: "() -> {count :int}",
         usage: %{duration_ms: 100, memory_bytes: 1024},
         trace: []
@@ -16,7 +15,6 @@ defmodule PtcRunner.StepTest do
       assert step.return == %{count: 5}
       assert step.fail == nil
       assert step.memory == %{"processed" => true}
-      assert step.memory_delta == nil
       assert step.signature == "() -> {count :int}"
       assert step.usage == %{duration_ms: 100, memory_bytes: 1024}
       assert step.trace == []
@@ -47,7 +45,6 @@ defmodule PtcRunner.StepTest do
       assert step.return == %{count: 5}
       assert step.fail == nil
       assert step.memory == %{"processed_ids" => [1, 2, 3]}
-      assert step.memory_delta == nil
       assert step.signature == nil
       assert step.usage == nil
       assert step.trace == nil
@@ -89,7 +86,6 @@ defmodule PtcRunner.StepTest do
       assert step.fail.reason == :timeout
       assert step.fail.message == "Execution exceeded time limit"
       assert step.memory == %{}
-      assert step.memory_delta == nil
       assert step.signature == nil
       assert step.usage == nil
       assert step.trace == nil
@@ -380,41 +376,6 @@ defmodule PtcRunner.StepTest do
       }
 
       assert step.signature == signature
-    end
-  end
-
-  describe "memory_delta field" do
-    test "memory_delta contains changed keys (Lisp)" do
-      step = %PtcRunner.Step{
-        return: %{},
-        fail: nil,
-        memory: %{"processed_ids" => [1, 2, 3], "cache" => %{"key" => "value"}},
-        memory_delta: %{"processed_ids" => [1, 2, 3]}
-      }
-
-      assert step.memory_delta == %{"processed_ids" => [1, 2, 3]}
-    end
-
-    test "memory_delta is nil for SubAgent" do
-      step = %PtcRunner.Step{
-        return: %{},
-        fail: nil,
-        memory: %{},
-        memory_delta: nil
-      }
-
-      assert step.memory_delta == nil
-    end
-
-    test "memory_delta can be empty map" do
-      step = %PtcRunner.Step{
-        return: %{},
-        fail: nil,
-        memory: %{},
-        memory_delta: %{}
-      }
-
-      assert step.memory_delta == %{}
     end
   end
 

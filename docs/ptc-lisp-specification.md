@@ -713,14 +713,11 @@ Binds a name to a value in the user namespace, persisting across turns:
 (def x 1)                         ; x = 1
 (def x 2)                         ; x = 2 (overwrites)
 
-; Define and return
-(def x 10)
-x                              ; => 10
+; Define and return (using implicit multi-expression)
+(def x 10) x                      ; => 10
 
-; Reference previous defs
-(def a 1)
-(def b (+ a 1))
-b                                 ; => 2
+; Reference previous defs (single evaluation)
+(def a 1) (def b (+ a 1)) b       ; => 2
 
 ; Error: cannot shadow builtins
 (def map {})                      ; => error: cannot shadow builtin 'map'
@@ -757,17 +754,14 @@ Syntactic sugar for defining named functions in the user namespace:
 (defn twice [x] (* x 2))              ; => #'twice
 (defn greet [name] (str "Hello, " name))  ; => #'greet
 
-; Use defined function
-(defn twice [x] (* x 2))
-(twice 21)                         ; => 42
+; Use defined function (single evaluation with implicit do)
+(defn twice [x] (* x 2)) (twice 21)   ; => 42
 
 ; Reference ctx/ data
 (defn expensive? [e] (> (:amount e) ctx/threshold))
 
-; Reference other defs
-(def rate 0.1)
-(defn apply-rate [x] (* x rate))
-(apply-rate 100)                      ; => 10.0
+; Reference other defs (single evaluation)
+(def rate 0.1) (defn apply-rate [x] (* x rate)) (apply-rate 100)  ; => 10.0
 
 ; With higher-order functions
 (defn expensive? [e] (> (:amount e) 5000))
@@ -794,17 +788,14 @@ Syntactic sugar for defining named functions in the user namespace:
 `defn` supports the same destructuring patterns as `fn` and `let`:
 
 ```clojure
-; Vector destructuring
-(defn first-name [[first last]] first)
-(first-name ["Alice" "Smith"])  ; => "Alice"
+; Vector destructuring (single evaluation)
+(defn first-name [[first last]] first) (first-name ["Alice" "Smith"])  ; => "Alice"
 
-; Map destructuring
-(defn greet [{:keys [name]}] (str "Hello " name))
-(greet {:name "World"})  ; => "Hello World"
+; Map destructuring (single evaluation)
+(defn greet [{:keys [name]}] (str "Hello " name)) (greet {:name "World"})  ; => "Hello World"
 
-; Nested destructuring
-(defn process [[id {:keys [status]}]] (str id ":" status))
-(process [42 {:status "ok"}])  ; => "42:ok"
+; Nested destructuring (single evaluation)
+(defn process [[id {:keys [status]}]] (str id ":" status)) (process [42 {:status "ok"}])  ; => "42:ok"
 ```
 
 

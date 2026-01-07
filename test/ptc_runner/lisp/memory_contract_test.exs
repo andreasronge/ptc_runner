@@ -13,29 +13,28 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
 
   describe "non-map results" do
     test "non-map result leaves memory unchanged" do
-      assert {:ok, %{return: 3, memory_delta: %{}, memory: %{}}} = Lisp.run("(+ 1 2)")
+      assert {:ok, %{return: 3, memory: %{}}} = Lisp.run("(+ 1 2)")
     end
 
     test "non-map result with context" do
-      assert {:ok, %{return: 10, memory_delta: %{}, memory: %{}}} =
+      assert {:ok, %{return: 10, memory: %{}}} =
                Lisp.run("ctx/x", context: %{x: 10})
     end
 
     test "non-map result with initial memory" do
       initial_mem = %{stored: 42}
 
-      assert {:ok, %{return: 5, memory_delta: %{}, memory: ^initial_mem}} =
+      assert {:ok, %{return: 5, memory: ^initial_mem}} =
                Lisp.run("(+ 2 3)", memory: initial_mem)
     end
 
     test "scalar result does not update memory" do
       initial_memory = %{"existing_key" => "preserved"}
 
-      {:ok, %Step{return: result, memory_delta: memory_delta, memory: new_memory}} =
+      {:ok, %Step{return: result, memory: new_memory}} =
         Lisp.run("42", memory: initial_memory)
 
       assert result == 42
-      assert memory_delta == %{}
       assert new_memory == initial_memory
     end
   end
@@ -43,10 +42,9 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
   describe "map results (no implicit merge)" do
     test "map returns as-is, memory unchanged" do
       source = "{:cached-count 3}"
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
+      {:ok, %{return: result, memory: new_memory}} = Lisp.run(source)
 
       assert result == %{:"cached-count" => 3}
-      assert delta == %{}
       assert new_memory == %{}
     end
 
@@ -54,21 +52,19 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       initial_memory = %{x: 10}
       source = "{:y 20}"
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, memory: initial_memory)
 
       assert result == %{y: 20}
-      assert delta == %{}
       assert new_memory == %{x: 10}
     end
 
     test "map with :return key passes through unchanged (no special handling)" do
       source = "{:return 42, :stored 100}"
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} = Lisp.run(source)
+      {:ok, %{return: result, memory: new_memory}} = Lisp.run(source)
 
       # :return is just a regular key now, no special extraction
       assert result == %{return: 42, stored: 100}
-      assert delta == %{}
       assert new_memory == %{}
     end
 
@@ -76,11 +72,10 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       initial_memory = %{x: 10}
       source = "{}"
 
-      {:ok, %{return: result, memory_delta: delta, memory: new_memory}} =
+      {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, memory: initial_memory)
 
       assert result == %{}
-      assert delta == %{}
       assert new_memory == %{x: 10}
     end
   end
