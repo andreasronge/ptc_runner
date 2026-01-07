@@ -231,9 +231,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
   def reverse(coll) when is_binary(coll), do: Enum.reverse(graphemes(coll))
 
+  def first(nil), do: nil
   def first(coll) when is_list(coll), do: List.first(coll)
   def first(coll) when is_binary(coll), do: String.at(coll, 0)
 
+  def second(nil), do: nil
   def second(coll) when is_list(coll), do: Enum.at(coll, 1)
   def second(coll) when is_binary(coll), do: String.at(coll, 1)
 
@@ -244,10 +246,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def nth(coll, idx) when is_binary(coll), do: String.at(coll, idx)
 
   # rest - always returns list (empty list for empty/single-element collections)
+  def rest(nil), do: []
   def rest(coll) when is_list(coll), do: Enum.drop(coll, 1)
   def rest(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), 1)
 
   # next - returns nil for empty/single-element collections
+  def next(nil), do: nil
+
   def next(coll) when is_list(coll) do
     case Enum.drop(coll, 1) do
       [] -> nil

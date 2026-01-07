@@ -152,7 +152,7 @@ defmodule PtcRunner.Lisp.Env do
         builtins_by_category(:regex) ++
         builtins_by_category(:math)
 
-    Map.keys(initial()) -- excluded
+    (Map.keys(initial()) -- excluded) ++ [:doseq]
   end
 
   @doc """
@@ -176,6 +176,7 @@ defmodule PtcRunner.Lisp.Env do
   defp builtin_bindings do
     [
       {:apply, {:special, :apply}},
+      {:println, {:special, :println}},
       # ============================================================
       # Collection operations (normal arity)
       # ============================================================

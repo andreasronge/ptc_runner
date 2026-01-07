@@ -123,6 +123,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :let}, rest, _list, tail?), do: analyze_let(rest, tail?)
   defp dispatch_list_form({:symbol, :loop}, rest, _list, tail?), do: analyze_loop(rest, tail?)
   defp dispatch_list_form({:symbol, :recur}, rest, _list, tail?), do: analyze_recur(rest, tail?)
+  defp dispatch_list_form({:symbol, :doseq}, rest, _list, tail?), do: analyze_doseq(rest, tail?)
   defp dispatch_list_form({:symbol, :fn}, rest, _list, _tail?), do: analyze_fn(rest)
 
   # Conditionals: if variants
@@ -275,6 +276,117 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_recur(_args, false) do
     {:error, {:invalid_form, "recur must be in tail position"}}
   end
+
+  # ============================================================
+  # Special form: doseq
+  # ============================================================
+
+  defp analyze_doseq([{:vector, bindings}, first_body | rest_body], _tail?) do
+    if rem(length(bindings), 2) != 0 do
+      {:error,
+       {:invalid_arity, :doseq,
+        "doseq requires pairs of [binding collection], got #{length(bindings)} element#{if length(bindings) == 1, do: "", else: "s"}"}}
+    else
+      case find_doseq_modifier(bindings) do
+        {:ok, mod} ->
+          {:error,
+           {:invalid_arity, :doseq,
+            "doseq modifier #{inspect(mod)} is not supported in this version or must follow a binding pair"}}
+
+        :none ->
+          body_asts = [first_body | rest_body]
+          pairs = Enum.chunk_every(bindings, 2)
+          do_build_doseq(pairs, body_asts)
+      end
+    end
+  end
+
+  defp analyze_doseq([{:vector, _bindings}], _tail?) do
+    {:error,
+     {:invalid_arity, :doseq, "doseq requires at least one body expression, missing body"}}
+  end
+
+  defp analyze_doseq(_, _tail?) do
+    {:error, {:invalid_arity, :doseq, "expected (doseq [bindings] body ...)"}}
+  end
+
+  defp find_doseq_modifier(bindings) do
+    bindings
+    |> Enum.take_every(2)
+    |> Enum.find_value(:none, fn
+      {:keyword, k} -> {:ok, k}
+      _ -> nil
+    end)
+  end
+
+  defp do_build_doseq([pair | rest_pairs], body_asts) do
+    [binding_ast, coll_ast] = pair
+
+    case check_doseq_collection(binding_ast, coll_ast) do
+      {:error, _} = err ->
+        err
+
+      {:ok, _} ->
+        inner_form =
+          if rest_pairs == [] do
+            {:program, body_asts}
+          else
+            {:list, [{:symbol, :doseq}, {:vector, Enum.flat_map(rest_pairs, & &1)} | body_asts]}
+          end
+
+        temp_sym = {:symbol, :"$doseq_temp"}
+
+        desugared =
+          {:list,
+           [
+             {:symbol, :loop},
+             {:vector, [temp_sym, {:list, [{:symbol, :seq}, coll_ast]}]},
+             {:list,
+              [
+                {:symbol, :if},
+                temp_sym,
+                {:list,
+                 [
+                   {:symbol, :do},
+                   {:list,
+                    [
+                      {:symbol, :let},
+                      {:vector, [binding_ast, {:list, [{:symbol, :first}, temp_sym]}]},
+                      inner_form
+                    ]},
+                   {:list, [{:symbol, :recur}, {:list, [{:symbol, :next}, temp_sym]}]}
+                 ]},
+                nil
+              ]}
+           ]}
+
+        do_analyze(desugared, true)
+    end
+  end
+
+  defp check_doseq_collection(binding_ast, coll_ast) do
+    case coll_ast do
+      n when is_number(n) ->
+        name = binding_name_prefix(binding_ast)
+
+        {:error,
+         {:invalid_arity, :doseq,
+          "doseq binding #{name}expected a collection, got: #{n} (integer)"}}
+
+      {:keyword, k} ->
+        name = binding_name_prefix(binding_ast)
+
+        {:error,
+         {:invalid_arity, :doseq,
+          "doseq binding #{name}expected a collection, got: :#{k} (keyword)"}}
+
+      _ ->
+        {:ok, coll_ast}
+    end
+  end
+
+  defp binding_name_prefix({:symbol, sym}), do: "'#{sym}' "
+  defp binding_name_prefix(_), do: ""
 
   # ============================================================
   # Pattern analysis (destructuring)
