@@ -93,16 +93,16 @@ defmodule PtcRunner.Lisp.PromptsTest do
   end
 
   describe "version/1" do
-    test "returns 2 for single_shot" do
-      assert Prompts.version(:single_shot) == 2
+    test "returns 3 for single_shot" do
+      assert Prompts.version(:single_shot) == 3
     end
 
-    test "returns 2 for multi_turn" do
-      assert Prompts.version(:multi_turn) == 2
+    test "returns 3 for multi_turn" do
+      assert Prompts.version(:multi_turn) == 3
     end
 
-    test "returns 2 for base" do
-      assert Prompts.version(:base) == 2
+    test "returns 3 for base" do
+      assert Prompts.version(:base) == 3
     end
 
     test "raises for unknown prompt" do
