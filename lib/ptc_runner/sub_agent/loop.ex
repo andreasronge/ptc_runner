@@ -339,9 +339,10 @@ defmodule PtcRunner.SubAgent.Loop do
           IO.puts("---")
         end
 
-        # Feed error back to LLM
+        # Feed error back to LLM with turn info
         error_message =
           "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('."
+          |> append_turn_info(agent, state)
 
         new_state = %{
           state
@@ -364,11 +365,12 @@ defmodule PtcRunner.SubAgent.Loop do
     # Check if code calls any catalog-only tools
     case ResponseHandler.find_catalog_tool_call(code, agent.tools, agent.tool_catalog) do
       {:error, catalog_tool_name} ->
-        # Feed error back to LLM
+        # Feed error back to LLM with turn info
         available_tools = Map.keys(agent.tools) |> Enum.sort() |> Enum.join(", ")
 
         error_message =
           "Error: Tool '#{catalog_tool_name}' is for planning only and cannot be called. Available tools: #{available_tools}"
+          |> append_turn_info(agent, state)
 
         new_state = %{
           state
@@ -426,8 +428,10 @@ defmodule PtcRunner.SubAgent.Loop do
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
 
       {:error, lisp_step} ->
-        # Feed error back to LLM for next turn
-        error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
+        # Feed error back to LLM for next turn with turn info
+        error_message =
+          ResponseHandler.format_error_for_llm(lisp_step.fail)
+          |> append_turn_info(agent, state)
 
         # Build trace entry for failed execution (show error message, not nil)
         error_result = {:error, lisp_step.fail.message}
@@ -649,12 +653,27 @@ defmodule PtcRunner.SubAgent.Loop do
     (history ++ [new_result]) |> Enum.take(-3)
   end
 
+  # Append turn info to any feedback message (used for both success and error paths)
+  defp append_turn_info(message, agent, state) do
+    if agent.max_turns > 1 do
+      next_turn = state.turn + 1
+      turns_remaining = agent.max_turns - state.turn
+
+      turn_info =
+        if turns_remaining == 1 do
+          "\n\n⚠️ FINAL TURN - you must call (return result) or (fail response) next."
+        else
+          "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_remaining} remaining)"
+        end
+
+      message <> turn_info
+    else
+      message
+    end
+  end
+
   # Returns {feedback_string, truncated?}
   defp format_turn_feedback(agent, state, lisp_step) do
-    # Next turn number and how many remain including it
-    next_turn = state.turn + 1
-    turns_remaining = agent.max_turns - state.turn
-
     {base_result, truncated?} =
       ResponseHandler.format_execution_result(lisp_step.return, agent.format_options)
 
@@ -667,20 +686,23 @@ defmodule PtcRunner.SubAgent.Loop do
         base_result
       end
 
-    # Add turn info for multi-turn agents
-    feedback =
-      if agent.max_turns > 1 do
-        turn_info =
-          if turns_remaining == 1 do
-            "\n\n⚠️ FINAL TURN - you must call (return result) or (fail response) next."
-          else
-            "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_remaining} remaining)"
-          end
+    # Add stored values hint for multi-turn agents (shows def bindings available as symbols)
+    result_with_stored =
+      if agent.max_turns > 1 and map_size(lisp_step.memory) > 0 do
+        stored_symbols =
+          lisp_step.memory
+          |> Map.keys()
+          |> Enum.map(&to_string/1)
+          |> Enum.sort()
+          |> Enum.join(", ")
 
-        result_with_hint <> turn_info
+        result_with_hint <> "\n\nStored (access as symbols): #{stored_symbols}"
       else
         result_with_hint
       end
+
+    # Add turn info for multi-turn agents
+    feedback = append_turn_info(result_with_stored, agent, state)
 
     {feedback, truncated?}
   end
