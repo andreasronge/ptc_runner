@@ -184,6 +184,7 @@ defmodule PtcRunner.Lisp.Env do
       {:find, {:normal, &Runtime.find/2}},
       {:map, {:normal, &Runtime.map/2}},
       {:mapv, {:normal, &Runtime.mapv/2}},
+      {:"map-indexed", {:normal, &Runtime.map_indexed/2}},
       {:pluck, {:normal, &Runtime.pluck/2}},
       {:sort, {:multi_arity, :sort, {&Runtime.sort/1, &Runtime.sort/2}}},
       # sort-by: 2-arity (key, coll) or 3-arity (key, comparator, coll)

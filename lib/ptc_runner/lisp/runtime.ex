@@ -41,6 +41,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate find(pred, coll), to: Collection
   defdelegate map(f, coll), to: Collection
   defdelegate mapv(f, coll), to: Collection
+  defdelegate map_indexed(f, coll), to: Collection
   defdelegate pluck(key, coll), to: Collection
   defdelegate sort(coll), to: Collection
   defdelegate sort(comp, coll), to: Collection
