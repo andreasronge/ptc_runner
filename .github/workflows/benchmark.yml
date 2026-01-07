@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: false
+      debug_parser:
+        description: 'Debug unidentified parse errors'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   benchmark:
@@ -34,6 +39,7 @@ jobs:
     env:
       MIX_ENV: dev
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      PTC_DEBUG_PARSER: ${{ inputs.debug_parser && '1' || '' }}
 
     steps:
       - name: Checkout repository

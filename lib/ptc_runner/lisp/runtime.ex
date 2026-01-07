@@ -98,7 +98,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate get_in(m, path), to: MapOps
   defdelegate get_in(m, path, default), to: MapOps
   defdelegate assoc(m, k, v), to: MapOps
+  defdelegate assoc_variadic(args), to: MapOps
   defdelegate assoc_in(m, path, v), to: MapOps
+  defdelegate dissoc_variadic(args), to: MapOps
   defdelegate update(m, k, f), to: MapOps
   defdelegate update_in(m, path, f), to: MapOps
   defdelegate dissoc(m, k), to: MapOps
@@ -145,6 +147,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   defdelegate not_(x), to: Predicates
   defdelegate identity(x), to: Predicates
+  defdelegate fnil(f, default), to: Predicates
 
   # ============================================================
   # String Manipulation
