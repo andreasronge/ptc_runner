@@ -1205,6 +1205,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `pmap` | `(pmap f coll)` | Apply f to each item in parallel |
 | `pcalls` | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
 | `mapv` | `(mapv f coll)` | Like map, returns vector |
+| `map-indexed` | `(map-indexed f coll)` | Apply f to index and item |
 | `select-keys` | `(select-keys map keys)` | Pick specific keys |
 | `pluck` | `(pluck key coll)` | Extract single field from each item |
 
@@ -1213,6 +1214,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (pmap :name users)                   ; same, but parallel execution
 (pcalls #(ctx/get-user) #(ctx/get-stats))  ; parallel heterogeneous calls
 (mapv :name users)                   ; same, ensures vector
+(map-indexed (fn [i x] [i x]) ["a" "b"]) ; => [[0 "a"] [1 "b"]]
 (select-keys user [:name :email])    ; pick keys from map
 (pluck :name users)                  ; shorthand for (map :name coll)
 ```

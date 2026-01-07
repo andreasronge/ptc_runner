@@ -148,6 +148,28 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def mapv(f, coll) when is_map(coll), do: Enum.map(coll, fn {k, v} -> f.([k, v]) end)
 
+  def map_indexed(f, coll) when is_list(coll) do
+    with_index_map(coll, f)
+  end
+
+  def map_indexed(f, coll) when is_binary(coll) do
+    with_index_map(graphemes(coll), f)
+  end
+
+  def map_indexed(f, %MapSet{} = set) do
+    with_index_map(set, f)
+  end
+
+  def map_indexed(f, coll) when is_map(coll) do
+    coll
+    |> Enum.with_index()
+    |> Enum.map(fn {{k, v}, idx} -> f.(idx, [k, v]) end)
+  end
+
+  defp with_index_map(enumerable, f) do
+    enumerable |> Enum.with_index() |> Enum.map(fn {item, idx} -> f.(idx, item) end)
+  end
+
   def pluck(_key, nil), do: []
   def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 

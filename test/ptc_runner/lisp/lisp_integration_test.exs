@@ -314,6 +314,25 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
   end
 
+  describe "map-indexed integration" do
+    test "map-indexed basic functionality" do
+      assert {:ok, %{return: [[0, "a"], [1, "b"]]}} =
+               Lisp.run(~S|(map-indexed (fn [i x] [i x]) ["a" "b"])|)
+    end
+
+    test "map-indexed with string" do
+      assert {:ok, %{return: [[0, "a"], [1, "b"]]}} =
+               Lisp.run(~S|(map-indexed (fn [i x] [i x]) "ab")|)
+    end
+
+    test "map-indexed with map" do
+      {:ok, %{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) {:a 1 :b 2})|)
+      assert length(result) == 2
+      # Order is arbitrary but structure should be [index, [key, value]]
+      assert Enum.any?(result, fn [i, x] -> i in [0, 1] and x in [[:a, 1], [:b, 2]] end)
+    end
+  end
+
   describe "character literals and string-as-sequence" do
     test "filter characters in string - the main use case" do
       source = ~S|(count (filter #(= \r %) "raspberry"))|
