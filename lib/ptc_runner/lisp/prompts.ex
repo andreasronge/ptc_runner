@@ -219,12 +219,6 @@ defmodule PtcRunner.Lisp.Prompts do
 
   Returns the version from the prompt's metadata, or 1 if not specified.
   For compositions, returns the version of the first component.
-
-  ## Examples
-
-      iex> PtcRunner.Lisp.Prompts.version(:base)
-      3
-
   """
   @spec version(atom()) :: pos_integer()
   def version(key) when is_atom(key) do
