@@ -155,6 +155,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate join(coll), to: RuntimeString
   defdelegate join(separator, coll), to: RuntimeString
   defdelegate split(s, separator), to: RuntimeString
+  defdelegate split_lines(s), to: RuntimeString
   defdelegate trim(s), to: RuntimeString
   defdelegate replace(s, pattern, replacement), to: RuntimeString
   defdelegate upcase(s), to: RuntimeString

@@ -71,6 +71,24 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
+  Split a string into a list of lines.
+  - (split-lines "line1\nline2\r\nline3") returns ["line1" "line2" "line3"]
+  - Does not return trailing empty lines.
+  """
+  def split_lines(s) when is_binary(s) do
+    s
+    |> String.split(~r/\r?\n/)
+    |> drop_trailing_empty()
+  end
+
+  defp drop_trailing_empty(list) do
+    list
+    |> Enum.reverse()
+    |> Enum.drop_while(&(&1 == ""))
+    |> Enum.reverse()
+  end
+
+  @doc """
   Trim leading and trailing whitespace.
   - (trim "  hello  ") returns "hello"
   - (trim "\n\t text \r\n") returns "text"
