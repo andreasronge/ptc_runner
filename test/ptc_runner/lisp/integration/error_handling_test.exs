@@ -14,21 +14,22 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "(filter (where :active ctx/users"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      assert message =~ "expected"
+      assert message =~ "unbalanced parentheses"
     end
 
     test "unbalanced brackets" do
       source = "[1 2 3"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      assert message =~ "expected"
+      assert message =~ "unbalanced brackets"
     end
 
     test "invalid token" do
       source = "(+ 1 @invalid)"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      assert message =~ "@invalid"
+      # @deref is not supported
+      assert message =~ "deref syntax"
     end
   end
 
@@ -123,7 +124,8 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "'(1 2 3)"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      assert message =~ "expected"
+      # Quote syntax is not supported
+      assert message =~ "quote syntax"
     end
 
     test "if without else clause" do

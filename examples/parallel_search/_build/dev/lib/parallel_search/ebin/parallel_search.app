@@ -1,0 +1,1 @@
+{application,parallel_search,[{modules,['Elixir.ParallelSearch']},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger,ptc_runner]},{description,"parallel_search"},{registered,[]},{vsn,"0.1.0"}]}.

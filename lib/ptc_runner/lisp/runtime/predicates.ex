@@ -18,6 +18,27 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   """
   def identity(x), do: x
 
+  @doc """
+  Returns a function that replaces nil first argument with a default value.
+
+  Commonly used with update-in: `(update-in m [:count] (fnil + 0) 1)`
+  This adds 1 to m[:count], using 0 as the initial value if nil.
+
+  ## Examples
+
+      iex> f = PtcRunner.Lisp.Runtime.Predicates.fnil(&Kernel.+/2, 0)
+      iex> f.(nil, 5)
+      5
+      iex> f.(3, 5)
+      8
+  """
+  def fnil(f, default) do
+    fn
+      nil, arg2 -> f.(default, arg2)
+      arg1, arg2 -> f.(arg1, arg2)
+    end
+  end
+
   defp truthy?(nil), do: false
   defp truthy?(false), do: false
   defp truthy?(_), do: true

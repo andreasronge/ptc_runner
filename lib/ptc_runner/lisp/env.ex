@@ -235,11 +235,11 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       {:get, {:multi_arity, :get, {&Runtime.get/2, &Runtime.get/3}}},
       {:"get-in", {:multi_arity, :"get-in", {&Runtime.get_in/2, &Runtime.get_in/3}}},
-      {:assoc, {:normal, &Runtime.assoc/3}},
+      {:assoc, {:collect, &Runtime.assoc_variadic/1}},
       {:"assoc-in", {:normal, &Runtime.assoc_in/3}},
       {:update, {:normal, &Runtime.update/3}},
       {:"update-in", {:normal, &Runtime.update_in/3}},
-      {:dissoc, {:normal, &Runtime.dissoc/2}},
+      {:dissoc, {:collect, &Runtime.dissoc_variadic/1}},
       {:merge, {:variadic, &Runtime.merge/2, %{}}},
       {:"select-keys", {:normal, &Runtime.select_keys/2}},
       {:keys, {:normal, &Runtime.keys/1}},
@@ -251,6 +251,7 @@ defmodule PtcRunner.Lisp.Env do
       # Utility functions
       # ============================================================
       {:identity, {:normal, &Runtime.identity/1}},
+      {:fnil, {:normal, &Runtime.fnil/2}},
 
       # ============================================================
       # Arithmetic — variadic with identity

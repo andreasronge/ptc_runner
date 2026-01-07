@@ -274,7 +274,16 @@ defmodule PtcDemo.LispTestRunner do
         effective_prompt = prompt_for_test(test_case, prompt_profile)
         agent_mod.set_prompt_profile(effective_prompt)
 
-        run_test(test_case, index, length(test_cases()), verbose, agent_mod, clojure_available)
+        # Note: debug is false for batch runs - use run_one for debugging
+        run_test(
+          test_case,
+          index,
+          length(test_cases()),
+          verbose,
+          false,
+          agent_mod,
+          clojure_available
+        )
       end)
 
     stats = agent_mod.stats()
@@ -317,6 +326,9 @@ defmodule PtcDemo.LispTestRunner do
   Run a single test by index (1-based).
   """
   def run_one(index, opts \\ []) do
+    # Normalize opts to keyword list for consistent access
+    opts = if is_map(opts), do: Map.to_list(opts), else: opts
+
     agent_mod = Keyword.get(opts, :agent, Agent)
 
     # Only load dotenv and check API key if using real agent
@@ -333,6 +345,7 @@ defmodule PtcDemo.LispTestRunner do
       model = Keyword.get(opts, :model)
       validate_clojure = Keyword.get(opts, :validate_clojure, false)
       verbose = Keyword.get(opts, :verbose, true)
+      debug = Keyword.get(opts, :debug, false)
 
       test_case = Enum.at(cases, index - 1)
 
@@ -353,7 +366,7 @@ defmodule PtcDemo.LispTestRunner do
       end
 
       clojure_available = check_clojure_validation(validate_clojure)
-      run_test(test_case, index, length(cases), verbose, agent_mod, clojure_available)
+      run_test(test_case, index, length(cases), verbose, debug, agent_mod, clojure_available)
     else
       verbose = Keyword.get(opts, :verbose, true)
 
@@ -418,7 +431,7 @@ defmodule PtcDemo.LispTestRunner do
     end
   end
 
-  defp run_test(test_case, index, total, verbose, agent_mod, clojure_available) do
+  defp run_test(test_case, index, total, verbose, debug, agent_mod, clojure_available) do
     query = test_case.query
     max_turns = Map.get(test_case, :max_turns, 1)
     expect = Map.get(test_case, :expect)
@@ -432,7 +445,7 @@ defmodule PtcDemo.LispTestRunner do
     end
 
     # Build ask options - signature takes precedence over expect for type validation
-    ask_opts = [max_turns: max_turns, expect: expect]
+    ask_opts = [max_turns: max_turns, expect: expect, debug: debug]
     ask_opts = if signature, do: Keyword.put(ask_opts, :signature, signature), else: ask_opts
 
     result =

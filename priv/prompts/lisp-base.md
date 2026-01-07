@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp.
 
-<!-- version: 4 -->
+<!-- version: 7 -->
 <!-- date: 2026-01-07 -->
-<!-- changes: Condensed to focus on PTC extensions and LLM blind spots only -->
+<!-- changes: Added fnil support, removed from restrictions -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -52,6 +52,9 @@ ctx/products                      ; read-only context data
 - No `for` — use `map` or `->>`
 - No regex literals (`#"..."`) — use `(re-pattern "\\d+")` then `re-find`/`re-matches`
 - `loop/recur` limited to 1000 iterations
+- No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!` — use `def` for state
+- No `partial` — use anonymous functions `#(...)`
+- No reader macros — no `#_` (discard), `#'` (var quote), `#""` (regex literal)
 
 ### Common Mistakes
 
@@ -63,5 +66,6 @@ ctx/products                      ; read-only context data
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` |
 | `(includes s "x")` | `(includes? s "x")` |
 | `(-> coll (filter f))` | `(->> coll (filter f))` |
+| `(def x (atom {})) @x` | `(def x {})` then `x` |
 
 <!-- PTC_PROMPT_END -->

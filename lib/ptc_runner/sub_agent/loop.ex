@@ -323,8 +323,32 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Handle LLM response - parse and execute code
   defp handle_llm_response(response, agent, llm, state) do
+    # Debug: log raw LLM response
+    if state.debug do
+      IO.puts("\n[Turn #{state.turn}] Raw LLM response (#{byte_size(response)} bytes):")
+      IO.puts("--- LLM RESPONSE START ---")
+      IO.puts(response)
+      IO.puts("--- LLM RESPONSE END ---")
+    end
+
     case ResponseHandler.parse(response) do
       {:ok, code} ->
+        # Debug: log the extracted code to help diagnose parse issues
+        if state.debug do
+          IO.puts("\n[Turn #{state.turn}] Extracted code (#{byte_size(code)} bytes):")
+          IO.puts("--- RAW CODE START ---")
+          IO.puts(code)
+          IO.puts("--- RAW CODE END ---")
+          # Also show hex dump of first 100 chars to catch invisible characters
+          hex =
+            code
+            |> String.slice(0, 100)
+            |> :binary.bin_to_list()
+            |> Enum.map_join(" ", &Integer.to_string(&1, 16))
+
+          IO.puts("First 100 bytes hex: #{hex}")
+        end
+
         execute_code(code, response, agent, llm, state)
 
       {:error, :no_code_in_response} ->

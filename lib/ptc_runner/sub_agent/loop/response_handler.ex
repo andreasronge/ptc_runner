@@ -14,8 +14,29 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
   alias PtcRunner.Lisp.Format
 
+  # Unicode characters that LLMs sometimes insert that break parsing:
+  # - U+FEFF: BOM (Byte Order Mark)
+  # - U+200B: Zero-width space
+  # - U+200C: Zero-width non-joiner
+  # - U+200D: Zero-width joiner
+  # - U+00A0: Non-breaking space
+  # - U+202F: Narrow no-break space
+  # - U+2060: Word joiner
+  # - U+FFFE: Invalid/reversed BOM
+  # - U+00AD: Soft hyphen
+  # - U+180E: Mongolian vowel separator
+  # - U+2000-U+200A: Various width spaces
+  @invisible_chars ~r/[\x{FEFF}\x{200B}\x{200C}\x{200D}\x{00A0}\x{202F}\x{2060}\x{FFFE}\x{00AD}\x{180E}\x{2000}-\x{200A}]/u
+
+  # Smart/curly quotes that should be normalized to ASCII
+  @smart_double_quotes ~r/[\x{201C}\x{201D}\x{201E}\x{201F}\x{2033}\x{2036}]/u
+  @smart_single_quotes ~r/[\x{2018}\x{2019}\x{201A}\x{201B}\x{2032}\x{2035}]/u
+
   @doc """
   Parse PTC-Lisp from LLM response.
+
+  Sanitizes LLM output by removing invisible Unicode characters (BOM, zero-width
+  spaces) and normalizing smart quotes to ASCII equivalents.
 
   ## Examples
 
@@ -35,25 +56,194 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   """
   @spec parse(String.t()) :: {:ok, String.t()} | {:error, :no_code_in_response}
   def parse(response) do
-    # Try extracting from code blocks (clojure or lisp)
-    case Regex.scan(~r/```(?:clojure|lisp)\n(.*?)```/s, response) do
-      [] ->
-        # Try raw s-expression
-        trimmed = String.trim(response)
+    # Normalize line endings (CRLF -> LF, CR -> LF)
+    response = String.replace(response, ~r/\r\n?/, "\n")
 
-        if String.starts_with?(trimmed, "(") do
-          {:ok, trimmed}
-        else
-          {:error, :no_code_in_response}
+    # DEBUG: Show what we're parsing
+    if System.get_env("DEBUG_PARSE") do
+      IO.puts("\n=== DEBUG: Raw response (#{byte_size(response)} bytes) ===")
+      IO.puts(response)
+      IO.puts("=== END RAW RESPONSE ===\n")
+    end
+
+    # Try extracting from code blocks - prefer clojure/lisp tagged blocks
+    # Allow optional whitespace/newline after language tag
+    case Regex.scan(~r/```(?:clojure|lisp)[ \t]*\n?(.*?)```/s, response) do
+      [] ->
+        # Try any code blocks (skip optional language tag, then capture content)
+        # Regex: ``` followed by optional non-newline chars (language tag), optional whitespace/newline, then content
+        case Regex.scan(~r/```[^\n]*[ \t]*\n?(.*?)```/s, response) do
+          [] ->
+            try_raw_sexp(response)
+
+          blocks ->
+            # Filter blocks that look like Lisp code (start with parenthesis after trimming)
+            lisp_blocks =
+              blocks
+              |> Enum.map(fn [_, code] -> String.trim(code) end)
+              |> Enum.filter(&String.starts_with?(&1, "("))
+
+            process_lisp_blocks(lisp_blocks, response)
         end
 
       [[_, code]] ->
-        {:ok, String.trim(code)}
+        result = code |> String.trim() |> sanitize_code()
+
+        if System.get_env("DEBUG_PARSE"),
+          do:
+            IO.puts(
+              "=== DEBUG: Single clojure/lisp block extracted ===\n#{result}\n=== END EXTRACTED ===\n"
+            )
+
+        {:ok, result}
 
       blocks ->
         # Multiple blocks - wrap in do
         code = Enum.map_join(blocks, "\n", &List.last/1)
-        {:ok, "(do #{code})"}
+        result = sanitize_code("(do #{code})")
+
+        if System.get_env("DEBUG_PARSE"),
+          do:
+            IO.puts(
+              "=== DEBUG: Multiple clojure/lisp blocks (#{length(blocks)}) wrapped in do ===\n#{result}\n=== END EXTRACTED ===\n"
+            )
+
+        {:ok, result}
+    end
+  end
+
+  # Process filtered lisp blocks, falling back to raw s-expression if none found
+  defp process_lisp_blocks([], response) do
+    try_raw_sexp(response)
+  end
+
+  defp process_lisp_blocks([single], _response) do
+    {:ok, sanitize_code(single)}
+  end
+
+  defp process_lisp_blocks(multiple, _response) do
+    code = Enum.join(multiple, "\n")
+    {:ok, sanitize_code("(do #{code})")}
+  end
+
+  # Try to extract raw s-expression from response
+  defp try_raw_sexp(response) do
+    sanitized = response |> String.trim() |> sanitize_code()
+
+    if String.starts_with?(sanitized, "(") do
+      {:ok, sanitized}
+    else
+      {:error, :no_code_in_response}
+    end
+  end
+
+  # Remove invisible Unicode characters, normalize smart quotes to ASCII,
+  # and strip unsupported reader macros. LLMs sometimes produce these which break the parser.
+  # Always trims the result since #_ stripping can leave leading whitespace.
+  defp sanitize_code(code) do
+    code
+    |> String.replace(@invisible_chars, "")
+    |> String.replace(@smart_double_quotes, "\"")
+    |> String.replace(@smart_single_quotes, "'")
+    |> strip_discard_reader_macros()
+    |> String.trim()
+  end
+
+  # Strip #_ reader macros (discard next form).
+  # Handles: #_symbol, #_(expr), #_[expr], #_{expr}
+  # Applied iteratively since #_ can be nested: #_#_foo discards two forms
+  defp strip_discard_reader_macros(code) do
+    # Pattern: #_ followed by either:
+    # - a balanced delimited form (parens, brackets, braces)
+    # - or a symbol/number (sequence of non-whitespace, non-delimiter chars)
+    result = do_strip_discard(code)
+
+    if result == code do
+      code
+    else
+      # Keep stripping in case of nested #_
+      strip_discard_reader_macros(result)
+    end
+  end
+
+  defp do_strip_discard(code) do
+    case Regex.run(~r/#_\s*/, code, return: :index) do
+      [{start, len}] ->
+        prefix = String.slice(code, 0, start)
+        rest = String.slice(code, start + len, String.length(code))
+
+        case skip_next_form(rest) do
+          {:ok, remaining} ->
+            prefix <> remaining
+
+          :error ->
+            # Can't parse the form, leave #_ in place (will cause parse error)
+            code
+        end
+
+      _ ->
+        code
+    end
+  end
+
+  # Skip the next Lisp form and return the remaining string
+  defp skip_next_form(str) do
+    str = String.trim_leading(str)
+
+    cond do
+      String.starts_with?(str, "(") -> skip_balanced(str, "(", ")")
+      String.starts_with?(str, "[") -> skip_balanced(str, "[", "]")
+      String.starts_with?(str, "{") -> skip_balanced(str, "{", "}")
+      String.starts_with?(str, "\"") -> skip_string(str)
+      # Handle nested #_ - skip #_ and then the form it's discarding
+      String.starts_with?(str, "#_") -> skip_discard_form(str)
+      true -> skip_symbol(str)
+    end
+  end
+
+  # Skip a #_ reader macro and the form it discards
+  defp skip_discard_form(str) do
+    # Skip the #_ prefix
+    rest = String.slice(str, 2, String.length(str))
+    # Then skip the form being discarded
+    skip_next_form(rest)
+  end
+
+  defp skip_balanced(str, open, close) do
+    # Find matching close delimiter, respecting nesting
+    do_skip_balanced(String.graphemes(str), 0, open, close, [])
+  end
+
+  defp do_skip_balanced([], _depth, _open, _close, _acc), do: :error
+
+  defp do_skip_balanced([char | rest], depth, open, close, acc) do
+    new_depth =
+      cond do
+        char == open -> depth + 1
+        char == close -> depth - 1
+        true -> depth
+      end
+
+    if new_depth == 0 do
+      {:ok, Enum.join(rest)}
+    else
+      do_skip_balanced(rest, new_depth, open, close, [char | acc])
+    end
+  end
+
+  defp skip_string(str) do
+    # Skip opening quote, then find unescaped closing quote
+    case Regex.run(~r/^"(?:[^"\\]|\\.)*"(.*)$/s, str) do
+      [_, rest] -> {:ok, rest}
+      _ -> :error
+    end
+  end
+
+  defp skip_symbol(str) do
+    # Symbol is sequence of non-whitespace, non-delimiter chars
+    case Regex.run(~r/^[^\s\(\)\[\]\{\}"]+(.*)$/s, str) do
+      [_, rest] -> {:ok, rest}
+      _ -> :error
     end
   end
 

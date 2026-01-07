@@ -42,6 +42,32 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
     end
   end
 
+  @doc """
+  Associate key-value pairs with a map.
+
+  Supports both standard 3-arg form and variadic form with multiple pairs:
+  - (assoc m k v)
+  - (assoc m k1 v1 k2 v2 k3 v3)
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.assoc_variadic([%{a: 1}, :b, 2])
+      %{a: 1, b: 2}
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.assoc_variadic([%{}, :a, 1, :b, 2, :c, 3])
+      %{a: 1, b: 2, c: 3}
+  """
+  def assoc_variadic([m | pairs]) when rem(length(pairs), 2) == 0 do
+    pairs
+    |> Enum.chunk_every(2)
+    |> Enum.reduce(m, fn [k, v], acc -> Map.put(acc, k, v) end)
+  end
+
+  def assoc_variadic(args) do
+    raise ArgumentError, "assoc requires a map and key-value pairs, got #{length(args)} args"
+  end
+
+  # Keep the 3-arg version for direct calls
   def assoc(m, k, v), do: Map.put(m, k, v)
   def assoc_in(m, path, v), do: FlexAccess.flex_put_in(m, path, v)
 
@@ -52,6 +78,27 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   end
 
   def update_in(m, path, f), do: FlexAccess.flex_update_in(m, path, f)
+
+  @doc """
+  Remove keys from a map.
+
+  Supports both 2-arg form and variadic form with multiple keys:
+  - (dissoc m k)
+  - (dissoc m k1 k2 k3)
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.dissoc_variadic([%{a: 1, b: 2}, :a])
+      %{b: 2}
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.dissoc_variadic([%{a: 1, b: 2, c: 3}, :a, :c])
+      %{b: 2}
+  """
+  def dissoc_variadic([m | keys]) do
+    Enum.reduce(keys, m, fn k, acc -> Map.delete(acc, k) end)
+  end
+
+  # Keep the 2-arg version for direct calls
   def dissoc(m, k), do: Map.delete(m, k)
   def merge(m1, m2), do: Map.merge(m1, m2)
 

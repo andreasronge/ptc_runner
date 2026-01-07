@@ -279,10 +279,125 @@ defmodule PtcRunner.Lisp.Parser do
         column = offset - line_offset + 1
         snippet = String.slice(rest, 0, 20)
 
-        {:error,
-         {:parse_error, "#{reason} at line #{line}, column #{column}: #{inspect(snippet)}"}}
+        # Improve error message for common cases
+        improved_reason =
+          cond do
+            reason == "expected end of string" and offset == 0 ->
+              # Failed at position 0 means no expressions were parsed
+              # Check for unbalanced delimiters first, then unsupported syntax
+              case check_delimiter_balance(source) do
+                "syntax error: could not parse expression" ->
+                  check_unsupported_patterns(source) ||
+                    "syntax error: could not parse expression"
+
+                msg ->
+                  msg
+              end
+
+            reason == "expected end of string" ->
+              # Parsed some content but then failed - check for unsupported syntax
+              check_unsupported_patterns(source) ||
+                debug_and_return_error(source, reason, line, column, snippet)
+
+            true ->
+              "#{reason} at line #{line}, column #{column}: #{inspect(snippet)}"
+          end
+
+        {:error, {:parse_error, improved_reason}}
     end
   rescue
     e in ArgumentError -> {:error, {:parse_error, e.message}}
+  end
+
+  # Check for unbalanced delimiters and return a helpful error message
+  defp check_delimiter_balance(source) do
+    {parens, brackets, braces} = count_delimiters(source)
+
+    format_delimiter_error(parens, "parentheses", "(", ")") ||
+      format_delimiter_error(brackets, "brackets", "[", "]") ||
+      format_delimiter_error(braces, "braces", "{", "}") ||
+      "syntax error: could not parse expression"
+  end
+
+  defp count_delimiters(source) do
+    source
+    |> String.graphemes()
+    |> Enum.reduce({0, 0, 0}, fn char, {p, b, br} ->
+      case char do
+        "(" -> {p + 1, b, br}
+        ")" -> {p - 1, b, br}
+        "[" -> {p, b + 1, br}
+        "]" -> {p, b - 1, br}
+        "{" -> {p, b, br + 1}
+        "}" -> {p, b, br - 1}
+        _ -> {p, b, br}
+      end
+    end)
+  end
+
+  defp format_delimiter_error(count, name, open, _close) when count > 0 do
+    "unbalanced #{name}: #{count} unclosed '#{open}'"
+  end
+
+  defp format_delimiter_error(count, name, _open, close) when count < 0 do
+    "unbalanced #{name}: #{-count} extra '#{close}'"
+  end
+
+  defp format_delimiter_error(0, _name, _open, _close), do: nil
+
+  # Check for unsupported syntax patterns and return a helpful error message
+  defp check_unsupported_patterns(source) do
+    # Remove string literals to avoid false positives (e.g., "user@example.com")
+    source_without_strings = Regex.replace(~r/"(?:[^"\\]|\\.)*"/, source, "\"\"")
+
+    cond do
+      # Java method call: (.methodName obj)
+      Regex.match?(~r/\(\.[a-zA-Z]/, source_without_strings) ->
+        case Regex.run(~r/\(\.([a-zA-Z][a-zA-Z0-9]*)/, source) do
+          [_, method] ->
+            "Java interop (.#{method} ...) is not supported. Use a helper function instead"
+
+          _ ->
+            "Java interop method calls (. syntax) are not supported"
+        end
+
+      # Java constructor: (ClassName. args) or (package.ClassName. args)
+      Regex.match?(~r/[a-zA-Z][a-zA-Z0-9.]*\.\s*[)\]]/, source_without_strings) or
+          Regex.match?(~r/\([a-zA-Z][a-zA-Z0-9.]*\.\s/, source_without_strings) ->
+        case Regex.run(~r/([a-zA-Z][a-zA-Z0-9.]*)\.\s/, source_without_strings) do
+          [_, class] ->
+            "Java constructor (#{class}. ...) is not supported. Use a helper function instead"
+
+          _ ->
+            "Java constructor syntax (ClassName.) is not supported"
+        end
+
+      # Deref syntax: @atom
+      Regex.match?(~r/@[a-zA-Z]/, source_without_strings) ->
+        "deref syntax (@var) is not supported. Atoms and refs are not available"
+
+      # Quote syntax: 'symbol or '(list)
+      Regex.match?(~r/'[a-zA-Z(]/, source_without_strings) ->
+        "quote syntax ('expr) is not supported. Use vectors [1 2 3] instead of quoted lists"
+
+      true ->
+        nil
+    end
+  end
+
+  # Debug helper: optionally print source and return error message
+  defp debug_and_return_error(source, reason, line, column, snippet) do
+    # Enable with: PTC_DEBUG_PARSER=1 mix ...
+    if System.get_env("PTC_DEBUG_PARSER") do
+      IO.puts("\n=== DEBUG: Unidentified parse error ===")
+      IO.puts("Source code:")
+      IO.puts("---")
+      IO.puts(source)
+      IO.puts("---")
+      IO.puts("Failed at line #{line}, column #{column}")
+      IO.puts("=== END DEBUG ===\n")
+    end
+
+    "#{reason} at line #{line}, column #{column}: #{inspect(snippet)}"
   end
 end
