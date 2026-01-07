@@ -58,6 +58,7 @@ defmodule PtcRunner.SubAgent.Debug do
   - `step` - A `%Step{}` struct with trace data
   - `opts` - Keyword list of options:
     - `messages: true` - Show full LLM response and feedback (requires `debug: true` during execution)
+    - `system: true` - Show the system prompt in each turn (default: `false` when `messages: true`)
 
   ## Examples
 
@@ -89,7 +90,7 @@ defmodule PtcRunner.SubAgent.Debug do
     show_messages = Keyword.get(opts, :messages, false)
 
     if show_messages do
-      Enum.each(trace, &print_turn_with_messages/1)
+      Enum.each(trace, &print_turn_with_messages(&1, opts))
     else
       Enum.each(trace, &print_turn/1)
     end
@@ -194,7 +195,7 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   # Print turn with full LLM messages (for messages: true option)
-  defp print_turn_with_messages(turn_entry) do
+  defp print_turn_with_messages(turn_entry, opts) do
     turn_num = Map.get(turn_entry, :turn, 0)
     program = Map.get(turn_entry, :program, "")
     result = Map.get(turn_entry, :result, nil)
@@ -204,13 +205,14 @@ defmodule PtcRunner.SubAgent.Debug do
 
     header = " Turn #{turn_num} "
     system_prompt = Map.get(turn_entry, :system_prompt)
+    show_system = Keyword.get(opts, :system, false)
 
     IO.puts(
       "\n#{ansi(:cyan)}┌─#{header}#{String.duplicate("─", @box_width - 3 - String.length(header))}┐#{ansi(:reset)}"
     )
 
     # Print System Prompt
-    if system_prompt do
+    if show_system and system_prompt do
       IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}System Prompt:#{ansi(:reset)}")
 
       system_prompt
