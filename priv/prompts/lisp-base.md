@@ -134,6 +134,7 @@ results                                        ; => the search results
 | `(range)` | `(range 10)` — range needs a limit |
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` — comparator before collection |
 | `(into #{} coll)` | `(set coll)` — into not supported |
+| `(includes s "x")` | `(includes? s "x")` — predicates end in `?` |
 
 ### Return Values
 Return raw values directly:
