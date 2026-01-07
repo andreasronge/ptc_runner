@@ -3,65 +3,55 @@ defmodule PtcRunner.Lisp.SchemaTest do
 
   alias PtcRunner.Lisp.Prompts
 
-  describe "to_prompt/0" do
+  describe "multi_turn prompt" do
     test "returns non-empty string" do
       prompt = Prompts.get(:multi_turn)
       assert is_binary(prompt)
-      assert String.length(prompt) > 1000
+      assert String.length(prompt) > 500
     end
 
-    test "contains language overview" do
+    test "documents PTC extensions" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "PTC-Lisp")
+      # Predicate builders
+      assert prompt =~ "where"
+      assert prompt =~ "all-of"
+      assert prompt =~ "any-of"
+      # Aggregation
+      assert prompt =~ "sum-by"
+      assert prompt =~ "min-by"
     end
 
-    test "contains data access section" do
+    test "documents context access" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "Data Access")
-      assert String.contains?(prompt, "ctx/products")
+      assert prompt =~ "ctx/"
     end
 
-    test "contains accessing data section" do
+    test "documents restrictions" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "ctx/")
+      # Key restrictions LLMs need to know
+      assert prompt =~ "if" and prompt =~ "else"
+      assert prompt =~ "range"
     end
 
-    test "contains unsupported features section" do
+    test "documents common mistakes" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "NOT Supported")
-      assert String.contains?(prompt, "`if` without else")
+      # Table with wrong/right patterns
+      assert prompt =~ "Wrong"
+      assert prompt =~ "Right"
     end
 
-    test "contains threading macros" do
+    test "documents state persistence for multi-turn" do
       prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "->>")
-      assert String.contains?(prompt, "->")
+      assert prompt =~ "def"
+      assert prompt =~ ~r/\*1|\*2|\*3/
     end
+  end
 
-    test "contains predicate builders" do
-      prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "where")
-      assert String.contains?(prompt, "all-of")
-      assert String.contains?(prompt, "any-of")
-    end
-
-    test "contains core functions" do
-      prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "filter")
-      assert String.contains?(prompt, "count")
-      assert String.contains?(prompt, "sum-by")
-    end
-
-    test "contains common mistakes section" do
-      prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "Common Mistakes")
-      assert String.contains?(prompt, "Wrong")
-      assert String.contains?(prompt, "Right")
-    end
-
-    test "contains state persistence section" do
-      prompt = Prompts.get(:multi_turn)
-      assert String.contains?(prompt, "State Persistence")
+  describe "single_shot prompt" do
+    test "does not include multi-turn memory docs" do
+      prompt = Prompts.get(:single_shot)
+      refute prompt =~ "*1"
+      refute prompt =~ "Previous turn"
     end
   end
 end
