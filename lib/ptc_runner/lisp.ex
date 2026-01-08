@@ -213,6 +213,29 @@ defmodule PtcRunner.Lisp do
       ]
 
       case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
+        {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
+          # For return signal, we return the value but wrap it in the sentinel for SubAgent to detect
+          step =
+            apply_memory_contract(
+              {:__ptc_return__, value},
+              eval_ctx.user_ns,
+              float_precision,
+              eval_ctx.prints
+            )
+
+          {:ok, %{step | usage: metrics}}
+
+        {:ok, {:fail_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
+          step =
+            apply_memory_contract(
+              {:__ptc_fail__, value},
+              eval_ctx.user_ns,
+              float_precision,
+              eval_ctx.prints
+            )
+
+          {:ok, %{step | usage: metrics}}
+
         {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
           step = apply_memory_contract(value, eval_ctx.user_ns, float_precision, eval_ctx.prints)
           step_with_usage = %{step | usage: metrics}

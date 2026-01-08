@@ -45,7 +45,10 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Predicates
           | {:where, field_path(), where_op(), t() | nil}
           | {:pred_combinator, :all_of | :any_of | :none_of, [t()]}
-          # Builtin call (return, fail)
+          # Control flow signals
+          | {:return, t()}
+          | {:fail, t()}
+          # Builtin call (other tools)
           | {:builtin_call, String.t(), t()}
           # Tool invocation via ctx namespace: (ctx/tool-name args...)
           | {:ctx_call, atom(), [t()]}

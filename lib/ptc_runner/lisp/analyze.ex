@@ -799,12 +799,12 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # Syntactic sugar: return and fail (desugar to builtin_call)
+  # Control flow signals: return and fail
   # ============================================================
 
   defp analyze_return([value_ast], _tail?) do
     with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:builtin_call, "return", value}}
+      {:ok, {:return, value}}
     end
   end
 
@@ -814,7 +814,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_fail([error_ast], _tail?) do
     with {:ok, error} <- do_analyze(error_ast, false) do
-      {:ok, {:builtin_call, "fail", error}}
+      {:ok, {:fail, error}}
     end
   end
 
