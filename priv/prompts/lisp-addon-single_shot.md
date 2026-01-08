@@ -2,15 +2,15 @@
 
 Rules for single-shot execution (one turn, no memory).
 
-<!-- version: 2 -->
+<!-- version: 4 -->
 <!-- date: 2026-01-08 -->
-<!-- changes: Added thinking example, moved rules from base -->
+<!-- changes: Removed mention of return/fail to avoid priming -->
 
 <!-- PTC_PROMPT_START -->
 
 ### Single-Shot Execution
 
-Respond with EXACTLY ONE ```clojure code block. The expression result IS your answer.
+Respond with EXACTLY ONE ```clojure code block. The last expression's value IS your answer.
 
 For complex tasks, think through the problem first:
 
