@@ -66,6 +66,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:destructure, {:map, [atom()], [{atom(), atom()}], keyword()}}
           | {:destructure, {:as, atom(), pattern()}}
           | {:destructure, {:seq, [pattern()]}}
+          # Rest pattern: [a b & rest] binds rest to remaining elements
+          | {:destructure, {:seq_rest, [pattern()], pattern()}}
 
   @type field_path :: {:field, [field_segment()]}
   @type field_segment :: {:keyword, atom()} | {:string, String.t()}

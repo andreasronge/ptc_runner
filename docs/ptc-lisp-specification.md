@@ -474,6 +474,18 @@ Extract values from vectors by position.
 ; Nested sequential destructuring
 (let [[a [b c]] [1 [2 3]]]
   (+ a b c)) ; => 6
+
+; Rest pattern: bind remaining elements to a variable
+(let [[x & rest] [1 2 3 4]]
+  rest)      ; => [2 3 4]
+
+; Rest pattern with multiple leading elements
+(let [[a b & rest] [1 2 3 4 5]]
+  [a b rest]) ; => [1 2 [3 4 5]]
+
+; Bind entire list (no leading elements)
+(let [[& all] [1 2 3]]
+  all)       ; => [1 2 3]
 ```
 
 **Map Destructuring:**
@@ -499,6 +511,7 @@ Extract values from maps by key. Supports both keyword and string keys.
 
 **Supported destructuring forms:**
 - `[a b]` — sequential (vector)
+- `[a & rest]` — rest pattern (bind remaining elements)
 - `{:keys [a b]}` — map keyword keys
 - `{:keys [a] :or {a default}}` — map with defaults
 - `{new-name :old-key}` — map renaming
@@ -819,7 +832,7 @@ Syntactic sugar for defining named functions in the user namespace:
 
 **Not supported:**
 - Multi-arity: `(defn f ([x] ...) ([x y] ...))` — use separate `defn` forms
-- Variadic args: `(defn f [& args] ...)` — not supported
+- Variadic args: `(defn f [& args] ...)` — not supported (use rest patterns in `let`/`loop` destructuring instead)
 - Pre/post conditions
 
 ---
@@ -861,6 +874,14 @@ Syntactic sugar for defining named functions in the user namespace:
      acc))
  5 1)
 ; => 120
+
+;; Process list with rest pattern destructuring
+(loop [[head & tail] [1 2 3 4]
+       sum 0]
+  (if head
+    (recur tail (+ sum head))
+    sum))
+; => 10
 ```
 
 **Safety Mechanism:**

@@ -23,8 +23,20 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
   def analyze_pattern({:symbol, name}), do: {:ok, {:var, name}}
 
   def analyze_pattern({:vector, elements}) do
-    with {:ok, patterns} <- analyze_pattern_list(elements) do
-      {:ok, {:destructure, {:seq, patterns}}}
+    case split_at_ampersand(elements) do
+      {:rest, leading, rest_elem} ->
+        with {:ok, leading_patterns} <- analyze_pattern_list(leading),
+             {:ok, rest_pattern} <- analyze_pattern(rest_elem) do
+          {:ok, {:destructure, {:seq_rest, leading_patterns, rest_pattern}}}
+        end
+
+      :no_rest ->
+        with {:ok, patterns} <- analyze_pattern_list(elements) do
+          {:ok, {:destructure, {:seq, patterns}}}
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -47,6 +59,26 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}
       other -> other
+    end
+  end
+
+  # Splits vector elements at & symbol for rest pattern destructuring.
+  # Returns {:rest, leading_elements, rest_element} or :no_rest
+  defp split_at_ampersand(elements) do
+    case Enum.split_while(elements, &(&1 != {:symbol, :&})) do
+      {_all, []} ->
+        :no_rest
+
+      {_, [{:symbol, :&}]} ->
+        {:error, {:invalid_form, "& must be followed by a pattern"}}
+
+      {leading, [{:symbol, :&}, rest]} ->
+        {:rest, leading, rest}
+
+      {_, [{:symbol, :&}, _ | extra]} ->
+        {:error,
+         {:invalid_form,
+          "& must be followed by exactly one pattern, got extra: #{inspect(extra)}"}}
     end
   end
 

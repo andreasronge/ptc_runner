@@ -111,6 +111,43 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
     {:error, {:destructure_error, "expected list or nil, got #{inspect(value)}"}}
   end
 
+  # Rest pattern: [a b & rest] - binds leading patterns, then rest to remaining
+  def match_pattern({:destructure, {:seq_rest, leading_patterns, rest_pattern}}, value)
+      when is_list(value) or is_nil(value) do
+    value = value || []
+    leading_count = length(leading_patterns)
+    {leading_values, rest_values} = Enum.split(value, leading_count)
+
+    # Match leading patterns
+    leading_result =
+      leading_patterns
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, %{}}, fn {pattern, i}, {:ok, acc} ->
+        val = Enum.at(leading_values, i)
+
+        case match_pattern(pattern, val) do
+          {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    # Then match rest pattern against remaining values
+    case leading_result do
+      {:ok, leading_bindings} ->
+        case match_pattern(rest_pattern, rest_values) do
+          {:ok, rest_bindings} -> {:ok, Map.merge(leading_bindings, rest_bindings)}
+          {:error, _} = err -> err
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  def match_pattern({:destructure, {:seq_rest, _, _}}, value) do
+    {:error, {:destructure_error, "expected list or nil, got #{inspect(value)}"}}
+  end
+
   def match_pattern({:destructure, {:as, as_name, inner_pattern}}, value) do
     case match_pattern(inner_pattern, value) do
       {:ok, inner_bindings} -> {:ok, Map.put(inner_bindings, as_name, value)}

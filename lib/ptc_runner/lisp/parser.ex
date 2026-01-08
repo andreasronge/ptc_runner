@@ -31,7 +31,8 @@ defmodule PtcRunner.Lisp.Parser do
 
   # Character classes for lookahead
   # Note: . is allowed for Clojure-style namespaces like clojure.string/join
-  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?.]
+  # Note: & is allowed for rest pattern destructuring [a & rest]
+  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
 
   nil_literal =
     string("nil")
@@ -114,7 +115,8 @@ defmodule PtcRunner.Lisp.Parser do
     |> reduce({ParserHelpers, :build_keyword, []})
 
   # Symbols (/ allowed for namespacing, _ for ignored bindings, % for param placeholders in #())
-  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?.]
+  # & is allowed for rest pattern destructuring [a & rest]
+  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
 
   symbol =
     ascii_string(symbol_first, 1)
