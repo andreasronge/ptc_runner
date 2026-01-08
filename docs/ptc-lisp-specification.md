@@ -1245,6 +1245,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 - Each parallel branch gets a read-only snapshot of the user namespace
 - Writes within branches (via `def`) are isolated and discarded
 - Errors in any branch propagate to the caller
+- Concurrency is bounded to `2 × CPU cores` to prevent resource exhaustion
+- Individual tasks timeout after 5 seconds
 
 **Parallel Calls (`pcalls`):** Executes multiple zero-arity functions (thunks) concurrently and returns their results as a vector. Unlike `pmap` which applies one function to many items, `pcalls` runs multiple different functions in parallel:
 
@@ -1266,6 +1268,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 - If any function fails, entire `pcalls` expression fails (atomic)
 - Errors include the failed function index and error details
 - Each parallel branch gets a read-only snapshot of the user namespace
+- Concurrency is bounded to `2 × CPU cores` to prevent resource exhaustion
+- Individual tasks timeout after 5 seconds
 
 #### Ordering
 
