@@ -48,12 +48,11 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert {:error, %Step{fail: %{reason: :not_callable}}} = Lisp.run(source)
     end
 
-    @tag :capture_log
-    test "unknown tool returns execution error" do
-      # Tool calls to unregistered tools return error tuple
+    test "unknown tool returns unknown_tool error" do
+      # Tool calls to unregistered tools return error tuple with specific reason
       source = ~S|(ctx/unknown-tool {})|
 
-      assert {:error, %Step{fail: %{reason: :execution_error, message: message}}} =
+      assert {:error, %Step{fail: %{reason: :unknown_tool, message: message}}} =
                Lisp.run(source)
 
       assert message =~ "Unknown tool"

@@ -349,14 +349,20 @@ defmodule PtcRunner.Lisp.Parser do
   defp check_unsupported_patterns(source) do
     # Remove string literals to avoid false positives (e.g., "user@example.com")
     source_without_strings = Regex.replace(~r/"(?:[^"\\]|\\.)*"/, source, "\"\"")
+    # Also remove comments to avoid false positives
+    source_clean = Regex.replace(~r/;[^\n]*/, source_without_strings, "")
 
     cond do
+      # Reader discard macro: #_ (Clojure-specific, not supported)
+      Regex.match?(~r/#_/, source_clean) ->
+        "reader discard syntax (#_) is not supported. Use ; for comments"
+
       # Deref syntax: @atom
-      Regex.match?(~r/@[a-zA-Z]/, source_without_strings) ->
+      Regex.match?(~r/@[a-zA-Z]/, source_clean) ->
         "deref syntax (@var) is not supported. Atoms and refs are not available"
 
       # Quote syntax: 'symbol or '(list)
-      Regex.match?(~r/'[a-zA-Z(]/, source_without_strings) ->
+      Regex.match?(~r/'[a-zA-Z(]/, source_clean) ->
         "quote syntax ('expr) is not supported. Use vectors [1 2 3] instead of quoted lists"
 
       true ->
@@ -377,6 +383,16 @@ defmodule PtcRunner.Lisp.Parser do
       IO.puts("=== END DEBUG ===\n")
     end
 
-    "#{reason} at line #{line}, column #{column}: #{inspect(snippet)}"
+    # Improve confusing NimbleParsec error messages
+    friendly_reason =
+      case reason do
+        "expected end of string" ->
+          "syntax error: invalid or unexpected content"
+
+        other ->
+          other
+      end
+
+    "#{friendly_reason} at line #{line}, column #{column}: #{inspect(snippet)}"
   end
 end
