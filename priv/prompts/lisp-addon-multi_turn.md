@@ -1,14 +1,14 @@
-# PTC-Lisp Memory Addon
+# PTC-Lisp Multi-Turn Mode
 
-Multi-turn state and result access.
+Rules for multi-turn execution with state persistence.
 
-<!-- version: 6 -->
-<!-- date: 2026-01-07 -->
-<!-- changes: println-only feedback - expression results no longer shown -->
+<!-- version: 1 -->
+<!-- date: 2026-01-08 -->
+<!-- changes: Renamed from lisp-addon-memory.md -->
 
 <!-- PTC_PROMPT_START -->
 
-### Multi-Turn Rules
+### Multi-Turn Execution
 
 - Each turn: write code, use `(println ...)` to inspect, continue or `(return answer)`
 - **Every turn MUST include a code block** — if done, use `(return value)`
