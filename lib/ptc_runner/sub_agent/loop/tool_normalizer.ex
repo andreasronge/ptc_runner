@@ -19,6 +19,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   3. Inherit runtime context for nested SubAgents
   """
 
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{SubAgentTool, Telemetry}
 
@@ -41,11 +42,11 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   def normalize(tools, state, agent) when is_map(tools) do
     Map.new(tools, fn
       {name, %SubAgentTool{} = tool} ->
-        wrapped = wrap_sub_agent_tool(tool, state)
+        wrapped = wrap_sub_agent_tool(name, tool, state)
         {name, wrap_with_telemetry(name, wrapped, agent)}
 
       {name, func} when is_function(func, 1) ->
-        wrapped = wrap_return(func)
+        wrapped = wrap_return(name, func)
         {name, wrap_with_telemetry(name, wrapped, agent)}
 
       {name, other} ->
@@ -119,13 +120,21 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   - `{:error, reason}` -> raises with error message
   - `value` -> `value` (pass-through)
   """
-  @spec wrap_return(function()) :: function()
-  def wrap_return(func) do
+  @spec wrap_return(String.t(), function()) :: function()
+  def wrap_return(name, func) do
     fn args ->
       case func.(args) do
-        {:ok, value} -> value
-        {:error, reason} -> raise "Tool error: #{inspect(reason)}"
-        value -> value
+        {:ok, value} ->
+          value
+
+        {:error, reason} ->
+          raise ExecutionError,
+            reason: :tool_error,
+            message: name,
+            data: reason
+
+        value ->
+          value
       end
     end
   end
@@ -138,8 +147,8 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   - Inherits llm_registry, nesting_depth, remaining_turns, and mission_deadline
   - Returns the child agent's return value or raises on failure
   """
-  @spec wrap_sub_agent_tool(SubAgentTool.t(), map()) :: function()
-  def wrap_sub_agent_tool(%SubAgentTool{} = tool, state) do
+  @spec wrap_sub_agent_tool(String.t(), SubAgentTool.t(), map()) :: function()
+  def wrap_sub_agent_tool(name, %SubAgentTool{} = tool, state) do
     fn args ->
       # Resolve LLM in priority order: agent.llm > bound_llm > parent's llm
       resolved_llm = tool.agent.llm || tool.bound_llm || state.llm
@@ -162,8 +171,10 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
         {:error, step} ->
           # Propagate child agent failure
-          raise RuntimeError,
-                "SubAgent tool failed: #{step.fail.message}"
+          raise PtcRunner.Lisp.ExecutionError,
+            reason: :tool_error,
+            message: name,
+            data: step.fail.message
       end
     end
   end
