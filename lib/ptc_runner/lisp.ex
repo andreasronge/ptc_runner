@@ -28,7 +28,7 @@ defmodule PtcRunner.Lisp do
   - Should not raise (return `{:error, reason}` for errors)
   """
 
-  alias PtcRunner.Lisp.{Analyze, Env, Eval, Parser, SymbolCounter}
+  alias PtcRunner.Lisp.{Analyze, Env, Eval, ExecutionError, Parser, SymbolCounter}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.Signature
@@ -116,10 +116,26 @@ defmodule PtcRunner.Lisp do
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
          {:ok, parsed_signature} <- parse_signature(signature_str) do
+      # Note: tool_executor handles {:error, reason} returns and unknown tools by raising
+      # ExecutionError. This matches the behavior in SubAgent.Loop.ToolNormalizer,
+      # which handles the SubAgent execution path.
       tool_executor = fn name, args ->
         case Map.fetch(normalized_tools, name) do
-          {:ok, %Tool{function: fun}} -> fun.(args)
-          :error -> raise "Unknown tool: #{name}"
+          {:ok, %Tool{function: fun}} ->
+            case fun.(args) do
+              {:ok, value} ->
+                value
+
+              {:error, reason} ->
+                raise ExecutionError, reason: :tool_error, message: name, data: reason
+
+              value ->
+                value
+            end
+
+          :error ->
+            available = Map.keys(normalized_tools) |> Enum.sort()
+            raise ExecutionError, reason: :unknown_tool, message: name, data: available
         end
       end
 
@@ -170,14 +186,23 @@ defmodule PtcRunner.Lisp do
 
       # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
       eval_fn = fn _ast, sandbox_context ->
-        Eval.eval_with_context(
-          core_ast,
-          sandbox_context.ctx,
-          sandbox_context.memory,
-          Env.initial(),
-          tool_executor,
-          sandbox_context.turn_history
-        )
+        try do
+          Eval.eval_with_context(
+            core_ast,
+            sandbox_context.ctx,
+            sandbox_context.memory,
+            Env.initial(),
+            tool_executor,
+            sandbox_context.turn_history
+          )
+        rescue
+          e in ExecutionError ->
+            {:error, {e.reason, e.message, e.data}}
+
+          e ->
+            # Catch unexpected exceptions in tool implementations and report as tool errors
+            {:error, {:tool_error, "unknown", Exception.message(e)}}
+        end
       end
 
       sandbox_opts = [
@@ -259,6 +284,13 @@ defmodule PtcRunner.Lisp do
   def format_error({:unbound_var, name}), do: "undefined variable: #{name}"
   def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
   def format_error({:arity_error, msg}), do: "arity error: #{msg}"
+  # Handle tool errors
+  def format_error({:unknown_tool, name, []}), do: "Unknown tool: #{name}. No tools available."
+
+  def format_error({:unknown_tool, name, available}),
+    do: "Unknown tool: #{name}. Available tools: #{Enum.join(available, ", ")}"
+
+  def format_error({:tool_error, name, reason}), do: "Tool '#{name}' failed: #{inspect(reason)}"
   # Handle other 3-tuple error formats from Eval: {type, message, data}
   def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"

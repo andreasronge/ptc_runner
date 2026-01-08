@@ -260,10 +260,41 @@ defmodule PtcRunner.LispTest do
                Lisp.run("(ctx/greet)", tools: tools)
     end
 
-    @tag :capture_log
-    test "returns error for unknown tool during execution" do
-      # Unknown tool raises error in the sandbox process
-      assert {:error, %{fail: _}} = Lisp.run("(ctx/unknown)")
+    test "gives helpful message for unknown tool" do
+      tools = %{"greet" => fn _args -> "hello" end}
+
+      assert {:error, %{fail: %{reason: :unknown_tool, message: msg}}} =
+               Lisp.run("(ctx/unknown)", tools: tools)
+
+      assert msg =~ "Unknown tool: unknown"
+      assert msg =~ "Available tools: greet"
+    end
+
+    test "handles tool execution failures" do
+      tools = %{"kaboom" => fn _args -> {:error, "boom"} end}
+
+      assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
+               Lisp.run("(ctx/kaboom)", tools: tools)
+
+      assert msg =~ "Tool 'kaboom' failed: \"boom\""
+    end
+
+    test "gives helpful message for unknown tool with no tools" do
+      assert {:error, %{fail: %{reason: :unknown_tool, message: msg}}} =
+               Lisp.run("(ctx/unknown)", tools: %{})
+
+      assert msg =~ "No tools available"
+    end
+
+    test "catches unexpected tool exceptions" do
+      tools = %{
+        "kaboom" => fn _args -> raise ArgumentError, "unexpected error" end
+      }
+
+      assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
+               Lisp.run("(ctx/kaboom)", tools: tools)
+
+      assert msg =~ "Tool 'unknown' failed: \"unexpected error\""
     end
   end
 
