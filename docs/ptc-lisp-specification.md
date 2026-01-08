@@ -1432,6 +1432,7 @@ The `seq` function converts a collection to a sequence:
 (reduce - 10 [1 2 3])             ; => 4 (10 - 1 - 2 - 3, Clojure style: f receives (acc, elem))
 
 ;; reduce on maps (v is [key value] pair)
+;; NOTE: 3-arg form is preferred for maps as the 2-arg form uses the first [k v] pair as init.
 (reduce (fn [acc [k v]] (+ acc v)) 0 {:a 1 :b 2}) ; => 3
 
 ;; reduce on strings (iterates over graphemes)

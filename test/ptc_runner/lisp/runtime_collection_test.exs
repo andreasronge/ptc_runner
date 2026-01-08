@@ -752,4 +752,90 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       assert Runtime.frequencies("") == %{}
     end
   end
+
+  describe "reduce - comprehensive support" do
+    test "reduce on lists (existing support)" do
+      assert Runtime.reduce(fn acc, x -> acc + x end, 0, [1, 2, 3]) == 6
+      assert Runtime.reduce(fn acc, x -> acc + x end, [1, 2, 3]) == 6
+    end
+
+    test "reduce on maps (3-arg init)" do
+      map = %{a: 1, b: 2}
+      # Result is 3 (0 + 1 + 2)
+      result = Runtime.reduce(fn acc, [_k, v] -> acc + v end, 0, map)
+      assert result == 3
+    end
+
+    test "reduce on maps (2-arg first record as init)" do
+      map = %{a: 1, b: 2}
+      # Since maps are unordered, we don't know which one comes first.
+      # If :a is first, acc starts as [:a, 1], next call is f.([:a, 1], [:b, 2])
+      # If :b is first, acc starts as [:b, 2], next call is f.([:b, 2], [:a, 1])
+      result =
+        Runtime.reduce(
+          fn acc, [_k, v] ->
+            # acc is either a pair (init) or the result of previous call
+            if is_list(acc) and length(acc) == 2 do
+              # First call case
+              Enum.at(acc, 1) + v
+            else
+              acc + v
+            end
+          end,
+          map
+        )
+
+      assert result == 3
+    end
+
+    test "reduce on empty collections" do
+      assert Runtime.reduce(fn acc, _ -> acc end, 99, %{}) == 99
+      assert Runtime.reduce(fn acc, _ -> acc end, %{}) == nil
+      assert Runtime.reduce(fn acc, _ -> acc end, 99, "") == 99
+      assert Runtime.reduce(fn acc, _ -> acc end, "") == nil
+      assert Runtime.reduce(fn acc, _ -> acc end, 99, MapSet.new()) == 99
+      assert Runtime.reduce(fn acc, _ -> acc end, MapSet.new()) == nil
+    end
+
+    test "reduce on MapSets" do
+      set = MapSet.new([1, 2, 3])
+      assert Runtime.reduce(&Kernel.+/2, 0, set) == 6
+      assert Runtime.reduce(&Kernel.+/2, set) == 6
+    end
+
+    test "reduce on strings (graphemes)" do
+      assert Runtime.reduce(fn acc, x -> acc <> "-" <> x end, "a", "bc") == "a-b-c"
+      assert Runtime.reduce(fn acc, x -> acc <> x end, "abc") == "abc"
+    end
+
+    test "reduce on maps with nested values" do
+      map = %{a: %{val: 10}, b: %{val: 20}}
+      result = Runtime.reduce(fn acc, [_k, v] -> acc + v.val end, 0, map)
+      assert result == 30
+    end
+
+    test "verify order independence for maps" do
+      # Using a non-commutative operation to see that it works regardless of order
+      # (Though we can't assert a specific order, we assert it completes)
+      map = %{a: 1, b: 2, c: 3}
+      result = Runtime.reduce(fn acc, [_k, v] -> [v | acc] end, [], map)
+      assert length(result) == 3
+      assert 1 in result
+      assert 2 in result
+      assert 3 in result
+    end
+
+    test "reduce on single-element collections (2-arg)" do
+      # Should return element without calling f
+      assert Runtime.reduce(fn _, _ -> :should_not_be_called end, [42]) == 42
+      assert Runtime.reduce(fn _, _ -> :should_not_be_called end, %{a: 1}) == [:a, 1]
+      assert Runtime.reduce(fn _, _ -> :should_not_be_called end, "x") == "x"
+      assert Runtime.reduce(fn _, _ -> :should_not_be_called end, MapSet.new([99])) == 99
+    end
+
+    test "reduce on unicode strings" do
+      assert Runtime.reduce(fn acc, x -> acc <> x end, "", "🎉👍") == "🎉👍"
+      assert Runtime.reduce(fn acc, _ -> acc + 1 end, 0, "café") == 4
+    end
+  end
 end
