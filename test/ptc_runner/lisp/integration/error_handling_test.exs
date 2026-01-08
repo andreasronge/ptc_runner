@@ -128,13 +128,12 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert message =~ "quote syntax"
     end
 
-    test "if without else clause" do
-      # PTC-Lisp requires else clause: (if cond then else)
-      # Use (when cond then) for single-branch conditionals
-      source = "(if true 1)"
+    test "if without then or else clause" do
+      # PTC-Lisp requires at least a then clause: (if cond then) or (if cond then else)
+      source = "(if true)"
 
       assert {:error, %Step{fail: %{reason: :invalid_arity, message: message}}} = Lisp.run(source)
-      assert message =~ "expected (if cond then else)"
+      assert message =~ "expected (if cond then else?)"
     end
 
     test "3-arity comparison (range syntax)" do
