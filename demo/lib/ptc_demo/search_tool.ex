@@ -29,7 +29,14 @@ defmodule PtcDemo.SearchTool do
           cursor: String.t() | nil
         }
 
-  @doc "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."
+  @doc """
+  Search policy documents by keyword.
+
+  Space-separated terms must ALL match (implicit AND). No query syntax - just plain words.
+  IMPORTANT: Uses substring matching, so prefer singular/base forms:
+  - "car" matches "carpool" ✓
+  - "cars" matches nothing ✗
+  """
   @spec search(search_args()) :: search_result()
   def search(args) do
     # Normalize keys - accept both string and atom keys
