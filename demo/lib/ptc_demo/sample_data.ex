@@ -397,80 +397,20 @@ defmodule PtcDemo.SampleData do
   end
 
   @doc """
-  Returns schema metadata for each dataset.
-  This simulates what MCP tools provide via their output schemas.
+  Returns context descriptions for SubAgent's Data Inventory.
+
+  These descriptions are shown alongside each ctx/ variable in the prompt.
   """
-  def schemas do
+  def context_descriptions do
     %{
-      "products" => %{
-        description: "Product catalog",
-        fields: %{
-          "id" => "integer",
-          "name" => "string",
-          "category" => "enum(electronics, clothing, food, books, sports, home, toys)",
-          "price" => "number (1-1100)",
-          "stock" => "integer (0-500)",
-          "rating" => "number (1.0-5.0)",
-          "status" => "enum(active, discontinued, out_of_stock)",
-          "created_at" => "date (YYYY-MM-DD)"
-        }
-      },
-      "orders" => %{
-        description: "Customer orders",
-        fields: %{
-          "id" => "integer",
-          "customer_id" => "integer (1-200)",
-          "product_id" => "integer (1-500)",
-          "quantity" => "integer (1-10)",
-          "total" => "number (1-5100)",
-          "status" => "enum(pending, shipped, delivered, cancelled, refunded)",
-          "payment_method" => "enum(credit_card, paypal, bank_transfer, crypto)",
-          "created_at" => "date (YYYY-MM-DD)"
-        }
-      },
-      "employees" => %{
-        description: "Employee directory",
-        fields: %{
-          "id" => "integer",
-          "name" => "string",
-          "department" => "enum(engineering, sales, marketing, support, hr, finance)",
-          "level" => "enum(junior, mid, senior, lead, manager, director)",
-          "salary" => "integer (50000-200000)",
-          "bonus" => "number",
-          "years_employed" => "integer (1-15)",
-          "remote" => "boolean"
-        }
-      },
-      "expenses" => %{
-        description: "Expense reports",
-        fields: %{
-          "id" => "integer",
-          "employee_id" => "integer (1-200)",
-          "category" => "enum(travel, equipment, software, meals, office, training)",
-          "amount" => "number (1-2100)",
-          "description" => "string",
-          "status" => "enum(pending, approved, rejected, reimbursed)",
-          "date" => "date (YYYY-MM-DD)"
-        }
-      }
-      # Note: documents not in schema - only accessible via search tool
+      "products" =>
+        "Product catalog [{id, name, category, price, stock, rating, status, created_at}]",
+      "orders" =>
+        "Orders [{id, customer_id, product_id, quantity, total, status, payment_method, created_at}]",
+      "employees" =>
+        "Employees [{id, name, department, level, salary, bonus, years_employed, remote}]",
+      "expenses" => "Expenses [{id, employee_id, category, amount, description, status, date}]"
     }
-  end
-
-  @doc """
-  Formats schemas for LLM consumption (like MCP tool descriptions).
-  """
-  def schema_prompt do
-    schemas()
-    |> Enum.map(fn {name, schema} ->
-      fields =
-        schema.fields
-        |> Enum.map(fn {field, type} -> "    #{field}: #{type}" end)
-        |> Enum.join("\n")
-
-      "#{name} - #{schema.description}:\n#{fields}"
-    end)
-    |> Enum.join("\n\n")
   end
 
   @doc """

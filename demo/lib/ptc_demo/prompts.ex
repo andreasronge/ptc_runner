@@ -2,8 +2,7 @@ defmodule PtcDemo.Prompts do
   @moduledoc """
   Prompt profiles for testing different LLM instruction styles.
 
-  This module delegates to `PtcRunner.Lisp.Prompts` for standard prompts
-  and provides demo-specific extensions.
+  This module delegates to `PtcRunner.Lisp.Prompts` for standard prompts.
 
   Different prompts can be useful for:
   - Testing model capabilities with varying levels of detail
@@ -17,7 +16,6 @@ defmodule PtcDemo.Prompts do
   |---------|-------------|----------|
   | `:single_shot` | Base language reference | Quick lookups, no memory |
   | `:multi_turn` | Base + memory addon | Conversational analysis |
-  | `:multi_turn_full` | Multi-turn with extra workflow guidance | Complex sessions |
 
   ## Usage
 
@@ -59,36 +57,6 @@ defmodule PtcDemo.Prompts do
     LibPrompts.get(profile)
   end
 
-  # Demo-specific: multi-turn with extra workflow guidance
-  def get(:multi_turn_full) do
-    """
-    #{LibPrompts.get(:multi_turn)}
-
-    ## Multi-Turn Workflow
-
-    You are in a conversational session. Use memory to build up analysis:
-
-    **Turn 1: Store intermediate results**
-    ```clojure
-    {:filtered-data (->> ctx/orders (filter (where :status = "complete")))}
-    ```
-
-    **Turn 2: Reference previous results**
-    ```clojure
-    {:summary {:count (count filtered-data)
-               :total (sum-by :amount filtered-data)}
-     :return "Analysis complete"}
-    ```
-
-    **Memory Contract:**
-    - Return a map → keys merge into memory
-    - Include `:return` key → that value is shown to user
-    - Non-map return → shown directly, no memory update
-
-    Build your analysis step by step, storing intermediate results for later reference.
-    """
-  end
-
   @doc """
   List all available prompt profiles with descriptions.
 
@@ -107,8 +75,7 @@ defmodule PtcDemo.Prompts do
   def list do
     [
       {:single_shot, "Base language reference for single-turn queries"},
-      {:multi_turn, "Base + memory addon for multi-turn conversations"},
-      {:multi_turn_full, "Multi-turn with extra workflow guidance"}
+      {:multi_turn, "Base + memory addon for multi-turn conversations"}
     ]
   end
 
@@ -135,7 +102,7 @@ defmodule PtcDemo.Prompts do
       {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, multi_turn, multi_turn_full"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, multi_turn"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}
@@ -153,22 +120,21 @@ defmodule PtcDemo.Prompts do
   @doc """
   Get the version number for a prompt profile.
 
-  Delegates to library for standard prompts. Demo-specific prompts return 1.
+  Delegates to library.
 
   ## Examples
 
       iex> PtcDemo.Prompts.version(:single_shot)
-      1
+      10
 
   """
   @spec version(atom()) :: pos_integer()
-  def version(:multi_turn_full), do: 1
   def version(profile), do: LibPrompts.version(profile)
 
   @doc """
   Get metadata for a prompt profile.
 
-  Delegates to library for standard prompts. Demo-specific prompts return minimal metadata.
+  Delegates to library.
 
   ## Examples
 
@@ -178,13 +144,10 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec metadata(atom()) :: map()
-  def metadata(:multi_turn_full), do: %{version: 1, type: :demo}
   def metadata(profile), do: LibPrompts.metadata(profile)
 
   @doc """
   Check if a prompt profile is archived.
-
-  Demo-specific prompts are never archived.
 
   ## Examples
 
@@ -193,7 +156,6 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec archived?(atom()) :: boolean()
-  def archived?(:multi_turn_full), do: false
   def archived?(profile), do: LibPrompts.archived?(profile)
 
   @doc """
@@ -208,9 +170,6 @@ defmodule PtcDemo.Prompts do
   """
   @spec list_current() :: [atom()]
   def list_current do
-    # All demo prompts are current, plus library's current prompts
-    demo_prompts = [:multi_turn_full]
-    lib_current = LibPrompts.list_current()
-    Enum.uniq(lib_current ++ demo_prompts)
+    LibPrompts.list_current()
   end
 end
