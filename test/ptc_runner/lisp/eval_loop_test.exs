@@ -107,4 +107,57 @@ defmodule PtcRunner.Lisp.EvalLoopTest do
       assert {:error, %{fail: %{reason: :arity_mismatch}}} = Lisp.run(code)
     end
   end
+
+  describe "calling functions from loop" do
+    test "calling defn from loop preserves loop bindings" do
+      # Regression test: calling user-defined functions from within a loop
+      # should not corrupt the loop's environment
+      code = """
+      (defn twice [x] (* x 2))
+      (loop [acc 0 n 3]
+        (if (zero? n)
+          acc
+          (recur (+ acc (twice n)) (dec n))))
+      """
+
+      # twice(3) + twice(2) + twice(1) = 6 + 4 + 2 = 12
+      assert {:ok, %{return: 12}} = Lisp.run(code)
+    end
+
+    test "calling defn with internal loop from outer loop" do
+      code = """
+      (defn is-prime? [n]
+        (if (<= n 1)
+          false
+          (loop [i 2]
+            (if (> (* i i) n)
+              true
+              (if (zero? (mod n i))
+                false
+                (recur (inc i)))))))
+
+      (loop [primes []
+             num 2]
+        (if (= (count primes) 5)
+          primes
+          (if (is-prime? num)
+            (recur (conj primes num) (inc num))
+            (recur primes (inc num)))))
+      """
+
+      assert {:ok, %{return: [2, 3, 5, 7, 11]}} = Lisp.run(code)
+    end
+
+    test "calling anonymous function from loop preserves bindings" do
+      code = """
+      (def triple (fn [x] (* x 3)))
+      (loop [acc [] n 3]
+        (if (zero? n)
+          acc
+          (recur (conj acc (triple n)) (dec n))))
+      """
+
+      assert {:ok, %{return: [9, 6, 3]}} = Lisp.run(code)
+    end
+  end
 end

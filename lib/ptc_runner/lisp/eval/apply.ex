@@ -494,7 +494,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             prints: caller_ctx.prints
         }
 
-        do_eval_fn.(body, closure_ctx)
+        case do_eval_fn.(body, closure_ctx) do
+          {:ok, result, final_ctx} ->
+            # Restore caller's environment, keep updated prints/user_ns
+            {:ok, result, %{final_ctx | env: caller_ctx.env}}
+
+          {:error, _} = err ->
+            err
+        end
 
       {:error, _} = err ->
         err
