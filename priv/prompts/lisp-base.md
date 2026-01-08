@@ -88,5 +88,6 @@ ctx/products                      ; read-only context data
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
 | `(pluck :name user)` | `(:name user)` — pluck is for lists |
  | `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
+| `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 
 <!-- PTC_PROMPT_END -->
