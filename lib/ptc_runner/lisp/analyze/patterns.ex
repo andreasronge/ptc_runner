@@ -62,9 +62,11 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
     end
   end
 
-  # Splits vector elements at & symbol for rest pattern destructuring.
-  # Returns {:rest, leading_elements, rest_element} or :no_rest
-  defp split_at_ampersand(elements) do
+  @doc """
+  Splits vector elements at & symbol for rest pattern destructuring.
+  Returns {:rest, leading_elements, rest_element} or :no_rest
+  """
+  def split_at_ampersand(elements) do
     case Enum.split_while(elements, &(&1 != {:symbol, :&})) do
       {_all, []} ->
         :no_rest

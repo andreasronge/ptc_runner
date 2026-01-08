@@ -832,7 +832,6 @@ Syntactic sugar for defining named functions in the user namespace:
 
 **Not supported:**
 - Multi-arity: `(defn f ([x] ...) ([x y] ...))` — use separate `defn` forms
-- Variadic args: `(defn f [& args] ...)` — not supported (use rest patterns in `let`/`loop` destructuring instead)
 - Pre/post conditions
 
 ---
@@ -2673,6 +2672,7 @@ Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
 ```clojure
 (fn [x] body)           ; single argument
 (fn [a b] body)         ; multiple arguments
+(fn [a & rest] body)    ; variadic arguments
 (fn [[a b]] body)       ; vector destructuring in params
 (fn [{:keys [x]}] body) ; map destructuring in params
 ```
