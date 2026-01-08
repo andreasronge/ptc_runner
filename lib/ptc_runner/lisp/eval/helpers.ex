@@ -76,21 +76,6 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
         "Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)", args}}
   end
 
-  # reduce with map - suggest using entries
-  defp specific_type_error(:reduce, [_f, %{} = _map] = args) do
-    {:ok,
-     {:type_error,
-      "reduce only supports lists, not maps. " <>
-        "To iterate over a map, use (entries my-map) to get [[key, value], ...] pairs", args}}
-  end
-
-  defp specific_type_error(:reduce, [_f, _init, %{} = _map] = args) do
-    {:ok,
-     {:type_error,
-      "reduce only supports lists, not maps. " <>
-        "To iterate over a map, use (entries my-map) to get [[key, value], ...] pairs", args}}
-  end
-
   defp specific_type_error(_name, _args), do: :none
 
   defp generic_type_error(fun_name, args) do

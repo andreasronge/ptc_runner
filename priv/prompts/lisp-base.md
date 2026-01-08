@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 11 -->
+<!-- version: 14 -->
 <!-- date: 2026-01-08 -->
-<!-- changes: Moved role/rules to mode-specific files -->
+<!-- changes: Added variadic update/update-in support, clarified pluck for lists -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -48,13 +48,13 @@ ctx/products                      ; read-only context data
 (none-of pred)
 ```
 
-**Aggregation:**
+**Aggregation** (all take a list of maps):
 ```clojure
-(sum-by :amount items)            ; sum of field values
-(avg-by :price items)             ; average
-(min-by :price items)             ; item with min (not value!)
-(max-by :salary items)            ; item with max
-(pluck :name items)               ; extract field from each
+(sum-by :amount orders)           ; sum of field values
+(avg-by :price products)          ; average
+(min-by :price products)          ; item with min (not value!)
+(max-by :salary employees)        ; item with max
+(pluck :name users)               ; ["Alice" "Bob" ...] from list of maps
 ```
 
 ### Restrictions
@@ -64,10 +64,14 @@ ctx/products                      ; read-only context data
 - No `if` without else — use `(if x y nil)` or `when`
 - No chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - No `some` — use `(first (filter pred coll))`
-- No `for` — use `map` or `->>`
+- No `for` — use `map` with destructuring: `(map (fn [[k v]] ...) m)`
 - No regex literals (`#"..."`) — use `(re-pattern "\\d+")` then `re-find`/`re-matches`
 - `loop/recur` limited to 1000 iterations
-- No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!` — use `def` for state
+- No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!`, `doseq` — use `reduce`:
+  ```clojure
+  ;; Wrong: (def acc (atom {})) (doseq [x xs] (swap! acc assoc ...)) @acc
+  ;; Right: (reduce (fn [acc x] (assoc acc ...)) {} xs)
+  ```
 - No `partial` — use anonymous functions `#(...)`
 - No reader macros — no `#_` (discard), `#'` (var quote), `#""` (regex literal)
 - No `try/catch/throw` — use `fail` for errors
@@ -83,6 +87,8 @@ ctx/products                      ; read-only context data
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` |
 | `(includes s "x")` | `(includes? s "x")` |
 | `(-> coll (filter f))` | `(->> coll (filter f))` |
-| `(def x (atom {})) @x` | `(def x {})` then `x` |
+| `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
+| `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
+| `(pluck :name user)` | `(:name user)` — pluck is for lists |
 
 <!-- PTC_PROMPT_END -->

@@ -71,10 +71,59 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   def assoc(m, k, v), do: Map.put(m, k, v)
   def assoc_in(m, path, v), do: FlexAccess.flex_put_in(m, path, v)
 
+  @doc """
+  Update a value in a map by applying a function.
+
+  Supports Clojure-style extra arguments that are passed to the function:
+  - (update m k f) - calls (f old-val)
+  - (update m k f arg1) - calls (f old-val arg1)
+  - (update m k f arg1 arg2) - calls (f old-val arg1 arg2)
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.update_variadic([%{n: 1}, :n, &Kernel.+/2, 5])
+      %{n: 6}
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.update_variadic([%{n: nil}, :n, &PtcRunner.Lisp.Runtime.Predicates.fnil(&Kernel.+/2, 0), 5])
+      %{n: 5}
+  """
+  def update_variadic([m, k, f]) do
+    old_val = Map.get(m, k)
+    new_val = f.(old_val)
+    Map.put(m, k, new_val)
+  end
+
+  def update_variadic([m, k, f | extra_args]) do
+    old_val = Map.get(m, k)
+    new_val = apply(f, [old_val | extra_args])
+    Map.put(m, k, new_val)
+  end
+
+  # Keep 3-arg version for direct calls
   def update(m, k, f) do
     old_val = Map.get(m, k)
     new_val = f.(old_val)
     Map.put(m, k, new_val)
+  end
+
+  @doc """
+  Update a nested value in a map by applying a function.
+
+  Supports Clojure-style extra arguments that are passed to the function:
+  - (update-in m path f) - calls (f old-val)
+  - (update-in m path f arg1) - calls (f old-val arg1)
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.update_in_variadic([%{a: %{b: 1}}, [:a, :b], &Kernel.+/2, 5])
+      %{a: %{b: 6}}
+  """
+  def update_in_variadic([m, path, f]) do
+    FlexAccess.flex_update_in(m, path, f)
+  end
+
+  def update_in_variadic([m, path, f | extra_args]) do
+    FlexAccess.flex_update_in(m, path, fn old_val -> apply(f, [old_val | extra_args]) end)
   end
 
   def update_in(m, path, f), do: FlexAccess.flex_update_in(m, path, f)
