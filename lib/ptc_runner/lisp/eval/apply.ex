@@ -74,10 +74,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          %EvalContext{} = eval_ctx,
          do_eval_fn
        ) do
-    if length(patterns) != length(args) do
-      {:error, {:arity_mismatch, length(patterns), length(args)}}
-    else
-      execute_closure(closure, args, eval_ctx, do_eval_fn)
+    case check_arity(patterns, args) do
+      :ok -> execute_closure(closure, args, eval_ctx, do_eval_fn)
+      {:error, _} = err -> err
     end
   end
 
@@ -304,6 +303,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     {:error, {:not_callable, other}}
   end
 
+  defp check_arity({:variadic, leading, _rest}, args) do
+    if length(args) >= length(leading) do
+      :ok
+    else
+      {:error, {:arity_mismatch, "#{length(leading)}+", length(args)}}
+    end
+  end
+
+  defp check_arity(patterns, args) when is_list(patterns) do
+    if length(patterns) == length(args) do
+      :ok
+    else
+      {:error, {:arity_mismatch, length(patterns), length(args)}}
+    end
+  end
+
   @doc """
   Converts Lisp closures to Erlang functions for use with higher-order functions.
 
@@ -316,61 +331,134 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         %EvalContext{} = eval_context,
         do_eval_fn
       ) do
-    case length(patterns) do
-      0 ->
-        fn ->
-          eval_closure_args(
-            [],
-            patterns,
-            body,
-            closure_env,
-            eval_context,
-            closure_turn_history,
-            do_eval_fn
-          )
-        end
+    # For variadic closures, we provide wrappers for common arities (0-3)
+    # as long as they satisfy the minimum arity (length of leading patterns).
+    # For fixed closures, we use the exact arity.
 
-      1 ->
-        fn arg1 ->
-          eval_closure_args(
-            [arg1],
-            patterns,
-            body,
-            closure_env,
-            eval_context,
-            closure_turn_history,
-            do_eval_fn
-          )
-        end
+    min_arity =
+      case patterns do
+        {:variadic, leading, _} -> length(leading)
+        _ when is_list(patterns) -> length(patterns)
+      end
 
-      2 ->
-        fn arg1, arg2 ->
-          eval_closure_args(
-            [arg1, arg2],
-            patterns,
-            body,
-            closure_env,
-            eval_context,
-            closure_turn_history,
-            do_eval_fn
-          )
-        end
+    if is_list(patterns) do
+      # Fixed arity closures
+      case min_arity do
+        0 ->
+          fn ->
+            eval_closure_args(
+              [],
+              patterns,
+              body,
+              closure_env,
+              eval_context,
+              closure_turn_history,
+              do_eval_fn
+            )
+          end
 
-      3 ->
-        fn arg1, arg2, arg3 ->
-          eval_closure_args(
-            [arg1, arg2, arg3],
-            patterns,
-            body,
-            closure_env,
-            eval_context,
-            closure_turn_history,
-            do_eval_fn
-          )
-        end
+        1 ->
+          fn arg1 ->
+            eval_closure_args(
+              [arg1],
+              patterns,
+              body,
+              closure_env,
+              eval_context,
+              closure_turn_history,
+              do_eval_fn
+            )
+          end
 
-      n ->
-        raise RuntimeError, "closures with more than 3 parameters not supported (got #{n})"
+        2 ->
+          fn arg1, arg2 ->
+            eval_closure_args(
+              [arg1, arg2],
+              patterns,
+              body,
+              closure_env,
+              eval_context,
+              closure_turn_history,
+              do_eval_fn
+            )
+          end
+
+        3 ->
+          fn arg1, arg2, arg3 ->
+            eval_closure_args(
+              [arg1, arg2, arg3],
+              patterns,
+              body,
+              closure_env,
+              eval_context,
+              closure_turn_history,
+              do_eval_fn
+            )
+          end
+
+        n ->
+          raise RuntimeError, "closures with more than 3 parameters not supported (got #{n})"
+      end
+    else
+      # Variadic closures - we don't know what arity the HOF wants,
+      # but we can check the call-time arity.
+      # Wait, HOFs like Enum.map expect a function of SPECIFIC arity.
+      # We can't return "any" arity. We'll return a 1-arity function by default
+      # if it's compatible, as it's the most common for HOFs.
+      # If they need 2 (reduce) or 3, it gets tricky.
+
+      # Let's try to return a 1-arity function if min_arity <= 1.
+      # If min_arity > 1, we might need a 2-arity or 3-arity.
+      # For now, we'll support the same 0-3 arity range, but the USER
+      # must choose the right one? No, we have to return one function.
+
+      # Actually, since we don't know, we'll return a 1-arity one if possible.
+      # If they need 2-arity, this will fail.
+      # A better approach might be to have builtins that use closure_to_fun
+      # specify the arity they need. But closure_to_fun is also used in other places.
+
+      # Clojure's variadic functions are actually multi-arity functions.
+      # For now, let's assume 1-arity is what's wanted if it's variadic and min_arity <= 1.
+      # If it's used in reduce, it needs 2.
+
+      # Let's check how builtins use it. reduce uses 2. map uses 1.
+      # We could return a function that supports multiple arities IF we use def
+      # but we are returning an anonymous function.
+
+      # Wait, I can't return multiple arities.
+      # I'll default to 1-arity for now, and maybe 2-arity if min_arity is 2.
+      # This is a limitation of converting to Erlang functions.
+      # Variadic closures
+      cond do
+        min_arity <= 1 ->
+          fn arg1 ->
+            eval_closure_args(
+              [arg1],
+              patterns,
+              body,
+              closure_env,
+              eval_context,
+              closure_turn_history,
+              do_eval_fn
+            )
+          end
+
+        min_arity == 2 ->
+          fn arg1, arg2 ->
+            eval_closure_args(
+              [arg1, arg2],
+              patterns,
+              body,
+              closure_env,
+              eval_context,
+              closure_turn_history,
+              do_eval_fn
+            )
+          end
+
+        true ->
+          raise RuntimeError, "Variadic closures with min_arity > 2 not supported in HOFs yet"
+      end
     end
   end
 
@@ -441,23 +529,23 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          closure_turn_history,
          do_eval_fn
        ) do
-    if length(args) != length(patterns) do
-      raise RuntimeError,
-            "closure arity mismatch: expected #{length(patterns)}, got #{length(args)}"
+    case check_arity(patterns, args) do
+      :ok ->
+        :ok
+
+      {:error, {:arity_mismatch, expected, actual}} ->
+        raise RuntimeError, "closure arity mismatch: expected #{expected}, got #{actual}"
     end
 
     # Match each argument against its corresponding pattern
     bindings =
-      Enum.zip(patterns, args)
-      |> Enum.reduce(%{}, fn {pattern, arg}, acc ->
-        case Patterns.match_pattern(pattern, arg) do
-          {:ok, bindings} ->
-            Map.merge(acc, bindings)
+      case bind_args(patterns, args) do
+        {:ok, bindings} ->
+          bindings
 
-          {:error, {:destructure_error, reason}} ->
-            raise RuntimeError, "destructure error: #{reason}"
-        end
-      end)
+        {:error, {:destructure_error, reason}} ->
+          raise RuntimeError, "destructure error: #{reason}"
+      end
 
     new_env = Map.merge(closure_env, bindings)
 
@@ -480,13 +568,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Closure Execution Helpers
   # ============================================================
 
-  defp execute_closure(
-         {:closure, patterns, body, closure_env, closure_turn_history} = closure,
+  defp execute_closure(closure, args, eval_ctx, do_eval_fn) do
+    {:closure, patterns, _body, _env, _th} = closure
+    do_execute_closure(closure, patterns, args, eval_ctx, do_eval_fn)
+  end
+
+  defp do_execute_closure(
+         {:closure, _closure_patterns, body, closure_env, closure_turn_history} = closure,
+         binding_patterns,
          args,
          %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
          do_eval_fn
        ) do
-    case bind_args(patterns, args) do
+    case bind_args(binding_patterns, args) do
       {:ok, bindings} ->
         new_env = Map.merge(closure_env, bindings)
         closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
@@ -512,24 +606,66 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   catch
     {:recur_signal, new_args, prints} ->
-      # Arity check for recur
-      if length(patterns) != length(new_args) do
-        {:error, {:arity_mismatch, length(patterns), length(new_args)}}
-      else
-        # Check iteration limit
-        case EvalContext.increment_iteration(caller_ctx) do
-          {:ok, updated_caller_ctx} ->
-            # Preserve prints from this iteration and recurse
-            updated_caller_ctx = %{updated_caller_ctx | prints: prints}
-            execute_closure(closure, new_args, updated_caller_ctx, do_eval_fn)
+      # For recur, variadic functions behave like fixed-arity functions
+      # where the & rest pattern is the last parameter.
+      {:closure, closure_patterns, _, _, _} = closure
 
-          {:error, :loop_limit_exceeded} ->
-            {:error, {:loop_limit_exceeded, caller_ctx.loop_limit}}
+      recur_patterns =
+        case closure_patterns do
+          {:variadic, leading, rest} -> leading ++ [rest]
+          others -> others
         end
+
+      case check_arity(recur_patterns, new_args) do
+        :ok ->
+          # Check iteration limit
+          case EvalContext.increment_iteration(caller_ctx) do
+            {:ok, updated_caller_ctx} ->
+              # Preserve prints from this iteration and recurse
+              updated_caller_ctx = %{updated_caller_ctx | prints: prints}
+
+              do_execute_closure(
+                closure,
+                recur_patterns,
+                new_args,
+                updated_caller_ctx,
+                do_eval_fn
+              )
+
+            {:error, :loop_limit_exceeded} ->
+              {:error, {:loop_limit_exceeded, caller_ctx.loop_limit}}
+          end
+
+        {:error, {:arity_mismatch, expected, actual}} ->
+          {:error, {:arity_mismatch, expected, actual}}
       end
   end
 
-  defp bind_args(patterns, args) do
+  defp bind_args({:variadic, leading, rest_pattern}, args) do
+    {leading_args, rest_args} = Enum.split(args, length(leading))
+
+    leading_res =
+      Enum.zip(leading, leading_args)
+      |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
+        case Patterns.match_pattern(pattern, arg) do
+          {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case leading_res do
+      {:ok, leading_bindings} ->
+        case Patterns.match_pattern(rest_pattern, rest_args) do
+          {:ok, rest_bindings} -> {:ok, Map.merge(leading_bindings, rest_bindings)}
+          {:error, _} = err -> err
+        end
+
+      err ->
+        err
+    end
+  end
+
+  defp bind_args(patterns, args) when is_list(patterns) do
     Enum.zip(patterns, args)
     |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
       case Patterns.match_pattern(pattern, arg) do

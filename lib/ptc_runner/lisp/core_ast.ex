@@ -20,6 +20,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:string, String.t()}
           | {:keyword, atom()}
 
+  @type fn_params :: [pattern()] | {:variadic, [pattern()], pattern()}
+
   @type t ::
           literal
           # Collections
@@ -36,7 +38,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Conditionals
           | {:if, t(), t(), t()}
           # Anonymous function
-          | {:fn, [pattern()], t()}
+          | {:fn, fn_params(), t()}
           # Sequential evaluation (special forms, not calls)
           | {:do, [t()]}
           # Short-circuit logic (special forms, not calls)

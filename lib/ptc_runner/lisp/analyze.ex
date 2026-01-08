@@ -599,22 +599,37 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp analyze_fn_params({:vector, param_asts}) do
-    params =
-      Enum.reduce_while(param_asts, {:ok, []}, fn ast, {:ok, acc} ->
-        case analyze_pattern(ast) do
-          {:ok, pattern} -> {:cont, {:ok, [pattern | acc]}}
-          {:error, _} = err -> {:halt, err}
+    case Patterns.split_at_ampersand(param_asts) do
+      {:rest, leading, rest_ast} ->
+        with {:ok, leading_patterns} <- analyze_list_of_patterns(leading),
+             {:ok, rest_pattern} <- analyze_pattern(rest_ast) do
+          {:ok, {:variadic, leading_patterns, rest_pattern}}
         end
-      end)
 
-    case params do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
+      :no_rest ->
+        analyze_list_of_patterns(param_asts)
+
+      {:error, _} = err ->
+        err
     end
   end
 
   defp analyze_fn_params(_) do
     {:error, {:invalid_form, "fn parameters must be a vector"}}
+  end
+
+  defp analyze_list_of_patterns(patterns) do
+    patterns
+    |> Enum.reduce_while({:ok, []}, fn ast, {:ok, acc} ->
+      case analyze_pattern(ast) do
+        {:ok, pattern} -> {:cont, {:ok, [pattern | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, rev} -> {:ok, Enum.reverse(rev)}
+      other -> other
+    end
   end
 
   # ============================================================
