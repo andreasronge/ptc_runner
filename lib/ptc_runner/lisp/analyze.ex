@@ -1014,6 +1014,10 @@ defmodule PtcRunner.Lisp.Analyze do
   # Takes a success callback to allow different behavior for symbol vs call position.
   defp normalize_clojure_namespace(ns, func, on_success) do
     cond do
+      Env.clojure_namespace?(ns) and Env.constant?(ns, func) ->
+        {:constant, value} = Map.get(Env.initial(), func)
+        {:ok, {:literal, value}}
+
       Env.clojure_namespace?(ns) and Env.builtin?(func) ->
         on_success.()
 

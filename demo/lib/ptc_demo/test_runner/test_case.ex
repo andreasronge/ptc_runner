@@ -251,18 +251,27 @@ defmodule PtcDemo.TestRunner.TestCase do
         constraint: {:has_keys, [:month, :growth_rate, :order_counts]},
         max_turns: 4,
         description: "Temporal trend: group by month, calculate sequential growth rates, find max"
+      },
+
+      # Budget-constrained optimization - greedy selection with constraint checking
+      %{
+        query:
+          "Select products to restock with a $50,000 budget, maximizing total expected revenue " <>
+            "(price × stock as proxy for demand). Each product's cost is its price. Don't exceed budget. " <>
+            "Use a greedy approach: sort by value ratio (expected_revenue / price = stock), " <>
+            "then select products until budget is exhausted. " <>
+            "Return a map with :product_ids (list of selected product IDs), :total_cost (sum of prices), " <>
+            "and :expected_revenue (sum of price × stock for selected products).",
+        expect: :map,
+        constraint: {:has_keys, [:product_ids, :total_cost, :expected_revenue]},
+        max_turns: 3,
+        description:
+          "Budget optimization: greedy selection by value ratio with constraint checking"
       }
 
       # ═══════════════════════════════════════════════════════════════════════════
       # TODO: Additional reasoning + computation tests to implement
       # ═══════════════════════════════════════════════════════════════════════════
-
-      # TODO: Budget-Constrained Optimization
-      # Query: "Select products to restock with a $50,000 budget, maximizing total
-      #         expected revenue (price × stock as proxy for demand). Don't exceed budget.
-      #         Return list of product IDs and total cost."
-      # Requires: sorting by value ratio, greedy selection, constraint checking
-      # Reasoning: Trade-off analysis, knowing when to stop adding items
 
       # TODO: Anomaly Detection with Explanation
       # Query: "Find employees whose expense patterns are unusual compared to their

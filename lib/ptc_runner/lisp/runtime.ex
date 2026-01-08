@@ -143,6 +143,10 @@ defmodule PtcRunner.Lisp.Runtime do
   # Comparison
   # ============================================================
 
+  defdelegate lt(x, y), to: Math
+  defdelegate gt(x, y), to: Math
+  defdelegate lte(x, y), to: Math
+  defdelegate gte(x, y), to: Math
   defdelegate not_eq(x, y), to: Math
   defdelegate compare(x, y), to: Math
 

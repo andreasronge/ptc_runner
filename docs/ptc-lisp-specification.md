@@ -151,6 +151,15 @@ false
 1.23e-4
 ```
 
+**Special Values (IEEE 754)** — namespaced constants:
+```clojure
+Double/POSITIVE_INFINITY    ; => ##Inf
+Double/NEGATIVE_INFINITY    ; => ##-Inf
+Double/NaN                  ; => ##NaN (Not a Number)
+```
+
+Special values are returned by operations like division by zero (`(/ 1.0 0.0)`) or indeterminate forms (`(/ 0.0 0.0)`). They are formatted using Clojure's reader syntax (`##Inf`, `##NaN`) but evaluate to their respective symbolic representations.
+
 **Not supported:** Ratios (`1/3`), BigDecimals (`1.0M`), octal/hex literals
 
 ### 3.4 Strings
@@ -1648,11 +1657,14 @@ The `seq` function converts a collection to a sequence:
 | `floor` | `(floor x)` | Round toward -∞ |
 | `ceil` | `(ceil x)` | Round toward +∞ |
 | `round` | `(round x)` | Round to nearest integer |
-| `trunc` | `(trunc x)` | Truncate toward zero |
-| `double` | `(double x)` | Coerce to float |
-| `int` | `(int x)` | Coerce to integer (truncates) |
+| `double` | `(double x)` | Type coercion (to float) |
+| `int` | `(int x)` | Type coercion (to integer) |
 
-**Division behavior:** The `/` operator always returns a float, even for exact divisions. Integer division (`quot`) is not supported. Division by zero raises an execution error.
+**Special Value Behavior:**
+- **NaN Propagation**: Any arithmetic operation involving `Double/NaN` returns `Double/NaN`.
+- **Division by Zero**: `(/ n 0)` returns `Double/POSITIVE_INFINITY` (if `n > 0`), `Double/NEGATIVE_INFINITY` (if `n < 0`), or `Double/NaN` (if `n = 0`).
+- **Indeterminate Forms**: Operations like `(- Double/POSITIVE_INFINITY Double/POSITIVE_INFINITY)` or `(* Double/POSITIVE_INFINITY 0)` return `Double/NaN`.
+- **Coercion**: Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
 
 ```clojure
 (+ 1 2 3)       ; => 6
@@ -1669,10 +1681,18 @@ The `seq` function converts a collection to a sequence:
 (floor 3.7)     ; => 3
 (ceil 3.2)      ; => 4
 (round 3.5)     ; => 4
-(trunc -3.7)    ; => -3
 (double 5)      ; => 5.0
 (int 3.7)       ; => 3
+
+(/ 1.0 0.0)                         ; => ##Inf
+(/ 0.0 0.0)                         ; => ##NaN
+(sqrt -1)                           ; => ##NaN
+(+ Double/POSITIVE_INFINITY 1)      ; => ##Inf
+(* Double/NaN 10)                   ; => ##NaN
+(int Double/POSITIVE_INFINITY)      ; => ARITHMETIC ERROR
 ```
+
+**Division behavior:** The `/` operator always returns a float, even for exact divisions. Integer division (`quot`) is not supported. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
 
 ### 8.5 Comparison
 
@@ -1695,6 +1715,13 @@ The `seq` function converts a collection to a sequence:
 (> 3 2)         ; => true
 (<= 1 1)        ; => true
 (>= 3 2)        ; => true
+
+;; Special Value Comparisons (IEEE 754)
+(< 1.0 Double/POSITIVE_INFINITY)     ; => true
+(> -1.0 Double/NEGATIVE_INFINITY)    ; => true
+(= Double/NaN Double/NaN)            ; => false
+(< Double/NaN 0.0)                   ; => false
+(>= Double/NaN 0.0)                  ; => false
 ```
 
 ### 8.6 Logic
@@ -1798,6 +1825,13 @@ To iterate over just keys or values, extract them first:
 | `neg?` | Is negative? |
 | `even?` | Is even? |
 | `odd?` | Is odd? |
+
+**Note on Special Values:**
+- `number?` returns `true` for `Infinity` and `NaN`.
+- `pos?` returns `true` for `Double/POSITIVE_INFINITY`.
+- `neg?` returns `true` for `Double/NEGATIVE_INFINITY`.
+- All predicates (including `zero?`) return `false` for `Double/NaN`.
+- `Double/NaN` is not equal to itself: `(= Double/NaN Double/NaN)` is `false`.
 
 **Integer predicates on floats:** The predicates `even?` and `odd?` require integers. Passing a float raises a `type-error`, even if the float represents a whole number:
 

@@ -55,6 +55,8 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
     end
   end
 
+  alias PtcRunner.Lisp.Runtime.SpecialValues
+
   defp truthy?(nil), do: false
   defp truthy?(false), do: false
   defp truthy?(_), do: true
@@ -66,9 +68,14 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def nil?(x), do: is_nil(x)
   def some?(x), do: not is_nil(x)
   def boolean?(x), do: is_boolean(x)
-  def number?(x), do: is_number(x)
+
+  def number?(x), do: is_number(x) or SpecialValues.special?(x)
+
   def string?(x), do: is_binary(x)
-  def keyword?(x), do: is_atom(x) and not is_nil(x) and not is_boolean(x)
+
+  def keyword?(x),
+    do: is_atom(x) and not is_nil(x) and not is_boolean(x) and not SpecialValues.special?(x)
+
   def vector?(x), do: is_list(x)
   def char?(x), do: is_binary(x) and String.length(x) == 1
 
@@ -96,8 +103,28 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   # ============================================================
 
   def zero?(x), do: x == 0
-  def pos?(x), do: x > 0
-  def neg?(x), do: x < 0
-  def even?(x), do: rem(x, 2) == 0
-  def odd?(x), do: rem(x, 2) != 0
+
+  def pos?(x) do
+    cond do
+      is_number(x) -> x > 0
+      SpecialValues.pos_infinite?(x) -> true
+      true -> false
+    end
+  end
+
+  def neg?(x) do
+    cond do
+      is_number(x) -> x < 0
+      SpecialValues.neg_infinite?(x) -> true
+      true -> false
+    end
+  end
+
+  def even?(x) do
+    if is_number(x), do: rem(x, 2) == 0, else: false
+  end
+
+  def odd?(x) do
+    if is_number(x), do: rem(x, 2) != 0, else: false
+  end
 end

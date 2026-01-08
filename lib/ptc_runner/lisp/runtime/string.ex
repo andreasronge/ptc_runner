@@ -21,6 +21,9 @@ defmodule PtcRunner.Lisp.Runtime.String do
 
   defp to_str(nil), do: ""
   defp to_str(s) when is_binary(s), do: s
+  defp to_str(:infinity), do: "Infinity"
+  defp to_str(:negative_infinity), do: "-Infinity"
+  defp to_str(:nan), do: "NaN"
   defp to_str(atom) when is_atom(atom), do: inspect(atom)
   defp to_str(x), do: inspect(x)
 
@@ -181,9 +184,24 @@ defmodule PtcRunner.Lisp.Runtime.String do
   def parse_double(nil), do: nil
 
   def parse_double(s) when is_binary(s) do
-    case Float.parse(s) do
-      {f, ""} -> f
-      _ -> nil
+    case s do
+      "Infinity" ->
+        :infinity
+
+      "+Infinity" ->
+        :infinity
+
+      "-Infinity" ->
+        :negative_infinity
+
+      "NaN" ->
+        :nan
+
+      _ ->
+        case Float.parse(s) do
+          {f, ""} -> f
+          _ -> nil
+        end
     end
   end
 

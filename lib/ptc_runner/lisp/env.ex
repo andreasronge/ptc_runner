@@ -20,6 +20,7 @@ defmodule PtcRunner.Lisp.Env do
           | {:variadic_nonempty, atom(), function()}
           | {:multi_arity, atom(), tuple()}
           | {:collect, function()}
+          | {:constant, term()}
   @type env :: %{atom() => binding()}
 
   @spec initial() :: env()
@@ -66,7 +67,8 @@ defmodule PtcRunner.Lisp.Env do
     :Interop => :interop,
     :System => :interop,
     :"java.time.LocalDate" => :interop,
-    :LocalDate => :interop
+    :LocalDate => :interop,
+    :Double => :interop
   }
 
   @doc """
@@ -101,6 +103,14 @@ defmodule PtcRunner.Lisp.Env do
   """
   @spec namespace_category(atom()) :: atom() | nil
   def namespace_category(ns), do: Map.get(@clojure_namespaces, ns)
+
+  @doc """
+  Check if a name is a namespaced constant.
+  """
+  def constant?(ns, name) do
+    clojure_namespace?(ns) and Map.has_key?(initial(), name) and
+      match?({:constant, _}, Map.get(initial(), name))
+  end
 
   @doc """
   Get the list of builtin functions for a category.
@@ -150,7 +160,15 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:interop) do
-    [:"java.util.Date.", :".getTime", :"System/currentTimeMillis", :"LocalDate/parse"]
+    [
+      :"java.util.Date.",
+      :".getTime",
+      :"System/currentTimeMillis",
+      :"LocalDate/parse",
+      :POSITIVE_INFINITY,
+      :NEGATIVE_INFINITY,
+      :NaN
+    ]
   end
 
   def builtins_by_category(:core) do
@@ -268,16 +286,16 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # Arithmetic — variadic with identity
       # ============================================================
-      {:+, {:variadic, &Kernel.+/2, 0}},
-      {:-, {:variadic, &Kernel.-/2, 0}},
-      {:*, {:variadic, &Kernel.*/2, 1}},
-      {:/, {:variadic_nonempty, :/, &Kernel.//2}},
+      {:+, {:variadic, &Runtime.Math.add/2, 0}},
+      {:-, {:variadic, &Runtime.Math.subtract/2, 0}},
+      {:*, {:variadic, &Runtime.Math.multiply/2, 1}},
+      {:/, {:variadic_nonempty, :/, &Runtime.Math.divide/2}},
       {:mod, {:normal, &Runtime.mod/2}},
       {:inc, {:normal, &Runtime.inc/1}},
       {:dec, {:normal, &Runtime.dec/1}},
       {:abs, {:normal, &Runtime.abs/1}},
-      {:max, {:variadic_nonempty, :max, &Runtime.max/2}},
-      {:min, {:variadic_nonempty, :min, &Runtime.min/2}},
+      {:max, {:variadic_nonempty, :max, &Runtime.Math.max/2}},
+      {:min, {:variadic_nonempty, :min, &Runtime.Math.min/2}},
       {:floor, {:normal, &Runtime.floor/1}},
       {:ceil, {:normal, &Runtime.ceil/1}},
       {:round, {:normal, &Runtime.round/1}},
@@ -290,12 +308,12 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # Comparison — normal (binary)
       # ============================================================
-      {:=, {:normal, &Kernel.==/2}},
-      {:"not=", {:normal, &Kernel.!=/2}},
-      {:>, {:normal, &Kernel.>/2}},
-      {:<, {:normal, &Kernel.</2}},
-      {:>=, {:normal, &Kernel.>=/2}},
-      {:<=, {:normal, &Kernel.<=/2}},
+      {:=, {:normal, &Runtime.Math.eq/2}},
+      {:"not=", {:normal, &Runtime.Math.not_eq/2}},
+      {:>, {:normal, &Runtime.gt/2}},
+      {:<, {:normal, &Runtime.lt/2}},
+      {:>=, {:normal, &Runtime.gte/2}},
+      {:<=, {:normal, &Runtime.lte/2}},
       {:compare, {:normal, &Runtime.compare/2}},
 
       # ============================================================
@@ -306,20 +324,20 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # Type predicates
       # ============================================================
-      {:nil?, {:normal, &is_nil/1}},
-      {:some?, {:normal, fn x -> not is_nil(x) end}},
-      {:boolean?, {:normal, &is_boolean/1}},
-      {:number?, {:normal, &is_number/1}},
-      {:string?, {:normal, &is_binary/1}},
+      {:nil?, {:normal, &Runtime.nil?/1}},
+      {:some?, {:normal, &Runtime.some?/1}},
+      {:boolean?, {:normal, &Runtime.boolean?/1}},
+      {:number?, {:normal, &Runtime.number?/1}},
+      {:string?, {:normal, &Runtime.string?/1}},
       {:char?, {:normal, &Runtime.char?/1}},
-      {:keyword?, {:normal, fn x -> is_atom(x) and x not in [nil, true, false] end}},
-      {:vector?, {:normal, &is_list/1}},
+      {:keyword?, {:normal, &Runtime.keyword?/1}},
+      {:vector?, {:normal, &Runtime.vector?/1}},
       {:set?, {:normal, &Runtime.set?/1}},
       {:set, {:normal, &Runtime.set/1}},
       {:vec, {:normal, &Runtime.vec/1}},
       {:vector, {:collect, &Function.identity/1}},
       {:map?, {:normal, &Runtime.map?/1}},
-      {:coll?, {:normal, &is_list/1}},
+      {:coll?, {:normal, &Runtime.coll?/1}},
 
       # ============================================================
       # String manipulation
@@ -356,11 +374,11 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # Numeric predicates
       # ============================================================
-      {:zero?, {:normal, fn x -> x == 0 end}},
-      {:pos?, {:normal, fn x -> x > 0 end}},
-      {:neg?, {:normal, fn x -> x < 0 end}},
-      {:even?, {:normal, fn x -> rem(x, 2) == 0 end}},
-      {:odd?, {:normal, fn x -> rem(x, 2) != 0 end}},
+      {:zero?, {:normal, &Runtime.zero?/1}},
+      {:pos?, {:normal, &Runtime.pos?/1}},
+      {:neg?, {:normal, &Runtime.neg?/1}},
+      {:even?, {:normal, &Runtime.even?/1}},
+      {:odd?, {:normal, &Runtime.odd?/1}},
 
       # ============================================================
       # Set Operations
@@ -376,7 +394,14 @@ defmodule PtcRunner.Lisp.Env do
        {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
       {:".getTime", {:normal, &Runtime.dot_get_time/1}},
       {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
-      {:parse, {:normal, &Runtime.local_date_parse/1}}
+      {:parse, {:normal, &Runtime.local_date_parse/1}},
+
+      # ============================================================
+      # Double Constants
+      # ============================================================
+      {:POSITIVE_INFINITY, {:constant, :infinity}},
+      {:NEGATIVE_INFINITY, {:constant, :negative_infinity}},
+      {:NaN, {:constant, :nan}}
     ]
   end
 end

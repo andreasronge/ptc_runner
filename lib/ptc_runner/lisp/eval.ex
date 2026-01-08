@@ -97,6 +97,8 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:string, s}, %EvalContext{} = eval_ctx), do: {:ok, s, eval_ctx}
   defp do_eval({:keyword, k}, %EvalContext{} = eval_ctx), do: {:ok, k, eval_ctx}
+  defp do_eval({:literal, v}, %EvalContext{} = eval_ctx), do: {:ok, v, eval_ctx}
+  defp do_eval(a, %EvalContext{} = eval_ctx) when is_atom(a), do: {:ok, a, eval_ctx}
 
   # ============================================================
   # Collections
@@ -143,7 +145,10 @@ defmodule PtcRunner.Lisp.Eval do
         {:ok, Map.get(user_ns, name), eval_ctx}
 
       Env.builtin?(name) ->
-        {:ok, Map.get(Env.initial(), name), eval_ctx}
+        case Map.get(Env.initial(), name) do
+          {:constant, value} -> {:ok, value, eval_ctx}
+          _ -> {:ok, Map.get(Env.initial(), name), eval_ctx}
+        end
 
       true ->
         name_str = to_string(name)

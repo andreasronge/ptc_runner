@@ -69,7 +69,7 @@ my_llm =
 ```elixir
 alias PtcRunner.SubAgent.Debug
 
-{_, step} = PtcRunner.SubAgent.run(
+{:ok, step} = PtcRunner.SubAgent.run(
   "What is the sum of the first 5 prime numbers?",
   llm: my_llm,
   debug: true
@@ -79,12 +79,21 @@ Debug.print_trace(step)
 step.return
 ```
 
+See [print_trace/2](https://hexdocs.pm/ptc_runner/PtcRunner.SubAgent.Debug.html#print_trace/2) for trace options (`messages`, `system`, `usage`).
+
+To preview the system prompt before running, use [preview_prompt/2](https://hexdocs.pm/ptc_runner/PtcRunner.SubAgent.html#preview_prompt/2):
+
+```elixir
+agent = PtcRunner.SubAgent.new(prompt: "What is 2 + 2?")
+PtcRunner.SubAgent.preview_prompt(agent).system |> IO.puts()
+```
+
 ## The Raspberry Problem
 
 LLMs often fail at simple counting tasks. Using PTC-Lisp, the agent can solve this accurately:
 
 ```elixir
-{_, step} = PtcRunner.SubAgent.run(
+{:ok, step} = PtcRunner.SubAgent.run(
   "How many r's are in raspberry?",
   llm: my_llm,
   debug: true
@@ -99,14 +108,15 @@ step.return
 Use `context` to pass data. Signatures validate the output structure:
 
 ```elixir
-{_, step} = PtcRunner.SubAgent.run(
+{:ok, step} = PtcRunner.SubAgent.run(
   "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
   context: %{review: "Great product, fast shipping! Would buy again."},
   signature: "(review :string) -> {sentiment :string, confidence :float}",
   llm: my_llm,
   debug: true
 )
-Debug.print_trace(step, messages: false)
+
+Debug.print_trace(step)
 step.return
 ```
 
