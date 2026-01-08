@@ -13,6 +13,31 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
 
   @doc """
+  Estimate token count for a text string.
+
+  Uses a simple approximation of ~4 characters per token, which is
+  reasonably accurate for most LLM tokenizers (within ~10-20%).
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.Metrics.estimate_tokens("Hello world")
+      2
+
+      iex> PtcRunner.SubAgent.Loop.Metrics.estimate_tokens("")
+      0
+
+      iex> PtcRunner.SubAgent.Loop.Metrics.estimate_tokens(nil)
+      0
+  """
+  @spec estimate_tokens(String.t() | nil) :: non_neg_integer()
+  def estimate_tokens(nil), do: 0
+  def estimate_tokens(""), do: 0
+
+  def estimate_tokens(text) when is_binary(text) do
+    max(1, div(String.length(text), 4))
+  end
+
+  @doc """
   Accumulate tokens from an LLM call into state.
 
   ## Parameters
@@ -69,7 +94,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         input_tokens: state.total_input_tokens,
         output_tokens: state.total_output_tokens,
         total_tokens: state.total_input_tokens + state.total_output_tokens,
-        llm_requests: state.llm_requests
+        llm_requests: state.llm_requests,
+        system_prompt_tokens: Map.get(state, :system_prompt_tokens, 0)
       })
     else
       # Still include llm_requests even without token counts
@@ -147,6 +173,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       program: program,
       result: result,
       tool_calls: tool_calls,
+      prints: Keyword.get(opts, :prints, []),
       feedback_truncated: Keyword.get(opts, :feedback_truncated, false)
     }
 

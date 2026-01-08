@@ -59,6 +59,7 @@ defmodule PtcRunner.SubAgent.Debug do
   - `opts` - Keyword list of options:
     - `messages: true` - Show full LLM response and feedback (requires `debug: true` during execution)
     - `system: true` - Show the system prompt in each turn (default: `false` when `messages: true`)
+    - `usage: true` - Show token usage summary after the trace
 
   ## Examples
 
@@ -70,6 +71,10 @@ defmodule PtcRunner.SubAgent.Debug do
       # Show full LLM messages (requires debug: true during execution)
       iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, debug: true)
       iex> PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
+      :ok
+
+      # Show token usage
+      iex> PtcRunner.SubAgent.Debug.print_trace(step, usage: true)
       :ok
 
   """
@@ -86,13 +91,18 @@ defmodule PtcRunner.SubAgent.Debug do
     :ok
   end
 
-  def print_trace(%Step{trace: trace}, opts) when is_list(trace) do
+  def print_trace(%Step{trace: trace, usage: usage}, opts) when is_list(trace) do
     show_messages = Keyword.get(opts, :messages, false)
+    show_usage = Keyword.get(opts, :usage, false)
 
     if show_messages do
       Enum.each(trace, &print_turn_with_messages(&1, opts))
     else
       Enum.each(trace, &print_turn/1)
+    end
+
+    if show_usage and usage do
+      print_usage_summary(usage)
     end
 
     :ok
@@ -145,6 +155,7 @@ defmodule PtcRunner.SubAgent.Debug do
     program = Map.get(turn_entry, :program, "")
     result = Map.get(turn_entry, :result, nil)
     tool_calls = Map.get(turn_entry, :tool_calls, [])
+    prints = Map.get(turn_entry, :prints, [])
 
     header = " Turn #{turn_num} "
 
@@ -183,6 +194,17 @@ defmodule PtcRunner.SubAgent.Debug do
       end)
     end
 
+    # Print println output if any
+    unless Enum.empty?(prints) do
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Output:#{ansi(:reset)}")
+
+      Enum.each(prints, fn line ->
+        IO.puts(
+          "#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:yellow)}#{truncate_line(line, 80)}#{ansi(:reset)}"
+        )
+      end)
+    end
+
     # Print result
     IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Result:#{ansi(:reset)}")
     result_lines = format_result(result)
@@ -200,6 +222,7 @@ defmodule PtcRunner.SubAgent.Debug do
     program = Map.get(turn_entry, :program, "")
     result = Map.get(turn_entry, :result, nil)
     tool_calls = Map.get(turn_entry, :tool_calls, [])
+    prints = Map.get(turn_entry, :prints, [])
     llm_response = Map.get(turn_entry, :llm_response)
     llm_feedback = Map.get(turn_entry, :llm_feedback)
 
@@ -271,6 +294,18 @@ defmodule PtcRunner.SubAgent.Debug do
 
         IO.puts(
           "#{ansi(:cyan)}│#{ansi(:reset)}     #{ansi(:green)}←#{ansi(:reset)} #{result_str}"
+        )
+      end)
+    end
+
+    # Print println output if any
+    unless Enum.empty?(prints) do
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Output:#{ansi(:reset)}")
+
+      Enum.each(prints, fn line ->
+        IO.puts(
+          "#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:yellow)}#{truncate_line(line, 80)}#{ansi(:reset)}"
         )
       end)
     end
@@ -440,6 +475,60 @@ defmodule PtcRunner.SubAgent.Debug do
       line
     end
   end
+
+  # Print usage summary
+  defp print_usage_summary(usage) do
+    header = " Usage "
+
+    IO.puts(
+      "\n#{ansi(:cyan)}┌─#{header}#{String.duplicate("─", @box_width - 3 - String.length(header))}┐#{ansi(:reset)}"
+    )
+
+    if usage[:input_tokens] do
+      IO.puts(
+        "#{ansi(:cyan)}│#{ansi(:reset)}   Input tokens:  #{format_number(usage.input_tokens)}"
+      )
+    end
+
+    if usage[:output_tokens] do
+      IO.puts(
+        "#{ansi(:cyan)}│#{ansi(:reset)}   Output tokens: #{format_number(usage.output_tokens)}"
+      )
+    end
+
+    if usage[:total_tokens] do
+      IO.puts(
+        "#{ansi(:cyan)}│#{ansi(:reset)}   Total tokens:  #{format_number(usage.total_tokens)}"
+      )
+    end
+
+    if usage[:system_prompt_tokens] && usage.system_prompt_tokens > 0 do
+      IO.puts(
+        "#{ansi(:cyan)}│#{ansi(:reset)}   System prompt: #{format_number(usage.system_prompt_tokens)} #{ansi(:dim)}(est.)#{ansi(:reset)}"
+      )
+    end
+
+    if usage[:duration_ms] do
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   Duration:      #{usage.duration_ms}ms")
+    end
+
+    if usage[:turns] do
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   Turns:         #{usage.turns}")
+    end
+
+    IO.puts("#{ansi(:cyan)}└#{String.duplicate("─", @box_width - 2)}┘#{ansi(:reset)}")
+  end
+
+  # Format number with thousand separators
+  defp format_number(n) when is_integer(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
+    |> String.reverse()
+  end
+
+  defp format_number(n), do: "#{n}"
 
   # ANSI color helpers
   defp ansi(:reset), do: IO.ANSI.reset()

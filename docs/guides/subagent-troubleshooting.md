@@ -161,6 +161,54 @@ Common issues and solutions when working with SubAgents.
 
 4. **Try a different model** - some models follow PTC-Lisp instructions better than others. See [Benchmark Evaluation](../benchmark-eval.md) for model comparisons.
 
+## Viewing Token Usage
+
+To see token consumption for debugging or optimization:
+
+```elixir
+{:ok, step} = SubAgent.run(prompt, llm: llm)
+SubAgent.Debug.print_trace(step, usage: true)
+```
+
+Output:
+```
+┌─ Usage ──────────────────────────────────────────────────┐
+│   Input tokens:  3,107
+│   Output tokens: 368
+│   Total tokens:  3,475
+│   System prompt: 2,329 (est.)
+│   Duration:      1,234ms
+│   Turns:         1
+└──────────────────────────────────────────────────────────┘
+```
+
+Options can be combined: `print_trace(step, messages: true, usage: true)`.
+
+## Viewing Println Output
+
+When debugging multi-turn agents, `println` output appears in the trace under "Output:":
+
+```elixir
+{:ok, step} = SubAgent.run(prompt, llm: llm, debug: true)
+SubAgent.Debug.print_trace(step)
+```
+
+Output:
+```
+┌─ Turn 1 ────────────────────────────────────────────────┐
+│ Program:
+│   (def results (ctx/search {:q "test"}))
+│   (println "Found:" (count results))
+│   results
+│ Output:
+│   Found: 42
+│ Result:
+│   [{:id 1, :name "..."}, ...]
+└──────────────────────────────────────────────────────────┘
+```
+
+If you don't see "Output:" in the trace, either no `println` was called or the LLM didn't use it. The prompt (`lisp-addon-multi_turn.md`) documents that only `println` output is shown in feedback—expression results are not displayed.
+
 ## Parse Errors in Generated Code
 
 **Symptom:** `{:error, {:parse_error, ...}}` from the sandbox.
