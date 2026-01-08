@@ -688,25 +688,35 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp apply_thread_step(kind, acc, {:list, [f_ast | arg_asts]}, tail?) do
-    with {:ok, f} <- do_analyze(f_ast, false),
-         {:ok, args} <- analyze_list(arg_asts) do
-      new_args =
-        case kind do
-          :-> -> [acc | args]
-          :"->>" -> args ++ [acc]
-        end
+    # Handle special forms (return, fail) that need the threaded value
+    case f_ast do
+      {:symbol, :return} when arg_asts == [] ->
+        {:ok, {:return, acc}}
 
-      case f do
-        {:var, :recur} ->
-          if tail? do
-            {:ok, {:recur, new_args}}
-          else
-            {:error, {:invalid_form, "recur must be in tail position"}}
+      {:symbol, :fail} when arg_asts == [] ->
+        {:ok, {:fail, acc}}
+
+      _ ->
+        with {:ok, f} <- do_analyze(f_ast, false),
+             {:ok, args} <- analyze_list(arg_asts) do
+          new_args =
+            case kind do
+              :-> -> [acc | args]
+              :"->>" -> args ++ [acc]
+            end
+
+          case f do
+            {:var, :recur} ->
+              if tail? do
+                {:ok, {:recur, new_args}}
+              else
+                {:error, {:invalid_form, "recur must be in tail position"}}
+              end
+
+            _ ->
+              {:ok, {:call, f, new_args}}
           end
-
-        _ ->
-          {:ok, {:call, f, new_args}}
-      end
+        end
     end
   end
 
