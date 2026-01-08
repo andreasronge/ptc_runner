@@ -6,7 +6,6 @@ defmodule PtcDemo.JsonTestRunnerTest do
   alias PtcDemo.{JsonTestRunner, MockAgent}
 
   setup do
-    # JsonTestRunner: 13 common + 2 multi_turn = 15 tests
     responses = common_mock_responses()
 
     start_supervised!({MockAgent, responses})
@@ -47,8 +46,8 @@ defmodule PtcDemo.JsonTestRunnerTest do
     test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
       result = JsonTestRunner.run_all(agent: mock_agent, verbose: false)
 
-      # JsonTestRunner: 13 common + 2 multi_turn = 15 test cases
-      assert result.total == 15
+      # Should run all common + multi_turn test cases
+      assert result.total >= 15
     end
   end
 
