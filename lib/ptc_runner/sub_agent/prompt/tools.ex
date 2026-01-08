@@ -172,11 +172,13 @@ defmodule PtcRunner.SubAgent.Prompt.Tools do
     # User-defined tool with explicit signature
     desc_line = if desc, do: desc, else: "User-defined tool."
     example = generate_tool_example(name, sig)
+    # Simplify signature display for single map parameters
+    display_sig = simplify_signature_for_display(sig)
 
     """
     ### #{name}
     ```
-    ctx/#{name}#{sig}
+    ctx/#{name}#{display_sig}
     ```
     #{desc_line}
     #{example}
@@ -212,6 +214,37 @@ defmodule PtcRunner.SubAgent.Prompt.Tools do
   end
 
   # ============================================================
+  # Private Helpers - Signature Simplification
+  # ============================================================
+
+  # Simplify signatures with a single map parameter for clearer display.
+  # When a function has a single map parameter with named fields like:
+  #   (args {query :string, limit :int?}) -> ...
+  # We display it as:
+  #   ({query :string, limit :int?}) -> ...
+  #
+  # This matches how the tool is actually called: (ctx/search {:query "..."})
+  defp simplify_signature_for_display(sig) do
+    case Signature.parse(sig) do
+      {:ok, {:signature, [{_param_name, {:map, fields}}], return_type}} when is_list(fields) ->
+        # Single map parameter - render fields directly without the param name
+        fields_str = render_map_fields(fields)
+        return_str = Signature.Renderer.render_type(return_type)
+        "({#{fields_str}}) -> #{return_str}"
+
+      _ ->
+        # Keep original signature for other cases
+        sig
+    end
+  end
+
+  defp render_map_fields(fields) do
+    Enum.map_join(fields, ", ", fn {name, type} ->
+      "#{name} #{Signature.Renderer.render_type(type)}"
+    end)
+  end
+
+  # ============================================================
   # Private Helpers - Tool Normalization
   # ============================================================
 
@@ -243,6 +276,18 @@ defmodule PtcRunner.SubAgent.Prompt.Tools do
       {:error, _} ->
         ""
     end
+  end
+
+  # When a single map parameter with named fields is used, show the inner fields directly.
+  # This handles the common pattern where tools accept %{field1: ..., field2: ...}
+  # and the signature shows (args {field1 :type, field2 :type}).
+  #
+  # Example: `(args {query :string})` → `:query "..."`
+  #          NOT → `:args {...}`
+  defp generate_example_args([{_param_name, {:map, fields}}]) when is_list(fields) do
+    Enum.map_join(fields, " ", fn {field_name, type} ->
+      ":#{field_name} #{generate_example_value(type)}"
+    end)
   end
 
   defp generate_example_args(params) do

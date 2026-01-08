@@ -352,6 +352,25 @@ defmodule PtcRunner.SubAgent.PromptTest do
       assert schemas =~ "search(query :string, limit :int) -> [:map]"
       assert schemas =~ "Search for items matching query"
     end
+
+    test "simplifies single map parameter in signature and example" do
+      # When a tool has a single map parameter with named fields,
+      # the signature should show the fields directly (not wrapped in param name)
+      # and the example should expand the fields
+      tools = %{
+        "search" => {fn _args -> [] end, "(args {query :string, limit :int?}) -> [:map]"}
+      }
+
+      schemas = Prompt.generate_tool_schemas(tools)
+
+      # Signature should NOT show "args" parameter name
+      refute schemas =~ "search(args"
+      # Signature should show fields directly
+      assert schemas =~ "ctx/search({query :string, limit :int?}) -> [:map]"
+      # Example should expand fields, not show {:args {...}}
+      assert schemas =~ ~s|Example: `(ctx/search {:query "..." :limit 10})`|
+      refute schemas =~ ":args"
+    end
   end
 
   describe "customization" do
