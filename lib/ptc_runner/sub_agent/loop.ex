@@ -418,7 +418,8 @@ defmodule PtcRunner.SubAgent.Loop do
       context: exec_context,
       memory: state.memory,
       tools: all_tools,
-      turn_history: state.turn_history
+      turn_history: state.turn_history,
+      float_precision: agent.float_precision
     ]
 
     case Lisp.run(code, lisp_opts) do

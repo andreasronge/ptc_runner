@@ -352,8 +352,17 @@ defmodule PtcRunner.Lisp do
     Enum.map(value, &round_floats(&1, precision))
   end
 
-  defp round_floats(value, precision) when is_map(value) do
+  defp round_floats(value, precision) when is_map(value) and not is_struct(value) do
     Map.new(value, fn {k, v} -> {k, round_floats(v, precision)} end)
+  end
+
+  # Handle sentinel tuples for return/fail signals
+  defp round_floats({:__ptc_return__, inner}, precision) do
+    {:__ptc_return__, round_floats(inner, precision)}
+  end
+
+  defp round_floats({:__ptc_fail__, inner}, precision) do
+    {:__ptc_fail__, round_floats(inner, precision)}
   end
 
   defp round_floats(value, _precision), do: value

@@ -278,6 +278,10 @@ Full agentic loop requiring explicit `return` or `fail`.
 
 **Note:** `max_turns > 1` without tools enables multi-turn exploration where map results merge into memory for iterative analysis.
 
+## Float Precision
+
+Floats are rounded to 2 decimal places by default (e.g., `3.33` instead of `3.3333333333333335`). Configure via `float_precision:` option. See [`SubAgent.new/1`](PtcRunner.SubAgent.html#new/1) for details.
+
 ## Defaults
 
 | Option | Default | Description |
@@ -286,6 +290,7 @@ Full agentic loop requiring explicit `return` or `fail`.
 | `timeout` | `5000` | Per-turn timeout (ms) |
 | `mission_timeout` | `60000` | Total mission timeout (ms) |
 | `prompt_limit` | `%{list: 5, string: 1000}` | Truncation limits for prompts |
+| `float_precision` | `2` | Decimal places for floats in results and Data Inventory |
 
 ## See Also
 
