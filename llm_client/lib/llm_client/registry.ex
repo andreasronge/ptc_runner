@@ -167,8 +167,8 @@ defmodule LLMClient.Registry do
     |> Enum.filter(fn {_p, env} -> System.get_env(env) != nil end)
     |> Enum.map(fn {p, _env} -> p end)
     |> then(fn cloud ->
-      # Skip Ollama check in CI to avoid slow HTTP retries when Ollama isn't running
-      if System.get_env("CI") do
+      # Skip Ollama check in CI/test to avoid slow HTTP retries when Ollama isn't running
+      if System.get_env("CI") || Mix.env() == :test do
         cloud
       else
         if LLMClient.Providers.available?("ollama:test"), do: [:ollama | cloud], else: cloud
