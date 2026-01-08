@@ -173,6 +173,11 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :pcalls}, rest, _list, tail?), do: analyze_pcalls(rest, tail?)
   defp dispatch_list_form({:symbol, :apply}, rest, _list, tail?), do: analyze_apply(rest, tail?)
 
+  defp dispatch_list_form({:symbol, :.}, _rest, _list, _tail?) do
+    {:error,
+     {:invalid_form, "(. obj method) syntax is not supported. Use (.method obj) instead."}}
+  end
+
   defp dispatch_list_form({:symbol, :call}, _rest, _list, _tail?) do
     {:error,
      {:invalid_form,

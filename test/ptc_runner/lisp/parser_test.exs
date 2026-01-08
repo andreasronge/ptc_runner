@@ -247,12 +247,14 @@ defmodule PtcRunner.Lisp.ParserTest do
   end
 
   describe "numeric edge cases" do
-    test "leading decimal point is invalid" do
-      assert {:error, {:parse_error, _}} = Parser.parse(".5")
+    test "leading decimal point parses as symbol (for .method interop)" do
+      # .5 is parsed as symbol because . can start method-call symbols like .getTime
+      assert {:ok, {:symbol, :".5"}} = Parser.parse(".5")
     end
 
-    test "trailing decimal point is invalid" do
-      assert {:error, {:parse_error, _}} = Parser.parse("5.")
+    test "trailing decimal point splits into number and dot symbol" do
+      # 5. parses as integer 5 followed by . symbol (since . is valid symbol)
+      assert {:ok, {:program, [5, {:symbol, :.}]}} = Parser.parse("5.")
     end
 
     test "exponent without decimal parses as two tokens" do
