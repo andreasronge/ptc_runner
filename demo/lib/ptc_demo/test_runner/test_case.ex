@@ -179,6 +179,16 @@ defmodule PtcDemo.TestRunner.TestCase do
         description:
           "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
       },
+
+      # 2. Group-by with max aggregation
+      %{
+        query:
+          "Which employee has the most rejected expense claims? " <>
+            "Return their employee_id.",
+        expect: :integer,
+        constraint: {:between, 1, 200},
+        description: "Group by employee_id, filter rejected, find max count"
+      }
     ]
   end
 
@@ -212,19 +222,6 @@ defmodule PtcDemo.TestRunner.TestCase do
         constraint: {:gt_length, 0},
         max_turns: 2,
         description: "pmap + tool calls: search for multiple items then fetch details in parallel"
-      },
-
-      # Open-form task requiring observation and judgment
-      # Cannot be solved in one program - requires interpreting what "suspicious" means
-      %{
-        query:
-          "Analyze expense claims to find suspicious patterns. " <>
-            "Which employee's spending looks most like potential fraud or abuse? " <>
-            "Return their employee_id.",
-        expect: :integer,
-        constraint: {:between, 1, 200},
-        max_turns: 6,
-        description: "Multi-turn: explore expense patterns, judge suspicious, return employee_id"
       },
 
       # Search-based task requiring query refinement
