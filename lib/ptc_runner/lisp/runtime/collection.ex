@@ -538,6 +538,46 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def max_by(_key, nil), do: nil
 
+  @doc """
+  Returns the x for which (f x) is greatest. Matches Clojure's max-key.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.max_key_variadic([&String.length/1, "a", "abc", "ab"])
+      "abc"
+  """
+  def max_key_variadic([f | args]) when is_function(f, 1) and args != [] do
+    Enum.max_by(args, f)
+  end
+
+  def max_key_variadic([_f]) do
+    raise ArgumentError, "max-key requires at least 2 arguments (function and one value)"
+  end
+
+  def max_key_variadic([f | _args]) do
+    raise ArgumentError, "max-key: first argument must be a function, got: #{inspect(f)}"
+  end
+
+  @doc """
+  Returns the x for which (f x) is least. Matches Clojure's min-key.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.min_key_variadic([&String.length/1, "a", "abc", "ab"])
+      "a"
+  """
+  def min_key_variadic([f | args]) when is_function(f, 1) and args != [] do
+    Enum.min_by(args, f)
+  end
+
+  def min_key_variadic([_f]) do
+    raise ArgumentError, "min-key requires at least 2 arguments (function and one value)"
+  end
+
+  def min_key_variadic([f | _args]) do
+    raise ArgumentError, "min-key: first argument must be a function, got: #{inspect(f)}"
+  end
+
   def group_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
     Enum.group_by(coll, keyfn)
   end
