@@ -168,9 +168,12 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   """
   @spec build_trace_entry(map(), String.t(), term(), list(), keyword()) :: map()
   def build_trace_entry(state, program, result, tool_calls, opts \\ []) do
+    llm_response = Keyword.get(opts, :llm_response)
+
     base = %{
       turn: state.turn,
       program: program,
+      reasoning: extract_reasoning(llm_response),
       result: result,
       tool_calls: tool_calls,
       prints: Keyword.get(opts, :prints, []),
@@ -179,7 +182,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
     if state.debug do
       Map.merge(base, %{
-        llm_response: Keyword.get(opts, :llm_response),
+        llm_response: llm_response,
         llm_feedback: Keyword.get(opts, :llm_feedback),
         system_prompt: Map.get(state, :current_system_prompt),
         context_snapshot: state.context,
@@ -189,6 +192,18 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     else
       base
     end
+  end
+
+  # Extract reasoning from LLM response (everything except the code block)
+  defp extract_reasoning(nil), do: nil
+
+  defp extract_reasoning(response) do
+    result =
+      response
+      |> String.replace(~r/```clojure\n.*?```/s, "")
+      |> String.trim()
+
+    if result == "", do: nil, else: result
   end
 
   @doc """

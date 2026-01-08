@@ -220,10 +220,10 @@ defmodule PtcRunner.SubAgent.Debug do
   defp print_turn_with_messages(turn_entry, opts) do
     turn_num = Map.get(turn_entry, :turn, 0)
     program = Map.get(turn_entry, :program, "")
+    reasoning = Map.get(turn_entry, :reasoning)
     result = Map.get(turn_entry, :result, nil)
     tool_calls = Map.get(turn_entry, :tool_calls, [])
     prints = Map.get(turn_entry, :prints, [])
-    llm_response = Map.get(turn_entry, :llm_response)
     llm_feedback = Map.get(turn_entry, :llm_feedback)
 
     header = " Turn #{turn_num} "
@@ -247,21 +247,17 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")
     end
 
-    # Print LLM Response (assistant message in messages array)
-    IO.puts(
-      "#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Assistant Message (LLM output):#{ansi(:reset)}"
-    )
+    # Print reasoning (everything except the code block)
+    IO.puts("#{ansi(:cyan)}│#{ansi(:reset)} #{ansi(:bold)}Reasoning:#{ansi(:reset)}")
 
-    if llm_response do
-      llm_response
+    if reasoning do
+      reasoning
       |> String.split("\n")
       |> Enum.each(fn line ->
         IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}#{line}#{ansi(:reset)}")
       end)
     else
-      IO.puts(
-        "#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}(not captured - run with debug: true)#{ansi(:reset)}"
-      )
+      IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}   #{ansi(:dim)}(none)#{ansi(:reset)}")
     end
 
     IO.puts("#{ansi(:cyan)}│#{ansi(:reset)}")

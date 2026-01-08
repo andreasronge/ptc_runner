@@ -496,7 +496,7 @@ defmodule PtcRunner.SubAgent.Loop do
           Metrics.build_trace_entry(state, code, fail_args, [],
             llm_response: response,
             llm_feedback: nil,
-            prints: lisp_step.prints || []
+            prints: lisp_step.prints
           )
 
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -529,7 +529,7 @@ defmodule PtcRunner.SubAgent.Loop do
                 llm_response: response,
                 llm_feedback: execution_result,
                 feedback_truncated: feedback_truncated,
-                prints: lisp_step.prints || []
+                prints: lisp_step.prints
               )
 
             # Update turn history with truncated result (keep last 3)
@@ -561,7 +561,7 @@ defmodule PtcRunner.SubAgent.Loop do
               Metrics.build_trace_entry(state, code, lisp_step.return, [],
                 llm_response: response,
                 llm_feedback: nil,
-                prints: lisp_step.prints || []
+                prints: lisp_step.prints
               )
 
             duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -740,7 +740,7 @@ defmodule PtcRunner.SubAgent.Loop do
       Metrics.build_trace_entry(state, code, lisp_step.return, [],
         llm_response: response,
         llm_feedback: nil,
-        prints: lisp_step.prints || []
+        prints: lisp_step.prints
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -777,7 +777,7 @@ defmodule PtcRunner.SubAgent.Loop do
       Metrics.build_trace_entry(state, code, lisp_step.return, [],
         llm_response: response,
         llm_feedback: error_message,
-        prints: lisp_step.prints || []
+        prints: lisp_step.prints
       )
 
     new_state = %{
