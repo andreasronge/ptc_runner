@@ -412,8 +412,15 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
+  defp analyze_if([cond_ast, then_ast], tail?) do
+    with {:ok, c} <- do_analyze(cond_ast, false),
+         {:ok, t} <- do_analyze(then_ast, tail?) do
+      {:ok, {:if, c, t, nil}}
+    end
+  end
+
   defp analyze_if(_, _tail?) do
-    {:error, {:invalid_arity, :if, "expected (if cond then else)"}}
+    {:error, {:invalid_arity, :if, "expected (if cond then else?)"}}
   end
 
   # ============================================================

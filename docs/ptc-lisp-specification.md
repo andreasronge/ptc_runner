@@ -489,7 +489,7 @@ Extract values from maps by key. Supports both keyword and string keys.
 
 ### 5.2 `if` — Conditional
 
-Two-branch conditional (else is **required**):
+Conditional (else is **optional**):
 
 ```clojure
 (if condition
@@ -506,7 +506,7 @@ Two-branch conditional (else is **required**):
 (if (empty? [1]) "empty" "full")  ; => "full"
 ```
 
-**Single-branch `if` is not allowed.** Use `when` instead.
+**Single-branch `if` is allowed** and returns `nil` if the condition is false. However, `when` is often more idiomatic for side effects.
 
 ### 5.3 `if-not` — Negative Conditional
 
@@ -2519,7 +2519,7 @@ type-error at line 5:
 |-------|------|
 | Unknown symbol `foo` | Did you mean: `filter`, `first`, `find`? |
 | `where` missing operator | Use `(where :field = value)`, not `(where :field value)` |
-| Wrong arity for `if` | `if` requires exactly 3 arguments (condition, then, else) |
+| Wrong arity for `if` | `if` requires 2 or 3 arguments (condition, then, else?) |
 | `let` bindings not paired | `let` requires an even number of binding forms |
 
 ---
@@ -2539,6 +2539,7 @@ type-error at line 5:
 | File I/O (`slurp`, `spit`) | Security |
 | Regex literals | Complexity (use `re-pattern`) |
 | Multi-methods, protocols | Complexity |
+| `try`, `catch`, `throw` | No exception handling (use `fail` for errors) |
 
 **Note:** `println` IS supported — see section 8.12. It writes to an internal trace buffer, not stdout.
 
