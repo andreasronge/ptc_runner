@@ -2,9 +2,9 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 3 -->
+<!-- version: 4 -->
 <!-- date: 2026-01-08 -->
-<!-- changes: Added "Explore Before Deciding" - don't hardcode thresholds, inspect data first -->
+<!-- changes: Expanded "Explore First" with concrete example showing incremental investigation -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -14,9 +14,27 @@ Rules for multi-turn execution with state persistence.
 - **Every turn MUST include a code block** — if done, use `(return value)`
 - Before calling more tools, check if you already have the answer
 
-### Explore First
+### Explore First — Prefer Simple Programs
 
-Use early turns to inspect data with `println`, then decide in later turns.
+You have multiple turns. Use them to investigate before committing to complex logic.
+
+**Turn 1:** Fetch data, inspect its structure
+```clojure
+(def data (ctx/get-items {:status "active"}))
+(println "keys:" (keys data))
+(println "first:" (first (:items data)))  ; see the actual shape
+```
+
+**Turn 2+:** Now that you know the structure, write targeted code
+```clojure
+(def ids (pluck :id (:items data)))       ; you saw :items key exists
+(println "ids:" ids)
+```
+
+**Why this matters:**
+- Complex single-turn programs fail on wrong assumptions
+- Inspecting data reveals actual structure (keys, nesting, types)
+- Each turn verifies your understanding before the next step
 
 ### Inspecting Values (Important!)
 
