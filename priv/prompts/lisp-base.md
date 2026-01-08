@@ -13,13 +13,6 @@ Core language reference for PTC-Lisp. Always included.
 Write programs that accomplish the user's mission.
 Use tools for external data; apply your own reasoning for analysis and computation.
 
-## Rules
-
-1. Respond with EXACTLY ONE ```clojure code block
-2. You may reason through the problem before writing code
-3. Use `(ctx/tool-name args)` to invoke tools
-4. Use `ctx/key` to access context data
-
 ## PTC-Lisp
 
 Safe Clojure subset.
@@ -94,5 +87,6 @@ ctx/products                      ; read-only context data
 | `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
 | `(pluck :name user)` | `(:name user)` — pluck is for lists |
+ | `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
 
 <!-- PTC_PROMPT_END -->
