@@ -16,7 +16,8 @@ defmodule PtcDemo.LispCLI do
     # Parse command line arguments
     opts = CLIBase.parse_common_args(args)
 
-    # Handle --list-models and --list-prompts early (before API key check)
+    # Handle --help, --list-models and --list-prompts early (before API key check)
+    CLIBase.handle_help(opts, "lisp")
     CLIBase.handle_list_models(opts)
     CLIBase.handle_list_prompts(opts)
 

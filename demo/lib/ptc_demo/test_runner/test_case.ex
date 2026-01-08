@@ -218,7 +218,7 @@ defmodule PtcDemo.TestRunner.TestCase do
       # Cannot be solved in one program - requires interpreting what "suspicious" means
       %{
         query:
-          "Analyze expense claims to find s uspicious patterns. " <>
+          "Analyze expense claims to find suspicious patterns. " <>
             "Which employee's spending looks most like potential fraud or abuse? " <>
             "Return their employee_id.",
         expect: :integer,

@@ -75,6 +75,7 @@ defmodule PtcDemo.TestRunner.Report do
     | Input Tokens | #{summary.stats.input_tokens} |
     | Output Tokens | #{summary.stats.output_tokens} |
     | Total Tokens | #{summary.stats.total_tokens} |
+    | System Prompt Tokens (est.) | #{summary.stats.system_prompt_tokens} |
     | Cost | #{Base.format_cost(summary.stats.total_cost)} |
 
     ## Results

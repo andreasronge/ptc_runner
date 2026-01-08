@@ -210,7 +210,8 @@ defmodule PtcDemo.Agent do
            debug: debug
          ) do
       {:ok, step} ->
-        if debug, do: SubAgent.Debug.print_trace(step, messages: true)
+        # Show trace: verbose shows program + usage, debug adds full messages
+        if debug or verbose, do: SubAgent.Debug.print_trace(step, messages: debug, usage: verbose)
 
         result = step.return
         new_memory = step.memory || %{}
@@ -387,10 +388,8 @@ defmodule PtcDemo.Agent do
         |> String.replace(~r/# Available Tools.*?(?=\n#|\z)/s, "")
 
       language_spec = PtcDemo.Prompts.get(prompt_profile)
-      output_format = output_format_for(prompt_profile)
 
-      [@role_prefix, stripped, language_spec, output_format]
-      |> Enum.reject(&is_nil/1)
+      [@role_prefix, stripped, language_spec]
       |> Enum.join("\n\n")
     end
   end
@@ -398,40 +397,8 @@ defmodule PtcDemo.Agent do
   defp build_system_prompt(prompt_profile, _max_turns) do
     %{
       prefix: @role_prefix,
-      language_spec: PtcDemo.Prompts.get(prompt_profile),
-      output_format: output_format_for(prompt_profile)
+      language_spec: PtcDemo.Prompts.get(prompt_profile)
     }
-  end
-
-  defp output_format_for(:multi_turn) do
-    """
-    # Output Format
-
-    Respond with a single ```clojure code block containing your program for THIS TURN:
-
-    ```clojure
-    (->> ctx/data (filter pred) (map transform))
-    ```
-
-    Do NOT include:
-    - Explanatory text before or after the code
-    - Multiple code blocks
-    - Programs for future turns (write ONE program, observe result, then decide next)
-    """
-  end
-
-  defp output_format_for(:single_shot) do
-    """
-    # Output Format
-
-    Respond with a single ```clojure code block. The expression's value IS the result.
-
-    ```clojure
-    (count ctx/products)
-    ```
-
-    **IMPORTANT:** Do NOT wrap in `(return ...)` - just write the expression directly.
-    """
   end
 
   defp llm_callback(model) do
@@ -520,12 +487,13 @@ defmodule PtcDemo.Agent do
     input = Map.get(usage, :input_tokens, 0)
     output = Map.get(usage, :output_tokens, 0)
     total = Map.get(usage, :total_tokens, input + output)
+    system_prompt = Map.get(usage, :system_prompt_tokens, 0)
 
     %{
       input_tokens: acc.input_tokens + input,
       output_tokens: acc.output_tokens + output,
       total_tokens: acc.total_tokens + total,
-      system_prompt_tokens: acc.system_prompt_tokens,
+      system_prompt_tokens: acc.system_prompt_tokens + system_prompt,
       total_runs: acc.total_runs + 1,
       total_cost: acc.total_cost,
       requests: acc.requests + Map.get(usage, :llm_requests, 1)
