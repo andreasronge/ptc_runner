@@ -234,7 +234,100 @@ defmodule PtcDemo.TestRunner.TestCase do
         constraint: {:eq, "Policy WFH-2024-REIMB"},
         max_turns: 6,
         description: "Multi-turn: search, narrow results, find document covering both topics"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # REASONING + COMPUTATION: Tests requiring both data processing and judgment
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # Temporal trend analysis - requires date parsing, grouping, delta calculation
+      %{
+        query:
+          "Find the month with the highest order growth rate compared to the previous month. " <>
+            "Orders have created_at dates in 'YYYY-MM-DD' format. " <>
+            "Return a map with :month (e.g. '2024-03'), :growth_rate (as decimal, e.g. 0.25 for 25%), " <>
+            "and :order_counts showing {:previous, :current} counts.",
+        expect: :map,
+        constraint: {:has_keys, [:month, :growth_rate, :order_counts]},
+        max_turns: 4,
+        description: "Temporal trend: group by month, calculate sequential growth rates, find max"
       }
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # TODO: Additional reasoning + computation tests to implement
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # TODO: Budget-Constrained Optimization
+      # Query: "Select products to restock with a $50,000 budget, maximizing total
+      #         expected revenue (price × stock as proxy for demand). Don't exceed budget.
+      #         Return list of product IDs and total cost."
+      # Requires: sorting by value ratio, greedy selection, constraint checking
+      # Reasoning: Trade-off analysis, knowing when to stop adding items
+
+      # TODO: Anomaly Detection with Explanation
+      # Query: "Find employees whose expense patterns are unusual compared to their
+      #         department peers. Return employee_id and explanation of why unusual."
+      # Requires: group-by department, calculate stats (mean, stddev), compare individuals
+      # Reasoning: Define "unusual" (>2 std dev?), articulate findings
+
+      # TODO: Data Quality Assessment
+      # Query: "Identify orders that have data integrity issues (e.g., quantity is 0,
+      #         total is negative, or status is invalid). Return list of order IDs
+      #         with the issue type for each."
+      # Requires: validation logic, cross-field checks
+      # Reasoning: Understanding what "integrity" means, categorizing issues
+
+      # TODO: Hypothesis Testing Loop
+      # Query: "Determine if remote employees have different expense patterns than
+      #         office employees. Compare average expense amounts and category
+      #         distributions. Return your methodology and conclusion as a map."
+      # Requires: join employees→expenses, group-by remote status, statistical comparison
+      # Reasoning: Form hypothesis, design test, interpret results
+
+      # TODO: Dependency Resolution (would need new dataset with task dependencies)
+      # Query: "Given project tasks with dependencies, return the optimal execution
+      #         order (topological sort) and identify any circular dependencies."
+      # Requires: graph traversal, cycle detection
+      # Reasoning: Understanding dependency semantics, handling edge cases
+
+      # TODO: Multi-Step ETL Pipeline
+      # Query: "Create a customer value report: calculate total spend per customer
+      #         from orders, segment into tiers (Bronze <$1000, Silver <$5000,
+      #         Gold ≥$5000), return count per tier."
+      # Requires: aggregation, classification logic, final summary
+      # Reasoning: Breaking complex task into sequential steps
+
+      # TODO: Comparative Period Analysis
+      # Query: "Compare first half vs second half of 2024 orders: which product
+      #         categories improved and which declined? Return categories with
+      #         change direction and percentage."
+      # Requires: date filtering, join orders→products, grouping, calculating changes
+      # Reasoning: Defining "improvement" and "decline" thresholds
+
+      # TODO: Resource Allocation with Minimum Threshold
+      # Query: "Distribute $100,000 training budget across departments proportionally
+      #         to headcount, but ensure no department gets less than $5,000.
+      #         Return allocation per department."
+      # Requires: proportional calculation, constraint handling, redistribution
+      # Reasoning: Handling minimum threshold edge cases, iterative adjustment
+
+      # TODO: Error Recovery Scenario (would need flaky tool simulation)
+      # Query: "Calculate correlation between employee tenure and expense approval rate.
+      #         Handle any incomplete or missing data gracefully."
+      # Requires: join, aggregation, handling missing values
+      # Reasoning: Recognizing incomplete data, deciding how to proceed
+
+      # TODO: Search with Disambiguation
+      # Query: "Find the policy about 'leaves'. If ambiguous (vacation vs environmental),
+      #         search for both interpretations and report what you found."
+      # Requires: multiple searches, result analysis
+      # Reasoning: Recognizing ambiguity, exploring interpretations
+
+      # TODO: Incremental Refinement (would need simulator tool)
+      # Query: "Find the optimal discount percentage (0-50%) that maximizes
+      #         revenue using the price_simulator tool. Use binary search."
+      # Requires: iterative testing, optimization strategy
+      # Reasoning: Search strategy, convergence criteria
     ]
   end
 end
