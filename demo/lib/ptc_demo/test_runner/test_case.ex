@@ -171,10 +171,11 @@ defmodule PtcDemo.TestRunner.TestCase do
       %{
         query:
           "Which expense category has the highest total spending? " <>
-            "Return a map with :highest (the top category with its stats) and :breakdown " <>
-            "(all categories sorted by total descending). Each category should have " <>
+            "Return the top category with its stats as :highest, and all categories " <>
+            "sorted by total descending as :breakdown. Each category should have " <>
             ":category, :total, :count, and :avg fields.",
         expect: :map,
+        signature: "(question :string) -> {highest :map, breakdown [:map]}",
         constraint: {:has_keys, [:highest, :breakdown]},
         description:
           "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
@@ -245,9 +246,11 @@ defmodule PtcDemo.TestRunner.TestCase do
         query:
           "Find the month with the highest order growth rate compared to the previous month. " <>
             "Orders have created_at dates in 'YYYY-MM-DD' format. " <>
-            "Return a map with :month (e.g. '2024-03'), :growth_rate (as decimal, e.g. 0.25 for 25%), " <>
-            "and :order_counts showing {:previous, :current} counts.",
+            "Return :month (e.g. '2024-03'), :growth_rate (as decimal, e.g. 0.25 for 25%), " <>
+            "and :order_counts with :previous and :current counts.",
         expect: :map,
+        signature:
+          "(question :string) -> {month :string, growth_rate :float, order_counts {previous :int, current :int}}",
         constraint: {:has_keys, [:month, :growth_rate, :order_counts]},
         max_turns: 4,
         description: "Temporal trend: group by month, calculate sequential growth rates, find max"
@@ -260,9 +263,11 @@ defmodule PtcDemo.TestRunner.TestCase do
             "(price × stock as proxy for demand). Each product's cost is its price. Don't exceed budget. " <>
             "Use a greedy approach: sort by value ratio (expected_revenue / price = stock), " <>
             "then select products until budget is exhausted. " <>
-            "Return a map with :product_ids (list of selected product IDs), :total_cost (sum of prices), " <>
+            "Return :product_ids (selected IDs), :total_cost (sum of prices), " <>
             "and :expected_revenue (sum of price × stock for selected products).",
         expect: :map,
+        signature:
+          "(question :string) -> {product_ids [:int], total_cost :float, expected_revenue :float}",
         constraint: {:has_keys, [:product_ids, :total_cost, :expected_revenue]},
         max_turns: 3,
         description:
