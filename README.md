@@ -118,6 +118,7 @@ end
 - **`mix ptc.repl`** - Interactive REPL for testing PTC-Lisp expressions
 - **[Playground Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)** - Try PTC-Lisp interactively
 - **[LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd)** - Build an agent end-to-end
+- **[examples/](examples/)** - Runnable example applications
 
 ## Low-Level API
 
