@@ -298,12 +298,15 @@ defmodule PtcRunner.SubAgent.Prompt do
     # Determine if multi-turn mode
     multi_turn? = agent.max_turns > 1
 
+    # Merge agent context_descriptions into received_field_descriptions
+    # Chained (received) descriptions take precedence (upstream agent knows better)
+    all_field_descriptions =
+      Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
+
     # Generate sections
-    role_section = generate_role_section()
-    rules_section = generate_rules_section(multi_turn?)
-    # Pass received field descriptions for rendering in the data inventory
+    # Note: Role and Rules are now in priv/prompts/lisp-base.md (included via language_ref)
     data_inventory =
-      DataInventory.generate(context, context_signature, received_field_descriptions)
+      DataInventory.generate(context, context_signature, all_field_descriptions)
 
     tool_schemas = Tools.generate(agent.tools, agent.tool_catalog, multi_turn?)
 
@@ -312,57 +315,17 @@ defmodule PtcRunner.SubAgent.Prompt do
     mission = expand_mission(agent.prompt, context)
 
     # Combine all sections
+    # language_ref contains role, rules, and language reference from priv/prompts/
     [
-      role_section,
-      rules_section,
+      language_ref,
       data_inventory,
       tool_schemas,
-      language_ref,
       expected_output,
       output_fmt,
       "# Mission\n\n#{mission}"
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
-  end
-
-  defp generate_role_section do
-    """
-    # Role
-
-    You are a PTC-Lisp program generator. Your task is to write programs that accomplish
-    the user's mission. Use tools when available for external data, but apply your own
-    reasoning for analysis, classification, and computation tasks.
-
-    You MUST respond with a PTC-Lisp program in a ```clojure code block.
-    The program will be executed, and you may see results in subsequent turns.
-    """
-  end
-
-  defp generate_rules_section(multi_turn?) do
-    base_rules = """
-    # Rules
-
-    1. Respond with EXACTLY ONE ```clojure code block
-    2. Do not include explanatory text outside the code block
-    3. Use `(ctx/tool-name args)` to invoke tools
-    4. Use `ctx/key` to access context data
-    5. For reasoning tasks (classification, analysis, summarization), compute the answer directly
-    """
-
-    if multi_turn? do
-      base_rules <>
-        """
-        6. Access stored values as plain symbols (values from previous turns)
-        7. Call `(return result)` when the mission is complete
-        8. Call `(fail {:reason :keyword :message "..."})` only for unrecoverable errors requiring unavailable external data
-        """
-    else
-      base_rules <>
-        """
-        6. The expression result is your answer - do NOT wrap it in `return`
-        """
-    end
   end
 
   defp expand_mission(prompt, context) do

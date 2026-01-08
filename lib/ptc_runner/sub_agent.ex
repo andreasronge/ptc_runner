@@ -32,6 +32,7 @@ defmodule PtcRunner.SubAgent do
   - `turn_budget` - pos_integer(), total turns across all nested agents (default: 20)
   - `description` - String.t() | nil, human-readable description for external documentation
   - `field_descriptions` - map() | nil, descriptions for signature fields (keys are field names)
+  - `context_descriptions` - map() | nil, descriptions for context variables (keys are field names)
   - `format_options` - keyword list controlling output truncation (see `t:format_options/0`)
 
   ## Tool Resolution
@@ -158,6 +159,7 @@ defmodule PtcRunner.SubAgent do
           turn_budget: pos_integer(),
           description: String.t() | nil,
           field_descriptions: map() | nil,
+          context_descriptions: map() | nil,
           format_options: format_options()
         }
 
@@ -183,6 +185,7 @@ defmodule PtcRunner.SubAgent do
     :system_prompt,
     :description,
     :field_descriptions,
+    :context_descriptions,
     tools: %{},
     max_turns: 5,
     memory_limit: 1_048_576,
@@ -222,6 +225,7 @@ defmodule PtcRunner.SubAgent do
   - `memory_limit` - Positive integer for max bytes for memory map (default: 1MB = 1,048,576 bytes)
   - `description` - String describing the agent's purpose (for external docs)
   - `field_descriptions` - Map of field names to descriptions for signature fields
+  - `context_descriptions` - Map of context variable names to descriptions (shown in Data Inventory)
   - `format_options` - Keyword list controlling output truncation (merged with defaults)
 
   ## Returns

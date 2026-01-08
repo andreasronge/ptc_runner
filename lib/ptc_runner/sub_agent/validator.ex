@@ -44,6 +44,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_prompt_placeholders!(opts)
     validate_description!(opts)
     validate_field_descriptions!(opts)
+    validate_context_descriptions!(opts)
     validate_format_options!(opts)
   end
 
@@ -187,6 +188,15 @@ defmodule PtcRunner.SubAgent.Validator do
       {:ok, nil} -> :ok
       {:ok, fd} when is_map(fd) -> :ok
       {:ok, _} -> raise ArgumentError, "field_descriptions must be a map"
+      :error -> :ok
+    end
+  end
+
+  defp validate_context_descriptions!(opts) do
+    case Keyword.fetch(opts, :context_descriptions) do
+      {:ok, nil} -> :ok
+      {:ok, cd} when is_map(cd) -> :ok
+      {:ok, _} -> raise ArgumentError, "context_descriptions must be a map"
       :error -> :ok
     end
   end
