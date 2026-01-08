@@ -431,10 +431,43 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def reduce(f, %MapSet{} = set) do
+    case MapSet.to_list(set) do
+      [] -> nil
+      [h | t] -> Enum.reduce(t, h, fn elem, acc -> f.(acc, elem) end)
+    end
+  end
+
+  def reduce(f, coll) when is_map(coll) do
+    case Map.to_list(coll) do
+      [] -> nil
+      [{k, v} | t] -> Enum.reduce(t, [k, v], fn {nk, nv}, acc -> f.(acc, [nk, nv]) end)
+    end
+  end
+
+  def reduce(f, coll) when is_binary(coll) do
+    case graphemes(coll) do
+      [] -> nil
+      [h | t] -> Enum.reduce(t, h, fn elem, acc -> f.(acc, elem) end)
+    end
+  end
+
   # reduce with 3 args: (reduce f init coll)
   # Clojure: (f acc elem), Elixir: fn elem, acc -> ... end
   def reduce(f, init, coll) when is_list(coll) do
     Enum.reduce(coll, init, fn elem, acc -> f.(acc, elem) end)
+  end
+
+  def reduce(f, init, %MapSet{} = set) do
+    Enum.reduce(set, init, fn elem, acc -> f.(acc, elem) end)
+  end
+
+  def reduce(f, init, coll) when is_map(coll) do
+    Enum.reduce(coll, init, fn {k, v}, acc -> f.(acc, [k, v]) end)
+  end
+
+  def reduce(f, init, coll) when is_binary(coll) do
+    Enum.reduce(graphemes(coll), init, fn elem, acc -> f.(acc, elem) end)
   end
 
   def sum_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
