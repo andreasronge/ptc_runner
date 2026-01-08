@@ -64,7 +64,9 @@ defmodule PtcRunner.Lisp.Env do
     :regex => :regex,
     :Math => :math,
     :Interop => :interop,
-    :System => :interop
+    :System => :interop,
+    :"java.time.LocalDate" => :interop,
+    :LocalDate => :interop
   }
 
   @doc """
@@ -148,7 +150,7 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:interop) do
-    [:"java.util.Date.", :".getTime", :"System/currentTimeMillis"]
+    [:"java.util.Date.", :".getTime", :"System/currentTimeMillis", :"LocalDate/parse"]
   end
 
   def builtins_by_category(:core) do
@@ -371,7 +373,8 @@ defmodule PtcRunner.Lisp.Env do
       {:"java.util.Date.",
        {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
       {:".getTime", {:normal, &Runtime.dot_get_time/1}},
-      {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}}
+      {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
+      {:parse, {:normal, &Runtime.local_date_parse/1}}
     ]
   end
 end
