@@ -140,7 +140,15 @@ defmodule PtcRunner.SubAgent.Prompt do
               to: DataInventory,
               as: :generate
 
-  defdelegate generate_tool_schemas(tools, tool_catalog \\ nil), to: Tools, as: :generate
+  @doc """
+  Generate tool schemas section. Delegates to `PtcRunner.SubAgent.Prompt.Tools.generate/3`.
+
+  The `multi_turn?` parameter controls whether `return`/`fail` tools are included.
+  Defaults to `true` for backward compatibility.
+  """
+  def generate_tool_schemas(tools, tool_catalog \\ nil, multi_turn? \\ true) do
+    Tools.generate(tools, tool_catalog, multi_turn?)
+  end
 
   @doc """
   Apply system prompt customization (string override, function, or map with prefix/suffix).
@@ -287,14 +295,17 @@ defmodule PtcRunner.SubAgent.Prompt do
           {Prompts.get(default_spec), @output_format}
       end
 
+    # Determine if multi-turn mode
+    multi_turn? = agent.max_turns > 1
+
     # Generate sections
     role_section = generate_role_section()
-    rules_section = generate_rules_section()
+    rules_section = generate_rules_section(multi_turn?)
     # Pass received field descriptions for rendering in the data inventory
     data_inventory =
       DataInventory.generate(context, context_signature, received_field_descriptions)
 
-    tool_schemas = Tools.generate(agent.tools, agent.tool_catalog)
+    tool_schemas = Tools.generate(agent.tools, agent.tool_catalog, multi_turn?)
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
@@ -328,19 +339,30 @@ defmodule PtcRunner.SubAgent.Prompt do
     """
   end
 
-  defp generate_rules_section do
-    """
+  defp generate_rules_section(multi_turn?) do
+    base_rules = """
     # Rules
 
     1. Respond with EXACTLY ONE ```clojure code block
     2. Do not include explanatory text outside the code block
     3. Use `(ctx/tool-name args)` to invoke tools
     4. Use `ctx/key` to access context data
-    5. Access stored values as plain symbols (values from previous turns)
-    6. Call `(return result)` when the mission is complete
-    7. Call `(fail {:reason :keyword :message "..."})` only for unrecoverable errors requiring unavailable external data
-    8. For reasoning tasks (classification, analysis, summarization), compute the answer directly
+    5. For reasoning tasks (classification, analysis, summarization), compute the answer directly
     """
+
+    if multi_turn? do
+      base_rules <>
+        """
+        6. Access stored values as plain symbols (values from previous turns)
+        7. Call `(return result)` when the mission is complete
+        8. Call `(fail {:reason :keyword :message "..."})` only for unrecoverable errors requiring unavailable external data
+        """
+    else
+      base_rules <>
+        """
+        6. The expression result is your answer - do NOT wrap it in `return`
+        """
+    end
   end
 
   defp expand_mission(prompt, context) do
