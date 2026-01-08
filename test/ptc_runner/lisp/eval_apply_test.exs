@@ -71,6 +71,16 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
       assert {:ok, "Alice", _} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
+    test "apply with map as function" do
+      env = Env.initial()
+      # (apply {:name "Alice"} [:name])
+      ast =
+        {:call, {:var, :apply},
+         [{:map, [{{:keyword, :name}, {:string, "Alice"}}]}, {:vector, [{:keyword, :name}]}]}
+
+      assert {:ok, "Alice", _} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
     test "apply with set as function" do
       env = Env.initial()
       # (apply #{1 2 3} [2])
