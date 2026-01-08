@@ -330,6 +330,12 @@ PtcRunner.SubAgent.new(
     price: "Price in USD"
   },
 
+  # Descriptions for context variables (shown in Data Inventory)
+  context_descriptions: %{
+    user_id: "ID of the customer performing the search",
+    region: "ISO region code (e.g. US, UK)"
+  },
+
   # Output formatting options (shown with defaults)
   format_options: [
     feedback_limit: 10,        # max collection items in turn feedback

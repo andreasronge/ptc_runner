@@ -200,9 +200,9 @@ SubAgent.new(
 ```
 
 The `:multi_turn` profile documents:
-- State persistence with `def`/`defn`
-- The `:return` key for output firewalling
-- Multi-turn workflow patterns
+- `return`/`fail` for finishing the agentic loop and returning values to caller
+- `println` for outputting values to LLM context (expression results are NOT shown)
+- State persistence with `def` and `*1/*2/*3` for previous results
 
 ## Prompt Preview
 
