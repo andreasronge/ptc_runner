@@ -63,7 +63,13 @@ defmodule PtcRunner.Lisp.Eval do
           {:ok, value(), EvalContext.t()} | {:error, runtime_error()}
   def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ []) do
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history)
-    do_eval(ast, eval_ctx)
+
+    try do
+      do_eval(ast, eval_ctx)
+    catch
+      {:return_signal, value, ctx} -> {:ok, {:return_signal, value}, ctx}
+      {:fail_signal, value, ctx} -> {:ok, {:fail_signal, value}, ctx}
+    end
   end
 
   # ============================================================
@@ -398,6 +404,12 @@ defmodule PtcRunner.Lisp.Eval do
               rescue
                 e ->
                   {:error, {:pmap_error, Exception.message(e)}}
+              catch
+                {:return_signal, _, _} ->
+                  {:error, {:pmap_error, "return called inside pmap"}}
+
+                {:fail_signal, _, _} ->
+                  {:error, {:pmap_error, "fail called inside pmap"}}
               end
             end,
             timeout: 5_000,
@@ -441,6 +453,12 @@ defmodule PtcRunner.Lisp.Eval do
                 rescue
                   e ->
                     {:error, {:pcalls_error, idx, Exception.message(e)}}
+                catch
+                  {:return_signal, _, _} ->
+                    {:error, {:pcalls_error, idx, "return called inside pcalls"}}
+
+                  {:fail_signal, _, _} ->
+                    {:error, {:pcalls_error, idx, "fail called inside pcalls"}}
                 end
               end,
               timeout: 5_000,
@@ -461,7 +479,20 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Builtin calls (return, fail)
+  # Control flow signals: return and fail
+  defp do_eval({:return, value_ast}, %EvalContext{} = eval_ctx) do
+    with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+      throw({:return_signal, value, eval_ctx2})
+    end
+  end
+
+  defp do_eval({:fail, error_ast}, %EvalContext{} = eval_ctx) do
+    with {:ok, error, eval_ctx2} <- do_eval(error_ast, eval_ctx) do
+      throw({:fail_signal, error, eval_ctx2})
+    end
+  end
+
+  # Builtin calls (other tools)
   defp do_eval(
          {:builtin_call, tool_name, args_ast},
          %EvalContext{tool_exec: tool_exec} = eval_ctx

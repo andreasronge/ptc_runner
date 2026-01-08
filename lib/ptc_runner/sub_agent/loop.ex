@@ -408,19 +408,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Normalize SubAgentTool instances to functions with telemetry
         normalized_tools = ToolNormalizer.normalize(agent.tools, state, agent)
 
-        # Merge system tools (return/fail) with user tools
-        # System tools must come second to take precedence
-        # Both return sentinel tuples so we can detect actual execution vs.
-        # presence in unevaluated conditional branches (static code analysis fails)
-        # Note: Sentinel collision with user data is theoretically possible but
-        # extremely unlikely - these tuples are internal implementation details
-        system_tools = %{
-          "return" => fn args -> {:__ptc_return__, args} end,
-          "fail" => fn args -> {:__ptc_fail__, args} end
-        }
-
-        all_tools = Map.merge(normalized_tools, system_tools)
-        execute_code_with_tools(code, response, agent, llm, state, exec_context, all_tools)
+        execute_code_with_tools(code, response, agent, llm, state, exec_context, normalized_tools)
     end
   end
 
