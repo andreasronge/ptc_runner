@@ -200,7 +200,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
       {"comp", "(comp inc inc)", :unbound_var},
       {"eval", "(eval (+ 1 2))", :unbound_var},
       {"read-string", "(read-string \"(+ 1 2)\")", :unbound_var},
-      {"println", "(println \"hi\")", :unbound_var}
+      {"println", "(println \"hi\")", :unbound_var},
+      {"try", "(try 1)", :unbound_var}
     ]
   end
 

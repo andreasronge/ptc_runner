@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp.
 
-<!-- version: 7 -->
-<!-- date: 2026-01-07 -->
-<!-- changes: Added fnil support, removed from restrictions -->
+<!-- version: 8 -->
+<!-- date: 2026-01-08 -->
+<!-- changes: Added try/catch/throw restriction -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -55,6 +55,7 @@ ctx/products                      ; read-only context data
 - No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!` — use `def` for state
 - No `partial` — use anonymous functions `#(...)`
 - No reader macros — no `#_` (discard), `#'` (var quote), `#""` (regex literal)
+- No `try/catch/throw` — use `fail` for errors
 
 ### Common Mistakes
 
