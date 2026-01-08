@@ -17,7 +17,8 @@ defmodule PtcDemo.JsonCLI do
     # Parse command line arguments
     opts = CLIBase.parse_common_args(args)
 
-    # Handle --list-models early (before API key check)
+    # Handle --help and --list-models early (before API key check)
+    CLIBase.handle_help(opts, "json")
     CLIBase.handle_list_models(opts)
 
     # Handle --show-prompt (needs agent but not API key)

@@ -125,6 +125,9 @@ defmodule PtcDemo.CLIBase do
               System.halt(1)
           end
 
+        arg == "--help" or arg == "-h" ->
+          Map.put(acc, :help, true)
+
         arg == "--verbose" or arg == "-v" ->
           Map.put(acc, :verbose, true)
 
@@ -231,9 +234,59 @@ defmodule PtcDemo.CLIBase do
         IO.puts("    #{description}\n")
       end
 
-      IO.puts("Usage: --prompt=<name>  (e.g., --prompt=minimal)\n")
+      IO.puts("Usage: --prompt=<name>  (e.g., --prompt=single_shot)\n")
       System.halt(0)
     end
+  end
+
+  @doc """
+  Handle --help flag. Prints usage information and exits if flag is set.
+
+  Takes opts map and the task name (e.g., "lisp", "json").
+  """
+  def handle_help(opts, task_name) do
+    if opts[:help] do
+      IO.puts(cli_help_text(task_name))
+      System.halt(0)
+    end
+  end
+
+  defp cli_help_text(task_name) do
+    """
+
+    Usage: mix #{task_name} [options]
+
+    Options:
+      -h, --help              Show this help message
+      -v, --verbose           Enable verbose output
+      -d, --debug             Enable debug mode (shows full prompts/responses)
+
+    Test Options:
+      --test                  Run all automated tests
+      --test=N                Run a single test by index (e.g., --test=16)
+      --runs=N                Run tests N times (e.g., --runs=3)
+      --report                Generate markdown report (auto-named)
+      --report=FILE           Generate report with custom filename
+      --validate-clojure      Validate programs against Babashka
+
+    Model & Prompt:
+      --model=NAME            Use specific model (e.g., --model=haiku, --model=gemini)
+      --prompt=NAME           Use specific prompt profile (e.g., --prompt=single_shot)
+      --prompt=A,B            Compare multiple prompts (e.g., --prompt=single_shot,multi_turn)
+      --explore               Start in explore mode (LLM discovers schema)
+
+    Info:
+      --list-models           Show available models and exit
+      --list-prompts          Show available prompt profiles and exit
+      --show-prompt           Show the system prompt and exit
+
+    Examples:
+      mix #{task_name}                           Start interactive REPL
+      mix #{task_name} --test                    Run all tests
+      mix #{task_name} --test=16 --verbose       Run test 16 with verbose output
+      mix #{task_name} --test --runs=5 --report  Run tests 5 times, generate report
+      mix #{task_name} --model=haiku             Start REPL with Haiku model
+    """
   end
 
   @doc """
@@ -310,13 +363,20 @@ defmodule PtcDemo.CLIBase do
   def format_stats(stats) do
     cost_str = format_cost(stats.total_cost)
 
+    system_prompt_line =
+      if stats.system_prompt_tokens > 0 do
+        "\n      System prompt (est.): #{format_number(stats.system_prompt_tokens)}"
+      else
+        ""
+      end
+
     """
 
     Session Statistics:
       Requests:      #{stats.requests}
       Input tokens:  #{format_number(stats.input_tokens)}
       Output tokens: #{format_number(stats.output_tokens)}
-      Total tokens:  #{format_number(stats.total_tokens)}
+      Total tokens:  #{format_number(stats.total_tokens)}#{system_prompt_line}
       Total cost:    #{cost_str}
     """
   end

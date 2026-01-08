@@ -346,6 +346,8 @@ defmodule PtcDemo.LispTestRunner do
       validate_clojure = Keyword.get(opts, :validate_clojure, false)
       verbose = Keyword.get(opts, :verbose, true)
       debug = Keyword.get(opts, :debug, false)
+      report_path = Keyword.get(opts, :report)
+      runs = Keyword.get(opts, :runs, 1)
 
       test_case = Enum.at(cases, index - 1)
 
@@ -356,17 +358,76 @@ defmodule PtcDemo.LispTestRunner do
         agent_mod.set_model(model)
       end
 
+      current_model = agent_mod.model()
+
       # Set prompt based on test type when :auto
       effective_prompt = prompt_for_test(test_case, prompt_profile)
-      agent_mod.set_prompt_profile(effective_prompt)
 
       if verbose do
         max_turns = Map.get(test_case, :max_turns, 1)
         IO.puts("   [Prompt] #{effective_prompt}, max_turns: #{max_turns}")
+
+        if runs > 1 do
+          IO.puts("   [Runs] #{runs}")
+        end
       end
 
       clojure_available = check_clojure_validation(validate_clojure)
-      run_test(test_case, index, length(cases), verbose, debug, agent_mod, clojure_available)
+
+      # Run the test multiple times if requested
+      summaries =
+        for run_num <- 1..runs do
+          if runs > 1 && verbose do
+            IO.puts("\n--- Run #{run_num}/#{runs} ---")
+          end
+
+          # Reset agent between runs
+          agent_mod.reset()
+          agent_mod.set_data_mode(data_mode)
+          agent_mod.set_prompt_profile(effective_prompt)
+
+          start_time = System.monotonic_time(:millisecond)
+
+          result =
+            run_test(
+              test_case,
+              index,
+              length(cases),
+              verbose,
+              debug,
+              agent_mod,
+              clojure_available
+            )
+
+          stats = agent_mod.stats()
+          Base.build_summary([result], start_time, current_model, data_mode, stats)
+        end
+
+      # Use last run's result for pass/fail determination
+      last_result = hd(Enum.reverse(summaries)).results |> hd()
+
+      # Print aggregate summary if multiple runs
+      if runs > 1 && verbose do
+        total_passed = Enum.count(summaries, fn s -> s.failed == 0 end)
+        IO.puts("\n--- Aggregate: #{total_passed}/#{runs} runs passed ---")
+      end
+
+      # Generate report if requested
+      if report_path do
+        aggregate_summary = Base.build_aggregate_summary(summaries)
+
+        actual_path =
+          if report_path == :auto do
+            CLIBase.generate_report_filename("lisp", current_model)
+          else
+            report_path
+          end
+
+        written_path = Report.write(actual_path, aggregate_summary, "Lisp")
+        IO.puts("\nReport written to: #{written_path}")
+      end
+
+      last_result
     else
       verbose = Keyword.get(opts, :verbose, true)
 

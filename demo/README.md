@@ -231,10 +231,12 @@ mix json --test --model=deepseek -v       # Test with DeepSeek
 
 ```bash
 mix lisp [options]
+mix lisp --help        # Show all available options
 ```
 
 | Option | Description |
 |--------|-------------|
+| `--help`, `-h` | Show all available options and examples |
 | `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
 | `--prompt=<name>` | Set prompt profile (single_shot, multi_turn, or auto) |
