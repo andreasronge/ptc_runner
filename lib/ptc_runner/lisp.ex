@@ -262,7 +262,7 @@ defmodule PtcRunner.Lisp do
       end
     else
       {:error, {:parse_error, msg}} ->
-        {:error, Step.error(:parse_error, msg, %{})}
+        {:error, Step.error(:parse_error, msg, memory)}
 
       {:error, %Step{} = step} ->
         # Pass through Step errors from check_symbol_limit
@@ -270,11 +270,11 @@ defmodule PtcRunner.Lisp do
 
       {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
         # Preserve specific error atoms from Analyze phase (e.g., {:invalid_arity, :if, "msg"})
-        {:error, Step.error(reason_atom, format_error(reason), %{})}
+        {:error, Step.error(reason_atom, format_error(reason), memory)}
 
       {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
         # Handle other 2-tuple errors from Analyze phase
-        {:error, Step.error(reason_atom, format_error(reason), %{})}
+        {:error, Step.error(reason_atom, format_error(reason), memory)}
     end
   end
 
