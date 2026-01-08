@@ -38,4 +38,38 @@ defmodule PtcRunner.Lisp.TerminationTest do
       assert step.memory == %{}
     end
   end
+
+  describe "return/fail in threading macros" do
+    test "return in thread-last (->>)" do
+      {:ok, step} = Lisp.run("(->> 42 (return))")
+      assert step.return == {:__ptc_return__, 42}
+    end
+
+    test "return in thread-first (->)" do
+      {:ok, step} = Lisp.run("(-> 42 (return))")
+      assert step.return == {:__ptc_return__, 42}
+    end
+
+    test "fail in thread-last (->>)" do
+      {:ok, step} = Lisp.run("(->> \"error\" (fail))")
+      assert step.return == {:__ptc_fail__, "error"}
+    end
+
+    test "fail in thread-first (->)" do
+      {:ok, step} = Lisp.run("(-> {:reason :test} (fail))")
+      assert step.return == {:__ptc_fail__, %{reason: :test}}
+    end
+
+    test "return in longer pipeline" do
+      code = """
+      (->> [1 2 3 4 5]
+           (filter #(> % 2))
+           (count)
+           (return))
+      """
+
+      {:ok, step} = Lisp.run(code)
+      assert step.return == {:__ptc_return__, 3}
+    end
+  end
 end
