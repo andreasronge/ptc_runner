@@ -176,6 +176,25 @@ defmodule PtcRunner.SubAgent.PromptTest do
       # Should use :string from signature, not inferred :int
       assert inventory =~ ":string"
     end
+
+    test "formats floats with 2 decimal places" do
+      context = %{ratio: 3.333333333, pi: 3.14159265}
+
+      inventory = Prompt.generate_data_inventory(context, nil)
+
+      assert inventory =~ "3.33"
+      assert inventory =~ "3.14"
+      refute inventory =~ "3.333333"
+      refute inventory =~ "3.14159"
+    end
+
+    test "formats floats that round up correctly" do
+      context = %{value: 2.999}
+
+      inventory = Prompt.generate_data_inventory(context, nil)
+
+      assert inventory =~ "3.00"
+    end
   end
 
   describe "generate_tool_schemas/2" do

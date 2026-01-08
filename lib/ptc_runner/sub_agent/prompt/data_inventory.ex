@@ -202,5 +202,10 @@ defmodule PtcRunner.SubAgent.Prompt.DataInventory do
     end
   end
 
+  defp format_sample(value) when is_float(value) do
+    # Format floats with 2 decimal places for readability
+    :erlang.float_to_binary(Float.round(value, 2), decimals: 2)
+  end
+
   defp format_sample(value), do: inspect(value)
 end

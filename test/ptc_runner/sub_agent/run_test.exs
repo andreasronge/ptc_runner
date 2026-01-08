@@ -188,4 +188,56 @@ defmodule PtcRunner.SubAgent.RunTest do
       assert error_step.fail.reason == :chained_failure
     end
   end
+
+  describe "float_precision" do
+    test "default float_precision is 2" do
+      agent = SubAgent.new(prompt: "Test")
+      assert agent.float_precision == 2
+    end
+
+    test "rounds floats to 2 decimals in single-shot mode" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(/ 10 3)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 3.33
+    end
+
+    test "rounds floats in nested structures in single-shot mode" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n{:value (/ 10 3) :pi 3.14159}\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == %{value: 3.33, pi: 3.14}
+    end
+
+    test "rounds floats to 2 decimals in loop mode" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 2)
+      llm = fn _input -> {:ok, "```clojure\n(return (/ 10 3))\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 3.33
+    end
+
+    test "custom float_precision rounds to specified decimals" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1, float_precision: 4)
+      llm = fn _input -> {:ok, "```clojure\n(/ 10 3)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 3.3333
+    end
+
+    test "float_precision 0 rounds to integers" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1, float_precision: 0)
+      llm = fn _input -> {:ok, "```clojure\n(/ 10 3)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 3.0
+    end
+  end
 end

@@ -34,6 +34,7 @@ defmodule PtcRunner.SubAgent do
   - `field_descriptions` - map() | nil, descriptions for signature fields (keys are field names)
   - `context_descriptions` - map() | nil, descriptions for context variables (keys are field names)
   - `format_options` - keyword list controlling output truncation (see `t:format_options/0`)
+  - `float_precision` - non_neg_integer(), decimal places for floats in results and context (default: 2)
 
   ## Tool Resolution
 
@@ -160,7 +161,8 @@ defmodule PtcRunner.SubAgent do
           description: String.t() | nil,
           field_descriptions: map() | nil,
           context_descriptions: map() | nil,
-          format_options: format_options()
+          format_options: format_options(),
+          float_precision: non_neg_integer()
         }
 
   alias PtcRunner.SubAgent.LLMResolver
@@ -191,7 +193,8 @@ defmodule PtcRunner.SubAgent do
     memory_limit: 1_048_576,
     max_depth: 3,
     turn_budget: 20,
-    format_options: @default_format_options
+    format_options: @default_format_options,
+    float_precision: 2
   ]
 
   @doc "Returns the default format options."
@@ -227,6 +230,7 @@ defmodule PtcRunner.SubAgent do
   - `field_descriptions` - Map of field names to descriptions for signature fields
   - `context_descriptions` - Map of context variable names to descriptions (shown in Data Inventory)
   - `format_options` - Keyword list controlling output truncation (merged with defaults)
+  - `float_precision` - Non-negative integer for decimal places in floats (default: 2)
 
   ## Returns
 
@@ -693,7 +697,11 @@ defmodule PtcRunner.SubAgent do
           {:ok, code} ->
             # Execute via Lisp
             lisp_result =
-              case PtcRunner.Lisp.run(code, context: context, tools: %{}) do
+              case PtcRunner.Lisp.run(code,
+                     context: context,
+                     tools: %{},
+                     float_precision: agent.float_precision
+                   ) do
                 {:ok, step} -> unwrap_sentinels(step)
                 other -> other
               end
