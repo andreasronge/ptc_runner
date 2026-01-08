@@ -1493,6 +1493,9 @@ The `seq` function converts a collection to a sequence:
 
 ;; Common pattern: find map entry with max/min value using apply
 (apply max-key second (seq {:a 3 :b 7 :c 2}))  ; => [:b 7]
+
+;; Note: max-key/min-key are variadic (take individual items) - use apply to spread a collection
+;; max-by/min-by take a collection directly - no apply needed: (max-by :key coll)
 ```
 
 #### Predicates on Collections

@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 15 -->
-<!-- date: 2026-01-08 -->
-<!-- changes: Added contains? for list membership, common mistake for includes? vs contains? -->
+<!-- version: 16 -->
+<!-- date: 2026-01-09 -->
+<!-- changes: Added common mistake: apply max-by vs max-by (takes collection directly) -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -84,6 +84,7 @@ ctx/products                      ; read-only context data
 | `(includes s "x")` | `(includes? s "x")` |
 | `(includes? list elem)` | `(contains? list elem)` — includes? is for strings only |
 | `(-> coll (filter f))` | `(->> coll (filter f))` |
+| `(apply max-by :field coll)` | `(max-by :field coll)` — max-by takes a collection directly |
 | `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
 | `(pluck :name user)` | `(:name user)` — pluck is for lists |
