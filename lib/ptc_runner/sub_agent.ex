@@ -692,7 +692,11 @@ defmodule PtcRunner.SubAgent do
         case extract_code(content) do
           {:ok, code} ->
             # Execute via Lisp
-            lisp_result = PtcRunner.Lisp.run(code, context: context, tools: %{})
+            lisp_result =
+              case PtcRunner.Lisp.run(code, context: context, tools: %{}) do
+                {:ok, step} -> unwrap_sentinels(step)
+                other -> other
+              end
 
             # Add usage metrics, field_descriptions, and trace from this execution
             case lisp_result do
@@ -932,6 +936,36 @@ defmodule PtcRunner.SubAgent do
     }
   end
 
+  @doc """
+  Unwraps internal sentinel values from a search result.
+
+  Handles:
+  - `{:__ptc_return__, value}` -> `{:ok, step_with_raw_value}`
+  - `{:__ptc_fail__, value}` -> `{:error, error_step}`
+
+  Used by single-shot mode and compiled agents to provide clean results.
+  """
+  @spec unwrap_sentinels(PtcRunner.Step.t()) ::
+          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+  def unwrap_sentinels(%{return: {:__ptc_return__, value}} = step) do
+    {:ok, %{step | return: value}}
+  end
+
+  def unwrap_sentinels(%{return: {:__ptc_fail__, value}} = step) do
+    # Handle both structured and simple fail values
+    {reason, message} =
+      if is_map(value) do
+        {Map.get(value, :reason, :failed), Map.get(value, :message, inspect(value))}
+      else
+        {:failed, inspect(value)}
+      end
+
+    # Convert to error step to preserve failure intent
+    {:error, %{step | return: nil, fail: %{reason: reason, message: message}}}
+  end
+
+  def unwrap_sentinels(step), do: {:ok, step}
+
   @doc "See `PtcRunner.SubAgent.Compiler.compile/2`."
   defdelegate compile(agent, opts), to: PtcRunner.SubAgent.Compiler
 
@@ -976,6 +1010,7 @@ defmodule PtcRunner.SubAgent do
           user: String.t(),
           tool_schemas: [map()]
         }
+
   def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
 
