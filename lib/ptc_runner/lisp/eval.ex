@@ -380,6 +380,8 @@ defmodule PtcRunner.Lisp.Eval do
       erlang_fn = value_to_erlang_fn(fn_val, eval_ctx2)
 
       # Execute in parallel using Task.async_stream
+      # Limit concurrency to available schedulers to prevent resource exhaustion
+      # when LLM generates pmap over large collections (e.g., unbounded search results)
       results =
         coll_val
         |> Task.async_stream(
@@ -391,8 +393,9 @@ defmodule PtcRunner.Lisp.Eval do
                 {:error, {:pmap_error, Exception.message(e)}}
             end
           end,
-          timeout: :infinity,
-          ordered: true
+          timeout: 5_000,
+          ordered: true,
+          max_concurrency: System.schedulers_online() * 2
         )
         |> Enum.to_list()
 
@@ -420,6 +423,7 @@ defmodule PtcRunner.Lisp.Eval do
             end)
 
           # Execute all thunks in parallel using Task.async_stream
+          # Limit concurrency to prevent resource exhaustion
           results =
             erlang_fns
             |> Task.async_stream(
@@ -431,8 +435,9 @@ defmodule PtcRunner.Lisp.Eval do
                     {:error, {:pcalls_error, idx, Exception.message(e)}}
                 end
               end,
-              timeout: :infinity,
-              ordered: true
+              timeout: 5_000,
+              ordered: true,
+              max_concurrency: System.schedulers_online() * 2
             )
             |> Enum.to_list()
 
