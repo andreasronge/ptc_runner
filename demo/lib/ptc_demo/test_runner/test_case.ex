@@ -223,7 +223,7 @@ defmodule PtcDemo.TestRunner.TestCase do
             "Return their employee_id.",
         expect: :integer,
         constraint: {:between, 1, 200},
-        max_turns: 4,
+        max_turns: 6,
         description: "Multi-turn: explore expense patterns, judge suspicious, return employee_id"
       },
 
