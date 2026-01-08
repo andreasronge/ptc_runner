@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.Prompt do
       iex> agent = PtcRunner.SubAgent.new(prompt: "Add {{x}} and {{y}}")
       iex> context = %{x: 5, y: 3}
       iex> prompt = PtcRunner.SubAgent.Prompt.generate(agent, context: context)
-      iex> prompt =~ "You are a PTC-Lisp program generator"
+      iex> prompt =~ "## Role"
       true
       iex> prompt =~ "ctx/x"
       true
@@ -48,17 +48,16 @@ defmodule PtcRunner.SubAgent.Prompt do
   @output_format """
   # Output Format
 
-  Respond with a single ```clojure code block containing your program:
+  For complex tasks, think through the problem first, then respond with EXACTLY ONE ```clojure code block:
+
+  thinking:
+  [your reasoning here]
 
   ```clojure
-  (let [data (ctx/fetch {:id ctx/user_id})]
-    (return {:result data}))
+  (your-program-here)
   ```
 
-  Do NOT include:
-  - Explanatory text before or after the code
-  - Multiple code blocks
-  - Code outside of the ```clojure block
+  Do NOT include multiple code blocks or code outside the ```clojure block.
   """
 
   @doc """
@@ -70,7 +69,7 @@ defmodule PtcRunner.SubAgent.Prompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Process data")
       iex> prompt = PtcRunner.SubAgent.Prompt.generate(agent, context: %{user: "Alice"})
-      iex> prompt =~ "# Role" and prompt =~ "# Rules"
+      iex> prompt =~ "## Role" and prompt =~ "thinking:"
       true
 
   """

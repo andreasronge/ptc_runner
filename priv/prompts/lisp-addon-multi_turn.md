@@ -2,67 +2,76 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 4 -->
+<!-- version: 6 -->
 <!-- date: 2026-01-08 -->
-<!-- changes: Expanded "Explore First" with concrete example showing incremental investigation -->
+<!-- changes: Added explicit guidance to not return early -->
 
 <!-- PTC_PROMPT_START -->
 
 ### Multi-Turn Execution
 
-- Each turn: write code, inspect with `(println ...)`, continue or `(return answer)`
-- **Every turn MUST include a code block** — if done, use `(return value)`
-- Before calling more tools, check if you already have the answer
+Respond with EXACTLY ONE ```clojure code block per turn. Use `(println ...)` to inspect, `(return answer)` when done.
 
-### Explore First — Prefer Simple Programs
+**Explore first, return last.** Never `return` on your first turn. Always inspect results with `println` before returning. Only `return` after you've verified the data is correct.
 
-You have multiple turns. Use them to investigate before committing to complex logic.
+**Don't echo data in code from your context.** You already know the data, no need to print it again. No need to print the result before returning.
 
-**Turn 1:** Fetch data, inspect its structure
+**Keep programs very short.** Small programs are less likely to fail. You can always reuse and combine the programs in future turns.
+
+
+**Multiple tool calls per turn.** You can call several tools in one program to gather data efficiently:
+
+```clojure
+(def users (ctx/get-users {:role "admin"}))
+(def logs (ctx/get-logs {:level "error"}))
+(println "users:" (count users) "logs:" (count logs))
+```
+
+For complex tasks, think through each step:
+
+**Turn 1:**
+
+Reason: I need to find active items, but I don't know the response structure yet. Let me fetch and inspect.
+
 ```clojure
 (def data (ctx/get-items {:status "active"}))
 (println "keys:" (keys data))
-(println "first:" (first (:items data)))  ; see the actual shape
+(println "first:" (first (:items data)))
 ```
 
-**Turn 2+:** Now that you know the structure, write targeted code
-```clojure
-(def ids (pluck :id (:items data)))       ; you saw :items key exists
-(println "ids:" ids)
-```
+**Turn 2:**
 
-**Why this matters:**
-- Complex single-turn programs fail on wrong assumptions
-- Inspecting data reveals actual structure (keys, nesting, types)
-- Each turn verifies your understanding before the next step
-
-### Inspecting Values (Important!)
-
-**You cannot see expression results** — use `println` to see what your code produced:
+Reason: I now see the data, it has an :items key with maps containing :id. Let me extract and inspect the IDs before returning.
 
 ```clojure
-(def results (ctx/search {:q "x"}))
-(println "Found:" (count results))    ; ✓ you see: "Found: 42"
-(println "First:" (first results))    ; ✓ you see: "{:id 1, :name ...}"
-results                                ; ✗ you see nothing!
+(def ids (pluck :id (:items data)))
+(println "Found" (count ids) "items:" ids)
 ```
 
-Without `println`, you're blind to intermediate results. Always inspect data before processing it.
+**Turn 3:**
+
+Reason: I have 5 item IDs. The user asked for active items, and I've verified the structure. Now I can return.
+
+```clojure
+(return ids)
+```
 
 **Keep output concise** — truncated at ~512 chars. Avoid decorative formatting.
 
 ### Completion
 
 ```clojure
-(return {:result data})           ; success - ends execution
-(fail {:reason :not_found :message "User not found"})  ; error - ends execution
+(return {:result data})           ; success - exits immediately
+(fail {:reason :not_found :message "User not found"})  ; error - exits immediately
 ```
+
+**Note:** `return`/`fail` exit immediately — don't `println` on the same turn, no one will see it.
 
 ### State Persistence
 
 ```clojure
-(def results (ctx/search {:q "x"}))   ; stored across turns
-results                                ; access in later turns
+(def results (ctx/fetch-data {:id 123}))  ; stored across turns
+results                                    ; access in later turns
 ```
 
 ### Accessing Previous Results
@@ -75,21 +84,6 @@ results                                ; access in later turns
 
 Use `def` to store values you need to reference later.
 
-### Critical: Never Embed Observed Data
-
-You see println output, but **cannot copy data into code**.
-
-**Wrong:**
-```clojure
-(let [data [{:id 1 :name "Alice"}]]  ; NO - embedding observed data
-  (count data))
-```
-
-**Right:**
-```clojure
-(def users (ctx/get-users))           ; store, then reference
-(println "count:" (count users))      ; inspect
-(filter (where :active) users)        ; use the stored value
-```
-
+**Avoid Clojure features not in PTC-Lisp.** Syntax errors waste a turn. Simpler, shorter programs are safer. You can always build on them in future turns.
 <!-- PTC_PROMPT_END -->
+

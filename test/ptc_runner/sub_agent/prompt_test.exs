@@ -15,9 +15,9 @@ defmodule PtcRunner.SubAgent.PromptTest do
       prompt = Prompt.generate(agent, context: context)
 
       # Check all major sections are present
-      assert prompt =~ "# Role"
-      assert prompt =~ "You are a PTC-Lisp program generator"
-      assert prompt =~ "# Rules"
+      assert prompt =~ "## Role"
+      assert prompt =~ "Write programs that accomplish the user's mission"
+      assert prompt =~ "thinking:"
       assert prompt =~ "# Data Inventory"
       assert prompt =~ "# Available Tools"
       assert prompt =~ "## PTC-Lisp"
@@ -500,8 +500,8 @@ defmodule PtcRunner.SubAgent.PromptTest do
 
       prompt = Prompt.generate(agent, context: %{})
 
-      assert prompt =~ "# Role"
-      assert prompt =~ "# Rules"
+      assert prompt =~ "## Role"
+      assert prompt =~ "thinking:"
     end
   end
 
@@ -619,7 +619,7 @@ defmodule PtcRunner.SubAgent.PromptTest do
       prompt = Prompt.generate(agent, context: context)
 
       # Role section
-      assert prompt =~ "You are a PTC-Lisp"
+      assert prompt =~ "## Role"
 
       # Data inventory
       assert prompt =~ "ctx/user"
@@ -632,8 +632,8 @@ defmodule PtcRunner.SubAgent.PromptTest do
       # Mission with expanded template
       assert prompt =~ "Find urgent emails for Alice"
 
-      # PTC-Lisp reference (updated to ctx/tool-name syntax)
-      assert prompt =~ "(ctx/tool-name"
+      # PTC-Lisp reference (ctx/ syntax for tool invocation)
+      assert prompt =~ "(ctx/search"
 
       # Output format
       assert prompt =~ "```clojure"

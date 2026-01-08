@@ -21,9 +21,9 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       system_prompt = input.system
 
       # Single-shot mode should now use full Prompt.generate, which includes:
-      assert system_prompt =~ "# Role"
-      assert system_prompt =~ "You are a PTC-Lisp program generator"
-      assert system_prompt =~ "# Rules"
+      assert system_prompt =~ "## Role"
+      assert system_prompt =~ "Write programs that accomplish the user's mission"
+      assert system_prompt =~ "thinking:"
       assert system_prompt =~ "# Data Inventory"
       assert system_prompt =~ "ctx/x"
       assert system_prompt =~ "ctx/y"
