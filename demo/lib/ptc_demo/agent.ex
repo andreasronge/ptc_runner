@@ -367,18 +367,8 @@ defmodule PtcDemo.Agent do
 
   defp build_tools do
     %{
-      "search" =>
-        {&SearchTool.search/1,
-         signature:
-           "(query :string, limit :int?, cursor :string?) -> " <>
-             "{results [{id :string, title :string, topics [:string], department :string}], " <>
-             "cursor :string?, has_more :bool, total :int}",
-         description:
-           "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."},
-      "fetch" =>
-        {&SearchTool.fetch/1,
-         signature: "(id :string) -> :any",
-         description: "Fetch a single policy document by its ID to see its full content."}
+      "search" => &SearchTool.search/1,
+      "fetch" => &SearchTool.fetch/1
     }
   end
 

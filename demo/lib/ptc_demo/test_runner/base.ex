@@ -193,7 +193,7 @@ defmodule PtcDemo.TestRunner.Base do
       "42"
   """
   @spec format_attempt_result(any()) :: String.t()
-  def format_attempt_result({:error, msg}), do: "ERROR: #{truncate(to_string(msg), 50)}"
+  def format_attempt_result({:error, msg}), do: "ERROR: #{truncate(to_string(msg), 100)}"
   def format_attempt_result(result), do: truncate(inspect(result), 50)
 
   @doc """
