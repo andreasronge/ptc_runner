@@ -186,10 +186,10 @@ defmodule PtcDemo.TestRunner.BaseTest do
                "ERROR: Something went wrong"
     end
 
-    test "truncates error messages over 50 characters" do
-      long_error = String.duplicate("a", 60)
+    test "truncates error messages over 100 characters" do
+      long_error = String.duplicate("a", 120)
       result = Base.format_attempt_result({:error, long_error})
-      assert String.length(result) <= String.length("ERROR: ...") + 50
+      assert String.length(result) <= String.length("ERROR: ...") + 100
     end
 
     test "formats other values as inspected strings" do
@@ -201,7 +201,7 @@ defmodule PtcDemo.TestRunner.BaseTest do
       long_list = Enum.to_list(1..100)
       result = Base.format_attempt_result(long_list)
       assert String.ends_with?(result, "...")
-      assert String.length(result) <= 53
+      assert String.length(result) <= 103
     end
   end
 

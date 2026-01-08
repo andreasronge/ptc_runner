@@ -9,8 +9,28 @@ defmodule PtcDemo.SearchTool do
 
   alias PtcDemo.SampleData
 
-  @doc "Search documents. Returns {results, cursor, has_more, total}. Use (get result :results) to extract the list."
-  @spec search(map()) :: map()
+  @type search_result_item :: %{
+          id: String.t(),
+          title: String.t(),
+          topics: [String.t()],
+          department: String.t()
+        }
+
+  @type search_result :: %{
+          results: [search_result_item()],
+          cursor: String.t() | nil,
+          has_more: boolean(),
+          total: non_neg_integer()
+        }
+
+  @type search_args :: %{
+          query: String.t(),
+          limit: non_neg_integer() | nil,
+          cursor: String.t() | nil
+        }
+
+  @doc "Search policy documents. Single keyword matching - search one topic at a time, then analyze results."
+  @spec search(search_args()) :: search_result()
   def search(args) do
     # Normalize keys - accept both string and atom keys
     args = normalize_keys(args)
@@ -30,8 +50,10 @@ defmodule PtcDemo.SearchTool do
     end
   end
 
-  @doc "Fetch document by ID. Returns full document map or nil if not found."
-  @spec fetch(map()) :: map() | nil
+  @type fetch_args :: %{id: String.t()}
+
+  @doc "Fetch a single policy document by its ID to see its full content."
+  @spec fetch(fetch_args()) :: map() | nil
   def fetch(args) do
     args = normalize_keys(args)
 
