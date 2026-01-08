@@ -1998,13 +1998,14 @@ Programs that call `println` will have their output available in the `prints` li
 
 ### 8.13 Date and Time (Minimal Java Interop)
 
-PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date` and `java.lang.System`.
+PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date`, `java.time.LocalDate`, and `java.lang.System`.
 
 | Symbol | Signature | Description |
 |--------|-----------|-------------|
 | `java.util.Date.` | `(java.util.Date.)` | Current UTC time |
 | | `(java.util.Date. arg)` | Construct from timestamp (ms/sec) or ISO-8601/RFC 2822 string |
-| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds |
+| `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string into a Date object |
+| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only**) |
 | `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current Unix milliseconds |
 
 #### Constructor `java.util.Date.`
@@ -2018,20 +2019,31 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
     2. **Date-only ISO** (e.g., `"2026-01-08"`, defaults to midnight UTC)
     3. **RFC 2822** (e.g., `"Wed, 8 Jan 2026 14:30:00 +0000"`, common in email headers)
 
+#### `java.time.LocalDate/parse`
+
+- **Shorthand**: `(LocalDate/parse s)` is also supported.
+- **Behavior**: Parses a string in ISO-8601 date format (`YYYY-MM-DD`). Returns an opaque Date object representing just the date (no time).
+- **Format**: When displayed or returned to an LLM, it is formatted as an ISO string: `"2023-10-27"`.
+
 #### Methods and Utilities
 
-- **`.getTime`**: Takes a Date object and returns its value as Unix milliseconds (integer).
+- **`.getTime`**: Takes a **DateTime** object (from `java.util.Date.`) and returns its value as Unix milliseconds (integer). **Note:** This method does not work on objects from `LocalDate/parse`.
 - **`System/currentTimeMillis`**: Returns the current system time in milliseconds.
 
 #### Errors and Type Safety
-- Passing `nil` to `java.util.Date.` or `.getTime` raises an error.
+- Passing `nil` to `java.util.Date.`, `LocalDate/parse`, or `.getTime` raises an error.
 - Invalid strings or types raise descriptive errors.
 - **Unsupported Methods**: Calling unregistered dot-methods (e.g., `(.toString date)`) provides a hint listing supported interop functions.
 
 #### Comparison
-Date objects themselves do not support direct comparison via `>`, `<`. Instead, extract the milliseconds:
+`java.util.Date` objects themselves do not support direct comparison via `>`, `<`. Instead, extract the milliseconds:
 ```clojure
 (< (.getTime d1) (.getTime d2))  ; check if d1 is before d2
+```
+
+`LocalDate` objects can be compared by converting to strings as they are ISO-8601 formatted:
+```clojure
+(< (str d1) (str d2))  ; lexicographical comparison works for YYYY-MM-DD
 ```
 
 ---
@@ -2177,6 +2189,7 @@ LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normali
 | `clojure.set` | `set` | Set functions |
 | `System` | - | Java System properties/time |
 | `java.util.Date` | - | Java Date constructors |
+| `java.time.LocalDate` | `LocalDate` | Java Date parsing (ISO-8601) |
 
 **Examples of normalization:**
 

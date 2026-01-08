@@ -121,4 +121,26 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   def current_time_millis do
     System.system_time(:millisecond)
   end
+
+  @doc """
+  Simulates java.time.LocalDate/parse.
+  Only supports ISO-8601 YYYY-MM-DD.
+  """
+  def local_date_parse(nil) do
+    raise "LocalDate/parse: cannot parse nil"
+  end
+
+  def local_date_parse(s) when is_binary(s) do
+    case Date.from_iso8601(s) do
+      {:ok, date} ->
+        date
+
+      {:error, _} ->
+        raise "LocalDate/parse: invalid date '#{s}'"
+    end
+  end
+
+  def local_date_parse(other) do
+    raise "LocalDate/parse: expected string, got #{inspect(other)}"
+  end
 end

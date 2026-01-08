@@ -228,4 +228,5 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate java_util_date(ms), to: Interop
   defdelegate dot_get_time(dt), to: Interop
   defdelegate current_time_millis, to: Interop
+  defdelegate local_date_parse(s), to: Interop
 end

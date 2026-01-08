@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.RuntimeInteropTest do
   use ExUnit.Case, async: true
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Format
 
   describe "java.util.Date interop" do
     test "java.util.Date. with timestamp (ms) returns a DateTime" do
@@ -102,6 +103,39 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     test "Runtime error on invalid string in java.util.Date." do
       assert {:error, step} = Lisp.run("(java.util.Date. \"not-a-date\")")
       assert step.fail.message =~ "cannot parse 'not-a-date'"
+    end
+  end
+
+  describe "java.time.LocalDate interop" do
+    test "java.time.LocalDate/parse returns a Date" do
+      {:ok, step} = Lisp.run("(java.time.LocalDate/parse \"2023-10-27\")")
+      result = step.return
+      assert %Date{} = result
+      assert result.year == 2023
+      assert result.month == 10
+      assert result.day == 27
+    end
+
+    test "LocalDate/parse alias returns a Date" do
+      {:ok, step} = Lisp.run("(LocalDate/parse \"2023-10-27\")")
+      result = step.return
+      assert %Date{} = result
+    end
+
+    test "LocalDate formatted output for feedback" do
+      {:ok, step} = Lisp.run("(LocalDate/parse \"2023-10-27\")")
+      {formatted, _} = Format.to_clojure(step.return)
+      assert formatted == "\"2023-10-27\""
+    end
+
+    test "LocalDate/parse error on invalid date" do
+      assert {:error, step} = Lisp.run("(LocalDate/parse \"not-a-date\")")
+      assert step.fail.message =~ "LocalDate/parse: invalid date 'not-a-date'"
+    end
+
+    test "LocalDate/parse error on nil" do
+      assert {:error, step} = Lisp.run("(LocalDate/parse nil)")
+      assert step.fail.message =~ "LocalDate/parse: cannot parse nil"
     end
   end
 end

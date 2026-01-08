@@ -178,6 +178,10 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  defp format_clojure(%Date{} = date, _opts) do
+    {"\"#{Date.to_iso8601(date)}\"", false}
+  end
+
   defp format_clojure(%_{} = struct, _opts), do: {inspect(struct), false}
 
   defp format_clojure(list, opts) when is_list(list) do
