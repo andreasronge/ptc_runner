@@ -176,7 +176,7 @@ defmodule PtcRunner.SubAgent.Prompt.Tools do
     """
     ### #{name}
     ```
-    #{name}#{sig}
+    ctx/#{name}#{sig}
     ```
     #{desc_line}
     #{example}
