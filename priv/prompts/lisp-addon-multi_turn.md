@@ -2,29 +2,36 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 1 -->
+<!-- version: 3 -->
 <!-- date: 2026-01-08 -->
-<!-- changes: Renamed from lisp-addon-memory.md -->
+<!-- changes: Added "Explore Before Deciding" - don't hardcode thresholds, inspect data first -->
 
 <!-- PTC_PROMPT_START -->
 
 ### Multi-Turn Execution
 
-- Each turn: write code, use `(println ...)` to inspect, continue or `(return answer)`
+- Each turn: write code, inspect with `(println ...)`, continue or `(return answer)`
 - **Every turn MUST include a code block** — if done, use `(return value)`
 - Before calling more tools, check if you already have the answer
-- **Only `println` output is shown** — expression results are NOT displayed
 
-### Inspecting Values
+### Explore First
+
+Use early turns to inspect data with `println`, then decide in later turns.
+
+### Inspecting Values (Important!)
+
+**You cannot see expression results** — use `println` to see what your code produced:
 
 ```clojure
 (def results (ctx/search {:q "x"}))
-(println "Found:" (count results))    ; shown in feedback
-(println "First:" (first results))    ; shown in feedback
-results                                ; NOT shown (use println to see it)
+(println "Found:" (count results))    ; ✓ you see: "Found: 42"
+(println "First:" (first results))    ; ✓ you see: "{:id 1, :name ...}"
+results                                ; ✗ you see nothing!
 ```
 
-**Keep println concise** — output is truncated (~512 chars). Avoid decorative formatting like `"\n=== Header ==="`.
+Without `println`, you're blind to intermediate results. Always inspect data before processing it.
+
+**Keep output concise** — truncated at ~512 chars. Avoid decorative formatting.
 
 ### Completion
 
