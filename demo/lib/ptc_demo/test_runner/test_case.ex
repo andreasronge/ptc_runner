@@ -179,16 +179,6 @@ defmodule PtcDemo.TestRunner.TestCase do
         description:
           "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
       },
-
-      # 2. Parallel processing (pmap) with tool calls
-      %{
-        query:
-          "Search for 'security' policies, then fetch the full content for ALL found documents in parallel. " <>
-            "Return a list of the full content of these documents.",
-        expect: :list,
-        constraint: {:gt_length, 0},
-        description: "pmap + tool calls: search for multiple items then fetch details in parallel"
-      }
     ]
   end
 
@@ -213,11 +203,22 @@ defmodule PtcDemo.TestRunner.TestCase do
   @spec multi_turn_cases() :: [map()]
   def multi_turn_cases do
     [
+      # Parallel processing (pmap) with tool calls
+      %{
+        query:
+          "Search for 'security' policies, then fetch the full content for ALL found documents in parallel. " <>
+            "Return a list of the full content of these documents.",
+        expect: :list,
+        constraint: {:gt_length, 0},
+        max_turns: 2,
+        description: "pmap + tool calls: search for multiple items then fetch details in parallel"
+      },
+
       # Open-form task requiring observation and judgment
       # Cannot be solved in one program - requires interpreting what "suspicious" means
       %{
         query:
-          "Analyze expense claims to find suspicious patterns. " <>
+          "Analyze expense claims to find s uspicious patterns. " <>
             "Which employee's spending looks most like potential fraud or abuse? " <>
             "Return their employee_id.",
         expect: :integer,
