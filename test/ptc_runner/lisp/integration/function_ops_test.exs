@@ -283,6 +283,70 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
   end
 
   # ==========================================================================
+  # Calling User-Defined Functions from Loops
+  # ==========================================================================
+
+  describe "calling closures from loop" do
+    # Regression test for environment corruption when calling closures from loops.
+    # Before fix: calling a user-defined function from within a loop would cause
+    # "undefined variable" errors because the closure's environment was returned
+    # instead of the caller's environment.
+
+    test "defn called from loop preserves loop bindings" do
+      source = ~S"""
+      (defn square [x] (* x x))
+      (loop [acc 0 n 3]
+        (if (zero? n)
+          acc
+          (recur (+ acc (square n)) (dec n))))
+      """
+
+      # square(3) + square(2) + square(1) = 9 + 4 + 1 = 14
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == 14
+    end
+
+    test "defn with internal loop called from outer loop" do
+      # This is the exact pattern that was failing: is-prime? has its own loop,
+      # and calling it from another loop was corrupting the outer loop's environment
+      source = ~S"""
+      (defn is-prime? [n]
+        (if (<= n 1)
+          false
+          (loop [i 2]
+            (if (> (* i i) n)
+              true
+              (if (zero? (mod n i))
+                false
+                (recur (inc i)))))))
+
+      (loop [primes [] num 2]
+        (if (= (count primes) 5)
+          primes
+          (if (is-prime? num)
+            (recur (conj primes num) (inc num))
+            (recur primes (inc num)))))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [2, 3, 5, 7, 11]
+    end
+
+    test "anonymous function via def called from loop" do
+      source = ~S"""
+      (def cube (fn [x] (* x x x)))
+      (loop [results [] n 3]
+        (if (zero? n)
+          results
+          (recur (conj results (cube n)) (dec n))))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [27, 8, 1]
+    end
+  end
+
+  # ==========================================================================
   # Sequential Evaluation with do
   # ==========================================================================
 
