@@ -375,32 +375,40 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:pmap, fn_ast, coll_ast}, %EvalContext{} = eval_ctx) do
     with {:ok, fn_val, eval_ctx1} <- do_eval(fn_ast, eval_ctx),
          {:ok, coll_val, eval_ctx2} <- do_eval(coll_ast, eval_ctx1) do
-      # Convert the function value to an Erlang function
-      # The closure captures a read-only snapshot of the environment at creation time
-      erlang_fn = value_to_erlang_fn(fn_val, eval_ctx2)
+      # Consistency check: keywords don't work with single hash-map in map/pmap
+      if is_atom(fn_val) and not is_boolean(fn_val) and is_map(coll_val) and
+           not is_struct(coll_val) do
+        {:error,
+         {:type_error, "pmap: keyword accessor requires a list of maps, got a single map",
+          [fn_val, coll_val]}}
+      else
+        # Convert the function value to an Erlang function
+        # The closure captures a read-only snapshot of the environment at creation time
+        erlang_fn = value_to_erlang_fn(fn_val, eval_ctx2)
 
-      # Execute in parallel using Task.async_stream
-      # Limit concurrency to available schedulers to prevent resource exhaustion
-      # when LLM generates pmap over large collections (e.g., unbounded search results)
-      results =
-        coll_val
-        |> Task.async_stream(
-          fn elem ->
-            try do
-              {:ok, erlang_fn.(elem)}
-            rescue
-              e ->
-                {:error, {:pmap_error, Exception.message(e)}}
-            end
-          end,
-          timeout: 5_000,
-          ordered: true,
-          max_concurrency: System.schedulers_online() * 2
-        )
-        |> Enum.to_list()
+        # Execute in parallel using Task.async_stream
+        # Limit concurrency to available schedulers to prevent resource exhaustion
+        # when LLM generates pmap over large collections (e.g., unbounded search results)
+        results =
+          coll_val
+          |> Task.async_stream(
+            fn elem ->
+              try do
+                {:ok, erlang_fn.(elem)}
+              rescue
+                e ->
+                  {:error, {:pmap_error, Exception.message(e)}}
+              end
+            end,
+            timeout: 5_000,
+            ordered: true,
+            max_concurrency: System.schedulers_online() * 2
+          )
+          |> Enum.to_list()
 
-      # Collect results, stopping at first error
-      collect_pmap_results(results, [], eval_ctx2)
+        # Collect results, stopping at first error
+        collect_pmap_results(results, [], eval_ctx2)
+      end
     end
   end
 

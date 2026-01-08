@@ -126,7 +126,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def map(f, %MapSet{} = set), do: Enum.map(set, f)
 
-  def map(f, coll) when is_map(coll) do
+  def map(f, coll) when is_function(f, 1) and is_map(coll) do
     # When mapping over a map, each entry is passed as [key, value] pair
     Enum.map(coll, fn {k, v} -> f.([k, v]) end)
   end
@@ -146,7 +146,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def mapv(f, %MapSet{} = set), do: Enum.map(set, f)
 
-  def mapv(f, coll) when is_map(coll), do: Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+  def mapv(f, coll) when is_function(f, 1) and is_map(coll) do
+    Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+  end
 
   def map_indexed(f, coll) when is_list(coll) do
     with_index_map(coll, f)
