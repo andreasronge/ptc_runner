@@ -244,6 +244,14 @@ Keywords can be called as functions to access map values:
 (:missing {:name "Alice"} "default")  ; => "default"
 ```
 
+Maps can also be called as functions with a keyword to access values:
+
+```clojure
+({:name "Alice" :age 30} :name)  ; => "Alice"
+({:name "Alice"} :missing)       ; => nil
+({:name "Alice"} :missing "default")  ; => "default"
+```
+
 Keywords also work as predicates in higher-order functions, checking if the field is truthy:
 
 ```clojure
@@ -2430,7 +2438,17 @@ Aggregation functions require numeric field values:
 (:name {} "Unknown")              ; => "Unknown"
 ```
 
-### 11.8 Flatten Behavior
+### 11.8 Map as Function
+
+Maps can be called as functions with a keyword argument:
+
+```clojure
+({:name "Alice"} :name)           ; => "Alice"
+({} :name)                        ; => nil
+({} :name "Unknown")              ; => "Unknown"
+```
+
+### 11.9 Flatten Behavior
 
 `flatten` recursively flattens nested collections:
 
@@ -2443,7 +2461,7 @@ Aggregation functions require numeric field values:
 - Maps, strings, and other non-collection values pass through unchanged
 - Flattening depth is bounded by `max_depth` limit
 
-### 11.9 Tool Call Evaluation Order
+### 11.10 Tool Call Evaluation Order
 
 Tool calls are evaluated in left-to-right order and never reordered:
 

@@ -56,6 +56,61 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
     end
   end
 
+  describe "function calls with map as function" do
+    test "map access on keyword with single arg" do
+      map = %{name: "Alice"}
+
+      assert {:ok, "Alice", %{}} =
+               Eval.eval(
+                 {:call, {:var, :m}, [{:keyword, :name}]},
+                 %{},
+                 %{},
+                 %{m: map},
+                 &dummy_tool/2
+               )
+    end
+
+    test "map access returns nil when key missing" do
+      map = %{name: "Alice"}
+
+      {:ok, nil, %{}} =
+        Eval.eval({:call, {:var, :m}, [{:keyword, :missing}]}, %{}, %{}, %{m: map}, &dummy_tool/2)
+    end
+
+    test "map access with default when key missing" do
+      map = %{name: "Alice"}
+
+      {:ok, "default", %{}} =
+        Eval.eval(
+          {:call, {:var, :m}, [{:keyword, :missing}, {:string, "default"}]},
+          %{},
+          %{},
+          %{m: map},
+          &dummy_tool/2
+        )
+    end
+
+    test "map access with default returns value when key exists" do
+      map = %{name: "Alice"}
+
+      {:ok, "Alice", %{}} =
+        Eval.eval(
+          {:call, {:var, :m}, [{:keyword, :name}, {:string, "default"}]},
+          %{},
+          %{},
+          %{m: map},
+          &dummy_tool/2
+        )
+    end
+
+    test "map access error with non-keyword arg" do
+      map = %{name: "Alice"}
+
+      {:error, {:invalid_map_call, _, _}} =
+        Eval.eval({:call, {:var, :m}, [{:string, "name"}]}, %{}, %{}, %{m: map}, &dummy_tool/2)
+    end
+  end
+
   describe "closure with destructuring patterns" do
     test "vector destructuring: extracts first element" do
       # (fn [[a b]] a) called with [1 2]

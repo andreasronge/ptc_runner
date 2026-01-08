@@ -2,11 +2,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   @moduledoc """
   Function application dispatch for Lisp evaluation.
 
-  Handles calling closures, keywords, sets, builtins, and plain functions.
+  Handles calling closures, keywords, maps, sets, builtins, and plain functions.
 
   ## Supported function types
 
   - Keywords as map accessors: `(:key map)` → `Map.get(map, :key)`
+  - Maps as keyword accessors: `(map :key)` → `Map.get(map, :key)`
   - Sets as membership check: `(set x)` → `x` or `nil`
   - Closures: user-defined functions
   - Builtins: `{:normal, fun}`, `{:variadic, fun, identity}`, etc.
@@ -273,6 +274,23 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, _do_eval_fn)
        when is_function(fun) do
     {:ok, apply(fun, args), eval_ctx}
+  end
+
+  # Map as function: (map :key) → Map.get(map, :key)
+  defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_map(m) do
+    case args do
+      [k] when is_atom(k) ->
+        {:ok, flex_get(m, k), eval_ctx}
+
+      [k, default] when is_atom(k) ->
+        case flex_fetch(m, k) do
+          {:ok, val} -> {:ok, val, eval_ctx}
+          :error -> {:ok, default, eval_ctx}
+        end
+
+      _ ->
+        {:error, {:invalid_map_call, m, args}}
+    end
   end
 
   # Fallback: not callable
