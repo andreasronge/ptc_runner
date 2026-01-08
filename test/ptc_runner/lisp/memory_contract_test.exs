@@ -80,6 +80,30 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
     end
   end
 
+  describe "memory preservation on errors" do
+    test "analysis error preserves initial memory" do
+      initial_memory = %{:"orders-by-month" => [%{month: "2024-01", count: 100}]}
+
+      # Double/POSITIVE_INFINITY causes an analysis error (unknown namespace)
+      {:error, %Step{memory: returned_memory}} =
+        Lisp.run("Double/POSITIVE_INFINITY", memory: initial_memory)
+
+      assert returned_memory == initial_memory,
+             "Memory should be preserved on analysis error, got: #{inspect(returned_memory)}"
+    end
+
+    test "parse error preserves initial memory" do
+      initial_memory = %{x: 42, y: "preserved"}
+
+      # Unclosed parenthesis causes parse error
+      {:error, %Step{memory: returned_memory}} =
+        Lisp.run("(+ 1 2", memory: initial_memory)
+
+      assert returned_memory == initial_memory,
+             "Memory should be preserved on parse error, got: #{inspect(returned_memory)}"
+    end
+  end
+
   describe "explicit storage via def" do
     test "def stores value in user_ns, accessible in same expression" do
       source = "(do (def x 42) x)"
