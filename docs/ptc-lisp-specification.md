@@ -42,6 +42,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
+| `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
 | `re-pattern` | Compile string to regex without literal syntax (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
@@ -1423,6 +1424,8 @@ The `seq` function converts a collection to a sequence:
 | `avg-by` | `(avg-by key coll)` | Average field values |
 | `min-by` | `(min-by key coll)` | Item with minimum field |
 | `max-by` | `(max-by key coll)` | Item with maximum field |
+| `min-key` | `(min-key f x y & more)` | Return x for which (f x) is least |
+| `max-key` | `(max-key f x y & more)` | Return x for which (f x) is greatest |
 | `group-by` | `(group-by keyfn coll)` | Group items by key |
 | `frequencies` | `(frequencies coll)` | Count occurrences of each item |
 
@@ -1453,6 +1456,14 @@ The `seq` function converts a collection to a sequence:
 (max-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; item with maximum second element
 (sum-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; => 5 (sum second elements)
 (group-by first [["a" 1] ["a" 2] ["b" 3]])  ; {"a" [["a" 1] ["a" 2]], "b" [["b" 3]]}
+
+;; max-key / min-key - compare variadic args using function
+(max-key count "a" "abc" "ab")              ; => "abc" (longest string)
+(min-key count "abc" "a" "ab")              ; => "a" (shortest string)
+(max-key #(nth % 1) ["a" 1] ["b" 5] ["c" 3]) ; => ["b" 5]
+
+;; Common pattern: find map entry with max/min value using apply
+(apply max-key second (seq {:a 3 :b 7 :c 2}))  ; => [:b 7]
 ```
 
 #### Predicates on Collections

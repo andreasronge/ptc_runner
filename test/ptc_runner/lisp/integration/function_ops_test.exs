@@ -105,6 +105,67 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       assert result == ["c", 30]
     end
 
+    test "max-key returns element with greatest (f x)" do
+      source = ~S|(max-key count "a" "abc" "ab")|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == "abc"
+    end
+
+    test "max-key with anonymous function" do
+      source = ~S|(max-key #(nth % 1) ["a" 1] ["b" 5] ["c" 3])|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == ["b", 5]
+    end
+
+    test "max-key on map entries" do
+      # Map entries are [:key value], use second to get the value
+      source = ~S"""
+      (def counts {:alice 3 :bob 7 :carol 2})
+      (max-key second (first (seq counts)) (second (seq counts)) (nth (seq counts) 2))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == [:bob, 7]
+    end
+
+    test "max-key with apply on map entries" do
+      # Use second to extract value from map entry [:key value]
+      source = ~S|(apply max-key second (seq {:alice 3 :bob 7 :carol 2}))|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == [:bob, 7]
+    end
+
+    test "min-key returns element with least (f x)" do
+      source = ~S|(min-key count "abc" "a" "ab")|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == "a"
+    end
+
+    test "min-key with anonymous function" do
+      source = ~S|(min-key #(nth % 1) ["a" 5] ["b" 1] ["c" 3])|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == ["b", 1]
+    end
+
+    test "max-key with single element returns that element" do
+      source = ~S|(max-key count "hello")|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == "hello"
+    end
+
     test "sum-by with function key" do
       source = ~S"""
       (let [pairs [["a" 10] ["b" 20] ["c" 30]]]

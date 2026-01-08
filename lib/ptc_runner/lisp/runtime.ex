@@ -80,6 +80,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate avg_by(keyfn, coll), to: Collection
   defdelegate min_by(keyfn, coll), to: Collection
   defdelegate max_by(keyfn, coll), to: Collection
+  defdelegate max_key_variadic(args), to: Collection
+  defdelegate min_key_variadic(args), to: Collection
   defdelegate group_by(keyfn, coll), to: Collection
   defdelegate frequencies(coll), to: Collection
   defdelegate some(pred, coll), to: Collection
