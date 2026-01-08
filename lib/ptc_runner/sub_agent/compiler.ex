@@ -95,15 +95,9 @@ defmodule PtcRunner.SubAgent.Compiler do
         field_descs = agent.field_descriptions
 
         execute = fn args ->
-          case PtcRunner.Lisp.run(source, context: args, tools: all_tools) do
-            {:ok, step} ->
-              # Unwrap sentinel tuples from return/fail and populate field_descriptions
-              unwrapped_step = unwrap_sentinel(step)
-              %{unwrapped_step | field_descriptions: field_descs}
-
-            {:error, step} ->
-              step
-          end
+          args
+          |> run_and_unwrap(source, all_tools)
+          |> add_field_descriptions(field_descs)
         end
 
         # Build metadata from the compilation step
@@ -137,18 +131,20 @@ defmodule PtcRunner.SubAgent.Compiler do
     end)
   end
 
-  # Unwraps sentinel tuples from return/fail tools
-  defp unwrap_sentinel(%{return: {:__ptc_return__, value}} = step) do
-    %{step | return: value}
+  # Runs the compiled program and unwraps any return/fail sentinels
+  defp run_and_unwrap(args, source, tools) do
+    case PtcRunner.Lisp.run(source, context: args, tools: tools) do
+      {:ok, step} -> SubAgent.unwrap_sentinels(step)
+      {:error, step} -> {:error, step}
+    end
   end
 
-  defp unwrap_sentinel(%{return: {:__ptc_fail__, _args}} = step) do
-    # For compiled agents, fail returns as error - convert sentinel to error step
-    # Note: In practice, compiled agents rarely use fail since they're single-shot
-    step
-  end
+  # Adds field_descriptions to the step regardless of success/error
+  defp add_field_descriptions({:ok, step}, field_descs),
+    do: %{step | field_descriptions: field_descs}
 
-  defp unwrap_sentinel(step), do: step
+  defp add_field_descriptions({:error, step}, field_descs),
+    do: %{step | field_descriptions: field_descs}
 
   # Extracts the final PTC-Lisp program from the trace
   defp extract_final_program(trace) when is_list(trace) do
