@@ -1430,6 +1430,16 @@ The `seq` function converts a collection to a sequence:
 (count [1 2 3])                   ; => 3
 (reduce + 0 [1 2 3])              ; => 6
 (reduce - 10 [1 2 3])             ; => 4 (10 - 1 - 2 - 3, Clojure style: f receives (acc, elem))
+
+;; reduce on maps (v is [key value] pair)
+(reduce (fn [acc [k v]] (+ acc v)) 0 {:a 1 :b 2}) ; => 3
+
+;; reduce on strings (iterates over graphemes)
+(reduce (fn [acc x] (str acc "-" x)) "a" "bc") ; => "a-b-c"
+
+;; reduce on sets
+(reduce + 0 #{1 2 3})              ; => 6
+
 (sum-by :amount expenses)         ; sum of :amount fields
 (avg-by :price products)          ; average of :price fields
 (min-by :price products)          ; item with lowest price
@@ -1502,7 +1512,9 @@ The `seq` function converts a collection to a sequence:
 | `assoc` | `(assoc m key val)` | Add/update key |
 | `assoc-in` | `(assoc-in m path val)` | Add/update nested |
 | `update` | `(update m key f)` | Update value with function |
+| `update` | `(update m key f & args)` | Update with extra args passed to f |
 | `update-in` | `(update-in m path f)` | Update nested with function |
+| `update-in` | `(update-in m path f & args)` | Update nested with extra args |
 | `dissoc` | `(dissoc m key)` | Remove key |
 | `merge` | `(merge m1 m2 ...)` | Merge maps (later wins) |
 | `select-keys` | `(select-keys m keys)` | Pick specific keys |
@@ -1518,6 +1530,9 @@ The `seq` function converts a collection to a sequence:
 (assoc {:a 1} :b 2)                ; => {:a 1 :b 2}
 (assoc-in {} [:user :name] "Bob")  ; => {:user {:name "Bob"}}
 (update {:n 1} :n inc)             ; => {:n 2}
+(update {:n 1} :n + 5)             ; => {:n 6} - extra args passed to f
+(update {:n nil} :n (fnil + 0) 5)  ; => {:n 5} - fnil provides default
+(update-in {:a {:b 1}} [:a :b] + 10) ; => {:a {:b 11}}
 (dissoc {:a 1 :b 2} :b)            ; => {:a 1}
 (merge {:a 1} {:b 2} {:a 3})       ; => {:a 3 :b 2}
 (select-keys {:a 1 :b 2 :c 3} [:a :c])  ; => {:a 1 :c 3}
@@ -1738,6 +1753,7 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `some` | ✗ | ✓ | Strings: returns first truthy result of predicate |
 | `every?` | ✗ | ✓ | Strings: true if predicate is truthy for all characters |
 | `not-any?` | ✗ | ✓ | Strings: true if predicate is false for all characters |
+| `reduce` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |
 | `entries` | ✓ | ✗ | Explicit conversion to list of `[key value]` pairs |
 
 **Note:** String operations that return characters return lists of single-character strings, not a string. Use `(join "" result)` to convert back to a string if needed.

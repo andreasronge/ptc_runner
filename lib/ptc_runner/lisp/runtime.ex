@@ -103,7 +103,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate assoc_in(m, path, v), to: MapOps
   defdelegate dissoc_variadic(args), to: MapOps
   defdelegate update(m, k, f), to: MapOps
+  defdelegate update_variadic(args), to: MapOps
   defdelegate update_in(m, path, f), to: MapOps
+  defdelegate update_in_variadic(args), to: MapOps
   defdelegate dissoc(m, k), to: MapOps
   defdelegate merge(m1, m2), to: MapOps
   defdelegate select_keys(m, ks), to: MapOps

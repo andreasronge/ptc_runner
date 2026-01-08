@@ -232,9 +232,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Collect builtins: pass all args as a list to unary function
-  defp do_apply_fun({:collect, fun}, args, %EvalContext{} = eval_ctx, _do_eval_fn)
+  defp do_apply_fun({:collect, fun}, args, %EvalContext{} = eval_ctx, do_eval_fn)
        when is_function(fun, 1) do
-    {:ok, fun.(args), eval_ctx}
+    # Convert any closures/builtins in args to callable functions
+    converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
+    {:ok, fun.(converted_args), eval_ctx}
   end
 
   # Multi-arity builtins: select function based on argument count

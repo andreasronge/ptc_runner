@@ -201,6 +201,8 @@ defmodule PtcRunner.SubAgent.Loop do
       total_input_tokens: 0,
       total_output_tokens: 0,
       llm_requests: 0,
+      # Estimated system prompt tokens (set on first turn)
+      system_prompt_tokens: 0,
       # Tokens from current turn's LLM call (for telemetry)
       turn_tokens: nil,
       # Turn history for *1/*2/*3 access (last 3 results, most recent last)
@@ -265,6 +267,7 @@ defmodule PtcRunner.SubAgent.Loop do
             state
             |> Metrics.accumulate_tokens(tokens)
             |> Map.put(:current_system_prompt, llm_input.system)
+            |> maybe_add_system_prompt_tokens(llm_input.system)
 
           result = handle_llm_response(content, agent, llm, state_with_metadata)
           # Emit turn stop event (only for completed turns, not continuation)
@@ -295,6 +298,13 @@ defmodule PtcRunner.SubAgent.Loop do
       end
     end
   end
+
+  # Estimate system prompt tokens on first turn only
+  defp maybe_add_system_prompt_tokens(%{turn: 1} = state, system_prompt) do
+    Map.put(state, :system_prompt_tokens, Metrics.estimate_tokens(system_prompt))
+  end
+
+  defp maybe_add_system_prompt_tokens(state, _system_prompt), do: state
 
   # Call LLM with telemetry wrapper
   defp call_llm_with_telemetry(llm, input, state, agent) do
@@ -497,7 +507,8 @@ defmodule PtcRunner.SubAgent.Loop do
         trace_entry =
           Metrics.build_trace_entry(state, code, fail_args, [],
             llm_response: response,
-            llm_feedback: nil
+            llm_feedback: nil,
+            prints: lisp_step.prints || []
           )
 
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -529,7 +540,8 @@ defmodule PtcRunner.SubAgent.Loop do
               Metrics.build_trace_entry(state, code, lisp_step.return, [],
                 llm_response: response,
                 llm_feedback: execution_result,
-                feedback_truncated: feedback_truncated
+                feedback_truncated: feedback_truncated,
+                prints: lisp_step.prints || []
               )
 
             # Update turn history with truncated result (keep last 3)
@@ -560,7 +572,8 @@ defmodule PtcRunner.SubAgent.Loop do
             trace_entry =
               Metrics.build_trace_entry(state, code, lisp_step.return, [],
                 llm_response: response,
-                llm_feedback: nil
+                llm_feedback: nil,
+                prints: lisp_step.prints || []
               )
 
             duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -738,7 +751,8 @@ defmodule PtcRunner.SubAgent.Loop do
     trace_entry =
       Metrics.build_trace_entry(state, code, lisp_step.return, [],
         llm_response: response,
-        llm_feedback: nil
+        llm_feedback: nil,
+        prints: lisp_step.prints || []
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -774,7 +788,8 @@ defmodule PtcRunner.SubAgent.Loop do
     trace_entry =
       Metrics.build_trace_entry(state, code, lisp_step.return, [],
         llm_response: response,
-        llm_feedback: error_message
+        llm_feedback: error_message,
+        prints: lisp_step.prints || []
       )
 
     new_state = %{
