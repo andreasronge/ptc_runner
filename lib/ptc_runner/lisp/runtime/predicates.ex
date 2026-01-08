@@ -21,8 +21,11 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   @doc """
   Returns a function that replaces nil first argument with a default value.
 
-  Commonly used with update-in: `(update-in m [:count] (fnil + 0) 1)`
-  This adds 1 to m[:count], using 0 as the initial value if nil.
+  Automatically detects arity of the wrapped function and returns a function
+  with matching arity. Supports 1-arity and 2-arity functions.
+
+  Commonly used with update: `(update m :count (fnil inc 0))` or
+  `(update m :count (fnil + 0) 5)` to provide default values for nil.
 
   ## Examples
 
@@ -31,8 +34,21 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
       5
       iex> f.(3, 5)
       8
+
+      iex> f = PtcRunner.Lisp.Runtime.Predicates.fnil(&(&1 + 1), 0)
+      iex> f.(nil)
+      1
+      iex> f.(5)
+      6
   """
-  def fnil(f, default) do
+  def fnil(f, default) when is_function(f, 1) do
+    fn
+      nil -> f.(default)
+      arg -> f.(arg)
+    end
+  end
+
+  def fnil(f, default) when is_function(f, 2) do
     fn
       nil, arg2 -> f.(default, arg2)
       arg1, arg2 -> f.(arg1, arg2)

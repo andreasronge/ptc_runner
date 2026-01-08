@@ -1467,7 +1467,7 @@ The `seq` function converts a collection to a sequence:
 | `every?` | `(every? :key coll)` | True if all have truthy `:key` |
 | `not-any?` | `(not-any? pred coll)` | True if none match |
 | `not-any?` | `(not-any? :key coll)` | True if none have truthy `:key` |
-| `contains?` | `(contains? coll key)` | True if key exists |
+| `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, lists) |
 
 ```clojure
 (empty? [])                        ; => true
@@ -1482,6 +1482,8 @@ The `seq` function converts a collection to a sequence:
 (not-any? :error items)            ; no errors?
 (contains? {:a 1} :a)              ; => true
 (contains? {:a 1} :b)              ; => false
+(contains? ["a" "b" "c"] "b")      ; => true (works on lists too)
+(contains? ["a" "b" "c"] "x")      ; => false
 ```
 
 #### Sequence Generation
@@ -1532,7 +1534,8 @@ The `seq` function converts a collection to a sequence:
 (assoc-in {} [:user :name] "Bob")  ; => {:user {:name "Bob"}}
 (update {:n 1} :n inc)             ; => {:n 2}
 (update {:n 1} :n + 5)             ; => {:n 6} - extra args passed to f
-(update {:n nil} :n (fnil + 0) 5)  ; => {:n 5} - fnil provides default
+(update {:n nil} :n (fnil inc 0))  ; => {:n 1} - fnil with 1-arity fn
+(update {:n nil} :n (fnil + 0) 5)  ; => {:n 5} - fnil with 2-arity fn + extra arg
 (update-in {:a {:b 1}} [:a :b] + 10) ; => {:a {:b 11}}
 (dissoc {:a 1 :b 2} :b)            ; => {:a 1}
 (merge {:a 1} {:b 2} {:a 3})       ; => {:a 3 :b 2}
