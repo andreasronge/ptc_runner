@@ -114,7 +114,7 @@ defmodule PtcRunner.Lisp.Parser do
     |> reduce({ParserHelpers, :build_keyword, []})
 
   # Symbols (/ allowed for namespacing, _ for ignored bindings, % for param placeholders in #())
-  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%]
+  symbol_first = [?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?.]
 
   symbol =
     ascii_string(symbol_first, 1)
@@ -351,27 +351,6 @@ defmodule PtcRunner.Lisp.Parser do
     source_without_strings = Regex.replace(~r/"(?:[^"\\]|\\.)*"/, source, "\"\"")
 
     cond do
-      # Java method call: (.methodName obj)
-      Regex.match?(~r/\(\.[a-zA-Z]/, source_without_strings) ->
-        case Regex.run(~r/\(\.([a-zA-Z][a-zA-Z0-9]*)/, source) do
-          [_, method] ->
-            "Java interop (.#{method} ...) is not supported. Use a helper function instead"
-
-          _ ->
-            "Java interop method calls (. syntax) are not supported"
-        end
-
-      # Java constructor: (ClassName. args) or (package.ClassName. args)
-      Regex.match?(~r/[a-zA-Z][a-zA-Z0-9.]*\.\s*[)\]]/, source_without_strings) or
-          Regex.match?(~r/\([a-zA-Z][a-zA-Z0-9.]*\.\s/, source_without_strings) ->
-        case Regex.run(~r/([a-zA-Z][a-zA-Z0-9.]*)\.\s/, source_without_strings) do
-          [_, class] ->
-            "Java constructor (#{class}. ...) is not supported. Use a helper function instead"
-
-          _ ->
-            "Java constructor syntax (ClassName.) is not supported"
-        end
-
       # Deref syntax: @atom
       Regex.match?(~r/@[a-zA-Z]/, source_without_strings) ->
         "deref syntax (@var) is not supported. Atoms and refs are not available"

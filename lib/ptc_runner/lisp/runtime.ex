@@ -16,6 +16,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   alias PtcRunner.Lisp.Runtime.Collection
   alias PtcRunner.Lisp.Runtime.FlexAccess
+  alias PtcRunner.Lisp.Runtime.Interop
   alias PtcRunner.Lisp.Runtime.MapOps
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
@@ -218,4 +219,13 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate intersection(s1, s2), to: Collection
   defdelegate union(s1, s2), to: Collection
   defdelegate difference(s1, s2), to: Collection
+
+  # ============================================================
+  # Interop
+  # ============================================================
+
+  defdelegate java_util_date(), to: Interop
+  defdelegate java_util_date(ms), to: Interop
+  defdelegate dot_get_time(dt), to: Interop
+  defdelegate current_time_millis, to: Interop
 end

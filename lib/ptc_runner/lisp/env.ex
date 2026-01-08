@@ -62,7 +62,9 @@ defmodule PtcRunner.Lisp.Env do
     :"clojure.set" => :set,
     :set => :set,
     :regex => :regex,
-    :Math => :math
+    :Math => :math,
+    :Interop => :interop,
+    :System => :interop
   }
 
   @doc """
@@ -145,13 +147,18 @@ defmodule PtcRunner.Lisp.Env do
     [:sqrt, :pow, :abs, :floor, :ceil, :round, :trunc, :double, :int, :max, :min]
   end
 
+  def builtins_by_category(:interop) do
+    [:"java.util.Date.", :".getTime", :"System/currentTimeMillis"]
+  end
+
   def builtins_by_category(:core) do
     # All other builtins (collection, arithmetic, logic, etc.)
     excluded =
       builtins_by_category(:string) ++
         builtins_by_category(:set) ++
         builtins_by_category(:regex) ++
-        builtins_by_category(:math)
+        builtins_by_category(:math) ++
+        builtins_by_category(:interop)
 
     (Map.keys(initial()) -- excluded) ++ [:doseq]
   end
@@ -172,6 +179,7 @@ defmodule PtcRunner.Lisp.Env do
   def category_name(:set), do: "Set"
   def category_name(:regex), do: "Regex"
   def category_name(:math), do: "Math"
+  def category_name(:interop), do: "Interop"
   def category_name(:core), do: "Core"
 
   defp builtin_bindings do
@@ -355,7 +363,15 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       {:intersection, {:variadic_nonempty, :intersection, &Runtime.intersection/2}},
       {:union, {:variadic, &Runtime.union/2, MapSet.new()}},
-      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}}
+      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}},
+
+      # ============================================================
+      # Interop
+      # ============================================================
+      {:"java.util.Date.",
+       {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
+      {:".getTime", {:normal, &Runtime.dot_get_time/1}},
+      {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}}
     ]
   end
 end

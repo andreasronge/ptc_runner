@@ -1984,6 +1984,46 @@ Programs that call `println` will have their output available in the `prints` li
 
 **Note:** In parallel operations like `pmap`, `println` output from parallel branches is NOT captured. Only the main execution thread's output is captured.
 
+### 8.13 Date and Time (Minimal Java Interop)
+
+PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date` and `java.lang.System`.
+
+| Symbol | Signature | Description |
+|--------|-----------|-------------|
+| `java.util.Date.` | `(java.util.Date.)` | Current UTC time |
+| | `(java.util.Date. arg)` | Construct from timestamp (ms/sec) or ISO-8601/RFC 2822 string |
+| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds |
+| `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current Unix milliseconds |
+
+#### Constructor `java.util.Date.`
+
+- **No arguments**: Returns a `DateTime` object for the current UTC time.
+- **Integer argument**: Smart unit detection.
+    - If `abs(ts) < 1,000,000,000,000`: Treated as **Unix seconds**.
+    - Otherwise: Treated as **Unix milliseconds**.
+- **String argument**: Attempts to parse in the following order:
+    1. **ISO-8601** (e.g., `"2026-01-08T14:30:00Z"`)
+    2. **Date-only ISO** (e.g., `"2026-01-08"`, defaults to midnight UTC)
+    3. **RFC 2822** (e.g., `"Wed, 8 Jan 2026 14:30:00 +0000"`, common in email headers)
+
+#### Methods and Utilities
+
+- **`.getTime`**: Takes a Date object and returns its value as Unix milliseconds (integer).
+- **`System/currentTimeMillis`**: Returns the current system time in milliseconds.
+
+#### Errors and Type Safety
+- Passing `nil` to `java.util.Date.` or `.getTime` raises an error.
+- Invalid strings or types raise descriptive errors.
+- **Unsupported Methods**: Calling unregistered dot-methods (e.g., `(.toString date)`) provides a hint listing supported interop functions.
+
+#### Comparison
+Date objects themselves do not support direct comparison via `>`, `<`. Instead, extract the milliseconds:
+```clojure
+(< (.getTime d1) (.getTime d2))  ; check if d1 is before d2
+```
+
+---
+
 ---
 
 ## 9. Namespaces, Context, and Tools
@@ -2123,6 +2163,8 @@ LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normali
 | `clojure.string` | `str`, `string` | String functions |
 | `clojure.core` | `core` | Core functions |
 | `clojure.set` | `set` | Set functions |
+| `System` | - | Java System properties/time |
+| `java.util.Date` | - | Java Date constructors |
 
 **Examples of normalization:**
 
@@ -2491,7 +2533,7 @@ type-error at line 5:
 | `lazy-seq` | All operations are eager |
 | Macros | No metaprogramming |
 | Namespaces (user-defined) | No modules |
-| Java interop | Security |
+| Full Java interop | Security (Minimal subset for Date/Time supported: see §8.13) |
 | Atoms, refs, agents | No mutable state |
 | `eval`, `read-string` | Security |
 | File I/O (`slurp`, `spit`) | Security |
