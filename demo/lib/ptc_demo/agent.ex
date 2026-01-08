@@ -351,9 +351,13 @@ defmodule PtcDemo.Agent do
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
       tools: build_tools(),
-      system_prompt: build_system_prompt(data_mode, prompt_profile, max_turns)
+      context_descriptions: context_descriptions_for(data_mode),
+      system_prompt: build_system_prompt(prompt_profile, max_turns)
     )
   end
+
+  defp context_descriptions_for(:schema), do: SampleData.context_descriptions()
+  defp context_descriptions_for(:explore), do: %{}
 
   # Infer signature from expect type (for backward compatibility)
   defp infer_signature(nil), do: nil
@@ -372,27 +376,28 @@ defmodule PtcDemo.Agent do
     }
   end
 
+  @role_prefix "You are a data analyst answering questions about datasets."
+
   # For single-shot (max_turns == 1), strip the Tools section that mentions return/fail
-  defp build_system_prompt(data_mode, prompt_profile, 1) do
+  defp build_system_prompt(prompt_profile, 1) do
     fn base_prompt ->
       # Remove the entire "# Available Tools" section
       stripped =
         base_prompt
         |> String.replace(~r/# Available Tools.*?(?=\n#|\z)/s, "")
 
-      prefix = system_prompt_prefix(data_mode, prompt_profile)
       language_spec = PtcDemo.Prompts.get(prompt_profile)
       output_format = output_format_for(prompt_profile)
 
-      [prefix, stripped, language_spec, output_format]
+      [@role_prefix, stripped, language_spec, output_format]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("\n\n")
     end
   end
 
-  defp build_system_prompt(data_mode, prompt_profile, _max_turns) do
+  defp build_system_prompt(prompt_profile, _max_turns) do
     %{
-      prefix: system_prompt_prefix(data_mode, prompt_profile),
+      prefix: @role_prefix,
       language_spec: PtcDemo.Prompts.get(prompt_profile),
       output_format: output_format_for(prompt_profile)
     }
@@ -426,59 +431,6 @@ defmodule PtcDemo.Agent do
     ```
 
     **IMPORTANT:** Do NOT wrap in `(return ...)` - just write the expression directly.
-    """
-  end
-
-  defp system_prompt_prefix(:schema, :multi_turn) do
-    data_schema = SampleData.schema_prompt()
-
-    """
-    You are a data analyst answering questions about datasets.
-
-    ## Closed-form vs Open-form Tasks
-
-    Before writing a program, determine whether the task is closed-form or open-form.
-
-    **Closed-form**: Final program can be fully specified without executing any prior program.
-    → Write one PTC-Lisp program and call (return result).
-
-    **Open-form**: Choice of entities, thresholds, or next computation depends on values
-    that must be observed at runtime (e.g., "most", "unusual", "inequity").
-    → Multi-turn: compute → observe → decide → compute → return.
-
-    **Turn 2 rules:**
-    - You SEE Turn 1's result as feedback
-    - You CANNOT embed it as literal data in Turn 2's code
-    - Turn 2 can only access: `ctx/*` (original data) and stored values (plain symbols defined via def)
-    - Use your observed conclusion to hardcode values in Turn 2
-
-    ## Datasets (access via ctx/name):
-
-    #{data_schema}
-    """
-  end
-
-  defp system_prompt_prefix(:schema, _prompt_profile) do
-    data_schema = SampleData.schema_prompt()
-
-    """
-    You are a data analyst answering questions about datasets.
-
-    ## Datasets (access via ctx/name):
-
-    #{data_schema}
-    """
-  end
-
-  defp system_prompt_prefix(:explore, _prompt_profile) do
-    dataset_names =
-      SampleData.available_datasets() |> Enum.map_join(", ", fn {name, _} -> name end)
-
-    """
-    You are a data analyst answering questions about datasets.
-
-    Datasets: #{dataset_names} (access via ctx/name)
-    Discover structure: (first ctx/products) or (keys (first ctx/products))
     """
   end
 
