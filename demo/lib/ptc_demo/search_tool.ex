@@ -9,31 +9,7 @@ defmodule PtcDemo.SearchTool do
 
   alias PtcDemo.SampleData
 
-  @doc """
-  Search knowledge base documents by keyword.
-
-  ## Arguments
-
-    * `"query"` - Search query string (required)
-    * `"limit"` - Max results per page (default: 5)
-    * `"cursor"` - Pagination cursor from previous search (optional)
-
-  ## Returns
-
-  A map with:
-    * `"results"` - List of matching documents (id, title, topics, department)
-    * `"cursor"` - Cursor for next page (nil if no more results)
-    * `"has_more"` - Boolean indicating if more results exist
-    * `"total"` - Total number of matching documents
-
-  ## Example
-
-      search(%{"query" => "remote work"})
-      #=> %{"results" => [...], "cursor" => "5", "has_more" => true, "total" => 8}
-
-      search(%{"query" => "remote work", "cursor" => "5"})
-      #=> %{"results" => [...], "cursor" => nil, "has_more" => false, "total" => 8}
-  """
+  @doc "Search documents. Returns {results, cursor, has_more, total}. Use (get result :results) to extract the list."
   @spec search(map()) :: map()
   def search(args) do
     # Normalize keys - accept both string and atom keys
@@ -54,17 +30,7 @@ defmodule PtcDemo.SearchTool do
     end
   end
 
-  @doc """
-  Fetch a single policy document by its ID.
-
-  ## Arguments
-
-    * `"id"` - The document ID (required)
-
-  ## Returns
-
-  The full document map or nil if not found.
-  """
+  @doc "Fetch document by ID. Returns full document map or nil if not found."
   @spec fetch(map()) :: map() | nil
   def fetch(args) do
     args = normalize_keys(args)

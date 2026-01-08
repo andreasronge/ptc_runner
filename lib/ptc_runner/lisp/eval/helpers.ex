@@ -11,40 +11,53 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   @spec type_error_for_args(function(), [term()]) :: {:type_error, String.t(), term()}
   def type_error_for_args(fun, args) do
     fun_name = function_name(fun)
+
+    case specific_type_error(fun_name, args) do
+      {:ok, error} -> error
+      :none -> generic_type_error(fun_name, args)
+    end
+  end
+
+  # Specific error messages for common mistakes
+  defp specific_type_error(name, [_, %MapSet{} = set])
+       when name in [:take, :drop, :sort_by, :pluck, :take_while, :drop_while] do
+    {:ok, {:type_error, "#{name} does not support sets (sets are unordered)", set}}
+  end
+
+  defp specific_type_error(name, [%MapSet{} = set])
+       when name in [:first, :last, :nth, :reverse, :distinct, :flatten, :sort] do
+    {:ok, {:type_error, "#{name} does not support sets (sets are unordered)", set}}
+  end
+
+  defp specific_type_error(:update_vals, [f, m] = args) when is_function(f) and is_map(m) do
+    {:ok,
+     {:type_error,
+      "update-vals expects (map, function) but got (function, map). " <>
+        "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
+  end
+
+  defp specific_type_error(name, [key, %{} = _map] = args)
+       when name in [:map, :mapv] and is_atom(key) and not is_boolean(key) do
+    {:ok,
+     {:type_error, "#{name}: keyword accessor requires a list of maps, got a single map", args}}
+  end
+
+  defp specific_type_error(:sort_by, [key, coll, comp] = args)
+       when (is_atom(key) or is_binary(key) or is_function(key, 1)) and is_list(coll) and
+              (is_function(comp) or comp in [:asc, :desc, :>, :<]) do
+    {:ok,
+     {:type_error,
+      "sort-by expects (key, comparator, collection) but got (key, collection, comparator). " <>
+        "Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)", args}}
+  end
+
+  defp specific_type_error(_name, _args), do: :none
+
+  defp generic_type_error(fun_name, args) do
     type_descriptions = Enum.map(args, &describe_type/1)
 
-    case {fun_name, args} do
-      # Sequence functions that don't support sets
-      {name, [_, %MapSet{}]}
-      when name in [:take, :drop, :sort_by, :pluck] ->
-        {:type_error, "#{name} does not support sets (sets are unordered)", hd(tl(args))}
-
-      {name, [_, %MapSet{}]}
-      when name in [:take_while, :drop_while] ->
-        {:type_error, "#{name} does not support sets (sets are unordered)", hd(tl(args))}
-
-      {name, [%MapSet{}]}
-      when name in [:first, :last, :nth, :reverse, :distinct, :flatten, :sort] ->
-        {:type_error, "#{name} does not support sets (sets are unordered)", hd(args)}
-
-      # update_vals with swapped arguments (function, map) instead of (map, function)
-      {:update_vals, [f, m]} when is_function(f) and is_map(m) ->
-        {:type_error,
-         "update-vals expects (map, function) but got (function, map). " <>
-           "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}
-
-      # sort-by with swapped arguments: (key, collection, comparator) instead of (key, comparator, collection)
-      {:sort_by, [key, coll, comp]}
-      when (is_atom(key) or is_binary(key) or is_function(key, 1)) and is_list(coll) and
-             (is_function(comp) or comp in [:asc, :desc, :>, :<]) ->
-        {:type_error,
-         "sort-by expects (key, comparator, collection) but got (key, collection, comparator). " <>
-           "Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)", args}
-
-      _ ->
-        {:type_error,
-         "#{fun_name}: invalid argument types: #{Enum.join(type_descriptions, ", ")}", args}
-    end
+    {:type_error, "#{fun_name}: invalid argument types: #{Enum.join(type_descriptions, ", ")}",
+     args}
   end
 
   @doc """
