@@ -148,6 +148,9 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(true, _opts), do: {"true", false}
   defp format_clojure(false, _opts), do: {"false", false}
   defp format_clojure(n, _opts) when is_integer(n), do: {Integer.to_string(n), false}
+  defp format_clojure(:infinity, _opts), do: {"##Inf", false}
+  defp format_clojure(:negative_infinity, _opts), do: {"##-Inf", false}
+  defp format_clojure(:nan, _opts), do: {"##NaN", false}
   defp format_clojure(f, _opts) when is_float(f), do: {Float.to_string(f), false}
   defp format_clojure(s, opts) when is_binary(s), do: format_clojure_string(s, opts)
   defp format_clojure(a, _opts) when is_atom(a), do: {":#{a}", false}

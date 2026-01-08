@@ -84,9 +84,9 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
     test "analysis error preserves initial memory" do
       initial_memory = %{:"orders-by-month" => [%{month: "2024-01", count: 100}]}
 
-      # Double/POSITIVE_INFINITY causes an analysis error (unknown namespace)
+      # Unknown/CONSTANT causes an analysis error (unknown namespace)
       {:error, %Step{memory: returned_memory}} =
-        Lisp.run("Double/POSITIVE_INFINITY", memory: initial_memory)
+        Lisp.run("Unknown/CONSTANT", memory: initial_memory)
 
       assert returned_memory == initial_memory,
              "Memory should be preserved on analysis error, got: #{inspect(returned_memory)}"

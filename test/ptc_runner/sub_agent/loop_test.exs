@@ -91,7 +91,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       # LLM that causes errors, forcing retries
       llm = fn %{turn: _} ->
-        {:ok, "```clojure\n(/ 1 0)\n```"}
+        {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"}
       end
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{})
@@ -173,7 +173,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
         case turn do
           1 ->
-            {:ok, "```clojure\n(/ 1 0)\n```"}
+            {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"}
 
           2 ->
             # Verify error was fed back
@@ -300,7 +300,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
         case turn do
           1 ->
-            {:ok, "```clojure\n(/ 1 0)\n```"}
+            {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"}
 
           2 ->
             # On turn 2, ctx/fail should be available
@@ -340,7 +340,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
             # Turn 1 should have just the user message
             assert length(messages) == 1
             assert hd(messages).role == :user
-            {:ok, "```clojure\n(/ 1 0)\n```"}
+            {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"}
 
           2 ->
             # Turn 2 should have: user, assistant, user (error feedback)

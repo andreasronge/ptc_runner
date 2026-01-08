@@ -129,7 +129,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
     test "propagates errors from Lisp execution" do
       agent = SubAgent.new(prompt: "Test", max_turns: 1)
-      llm = fn _input -> {:ok, "```clojure\n(/ 1 0)\n```"} end
+      llm = fn _input -> {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"} end
 
       {:error, step} = SubAgent.run(agent, llm: llm)
 

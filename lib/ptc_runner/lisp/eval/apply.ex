@@ -18,6 +18,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Runtime.Math
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
 
@@ -142,6 +143,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
         {:error, {:type_error, Exception.message(e), converted_args}}
 
+      e in ArithmeticError ->
+        {:error, {:arithmetic_error, Exception.message(e)}}
+
       e in BadFunctionError ->
         # Catch attempts to use non-functions as functions (e.g., :keyword passed to map)
         {:error, {:type_error, Exception.message(e), converted_args}}
@@ -155,8 +159,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          %EvalContext{} = eval_ctx,
          _do_eval_fn
        ) do
-    if fun2 == (&Kernel.-/2) do
-      {:ok, -x, eval_ctx}
+    if fun2 == (&Kernel.-/2) or fun2 == (&Math.subtract/2) do
+      {:ok, Math.subtract([x]), eval_ctx}
     else
       # For other variadic functions like *, single arg returns the arg itself
       {:ok, x, eval_ctx}
