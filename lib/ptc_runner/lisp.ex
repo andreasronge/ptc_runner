@@ -30,6 +30,7 @@ defmodule PtcRunner.Lisp do
 
   alias PtcRunner.Lisp.{Analyze, Env, Eval, ExecutionError, Parser, SymbolCounter}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
@@ -281,7 +282,13 @@ defmodule PtcRunner.Lisp do
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
   # Handle Eval errors with specific types
-  def format_error({:unbound_var, name}), do: "undefined variable: #{name}"
+  def format_error({:unbound_var, name}) do
+    msg = Helpers.format_closure_error({:unbound_var, name})
+    # Lowercase first letter to match existing style
+    <<first::utf8, rest::binary>> = msg
+    <<String.downcase(<<first::utf8>>)::binary, rest::binary>>
+  end
+
   def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
   def format_error({:arity_error, msg}), do: "arity error: #{msg}"
   # Handle tool errors
