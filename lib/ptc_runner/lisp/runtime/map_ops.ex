@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   Provides get, assoc, update, merge, and other map manipulation functions.
   """
 
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
   def get(m, k) when is_map(m), do: FlexAccess.flex_get(m, k)
@@ -89,20 +90,20 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   """
   def update_variadic([m, k, f]) do
     old_val = Map.get(m, k)
-    new_val = f.(old_val)
+    new_val = apply_with_arity_check(f, [old_val], "update")
     Map.put(m, k, new_val)
   end
 
   def update_variadic([m, k, f | extra_args]) do
     old_val = Map.get(m, k)
-    new_val = apply(f, [old_val | extra_args])
+    new_val = apply_with_arity_check(f, [old_val | extra_args], "update")
     Map.put(m, k, new_val)
   end
 
   # Keep 3-arg version for direct calls
   def update(m, k, f) do
     old_val = Map.get(m, k)
-    new_val = f.(old_val)
+    new_val = apply_with_arity_check(f, [old_val], "update")
     Map.put(m, k, new_val)
   end
 
@@ -119,14 +120,22 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       %{a: %{b: 6}}
   """
   def update_in_variadic([m, path, f]) do
-    FlexAccess.flex_update_in(m, path, f)
+    FlexAccess.flex_update_in(m, path, fn old_val ->
+      apply_with_arity_check(f, [old_val], "update-in")
+    end)
   end
 
   def update_in_variadic([m, path, f | extra_args]) do
-    FlexAccess.flex_update_in(m, path, fn old_val -> apply(f, [old_val | extra_args]) end)
+    FlexAccess.flex_update_in(m, path, fn old_val ->
+      apply_with_arity_check(f, [old_val | extra_args], "update-in")
+    end)
   end
 
-  def update_in(m, path, f), do: FlexAccess.flex_update_in(m, path, f)
+  def update_in(m, path, f) do
+    FlexAccess.flex_update_in(m, path, fn old_val ->
+      apply_with_arity_check(f, [old_val], "update-in")
+    end)
+  end
 
   @doc """
   Remove keys from a map.
@@ -187,4 +196,37 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   end
 
   def update_vals(nil, _f), do: nil
+
+  # Helper to apply a function with proper arity error handling
+  defp apply_with_arity_check(f, args, context) do
+    apply(f, args)
+  rescue
+    e in BadArityError ->
+      # Extract arity info from the error
+      expected = :erlang.fun_info(e.function, :arity) |> elem(1)
+      got = length(args)
+
+      msg =
+        "#{context}: function expects #{expected} argument(s) but was called with #{got}. " <>
+          arity_hint(expected, got, context)
+
+      reraise ExecutionError.exception(reason: :arity_error, message: msg, data: nil),
+              __STACKTRACE__
+  end
+
+  defp arity_hint(expected, got, context) when got > expected do
+    extra = got - expected
+
+    case extra do
+      1 ->
+        "The extra argument may have been intended as a default value, " <>
+          "but #{context} passes extra args to the function. " <>
+          "Use (or current-val default) inside the function, or wrap with fnil."
+
+      _ ->
+        "Extra arguments are passed to the function, not used as defaults."
+    end
+  end
+
+  defp arity_hint(_, _, _), do: ""
 end
