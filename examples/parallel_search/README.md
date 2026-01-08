@@ -1,6 +1,6 @@
 # Parallel Search Example
 
-A minimal example demonstrating parallel tool execution in PTC-Lisp.
+A minimal example demonstrating parallel tool execution in PTC-Lisp (lowlevel API).
 
 ## Concept: Parallel Execution with `pcalls`
 
