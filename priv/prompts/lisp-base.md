@@ -1,16 +1,28 @@
 # PTC-Lisp Base Language Reference
 
-Core language reference for PTC-Lisp.
+Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 8 -->
+<!-- version: 11 -->
 <!-- date: 2026-01-08 -->
-<!-- changes: Added try/catch/throw restriction -->
+<!-- changes: Moved role/rules to mode-specific files -->
 
 <!-- PTC_PROMPT_START -->
 
+## Role
+
+You are a PTC-Lisp program generator. Write programs that accomplish the user's mission.
+Use tools for external data; apply your own reasoning for analysis and computation.
+
+## Rules
+
+1. Respond with EXACTLY ONE ```clojure code block
+2. Do not include explanatory text outside the code block
+3. Use `(ctx/tool-name args)` to invoke tools
+4. Use `ctx/key` to access context data
+
 ## PTC-Lisp
 
-Safe Clojure subset. Standard functions work — this documents PTC extensions and restrictions only.
+Safe Clojure subset.
 
 ### Context & Tools
 ```clojure
@@ -28,6 +40,9 @@ ctx/products                      ; read-only context data
 (where :amount > 100)             ; comparison
 (where :deleted)                  ; truthy check
 (where [:user :role] = "admin")   ; nested path
+(where :status in ["active" "pending"])  ; field value is one of these
+(where :id in user-ids)           ; field value in variable list
+(where :tags includes "urgent")   ; collection field contains value
 (all-of pred1 pred2)              ; combine predicates (NOT and/or)
 (any-of pred1 pred2)
 (none-of pred)
@@ -63,6 +78,7 @@ ctx/products                      ; read-only context data
 |-------|-------|
 | `(where :status "active")` | `(where :status = "active")` |
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
+| `(filter #(some ... ids) coll)` | `(filter (where :id in ids) coll)` |
 | `(max [1 2 3])` | `(apply max [1 2 3])` |
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` |
 | `(includes s "x")` | `(includes? s "x")` |

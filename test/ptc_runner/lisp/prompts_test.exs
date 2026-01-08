@@ -6,17 +6,19 @@ defmodule PtcRunner.Lisp.PromptsTest do
   doctest Prompts
 
   describe "get/1" do
-    test "returns single_shot prompt (base only)" do
+    test "returns single_shot prompt (base + single_shot addon)" do
       prompt = Prompts.get(:single_shot)
       assert is_binary(prompt)
       assert String.contains?(prompt, "PTC-Lisp")
+      assert String.contains?(prompt, "Single-Shot")
     end
 
-    test "returns multi_turn prompt (base + memory addon)" do
+    test "returns multi_turn prompt (base + multi_turn addon)" do
       prompt = Prompts.get(:multi_turn)
       assert is_binary(prompt)
       assert String.contains?(prompt, "PTC-Lisp")
-      # multi_turn is longer than single_shot (has addon)
+      assert String.contains?(prompt, "Multi-Turn")
+      # multi_turn is longer than single_shot
       assert String.length(prompt) > String.length(Prompts.get(:single_shot))
     end
 
@@ -26,10 +28,15 @@ defmodule PtcRunner.Lisp.PromptsTest do
       assert String.contains?(prompt, "PTC-Lisp")
     end
 
-    test "returns addon_memory snippet" do
-      prompt = Prompts.get(:addon_memory)
+    test "returns addon_single_shot snippet" do
+      prompt = Prompts.get(:addon_single_shot)
       assert is_binary(prompt)
-      # addon should reference state persistence
+      assert String.contains?(prompt, "Single-Shot")
+    end
+
+    test "returns addon_multi_turn snippet" do
+      prompt = Prompts.get(:addon_multi_turn)
+      assert is_binary(prompt)
       assert String.contains?(prompt, "State Persistence")
     end
 
@@ -52,14 +59,18 @@ defmodule PtcRunner.Lisp.PromptsTest do
   end
 
   describe "compositions" do
-    test "single_shot equals base" do
-      assert Prompts.get(:single_shot) == Prompts.get(:base)
+    test "single_shot equals base + addon_single_shot" do
+      base = Prompts.get(:base)
+      addon = Prompts.get(:addon_single_shot)
+      expected = base <> "\n\n" <> addon
+
+      assert Prompts.get(:single_shot) == expected
     end
 
-    test "multi_turn equals base + addon_memory" do
+    test "multi_turn equals base + addon_multi_turn" do
       base = Prompts.get(:base)
-      memory = Prompts.get(:addon_memory)
-      expected = base <> "\n\n" <> memory
+      addon = Prompts.get(:addon_multi_turn)
+      expected = base <> "\n\n" <> addon
 
       assert Prompts.get(:multi_turn) == expected
     end
@@ -71,7 +82,8 @@ defmodule PtcRunner.Lisp.PromptsTest do
       assert :single_shot in keys
       assert :multi_turn in keys
       assert :base in keys
-      assert :addon_memory in keys
+      assert :addon_single_shot in keys
+      assert :addon_multi_turn in keys
     end
   end
 
@@ -138,7 +150,8 @@ defmodule PtcRunner.Lisp.PromptsTest do
 
     test "returns false for current snippets" do
       refute Prompts.archived?(:base)
-      refute Prompts.archived?(:addon_memory)
+      refute Prompts.archived?(:addon_single_shot)
+      refute Prompts.archived?(:addon_multi_turn)
     end
 
     test "raises for unknown prompt" do
@@ -154,7 +167,8 @@ defmodule PtcRunner.Lisp.PromptsTest do
       assert :single_shot in keys
       assert :multi_turn in keys
       assert :base in keys
-      assert :addon_memory in keys
+      assert :addon_single_shot in keys
+      assert :addon_multi_turn in keys
     end
 
     test "list_current is subset of list" do

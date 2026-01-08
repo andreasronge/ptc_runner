@@ -9,15 +9,16 @@ defmodule PtcRunner.Lisp.Prompts do
 
   | Key | Description |
   |-----|-------------|
-  | `:single_shot` | Base language reference (no memory docs) |
-  | `:multi_turn` | Base + memory addon for conversational use |
+  | `:single_shot` | Base + single-shot rules |
+  | `:multi_turn` | Base + multi-turn rules (return/fail, memory) |
 
   ## Raw Snippets
 
   | Key | File | Description |
   |-----|------|-------------|
   | `:base` | `lisp-base.md` | Core language reference |
-  | `:addon_memory` | `lisp-addon-memory.md` | Memory persistence docs |
+  | `:addon_single_shot` | `lisp-addon-single_shot.md` | Single-shot mode rules |
+  | `:addon_multi_turn` | `lisp-addon-multi_turn.md` | Multi-turn mode rules |
 
   ## Version Metadata
 
@@ -141,8 +142,8 @@ defmodule PtcRunner.Lisp.Prompts do
 
   # Compositions: predefined combinations of snippets
   @compositions %{
-    single_shot: [:base],
-    multi_turn: [:base, :addon_memory]
+    single_shot: [:base, :addon_single_shot],
+    multi_turn: [:base, :addon_multi_turn]
   }
 
   @doc """
@@ -350,8 +351,8 @@ defmodule PtcRunner.Lisp.Prompts do
   @spec list_with_descriptions() :: [{atom(), String.t()}]
   def list_with_descriptions do
     composition_descriptions = [
-      {:single_shot, "Base language reference for single-turn queries"},
-      {:multi_turn, "Base + memory addon for multi-turn conversations"}
+      {:single_shot, "Base + single-shot rules"},
+      {:multi_turn, "Base + multi-turn rules (return/fail, memory)"}
     ]
 
     snippet_descriptions =
