@@ -410,10 +410,10 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       result1 = compiled.execute.(%{a: 10, b: 2})
       assert result1.return.result == 5
 
-      # Runtime error
+      # Runtime error - tool exceptions return :tool_error
       result2 = compiled.execute.(%{a: 10, b: 0})
       assert result2.fail != nil
-      assert result2.fail.reason == :execution_error
+      assert result2.fail.reason == :tool_error
     end
   end
 end

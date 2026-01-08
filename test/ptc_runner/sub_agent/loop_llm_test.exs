@@ -277,9 +277,9 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 ```|}
 
           2 ->
-            # Error should be fed back (wrapped in execution_error)
+            # Error should be fed back (with tool_error reason)
             assert Enum.any?(messages, fn msg ->
-                     msg.role == :user and msg.content =~ "Tool error:" and
+                     msg.role == :user and msg.content =~ "Error:" and
                        msg.content =~ "something failed"
                    end)
 

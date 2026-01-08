@@ -244,6 +244,18 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert message =~ "regex literals"
       assert message =~ "not supported"
     end
+
+    test "reader discard syntax #_ is rejected with helpful error" do
+      assert {:error, {:parse_error, message}} = Parser.parse("#_ (def x 1)")
+      assert message =~ "reader discard syntax (#_)"
+      assert message =~ "not supported"
+    end
+
+    test "deref syntax @ is rejected with helpful error" do
+      assert {:error, {:parse_error, message}} = Parser.parse("@state")
+      assert message =~ "deref syntax (@var)"
+      assert message =~ "not supported"
+    end
   end
 
   describe "numeric edge cases" do
