@@ -87,6 +87,8 @@ The question "should async be at Lisp level or SubAgent level only?" is answered
 
 Lisp-level await enables the LLM to express "wait for multiple async results, then combine" in a single program. SubAgent-level-only would force multiple round-trips for common patterns.
 
+**Lisp suspension serialization**: When `(await)` suspends mid-execution, we need to serialize the continuation. Since PTC-Lisp is interpreted, serialize AST + environment (variable bindings), not closures. Resume by continuing interpretation from suspension point.
+
 **BEAM-Native Approach**:
 - Could model as GenServer that receives messages
 - Or continuation-based: save/restore execution state
