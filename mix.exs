@@ -89,6 +89,7 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-patterns.md",
         "docs/guides/subagent-testing.md",
         "docs/guides/subagent-troubleshooting.md",
+        "docs/guides/subagent-observability.md",
         "docs/guides/subagent-advanced.md",
         "docs/guides/subagent-prompts.md",
         # Reference

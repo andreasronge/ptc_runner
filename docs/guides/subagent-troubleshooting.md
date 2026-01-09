@@ -288,6 +288,7 @@ See [Core Concepts](subagent-concepts.md) for the full state persistence documen
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage
+- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Core Concepts](subagent-concepts.md) - Context, memory, error handling
 - [Testing](subagent-testing.md) - Mock LLMs and debug strategies
 - `PtcRunner.SubAgent` - API reference

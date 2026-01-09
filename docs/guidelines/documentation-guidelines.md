@@ -47,6 +47,25 @@ until completion or failure.
 | Options | Bullet list: `:option` - Description |
 | Headings | `##` for sections (never `#`) |
 
+### Auto-linking in Guides
+
+In markdown guides (extras), only **function references with arity** auto-link:
+
+| Reference | In `@doc`/`@moduledoc` | In guides (`.md`) |
+|-----------|------------------------|-------------------|
+| `` `PtcRunner.SubAgent` `` | Links ✓ | Code only, no link |
+| `` `PtcRunner.SubAgent.run/2` `` | Links ✓ | Links ✓ |
+
+To link from guides, always include the arity:
+
+```markdown
+<!-- Won't link in guides -->
+See `PtcRunner.SubAgent.Telemetry` for details.
+
+<!-- Will link in guides -->
+See `PtcRunner.SubAgent.Telemetry.span/3` for details.
+```
+
 ## Code Examples
 
 Use `iex>` prompt for doctests:

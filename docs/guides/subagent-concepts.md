@@ -295,8 +295,9 @@ Floats are rounded to 2 decimal places by default (e.g., `3.33` instead of `3.33
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
+- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
-- [Advanced Topics](subagent-advanced.md) - Observability and the compile pattern
+- [Advanced Topics](subagent-advanced.md) - ReAct patterns and the compile pattern
 - `PtcRunner.SubAgent` - API reference

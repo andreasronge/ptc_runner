@@ -387,7 +387,7 @@ Features that would make ptc_runner unique in the LLM tooling ecosystem:
 
 ```
 v0.5: Observability & Debugging
-  - Fix tool call tracking in traces
+  - Fix tool call tracking in traces (done)
   - Add messages to Step (opt-in)
   - Document existing telemetry
   - Lisp error attribution (line/column in generated code)
