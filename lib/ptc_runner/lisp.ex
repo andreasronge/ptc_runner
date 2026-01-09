@@ -200,6 +200,10 @@ defmodule PtcRunner.Lisp do
           e in ExecutionError ->
             {:error, {e.reason, e.message, e.data}}
 
+          e in PtcRunner.ToolExecutionError ->
+            # Tool error with eval_ctx preserved (contains recorded tool_calls)
+            {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
+
           e ->
             # Catch unexpected exceptions in tool implementations and report as tool errors
             {:error, {:tool_error, "unknown", Exception.message(e)}}
@@ -255,6 +259,26 @@ defmodule PtcRunner.Lisp do
             {:ok, validated_step} -> {:ok, validated_step}
             {:error, reason} -> {:error, reason}
           end
+
+        {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx} ->
+          # Error with eval_ctx preserved (e.g., from tool execution error)
+          reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
+
+          step = %Step{
+            return: nil,
+            fail: %{reason: reason_atom, message: format_error(reason)},
+            memory: memory,
+            signature: nil,
+            usage: metrics,
+            trace: nil,
+            trace_id: nil,
+            parent_trace_id: nil,
+            field_descriptions: nil,
+            prints: eval_ctx.prints,
+            tool_calls: eval_ctx.tool_calls
+          }
+
+          {:error, step}
 
         {:error, {:timeout, ms}} ->
           {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory)}

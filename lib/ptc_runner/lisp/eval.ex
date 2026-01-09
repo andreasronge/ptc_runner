@@ -20,6 +20,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval.{Apply, Patterns, Where}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
@@ -503,26 +504,7 @@ defmodule PtcRunner.Lisp.Eval do
          %EvalContext{tool_exec: tool_exec} = eval_ctx
        ) do
     with {:ok, args_map, eval_ctx2} <- do_eval(args_ast, eval_ctx) do
-      # Record tool call timing and result
-      start_time = System.monotonic_time(:millisecond)
-      timestamp = DateTime.utc_now()
-
-      # Call the tool executor - let exceptions propagate normally
-      result = tool_exec.(tool_name, args_map)
-
-      duration_ms = System.monotonic_time(:millisecond) - start_time
-
-      tool_call = %{
-        name: tool_name,
-        args: args_map,
-        result: result,
-        error: nil,
-        timestamp: timestamp,
-        duration_ms: duration_ms
-      }
-
-      eval_ctx3 = EvalContext.append_tool_call(eval_ctx2, tool_call)
-      {:ok, result, eval_ctx3}
+      record_tool_call(tool_name, args_map, tool_exec, eval_ctx2)
     end
   end
 
@@ -535,27 +517,7 @@ defmodule PtcRunner.Lisp.Eval do
         args_map = build_args_map(arg_vals)
         # Convert atom to string for backward compatibility with tool_exec
         tool_name_str = Atom.to_string(tool_name)
-
-        # Record tool call timing and result
-        start_time = System.monotonic_time(:millisecond)
-        timestamp = DateTime.utc_now()
-
-        # Call the tool executor - let exceptions propagate normally
-        result = tool_exec.(tool_name_str, args_map)
-
-        duration_ms = System.monotonic_time(:millisecond) - start_time
-
-        tool_call = %{
-          name: tool_name_str,
-          args: args_map,
-          result: result,
-          error: nil,
-          timestamp: timestamp,
-          duration_ms: duration_ms
-        }
-
-        eval_ctx3 = EvalContext.append_tool_call(eval_ctx2, tool_call)
-        {:ok, result, eval_ctx3}
+        record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2)
 
       {:error, _} = err ->
         err
@@ -573,6 +535,50 @@ defmodule PtcRunner.Lisp.Eval do
   defp build_args_map([]), do: %{}
   defp build_args_map([arg]) when is_map(arg), do: arg
   defp build_args_map(args), do: %{args: args}
+
+  # Record a tool call with timing, execution, error capture, and evaluation context update.
+  # Captures the error field if the tool raises an exception, records it, and throws a special
+  # exception that includes the updated eval_ctx so the error can be properly reported.
+  defp record_tool_call(tool_name, args_map, tool_exec, eval_ctx) do
+    start_time = System.monotonic_time(:millisecond)
+    timestamp = DateTime.utc_now()
+
+    {result, error} =
+      try do
+        {tool_exec.(tool_name, args_map), nil}
+      rescue
+        e in ExecutionError ->
+          # Let ExecutionErrors from tools (e.g., {:error, reason} returns) propagate
+          reraise e, __STACKTRACE__
+
+        e ->
+          # Catch unexpected exceptions and record the error
+          {nil, Exception.message(e)}
+      end
+
+    duration_ms = System.monotonic_time(:millisecond) - start_time
+
+    tool_call = %{
+      name: tool_name,
+      args: args_map,
+      result: result,
+      error: error,
+      timestamp: timestamp,
+      duration_ms: duration_ms
+    }
+
+    eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
+
+    if error do
+      # Throw a special exception that carries the eval_ctx so tool_calls aren't lost
+      raise PtcRunner.ToolExecutionError,
+        message: error,
+        eval_ctx: eval_ctx2,
+        tool_name: tool_name
+    else
+      {:ok, result, eval_ctx2}
+    end
+  end
 
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do

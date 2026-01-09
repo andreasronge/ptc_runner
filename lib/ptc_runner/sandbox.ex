@@ -97,6 +97,12 @@ defmodule PtcRunner.Sandbox do
           {:ok, value, eval_memory} ->
             {:ok, value, %{duration_ms: duration, memory_bytes: memory}, eval_memory}
 
+          {:error, reason, eval_ctx} ->
+            # Error with eval_ctx (e.g., from tool execution error with recorded tool_calls)
+            # Return as a 4-tuple success with error tagged in the value
+            {:ok, {:error_with_ctx, reason}, %{duration_ms: duration, memory_bytes: memory},
+             eval_ctx}
+
           {:error, reason} ->
             {:error, reason}
         end

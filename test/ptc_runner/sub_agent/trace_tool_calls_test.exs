@@ -256,4 +256,56 @@ defmodule PtcRunner.SubAgent.TraceToolCallsTest do
       assert tool_call.duration_ms >= 10
     end
   end
+
+  describe "tool call error capture" do
+    test "captures tool error in trace entry before re-raising" do
+      tools = %{
+        "failing_tool" => fn _ ->
+          raise "intentional failure"
+        end
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Call failing tool",
+          tools: tools,
+          max_turns: 5
+        )
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(ctx/failing_tool {})
+```|}
+
+          2 ->
+            {:ok, ~S|```clojure
+(return 42)
+```|}
+
+          _ ->
+            {:ok, ~S|```clojure
+(return nil)
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      # Tool error occurred on first turn, which caused the error turn
+      assert length(step.trace) == 2
+      [error_turn, _recovery_turn] = step.trace
+
+      # Tool was called and error was recorded in the trace
+      assert length(error_turn.tool_calls) == 1
+      [tool_call] = error_turn.tool_calls
+
+      assert tool_call.name == "failing_tool"
+      assert tool_call.args == %{}
+      assert tool_call.result == nil
+      assert tool_call.error == "intentional failure"
+      assert is_integer(tool_call.duration_ms)
+    end
+  end
 end
