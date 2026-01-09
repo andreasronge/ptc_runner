@@ -122,6 +122,15 @@ if ! mix test; then
 fi
 echo "✓ Tests passed"
 
+# 9b. Run demo tests
+echo ""
+echo "Running demo tests..."
+if ! (cd demo && mix test); then
+  echo "Error: Demo tests failed"
+  exit 1
+fi
+echo "✓ Demo tests passed"
+
 # 10. Run credo (if available)
 echo ""
 echo "Running credo..."
