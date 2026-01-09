@@ -436,7 +436,7 @@ defmodule PtcRunner.SubAgent.Loop do
         error_result = {:error, lisp_step.fail.message}
 
         trace_entry =
-          Metrics.build_trace_entry(state, code, error_result, [],
+          Metrics.build_trace_entry(state, code, error_result, lisp_step.tool_calls,
             llm_response: response,
             llm_feedback: error_message
           )
@@ -494,7 +494,7 @@ defmodule PtcRunner.SubAgent.Loop do
         {:__ptc_fail__, fail_args} = lisp_step.return
 
         trace_entry =
-          Metrics.build_trace_entry(state, code, fail_args, [],
+          Metrics.build_trace_entry(state, code, fail_args, lisp_step.tool_calls,
             llm_response: response,
             llm_feedback: nil,
             prints: lisp_step.prints
@@ -526,7 +526,7 @@ defmodule PtcRunner.SubAgent.Loop do
             {execution_result, feedback_truncated} = format_turn_feedback(agent, state, lisp_step)
 
             trace_entry =
-              Metrics.build_trace_entry(state, code, lisp_step.return, [],
+              Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
                 llm_response: response,
                 llm_feedback: execution_result,
                 feedback_truncated: feedback_truncated,
@@ -559,7 +559,7 @@ defmodule PtcRunner.SubAgent.Loop do
           {:error, :memory_limit_exceeded, actual_size} ->
             # Memory limit exceeded - return error
             trace_entry =
-              Metrics.build_trace_entry(state, code, lisp_step.return, [],
+              Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
                 llm_response: response,
                 llm_feedback: nil,
                 prints: lisp_step.prints
@@ -738,7 +738,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Build success step for return/single-shot termination
   defp build_success_step(code, response, lisp_step, state, agent) do
     trace_entry =
-      Metrics.build_trace_entry(state, code, lisp_step.return, [],
+      Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
         llm_response: response,
         llm_feedback: nil,
         prints: lisp_step.prints
@@ -775,7 +775,7 @@ defmodule PtcRunner.SubAgent.Loop do
     error_message = format_validation_error_for_llm(agent, lisp_step.return, errors)
 
     trace_entry =
-      Metrics.build_trace_entry(state, code, lisp_step.return, [],
+      Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
         llm_response: response,
         llm_feedback: error_message,
         prints: lisp_step.prints

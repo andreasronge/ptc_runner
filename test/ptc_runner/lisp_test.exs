@@ -294,7 +294,7 @@ defmodule PtcRunner.LispTest do
       assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
                Lisp.run("(ctx/kaboom)", tools: tools)
 
-      assert msg =~ "Tool 'unknown' failed: \"unexpected error\""
+      assert msg =~ "Tool 'kaboom' failed: \"unexpected error\""
     end
   end
 
