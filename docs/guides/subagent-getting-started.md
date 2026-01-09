@@ -343,7 +343,10 @@ PtcRunner.SubAgent.new(
     history_max_bytes: 512,    # truncation limit for *1/*2/*3 history
     result_limit: 50,          # inspect :limit for final result
     result_max_chars: 500      # final string truncation
-  ]
+  ],
+
+  # Float precision for output formatting (default: 2)
+  float_precision: 2
 )
 ```
 
