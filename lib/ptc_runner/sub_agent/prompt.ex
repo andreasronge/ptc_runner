@@ -7,6 +7,18 @@ defmodule PtcRunner.SubAgent.Prompt do
   - `Prompt.Tools` - Available tool schemas and signatures
   - `Prompt.Output` - Expected return format from signature
 
+  ## Prompt Caching Architecture
+
+  To enable efficient prompt caching (e.g., Anthropic's cache_control), the prompt
+  is split into **static** and **dynamic** sections:
+
+  - **Static (system prompt)**: `generate_system/2` returns language reference and output
+    format - these rarely change and benefit from caching across different questions.
+  - **Dynamic (user message)**: `generate_context/2` returns data inventory, tool schemas,
+    and expected output - these vary per agent configuration but not per question.
+
+  The mission is placed only in the user message (not duplicated in system prompt).
+
   ## Customization
 
   The `system_prompt` field on `SubAgent` accepts:
@@ -98,6 +110,97 @@ defmodule PtcRunner.SubAgent.Prompt do
 
     # Apply truncation if prompt_limit is set
     truncate_if_needed(customized_prompt, agent.prompt_limit)
+  end
+
+  @doc """
+  Generate static system prompt sections (cacheable).
+
+  Returns only the language reference and output format - these sections rarely
+  change across different questions and benefit from prompt caching.
+
+  ## Options
+
+  - `:resolution_context` - Map with turn/model/memory/messages for language_spec callbacks
+
+  ## Examples
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Test")
+      iex> system = PtcRunner.SubAgent.Prompt.generate_system(agent)
+      iex> system =~ "## Role" and system =~ "# Output Format"
+      true
+      iex> system =~ "# Data Inventory"
+      false
+
+  """
+  @spec generate_system(SubAgent.t(), keyword()) :: String.t()
+  def generate_system(%SubAgent{} = agent, opts \\ []) do
+    resolution_context = Keyword.get(opts, :resolution_context, %{})
+
+    {language_ref, output_fmt} = resolve_static_sections(agent, resolution_context)
+
+    base_prompt =
+      [language_ref, output_fmt]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    # Apply customization (prefix/suffix) but not string/function overrides
+    # since those replace the entire prompt
+    customized_prompt = apply_customization(base_prompt, agent.system_prompt)
+
+    # Apply truncation if prompt_limit is set
+    truncate_if_needed(customized_prompt, agent.prompt_limit)
+  end
+
+  @doc """
+  Generate dynamic context sections (prepended to user message).
+
+  Returns data inventory, tool schemas, and expected output - these sections vary
+  per agent configuration but not per individual question.
+
+  Note: The mission is NOT included here - it's already in the user message.
+
+  ## Options
+
+  - `:context` - Map of context variables for the data inventory
+  - `:received_field_descriptions` - Field descriptions from upstream agent
+
+  ## Examples
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Test", tools: %{"search" => fn _ -> [] end})
+      iex> context_prompt = PtcRunner.SubAgent.Prompt.generate_context(agent, context: %{x: 1})
+      iex> context_prompt =~ "# Data Inventory" and context_prompt =~ "# Available Tools"
+      true
+      iex> context_prompt =~ "# Mission"
+      false
+
+  """
+  @spec generate_context(SubAgent.t(), keyword()) :: String.t()
+  def generate_context(%SubAgent{} = agent, opts \\ []) do
+    context = Keyword.get(opts, :context, %{})
+    received_field_descriptions = Keyword.get(opts, :received_field_descriptions)
+
+    # Parse signature if present
+    context_signature = parse_signature(agent.signature)
+
+    # Determine if multi-turn mode
+    multi_turn? = agent.max_turns > 1
+
+    # Merge agent context_descriptions into received_field_descriptions
+    # Chained (received) descriptions take precedence (upstream agent knows better)
+    all_field_descriptions =
+      Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
+
+    # Generate dynamic sections
+    data_inventory =
+      DataInventory.generate(context, context_signature, all_field_descriptions)
+
+    tool_schemas = Tools.generate(agent.tools, agent.tool_catalog, multi_turn?)
+
+    expected_output = Output.generate(context_signature, agent.field_descriptions)
+
+    [data_inventory, tool_schemas, expected_output]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
   end
 
   @doc """
@@ -262,37 +365,10 @@ defmodule PtcRunner.SubAgent.Prompt do
          received_field_descriptions
        ) do
     # Parse signature if present
-    context_signature =
-      case agent.signature do
-        nil ->
-          nil
+    context_signature = parse_signature(agent.signature)
 
-        sig_str ->
-          case Signature.parse(sig_str) do
-            {:ok, sig} -> sig
-            {:error, _reason} -> nil
-          end
-      end
-
-    # Get custom sections from system_prompt if it's a map
-    # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
-    default_spec = if agent.max_turns > 1, do: :multi_turn, else: :single_shot
-
-    {language_ref, output_fmt} =
-      case agent.system_prompt do
-        opts when is_map(opts) ->
-          # Resolve language_spec (can be string, atom, or callback)
-          raw_spec = Map.get(opts, :language_spec, default_spec)
-          resolved_spec = resolve_language_spec(raw_spec, resolution_context)
-
-          {
-            resolved_spec,
-            Map.get(opts, :output_format, @output_format)
-          }
-
-        _ ->
-          {Prompts.get(default_spec), @output_format}
-      end
+    # Get static sections (language_ref, output_fmt)
+    {language_ref, output_fmt} = resolve_static_sections(agent, resolution_context)
 
     # Determine if multi-turn mode
     multi_turn? = agent.max_turns > 1
@@ -331,6 +407,37 @@ defmodule PtcRunner.SubAgent.Prompt do
     case Template.expand(prompt, context) do
       {:ok, expanded} -> expanded
       {:error, {:missing_keys, _keys}} -> prompt
+    end
+  end
+
+  # Resolve language_ref and output_fmt from agent config
+  defp resolve_static_sections(%SubAgent{} = agent, resolution_context) do
+    # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
+    default_spec = if agent.max_turns > 1, do: :multi_turn, else: :single_shot
+
+    case agent.system_prompt do
+      opts when is_map(opts) ->
+        # Resolve language_spec (can be string, atom, or callback)
+        raw_spec = Map.get(opts, :language_spec, default_spec)
+        resolved_spec = resolve_language_spec(raw_spec, resolution_context)
+
+        {
+          resolved_spec,
+          Map.get(opts, :output_format, @output_format)
+        }
+
+      _ ->
+        {Prompts.get(default_spec), @output_format}
+    end
+  end
+
+  # Parse signature string to struct, returning nil on failure
+  defp parse_signature(nil), do: nil
+
+  defp parse_signature(sig_str) do
+    case Signature.parse(sig_str) do
+      {:ok, sig} -> sig
+      {:error, _reason} -> nil
     end
   end
 end

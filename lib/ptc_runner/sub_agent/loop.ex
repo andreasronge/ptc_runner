@@ -182,14 +182,18 @@ defmodule PtcRunner.SubAgent.Loop do
     calculated_deadline =
       run_opts.mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
-    # Expand template in prompt
+    # Expand template in prompt (mission)
     expanded_prompt = expand_template(agent.prompt, run_opts.context)
+
+    # Build first user message with dynamic context prepended
+    # This includes data inventory, tool schemas, expected output, plus the mission
+    first_user_message = build_first_user_message(agent, run_opts, expanded_prompt)
 
     initial_state = %{
       llm: run_opts.llm,
       llm_registry: run_opts.llm_registry,
       turn: 1,
-      messages: [%{role: :user, content: expanded_prompt}],
+      messages: [%{role: :user, content: first_user_message}],
       context: run_opts.context,
       trace: [],
       start_time: System.monotonic_time(:millisecond),
@@ -621,13 +625,24 @@ defmodule PtcRunner.SubAgent.Loop do
     result
   end
 
-  # System prompt generation with resolution context for language_spec callbacks
-  defp build_system_prompt(agent, context, resolution_context, received_field_descriptions) do
-    Prompt.generate(agent,
-      context: context,
-      resolution_context: resolution_context,
-      received_field_descriptions: received_field_descriptions
-    )
+  # System prompt generation - static sections only (cacheable)
+  # Dynamic sections (data inventory, tools, expected output) are in the first user message
+  defp build_system_prompt(agent, _context, resolution_context, _received_field_descriptions) do
+    Prompt.generate_system(agent, resolution_context: resolution_context)
+  end
+
+  # Build the first user message with dynamic context prepended to mission
+  defp build_first_user_message(agent, run_opts, expanded_mission) do
+    context_prompt =
+      Prompt.generate_context(agent,
+        context: run_opts.context,
+        received_field_descriptions: run_opts.received_field_descriptions
+      )
+
+    # Combine context sections with mission
+    [context_prompt, "# Mission\n\n#{expanded_mission}"]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
   end
 
   # Calculate approximate memory size in bytes
