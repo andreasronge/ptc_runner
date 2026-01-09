@@ -74,6 +74,152 @@ defmodule PtcRunner.SubAgent.PromptTest do
     end
   end
 
+  describe "generate_system/2" do
+    test "returns only static sections (language ref and output format)" do
+      agent = SubAgent.new(prompt: "Test task", tools: %{"search" => fn _ -> [] end})
+
+      system = Prompt.generate_system(agent)
+
+      # Should have static sections
+      assert system =~ "## Role"
+      assert system =~ "# Output Format"
+
+      # Should NOT have dynamic sections
+      refute system =~ "# Data Inventory"
+      refute system =~ "# Available Tools"
+      refute system =~ "# Expected Output"
+      refute system =~ "# Mission"
+    end
+
+    test "returns stable output for same agent config" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      system1 = Prompt.generate_system(agent)
+      system2 = Prompt.generate_system(agent)
+
+      assert system1 == system2
+    end
+
+    test "uses single_shot language spec for max_turns: 1" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      system = Prompt.generate_system(agent)
+
+      # Single-shot should not have multi-turn memory docs
+      refute system =~ "Memory: Persisting Data Between Turns"
+    end
+
+    test "uses multi_turn language spec for max_turns > 1" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 5)
+
+      system = Prompt.generate_system(agent)
+
+      # Multi-turn should have state persistence docs
+      assert system =~ "### State Persistence"
+    end
+
+    test "applies customization prefix and suffix" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          system_prompt: %{prefix: "PREFIX:", suffix: ":SUFFIX"}
+        )
+
+      system = Prompt.generate_system(agent)
+
+      assert String.starts_with?(system, "PREFIX:")
+      assert String.ends_with?(system, ":SUFFIX")
+    end
+
+    test "string override replaces static sections" do
+      agent = SubAgent.new(prompt: "Test", system_prompt: "Custom system prompt")
+
+      system = Prompt.generate_system(agent)
+
+      assert system == "Custom system prompt"
+    end
+
+    test "function transformer is applied" do
+      agent = SubAgent.new(prompt: "Test", system_prompt: fn p -> "<<" <> p <> ">>" end)
+
+      system = Prompt.generate_system(agent)
+
+      assert String.starts_with?(system, "<<")
+      assert String.ends_with?(system, ">>")
+    end
+  end
+
+  describe "generate_context/2" do
+    test "includes dynamic sections" do
+      agent = SubAgent.new(prompt: "Test", tools: %{"search" => fn _ -> [] end})
+      context = %{user: "Alice", count: 5}
+
+      context_prompt = Prompt.generate_context(agent, context: context)
+
+      # Should have dynamic sections
+      assert context_prompt =~ "# Data Inventory"
+      assert context_prompt =~ "# Available Tools"
+      assert context_prompt =~ "ctx/user"
+      assert context_prompt =~ "ctx/count"
+      assert context_prompt =~ "### search"
+
+      # Should NOT have static sections
+      refute context_prompt =~ "## Role"
+      refute context_prompt =~ "# Output Format"
+    end
+
+    test "does not include mission" do
+      agent = SubAgent.new(prompt: "This is the mission")
+
+      context_prompt = Prompt.generate_context(agent, context: %{})
+
+      refute context_prompt =~ "# Mission"
+      refute context_prompt =~ "This is the mission"
+    end
+
+    test "includes Expected Output when signature is present" do
+      agent = SubAgent.new(prompt: "Test", signature: "(x :int) -> {count :int}")
+
+      context_prompt = Prompt.generate_context(agent, context: %{x: 5})
+
+      assert context_prompt =~ "# Expected Output"
+      assert context_prompt =~ "{count :int}"
+    end
+
+    test "includes return/fail tools for multi-turn mode" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 5)
+
+      context_prompt = Prompt.generate_context(agent, context: %{})
+
+      assert context_prompt =~ "### return"
+      assert context_prompt =~ "### fail"
+    end
+
+    test "omits return/fail tools for single-shot mode" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 1)
+
+      context_prompt = Prompt.generate_context(agent, context: %{})
+
+      # Single-shot should NOT have return/fail
+      refute context_prompt =~ "### return"
+      refute context_prompt =~ "### fail"
+    end
+
+    test "merges field descriptions from upstream" do
+      agent = SubAgent.new(prompt: "Test", context_descriptions: %{user: "Local desc"})
+
+      context_prompt =
+        Prompt.generate_context(agent,
+          context: %{user: "Alice", items: [1, 2]},
+          received_field_descriptions: %{items: "Received desc"}
+        )
+
+      # Both descriptions should appear
+      assert context_prompt =~ "Local desc"
+      assert context_prompt =~ "Received desc"
+    end
+  end
+
   describe "generate_data_inventory/2" do
     test "formats simple context correctly" do
       context = %{user_id: 123, name: "Alice"}
