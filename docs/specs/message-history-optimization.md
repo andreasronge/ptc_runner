@@ -1,5 +1,9 @@
 # Message History Optimization Specification
 
+## Prerequisites
+
+- [#603 - Messages should be stored in Step](https://github.com/andreasronge/ptc_runner/issues/603) must be completed first. Message history optimization depends on having messages stored in Step.
+
 ## Problem Statement
 
 In multi-turn PTC-Lisp execution, the message array accumulates full programs from each turn:
@@ -223,6 +227,8 @@ It does NOT see:
 
 ### What Gets Compressed
 
+**CRITICAL: The initial USER message (mission) is NEVER removed.** This contains the task/question that drives the entire conversation. See [#603](https://github.com/andreasronge/ptc_runner/issues/603).
+
 | Message Type | Compress? | Reason |
 |--------------|-----------|--------|
 | Old successful ASSISTANT | Yes | Code is disposable, results matter |
@@ -230,7 +236,7 @@ It does NOT see:
 | Latest ASSISTANT | No | LLM just wrote it, may need to iterate |
 | USER feedback | No | Already minimal (output + turn info) |
 | SYSTEM prompt | No | Static, needed for context |
-| Initial USER message | No | The task/question |
+| Initial USER message | **Never** | The mission - task/question driving execution |
 
 ### Compression Timing
 
