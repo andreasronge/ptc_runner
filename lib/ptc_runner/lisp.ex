@@ -242,24 +242,6 @@ defmodule PtcRunner.Lisp do
 
           {:ok, %{step | usage: metrics}}
 
-        {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
-          step =
-            apply_memory_contract(
-              value,
-              eval_ctx.user_ns,
-              float_precision,
-              eval_ctx.prints,
-              eval_ctx.tool_calls
-            )
-
-          step_with_usage = %{step | usage: metrics}
-
-          # Validate signature if provided
-          case validate_return_value(parsed_signature, signature_str, step_with_usage) do
-            {:ok, validated_step} -> {:ok, validated_step}
-            {:error, reason} -> {:error, reason}
-          end
-
         {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx} ->
           # Error with eval_ctx preserved (e.g., from tool execution error)
           reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
@@ -279,6 +261,24 @@ defmodule PtcRunner.Lisp do
           }
 
           {:error, step}
+
+        {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
+          step =
+            apply_memory_contract(
+              value,
+              eval_ctx.user_ns,
+              float_precision,
+              eval_ctx.prints,
+              eval_ctx.tool_calls
+            )
+
+          step_with_usage = %{step | usage: metrics}
+
+          # Validate signature if provided
+          case validate_return_value(parsed_signature, signature_str, step_with_usage) do
+            {:ok, validated_step} -> {:ok, validated_step}
+            {:error, reason} -> {:error, reason}
+          end
 
         {:error, {:timeout, ms}} ->
           {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory)}
