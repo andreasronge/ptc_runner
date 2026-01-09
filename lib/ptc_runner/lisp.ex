@@ -220,7 +220,8 @@ defmodule PtcRunner.Lisp do
               {:__ptc_return__, value},
               eval_ctx.user_ns,
               float_precision,
-              eval_ctx.prints
+              eval_ctx.prints,
+              eval_ctx.tool_calls
             )
 
           {:ok, %{step | usage: metrics}}
@@ -231,13 +232,22 @@ defmodule PtcRunner.Lisp do
               {:__ptc_fail__, value},
               eval_ctx.user_ns,
               float_precision,
-              eval_ctx.prints
+              eval_ctx.prints,
+              eval_ctx.tool_calls
             )
 
           {:ok, %{step | usage: metrics}}
 
         {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
-          step = apply_memory_contract(value, eval_ctx.user_ns, float_precision, eval_ctx.prints)
+          step =
+            apply_memory_contract(
+              value,
+              eval_ctx.user_ns,
+              float_precision,
+              eval_ctx.prints,
+              eval_ctx.tool_calls
+            )
+
           step_with_usage = %{step | usage: metrics}
 
           # Validate signature if provided
@@ -329,7 +339,7 @@ defmodule PtcRunner.Lisp do
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
-  defp apply_memory_contract(value, memory, precision, prints) do
+  defp apply_memory_contract(value, memory, precision, prints, tool_calls) do
     %Step{
       return: round_floats(value, precision),
       fail: nil,
@@ -337,7 +347,8 @@ defmodule PtcRunner.Lisp do
       signature: nil,
       usage: nil,
       trace: nil,
-      prints: Enum.reverse(prints)
+      prints: Enum.reverse(prints),
+      tool_calls: Enum.reverse(tool_calls)
     }
   end
 
