@@ -5,12 +5,14 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   Formats execution results and turn state information for LLM feedback.
   """
 
+  alias PtcRunner.SubAgent
+
   @doc """
   Append turn progress info to a feedback message.
 
   For multi-turn agents, adds remaining turn count and final turn warnings.
   """
-  @spec append_turn_info(String.t(), map(), map()) :: String.t()
+  @spec append_turn_info(String.t(), SubAgent.t(), map()) :: String.t()
   def append_turn_info(message, agent, state) do
     if agent.max_turns > 1 do
       next_turn = state.turn + 1
@@ -36,7 +38,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   Only shows explicit println output - the LLM must be intentional about what it inspects.
   """
-  @spec format(map(), map(), map()) :: {String.t(), boolean()}
+  @spec format(SubAgent.t(), map(), map()) :: {String.t(), boolean()}
   def format(agent, state, lisp_step) do
     max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
 
