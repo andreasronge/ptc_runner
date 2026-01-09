@@ -5,11 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-01-09
 
 ### Added
 
-- Add `juxt` function combinator for multi-criteria sorting and multi-value extraction (#548)
+- Add `juxt` function combinator for multi-criteria operations
+- Add variadic function support with rest parameters `[a & rest]`
+- Add `max-key` and `min-key` for variadic comparisons
+- Add IEEE 754 special values: `##Inf`, `##-Inf`, `##NaN`
+- Add `float_precision` option to SubAgent (default: 2 decimal places)
+- Add `context_descriptions` for automatic data inventory in prompts
+- Extend `reduce` to work on maps, sets, and strings
+- Add variadic `update` and `update-in` (match Clojure semantics)
+- Add `java.time.LocalDate/parse` for date handling
+
+### Fixed
+
+- Preserve memory state on parse/analysis errors (multi-turn recovery)
+- Handle `return`/`fail` correctly in threading macros (`->`, `->>`)
+- Make `return`/`fail` terminate execution immediately
+- Restore caller environment after closure execution
+- Improve error messages with actionable suggestions
 
 ## [0.4.0] - 2026-01-06
 
@@ -265,6 +281,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.4.1]: https://github.com/andreasronge/ptc_runner/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/andreasronge/ptc_runner/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/andreasronge/ptc_runner/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/andreasronge/ptc_runner/compare/v0.3.2...v0.3.3
