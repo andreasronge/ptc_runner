@@ -7,7 +7,7 @@ deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
     [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
   else
-    [{:ptc_runner, "~> 0.4.0"}]
+    [{:ptc_runner, "~> 0.4.1"}]
   end
 
 Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
@@ -178,5 +178,3 @@ end
 * [Playground](ptc_runner_playground.livemd) - PTC-Lisp basics
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [PTC-Lisp Spec](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html)
-
-<!-- livebook:{"offset":4776,"stamp":{"token":"XCP.HrbTBtj92kfCYNK18yA8ch9bn0N4Oi077gA0wIonMzCI0163mNlVfIWdQLJbb_yktIe3xTGw6UPWq25LxLJdorTRjZOAwbD7MTkronPoqZcChZYsQA1IGbaTwUpp","version":2}} -->
