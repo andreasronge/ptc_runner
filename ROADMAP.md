@@ -66,8 +66,26 @@ tools: %{
 **Design Considerations**:
 - Multiple async ops can be pending simultaneously
 - Resume feeds results back into LLM context
-- PTC-Lisp might need `(await call_id)` form or implicit suspension
-- Consider: should async tools be callable from Lisp, or only at SubAgent level?
+
+**Decision: Lisp-level `(await)` is required**
+
+The question "should async be at Lisp level or SubAgent level only?" is answered by real use cases:
+
+```lisp
+;; Use case: "Call Alice and Bob in parallel, then summarize both"
+;; This REQUIRES Lisp-level await:
+(let [transcript-a (await call-alice)
+      transcript-b (await call-bob)]
+  (summarize (concat transcript-a transcript-b)))
+
+;; Without Lisp-level await, this requires:
+;; 1. First SubAgent run -> starts calls -> suspends
+;; 2. Resume with Alice result -> suspends again (can't reference Bob yet)
+;; 3. Resume with Bob result -> another LLM turn to combine
+;; That's 3 LLM round-trips instead of 1
+```
+
+Lisp-level await enables the LLM to express "wait for multiple async results, then combine" in a single program. SubAgent-level-only would force multiple round-trips for common patterns.
 
 **BEAM-Native Approach**:
 - Could model as GenServer that receives messages
@@ -104,9 +122,42 @@ tools: %{
 
 **Design Considerations**:
 - What's serializable? Step fields, memory, pending ops, message history
-- Use `:erlang.term_to_binary` with safe options? Or JSON for portability?
 - Version the serialization format for migrations
-- Consider: anonymous functions in tools aren't serializable - need registry approach
+
+**Decision: JSON as default format**
+
+Leaning toward JSON over `:erlang.term_to_binary`:
+- Async state may sit in Postgres for minutes/hours (human-in-the-loop)
+- Debuggability matters: `jq` a suspended state to understand what's happening
+- Efficiency matters less than correctness during 0.x development
+- Can add binary as optional optimization later for high-throughput cases
+
+```elixir
+# Default: JSON for debuggability
+{:ok, json} = PtcRunner.SubAgent.serialize(step, format: :json)
+# Inspect with jq, store in JSONB column, debug easily
+
+# Optional: binary for performance-critical paths
+{:ok, binary} = PtcRunner.SubAgent.serialize(step, format: :binary)
+```
+
+**Decision: MFA tuples for serializable tools**
+
+Anonymous functions aren't serializable. Two approaches:
+
+```elixir
+# Option A: Tool registry (adds global state)
+PtcRunner.register_tool(:make_call, &MyApp.Phone.call/1)
+# Serialize stores :make_call, deserialize looks up
+
+# Option B: MFA tuples (no registry, already serializable) ← Preferred
+tools: %{
+  "make_call" => {MyApp.Phone, :call, []},
+  "send_email" => {MyApp.Email, :send, []}
+}
+```
+
+MFA tuples are simpler - no registry, no global state, naturally serializable. Less ergonomic than anonymous functions, but the trade-off is worth it for crash recovery and distributed resume.
 
 **Relationship to Async**:
 - Required for async to work (pending state must be persistable)
@@ -114,9 +165,86 @@ tools: %{
 
 ---
 
+## OTP Application Architecture
+
+**Current**: Pure library. `SubAgent.run/2` is synchronous, sandboxes are ephemeral.
+
+**Trigger**: Async tools + state persistence (v0.6-v0.7) require shared state → processes.
+
+### Pattern: child_spec Without Auto-Start
+
+```elixir
+# User explicitly opts in
+children = [
+  {PtcRunner.Supervisor, name: :ptc, pool_size: 10},
+]
+```
+
+No surprise processes on dependency add. Host app controls the tree.
+
+### What to Supervise
+
+- ✅ Agent sessions, pending ops registry, pool manager
+- ❌ Sandbox processes (short-lived, meant to crash, disposable)
+
+### Potential Tree
+
+```
+PtcRunner.Supervisor
+├── AgentRegistry
+├── PendingOps
+├── SandboxPool (manager only, not individual sandboxes)
+└── SessionSupervisor (DynamicSupervisor)
+    └── Session (GenServer per long-lived agent)
+```
+
+All components optional. Multi-instance via `:name` option
+
+---
+
 ## Tier 2: UX & Debugging
 
-### 3. Streaming Support
+### 3. Debugging & Inspectability
+
+**Problem**: When things go wrong (LLM generates bad Lisp, async resume fails, state corrupted), developers need visibility.
+
+**Challenges unique to PTC**:
+- LLM-generated code errors need clear attribution (line/column in generated Lisp)
+- Suspended async state may sit in storage - need to inspect it
+- Multi-turn conversations have complex message history
+
+**Proposed Features**:
+
+```elixir
+# 1. Lisp execution tracing
+SubAgent.run(agent,
+  trace_lisp: true,  # Captures each form evaluated
+  on_lisp_error: fn error, source, line, col ->
+    Logger.error("Lisp error at #{line}:#{col}: #{error}")
+  end
+)
+
+# 2. JSON state inspection (enabled by JSON serialization decision)
+{:ok, json} = SubAgent.serialize(pending_step)
+# In shell: cat state.json | jq '.pending_ops'
+# In Elixir: Jason.decode!(json) |> get_in(["pending_ops"])
+
+# 3. Step introspection
+%Step{
+  trace: %{
+    turns: [...],           # Each LLM turn with timing
+    tool_calls: [...],      # Every tool invocation
+    lisp_forms: [...]       # Optional: each evaluated form
+  }
+}
+```
+
+**Why this matters**:
+- "Why did the agent do X?" → inspect message history and tool calls
+- "Why did async resume fail?" → `jq` the serialized state
+- "Why did Lisp crash?" → line/column error with source context
+
+### 4. Streaming Support
 
 **Problem**: Chat UX expects to see responses as they generate.
 
@@ -260,42 +388,105 @@ v0.5: Observability & Debugging
   - Fix tool call tracking in traces
   - Add messages to Step (opt-in)
   - Document existing telemetry
+  - Lisp error attribution (line/column in generated code)
+  - Step introspection (trace field with turns, tool_calls)
+  Architecture: Pure library (no processes)
 
 v0.6: State Management
-  - State serialization (Step <-> binary)
+  - JSON serialization as default (Step <-> JSON)
+  - Binary serialization as opt-in for high-throughput
   - Resume from serialized state
+  - MFA tuple tool format for serializability
   - Version format for migrations
+  - Optional: AgentRegistry with child_spec/1 (user-supervised)
+  Architecture: First child_spec components (opt-in)
 
 v0.7: Async Tools
   - {:async, id, immediate_result} pattern
   - PendingStep struct
   - SubAgent.resume/3
-  - PTC-Lisp await form (if needed)
+  - PTC-Lisp (await id) form (required for multi-async patterns)
+  - PendingOps registry for tracking async operations
+  - PtcRunner.Supervisor convenience module
+  Architecture: Full child_spec suite (still opt-in)
 
-v0.8: Streaming
+v0.8: Streaming & Sessions
   - on_token callback
   - on_tool_start/end callbacks
   - LiveView helper module
+  - Session GenServer for long-lived agents
+  - SandboxPool for concurrency limiting
+  Architecture: Complete supervision tree available
 
 v1.0: Production Ready
   - Stable serialization format
   - Phoenix/Oban integration guides
   - Performance benchmarks
+  - Decide: auto-start Application or stay opt-in
+  Architecture: Evaluate user feedback on OTP adoption
 ```
+
+---
+
+## Decisions Made
+
+These questions have been resolved based on real-world feedback:
+
+1. **Async tool design**: ✅ **Lisp-level `(await)`** - Required for "call multiple async tools, combine results" patterns without multiple LLM round-trips.
+
+2. **Serialization format**: ✅ **JSON as default** - Debuggability (`jq`) matters more than efficiency for async state that may sit in storage for minutes/hours. Binary available as opt-in for high-throughput.
+
+3. **Tool serialization**: ✅ **MFA tuples** - No registry needed, naturally serializable, simpler than global tool registry.
+
+4. **Multi-instance naming**: ✅ **Default + explicit override** - Simple cases need no config; multi-instance passes `instance: :name` only when multiple supervisors exist.
+
+5. **Session lifecycle**: ✅ **Idle timeout + pending-aware + explicit** - Terminate after configurable idle timeout, but not if async ops pending, and allow explicit termination.
+
+---
+
+## Integration Patterns
+
+**Recommended: Use as pure library within your GenServer**
+
+```
+Your app supervision tree:
+├── YourApp.SessionSupervisor
+│   └── YourApp.Orchestrator (your GenServer - owns lifecycle, PubSub, persistence)
+│       └── calls PtcRunner.SubAgent.run/2 (pure function, no processes)
+```
+
+ptc_runner shouldn't duplicate app-level orchestration. Your GenServer handles session lifecycle, persistence, PubSub - ptc_runner just runs the tool loop.
+
+**Optional: Use ptc_runner supervision for async-heavy workloads**
+
+Only adopt `PtcRunner.Supervisor` when you need:
+- Sandbox pooling (limit concurrent LLM-generated code execution)
+- Built-in pending ops tracking
+- Session GenServer with idle timeout + async-awareness
+
+Even then, your app may still own the outer session lifecycle.
 
 ---
 
 ## Open Questions
 
-1. **Async tool design**: Should async be at Lisp level (`(await id)`) or SubAgent level only?
+### Async & State
 
-2. **Serialization format**: `:erlang.term_to_binary` (efficient, BEAM-only) vs JSON (portable, inspectable)?
+1. **Message history**: Always collect, opt-in, or opt-out?
 
-3. **Message history**: Always collect, opt-in, or opt-out?
+2. **Backpressure**: How to handle LLM rate limits in streaming mode?
 
-4. **GenServer mode**: Should SubAgent optionally run as a process that receives messages?
+3. **Await semantics**: Does `(await id)` block the Lisp program until result arrives, or return a placeholder that suspends the whole SubAgent?
 
-5. **Backpressure**: How to handle LLM rate limits in streaming mode?
+### OTP Architecture
+
+4. **GenServer mode**: Should SubAgent optionally run as a process that receives messages? If yes, what's the API?
+
+5. **Auto-start vs opt-in**: Should v1.0 auto-start an Application, or always require explicit `child_spec` in host app?
+
+6. **Pool implementation**: Use existing library (Poolboy, NimblePool) or custom pool for sandbox workers?
+
+7. **State persistence hooks**: Is persistence a GenServer responsibility, or a callback module the user provides?
 
 ---
 
