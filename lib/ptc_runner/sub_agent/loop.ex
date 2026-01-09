@@ -84,6 +84,9 @@ defmodule PtcRunner.SubAgent.Loop do
   - `opts` - Keyword list with:
     - `llm` - Required. LLM callback function
     - `context` - Initial context map (default: %{})
+    - `cache` - Enable prompt caching (default: false). When true, the LLM callback receives
+      `cache: true` in its input map. The callback should pass this to the provider to enable
+      caching of system prompts for cost savings on multi-turn agents.
     - `debug` - Enable debug mode (default: false). When enabled, trace entries store exact message contents:
       - `llm_response` - The assistant message (LLM output, stored as-is)
       - `llm_feedback` - The user message (execution feedback, after truncation)
@@ -115,6 +118,7 @@ defmodule PtcRunner.SubAgent.Loop do
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
     llm_registry = Keyword.get(opts, :llm_registry, %{})
+    cache = Keyword.get(opts, :cache, false)
     debug = Keyword.get(opts, :debug, false)
     trace_mode = Keyword.get(opts, :trace, true)
     llm_retry = Keyword.get(opts, :llm_retry)
@@ -156,6 +160,7 @@ defmodule PtcRunner.SubAgent.Loop do
           remaining_turns: remaining_turns,
           mission_deadline: mission_deadline,
           llm_registry: llm_registry,
+          cache: cache,
           debug: debug,
           trace_mode: trace_mode,
           llm_retry: llm_retry,
@@ -211,6 +216,7 @@ defmodule PtcRunner.SubAgent.Loop do
       nesting_depth: run_opts.nesting_depth,
       remaining_turns: run_opts.remaining_turns,
       mission_deadline: calculated_deadline,
+      cache: run_opts.cache,
       debug: run_opts.debug,
       trace_mode: run_opts.trace_mode,
       llm_retry: run_opts.llm_retry,
@@ -218,6 +224,8 @@ defmodule PtcRunner.SubAgent.Loop do
       # Token accumulation across LLM calls
       total_input_tokens: 0,
       total_output_tokens: 0,
+      total_cache_creation_tokens: 0,
+      total_cache_read_tokens: 0,
       llm_requests: 0,
       # Estimated system prompt tokens (set on first turn)
       system_prompt_tokens: 0,
@@ -276,7 +284,8 @@ defmodule PtcRunner.SubAgent.Loop do
           ),
         messages: state.messages,
         turn: state.turn,
-        tool_names: Map.keys(agent.tools)
+        tool_names: Map.keys(agent.tools),
+        cache: state.cache
       }
 
       # Call LLM with telemetry and retry logic
