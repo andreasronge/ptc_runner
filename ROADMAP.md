@@ -271,44 +271,37 @@ SubAgent.run(agent,
 - How to handle streaming + async tools together?
 - Phoenix.Channel / LiveView integration helpers?
 
-### 4. Conversation History Access
+### 5. Conversation History & Serialization
 
-**Problem**: Apps want OpenAI-format message history for debugging, context, UI.
+**Problem**: Track conversation state for serialization and multi-turn context.
 
-**Current State**: Messages are internal to Loop, not exposed in Step.
-
-**Proposed API**:
+**Internal message struct (for serialization, not OpenAI-compatible):**
 
 ```elixir
-# Option A: Add to Step
-%Step{
-  # ... existing fields
-  messages: [
-    %{role: :system, content: "..."},
-    %{role: :user, content: "..."},
-    %{role: :assistant, content: "```ptc-lisp\n...```"}
-  ]
+@type turn_summary :: %{
+  definitions: [%{name: String.t(), kind: :data | :function, arity: integer() | nil, doc: String.t() | nil}],
+  output: [String.t()],  # println
+  status: :ok | {:error, String.t()},
+  program: String.t() | nil  # only on error
 }
 
-# Option B: Callback during execution
-SubAgent.run(agent,
-  llm: llm,
-  on_turn: fn %{turn: n, messages: msgs, program: code, result: res} ->
-    persist_turn(conversation_id, n, msgs)
-  end
-)
+@type message :: %{
+  role: :system | :user | :assistant,
+  content: String.t() | nil,
+  turn: turn_summary() | nil
+}
 ```
 
-**Design Considerations**:
-- Memory cost of keeping full history in Step
-- Privacy: some apps may not want to persist LLM outputs
-- Format: OpenAI-style maps vs custom structs?
+**Purpose:** Internal state + serialization. LLM sees transformed view:
+- Old turns → summaries (docstrings + println)
+- Full program only on errors
+- Memory: `Data: {x, emails} Functions: {fetch/1, filter/2}`
 
 ---
 
 ## Tier 3: Nice-to-Have
 
-### 5. Tool Timeout with Partial Results
+### 6. Tool Timeout with Partial Results
 
 **Problem**: Long-running tools should return partial results on timeout rather than fail completely.
 
@@ -335,7 +328,7 @@ end
 }
 ```
 
-### 6. Pre/Post Hooks
+### 7. Pre/Post Hooks
 
 **Problem**: No lifecycle callbacks beyond telemetry.
 
