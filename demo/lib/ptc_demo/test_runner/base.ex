@@ -453,14 +453,14 @@ defmodule PtcDemo.TestRunner.Base do
     case stats do
       %{total_cost: cost} when cost == nil or cost == 0.0 ->
         # Calculate cost from tokens if not provided by API
-        calculated_cost =
-          LLMClient.calculate_cost(
-            model,
-            Map.get(stats, :input_tokens, 0),
-            Map.get(stats, :output_tokens, 0)
-          )
+        tokens = %{
+          input: Map.get(stats, :input_tokens, 0),
+          output: Map.get(stats, :output_tokens, 0),
+          cache_creation: Map.get(stats, :cache_creation_tokens, 0),
+          cache_read: Map.get(stats, :cache_read_tokens, 0)
+        }
 
-        %{stats | total_cost: calculated_cost}
+        %{stats | total_cost: LLMClient.calculate_cost(model, tokens)}
 
       _ ->
         stats
