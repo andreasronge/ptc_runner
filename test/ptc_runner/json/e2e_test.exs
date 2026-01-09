@@ -7,10 +7,24 @@ defmodule PtcRunner.Json.E2ETest do
   Tests basic operations that LLMs can reliably generate.
   Complex queries are covered by demo benchmarks instead.
 
-  Run with: mix test test/ptc_runner/json/e2e_test.exs --include e2e
+  ## Running E2E Tests
+
+  Requires `OPENROUTER_API_KEY` environment variable (available as GitHub secret in CI).
+
+      mix test --only e2e
+
+  Note: E2E tests can be flaky due to LLM provider issues (502 errors, rate limits).
+  The PTC-Lisp E2E tests are more reliable than these PTC-JSON tests.
+
+  ## Why Skipped
+
+  These tests are currently skipped because the structured output mode frequently
+  hits provider errors (502) from OpenRouter. The PTC-Lisp E2E tests provide
+  sufficient coverage for LLM integration.
   """
 
   @moduletag :e2e
+  @moduletag :skip
 
   alias PtcRunner.TestSupport.LLMClient
 
