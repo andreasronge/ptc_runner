@@ -63,8 +63,17 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step}
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.Loop.{LLMRetry, Metrics, ResponseHandler, ToolNormalizer}
-  alias PtcRunner.SubAgent.{Prompt, Signature, Telemetry}
+
+  alias PtcRunner.SubAgent.Loop.{
+    LLMRetry,
+    Metrics,
+    ResponseHandler,
+    ReturnValidation,
+    ToolNormalizer,
+    TurnFeedback
+  }
+
+  alias PtcRunner.SubAgent.{Prompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -374,7 +383,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Feed error back to LLM with turn info
         error_message =
           "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('."
-          |> append_turn_info(agent, state)
+          |> TurnFeedback.append_turn_info(agent, state)
 
         new_state = %{
           state
@@ -402,7 +411,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
         error_message =
           "Error: Tool '#{catalog_tool_name}' is for planning only and cannot be called. Available tools: #{available_tools}"
-          |> append_turn_info(agent, state)
+          |> TurnFeedback.append_turn_info(agent, state)
 
         new_state = %{
           state
@@ -452,7 +461,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Feed error back to LLM for next turn with turn info
         error_message =
           ResponseHandler.format_error_for_llm(lisp_step.fail)
-          |> append_turn_info(agent, state)
+          |> TurnFeedback.append_turn_info(agent, state)
 
         # Build trace entry for failed execution (show error message, not nil)
         error_result = {:error, lisp_step.fail.message}
@@ -491,7 +500,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Update lisp_step with unwrapped value for downstream use
         unwrapped_step = %{lisp_step | return: return_value}
 
-        case validate_return_type(agent, return_value) do
+        case ReturnValidation.validate(agent, return_value) do
           :ok ->
             build_success_step(code, response, unwrapped_step, state, agent)
 
@@ -549,7 +558,7 @@ defmodule PtcRunner.SubAgent.Loop do
         case check_memory_limit(lisp_step.memory, agent.memory_limit) do
           {:ok, _size} ->
             # Calculate feedback before building trace entry
-            {execution_result, feedback_truncated} = format_turn_feedback(agent, state, lisp_step)
+            {execution_result, feedback_truncated} = TurnFeedback.format(agent, state, lisp_step)
 
             trace_entry =
               Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
@@ -697,86 +706,6 @@ defmodule PtcRunner.SubAgent.Loop do
     (history ++ [new_result]) |> Enum.take(-3)
   end
 
-  # Append turn info to any feedback message (used for both success and error paths)
-  defp append_turn_info(message, agent, state) do
-    if agent.max_turns > 1 do
-      next_turn = state.turn + 1
-      turns_remaining = agent.max_turns - state.turn
-
-      turn_info =
-        if turns_remaining == 1 do
-          "\n\n⚠️ FINAL TURN - you must call (return result) or (fail response) next."
-        else
-          "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_remaining} remaining)"
-        end
-
-      message <> turn_info
-    else
-      message
-    end
-  end
-
-  # Returns {feedback_string, truncated?}
-  # Only shows explicit println output - LLM must be intentional about what it inspects
-  defp format_turn_feedback(agent, state, lisp_step) do
-    max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
-
-    # Only show println output (no implicit last-expression result)
-    {prints_output, truncated?} =
-      case lisp_step.prints do
-        [_ | _] = prints ->
-          joined = Enum.join(prints, "\n")
-          truncate_prints(joined, max_chars)
-
-        _ ->
-          {nil, false}
-      end
-
-    # Add stored values hint for multi-turn agents (shows def bindings available as symbols)
-    stored_hint =
-      if agent.max_turns > 1 and map_size(lisp_step.memory) > 0 do
-        stored_symbols =
-          lisp_step.memory
-          |> Map.keys()
-          |> Enum.map(&to_string/1)
-          |> Enum.sort()
-          |> Enum.join(", ")
-
-        "Stored (access as symbols): #{stored_symbols}"
-      else
-        nil
-      end
-
-    # Add truncation hint if needed
-    prints_with_hint =
-      if truncated? do
-        prints_output <> "\n... (truncated, use println selectively)"
-      else
-        prints_output
-      end
-
-    # Combine parts
-    feedback =
-      [prints_with_hint, stored_hint]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join("\n\n")
-
-    # Add turn info for multi-turn agents
-    feedback = append_turn_info(feedback, agent, state)
-
-    {feedback, truncated?}
-  end
-
-  defp truncate_prints(str, max_chars) when byte_size(str) > max_chars do
-    {String.slice(str, 0, max_chars), true}
-  end
-
-  defp truncate_prints(str, _max_chars), do: {str, false}
-
-  # ============================================================
-  # Return Type Validation
-  # ============================================================
-
   # Build success step for return/single-shot termination
   defp build_success_step(code, response, lisp_step, state, agent) do
     trace_entry =
@@ -807,18 +736,9 @@ defmodule PtcRunner.SubAgent.Loop do
     {:ok, final_step}
   end
 
-  # Validate return value against agent's parsed signature
-  # Returns :ok or {:error, [validation_error()]}
-  defp validate_return_type(%{parsed_signature: nil}, _value), do: :ok
-  defp validate_return_type(%{parsed_signature: {:signature, _, :any}}, _value), do: :ok
-
-  defp validate_return_type(%{parsed_signature: parsed_sig}, value) do
-    Signature.validate(parsed_sig, value)
-  end
-
   # Handle return validation error - feed back to LLM for retry
   defp handle_return_validation_error(code, response, lisp_step, state, agent, llm, errors) do
-    error_message = format_validation_error_for_llm(agent, lisp_step.return, errors)
+    error_message = ReturnValidation.format_error_for_llm(agent, lisp_step.return, errors)
 
     trace_entry =
       Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
@@ -843,36 +763,6 @@ defmodule PtcRunner.SubAgent.Loop do
     }
 
     loop(agent, llm, new_state)
-  end
-
-  # Format validation error for LLM feedback (actionable, helps LLM fix)
-  defp format_validation_error_for_llm(agent, actual_value, errors) do
-    expected_type = format_expected_type(agent)
-    error_details = format_error_details(errors)
-    actual_str = inspect(actual_value, limit: 10, pretty: false)
-    truncated_actual = String.slice(actual_str, 0, 200)
-
-    """
-    Return type validation failed.
-    Expected: #{expected_type}
-    Received: #{truncated_actual}
-    Errors:
-    #{error_details}
-    Please fix and call (return ...) with a correctly typed value.
-    """
-  end
-
-  defp format_expected_type(%{parsed_signature: nil}), do: ":any"
-
-  defp format_expected_type(%{parsed_signature: {:signature, _, return_type}}) do
-    Signature.Renderer.render_type(return_type)
-  end
-
-  defp format_error_details(errors) do
-    Enum.map_join(errors, "\n", fn %{path: path, message: message} ->
-      path_str = if path == [], do: "root", else: "[#{Enum.join(path, ".")}]"
-      "- #{path_str}: #{message}"
-    end)
   end
 
   # ============================================================
