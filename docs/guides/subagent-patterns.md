@@ -449,7 +449,8 @@ The LLM sees tool schemas in `tool_catalog` for planning but can only call tools
 
 ## See Also
 
-- [Advanced Topics](subagent-advanced.md) - Multi-turn ReAct, compile pattern, observability
+- [Advanced Topics](subagent-advanced.md) - Multi-turn ReAct and compile pattern
+- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
 - `PtcRunner.SubAgent` - API reference

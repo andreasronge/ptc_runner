@@ -109,6 +109,8 @@ PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
 
 This is essential for identifying why a model might be failing or ignoring tool instructions.
 
+> **More options:** See [Observability](subagent-observability.md) for telemetry, trace filtering, and production tips.
+
 ## Signatures (Optional)
 
 Signatures define a contract for inputs and outputs:
@@ -383,7 +385,8 @@ State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-
 ## See Also
 
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
+- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
-- [Advanced Topics](subagent-advanced.md) - Observability and the compile pattern
+- [Advanced Topics](subagent-advanced.md) - ReAct patterns and the compile pattern
 - `PtcRunner.SubAgent` - API reference

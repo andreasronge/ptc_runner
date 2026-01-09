@@ -194,5 +194,6 @@ In the detailed view (`messages: true`), you'll see the **System Prompt** for ea
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
+- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - `PtcRunner.SubAgent` - API reference (all options)
 - `PtcRunner.Step` - Result struct reference

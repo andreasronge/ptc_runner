@@ -1,6 +1,6 @@
 # Advanced Topics
 
-This guide covers advanced SubAgent features: multi-turn ReAct patterns, the compile pattern for batch processing, observability, and system prompt internals.
+This guide covers advanced SubAgent features: multi-turn ReAct patterns, the compile pattern for batch processing, and system prompt internals.
 
 ## Multi-Turn Patterns (ReAct)
 
@@ -97,50 +97,7 @@ The LLM can "walk" the data across turns:
 (return {:report_id 123 :reasoning "..."})
 ```
 
-## Debugging & Observability
-
-Every `Step` includes a `trace` field with per-turn execution history (a list of entries). Aggregated metrics are in `step.usage`.
-
-```elixir
-{:ok, step} = SubAgent.run(agent, llm: llm)
-
-# Inspect turns
-for entry <- step.trace do
-  IO.puts("Turn #{entry.turn}: #{entry.program}")
-  IO.puts("  Tools: #{inspect(Enum.map(entry.tool_calls, & &1.name))}")
-end
-
-# Aggregated metrics are in step.usage, not trace
-step.usage.duration_ms
-step.usage.total_tokens
-```
-
-### Debug Mode
-
-Enable debug mode to capture full LLM messages:
-
-```elixir
-{:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
-
-# Default compact view
-SubAgent.Debug.print_trace(step)
-
-# Show full LLM messages (what was sent/received)
-SubAgent.Debug.print_trace(step, messages: true)
-```
-
-With `messages: true`, each turn shows the exact contents of the messages array:
-- **Assistant Message** - The LLM output (stored as-is in messages array)
-- **Program** - The extracted PTC-Lisp code
-- **Result** - The full execution result (before truncation)
-- **User Message** - The feedback after truncation (exactly what's sent to LLM)
-
-This is particularly useful for understanding:
-- Exactly what the LLM sees in its conversation history
-- How `format_options` truncation affects the feedback
-- Why `MaxTurnsExceeded` errors occur (LLM not generating valid code)
-
-Debug mode also captures: context snapshots, memory snapshots, and full prompts.
+## Debugging
 
 ### Prompt Preview
 
@@ -155,32 +112,7 @@ IO.puts(preview.system)  # Full system prompt
 IO.puts(preview.user)    # Expanded user prompt
 ```
 
-### Trace Options
-
-```elixir
-# Only keep trace on failure (production optimization)
-SubAgent.run(agent, llm: llm, trace: :on_error)
-
-# Disable tracing entirely
-SubAgent.run(agent, llm: llm, trace: false)
-```
-
-### Telemetry
-
-SubAgent emits telemetry events for observability integration:
-
-```elixir
-:telemetry.attach(
-  "sub-agent-logger",
-  [:ptc_runner, :sub_agent, :run, :stop],
-  &MyApp.Telemetry.handle_event/4,
-  nil
-)
-```
-
-Events: `run:start/stop`, `turn:start/stop`, `llm:start/stop`, `tool:start/stop/exception`.
-
-> **Full details:** See `PtcRunner.SubAgent.Debug` for trace inspection functions.
+> **Telemetry, debug mode, and trace inspection:** See [Observability](subagent-observability.md).
 
 ### Output Truncation
 
@@ -391,6 +323,7 @@ key                            ; Access stored value
 ## See Also
 
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Type system details
