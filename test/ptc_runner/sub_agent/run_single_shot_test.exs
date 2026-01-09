@@ -195,5 +195,62 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
       SubAgent.run(agent, llm: llm, context: %{other: "value"})
     end
+
+    test "collect_messages: false (default) returns nil messages" do
+      agent = SubAgent.new(prompt: "Calculate 2 + 3", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(+ 2 3)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == 5
+      assert step.messages == nil
+    end
+
+    test "collect_messages: true returns messages with system, user, and assistant" do
+      agent = SubAgent.new(prompt: "Calculate 2 + 3", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(+ 2 3)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
+
+      assert step.return == 5
+      assert is_list(step.messages)
+      assert length(step.messages) == 3
+
+      roles = Enum.map(step.messages, & &1.role)
+      assert roles == [:system, :user, :assistant]
+
+      [system, user, assistant] = step.messages
+      assert system.content =~ "PTC-Lisp"
+      assert user.content == "Calculate 2 + 3"
+      assert assistant.content =~ "(+ 2 3)"
+    end
+
+    test "collect_messages: true with template expansion" do
+      agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{x: 10, y: 5}, collect_messages: true)
+
+      assert step.return == 15
+      assert is_list(step.messages)
+
+      [_system, user, _assistant] = step.messages
+      # User message should have expanded template
+      assert user.content == "Calculate 10 + 5"
+    end
+
+    test "collect_messages: true on error returns messages" do
+      agent = SubAgent.new(prompt: "Test error", max_turns: 1)
+      llm = fn _input -> {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"} end
+
+      {:error, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
+
+      assert step.fail.reason == :arithmetic_error
+      assert is_list(step.messages)
+      assert length(step.messages) == 3
+
+      roles = Enum.map(step.messages, & &1.role)
+      assert roles == [:system, :user, :assistant]
+    end
   end
 end

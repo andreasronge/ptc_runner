@@ -659,6 +659,8 @@ defmodule PtcRunner.SubAgent do
          received_field_descriptions,
          opts
        ) do
+    collect_messages = Keyword.get(opts, :collect_messages, false)
+
     # Expand template in prompt
     expanded_prompt = expand_template(agent.prompt, context)
 
@@ -724,11 +726,20 @@ defmodule PtcRunner.SubAgent do
                     opts
                   )
 
+                collected_messages =
+                  build_single_shot_messages(
+                    collect_messages,
+                    system_prompt,
+                    expanded_prompt,
+                    content
+                  )
+
                 updated_step =
                   step
                   |> update_step_usage(duration_ms, tokens)
                   |> Map.put(:field_descriptions, agent.field_descriptions)
                   |> Map.put(:trace, trace)
+                  |> Map.put(:messages, collected_messages)
 
                 {:ok, updated_step}
 
@@ -746,10 +757,19 @@ defmodule PtcRunner.SubAgent do
                     opts
                   )
 
+                collected_messages =
+                  build_single_shot_messages(
+                    collect_messages,
+                    system_prompt,
+                    expanded_prompt,
+                    content
+                  )
+
                 updated_step =
                   step
                   |> update_step_usage(duration_ms, tokens)
                   |> Map.put(:trace, trace)
+                  |> Map.put(:messages, collected_messages)
 
                 {:error, updated_step}
             end
@@ -827,6 +847,18 @@ defmodule PtcRunner.SubAgent do
       end
 
     %{step | usage: usage_with_tokens}
+  end
+
+  # Build collected messages for single-shot mode (or nil if not collecting)
+  defp build_single_shot_messages(false, _system_prompt, _user_prompt, _assistant_content),
+    do: nil
+
+  defp build_single_shot_messages(true, system_prompt, user_prompt, assistant_content) do
+    [
+      %{role: :system, content: system_prompt},
+      %{role: :user, content: user_prompt},
+      %{role: :assistant, content: assistant_content}
+    ]
   end
 
   # Helper to build trace for single-shot execution
