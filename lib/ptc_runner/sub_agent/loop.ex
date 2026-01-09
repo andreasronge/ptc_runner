@@ -80,6 +80,8 @@ defmodule PtcRunner.SubAgent.Loop do
       - `llm_feedback` - The user message (execution feedback, after truncation)
       Use `SubAgent.Debug.print_trace(step, messages: true)` to view the conversation.
     - `trace` - Trace filtering: true (always), false (never), :on_error (only on failure) (default: true)
+    - `collect_messages` - Capture full conversation history in Step.messages (default: false).
+      When enabled, messages are in OpenAI format: `[%{role: :system | :user | :assistant, content: String.t()}]`
     - `llm_retry` - Optional retry configuration map with:
       - `max_attempts` - Maximum number of retry attempts (default: 1, meaning no retries unless explicitly configured)
       - `backoff` - Backoff strategy: :exponential, :linear, or :constant (default: :exponential)
@@ -107,6 +109,7 @@ defmodule PtcRunner.SubAgent.Loop do
     debug = Keyword.get(opts, :debug, false)
     trace_mode = Keyword.get(opts, :trace, true)
     llm_retry = Keyword.get(opts, :llm_retry)
+    collect_messages = Keyword.get(opts, :collect_messages, false)
     # Field descriptions received from upstream agent in a chain
     received_field_descriptions = Keyword.get(opts, :_received_field_descriptions)
 
@@ -147,6 +150,7 @@ defmodule PtcRunner.SubAgent.Loop do
           debug: debug,
           trace_mode: trace_mode,
           llm_retry: llm_retry,
+          collect_messages: collect_messages,
           received_field_descriptions: received_field_descriptions
         }
 
@@ -197,6 +201,7 @@ defmodule PtcRunner.SubAgent.Loop do
       debug: run_opts.debug,
       trace_mode: run_opts.trace_mode,
       llm_retry: run_opts.llm_retry,
+      collect_messages: run_opts.collect_messages,
       # Token accumulation across LLM calls
       total_input_tokens: 0,
       total_output_tokens: 0,
@@ -208,7 +213,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Turn history for *1/*2/*3 access (last 3 results, most recent last)
       turn_history: [],
       # Field descriptions received from upstream agent in a chain
-      received_field_descriptions: run_opts.received_field_descriptions
+      received_field_descriptions: run_opts.received_field_descriptions,
+      # System prompt for message collection (set on first turn)
+      collected_system_prompt: nil
     }
 
     loop(agent, run_opts.llm, initial_state)
@@ -282,7 +289,9 @@ defmodule PtcRunner.SubAgent.Loop do
           step_with_metrics = %{
             step
             | usage: Metrics.build_final_usage(state, duration_ms, 0),
-              trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+              trace:
+                Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true),
+              messages: build_collected_messages(state, state.messages)
           }
 
           # Emit turn stop on error
@@ -299,12 +308,21 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Estimate system prompt tokens on first turn only
+  # Estimate system prompt tokens on first turn only, and capture system prompt if collecting messages
   defp maybe_add_system_prompt_tokens(%{turn: 1} = state, system_prompt) do
-    Map.put(state, :system_prompt_tokens, Metrics.estimate_tokens(system_prompt))
+    state
+    |> Map.put(:system_prompt_tokens, Metrics.estimate_tokens(system_prompt))
+    |> maybe_capture_system_prompt(system_prompt)
   end
 
   defp maybe_add_system_prompt_tokens(state, _system_prompt), do: state
+
+  # Capture system prompt for message collection if enabled
+  defp maybe_capture_system_prompt(%{collect_messages: true} = state, system_prompt) do
+    Map.put(state, :collected_system_prompt, system_prompt)
+  end
+
+  defp maybe_capture_system_prompt(state, _system_prompt), do: state
 
   # Call LLM with telemetry wrapper
   defp call_llm_with_telemetry(llm, input, state, agent) do
@@ -504,6 +522,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
         error_step = Step.error(:failed, inspect(fail_args), lisp_step.memory)
 
+        # Include the final assistant response in messages
+        final_messages = state.messages ++ [%{role: :assistant, content: response}]
+
         final_step = %{
           error_step
           | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
@@ -512,7 +533,8 @@ defmodule PtcRunner.SubAgent.Loop do
                 Enum.reverse([trace_entry | state.trace]),
                 state.trace_mode,
                 true
-              )
+              ),
+            messages: build_collected_messages(state, final_messages)
         }
 
         {:error, final_step}
@@ -572,6 +594,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
             error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
 
+            # Include the final assistant response in messages
+            final_messages = state.messages ++ [%{role: :assistant, content: response}]
+
             final_step = %{
               error_step
               | usage: Metrics.build_final_usage(state, duration_ms, actual_size),
@@ -580,7 +605,8 @@ defmodule PtcRunner.SubAgent.Loop do
                     Enum.reverse([trace_entry | state.trace]),
                     state.trace_mode,
                     true
-                  )
+                  ),
+                messages: build_collected_messages(state, final_messages)
             }
 
             {:error, final_step}
@@ -643,7 +669,8 @@ defmodule PtcRunner.SubAgent.Loop do
     step_with_metrics = %{
       step
       | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
-        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true)
+        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true),
+        messages: build_collected_messages(state, state.messages)
     }
 
     {:error, step_with_metrics}
@@ -746,6 +773,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
+    # Include the final assistant response in messages
+    final_messages = state.messages ++ [%{role: :assistant, content: response}]
+
     final_step = %{
       lisp_step
       | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
@@ -755,7 +785,8 @@ defmodule PtcRunner.SubAgent.Loop do
             state.trace_mode,
             false
           ),
-        field_descriptions: agent.field_descriptions
+        field_descriptions: agent.field_descriptions,
+        messages: build_collected_messages(state, final_messages)
     }
 
     {:ok, final_step}
@@ -827,5 +858,19 @@ defmodule PtcRunner.SubAgent.Loop do
       path_str = if path == [], do: "root", else: "[#{Enum.join(path, ".")}]"
       "- #{path_str}: #{message}"
     end)
+  end
+
+  # ============================================================
+  # Message Collection
+  # ============================================================
+
+  # Build collected messages with system prompt prepended, or nil if not collecting
+  defp build_collected_messages(%{collect_messages: false}, _messages), do: nil
+
+  defp build_collected_messages(%{collect_messages: true} = state, messages) do
+    case state.collected_system_prompt do
+      nil -> messages
+      system_prompt -> [%{role: :system, content: system_prompt} | messages]
+    end
   end
 end

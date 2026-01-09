@@ -315,6 +315,8 @@ defmodule PtcRunner.SubAgent do
     - `backoff` - Backoff strategy: `:exponential`, `:linear`, or `:constant` (default: `:exponential`)
     - `base_delay` - Base delay in milliseconds (default: 1000)
     - `retryable_errors` - List of error types to retry (default: `[:rate_limit, :timeout, :server_error]`)
+  - `collect_messages` - Capture full conversation history in Step.messages (default: false).
+    When enabled, messages are in OpenAI format: `[%{role: :system | :user | :assistant, content: String.t()}]`
   - Other options from agent definition can be overridden
 
   ## LLM Registry

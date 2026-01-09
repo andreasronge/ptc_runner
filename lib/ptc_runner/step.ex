@@ -83,6 +83,15 @@ defmodule PtcRunner.Step do
   - **Nil when:** No field descriptions provided
   - **Used for:** Passing field documentation through chained executions
 
+  ### `messages`
+
+  Full conversation history in OpenAI format.
+
+  - **Type:** `[t:message/0] | nil`
+  - **Set when:** `collect_messages: true` option passed to `SubAgent.run/2`
+  - **Nil when:** `collect_messages: false` (default)
+  - **Used for:** Debugging, persistence, and displaying the LLM conversation
+
   ## Error Reasons
 
   Complete list of error reasons in `step.fail.reason`:
@@ -171,7 +180,8 @@ defmodule PtcRunner.Step do
     :parent_trace_id,
     :field_descriptions,
     :prints,
-    :tool_calls
+    :tool_calls,
+    :messages
   ]
 
   @typedoc """
@@ -251,6 +261,18 @@ defmodule PtcRunner.Step do
         }
 
   @typedoc """
+  A single message in OpenAI format.
+
+  Fields:
+  - `role`: The message role (:system, :user, or :assistant)
+  - `content`: The message content
+  """
+  @type message :: %{
+          role: :system | :user | :assistant,
+          content: String.t()
+        }
+
+  @typedoc """
   Step result struct.
 
   One of `return` or `fail` will be set, but never both:
@@ -271,7 +293,8 @@ defmodule PtcRunner.Step do
           parent_trace_id: String.t() | nil,
           field_descriptions: map() | nil,
           prints: [String.t()],
-          tool_calls: [tool_call()]
+          tool_calls: [tool_call()],
+          messages: [message()] | nil
         }
 
   @doc """
