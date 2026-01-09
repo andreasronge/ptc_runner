@@ -27,7 +27,12 @@ defmodule LLMClient.Providers do
   @type message :: %{role: :system | :user | :assistant, content: String.t()}
   @type response :: %{
           content: String.t(),
-          tokens: %{input: non_neg_integer(), output: non_neg_integer()}
+          tokens: %{
+            input: non_neg_integer(),
+            output: non_neg_integer(),
+            cache_creation: non_neg_integer(),
+            cache_read: non_neg_integer()
+          }
         }
 
   @doc """
@@ -41,10 +46,22 @@ defmodule LLMClient.Providers do
   ## Options
     - `:receive_timeout` - Request timeout in ms (default: #{@default_timeout})
     - `:ollama_base_url` - Override Ollama server URL (default: #{@ollama_base_url})
+    - `:cache` - Enable prompt caching for supported providers (default: false).
+      Works with direct Anthropic API (`anthropic:`) and OpenRouter Anthropic models
+      (`openrouter:anthropic/...`). Uses 5-minute ephemeral cache.
 
   ## Returns
-    - `{:ok, %{content: string, tokens: %{input: int, output: int}}}`
+    - `{:ok, %{content: string, tokens: %{input: int, output: int, cache_creation: int, cache_read: int}}}`
     - `{:error, reason}`
+
+  ## Prompt Caching
+
+  When `cache: true` is set and the model supports it (Anthropic via OpenRouter or direct),
+  the system and tool prompts are cached. Token counts include:
+    - `input` - Non-cached input tokens
+    - `output` - Generated output tokens
+    - `cache_creation` - Tokens written to cache (costs 1.25x input rate)
+    - `cache_read` - Tokens read from cache (costs 0.1x input rate)
   """
   @spec generate_text(String.t(), [message()], keyword()) :: {:ok, response()} | {:error, term()}
   def generate_text(model, messages, opts \\ []) do
@@ -122,7 +139,7 @@ defmodule LLMClient.Providers do
            receive_timeout: timeout
          ) do
       {:ok, %{status: 200, body: %{"response" => text} = body}} ->
-        tokens = extract_ollama_tokens(body)
+        tokens = extract_ollama_tokens(body) |> add_cache_fields()
         {:ok, %{content: text, tokens: tokens}}
 
       {:ok, %{status: status, body: body}} ->
@@ -155,10 +172,12 @@ defmodule LLMClient.Providers do
         text = get_in(body, ["choices", Access.at(0), "message", "content"]) || ""
         usage = body["usage"] || %{}
 
-        tokens = %{
-          input: usage["prompt_tokens"] || 0,
-          output: usage["completion_tokens"] || 0
-        }
+        tokens =
+          %{
+            input: usage["prompt_tokens"] || 0,
+            output: usage["completion_tokens"] || 0
+          }
+          |> add_cache_fields()
 
         {:ok, %{content: text, tokens: tokens}}
 
@@ -173,18 +192,32 @@ defmodule LLMClient.Providers do
   defp call_req_llm(model, messages, opts) do
     timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
     http_opts = Keyword.get(opts, :req_http_options, [])
+    cache_enabled = Keyword.get(opts, :cache, false)
 
-    case ReqLLM.generate_text(model, messages,
-           receive_timeout: timeout,
-           req_http_options: http_opts
-         ) do
+    # Apply caching: either via provider_options (Anthropic) or message/opts transformation (OpenRouter)
+    {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
+
+    req_opts =
+      [receive_timeout: timeout, req_http_options: http_opts]
+      |> Keyword.merge(extra_opts)
+
+    case ReqLLM.generate_text(model, messages, req_opts) do
       {:ok, response} ->
         text = ReqLLM.Response.text(response) || ""
         usage = ReqLLM.Response.usage(response) || %{}
 
+        # Extract cache tokens from usage and provider_meta
+        # ReqLLM normalizes cache_read to :cached_tokens
+        # cache_write_tokens may be in provider_meta (raw OpenRouter response)
+        cached_tokens = usage[:cached_tokens] || usage["cached_tokens"] || 0
+
+        cache_write = extract_cache_write_tokens(response.provider_meta)
+
         tokens = %{
           input: usage[:input_tokens] || usage["input_tokens"] || 0,
-          output: usage[:output_tokens] || usage["output_tokens"] || 0
+          output: usage[:output_tokens] || usage["output_tokens"] || 0,
+          cache_creation: cache_write,
+          cache_read: cached_tokens
         }
 
         {:ok, %{content: text, tokens: tokens}}
@@ -192,6 +225,68 @@ defmodule LLMClient.Providers do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # Apply caching based on provider type
+  # Returns {possibly_modified_messages, extra_opts_keyword_list}
+  defp apply_caching(model, messages, true = _cache_enabled) do
+    cond do
+      # Direct Anthropic API - use provider_options for caching
+      String.starts_with?(model, "anthropic:") ->
+        extra_opts = [
+          provider_options: [
+            anthropic_prompt_cache: true,
+            anthropic_prompt_cache_ttl: "5m"
+          ]
+        ]
+
+        {messages, extra_opts}
+
+      # OpenRouter with Anthropic model - embed cache_control in message content
+      # AND force Anthropic as provider (Google doesn't support cache_control)
+      String.starts_with?(model, "openrouter:") and anthropic_model_on_openrouter?(model) ->
+        # openrouter_provider is a top-level option, not under provider_options
+        extra_opts = [
+          openrouter_provider: %{order: ["Anthropic"], allow_fallbacks: false}
+        ]
+
+        {add_cache_control_to_messages(messages), extra_opts}
+
+      # Other providers - no caching support
+      true ->
+        {messages, []}
+    end
+  end
+
+  defp apply_caching(_model, messages, false), do: {messages, []}
+
+  defp anthropic_model_on_openrouter?(model) do
+    String.contains?(model, "anthropic") or String.contains?(model, "claude")
+  end
+
+  # Add cache_control to system message content for OpenRouter
+  # OpenRouter requires cache_control embedded in content blocks, not as provider options
+  # Must use ReqLLM.Message structs (not loose maps) for structured content
+  defp add_cache_control_to_messages(messages) do
+    Enum.map(messages, fn
+      %{role: :system, content: content} when is_binary(content) ->
+        # Use ReqLLM.Message struct with ContentPart containing cache_control
+        content_part =
+          ReqLLM.Message.ContentPart.text(content, %{cache_control: %{type: "ephemeral"}})
+
+        %ReqLLM.Message{role: :system, content: [content_part]}
+
+      # Convert other loose maps to Message structs for consistency
+      %{role: role, content: content} when is_atom(role) and is_binary(content) ->
+        %ReqLLM.Message{role: role, content: [ReqLLM.Message.ContentPart.text(content)]}
+
+      # Already a Message struct - pass through
+      %ReqLLM.Message{} = message ->
+        message
+
+      message ->
+        message
+    end)
   end
 
   # --- Provider Parsing ---
@@ -229,6 +324,22 @@ defmodule LLMClient.Providers do
       input: body["prompt_eval_count"] || 0,
       output: body["eval_count"] || 0
     }
+  end
+
+  defp add_cache_fields(tokens) do
+    Map.merge(tokens, %{cache_creation: 0, cache_read: 0})
+  end
+
+  # Extract cache_write_tokens from provider_meta (raw OpenRouter/Anthropic response)
+  # OpenRouter returns: usage.prompt_tokens_details.cache_write_tokens
+  defp extract_cache_write_tokens(nil), do: 0
+
+  defp extract_cache_write_tokens(%{} = meta) do
+    # Try different paths where cache_write might be stored
+    get_in(meta, ["usage", "prompt_tokens_details", "cache_write_tokens"]) ||
+      get_in(meta, [:usage, :prompt_tokens_details, :cache_write_tokens]) ||
+      get_in(meta, ["prompt_tokens_details", "cache_write_tokens"]) ||
+      0
   end
 
   defp check_ollama_available do

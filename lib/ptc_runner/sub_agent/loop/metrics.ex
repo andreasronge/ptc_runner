@@ -43,7 +43,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   ## Parameters
 
   - `state` - Current loop state
-  - `tokens` - Token counts map with `:input` and `:output` keys, or nil
+  - `tokens` - Token counts map with `:input`, `:output`, `:cache_creation`, `:cache_read` keys, or nil
 
   ## Returns
 
@@ -56,11 +56,16 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def accumulate_tokens(state, tokens) when is_map(tokens) do
     input = Map.get(tokens, :input, 0)
     output = Map.get(tokens, :output, 0)
+    cache_creation = Map.get(tokens, :cache_creation, 0)
+    cache_read = Map.get(tokens, :cache_read, 0)
 
     %{
       state
       | total_input_tokens: state.total_input_tokens + input,
         total_output_tokens: state.total_output_tokens + output,
+        total_cache_creation_tokens:
+          Map.get(state, :total_cache_creation_tokens, 0) + cache_creation,
+        total_cache_read_tokens: Map.get(state, :total_cache_read_tokens, 0) + cache_read,
         llm_requests: state.llm_requests + 1,
         turn_tokens: tokens
     }
@@ -78,7 +83,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
   ## Returns
 
-  Map with usage statistics.
+  Map with usage statistics including cache token metrics when available.
   """
   @spec build_final_usage(map(), non_neg_integer(), non_neg_integer(), integer()) :: map()
   def build_final_usage(state, duration_ms, memory_bytes, turn_offset \\ 0) do
@@ -90,13 +95,29 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
     # Add token counts if any LLM calls were made with token reporting
     if state.total_input_tokens > 0 or state.total_output_tokens > 0 do
-      Map.merge(base, %{
+      cache_creation = Map.get(state, :total_cache_creation_tokens, 0)
+      cache_read = Map.get(state, :total_cache_read_tokens, 0)
+
+      token_stats = %{
         input_tokens: state.total_input_tokens,
         output_tokens: state.total_output_tokens,
         total_tokens: state.total_input_tokens + state.total_output_tokens,
         llm_requests: state.llm_requests,
         system_prompt_tokens: Map.get(state, :system_prompt_tokens, 0)
-      })
+      }
+
+      # Add cache token stats if any caching occurred
+      cache_stats =
+        if cache_creation > 0 or cache_read > 0 do
+          %{
+            cache_creation_tokens: cache_creation,
+            cache_read_tokens: cache_read
+          }
+        else
+          %{}
+        end
+
+      Map.merge(base, Map.merge(token_stats, cache_stats))
     else
       # Still include llm_requests even without token counts
       if state.llm_requests > 0 do

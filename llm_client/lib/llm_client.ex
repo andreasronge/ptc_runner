@@ -44,8 +44,7 @@ defmodule LLMClient do
   defdelegate default_model(), to: LLMClient.Registry
   defdelegate validate(model_string), to: LLMClient.Registry
 
-  defdelegate calculate_cost(alias_or_model_id, input_tokens, output_tokens),
-    to: LLMClient.Registry
+  defdelegate calculate_cost(alias_or_model_id, tokens), to: LLMClient.Registry
 
   @doc """
   Get all model presets as a map of alias to model ID.

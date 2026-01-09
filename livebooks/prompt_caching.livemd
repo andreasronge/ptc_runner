@@ -1,0 +1,249 @@
+# Prompt Caching
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+  else
+    [{:ptc_runner, "~> 0.4.1"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+## What is Prompt Caching?
+
+LLM providers like Anthropic cache the prefix of your request. When subsequent requests share the same prefix (system prompt, tools, initial messages), the cached portion is:
+
+* **90% cheaper** (cache read vs normal input)
+* **Faster** (no need to reprocess cached tokens)
+
+The trade-off: first request pays a **25% premium** to write the cache.
+
+**Minimum token requirements:**
+
+* Claude Haiku 4.5: **4,096 tokens**
+* Claude Sonnet 4: **1,024 tokens**
+
+The PTC-Lisp system prompt is ~1,700 tokens, so caching only works with Sonnet (or by adding custom content to exceed Haiku's threshold).
+
+**Requirements for caching to work:**
+
+1. **Minimum tokens** - Your system prompt must exceed the threshold (1,024 for Sonnet, 4,096 for Haiku)
+2. **Anthropic routing** - OpenRouter must route to Anthropic (not Google). `LLMClient` handles this automatically when `cache: true`
+3. **Identical prefix** - The cached portion (system prompt) must be byte-for-byte identical between requests
+
+## Setup
+
+Add your API key in the Secrets panel (`ss`).
+
+```elixir
+api_key = System.get_env("LB_OPENROUTER_API_KEY") || System.get_env("OPENROUTER_API_KEY")
+
+if api_key do
+  System.put_env("OPENROUTER_API_KEY", api_key)
+  "OpenRouter API key configured"
+else
+  raise "OPENROUTER_API_KEY required for this demo"
+end
+```
+
+```elixir
+# Use Sonnet for caching demo (1,024 token minimum vs Haiku's 4,096)
+model = "openrouter:anthropic/claude-sonnet-4"
+
+# Store system prompt hashes for debugging
+:persistent_term.put(:prompt_hashes, [])
+
+# LLM callback that respects the cache option and logs prompt hash
+my_llm = fn %{system: system, messages: messages, cache: cache} ->
+  # Hash the system prompt to verify it's identical between calls
+  hash = :crypto.hash(:sha256, system) |> Base.encode16() |> String.slice(0, 16)
+  call_num = length(:persistent_term.get(:prompt_hashes, [])) + 1
+  hashes = :persistent_term.get(:prompt_hashes, [])
+  :persistent_term.put(:prompt_hashes, hashes ++ [hash])
+
+  # Save prompt to file for diffing
+  File.write!("/tmp/prompt_#{call_num}.txt", system)
+  IO.puts("System prompt hash: #{hash} (len: #{String.length(system)}, saved to /tmp/prompt_#{call_num}.txt)")
+
+  opts = [receive_timeout: 60_000, cache: cache]
+
+  case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], opts) do
+    {:ok, r} ->
+      IO.puts("LLM tokens: #{inspect(r.tokens)}")
+      {:ok, r}
+    error -> error
+  end
+end
+
+"Ready: #{model}"
+```
+
+## Compare: Without vs With Caching
+
+First, let's run without caching to establish a baseline:
+
+```elixir
+{:ok, step_no_cache} = PtcRunner.SubAgent.run(
+  "What is 17 * 23?",
+  llm: my_llm,
+  cache: false
+)
+
+IO.puts("Without caching:")
+IO.inspect(step_no_cache.usage, label: "Usage")
+IO.inspect(LLMClient.calculate_cost(model, step_no_cache.usage), label: "Cost ($)")
+step_no_cache.return
+```
+
+Now with caching enabled. We use a unique question (with timestamp) to bust any existing cache and force a cache write:
+
+```elixir
+# Generate a unique question to bust any existing cache
+unique_num = System.system_time(:second) |> rem(1000)
+question = "What is #{unique_num} * 17?"
+IO.puts("Using unique question: #{question}")
+
+{:ok, step_cache_write} = PtcRunner.SubAgent.run(
+  question,
+  llm: my_llm,
+  cache: true
+)
+
+IO.puts("\nWith caching (first call - should be cache WRITE):")
+IO.puts("  cache_creation_tokens: #{step_cache_write.usage[:cache_creation_tokens] || 0}")
+IO.puts("  cache_read_tokens: #{step_cache_write.usage[:cache_read_tokens] || 0}")
+IO.inspect(LLMClient.calculate_cost(model, step_cache_write.usage), label: "Cost ($)")
+
+# Store question for next cell
+:persistent_term.put(:cache_test_question, question)
+step_cache_write.return
+```
+
+Run again immediately with **the same question** (cache hit):
+
+> **Note:** The mission/question is part of the system prompt in SubAgent, so caching only works when the question is identical.
+
+```elixir
+# Use the same question from the previous cell
+question = :persistent_term.get(:cache_test_question)
+IO.puts("Using same question: #{question}")
+
+{:ok, step_cache_read} = PtcRunner.SubAgent.run(
+  question,
+  llm: my_llm,
+  cache: true
+)
+
+IO.puts("\nWith caching (second call - should be cache READ):")
+IO.puts("  cache_creation_tokens: #{step_cache_read.usage[:cache_creation_tokens] || 0}")
+IO.puts("  cache_read_tokens: #{step_cache_read.usage[:cache_read_tokens] || 0}")
+IO.inspect(LLMClient.calculate_cost(model, step_cache_read.usage), label: "Cost ($)")
+step_cache_read.return
+```
+
+## Understanding the Metrics
+
+```elixir
+write_creation = step_cache_write.usage[:cache_creation_tokens] || 0
+write_read = step_cache_write.usage[:cache_read_tokens] || 0
+read_creation = step_cache_read.usage[:cache_creation_tokens] || 0
+read_read = step_cache_read.usage[:cache_read_tokens] || 0
+
+IO.puts("""
+Token Breakdown:
+================
+
+Without caching:
+  input_tokens: #{step_no_cache.usage[:input_tokens]} (all tokens processed at full rate)
+
+Cache write (first call):
+  input_tokens: #{step_cache_write.usage[:input_tokens]}
+  cache_creation_tokens: #{write_creation} #{if write_creation > 0, do: "✓ CACHE WRITE", else: "(expected > 0)"}
+  cache_read_tokens: #{write_read} #{if write_read == 0, do: "(expected 0)", else: "← cache was already warm!"}
+
+Cache read (second call):
+  input_tokens: #{step_cache_read.usage[:input_tokens]}
+  cache_creation_tokens: #{read_creation} #{if read_creation == 0, do: "(expected 0)", else: ""}
+  cache_read_tokens: #{read_read} #{if read_read > 0, do: "✓ CACHE HIT!", else: "(expected > 0)"}
+
+Key insight: input_tokens INCLUDES cached tokens. The cache_read_tokens are charged at 10% rate.
+""")
+```
+
+## Cost Comparison
+
+```elixir
+cost_no_cache = LLMClient.calculate_cost(model, step_no_cache.usage)
+cost_cache_write = LLMClient.calculate_cost(model, step_cache_write.usage)
+cost_cache_read = LLMClient.calculate_cost(model, step_cache_read.usage)
+
+# Check if we actually got a cache write vs read
+write_was_cache_read = (step_cache_write.usage[:cache_read_tokens] || 0) > 0 and
+                       (step_cache_write.usage[:cache_creation_tokens] || 0) == 0
+
+savings_vs_no_cache = if cost_no_cache > 0 do
+  ((cost_no_cache - cost_cache_read) / cost_no_cache * 100) |> Float.round(1)
+else
+  0.0
+end
+
+IO.puts("""
+Cost Analysis:
+==============
+
+Without caching:  $#{Float.round(cost_no_cache, 6)}
+Cache write:      $#{Float.round(cost_cache_write, 6)}#{if write_was_cache_read, do: " (was actually a cache read!)", else: " (pays 25% write premium)"}
+Cache read:       $#{Float.round(cost_cache_read, 6)} (90% discount on cached tokens)
+
+Savings vs no caching: #{savings_vs_no_cache}%
+
+#{if write_was_cache_read do
+  "⚠️  Both calls hit an existing cache. Re-run the 'cache write' cell to generate a new question."
+else
+  "Break-even: After ~2 calls with same system prompt, caching saves money."
+end}
+""")
+
+# Debug: Show all system prompt hashes
+hashes = :persistent_term.get(:prompt_hashes, [])
+IO.puts("\nDebug - System Prompt Hashes:")
+IO.puts("=============================")
+Enum.with_index(hashes, 1) |> Enum.each(fn {hash, i} ->
+  IO.puts("  Call #{i}: #{hash}")
+end)
+
+if length(Enum.uniq(hashes)) == 1 do
+  IO.puts("\n✓ All prompts identical (cache should work)")
+else
+  IO.puts("\n✗ Prompts differ! Cache will be busted.")
+  IO.puts("  Unique hashes: #{length(Enum.uniq(hashes))}")
+end
+```
+
+## When to Use Caching
+
+**Enable caching when:**
+
+* Running multiple queries with the same agent configuration
+* System prompts are large (PTC-Lisp spec is ~2-3K tokens)
+* Multi-turn agents (system prompt repeated each turn)
+
+**Supported providers:**
+
+* Direct Anthropic API (`anthropic:claude-...`)
+* OpenRouter with Anthropic models (`openrouter:anthropic/...`)
+
+**Skip caching when:**
+
+* One-off queries
+* Testing/development with changing prompts
+* Using Ollama or other local models
+* Using non-Anthropic models (no caching support)
+
+## Cache Lifetime
+
+Anthropic caches expire after **5 minutes** of inactivity. The cache is keyed on the exact prefix, so any change to the system prompt invalidates the cache.

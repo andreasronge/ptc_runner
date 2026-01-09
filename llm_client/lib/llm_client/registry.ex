@@ -358,9 +358,32 @@ defmodule LLMClient.Registry do
 
   Uses the model's cost rates if available (looks up by alias or model_id).
   Returns the cost in dollars or 0.0 if rates not available.
+
+  ## Arguments
+
+    - `alias_or_model_id` - Model alias or full model ID
+    - `tokens` - Token counts map with keys: `:input`, `:output`, `:cache_creation`, `:cache_read`
+
+  ## Cost Calculation
+
+  For Anthropic models with prompt caching:
+    - Cache creation: 1.25x input rate (25% premium to write cache)
+    - Cache read: 0.1x input rate (90% discount on cache hits)
+    - Regular input: 1.0x input rate
+
+  ## Examples
+
+      LLMClient.Registry.calculate_cost("haiku", %{input: 1000, output: 500, cache_creation: 0, cache_read: 0})
+      # => 0.0028 (standard pricing)
+
+      LLMClient.Registry.calculate_cost("haiku", %{input: 100, output: 500, cache_creation: 1000, cache_read: 0})
+      # => 0.003 (cache write premium)
+
+      LLMClient.Registry.calculate_cost("haiku", %{input: 100, output: 500, cache_creation: 0, cache_read: 1000})
+      # => 0.00208 (cache read discount)
   """
-  @spec calculate_cost(String.t(), non_neg_integer(), non_neg_integer()) :: float()
-  def calculate_cost(alias_or_model_id, input_tokens, output_tokens) do
+  @spec calculate_cost(String.t(), map()) :: float()
+  def calculate_cost(alias_or_model_id, tokens) when is_map(tokens) do
     costs = find_costs(alias_or_model_id)
 
     case costs do
@@ -368,8 +391,27 @@ defmodule LLMClient.Registry do
         0.0
 
       %{input: input_rate, output: output_rate} ->
-        input_rate * input_tokens / 1_000_000 + output_rate * output_tokens / 1_000_000
+        # Support both key formats: :input/:output and :input_tokens/:output_tokens
+        total_input = get_token_count(tokens, [:input, :input_tokens])
+        output_tokens = get_token_count(tokens, [:output, :output_tokens])
+        cache_creation = get_token_count(tokens, [:cache_creation, :cache_creation_tokens])
+        cache_read = get_token_count(tokens, [:cache_read, :cache_read_tokens])
+
+        # input_tokens INCLUDES cached tokens, so subtract to get uncached portion
+        # Cache write tokens are ADDITIONAL (not included in input_tokens)
+        uncached_input = max(total_input - cache_read, 0)
+
+        uncached_input_cost = input_rate * uncached_input / 1_000_000
+        output_cost = output_rate * output_tokens / 1_000_000
+        cache_write_cost = input_rate * 1.25 * cache_creation / 1_000_000
+        cache_read_cost = input_rate * 0.10 * cache_read / 1_000_000
+
+        uncached_input_cost + output_cost + cache_write_cost + cache_read_cost
     end
+  end
+
+  defp get_token_count(tokens, keys) do
+    Enum.find_value(keys, 0, fn key -> Map.get(tokens, key) end)
   end
 
   # Private functions
