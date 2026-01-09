@@ -200,6 +200,10 @@ defmodule PtcRunner.Lisp do
           e in ExecutionError ->
             {:error, {e.reason, e.message, e.data}}
 
+          e in PtcRunner.ToolExecutionError ->
+            # Tool error with eval_ctx preserved (contains recorded tool_calls)
+            {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
+
           e ->
             # Catch unexpected exceptions in tool implementations and report as tool errors
             {:error, {:tool_error, "unknown", Exception.message(e)}}
@@ -220,7 +224,8 @@ defmodule PtcRunner.Lisp do
               {:__ptc_return__, value},
               eval_ctx.user_ns,
               float_precision,
-              eval_ctx.prints
+              eval_ctx.prints,
+              eval_ctx.tool_calls
             )
 
           {:ok, %{step | usage: metrics}}
@@ -231,13 +236,42 @@ defmodule PtcRunner.Lisp do
               {:__ptc_fail__, value},
               eval_ctx.user_ns,
               float_precision,
-              eval_ctx.prints
+              eval_ctx.prints,
+              eval_ctx.tool_calls
             )
 
           {:ok, %{step | usage: metrics}}
 
+        {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx} ->
+          # Error with eval_ctx preserved (e.g., from tool execution error)
+          reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
+
+          step = %Step{
+            return: nil,
+            fail: %{reason: reason_atom, message: format_error(reason)},
+            memory: memory,
+            signature: nil,
+            usage: metrics,
+            trace: nil,
+            trace_id: nil,
+            parent_trace_id: nil,
+            field_descriptions: nil,
+            prints: eval_ctx.prints,
+            tool_calls: eval_ctx.tool_calls
+          }
+
+          {:error, step}
+
         {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
-          step = apply_memory_contract(value, eval_ctx.user_ns, float_precision, eval_ctx.prints)
+          step =
+            apply_memory_contract(
+              value,
+              eval_ctx.user_ns,
+              float_precision,
+              eval_ctx.prints,
+              eval_ctx.tool_calls
+            )
+
           step_with_usage = %{step | usage: metrics}
 
           # Validate signature if provided
@@ -329,7 +363,7 @@ defmodule PtcRunner.Lisp do
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
-  defp apply_memory_contract(value, memory, precision, prints) do
+  defp apply_memory_contract(value, memory, precision, prints, tool_calls) do
     %Step{
       return: round_floats(value, precision),
       fail: nil,
@@ -337,7 +371,8 @@ defmodule PtcRunner.Lisp do
       signature: nil,
       usage: nil,
       trace: nil,
-      prints: Enum.reverse(prints)
+      prints: Enum.reverse(prints),
+      tool_calls: Enum.reverse(tool_calls)
     }
   end
 

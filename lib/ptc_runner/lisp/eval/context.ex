@@ -18,10 +18,31 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :turn_history,
     iteration_count: 0,
     loop_limit: 1000,
-    prints: []
+    prints: [],
+    tool_calls: []
   ]
 
   @max_loop_limit 10_000
+
+  @typedoc """
+  Tool call record for tracing.
+
+  Fields:
+  - `name`: Tool name
+  - `args`: Arguments passed to tool
+  - `result`: Tool result
+  - `error`: Error message if tool failed
+  - `timestamp`: When tool was called
+  - `duration_ms`: How long tool took
+  """
+  @type tool_call :: %{
+          name: String.t(),
+          args: map(),
+          result: term(),
+          error: String.t() | nil,
+          timestamp: DateTime.t(),
+          duration_ms: non_neg_integer()
+        }
 
   @type t :: %__MODULE__{
           ctx: map(),
@@ -31,7 +52,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           turn_history: list(),
           iteration_count: integer(),
           loop_limit: integer(),
-          prints: [String.t()]
+          prints: [String.t()],
+          tool_calls: [tool_call()]
         }
 
   @doc """
@@ -52,7 +74,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       env: env,
       tool_exec: tool_exec,
       turn_history: turn_history,
-      prints: []
+      prints: [],
+      tool_calls: []
     }
   end
 
@@ -62,6 +85,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec append_print(t(), String.t()) :: t()
   def append_print(%__MODULE__{prints: prints} = context, message) do
     %{context | prints: [message | prints]}
+  end
+
+  @doc """
+  Appends a tool call record to the context.
+  """
+  @spec append_tool_call(t(), tool_call()) :: t()
+  def append_tool_call(%__MODULE__{tool_calls: tool_calls} = context, tool_call) do
+    %{context | tool_calls: [tool_call | tool_calls]}
   end
 
   @doc """
