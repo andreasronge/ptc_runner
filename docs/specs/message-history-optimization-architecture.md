@@ -18,8 +18,8 @@ Implementation guidance for [message-history-optimization.md](./message-history-
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
 │  │                    Strategy: SingleUserCoalesced                         ││
 │  │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐           ││
-│  │  │ ToolCalls  │ │ Functions  │ │ Definitions│ │ Output     │           ││
-│  │  │ Section    │ │ Section    │ │ Section    │ │ Section    │           ││
+│  │  │  tool/     │ │   data/    │ │   user/    │ │  History   │           ││
+│  │  │ (stable)   │ │  (stable)  │ │ (prelude)  │ │ (changes)  │           ││
 │  │  └────────────┘ └────────────┘ └────────────┘ └────────────┘           ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 │                                     │                                        │
@@ -32,6 +32,32 @@ Implementation guidance for [message-history-optimization.md](./message-history-
 ```
 
 ## Core Design Principles
+
+### REPL with Prelude
+
+The LLM experience is modeled after a **Clojure REPL with a prelude**:
+
+```
+Turn 1: Fresh REPL with tool/ and data/ namespaces loaded
+Turn N+1: Continue session with user/ prelude of previous definitions
+```
+
+Three namespaces rendered consistently:
+- `tool/` - Available tools (external, stable)
+- `data/` - Input data (external, stable)
+- `user/` - LLM definitions (prelude, grows each turn)
+
+### Prompt Caching
+
+The `tool/` and `data/` sections are **stable** across turns:
+
+```
+Turn 1: [tool/ + data/] + [user/ empty]     ← tool/data cached
+Turn 2: [tool/ + data/] + [user/ small]     ← tool/data cache hit
+Turn 3: [tool/ + data/] + [user/ larger]    ← tool/data cache hit
+```
+
+Only `user/` and execution history change between turns.
 
 ### Append-Only Turns
 
@@ -310,54 +336,113 @@ end
 
 ---
 
-### 4. Summary (Format compressed context)
+### 4. Summary (Format unified namespaces)
 
 **File:** `lib/ptc_runner/sub_agent/compression/summary.ex`
+
+The Summary module renders the unified namespace format (REPL with Prelude model):
 
 ```elixir
 defmodule PtcRunner.SubAgent.Compression.Summary do
   @moduledoc """
-  Format accumulated turn data into compressed summary.
+  Format turn data as unified namespaces (REPL with Prelude model).
 
-  Used by SingleUserCoalesced to render the context section.
+  Renders three namespace sections plus execution history:
+  - tool/  : Available tools (from agent config, stable)
+  - data/  : Input data (from agent config, stable)
+  - user/  : LLM definitions (prelude, grows each turn)
+  - Tool calls made / Output (execution history)
   """
 
   alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.Compression.TypeVocabulary
 
-  @doc "Format successful turns as a summary string"
-  @spec format([Turn.t()], map(), map()) :: String.t() | nil
-  def format([], _memory, _config), do: nil
-  def format(turns, memory, config) do
-    # Aggregate data from all successful turns
-    all_tool_calls = turns |> Enum.flat_map(& &1.tool_calls)
-    all_prints = turns |> Enum.flat_map(& &1.prints)
-    has_println = length(all_prints) > 0
-
-    # Extract definitions and functions from final memory
-    {functions, definitions} = partition_memory(memory)
-
+  @doc "Format all context as unified namespace sections"
+  @spec format(map()) :: String.t()
+  def format(config) do
     sections = [
-      format_tool_calls(all_tool_calls, config.tool_call_limit),
-      format_functions(functions),
-      format_definitions(definitions, has_println),
-      format_output(all_prints, config.println_limit, has_println)
+      format_tool_namespace(config.tools),
+      format_data_namespace(config.data),
+      format_user_namespace(config.memory, config.has_println),
+      format_tool_calls_made(config.tool_calls, config.tool_call_limit),
+      format_output(config.prints, config.println_limit, config.has_println)
     ]
     |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n")
+    |> Enum.join("\n\n")
 
-    if sections == "", do: nil, else: sections
+    sections
   end
 
-  defp partition_memory(memory) do
-    Enum.split_with(memory, fn {_name, value} ->
-      match?({:closure, _, _, _, _}, value)
+  # tool/ namespace (stable, cacheable)
+  defp format_tool_namespace(tools) when map_size(tools) == 0, do: nil
+  defp format_tool_namespace(tools) do
+    lines = tools
+    |> Enum.map(fn {name, schema} ->
+      "(tool/#{name} #{format_params(schema)})      ; #{format_signature(schema)}"
     end)
+
+    [";; === tool/ ===" | lines] |> Enum.join("\n")
   end
 
-  # Tool calls section
-  defp format_tool_calls([], _limit), do: "; No tool calls made"
-  defp format_tool_calls(tool_calls, limit) do
+  # data/ namespace (stable, cacheable)
+  defp format_data_namespace(data) when map_size(data) == 0, do: nil
+  defp format_data_namespace(data) do
+    lines = data
+    |> Enum.map(fn {name, value} ->
+      type_label = TypeVocabulary.type_of(value)
+      sample = format_sample(value)
+      "data/#{name}                    ; #{type_label}, sample: #{sample}"
+    end)
+
+    [";; === data/ ===" | lines] |> Enum.join("\n")
+  end
+
+  # user/ namespace (prelude, grows each turn)
+  defp format_user_namespace(memory, _has_println) when map_size(memory) == 0, do: nil
+  defp format_user_namespace(memory, has_println) do
+    {functions, definitions} = partition_memory(memory)
+
+    fn_lines = Enum.map(functions, fn {name, closure} ->
+      format_user_function(name, closure)
+    end)
+
+    def_lines = Enum.map(definitions, fn {name, value} ->
+      format_user_definition(name, value, has_println)
+    end)
+
+    lines = fn_lines ++ def_lines
+    [";; === user/ (your prelude) ===" | lines] |> Enum.join("\n")
+  end
+
+  defp format_user_function(name, {:closure, params, _body, _env, meta}) do
+    params_str = Enum.join(params, " ")
+    docstring = meta[:doc]
+    return_type = meta[:return_type]
+
+    cond do
+      docstring && return_type ->
+        "(#{name} [#{params_str}])           ; \"#{docstring}\" -> #{return_type}"
+      docstring ->
+        "(#{name} [#{params_str}])           ; \"#{docstring}\""
+      true ->
+        "(#{name} [#{params_str}])"
+    end
+  end
+
+  defp format_user_definition(name, value, has_println) do
+    type_label = TypeVocabulary.type_of(value)
+
+    if has_println do
+      "#{name}                         ; = #{type_label}"
+    else
+      sample = format_sample(value)
+      "#{name}                         ; = #{type_label}, sample: #{sample}"
+    end
+  end
+
+  # Tool calls made (execution history)
+  defp format_tool_calls_made([], _limit), do: ";; No tool calls made"
+  defp format_tool_calls_made(tool_calls, limit) do
     recent = Enum.take(tool_calls, -limit)
 
     lines = Enum.map(recent, fn tc ->
@@ -365,40 +450,21 @@ defmodule PtcRunner.SubAgent.Compression.Summary do
       ";   #{tc.name}(#{args_str})"
     end)
 
-    ["; Tool calls:" | lines] |> Enum.join("\n")
+    [";; Tool calls made:" | lines] |> Enum.join("\n")
   end
 
-  # Functions section (closures from memory)
-  defp format_functions([]), do: nil
-  defp format_functions(functions) do
-    functions
-    |> Enum.map(fn {name, _closure} ->
-      # TODO: Extract docstring from closure metadata
-      "; Function: #{name}"
+  # Output section (println history)
+  defp format_output(_prints, _limit, false), do: nil
+  defp format_output(prints, limit, true) do
+    recent = Enum.take(prints, -limit)
+    [";; Output:" | recent] |> Enum.join("\n")
+  end
+
+  # Helpers
+  defp partition_memory(memory) do
+    Enum.split_with(memory, fn {_name, value} ->
+      match?({:closure, _, _, _, _}, value)
     end)
-    |> Enum.join("\n")
-  end
-
-  # Definitions section
-  defp format_definitions([], _has_println), do: nil
-  defp format_definitions(definitions, has_println) do
-    definitions
-    |> Enum.map(fn {name, value} ->
-      type_label = TypeVocabulary.type_of(value)
-      format_definition_line(name, type_label, value, has_println)
-    end)
-    |> Enum.join("\n")
-  end
-
-  defp format_definition_line(name, type, value, has_println) do
-    base = "; Defined: #{name} = #{type}"
-
-    if has_println do
-      base
-    else
-      sample = format_sample(value)
-      if sample, do: "#{base}, sample: #{sample}", else: base
-    end
   end
 
   defp format_sample(value) do
@@ -406,11 +472,14 @@ defmodule PtcRunner.SubAgent.Compression.Summary do
     str
   end
 
-  # Output section (println)
-  defp format_output(_prints, _limit, false), do: nil
-  defp format_output(prints, limit, true) do
-    recent = Enum.take(prints, -limit)
-    ["; Output:" | recent] |> Enum.join("\n")
+  defp format_params(schema) do
+    # Extract param names from tool schema
+    schema[:parameters] |> Map.keys() |> Enum.join(" ")
+  end
+
+  defp format_signature(schema) do
+    # Format as "param:type -> return_type, description"
+    "#{schema[:description]}"
   end
 end
 ```

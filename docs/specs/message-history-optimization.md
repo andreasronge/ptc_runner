@@ -103,17 +103,25 @@ The LLM never sees a previous ASSISTANT message with summary format, so there's 
 ### Message Structure
 
 ```
-[SYSTEM, USER(mission + accumulated context + turns left), ASSISTANT(current code)]
+[SYSTEM, USER(mission + namespaces + execution history + turns left), ASSISTANT(current code)]
 ```
 
-**Mission format**: The original mission text appears first, followed by a blank line, then the accumulated context:
+**Mission format**: The original mission text appears first, followed by namespace sections and execution history:
 
 ```
 Find well-reviewed products in stock
 
-; Tool calls:
+;; === tool/ ===
+(tool/search-reviews query)      ; query:string -> string
+
+;; === data/ ===
+data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
+
+;; === user/ (your prelude) ===
+electronics                      ; = list[4], sample: {:name "Laptop"}
+
+;; Tool calls made:
 ;   search-reviews("Electronics")
-; Defined: ...
 
 Turns left: 4
 ```
@@ -151,11 +159,21 @@ Turn 2 of 5
 
 [USER] Find well-reviewed products in stock
 
-; Tool calls:
+;; === tool/ ===
+(tool/search-reviews query)      ; query:string -> string
+(tool/get-inventory)             ; -> map
+
+;; === data/ ===
+data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
+
+;; === user/ (your prelude) ===
+electronics                      ; = list[4], sample: {:name "Laptop", :price 1200}
+reviews                          ; = string
+
+;; Tool calls made:
 ;   search-reviews("Electronics")
-; Defined: electronics = list[4], sample: {:name "Laptop", :price 1200, ...}
-; Defined: reviews = string
-; Output:
+
+;; Output:
 Reviews: Customer Review Summary for Electronics...
 
 Turns left: 4
@@ -169,51 +187,83 @@ Turns left: 4
 
 ## Compressed Turn Format
 
-Successful turns are replaced with a summary showing:
+The USER message contains unified namespace sections plus execution history:
 
-```
-; Tool calls:
+```clojure
+;; === tool/ ===
+(tool/search-reviews query)      ; query:string -> string
+(tool/send-notification opts)    ; opts:map -> nil
+
+;; === data/ ===
+data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
+
+;; === user/ (your prelude) ===
+(fetch-users [category])         ; "Fetches users by category" -> list[5]
+users                            ; = list[5], sample: {:name "Alice", :email "..."}
+
+;; Tool calls made:
 ;   search-reviews("Electronics")
 ;   send-notification({:to "alice@example.com" :subject "Update"})
-; Function: fetch-users - "Fetches users by category, returns list of user maps"
-; Defined: users - "Active users from API" = list[5], sample: {:name "Alice", :email "..."}
-; Output:
+
+;; Output:
 Found 5 users
 Processing complete
 ```
 
-Without docstrings or tool calls:
-```
-; Function: helper-fn
-; Defined: users = list[5], sample: {:name "Alice", :email "..."}
+**Turn 1** (empty prelude):
+```clojure
+;; === tool/ ===
+(tool/search-reviews query)      ; query:string -> string
+
+;; === data/ ===
+data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
+
+;; No tool calls made
 ```
 
-If no tool calls have been made across any turns:
-```
-; No tool calls made
-; Defined: ...
+**Minimal** (no tools, no output):
+```clojure
+;; === data/ ===
+data/items                       ; list[3]
+
+;; === user/ ===
+results                          ; = list[2], sample: {:id 1}
 ```
 
 ### Format Templates
 
-| Component | Format Template |
-|-----------|-----------------|
-| Tool calls header | `; Tool calls:` |
-| Tool call entry | `;   {name}({args})` |
-| No tool calls | `; No tool calls made` |
-| Function with docstring | `; Function: {name} - "{docstring}"` |
-| Function without docstring | `; Function: {name}` |
-| Defined with docstring + sample | `; Defined: {name} - "{docstring}" = {type}, sample: {sample}` |
-| Defined with sample (no docstring) | `; Defined: {name} = {type}, sample: {sample}` |
-| Defined without sample | `; Defined: {name} = {type}` |
-| Output header | `; Output:` |
-| Output line | `{line}` (no prefix, preserves original output) |
+**Namespace sections** (stable, cacheable):
+
+| Section | Header | Entry Format |
+|---------|--------|--------------|
+| Tools | `;; === tool/ ===` | `(tool/{name} {params})      ; {signature}` |
+| Data | `;; === data/ ===` | `data/{name}                    ; {type}, sample: {sample}` |
+| User prelude | `;; === user/ (your prelude) ===` | See below |
+
+**User prelude entries:**
+
+| Type | Format |
+|------|--------|
+| Function with docstring + return | `({name} [{params}])           ; "{docstring}" -> {type}` |
+| Function with docstring | `({name} [{params}])           ; "{docstring}"` |
+| Function minimal | `({name} [{params}])` |
+| Value with sample | `{name}                         ; = {type}, sample: {sample}` |
+| Value without sample | `{name}                         ; = {type}` |
+
+**Execution history** (changes each turn):
+
+| Section | Header | Entry Format |
+|---------|--------|--------------|
+| Tool calls | `;; Tool calls made:` | `;   {name}({args})` |
+| No calls | `;; No tool calls made` | (no entries) |
+| Output | `;; Output:` | `{line}` (no prefix) |
 
 **Section ordering** (empty sections omitted):
-1. Tool calls (or "No tool calls made")
-2. Functions
-3. Defined
-4. Output
+1. `tool/` namespace
+2. `data/` namespace
+3. `user/` namespace (prelude)
+4. Tool calls made (or "No tool calls made")
+5. Output
 
 ### Type Vocabulary
 
@@ -307,9 +357,17 @@ Essential for:
 ```
 {mission}
 
-; Tool calls:
+;; === tool/ ===
+(tool/fetch-data key)            ; key:string -> map
+
+;; === data/ ===
+data/config                      ; map[3]
+
+;; === user/ (your prelude) ===
+users                            ; = list[5], sample: {:name "Alice"}
+
+;; Tool calls made:
 ;   fetch-data("users")
-; Defined: users = list[5], ...
 
 ---
 Your previous attempt:
@@ -338,17 +396,77 @@ Multiple failed turns each keep their full code blocks.
 
 **CRITICAL: The mission is NEVER removed.**
 
-## Namespace Design
+## Namespace Design: REPL with Prelude
 
-Clear namespace separation helps the LLM distinguish between different types of symbols:
+The LLM experience is modeled after a **Clojure REPL with a prelude**:
 
-| Namespace | Meaning | Example |
-|-----------|---------|---------|
-| `tool/` | Provided tools (side effects) | `(tool/fetch-users "admin")` |
-| `data/` | Provided input data (read-only) | `(filter ... data/products)` |
-| (bare) | User definitions | `(my-helper x)` |
+- **Turn 1**: Like starting a fresh REPL with `tool/` and `data/` namespaces loaded
+- **Turn N+1**: Like continuing the session with a "prelude" of your previous definitions
 
-**Auto-fallback**: If the LLM writes `fetch-users` without namespace and no local definition exists, it resolves to `tool/fetch-users` (same for `data/`). Local definitions always take precedence. If both `tool/foo` and `data/foo` exist, bare `foo` raises a runtime exception (ambiguous reference).
+This unified model means the LLM sees the same format regardless of whether data came from external input or previous turns.
+
+### Three Namespaces
+
+| Namespace | Meaning | Mutable? |
+|-----------|---------|----------|
+| `tool/` | Available tools (side effects) | No (external) |
+| `data/` | Input data (read-only) | No (external) |
+| `user/` | Your definitions (prelude) | Yes (grows each turn) |
+
+### Unified Format
+
+All namespaces are shown in a consistent Clojure-like format:
+
+```clojure
+;; === tool/ (available functions) ===
+(tool/fetch-users category)      ; category:string -> list[user], "Fetches users by category"
+(tool/send-email opts)           ; opts:map -> nil, "Sends email notification"
+
+;; === data/ (read-only input) ===
+data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
+data/config                      ; map[3], sample: {:env "prod", :debug false}
+
+;; === user/ (your prelude) ===
+(helper-fn [category])           ; "Filters by category"
+users                            ; = list[5], sample: {:name "Alice"}
+```
+
+**Turn 1**: `user/` section is empty or omitted
+**Turn N+1**: `user/` section shows accumulated definitions from previous turns
+
+### User Definitions (Best Effort)
+
+User-defined functions show what we can capture:
+
+| Component | Source | Always Available? |
+|-----------|--------|-------------------|
+| Name | `defn` form | Yes |
+| Parameters | `[params]` vector | Yes |
+| Docstring | Optional string | If provided |
+| Return type | Last execution | Only if called |
+
+```clojure
+;; user/
+(process-data [items filter-fn])  ; "Processes and filters items" -> list[3]
+(helper [x])                      ; (uncalled)
+results                           ; = list[5], sample: {:id 1, :name "Alice"}
+```
+
+### Prompt Caching Benefits
+
+The `tool/` and `data/` sections are **stable** across turns (cache hit). Only `user/` changes:
+
+```
+Turn 1: [tool/ + data/] + [user/ empty]     ← tool/data cached
+Turn 2: [tool/ + data/] + [user/ small]     ← tool/data cache hit
+Turn 3: [tool/ + data/] + [user/ larger]    ← tool/data cache hit
+```
+
+This makes the system prompt highly cacheable.
+
+### Auto-fallback Resolution
+
+If the LLM writes `fetch-users` without namespace and no local definition exists, it resolves to `tool/fetch-users` (same for `data/`). Local definitions always take precedence. If both `tool/foo` and `data/foo` exist, bare `foo` raises a runtime exception (ambiguous reference).
 
 ## Debug and Tracing
 

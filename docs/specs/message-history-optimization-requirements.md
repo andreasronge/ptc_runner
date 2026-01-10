@@ -32,38 +32,72 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | ARC-006 | Turn count derived from `length(turns)`, not messages | Message array length varies by compression strategy |
 | ARC-007 | `Step.turns` replaces `Step.trace` | Each Turn contains data previously in trace_entry plus prints |
 
-## Namespace Design
+## Namespace Design (REPL with Prelude)
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
 | NS-001 | `tool/` namespace for provided tools (side effects) | e.g., `(tool/fetch-users "admin")` |
 | NS-002 | `data/` namespace for provided input data (read-only) | e.g., `data/products` |
-| NS-003 | Bare names for user definitions | e.g., `(my-helper x)` |
+| NS-003 | `user/` namespace for LLM definitions (prelude) | Grows each turn with def/defn |
 | NS-004 | Auto-fallback: bare name resolves to `tool/` if no local definition exists | |
 | NS-005 | Auto-fallback: bare name resolves to `data/` if no local definition exists | |
 | NS-006 | Local definitions take precedence over fallback | |
-| NS-007 | Ambiguous reference (both `tool/foo` and `data/foo` exist) raises runtime exception | Error: `{:error, {:ambiguous_reference, "Symbol 'X' exists in both tool/ and data/ namespaces. Use explicit namespace."}}` |
-| NS-008 | Initial `input_data` keys available as `data/key` | Not shown in Defined section (system prompt describes available data) |
+| NS-007 | Ambiguous reference (both `tool/foo` and `data/foo` exist) raises runtime exception | Error: `{:error, {:ambiguous_reference, "..."}}` |
+| NS-008 | Initial `input_data` keys shown in `data/` section | Unified format with user definitions |
 | NS-009 | Explicit namespace access (`data/foo`) bypasses local shadowing | LLM can always access shadowed values via full namespace |
+| NS-010 | Turn 1: `user/` section empty or omitted | REPL with no prelude loaded |
+| NS-011 | Turn N+1: `user/` section shows accumulated definitions | Prelude grows each turn |
+| NS-012 | `tool/` and `data/` sections are stable (cacheable) | Only `user/` changes between turns |
 
-## Summary Format
+## Summary Format (Unified Namespaces)
+
+### Namespace Section Headers
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| FMT-001 | Tool calls header: `; Tool calls:` | |
-| FMT-002 | Tool call entry: `;   {name}({args})` | Two-space indent after semicolon. Always show parens, even for no-arg calls: `get-inventory()` |
-| FMT-003 | No tool calls: `; No tool calls made` | |
-| FMT-004 | Function with docstring: `; Function: {name} - "{docstring}"` | |
-| FMT-005 | Function without docstring: `; Function: {name}` | |
-| FMT-006 | Defined with docstring + sample: `; Defined: {name} - "{docstring}" = {type}, sample: {sample}` | |
-| FMT-007 | Defined with sample (no docstring): `; Defined: {name} = {type}, sample: {sample}` | |
-| FMT-008 | Defined without sample: `; Defined: {name} = {type}` | |
-| FMT-009 | Output header: `; Output:` | |
-| FMT-010 | Output lines have no prefix (preserve original) | |
-| FMT-011 | Section order: Tool calls → Functions → Defined → Output | |
-| FMT-012 | Empty sections are omitted entirely | |
-| FMT-013 | Summaries consolidated across all successful turns | Single Tool calls list, single Defined list (not per-turn blocks) |
-| FMT-014 | Output section rendered as-is without sanitization | Risk of confusing patterns accepted (low probability in practice) |
+| FMT-001 | Tool section header: `;; === tool/ ===` | |
+| FMT-002 | Data section header: `;; === data/ ===` | |
+| FMT-003 | User section header: `;; === user/ (your prelude) ===` | |
+
+### Tool Namespace Format
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| FMT-004 | Tool entry: `(tool/{name} {params})      ; {signature}` | Uses existing tool schema |
+
+### Data Namespace Format
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| FMT-005 | Data entry: `data/{name}                    ; {type}, sample: {sample}` | |
+
+### User Prelude Format (Best Effort)
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| FMT-006 | Function with docstring + return: `({name} [{params}])           ; "{docstring}" -> {type}` | Return type if called |
+| FMT-007 | Function with docstring: `({name} [{params}])           ; "{docstring}"` | |
+| FMT-008 | Function minimal: `({name} [{params}])` | Uncalled, no docstring |
+| FMT-009 | Value with sample: `{name}                         ; = {type}, sample: {sample}` | |
+| FMT-010 | Value without sample: `{name}                         ; = {type}` | |
+
+### Execution History Format
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| FMT-011 | Tool calls header: `;; Tool calls made:` | |
+| FMT-012 | Tool call entry: `;   {name}({args})` | Always show parens |
+| FMT-013 | No tool calls: `;; No tool calls made` | |
+| FMT-014 | Output header: `;; Output:` | |
+| FMT-015 | Output lines have no prefix (preserve original) | |
+
+### Section Ordering
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| FMT-016 | Section order: tool/ → data/ → user/ → Tool calls → Output | Empty sections omitted |
+| FMT-017 | Summaries consolidated across all successful turns | Single lists, not per-turn blocks |
+| FMT-018 | Output section rendered as-is without sanitization | Risk accepted (low probability) |
 
 ## Type Vocabulary
 
@@ -195,18 +229,7 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | AMB-009 | TRN-009: No special handling, multiline output = one println call |
 | AMB-010 | Confirmed: NS-007 covers this (runtime exception for ambiguous reference) |
 
-## Additional Requirements (from review)
-
-| ID | Requirement | Notes |
-|----|-------------|-------|
-| NS-008 | Initial `input_data` keys available as `data/key` | Not shown in Defined section |
-| NS-009 | Explicit namespace access bypasses local shadowing | `data/foo` always accessible |
-| FMT-013 | Summaries consolidated across all successful turns | Single lists, not per-turn blocks |
-| FMT-014 | Output section rendered as-is | Risk of confusing patterns accepted |
-| TYP-012 | MapSet → `set[N]` | |
-| TRN-011 | println output truncated per call | e.g., 2000 chars per call |
-
-## Change Log (from architecture doc)
+## Change Log
 
 | ID | Change |
 |----|--------|
@@ -215,7 +238,11 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | CHG-003 | Added `Turn` struct for immutable turn records |
 | CHG-004 | Added `Compression` behaviour for strategy pattern |
 | CHG-005 | `Step.trace` renamed to `Step.turns` |
-| CHG-006 | TC-008 (consecutive call compression) dropped from architecture |
+| CHG-006 | TC-008 (consecutive call compression) dropped |
 | CHG-007 | MSG-005 final turn message simplified (no emoji) |
-| CHG-008 | Docstrings in summaries deferred (FMT-004, FMT-006, DEF-005-007 marked TODO in architecture) |
+| CHG-008 | Unified namespace model: tool/, data/, user/ shown consistently |
+| CHG-009 | REPL with Prelude mental model added |
+| CHG-010 | Format changed from `; Defined:` to namespace sections |
+| CHG-011 | Prompt caching optimization: stable tool/data sections |
+| CHG-012 | User defn shows params (best effort for return type) |
 
