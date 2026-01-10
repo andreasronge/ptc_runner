@@ -12,13 +12,25 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| API-001 | `compress_history: true` enables compression with defaults | |
-| API-002 | `compress_history: [println_limit: N, tool_call_limit: M]` enables with custom limits | |
-| API-003 | `compress_history: false` disables compression (default) | |
+| API-001 | `compression: true` enables compression with default strategy | Uses `SingleUserCoalesced` |
+| API-002 | `compression: {Strategy, opts}` enables with custom strategy and options | e.g., `{SingleUserCoalesced, println_limit: 10}` |
+| API-003 | `compression: false` or `nil` disables compression (default) | |
 | API-004 | Default `println_limit` is 15 | Most recent println calls shown |
 | API-005 | Default `tool_call_limit` is 20 | Most recent tool calls shown |
-| API-006 | Options normalized to `%HistoryOpts{}` struct internally | |
+| API-006 | `Compression.normalize/1` returns `{strategy, opts}` tuple | Handles `true`, `false`, `Module`, `{Module, opts}` |
 | API-007 | Options inherited like other SubAgent options | |
+
+## Architecture
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| ARC-001 | `Turn` struct captures immutable turn records | Fields: number, program, result, prints, tool_calls, memory, success? |
+| ARC-002 | Turns list is append-only (no mutation) | Each turn is a snapshot of that cycle's execution |
+| ARC-003 | `Compression` behaviour defines strategy interface | `to_messages/3` and `name/0` callbacks |
+| ARC-004 | Compression is a pure render function | Same input always produces same output, no side effects |
+| ARC-005 | `SingleUserCoalesced` is the default strategy | Accumulates all context into single USER message |
+| ARC-006 | Turn count derived from `length(turns)`, not messages | Message array length varies by compression strategy |
+| ARC-007 | `Step.turns` replaces `Step.trace` | Each Turn contains data previously in trace_entry plus prints |
 
 ## Namespace Design
 
@@ -119,7 +131,6 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | TC-005 | Tool results appear in Defined section if stored via `def` | |
 | TC-006 | Data comes from `Step.tool_calls` (fields: name, args, result) | Result shown if no println used, truncated like samples |
 | TC-007 | When `tool_call_limit` reached, drop oldest (FIFO) | |
-| TC-008 | Consecutive identical calls compressed: `foo("bar") x5` | Only if calls are consecutive, not mixed with other calls |
 
 ## Message Array Transformation
 
@@ -129,7 +140,7 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | MSG-002 | Message array structure: `[SYSTEM, USER(mission + context + turns left), ASSISTANT(current)]` | |
 | MSG-003 | Mission text appears first in USER message | |
 | MSG-004 | Blank line separates mission from accumulated context | |
-| MSG-005 | "Turns left: N" at the end, unless final turn | Final turn: `⚠️ FINAL TURN - you must call (return result) or (fail response) next.` |
+| MSG-005 | "Turns left: N" at the end, unless final turn | Final turn: `FINAL TURN - you must call (return result) or (fail reason) now.` |
 | MSG-006 | SYSTEM prompt unchanged | |
 | MSG-007 | Mission is NEVER removed | Critical requirement |
 
@@ -161,11 +172,11 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| DBG-001 | Full programs preserved in `Step.trace` | |
-| DBG-002 | Trace contains: turn, program, output, definitions | |
-| DBG-003 | Serialization stores both summaries and full programs | |
-| DBG-004 | LLM prompt uses compressed summaries | |
-| DBG-005 | Debug/inspection uses full trace | |
+| DBG-001 | Full programs preserved in `Step.turns` | Each Turn contains complete execution data |
+| DBG-002 | Turn contains: number, program, result, prints, tool_calls, memory, success? | See ARC-001 |
+| DBG-003 | Serialization stores turns (summaries derived on-demand) | |
+| DBG-004 | LLM prompt uses compressed summaries via Compression strategy | |
+| DBG-005 | Debug/inspection uses full turns list | |
 
 ---
 
@@ -178,9 +189,9 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | AMB-003 | MSG-005: Show "Turns left: N" unless final turn (use existing warning message) |
 | AMB-004 | DEF-007: Semicolons removed entirely from docstrings |
 | AMB-005 | TC-006: Fields are name, args, result. Result shown if no println, truncated |
-| AMB-006 | API-006: `%HistoryOpts{}` defined during implementation (fields: println_limit, tool_call_limit) |
+| AMB-006 | API-006: `Compression.normalize/1` returns `{strategy, opts}` tuple (replaces `%HistoryOpts{}`) |
 | AMB-007 | FMT-002: Always show parens, even for no-arg calls |
-| AMB-008 | TC-007, TRN-010: FIFO (drop oldest). TC-008: Consecutive identical calls compressed |
+| AMB-008 | TC-007, TRN-010: FIFO (drop oldest). ~~TC-008: Dropped from architecture~~ |
 | AMB-009 | TRN-009: No special handling, multiline output = one println call |
 | AMB-010 | Confirmed: NS-007 covers this (runtime exception for ambiguous reference) |
 
@@ -194,4 +205,17 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | FMT-014 | Output section rendered as-is | Risk of confusing patterns accepted |
 | TYP-012 | MapSet → `set[N]` | |
 | TRN-011 | println output truncated per call | e.g., 2000 chars per call |
+
+## Change Log (from architecture doc)
+
+| ID | Change |
+|----|--------|
+| CHG-001 | `compress_history` renamed to `compression` |
+| CHG-002 | `%HistoryOpts{}` replaced with `{strategy, opts}` tuple |
+| CHG-003 | Added `Turn` struct for immutable turn records |
+| CHG-004 | Added `Compression` behaviour for strategy pattern |
+| CHG-005 | `Step.trace` renamed to `Step.turns` |
+| CHG-006 | TC-008 (consecutive call compression) dropped from architecture |
+| CHG-007 | MSG-005 final turn message simplified (no emoji) |
+| CHG-008 | Docstrings in summaries deferred (FMT-004, FMT-006, DEF-005-007 marked TODO in architecture) |
 
