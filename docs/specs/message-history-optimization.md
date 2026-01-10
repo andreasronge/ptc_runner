@@ -100,6 +100,22 @@ If summaries appeared in ASSISTANT messages, the LLM might try to output `; Defi
 
 The LLM never sees a previous ASSISTANT message with summary format, so there's no template to mimic.
 
+### Message Responsibilities
+
+| Location | Content | Cacheable? |
+|----------|---------|------------|
+| SYSTEM | PTC-Lisp syntax, return/fail usage, general instructions | Yes (static) |
+| USER | Mission + all namespaces + execution history + turns left | Partial (tool/data stable) |
+| ASSISTANT | LLM's PTC-Lisp code | No |
+
+**Tools and data are NOT in SYSTEM prompt.** They're rendered in USER message alongside user definitions.
+
+### Non-goals
+
+- Tools are NOT described in system prompt (they're in USER message)
+- System prompt does NOT change between turns
+- No tool/data formatting logic in system prompt generation
+
 ### Message Structure
 
 ```
@@ -226,7 +242,7 @@ data/products                    ; list[7], sample: {:name "Laptop", :price 1200
 ;; === data/ ===
 data/items                       ; list[3]
 
-;; === user/ ===
+;; === user/ (your prelude) ===
 results                          ; = list[2], sample: {:id 1}
 ```
 
@@ -418,11 +434,11 @@ This unified model means the LLM sees the same format regardless of whether data
 All namespaces are shown in a consistent Clojure-like format:
 
 ```clojure
-;; === tool/ (available functions) ===
+;; === tool/ ===
 (tool/fetch-users category)      ; category:string -> list[user], "Fetches users by category"
 (tool/send-email opts)           ; opts:map -> nil, "Sends email notification"
 
-;; === data/ (read-only input) ===
+;; === data/ ===
 data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
 data/config                      ; map[3], sample: {:env "prod", :debug false}
 
