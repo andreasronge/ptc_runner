@@ -580,6 +580,7 @@ Integrate compression strategy into the Loop. **This is the atomic switch** that
 - API-001 to API-003: compression option
 - ARC-009: Tools and data in USER message
 - ARC-011, ARC-012: Prompt structure universal, compression only affects history
+- UCM-001 to UCM-010: Uncompressed mode behavior
 - SS-001, SS-002: Single-shot mode handling
 - CMP-003: Compression at render time
 - MSG-006: SYSTEM static text unchanged
@@ -592,13 +593,22 @@ Integrate compression strategy into the Loop. **This is the atomic switch** that
 
 **Acceptance criteria:**
 - Loop uses `SystemPrompt.generate_static/2` (new prompt structure)
-- Tool/ and data/ namespaces rendered in USER message via Namespace module
+- Tool/ and data/ namespaces rendered in first USER message via Namespace module
 - `compression: true` uses SingleUserCoalesced for history
-- `compression: false` uses new prompt structure but full history (no summarization)
 - `compression: {Strategy, opts}` uses custom strategy
 - `max_turns: 1` skips history compression
 - Messages built via strategy.to_messages/3
 - **Agents work correctly** - tools visible to LLM via USER message
+
+**Uncompressed mode (`compression: false`) acceptance criteria:**
+- Static SYSTEM prompt (same as compressed)
+- First USER contains: mission + tool/ + data/ namespaces
+- Turn history as USER/ASSISTANT pairs (one pair per completed turn)
+- ASSISTANT messages contain full program code (not summarized)
+- USER feedback messages contain: Result/Error + println output + turns left
+- No user/ prelude section (definitions visible in ASSISTANT history)
+- No println_limit or tool_call_limit (full output preserved)
+- Full error shown (no conditional collapsing)
 
 **Blocked by:** #13, #18, #19, #21
 
