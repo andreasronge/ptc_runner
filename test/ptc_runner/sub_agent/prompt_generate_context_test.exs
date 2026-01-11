@@ -2,15 +2,15 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.Prompt
   alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.SubAgent.SystemPrompt
 
   describe "generate_context/2" do
     test "includes dynamic sections" do
       agent = SubAgent.new(prompt: "Test", tools: %{"search" => fn _ -> [] end})
       context = %{user: "Alice", count: 5}
 
-      context_prompt = Prompt.generate_context(agent, context: context)
+      context_prompt = SystemPrompt.generate_context(agent, context: context)
 
       # Should have dynamic sections
       assert context_prompt =~ "# Data Inventory"
@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "does not include mission" do
       agent = SubAgent.new(prompt: "This is the mission")
 
-      context_prompt = Prompt.generate_context(agent, context: %{})
+      context_prompt = SystemPrompt.generate_context(agent, context: %{})
 
       refute context_prompt =~ "# Mission"
       refute context_prompt =~ "This is the mission"
@@ -36,7 +36,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "includes Expected Output when signature is present" do
       agent = SubAgent.new(prompt: "Test", signature: "(x :int) -> {count :int}")
 
-      context_prompt = Prompt.generate_context(agent, context: %{x: 5})
+      context_prompt = SystemPrompt.generate_context(agent, context: %{x: 5})
 
       assert context_prompt =~ "# Expected Output"
       assert context_prompt =~ "{count :int}"
@@ -45,7 +45,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "includes return/fail tools for multi-turn mode" do
       agent = SubAgent.new(prompt: "Test", max_turns: 5)
 
-      context_prompt = Prompt.generate_context(agent, context: %{})
+      context_prompt = SystemPrompt.generate_context(agent, context: %{})
 
       assert context_prompt =~ "### return"
       assert context_prompt =~ "### fail"
@@ -54,7 +54,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "omits return/fail tools for single-shot mode" do
       agent = SubAgent.new(prompt: "Test", max_turns: 1)
 
-      context_prompt = Prompt.generate_context(agent, context: %{})
+      context_prompt = SystemPrompt.generate_context(agent, context: %{})
 
       # Single-shot should NOT have return/fail
       refute context_prompt =~ "### return"
@@ -65,7 +65,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       agent = SubAgent.new(prompt: "Test", context_descriptions: %{user: "Local desc"})
 
       context_prompt =
-        Prompt.generate_context(agent,
+        SystemPrompt.generate_context(agent,
           context: %{user: "Alice", items: [1, 2]},
           received_field_descriptions: %{items: "Received desc"}
         )
@@ -80,7 +80,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "formats simple context correctly" do
       context = %{user_id: 123, name: "Alice"}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "# Data Inventory"
       assert inventory =~ "ctx/user_id"
@@ -92,7 +92,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "handles nested maps" do
       context = %{user: %{id: 1, name: "Bob"}}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "ctx/user"
       # Should show map keys
@@ -102,7 +102,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "handles lists with sampling" do
       context = %{items: [1, 2, 3, 4, 5]}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "ctx/items"
       # Should show sample with count
@@ -112,7 +112,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "handles empty lists" do
       context = %{items: []}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "ctx/items"
       assert inventory =~ "[]"
@@ -122,7 +122,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       long_string = String.duplicate("a", 100)
       context = %{text: long_string}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "..."
     end
@@ -130,7 +130,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "marks firewalled fields" do
       context = %{_token: "secret", public: "data"}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "[Firewalled]"
       assert inventory =~ "ctx/_token"
@@ -139,7 +139,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     end
 
     test "handles empty context" do
-      inventory = Prompt.generate_data_inventory(%{}, nil)
+      inventory = SystemPrompt.generate_data_inventory(%{}, nil)
 
       assert inventory =~ "No data available"
     end
@@ -147,7 +147,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "sorts keys alphabetically" do
       context = %{z: 1, a: 2, m: 3}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       # Extract the lines
       lines = String.split(inventory, "\n")
@@ -173,7 +173,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
 
       {:ok, signature} = Signature.parse("(user_id :string) -> :any")
 
-      inventory = Prompt.generate_data_inventory(context, signature)
+      inventory = SystemPrompt.generate_data_inventory(context, signature)
 
       # Should use :string from signature, not inferred :int
       assert inventory =~ ":string"
@@ -182,7 +182,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "formats floats with 2 decimal places" do
       context = %{ratio: 3.333333333, pi: 3.14159265}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "3.33"
       assert inventory =~ "3.14"
@@ -193,7 +193,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "formats floats that round up correctly" do
       context = %{value: 2.999}
 
-      inventory = Prompt.generate_data_inventory(context, nil)
+      inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "3.00"
     end
@@ -201,7 +201,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
 
   describe "generate_tool_schemas/2" do
     test "handles empty tools" do
-      schemas = Prompt.generate_tool_schemas(%{})
+      schemas = SystemPrompt.generate_tool_schemas(%{})
 
       assert schemas =~ "# Available Tools"
       # Even with no user tools, should show return/fail
@@ -213,7 +213,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       tools = %{"search" => fn _ -> [] end}
       catalog = %{"email_agent" => nil, "report_agent" => nil}
 
-      schemas = Prompt.generate_tool_schemas(tools, catalog)
+      schemas = SystemPrompt.generate_tool_schemas(tools, catalog)
 
       assert schemas =~ "## Tools you can call"
       assert schemas =~ "### search"
@@ -226,7 +226,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "handles empty tool_catalog" do
       tools = %{"search" => fn _ -> [] end}
 
-      schemas = Prompt.generate_tool_schemas(tools, %{})
+      schemas = SystemPrompt.generate_tool_schemas(tools, %{})
 
       assert schemas =~ "### search"
       refute schemas =~ "Tools for planning"
@@ -235,7 +235,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "handles nil tool_catalog" do
       tools = %{"search" => fn _ -> [] end}
 
-      schemas = Prompt.generate_tool_schemas(tools, nil)
+      schemas = SystemPrompt.generate_tool_schemas(tools, nil)
 
       assert schemas =~ "### search"
       refute schemas =~ "Tools for planning"
@@ -244,7 +244,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "catalog with no callable tools still shows return/fail" do
       catalog = %{"email_agent" => nil}
 
-      schemas = Prompt.generate_tool_schemas(%{}, catalog)
+      schemas = SystemPrompt.generate_tool_schemas(%{}, catalog)
 
       assert schemas =~ "### return"
       assert schemas =~ "### fail"
@@ -255,7 +255,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "sorts catalog tools alphabetically" do
       catalog = %{"zebra_agent" => nil, "alpha_agent" => nil}
 
-      schemas = Prompt.generate_tool_schemas(%{}, catalog)
+      schemas = SystemPrompt.generate_tool_schemas(%{}, catalog)
 
       alpha_pos = String.split(schemas, "### alpha_agent") |> List.first() |> String.length()
       zebra_pos = String.split(schemas, "### zebra_agent") |> List.first() |> String.length()
@@ -267,7 +267,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       tools = %{"search" => fn _ -> [] end}
       catalog = %{"search" => nil}
 
-      schemas = Prompt.generate_tool_schemas(tools, catalog)
+      schemas = SystemPrompt.generate_tool_schemas(tools, catalog)
 
       # Count occurrences of "### search"
       search_count =
@@ -285,7 +285,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "generates schemas for user tools" do
       tools = %{"search" => fn _ -> [] end, "fetch" => fn _ -> %{} end}
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       assert schemas =~ "### search"
       assert schemas =~ "### fetch"
@@ -295,7 +295,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "includes return and fail tools" do
       tools = %{"custom" => fn _ -> :ok end}
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       assert schemas =~ "### return"
       assert schemas =~ "### fail"
@@ -306,7 +306,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "does not duplicate return/fail if already present" do
       tools = %{"return" => fn _ -> :ok end, "fail" => fn _ -> :error end}
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       # Count occurrences of "### return"
       return_count =
@@ -321,7 +321,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "sorts tools alphabetically" do
       tools = %{"zebra" => fn _ -> :ok end, "alpha" => fn _ -> :ok end}
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       alpha_pos = String.split(schemas, "### alpha") |> List.first() |> String.length()
       zebra_pos = String.split(schemas, "### zebra") |> List.first() |> String.length()
@@ -335,7 +335,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
         "search" => {fn _args -> [] end, "(query :string, limit :int) -> [{id :int}]"}
       }
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       assert schemas =~ "### search"
       # The signature should be rendered, not just "User-defined tool"
@@ -352,7 +352,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
            description: "Analyzes data and returns a score."}
       }
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       assert schemas =~ "### analyze"
       assert schemas =~ "analyze(data :map) -> {score :float}"
@@ -367,7 +367,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
         "search" => &TestFunctions.search/2
       }
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       assert schemas =~ "### search"
       assert schemas =~ "search(query :string, limit :int) -> [:map]"
@@ -382,7 +382,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
         "search" => {fn _args -> [] end, "(args {query :string, limit :int?}) -> [:map]"}
       }
 
-      schemas = Prompt.generate_tool_schemas(tools)
+      schemas = SystemPrompt.generate_tool_schemas(tools)
 
       # Signature should NOT show "args" parameter name
       refute schemas =~ "search(args"

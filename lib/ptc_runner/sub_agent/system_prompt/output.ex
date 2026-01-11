@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Prompt.Output do
+defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   @moduledoc """
   Expected output section generation for SubAgent prompts.
 
@@ -7,8 +7,8 @@ defmodule PtcRunner.SubAgent.Prompt.Output do
   for output fields.
   """
 
-  alias PtcRunner.SubAgent.Prompt.DataInventory
   alias PtcRunner.SubAgent.Signature.Renderer
+  alias PtcRunner.SubAgent.SystemPrompt.DataInventory
 
   @doc """
   Generate the expected output section from signature.
@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.Prompt.Output do
   ## Examples
 
       iex> sig = {:signature, [{"x", :int}], :int}
-      iex> output = PtcRunner.SubAgent.Prompt.Output.generate(sig, nil)
+      iex> output = PtcRunner.SubAgent.SystemPrompt.Output.generate(sig, nil)
       iex> output =~ "Expected Output"
       true
       iex> output =~ ":int"

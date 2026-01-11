@@ -34,7 +34,7 @@ This feature requires restructuring prompt-related modules for clarity. The curr
 |---------|-----|-----------|
 | `PtcRunner.Prompt` | `PtcRunner.Template` | It's a template struct, not "the prompt" |
 | `~PROMPT` sigil | `~T` | Matches Template naming |
-| `SubAgent.Prompt` | `SubAgent.SystemPrompt` | Explicitly about system prompt |
+| `SubAgent.Prompt` | `SubAgent.SystemPrompt` | Explicitly about system prompt - DONE |
 | `SubAgent.Template` | `SubAgent.MissionExpander` | Clearer purpose |
 | `Lisp.Prompts` | `Lisp.LanguageSpec` | It's the PTC-Lisp language reference |
 
@@ -220,7 +220,7 @@ defmodule PtcRunner.Turn do
 
   Turns are immutable once created. The turns list is append-only.
   `raw_response` is always captured (no debug flag needed).
-  System prompt is NOT stored - it's static, use `SubAgent.Prompt.generate_system/2`.
+  System prompt is NOT stored - it's static, use `SubAgent.SystemPrompt.generate_system/2`.
   """
 
   defstruct [
@@ -950,7 +950,7 @@ to_messages(turns, memory, opts)
 
 1. **Phase 1: Module Refactoring** (can be done independently)
    - Rename `PtcRunner.Prompt` → `PtcRunner.Template`
-   - Rename `SubAgent.Prompt` → `SubAgent.SystemPrompt`
+   - Rename `SubAgent.Prompt` → `SubAgent.SystemPrompt` - DONE
    - Rename `SubAgent.Template` → `SubAgent.MissionExpander`
    - Rename `Lisp.Prompts` → `Lisp.LanguageSpec`
    - Update `~PROMPT` sigil to `~T`
