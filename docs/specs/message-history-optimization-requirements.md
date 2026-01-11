@@ -4,7 +4,7 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 
 **Implementation:** See [message-history-optimization-roadmap.md](./message-history-optimization-roadmap.md) for GitHub issues.
 
-**Last verified:** 2026-01-11 (CHG-027 to CHG-029)
+**Last verified:** 2026-01-11 (CHG-040 to CHG-043)
 
 ## Prerequisites
 
@@ -27,6 +27,12 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | BRK-007 | Module rename | `Lisp.Prompts` | `Lisp.LanguageSpec` | It's the language reference |
 | BRK-008 | Debug option removed | `debug: true` required | Always captured | `raw_response` always in Turn |
 | BRK-009 | Debug API options | `messages:`, `system:` | `view:`, `raw:` | Simpler, orthogonal options |
+
+## Mission
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| MIS-001 | Mission string supports `{{placeholder}}` expansion | MissionExpander handles variable substitution |
 
 ## Demo Migration
 
@@ -52,6 +58,7 @@ Required changes to the demo application (`demo/`):
 | API-005 | Default `tool_call_limit` is 20 | Most recent tool calls shown |
 | API-006 | `Compression.normalize/1` returns `{strategy, opts}` tuple | Handles `nil`, `true`, `false`, `Module`, `{Module, opts}` |
 | API-007 | Options inherited like other SubAgent options | |
+| API-008 | `max_turns: 1` implicitly disables compression | Single-shot mode bypasses compression regardless of setting |
 
 ## Architecture
 
@@ -174,8 +181,8 @@ Required changes to the demo application (`demo/`):
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| SAM-001 | If turn has NO println: show samples in Defined lines | |
-| SAM-002 | If turn has println: omit samples, show Output section | |
+| SAM-001 | If NO println output across all successful turns: show samples in user/ prelude | Global toggle, not per-turn |
+| SAM-002 | If ANY println output exists: omit samples, show Output section | |
 | SAM-003 | Samples use Clojure-style syntax (`{:key value}`) | |
 
 ## Definitions
@@ -196,7 +203,7 @@ Required changes to the demo application (`demo/`):
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| TC-001 | Tool calls accumulated across all turns | |
+| TC-001 | Tool calls accumulated from successful turns | Failed turn side effects discarded |
 | TC-002 | Tool calls limited by `tool_call_limit` | |
 | TC-003 | Tool call format: `name(args)` with truncated args | |
 | TC-004 | Tool results NOT shown in tool call list | |
@@ -251,8 +258,13 @@ Error: {error_message}
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| SS-001 | No compression for `max_turns: 1` | |
+| SS-001 | No compression for `max_turns: 1` | Loop enforces: compression ignored when max_turns == 1 |
 | SS-002 | `max_turns` defaults to 5 if not specified | |
+| SS-003 | Message structure: `[SYSTEM, USER(mission + tool/ + data/)]` | No user/ prelude, no history |
+| SS-004 | No "Turns left" indicator | Only one turn, indicator unnecessary |
+| SS-005 | Expression result is final answer; `return`/`fail` optional | If used, works normally |
+| SS-006 | No error recovery | If turn fails, Step fails immediately |
+| SS-007 | Type hints available via `signature` option | Provides return type guidance to LLM |
 
 ## Uncompressed Mode (compression: false)
 
@@ -532,4 +544,9 @@ Add `lib/ptc_runner/migration_guard.ex` with compile-time guards. Uncomment each
 | CHG-037 | Roadmap: Issue #17 now requires get/1 API verification |
 | CHG-038 | Added Uncompressed Mode section (UCM-001 to UCM-010) |
 | CHG-039 | PRE-001 (#603) marked complete (closed 2026-01-09) |
+| CHG-040 | TC-001: Clarified tool calls accumulated from successful turns only |
+| CHG-041 | SAM-001/SAM-002: Clarified println check is global across all turns |
+| CHG-042 | Added API-008: max_turns: 1 implicitly disables compression |
+| CHG-043 | Added MIS-001: Mission placeholder expansion requirement |
+| CHG-044 | Added SS-003 to SS-007: Complete single-shot mode specification |
 
