@@ -1,77 +1,80 @@
 defmodule PtcRunner.SubAgent.SigilsTest do
   use ExUnit.Case, async: true
 
+  # Exclude Kernel's ~T sigil to use our own
+  import Kernel, except: [sigil_T: 2]
   import PtcRunner.SubAgent.Sigils
 
-  alias PtcRunner.Prompt
-  alias PtcRunner.SubAgent.Template
+  alias PtcRunner.SubAgent.Template, as: TemplateExpander
+  alias PtcRunner.Template
 
-  doctest PtcRunner.SubAgent.Sigils
+  # Note: doctest is not used because the ~T sigil conflicts with Elixir's built-in
+  # Time sigil. The examples in the module doc are for reading, not testing.
 
-  describe "~PROMPT sigil" do
-    test "creates Prompt struct at compile time" do
-      prompt = ~PROMPT"Hello {{name}}"
+  describe "~T sigil" do
+    test "creates Template struct at compile time" do
+      template = ~T"Hello {{name}}"
 
-      assert %Prompt{} = prompt
-      assert prompt.template == "Hello {{name}}"
-      assert is_list(prompt.placeholders)
+      assert %Template{} = template
+      assert template.template == "Hello {{name}}"
+      assert is_list(template.placeholders)
     end
 
     test "extracts simple placeholders into struct" do
-      prompt = ~PROMPT"Hello {{name}}"
+      template = ~T"Hello {{name}}"
 
-      assert prompt.placeholders == [%{path: ["name"], type: :simple}]
+      assert template.placeholders == [%{path: ["name"], type: :simple}]
     end
 
     test "extracts nested placeholders" do
-      prompt = ~PROMPT"User {{user.name}} has {{count}} items"
+      template = ~T"User {{user.name}} has {{count}} items"
 
-      assert prompt.placeholders == [
+      assert template.placeholders == [
                %{path: ["user", "name"], type: :simple},
                %{path: ["count"], type: :simple}
              ]
     end
 
     test "works with template containing no placeholders" do
-      prompt = ~PROMPT"No placeholders here"
+      template = ~T"No placeholders here"
 
-      assert prompt.template == "No placeholders here"
-      assert prompt.placeholders == []
+      assert template.template == "No placeholders here"
+      assert template.placeholders == []
     end
 
     test "works with empty template" do
-      prompt = ~PROMPT""
+      template = ~T""
 
-      assert prompt.template == ""
-      assert prompt.placeholders == []
+      assert template.template == ""
+      assert template.placeholders == []
     end
 
     test "works with heredoc syntax" do
-      prompt = ~PROMPT"""
+      template = ~T"""
       Hello {{name}},
 
       You have {{items.count}} items.
       """
 
-      assert prompt.template == "Hello {{name}},\n\nYou have {{items.count}} items.\n"
+      assert template.template == "Hello {{name}},\n\nYou have {{items.count}} items.\n"
 
-      assert prompt.placeholders == [
+      assert template.placeholders == [
                %{path: ["name"], type: :simple},
                %{path: ["items", "count"], type: :simple}
              ]
     end
 
     test "template expansion with sigil" do
-      prompt = ~PROMPT"Find emails for {{user}} from {{sender.name}}"
+      template = ~T"Find emails for {{user}} from {{sender.name}}"
 
-      assert prompt.template == "Find emails for {{user}} from {{sender.name}}"
-      assert length(prompt.placeholders) == 2
-      assert %{path: ["user"], type: :simple} in prompt.placeholders
-      assert %{path: ["sender", "name"], type: :simple} in prompt.placeholders
+      assert template.template == "Find emails for {{user}} from {{sender.name}}"
+      assert length(template.placeholders) == 2
+      assert %{path: ["user"], type: :simple} in template.placeholders
+      assert %{path: ["sender", "name"], type: :simple} in template.placeholders
 
       {:ok, expanded} =
-        Template.expand(
-          prompt.template,
+        TemplateExpander.expand(
+          template.template,
           %{user: "alice", sender: %{name: "bob"}}
         )
 
@@ -79,15 +82,15 @@ defmodule PtcRunner.SubAgent.SigilsTest do
     end
 
     test "sigil extracts unique placeholders" do
-      prompt = ~PROMPT"{{name}} and {{name}} again"
+      template = ~T"{{name}} and {{name}} again"
 
-      assert prompt.placeholders == [%{path: ["name"], type: :simple}]
+      assert template.placeholders == [%{path: ["name"], type: :simple}]
     end
 
     test "sigil handles deeply nested placeholders" do
-      prompt = ~PROMPT"Value: {{a.b.c.d}}"
+      template = ~T"Value: {{a.b.c.d}}"
 
-      assert prompt.placeholders == [%{path: ["a", "b", "c", "d"], type: :simple}]
+      assert template.placeholders == [%{path: ["a", "b", "c", "d"], type: :simple}]
     end
   end
 end

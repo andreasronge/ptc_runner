@@ -1,24 +1,24 @@
 defmodule PtcRunner.SubAgent.Sigils do
   @moduledoc """
-  Sigils for SubAgent prompt templates.
+  Sigils for SubAgent templates.
 
-  ## ~PROMPT Sigil
+  ## ~T Sigil
 
-  The `~PROMPT` sigil creates a `PtcRunner.Prompt` struct at compile time with
+  The `~T` sigil creates a `PtcRunner.Template` struct at compile time with
   extracted placeholders.
 
   ### Examples
 
       import PtcRunner.SubAgent.Sigils
 
-      ~PROMPT"Hello {{name}}"
-      #=> %PtcRunner.Prompt{
+      ~T"Hello {{name}}"
+      #=> %PtcRunner.Template{
       #=>   template: "Hello {{name}}",
       #=>   placeholders: [%{path: ["name"], type: :simple}]
       #=> }
 
-      ~PROMPT"User {{user.name}} has {{count}} items"
-      #=> %PtcRunner.Prompt{
+      ~T"User {{user.name}} has {{count}} items"
+      #=> %PtcRunner.Template{
       #=>   template: "User {{user.name}} has {{count}} items",
       #=>   placeholders: [
       #=>     %{path: ["user", "name"], type: :simple},
@@ -28,36 +28,52 @@ defmodule PtcRunner.SubAgent.Sigils do
 
   The sigil also supports heredoc syntax:
 
-      ~PROMPT\"\"\"
+      ~T\"\"\"
       Hello {{name}},
 
       You have {{items.count}} items.
       \"\"\"
 
   Use `PtcRunner.SubAgent.Template.expand/2` to expand the template with values.
+
+  ## Note on Elixir's Built-in ~T Sigil
+
+  Elixir has a built-in `~T` sigil for Time structs (e.g., `~T[00:00:00]`).
+  When you import this module, our `~T` sigil shadows the built-in one.
+
+  This is safe in practice because:
+  - The built-in `~T` uses square brackets: `~T[00:00:00]`
+  - Our `~T` uses double quotes: `~T"Hello {{name}}"`
+  - Files using Time literals typically don't import this module
+
+  If you need both in the same file, you can use `Time.new!/3` instead of
+  the Time sigil, or explicitly qualify the Time sigil with `import Kernel, only: [sigil_T: 2]`.
   """
 
-  alias PtcRunner.Prompt
-  alias PtcRunner.SubAgent.Template
+  alias PtcRunner.SubAgent.Template, as: TemplateExpander
+  alias PtcRunner.Template
 
   @doc """
-  Creates a Prompt struct with compile-time placeholder extraction.
+  Creates a Template struct with compile-time placeholder extraction.
 
   ## Examples
 
-      iex> import PtcRunner.SubAgent.Sigils
-      iex> prompt = ~PROMPT"Hello {{name}}"
-      iex> prompt.template
-      "Hello {{name}}"
-      iex> prompt.placeholders
-      [%{path: ["name"], type: :simple}]
+  Note: Due to Elixir's built-in `~T` sigil for Time, doctests cannot be used
+  here without import conflicts. See the test file for usage examples.
+
+      import PtcRunner.SubAgent.Sigils
+      template = ~T"Hello {{name}}"
+      template.template
+      #=> "Hello {{name}}"
+      template.placeholders
+      #=> [%{path: ["name"], type: :simple}]
 
   """
-  defmacro sigil_PROMPT({:<<>>, _meta, [template]}, _modifiers) do
-    placeholders = Template.extract_placeholders(template)
+  defmacro sigil_T({:<<>>, _meta, [template]}, _modifiers) do
+    placeholders = TemplateExpander.extract_placeholders(template)
 
     quote do
-      %Prompt{
+      %Template{
         template: unquote(template),
         placeholders: unquote(Macro.escape(placeholders))
       }

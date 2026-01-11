@@ -875,19 +875,23 @@ LLMTool.new(
 #=> {:error, {:template_error, "placeholder {{unknown}} not found in signature"}}
 ```
 
-### ~PROMPT Sigil
+### ~T Sigil
 
 Compile-time placeholder extraction:
 
 ```elixir
 import PtcRunner.SubAgent.Sigils
 
-~PROMPT"Hello {{name}}, you have {{count}} items"
-#=> %PtcRunner.Prompt{
+~T"Hello {{name}}, you have {{count}} items"
+#=> %PtcRunner.Template{
 #=>   template: "Hello {{name}}, you have {{count}} items",
 #=>   placeholders: [%{path: ["name"], type: :simple}, %{path: ["count"], type: :simple}]
 #=> }
 ```
+
+Note: The `~T` sigil shadows Elixir's built-in Time sigil when imported. This is
+safe because our `~T` uses double quotes (`~T"..."`) while the Time sigil uses
+square brackets (`~T[00:00:00]`).
 
 ---
 
