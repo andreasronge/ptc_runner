@@ -57,38 +57,53 @@ jobs:
             ISSUE NUMBER: ${{ github.event.issue.number }}
             ISSUE TITLE: ${{ github.event.issue.title }}
 
-            Review this GitHub issue using the project's planning guidelines:
+            ## Step 1: Get Context
 
-            1. Read `docs/guidelines/planning-guidelines.md` for the pre-review checks and 9-point review checklist
-            2. Use `gh issue view ${{ github.event.issue.number }} --comments` to read the full issue and all comments
-            3. Explore the codebase to verify proposed solutions work with existing code
-            4. Follow the output format from the planning guidelines (including Pre-Review Checks section)
+            1. Read the issue: `gh issue view ${{ github.event.issue.number }} --comments`
+            2. Check for `epic:*` label. If present, read the active epic for context:
+               ```bash
+               gh issue list --label "type:epic" --label "status:active" --state open --json number,body --limit 1
+               ```
+            3. Read `docs/guidelines/planning-guidelines.md` for review checklist
 
-            After your review:
+            ## Step 2: Review
 
-            1. **Always update the issue body** with improvements you identify:
-               - Fix unclear descriptions, add missing context
-               - Add edge cases, test scenarios, or acceptance criteria
-               - Correct technical inaccuracies based on codebase exploration
-               - Structure the issue better (add sections if missing)
-               - To update: write to /tmp/issue-body.md, then run:
-                 `gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md`
+            1. Explore the codebase to verify proposed solutions work with existing code
+            2. Check for "Blocked by:" dependencies - verify blockers exist and are tracked
 
-            2. **Post a review comment** summarizing:
-               - What you found and changed in the issue body
-               - Any remaining concerns or questions
-               - Your recommendation (ready, needs-clarification, or needs-breakdown)
+            ## Step 3: Update Issue
 
-            3. **Add appropriate labels** using `gh issue edit --add-label`:
-               - `ready-for-implementation` if issue is well-defined and ready
-               - `needs-clarification` if important details are missing (and you couldn't fill them in)
-               - `needs-breakdown` if issue should be split into smaller issues
-               - `bug` / `enhancement` / `documentation` based on issue type
+            **Always update the issue body** with improvements:
+            - Fix unclear descriptions, add missing context
+            - Add edge cases, test scenarios, or acceptance criteria
+            - Ensure "Blocked by: #X, #Y" section exists if there are dependencies
+            - Structure the issue better (add sections if missing)
 
-            4. **If approved (added `ready-for-implementation`)**, trigger implementation:
-               - First check no implementation is running:
-                 `gh run list --workflow=claude-issue.yml --status=in_progress --json databaseId --jq 'length'`
-               - If result is 0, post trigger: `gh issue comment ${{ github.event.issue.number }} --body "@claude Please implement this issue. Read the linked spec documents for context."`
-               - If result is > 0, skip trigger (another implementation is running)
+            To update: write to /tmp/issue-body.md, then run:
+            `gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md`
+
+            ## Step 4: Post Review Comment
+
+            Summarize:
+            - What you found and changed in the issue body
+            - Dependencies identified
+            - Your recommendation (ready, needs-clarification, or needs-breakdown)
+
+            ## Step 5: Add Labels
+
+            Using `gh issue edit --add-label`:
+            - `ready-for-implementation` if issue is well-defined and ready
+            - `needs-clarification` if important details are missing
+            - `needs-breakdown` if issue should be split into smaller issues
+            - `bug` / `enhancement` / `documentation` based on issue type
+
+            ## Step 6: Trigger Implementation (if approved)
+
+            If you added `ready-for-implementation`:
+            ```bash
+            gh issue comment ${{ github.event.issue.number }} --body "@claude Please implement this issue."
+            ```
+
+            NEVER include "@claude" except in the trigger comment above.
 
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'

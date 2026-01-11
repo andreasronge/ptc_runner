@@ -124,9 +124,31 @@ jobs:
           prompt: |
             Implement issue #${{ github.event.issue.number }}.
 
-            Read the issue and comments: `gh issue view ${{ github.event.issue.number }} --comments`
+            ## Step 1: Read Issue and Check Dependencies
 
-            ${{ steps.test-feedback.outputs.has_failures == 'true' && format('## Current Test Failures
+            ```bash
+            gh issue view ${{ github.event.issue.number }} --comments
+            ```
+
+            **Check for "Blocked by:" in the issue body.** If blocking issues exist:
+            1. Check if each blocking issue is closed: `gh issue view BLOCKER_NUMBER --json state`
+            2. If ANY blocker is still open:
+               - Post comment: "This issue is blocked by #X (still open). Removing ready-for-implementation label."
+               - Remove label: `gh issue edit ${{ github.event.issue.number }} --remove-label "ready-for-implementation"`
+               - Stop here - do not implement
+
+            ## Step 2: Get Epic Context (if part of an epic)
+
+            Check issue labels for `epic:*` label. If present:
+            ```bash
+            # Find the active epic
+            gh issue list --label "type:epic" --label "status:active" --state open --json number,title,body --limit 1
+            ```
+            Read the epic to understand the broader context and what's been completed.
+
+            ## Step 3: Implement
+
+            ${{ steps.test-feedback.outputs.has_failures == 'true' && format('### Current Test Failures
 
             The following checks are currently failing: {0}
 
@@ -134,7 +156,7 @@ jobs:
             {1}
             ```
 
-            **Be aware of these existing failures when implementing the issue. If related to your changes, fix them.**
+            **Be aware of these existing failures. If related to your changes, fix them.**
 
             ', steps.test-feedback.outputs.failures, steps.test-feedback.outputs.output) || '' }}
             **Guidelines:**
@@ -143,10 +165,14 @@ jobs:
             - Create PR with "Closes #${{ github.event.issue.number }}" in body
 
             **When tests fail for non-trivial out-of-scope issues:**
-            - Create a GH issue with `from-pr-review` and `needs-review` labels, then skip the test with `@tag :skip` and a comment referencing the issue
-            - Never bypass tests without tracking - each skipped test must reference an issue
+            - Create a GH issue with `from-pr-review` and `needs-review` labels
+            - Skip the test with `@tag :skip` and a comment referencing the issue
 
-            **Escape hatch:** If you discover unexpected complexity or blockers clearly not belonging to the issue, close this issue with a comment explaining why. Create new issues for the blockers and the original work - add `from-pr-review` and `needs-review` labels to ONE issue (the next actionable one). If you created a branch, reference it in the new issue.
+            **Escape hatch:** If you discover unexpected complexity or blockers:
+            1. Close this issue with a comment explaining why
+            2. Create new issues for the blockers and original work
+            3. Add `from-pr-review` and `needs-review` labels to the next actionable issue
+            4. If you created a branch, reference it in the new issue
 
             NEVER include "@claude" in comments.
 

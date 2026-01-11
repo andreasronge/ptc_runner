@@ -7,52 +7,33 @@ on:
 
 jobs:
   triage:
-    # Only run if review workflow succeeded and was triggered by a PR
     if: >
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request'
 
     runs-on: ubuntu-latest
 
-    # Prevent concurrent Claude operations on the same PR
-    # NOTE: Uses branch name because workflow_run doesn't provide PR number until steps run.
-    # This differs from claude.yml/code-review which use PR number, meaning triage won't
-    # block/be blocked by those workflows via concurrency. This is acceptable because:
-    # 1. Triage runs AFTER code-review completes (workflow_run trigger)
-    # 2. Triage's @claude comments trigger claude.yml, which should run after triage
-    # 3. The "Fail if fixes pending" step prevents premature completion
     concurrency:
-      group: claude-triage-${{ github.event.workflow_run.head_branch }}
-      cancel-in-progress: true
+      group: claude-automation
+      cancel-in-progress: false
 
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: read
-      statuses: write  # Required to report check status to PR
+      statuses: write
       id-token: write
 
     steps:
-      - name: Check PAT availability
-        run: |
-          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
-            echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - @claude fix comments won't trigger the fix workflow"
-            echo "::warning::Auto-merge will also be disabled"
-          fi
-
-      - name: Get PR number from workflow run
+      - name: Get PR from workflow run
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get the PR number from the workflow run's head branch
           HEAD_BRANCH="${{ github.event.workflow_run.head_branch }}"
           HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
 
-          echo "Looking for PR with head branch: $HEAD_BRANCH and SHA: $HEAD_SHA"
-
-          # Find the PR associated with this workflow run
           PR_NUMBER=$(gh pr list \
             --repo "${{ github.repository }}" \
             --state open \
@@ -71,500 +52,165 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
           echo "head_sha=$HEAD_SHA" >> $GITHUB_OUTPUT
 
-          # Get PR details including fork info
-          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName,baseRefName,title,headRepositoryOwner)
-          HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
-          BASE_REF=$(echo "$PR_DATA" | jq -r '.baseRefName')
-          PR_TITLE=$(echo "$PR_DATA" | jq -r '.title')
+          # Get PR details
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName,title,headRepositoryOwner)
+          echo "head_ref=$(echo "$PR_DATA" | jq -r '.headRefName')" >> $GITHUB_OUTPUT
+          echo "title=$(echo "$PR_DATA" | jq -r '.title')" >> $GITHUB_OUTPUT
+
+          # Check if fork
           HEAD_OWNER=$(echo "$PR_DATA" | jq -r '.headRepositoryOwner.login')
-
-          echo "head_ref=$HEAD_REF" >> $GITHUB_OUTPUT
-          echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
-          echo "title=$PR_TITLE" >> $GITHUB_OUTPUT
-
-          # Check if PR is from a fork
-          REPO_OWNER="${{ github.repository_owner }}"
-          if [ "$HEAD_OWNER" != "$REPO_OWNER" ]; then
+          if [ "$HEAD_OWNER" != "${{ github.repository_owner }}" ]; then
             echo "is_fork=true" >> $GITHUB_OUTPUT
-            echo "::notice::PR is from fork ($HEAD_OWNER) - FIX_NOW items will be converted to issues"
           else
             echo "is_fork=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Skip if no PR found
-        if: steps.pr.outputs.skip == 'true'
-        run: |
-          echo "::notice::No PR found for this workflow run, skipping triage"
-          exit 0
-
-      # Report pending status to PR so it shows as a required check
-      - name: Report pending status
+      - name: Check skip labels
         if: steps.pr.outputs.skip != 'true'
+        id: labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LABELS=$(gh pr view ${{ steps.pr.outputs.number }} --repo "${{ github.repository }}" --json labels --jq '.labels[].name')
+
+          if echo "$LABELS" | grep -q "do-not-auto-merge\|needs-human-review"; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::PR has skip label, skipping triage"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Report pending status
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head_sha }} \
             -f state=pending \
             -f context="triage" \
-            -f description="Triage in progress..." \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-      - name: Check labels and triage cycle count
-        if: steps.pr.outputs.skip != 'true'
-        id: check-labels
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          LABELS=$(gh pr view ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --json labels \
-            --jq '.labels[].name')
-
-          echo "Current labels: $LABELS"
-
-          # Check for skip labels
-          if echo "$LABELS" | grep -q "do-not-auto-merge"; then
-            echo "::notice::PR has do-not-auto-merge label, skipping triage"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if echo "$LABELS" | grep -q "needs-human-review"; then
-            echo "::notice::PR has needs-human-review label, skipping triage (human must intervene)"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Count triage cycles (tracks how many times triage has run)
-          # This prevents infinite review→triage→fix→review loops
-          TRIAGE_CYCLE=0
-          if echo "$LABELS" | grep -q "auto-triage-cycle-3"; then
-            TRIAGE_CYCLE=3
-          elif echo "$LABELS" | grep -q "auto-triage-cycle-2"; then
-            TRIAGE_CYCLE=2
-          elif echo "$LABELS" | grep -q "auto-triage-cycle-1"; then
-            TRIAGE_CYCLE=1
-          fi
-
-          echo "Current triage cycle: $TRIAGE_CYCLE"
-          echo "triage_cycle=$TRIAGE_CYCLE" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
-
-      - name: Check if max triage cycles reached
-        if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle == '3'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "::error::PR has reached max triage cycles (3), adding needs-human-review label"
-
-          # Add needs-human-review label
-          gh pr edit ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --add-label "needs-human-review"
-
-          # Post explanatory comment
-          gh pr comment ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --body "$(cat <<'EOF'
-          ## Auto-Triage: Max Cycles Reached
-
-          This PR has gone through **3 triage cycles** (review → triage → fix → review...).
-
-          **What this means:**
-          - The automated system keeps finding new issues after fixes
-          - To prevent infinite loops, no further automated triage will run
-
-          **Next steps for a human:**
-          1. Review the PR and any outstanding issues
-          2. Make manual fixes if needed
-          3. Remove the `needs-human-review` label to re-enable automation (if desired)
-
-          ---
-          *This is an automated message from the auto-triage workflow.*
-          EOF
-          )"
-
-          # Fail the job to prevent auto-merge
-          exit 1
+            -f description="Triage in progress..."
 
       - name: Checkout repository
-        if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ steps.pr.outputs.head_ref }}
 
-      # No Elixir setup needed - triage only reads code and PR comments
-
       - name: Setup Claude Code
-        if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
-      - name: Record triage start time and add labels
-        if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
-        id: triage-start
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Record start time in ISO format for later filtering of comments
-          TRIAGE_START=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "start_time=$TRIAGE_START" >> $GITHUB_OUTPUT
-          echo "Triage started at: $TRIAGE_START"
-
-          # Add pending label
-          gh pr edit ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --add-label "auto-triage-pending" || true
-
       - name: Run Claude Auto-Triage
-        if: steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
         id: triage
         uses: anthropics/claude-code-action@v1
         env:
-          # Use PAT to allow posted comments to trigger other workflows (like claude.yml)
-          # Falls back to github.token if PAT not available
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
           prompt: |
-            # Auto-Triage PR Review
+            # Auto-Triage PR #${{ steps.pr.outputs.number }}
 
-            You are triaging the review comments for PR #${{ steps.pr.outputs.number }}.
+            **Title**: ${{ steps.pr.outputs.title }}
+            **Is Fork**: ${{ steps.pr.outputs.is_fork }}
 
-            **PR Title**: ${{ steps.pr.outputs.title }}
-            **Repository**: ${{ github.repository }}
-            **Triage Cycle**: ${{ steps.check-labels.outputs.triage_cycle }} of 3 max
-            **Is Fork PR**: ${{ steps.pr.outputs.is_fork }}
+            ## Task
 
-            ## Fork PR Handling
+            1. Read review comments: `gh pr view ${{ steps.pr.outputs.number }} --comments`
+            2. For each issue found, decide: **FIX_NOW**, **DEFER_ISSUE**, or **IGNORE**
+            3. Execute actions and post summary
 
-            **IMPORTANT**: If this is a fork PR (`Is Fork PR: true`), you CANNOT use FIX_NOW.
-            Automated fixes cannot push to fork branches. Instead:
-            - Convert ALL FIX_NOW items to DEFER_ISSUE
-            - Create issues with clear fix instructions so the contributor can apply them
-            - In the summary, note that fixes were deferred because this is a fork PR
+            ## Decision Rules
 
-            ## Your Task
+            **FIX_NOW** (max 3 items, batch in one comment):
+            - Mechanical fixes (rename, remove debug code, add null checks)
+            - In-scope incomplete work
+            - If fork PR: convert to DEFER_ISSUE instead
 
-            1. **Fetch the review comment** using `gh pr view ${{ steps.pr.outputs.number }} --comments`
-            2. **Parse** each issue/suggestion from the review
-            3. **Investigate** each item by:
-               - Searching the codebase for similar patterns
-               - Checking existing GitHub issues: `gh issue list --search "keyword"`
-               - Reading CLAUDE.md for project conventions
-               - Assessing complexity (lines of code, files affected)
-            4. **Decide** for each item: FIX_NOW, DEFER_ISSUE, or IGNORE
-            5. **Execute** actions:
-               - FIX_NOW: Create a PR comment with `@claude please fix...`
-               - DEFER_ISSUE: Create a GitHub issue with `gh issue create`
-               - IGNORE: Document reasoning in summary
-            6. **Post summary** comment on the PR
+            **DEFER_ISSUE** (create GitHub issue):
+            - Complex changes, architectural suggestions
+            - Out-of-scope improvements
+            - Use `quick-fix` label for trivial out-of-scope fixes
+            - Use `from-pr-review` label for all deferred issues
 
-            ## Decision Guidelines
+            **IGNORE**: False positives, existing issues cover it, pure style preference
 
-            ### CRITICAL: Approval Does NOT Mean "Done"
-            Even if the review verdict is "Approve", you MUST still evaluate each finding:
-            - **In-scope mechanical fixes → FIX_NOW** (don't skip just because approved)
-            - Reviewer language like "consider", "lower risk", "could" does NOT mean skip
-            - If the fix is mechanical AND related to PR's purpose → FIX_NOW
+            ## Execute Actions
 
-            ### Complexity (NOT line count!)
-            **Simple (mechanical)** - No design decisions needed:
-            - Renaming functions/variables (even across many files)
-            - Removing debug logs or commented code
-            - Adding null checks or guard clauses
-            - Fixing typos, formatting, error messages
-            - Applying the same pattern the PR already establishes elsewhere
-            - Completing incomplete changes (e.g., "6 more instances of X to fix")
-
-            **Complex (architectural)** - Requires design decisions:
-            - Adding new abstractions or modules
-            - Changing data flow or control flow
-            - Introducing new dependencies
-            - Performance optimizations needing investigation
-
-            ### Scope Assessment
-            **In-scope**: Fix is directly related to PR's stated purpose
-            - Example: PR fixes DateTime.utc_now() timing → fixing remaining DateTime.utc_now() calls IS in scope
-            - Example: PR adds validation → completing validation for other similar cases IS in scope
-
-            **Out-of-scope**: Fix is unrelated improvement
-            - Example: PR fixes bug → adding unrelated logging is out of scope
-            - Example: PR adds feature A → refactoring feature B is out of scope
-
-            ### Actions
-            **FIX_NOW** when:
-            - Mechanical change (simple, no design decisions)
-            - Matches existing codebase patterns
-            - Security issue or bug that's simple to fix
-            - **IN-SCOPE incomplete work** (PR started a pattern but didn't finish applying it)
-            - Fix follows same approach the PR already uses
-
-            **DEFER_ISSUE** when the observation is worth remembering:
-            - If a human would want to revisit this later → create an issue
-            - "Future refactoring", "could consolidate", "spec drift", "tech debt" → track it
-            - Complex changes, architectural suggestions, missing features → track them
-            - **IMPORTANT**: First search for existing issues: `gh issue list --search "keyword" --state all`
-            - Only create issue if no existing issue covers it
-
-            **Use `quick-fix` label** for trivial OUT-OF-SCOPE mechanical fixes:
-            - Typos, formatting issues in unrelated files
-            - Missing null checks in unrelated code
-            - Simple cleanup noticed during review but unrelated to PR
-            - These skip normal review and get batched together later
-
-            **IGNORE** only when there's truly nothing to do:
-            - False positive (investigation shows code is correct)
-            - Existing GitHub issue already covers this (link to it in summary)
-            - Pure style preference with zero functional benefit
-
-            When in doubt, create an issue. Issues are cheap; forgotten improvements are expensive.
-
-            ## CRITICAL: How to Execute Actions
-
-            ### For PR DESCRIPTION fixes - Fix directly (no @claude comment needed)
-
-            If a FIX_NOW item only requires updating the PR description (not code), fix it directly:
-            1. Get current PR body: `gh pr view ${{ steps.pr.outputs.number }} --json body --jq '.body'`
-            2. Edit the description: `gh pr edit ${{ steps.pr.outputs.number }} --body "updated description..."`
-            3. Post a confirmation comment (without @claude prefix)
-            4. Do NOT count this as a pending fix - it's already done
-
-            This avoids triggering a separate workflow for trivial description updates.
-
-            ### For CODE fixes - Post ONE BATCHED comment that triggers claude-pr-fix.yml
-
-            **IMPORTANT**: Batch ALL code FIX_NOW items into a SINGLE comment to minimize workflow cycles.
-
-            Post ONE comment using `gh pr comment` with this EXACT format:
-
+            **For FIX_NOW** (batch all in ONE comment):
             ```bash
-            gh pr comment ${{ steps.pr.outputs.number }} --body "@claude please fix these issues from PR review:
-
-            ## Issue 1: [brief title]
-            **Location**: \`[file:line]\`
-            **Problem**: [what's wrong]
-            **Fix**: [specific fix instructions]
-
-            ## Issue 2: [brief title]
-            **Location**: \`[file:line]\`
-            **Problem**: [what's wrong]
-            **Fix**: [specific fix instructions]
-
-            ## Issue 3: [brief title]
-            ...
-
-            Please fix ALL issues above in a SINGLE commit. Make minimal changes to resolve each issue."
+            gh pr comment ${{ steps.pr.outputs.number }} --body "@claude please fix:
+            1. [issue]: [fix instructions]
+            2. [issue]: [fix instructions]
+            ..."
             ```
 
-            **IMPORTANT**:
-            - ALL FIX_NOW items go in ONE comment (reduces workflow runs)
-            - The comment MUST start with `@claude` to trigger the fix workflow
-            - Post the fix comment BEFORE posting the summary
-            - Claude Code will fix all issues in a single commit
-
-            ### For DEFER_ISSUE items - Create a GitHub issue
-
-            Choose appropriate labels based on the issue type:
-
-            **For trivial out-of-scope fixes (use quick-fix label):**
-            First check if a similar quick-fix issue already exists:
+            **For DEFER_ISSUE**:
             ```bash
-            gh issue list --label "quick-fix" --state open --json number,title
-            ```
-            If no duplicate exists, create the issue:
-            ```bash
-            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
-              --label "quick-fix" --label "from-pr-review" \
-              --body "Simple fix noticed during review. Out of scope for current PR."
-            ```
-            If a similar issue exists, skip creating a duplicate and note in the summary.
-
-            **For feature enhancements:**
-            ```bash
-            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
-              --label "enhancement" --label "from-pr-review" \
-              --body "Context and suggested improvement..."
+            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [desc]" \
+              --label "from-pr-review" --body "..."
             ```
 
-            **For technical debt (refactoring, code quality, test improvements):**
-            ```bash
-            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
-              --label "tech-debt" --label "from-pr-review" \
-              --body "Context and suggested improvement..."
-            ```
-
-            **For bugs found during review:**
-            ```bash
-            gh issue create --title "[From PR #${{ steps.pr.outputs.number }}] [brief description]" \
-              --label "bug" --label "from-pr-review" \
-              --body "Context and bug description..."
-            ```
-
-            ### After all actions - Post a summary comment (no @claude prefix!)
-
-            Post ONE summary comment at the end (this should NOT trigger claude.yml):
-
+            **Post summary** (no @claude prefix):
             ```bash
             gh pr comment ${{ steps.pr.outputs.number }} --body "## Auto-Triage Summary
-
-            ### Decisions Made
-            | # | Issue | Decision | Action |
-            |---|-------|----------|--------|
-            | 1 | [desc] | FIX_NOW | Included in fix request above |
-            | 2 | [desc] | FIX_NOW | Included in fix request above |
-            | 3 | [desc] | DEFER_ISSUE | Created issue #N |
-            | 4 | [desc] | IGNORE | [reason] |
-
-            ### Status
-            - FIX_NOW items: N (batched in single fix comment above)
-            - Issues created: M
-            - Items ignored: K"
+            | Issue | Decision | Action |
+            |-------|----------|--------|
+            | ... | FIX_NOW | In fix request |
+            | ... | DEFER_ISSUE | Created #N |"
             ```
 
-            ## Safety Rules
-
-            1. Max 3 FIX_NOW items per triage (defer rest to issues)
-            2. Never suggest changes outside original PR scope
-            3. If unsure, default to DEFER_ISSUE
-            4. Always document IGNORE reasoning
-            5. Post fix requests BEFORE the summary
-
-            ## After Triage - DO NOT MERGE
-
-            **IMPORTANT**: Do NOT attempt to merge the PR. Auto-merge is configured on this repository
-            and will handle merging automatically once all required checks pass.
-
-            Your job is only to:
-            - Post @claude fix requests for FIX_NOW items
-            - Create GitHub issues for DEFER_ISSUE items
-            - Post a summary comment
-
-            If there are NO FIX_NOW items, simply add the `ready-to-merge` label:
+            **If no FIX_NOW items**, add ready-to-merge label:
             ```bash
             gh pr edit ${{ steps.pr.outputs.number }} --add-label "ready-to-merge"
             ```
 
-            Now begin the triage process.
-
-          # Triage only needs to read code and interact with GitHub - no compilation or tests
-          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
-
-          # Enable full output for debugging
+          claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 30 --allowed-tools "Read,Glob,Grep,Bash,Task"'
           show_full_output: true
 
-      # Check if triage posted any @claude fix requests (only from THIS triage run)
       - name: Check for pending fixes
-        if: success() && steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
         id: check-fixes
         env:
           GH_TOKEN: ${{ github.token }}
-          TRIAGE_START: ${{ steps.triage-start.outputs.start_time }}
         run: |
-          echo "Checking for @claude fix comments posted after: $TRIAGE_START"
-
-          # Get comments posted after triage started that contain @claude fix requests
-          # Exclude triage summary comments (they mention "@claude fix" in historical context)
-          # Note: gh --jq doesn't support --arg, so we pipe through jq separately
-          RECENT_FIX_REQUESTS=$(gh pr view ${{ steps.pr.outputs.number }} \
+          # Check if triage posted @claude fix requests
+          FIX_REQUESTS=$(gh pr view ${{ steps.pr.outputs.number }} \
             --repo "${{ github.repository }}" \
-            --json comments | jq --arg start "$TRIAGE_START" '[.comments[] | select(
-              .createdAt > $start and
-              (.body | test("@claude.*fix"; "i")) and
-              (.body | test("^## Auto-Triage"; "m") | not)
-            )] | length')
+            --json comments \
+            | jq '[.comments[] | select(.body | test("@claude.*fix"; "i"))] | length')
 
-          echo "Found $RECENT_FIX_REQUESTS @claude fix request(s) from this triage run"
-          echo "fix_count=$RECENT_FIX_REQUESTS" >> $GITHUB_OUTPUT
-
-          if [ "$RECENT_FIX_REQUESTS" -gt 0 ]; then
-            echo "::warning::Triage posted $RECENT_FIX_REQUESTS fix request(s) - fixes are pending"
+          echo "fix_count=$FIX_REQUESTS" >> $GITHUB_OUTPUT
+          if [ "$FIX_REQUESTS" -gt 0 ]; then
             echo "has_fixes=true" >> $GITHUB_OUTPUT
           else
-            echo "No fix requests posted - PR may be ready for merge"
             echo "has_fixes=false" >> $GITHUB_OUTPUT
           fi
 
-      # Increment triage cycle counter
-      - name: Track triage cycle
-        if: success() && steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TRIAGE_CYCLE: ${{ steps.check-labels.outputs.triage_cycle }}
-        run: |
-          NEXT_CYCLE=$((TRIAGE_CYCLE + 1))
-          echo "Incrementing triage cycle to: $NEXT_CYCLE"
-
-          # Remove old cycle label if exists
-          if [ "$TRIAGE_CYCLE" -gt 0 ]; then
-            gh pr edit ${{ steps.pr.outputs.number }} \
-              --repo "${{ github.repository }}" \
-              --remove-label "auto-triage-cycle-$TRIAGE_CYCLE" 2>/dev/null || true
-          fi
-
-          # Add new cycle label
-          gh pr edit ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --add-label "auto-triage-cycle-$NEXT_CYCLE" || true
-
-      # Fail job if fixes are pending (prevents auto-merge)
-      - name: Fail if fixes pending
-        if: success() && steps.check-fixes.outputs.has_fixes == 'true'
-        run: |
-          echo "::error::Fixes are pending - failing job to prevent auto-merge"
-          echo "The claude.yml workflow will handle the fix requests"
-          exit 1
-
-      - name: Update labels on completion
-        if: always() && steps.pr.outputs.skip != 'true' && steps.check-labels.outputs.skip != 'true' && steps.check-labels.outputs.triage_cycle != '3'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Remove pending label
-          gh pr edit ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --remove-label "auto-triage-pending" 2>/dev/null || true
-
-          # Add complete label
-          gh pr edit ${{ steps.pr.outputs.number }} \
-            --repo "${{ github.repository }}" \
-            --add-label "auto-triage-complete" 2>/dev/null || true
-
-      # Enable auto-merge when no fixes are pending
       - name: Enable auto-merge
-        if: success() && steps.pr.outputs.skip != 'true' && steps.check-fixes.outputs.has_fixes != 'true'
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true' && steps.check-fixes.outputs.has_fixes != 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER }}
         run: |
-          echo "Enabling auto-merge for PR #${{ steps.pr.outputs.number }}"
           gh pr merge ${{ steps.pr.outputs.number }} \
             --repo "${{ github.repository }}" \
-            --auto \
-            --squash \
-            --delete-branch
+            --auto --squash --delete-branch || true
 
-      # Report final status to PR (success case)
-      - name: Report success status
-        if: success() && steps.pr.outputs.skip != 'true'
+      - name: Report status
+        if: always() && steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head_sha }} \
-            -f state=success \
-            -f context="triage" \
-            -f description="Triage complete - ready to merge" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ "${{ steps.check-fixes.outputs.has_fixes }}" = "true" ]; then
+            STATE="failure"
+            DESC="Fixes pending"
+          else
+            STATE="success"
+            DESC="Triage complete"
+          fi
 
-      # Report final status to PR (failure case)
-      - name: Report failure status
-        if: failure() && steps.pr.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
           gh api repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head_sha }} \
-            -f state=failure \
-            -f context="triage" \
-            -f description="Fixes pending or max cycles reached" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            -f state="$STATE" -f context="triage" -f description="$DESC"

@@ -1,18 +1,25 @@
 # GitHub Workflows Overview
 
-This document describes the Claude-powered GitHub workflows and their security gates.
+This document describes the Claude-powered GitHub workflows for autonomous issue implementation.
+
+## Design Principles
+
+1. **Trust Claude to be smart** - Keep workflow YAML simple, let Claude figure out context
+2. **Epic as source of truth** - All project state lives in the epic issue
+3. **Single concurrency group** - One Claude operation at a time, no race conditions
+4. **Dependencies checked at runtime** - Claude reads "Blocked by:" and refuses if blockers open
 
 ## Workflow Summary
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `claude-code-review.yml` | PR by `claude[bot]`, `claude/*` branch, or `claude-review` label | Automated PR review |
+| `claude-code-review.yml` | PR events, `claude-review` label | Review PR code |
 | `claude-auto-triage.yml` | After code-review completes | Triage review findings |
-| `claude-issue.yml` | `@claude` in issue + `ready-for-implementation` label | Implement issues |
-| `claude-pr-fix.yml` | `@claude` in PR + `claude-approved` label | Fix PRs |
-| `claude-issue-review.yml` | `needs-review` label | Review issue, trigger implementation |
-| `claude-implementation-feedback.yml` | Feedback labels | Handle implementation feedback |
-| `claude-pm.yml` | Schedule (6h), PR merged, issue events | Keep project moving |
+| `claude-issue-review.yml` | `needs-review` label | Review issue, add `ready-for-implementation` |
+| `claude-issue.yml` | `@claude` + `ready-for-implementation` | Implement issues |
+| `claude-pr-fix.yml` | `@claude` on PR | Fix PR issues |
+| `claude-epic-update.yml` | Issue closed with `epic:*` label | Update epic checkboxes |
+| `claude-batch-fix.yml` | Manual or 5+ `quick-fix` issues | Batch fix trivial issues |
 
 ## Workflow Interactions
 
@@ -21,10 +28,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 │                        PR WORKFLOW                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  PR Created ──► Maintainer adds ──► code-review.yml             │
-│                 `claude-review`          │                      │
-│                                          ▼                      │
-│                                    auto-triage.yml              │
+│  PR Created ──► code-review.yml ──► auto-triage.yml             │
 │                                          │                      │
 │                              ┌───────────┴───────────┐          │
 │                              ▼                       ▼          │
@@ -32,10 +36,7 @@ This document describes the Claude-powered GitHub workflows and their security g
 │                     (posts @claude)        (creates issue)      │
 │                              │                                  │
 │                              ▼                                  │
-│                     claude-pr-fix.yml ──► pushes fix            │
-│                              │                                  │
-│                              ▼                                  │
-│                    (loop max 3 cycles)                          │
+│                     claude-pr-fix.yml                           │
 │                              │                                  │
 │                              ▼                                  │
 │                        Auto-merge                               │
@@ -46,247 +47,187 @@ This document describes the Claude-powered GitHub workflows and their security g
 │                       ISSUE WORKFLOW                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Issue Created ──► Maintainer adds ──► issue-review.yml         │
-│       or              `needs-review`         │                  │
-│  PM queues it                                ▼                  │
-│                                   Adds `ready-for-implementation`
-│                                   + posts @claude trigger       │
-│                                              │                  │
-│                                              ▼                  │
-│                                      claude-issue.yml           │
-│                                              │                  │
-│                              ┌───────────────┴───────────────┐  │
-│                              ▼                               ▼  │
-│                         SUCCESS                          FEEDBACK│
-│                       (creates PR)                    (too big, │
-│                                                      edge case, │
-│                                                       blocked)  │
-│                                                          │      │
-│                                                          ▼      │
-│                                         implementation-feedback.yml
-│                                                          │      │
-│                              ┌───────────────────────────┴──┐   │
-│                              ▼                              ▼   │
-│                       needs-breakdown              edge-case or │
-│                      (creates sub-issues)           blocked     │
-│                              │                     (updates issue)
-│                              ▼                              │   │
-│                      Sub-issues get                         ▼   │
-│                      `needs-review`              Back to review │
-│                                                  or maintainer  │
+│  Issue Created ──► Add `needs-review` ──► issue-review.yml      │
+│                          label                  │               │
+│                                                 ▼               │
+│                                     Adds `ready-for-implementation`
+│                                     + posts @claude trigger     │
+│                                                 │               │
+│                                                 ▼               │
+│                                         claude-issue.yml        │
+│                                                 │               │
+│                                    ┌────────────┴────────┐      │
+│                                    ▼                     ▼      │
+│                               SUCCESS               BLOCKED     │
+│                             (creates PR)      (removes label,   │
+│                                    │           posts comment)   │
+│                                    ▼                            │
+│                              PR merged                          │
+│                                    │                            │
+│                                    ▼                            │
+│                          epic-update.yml                        │
+│                        (checks epic box)                        │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## PM Workflow
+## Epic-Driven Development
 
-The PM workflow (`claude-pm.yml`) keeps the project moving by handling tech debt, stuck reviews, and epic progress.
+### Epic Issue Structure
 
-**Triggers**: Schedule (every 6h), PR merged, issue closed, labels (`from-pr-review`, `needs-clarification`, `needs-breakdown`, `ready-for-implementation`)
-
-**Priorities**: Tech debt (`from-pr-review`) → stuck reviews → next epic task
-
-**Details**: See `.claude/commands/pm-workflow.md`
-
-### Epic Issue Pattern
-
-The PM workflow reads from a human-created "epic issue" to understand what work needs to be done:
+The epic issue is the single source of truth for project progress:
 
 ```markdown
 # [Epic Name] Implementation
 
 ## Specification Documents
-- [Primary Spec](docs/spec.md) - Main implementation guide
+- [Primary Spec](docs/specs/spec.md)
 
 ## Progress
 
 ### Phase 1: [Phase Name]
-- [ ] #123 - [Linked issue title]
-- [ ] Create parser module (PM will create issue)
-- [x] #124 - [Completed] (closed via #PR-456)
+- [ ] #123 - Task description
+- [ ] #124 - Another task
+- [x] #125 - Completed task
 
 ### Phase 2: [Phase Name]
-- [ ] Next phase tasks...
+- [ ] #126 - Blocked by #123
+...
 
-## Notes
-[Special instructions for PM, blockers]
+## Discovered Issues
+- #130 - Found during implementation of #124
 ```
 
-**Epic identification**: Labels `type:epic` + `status:active` (only one epic should be active at a time)
+**Required labels on epic:** `type:epic`, `status:active`
 
-### Key Behaviors
+**Labels on issues in epic:** `epic:epic-name` (e.g., `epic:message-history`)
 
-- **Epic as source of truth**: PM reads epic body to find spec docs, tasks, and progress
-- **Creates ONE issue at a time**: From unchecked text items in the epic
-- **Queues issues for review**: Adds `needs-review` label to linked issues without `ready-for-implementation`
-- **Updates epic on progress**: Links new issues, marks checkboxes when closed
-- **Monitors tech debt**: Handles `from-pr-review` issues regardless of epic
-- **Bookkeeping when PRs open**: Updates epic checkboxes and handles tech debt, but doesn't create new issues
+### Dependency Tracking
 
-**Note**: PM no longer triggers implementation. The review workflow posts `@claude` directly after approval.
+Issues track dependencies in their body:
 
-**GitHub Project**: [PTC-Lisp Implementation](https://github.com/users/andreasronge/projects/1)
-
-## Implementation Feedback Workflow
-
-The implementation workflow (`claude-issue.yml`) includes a **feedback protocol** for handling issues that are too large or have unexpected complications.
-
-### Feedback Types
-
-| Label | Meaning | Feedback Workflow Action |
-|-------|---------|--------------------------|
-| `needs-breakdown` | Issue scope too large (>30 test changes, >5 files) | Creates sub-issues, marks parent as tracking issue |
-| `implementation-blocked` | Missing info, unclear requirements, blocking dependency | Updates issue with blocker details, adds `needs-maintainer-input` |
-| `edge-case-found` | Discovered scenarios not in acceptance criteria | Updates issue with edge cases, may re-trigger implementation |
-
-### How It Works
-
-1. **Scope Assessment**: Before implementing, Claude assesses scope and complexity
-2. **Feedback Decision**: If thresholds exceeded or blockers found, uses feedback protocol instead of implementing
-3. **Label Update**: Removes `ready-for-implementation`, adds appropriate feedback label
-4. **Structured Comment**: Posts detailed feedback comment with analysis
-5. **Feedback Workflow**: `claude-implementation-feedback.yml` triggers and handles the feedback:
-   - **needs-breakdown**: Creates sub-issues from suggested breakdown, updates parent
-   - **implementation-blocked**: Documents blocker, requests maintainer input
-   - **edge-case-found**: Documents edge cases, may auto-resolve and re-trigger
-
-### Thresholds
-
-The implementation workflow uses these thresholds to trigger feedback:
-- More than ~30 test assertion changes
-- More than ~5 files need modification
-- Missing dependencies or unclear requirements
-- Edge cases not addressed in acceptance criteria
-
-### Recovery
-
-After feedback is handled:
-- **Sub-issues**: Each gets `needs-review` label, goes through normal review process
-- **Blocked issues**: Wait for maintainer to provide info, then manually add `needs-review`
-- **Edge cases resolved**: Workflow may automatically re-trigger implementation
-
-## Closing Issues
-
-### Completed (Done)
-When an issue is implemented via PR merge, it's automatically closed as "completed":
-```bash
-# Usually automatic, but manual if needed:
-gh issue close ISSUE_NUMBER
+```markdown
+## Blocked by
+- #123 - Must complete first
+- #124 - Provides required API
 ```
 
-### Not Planned (Declined)
-When deciding not to implement an issue:
-```bash
-# Close with "not planned" reason (shows gray icon in GitHub)
-gh issue close ISSUE_NUMBER --reason "not planned"
+The implementation workflow checks these at runtime:
+1. Reads "Blocked by:" section
+2. Checks if each blocker is closed
+3. If any blocker is open: removes `ready-for-implementation`, posts comment, stops
 
-# Add a label documenting why
-gh issue edit ISSUE_NUMBER --add-label "wontfix"  # or duplicate, out-of-scope, deferred, superseded
+### Workflow Behaviors
 
-# Add explanatory comment
-gh issue comment ISSUE_NUMBER --body "Closing: [explanation of why this won't be done]"
+**Issue Review (`claude-issue-review.yml`):**
+- Reads epic for context (if `epic:*` label present)
+- Ensures "Blocked by:" section exists if dependencies mentioned
+- Adds `ready-for-implementation` and posts `@claude` trigger
+
+**Issue Implementation (`claude-issue.yml`):**
+- Checks dependencies before implementing
+- Reads epic for broader context
+- Creates PR or reports blockers
+
+**Epic Update (`claude-epic-update.yml`):**
+- Triggers when issue with `epic:*` label closes
+- Finds active epic and checks off the completed issue
+
+## Labels Reference
+
+### Trigger Labels
+| Label | Purpose |
+|-------|---------|
+| `needs-review` | Triggers issue review workflow |
+| `ready-for-implementation` | Security gate for implementation |
+| `claude-review` | Triggers PR review |
+| `claude-approved` | Security gate for PR fixes (non-maintainer) |
+
+### Epic Labels
+| Label | Purpose |
+|-------|---------|
+| `type:epic` | Issue is an epic |
+| `status:active` | Currently active epic (only one at a time) |
+| `epic:*` | Links issue to specific epic (e.g., `epic:message-history`) |
+
+### Status Labels
+| Label | Purpose |
+|-------|---------|
+| `needs-human-review` | Automation stopped, human must intervene |
+| `do-not-auto-merge` | Prevents auto-merge |
+| `ready-to-merge` | Triage approved, ready for merge |
+| `merge-conflict` | PR has merge conflicts |
+
+### Issue Type Labels
+| Label | Purpose |
+|-------|---------|
+| `from-pr-review` | Issue created from PR review |
+| `quick-fix` | Trivial fix, batched by batch-fix workflow |
+| `needs-clarification` | Issue needs more details |
+| `needs-breakdown` | Issue too large, needs splitting |
+
+## Concurrency Control
+
+All Claude workflows share one concurrency group:
+
+```yaml
+concurrency:
+  group: claude-automation
+  cancel-in-progress: false
 ```
+
+This ensures:
+- Only one Claude operation runs at a time
+- No race conditions on issues/PRs
+- Jobs queue instead of being cancelled
 
 ## Security Gates
 
 ### For Public Repository Safety
 
-Most workflows require explicit maintainer approval before Claude can act:
-
 1. **PRs**: Maintainer must add `claude-review` label
-2. **PR fixes with @claude**: Requires `claude-approved` label (or be the maintainer)
-3. **Issue implementation**: Requires `ready-for-implementation` label (added by review workflow)
+2. **PR fixes**: Requires `claude-approved` label (or be maintainer)
+3. **Issue implementation**: Requires `ready-for-implementation` label
 
 ### Loop Prevention
 
-- **Label gates**: `ready-for-implementation` for issues, `claude-approved` for PRs (prevents unauthorized automation)
-- **Cycle limit**: auto-triage.yml tracks cycles with labels, stops after 3 cycles
-- **Human intervention**: Adds `needs-human-review` label when max cycles reached
+- Auto-triage batches max 3 FIX_NOW items per run
+- `needs-human-review` label stops all automation
+- Concurrency group prevents parallel execution
 
-### Stuck State & Recovery
+### Recovery from Stuck States
 
-**When a PR gets stuck (max triage cycles):**
-1. Triage adds `needs-human-review` label and posts explanation comment
-2. Subsequent triage runs skip immediately (label check)
-3. PM workflow detects open PR and skips creating new work
-4. System is effectively **paused** until human intervenes
+**PR stuck:**
+1. Check for `needs-human-review` label
+2. Fix manually or remove label to retry
 
-**When PM workflow gets stuck:**
-1. PM adds `needs-human-review` label after 3 failed attempts
-2. Remove label manually to resume
-
-**Recovery**: Remove `needs-human-review` label to re-enable automation, or manually fix/close the issue/PR.
-
-### Concurrency Control
-
-All Claude workflows share one concurrency group: `claude-automation` (queue, no cancel).
-
-This ensures only one Claude workflow runs at a time, preventing parallel Claude Code installations and race conditions.
-
-## Labels Reference
-
-### Trigger Labels
-- `claude-review` - Triggers PR review
-- `needs-review` - Triggers issue review
-- `ready-for-implementation` - Security gate for issue implementation (added by review)
-- `claude-approved` - Security gate for PR fixes (for non-maintainer triggers)
-
-### Epic Labels
-- `type:epic` - Issue is an epic (contains task list for PM to follow)
-- `status:active` - Currently active epic (only one at a time)
-
-### Phase Labels (Optional)
-Phase labels can be used to categorize issues, but are not required for the PM workflow (which uses the epic for tracking):
-- `phase:api-refactor` - API namespace refactoring
-- `phase:parser` - PTC-Lisp parser implementation
-- `phase:analyzer` - PTC-Lisp analyzer implementation
-- `phase:eval` - PTC-Lisp interpreter implementation
-- `phase:integration` - End-to-end integration
-- `phase:polish` - Polish & cleanup
-- `ptc-lisp` - General PTC-Lisp language work
-
-### Status Labels
-- `merge-conflict` - PR has merge conflicts (auto-removed when resolved)
-- `auto-triage-pending` - Triage in progress
-- `auto-triage-complete` - Triage finished
-- `auto-triage-cycle-N` - Tracks triage iterations (1-3)
-- `needs-human-review` - Max cycles reached, human must intervene
-- `do-not-auto-merge` - Prevents auto-merge
-- `ready-to-merge` - Triage approved, ready for auto-merge
-
-### Implementation Feedback Labels
-- `needs-breakdown` - Issue too large, needs to be split into sub-issues
-- `implementation-blocked` - Blocker found during implementation attempt
-- `edge-case-found` - Edge cases discovered not in acceptance criteria
-- `needs-maintainer-input` - Waiting for maintainer decision/info
-- `tracking-issue` - Parent issue with linked sub-issues
-
-### Classification Labels
-- `from-pr-review` - Issue created from PR review findings
-- `pm-stuck` - PM workflow encountered unrecoverable error
-- `pm-failed-attempt` - PM attempt failed
-
-### Declined Issue Labels
-When closing an issue as "not planned", add one of these labels to document why:
-- `wontfix` - Decision not to address (low value, against project direction)
-- `duplicate` - Duplicate of another issue (reference the original in comment)
-- `out-of-scope` - Outside current project goals
-- `deferred` - Postponed indefinitely (may revisit later)
-- `superseded` - Replaced by a different approach (reference new issue/PR)
+**Issue stuck:**
+1. Check if blocked by open issues
+2. Verify `ready-for-implementation` label is present
+3. Manually post `@claude Please implement this issue.`
 
 ## Fork PR Handling
 
 Fork PRs have limited automation:
-
 1. **code-review.yml** - Works normally (read-only)
-2. **auto-triage.yml** - Creates issues instead of @claude fix comments
+2. **auto-triage.yml** - Creates issues instead of `@claude` fix comments
 3. **claude-pr-fix.yml** - Posts explanation and skips (cannot push to forks)
-
-Contributors must apply fixes manually based on created issues.
 
 ## Secrets Required
 
-- `CLAUDE_CODE_OAUTH_TOKEN` - Claude API authentication
-- `PAT_WORKFLOW_TRIGGER` - Personal Access Token to trigger workflows from bot actions
+| Secret | Purpose |
+|--------|---------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude API authentication |
+| `PAT_WORKFLOW_TRIGGER` | Enable bot comments to trigger workflows |
 
 Without `PAT_WORKFLOW_TRIGGER`, bot-created comments won't trigger other workflows.
+
+## Quick Reference: Starting Work on an Epic
+
+1. **Create epic issue** with `type:epic` and `status:active` labels
+2. **Create all issues** from roadmap with:
+   - `epic:your-epic-name` label
+   - "Blocked by: #X, #Y" section in body
+   - Clear acceptance criteria
+3. **Add `needs-review`** to the first unblocked issue
+4. **Automation takes over**: review → implement → PR → merge → next issue
