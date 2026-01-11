@@ -1,0 +1,151 @@
+name: Claude Epic Start
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  start-epic:
+    # Trigger when status:active is added to an epic
+    if: |
+      github.event.label.name == 'status:active' &&
+      contains(toJSON(github.event.issue.labels), 'type:epic')
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+
+    steps:
+      - name: Find and trigger first unblocked issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EPIC_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          echo "Epic #$EPIC_NUMBER activated, finding first unblocked issue..."
+
+          # Get all open issues with epic:* labels
+          EPIC_ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --json number,body,labels \
+            --limit 100)
+
+          # Save to file to avoid subshell issues
+          echo "$EPIC_ISSUES" > /tmp/epic_issues.json
+
+          FOUND_UNBLOCKED=""
+          EPIC_ISSUE_COUNT=0
+
+          # Get issue count and iterate by index (avoids word splitting issues)
+          ISSUE_COUNT=$(jq 'length' /tmp/epic_issues.json)
+
+          for i in $(seq 0 $((ISSUE_COUNT - 1))); do
+            row=$(jq -c ".[$i]" /tmp/epic_issues.json)
+            ISSUE_NUMBER=$(echo "$row" | jq -r '.number')
+            ISSUE_BODY=$(echo "$row" | jq -r '.body')
+
+            # Skip if this is the epic itself
+            [ "$ISSUE_NUMBER" = "$EPIC_NUMBER" ] && continue
+
+            # Check if issue has an epic:* label
+            HAS_EPIC_LABEL=$(echo "$row" | jq '[.labels[].name | select(startswith("epic:"))] | length')
+            [ "$HAS_EPIC_LABEL" -eq 0 ] && continue
+
+            EPIC_ISSUE_COUNT=$((EPIC_ISSUE_COUNT + 1))
+
+            # Skip if already has needs-review or ready-for-implementation
+            HAS_WORKFLOW_LABEL=$(echo "$row" | jq '[.labels[].name | select(. == "needs-review" or . == "ready-for-implementation")] | length')
+            if [ "$HAS_WORKFLOW_LABEL" -gt 0 ]; then
+              echo "Issue #$ISSUE_NUMBER already has review/implementation label, skipping"
+              continue
+            fi
+
+            # Skip if has needs-clarification or needs-breakdown
+            HAS_BLOCKING_LABEL=$(echo "$row" | jq '[.labels[].name | select(. == "needs-clarification" or . == "needs-breakdown")] | length')
+            if [ "$HAS_BLOCKING_LABEL" -gt 0 ]; then
+              echo "Issue #$ISSUE_NUMBER needs clarification/breakdown, skipping"
+              continue
+            fi
+
+            # Skip quick-fix issues - they're handled by batch-fix workflow
+            IS_QUICK_FIX=$(echo "$row" | jq '[.labels[].name | select(. == "quick-fix")] | length')
+            if [ "$IS_QUICK_FIX" -gt 0 ]; then
+              echo "Issue #$ISSUE_NUMBER is quick-fix, handled by batch-fix workflow"
+              continue
+            fi
+
+            # Check if issue has open blockers
+            IS_BLOCKED=false
+            if echo "$ISSUE_BODY" | grep -qi "blocked by:"; then
+              # Extract blocker numbers from the Blocked by section
+              BLOCKED_SECTION=$(echo "$ISSUE_BODY" | grep -iA5 "blocked by:" | head -10 || true)
+              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+
+              for blocker in $BLOCKERS; do
+                [ -z "$blocker" ] && continue
+                BLOCKER_STATE=$(gh issue view "$blocker" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                if [ "$BLOCKER_STATE" != "CLOSED" ]; then
+                  echo "Issue #$ISSUE_NUMBER is blocked by #$blocker ($BLOCKER_STATE)"
+                  IS_BLOCKED=true
+                  break
+                fi
+              done
+            fi
+
+            if [ "$IS_BLOCKED" = "false" ]; then
+              echo "Found unblocked issue: #$ISSUE_NUMBER"
+
+              # Add needs-review label to trigger the review workflow
+              gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-review"
+
+              gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+          ## Epic Started
+
+          Epic #$EPIC_NUMBER has been activated. This issue is unblocked and ready for review.
+
+          Adding \`needs-review\` label to trigger review before implementation.
+          EOF
+          )"
+
+              echo "Added needs-review to #$ISSUE_NUMBER"
+              FOUND_UNBLOCKED="$ISSUE_NUMBER"
+
+              # Only trigger one issue to start the chain
+              break
+            fi
+          done
+
+          # Post warning to epic if no unblocked issues found
+          if [ -z "$FOUND_UNBLOCKED" ]; then
+            if [ "$EPIC_ISSUE_COUNT" -eq 0 ]; then
+              echo "::warning::No issues found with epic:* labels"
+              gh issue comment "$EPIC_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+          ## ⚠️ No Epic Issues Found
+
+          This epic was activated but no open issues with \`epic:*\` labels were found.
+
+          **To fix:**
+          1. Create issues for this epic
+          2. Add \`epic:your-epic-name\` label to each issue
+          3. Remove and re-add \`status:active\` to retry
+          EOF
+          )"
+            else
+              echo "::warning::All $EPIC_ISSUE_COUNT epic issues are blocked or already in progress"
+              gh issue comment "$EPIC_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+          ## ⚠️ No Unblocked Issues
+
+          This epic was activated but all $EPIC_ISSUE_COUNT issues are either:
+          - Already have \`needs-review\` or \`ready-for-implementation\`
+          - Have \`needs-clarification\` or \`needs-breakdown\`
+          - Are blocked by open issues
+
+          **Check:**
+          - Verify blocker issues exist and are properly tracked
+          - Ensure at least one issue has no open blockers
+          EOF
+          )"
+            fi
+          fi
+
+          echo "Epic start complete"

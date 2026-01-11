@@ -78,6 +78,60 @@ jobs:
             fi
           done
 
+      - name: Check for stale reviews
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Checking for stale reviews ==="
+
+          # Find issues with needs-review but no activity for 2+ hours
+          # This catches cases where issue-review.yml failed or didn't run
+          STALE_REVIEWS=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "needs-review" \
+            --state open \
+            --json number,title,updatedAt,labels \
+            --jq '[.[] | select(.labels | map(.name) | index("needs-attention") | not)]')
+
+          echo "$STALE_REVIEWS" | jq -c '.[]' | while read -r issue; do
+            ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
+            ISSUE_TITLE=$(echo "$issue" | jq -r '.title')
+            UPDATED=$(echo "$issue" | jq -r '.updatedAt')
+
+            # Check if updated more than 2 hours ago
+            UPDATED_EPOCH=$(date -d "$UPDATED" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$UPDATED" +%s 2>/dev/null || echo 0)
+            NOW_EPOCH=$(date +%s)
+            HOURS_AGO=$(( (NOW_EPOCH - UPDATED_EPOCH) / 3600 ))
+
+            if [ "$HOURS_AGO" -ge 2 ]; then
+              # Check if issue-review.yml has posted a review comment
+              HAS_REVIEW=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json comments \
+                --jq '[.comments[] | select(.body | test("recommendation|ready-for-implementation|needs-clarification"; "i"))] | length')
+
+              if [ "$HAS_REVIEW" -eq 0 ]; then
+                echo "Issue #$ISSUE_NUMBER has stale needs-review (${HOURS_AGO}h without review)"
+
+                # Add needs-attention label
+                gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-attention"
+
+                gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+          ## Stale Review Detected
+
+          This issue has \`needs-review\` but:
+          - No review comment found
+          - No activity for ${HOURS_AGO} hours
+
+          **Possible causes:**
+          - Issue review workflow didn't run
+          - Workflow was interrupted or failed
+
+          **To retry:** Remove and re-add \`needs-review\` label.
+          EOF
+          )"
+              fi
+            fi
+          done
+
       - name: Check for orphan branches
         env:
           GH_TOKEN: ${{ github.token }}
