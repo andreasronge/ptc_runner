@@ -1,222 +1,70 @@
 # Issue Creation Guidelines
 
-## Purpose
+Guidelines for writing GitHub issues that work well with the automation workflows.
 
-This document defines **how to write well-specified GitHub issues** - the template, sizing guidelines, and quality checklist.
+## Key Principles
 
-**Audience**: Anyone creating issues (maintainers, PM workflow, auto-triage).
+1. **Self-contained**: Include enough context to implement without external knowledge
+2. **Right-sized**: One PR, testable via E2E test, clear boundaries
+3. **Verified**: Based on actual codebase analysis, not assumptions
+4. **Link, don't duplicate**: Reference specs instead of copying content
 
-**Relationship to other docs**:
-- After creation, issues are reviewed using `planning-guidelines.md` (9-point checklist)
-- The PM workflow (`pm-workflow.md`) orchestrates when to create issues
+## Essential Sections
 
-**Used by**: `claude-pm.yml` workflow when creating new issues.
+Issues should generally include:
 
-## Overview
+- **Summary**: What and why (1-2 sentences)
+- **Context**: Link to spec document if part of an epic (use full GitHub URL)
+- **Acceptance criteria**: Specific, testable conditions for completion
+- **Blocked by**: Dependencies in format `Blocked by: #123, #456` (automation parses this)
 
-Issues can be created by:
-- **Maintainers**: Direct creation for any work item
-- **PM Workflow**: Automated creation from specification documents (see `github-workflows.md`)
-- **Auto-Triage**: Created during PR review for deferred items (labeled `from-pr-review`)
+Beyond these essentials, use judgment. Some issues need implementation hints, edge cases, or test plans. Others are simple enough to not need them.
 
-Each issue should be:
-- **Self-contained**: All information needed to implement is in the issue
-- **Right-sized**: Large enough to be testable via E2E/integration test, small enough for one PR
-- **Verified**: Based on actual codebase analysis, not assumptions
+## For Epic Issues
 
-## Issue Template
+When creating issues from a roadmap:
 
-```markdown
-## Summary
+- **Add epic label**: e.g., `epic:message-history`
+- **Link to spec**: Add Context section with URL to requirements/spec document
+- **Real issue numbers only**: Don't add "Blocks: #7, #8" if those issues don't exist yet
+- **Mark complete blockers**: If blocker is already closed, note it: `#603 - ✅ Complete`
 
-[1-2 sentences: What is being implemented and why it matters to library users]
+## Sizing
 
-## Context
+**Right-sized:**
+- Delivers user-visible value (can write E2E test)
+- Fits in one PR (typically 100-500 lines)
+- Clear scope boundaries
 
-**Architecture reference**: [Link to relevant DSL specification or SubAgent guide]
-**Dependencies**: [What must be implemented first, or "None"]
-**Related issues**: [Links to related issues, or "None"]
-
-## Current State
-
-[Brief description of what exists now - based on actual codebase analysis]
-
-## Acceptance Criteria
-
-- [ ] [Specific, testable criterion]
-- [ ] [Another criterion]
-- [ ] E2E test demonstrates the feature works
-- [ ] Existing tests pass
-- [ ] Documentation updated (if public API changes)
-
-## Implementation Hints
-
-**Files to modify:**
-- `lib/ptc_runner/module.ex` - [what changes]
-- `test/ptc_runner/module_test.exs` - [what tests to add]
-
-**Patterns to follow:**
-- [Reference existing similar code]
-
-**Edge cases to consider:**
-- [Specific edge case]
-
-## Test Plan
-
-**Unit tests:**
-- [Specific test case]
-
-**E2E test:**
-- [Describe the end-to-end scenario that proves the feature works]
-
-## Out of Scope
-
-[Explicitly list what this issue does NOT include]
-
-## Documentation Updates
-
-[List docs that need updating, or "None" if purely internal change]
-- `docs/reference/ptc-json-specification.md` - [if JSON DSL changes]
-- `docs/ptc-lisp-specification.md` - [if PTC-Lisp changes]
-- [Other affected docs]
-```
-
-## Sizing Guidelines
-
-### Right-Sized Issue
-
-An issue is correctly sized when:
-- It delivers **user-visible value** (can write an E2E test for it)
-- It fits in **one PR** (typically 100-500 lines changed)
-- It has **clear boundaries** (easy to say what's in/out of scope)
-- A competent developer could implement it from the description alone
-
-### Too Large
-
-Signs an issue is too large:
-- Has more than 5 acceptance criteria
+**Too large** (split it):
+- More than 5 acceptance criteria
 - Touches more than 5 files significantly
 - Description says "and also..."
 
-**Solution**: Split into multiple issues with dependencies.
+**Too small** (combine or skip):
+- Pure mechanical change
+- No E2E test possible
+- Done in < 30 minutes
 
-### Too Small
+## Automation Labels
 
-Signs an issue is too small:
-- Pure mechanical change (rename, move file)
-- No E2E test possible (just internal refactoring)
-- Could be done in < 30 minutes
+| Label | Trigger |
+|-------|---------|
+| `needs-review` | Issue review workflow evaluates and improves the issue |
+| `ready-for-implementation` | Issue approved; implementation can start |
 
-**Solution**: Combine with related work, or just do it as part of another issue.
-
-### Splitting Example
-
-**Too large**: "Add logic and variable operations"
-
-**Split into:**
-1. "Add `let` variable bindings" - Core variable binding with scoping
-2. "Add `if` conditional operation" - Conditional branching
-3. "Add boolean logic operations (`and`, `or`, `not`)" - Composable conditions
-4. "Add `merge` and `concat` combiners" - Data combination
-
-Each is independently testable and delivers value.
-
-## Quality Checklist
-
-Before submitting an issue for review:
-
-- [ ] Summary explains value to library users
-- [ ] Context references relevant docs (README.md, specifications)
-- [ ] Current state based on actual codebase analysis (not assumptions)
-- [ ] Acceptance criteria are specific and testable
-- [ ] E2E test scenario is described
-- [ ] Files to modify are identified and exist
-- [ ] Patterns to follow reference actual existing code
-- [ ] Edge cases are specific to this feature
-- [ ] Out of scope is explicit
-- [ ] Documentation impact analyzed (which docs need updates)
-- [ ] Issue is right-sized (one PR, user-visible value)
+The review workflow adds `ready-for-implementation` when an issue passes review and triggers implementation automatically.
 
 ## Common Mistakes
 
-### 1. Assuming Instead of Verifying
-
-**Wrong:**
-> "The parser currently doesn't support nested operations"
-
-**Right:**
-> "Verified: `grep -r "nested" lib/ptc_runner/parser.ex` shows no handling for nested ops.
-> Current parser handles only flat structures (see `parse_operation/1` at line 45)."
-
-### 2. Vague Acceptance Criteria
-
-**Wrong:**
-- [ ] Parser handles edge cases
-- [ ] Good test coverage
-
-**Right:**
-- [ ] Parser returns `{:error, {:parse_error, msg}}` for malformed JSON
-- [ ] Parser returns `{:error, {:validation_error, msg}}` for unknown operations
-- [ ] Tests cover: empty input, invalid JSON, missing required fields, unknown op
-
-### 3. Missing E2E Test Description
-
-**Wrong:**
-> "Add appropriate tests"
-
-**Right:**
-> **E2E test**: Run a program that uses `let` to store a tool result, then references
-> it twice in subsequent operations. Verify the stored value is correctly retrieved
-> both times without re-calling the tool.
-
-### 4. Forgetting Out of Scope
-
-Without explicit scope, implementation may gold-plate:
-
-**Add:**
-> ## Out of Scope
-> - Nested `let` bindings (future issue)
-> - `let` with destructuring (not in spec)
-> - Performance optimization for many variables
-
-## Handling Review Feedback
-
-When an issue is rejected by the review workflow:
-
-### If Fixable
-1. Read the review feedback carefully
-2. Update the issue to address concerns
-3. Add `needs-review` label again
-4. Document what changed in a comment
-
-### If Fundamental Problem
-1. Close the issue with explanation
-2. Create a new issue if the work is still needed
-3. Reference the closed issue for context
-
-## Enabling Automation
-
-For Claude workflows to work on an issue:
-
-1. **Add `needs-review` label** - Triggers issue review workflow
-2. **Issue review adds both labels** - When approved, review adds `ready-for-implementation` AND `claude-approved`
-3. **PM triggers implementation** - Posts `@claude` comment, which requires `claude-approved` to execute
-
-The review gate is the single approval point. Once an issue passes review, automation handles the rest.
-
-## Labels
-
-See [GitHub Workflows](github-workflows.md#labels-reference) for the complete labels reference.
-
-**Key labels for issues**:
-- `needs-review` - Triggers issue review workflow
-- `ready-for-implementation` - Issue approved and ready for PM
-- `claude-approved` - Allows `@claude` comments to trigger implementation (added by review workflow)
+1. **Assuming instead of verifying** - Check the codebase before describing current state
+2. **Vague acceptance criteria** - "Good test coverage" vs specific test cases
+3. **Missing dependencies** - If blocked, add `Blocked by: #X` section
+4. **Referencing non-existent issues** - Don't add "Blocks: #7" if #7 doesn't exist
+5. **Duplicating spec content** - Link to specs, don't copy requirements lists
 
 ## References
 
-- [Planning Guidelines](planning-guidelines.md) - The 9-point review checklist
-- [Testing Guidelines](testing-guidelines.md) - How to write good tests
-- [PR Review Guidelines](pr-review-guidelines.md) - What PR reviewers look for
-- [PTC-JSON Specification](../reference/ptc-json-specification.md) - JSON DSL reference
-- [PTC-Lisp Specification](../ptc-lisp-specification.md) - PTC-Lisp reference
+- [Planning Guidelines](planning-guidelines.md) - Review checklist
+- [GitHub Workflows](github-workflows.md) - How automation works
+- [Epic Creation Guidelines](epic-creation-guidelines.md) - Coordinating related issues
