@@ -22,8 +22,9 @@ This document describes the Claude-powered GitHub workflows for autonomous issue
 | `claude-issue.yml` | `@claude` + `ready-for-implementation` | Implement issues with mandatory status |
 | `claude-pr-fix.yml` | `@claude` on PR | Fix PR issues (max 3 attempts) |
 | `claude-second-opinion.yml` | `needs-second-opinion` label | Fresh context review after failed fixes |
+| `claude-epic-start.yml` | `status:active` on epic | Start epic by triggering first unblocked issue |
 | `claude-epic-update.yml` | Issue closed with `epic:*` label | Update epic checkboxes |
-| `claude-blocker-resolved.yml` | Issue closed | Re-enable blocked issues |
+| `claude-blocker-resolved.yml` | Issue closed | Add `needs-review` to unblocked issues |
 | `claude-stale-check.yml` | Every 2 hours (scheduled) | Detect stuck implementations |
 | `claude-batch-fix.yml` | Manual or 5+ `quick-fix` issues | Batch fix trivial issues |
 
@@ -68,32 +69,39 @@ This document describes the Claude-powered GitHub workflows for autonomous issue
 │                       ISSUE WORKFLOW                                 │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  Issue Created ──► Add `needs-review` ──► issue-review.yml          │
-│                          label                  │                    │
-│                                                 ▼                    │
-│                                     Adds `ready-for-implementation`  │
-│                                     + posts @claude trigger          │
-│                                                 │                    │
-│                                                 ▼                    │
-│                                         claude-issue.yml             │
-│                                                 │                    │
-│                              ┌──────────────────┼──────────────────┐ │
-│                              ▼                  ▼                  ▼ │
-│                          SUCCESS           INCOMPLETE          BLOCKED│
-│                        (creates PR)    (posts status,     (removes   │
-│                              │          needs-attention)   label)    │
-│                              │                  │                    │
-│                              │                  ▼                    │
-│                              │          stale-check.yml              │
-│                              │          (retries stale)              │
-│                              │                                       │
-│                              ▼                                       │
-│                         PR merged                                    │
-│                              │                                       │
-│                         ┌────┴────┐                                  │
-│                         ▼         ▼                                  │
-│                  epic-update.yml  blocker-resolved.yml               │
-│                 (checks epic box) (re-enables dependents)            │
+│  Epic activated ──► epic-start.yml ──► Adds `needs-review`          │
+│  (status:active)        │              to first unblocked issue      │
+│                         │                       │                    │
+│                         │                       ▼                    │
+│                         │              issue-review.yml              │
+│                         │                       │                    │
+│                         │                       ▼                    │
+│                         │           Adds `ready-for-implementation`  │
+│                         │           + posts @claude trigger          │
+│                         │                       │                    │
+│                         │                       ▼                    │
+│                         │               claude-issue.yml             │
+│                         │                       │                    │
+│                         │        ┌──────────────┼──────────────┐     │
+│                         │        ▼              ▼              ▼     │
+│                         │    SUCCESS       INCOMPLETE       BLOCKED  │
+│                         │  (creates PR)  (posts status,  (removes    │
+│                         │        │       needs-attention)  label)    │
+│                         │        │              │                    │
+│                         │        │              ▼                    │
+│                         │        │      stale-check.yml              │
+│                         │        │      (retries stale)              │
+│                         │        │                                   │
+│                         │        ▼                                   │
+│                         │   PR merged                                │
+│                         │        │                                   │
+│                         │   ┌────┴────┐                              │
+│                         │   ▼         ▼                              │
+│                         │ epic-    blocker-resolved.yml              │
+│                         │ update   (adds needs-review to             │
+│                         │ .yml      next unblocked issue)            │
+│                         │              │                             │
+│                         └──────────────┘ (chains to next issue)      │
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -241,19 +249,23 @@ When implementation discovers prerequisite work:
 
 ```
 1. STOP - don't try to fix it in the same PR
-2. Create issue with `discovered-blocker` label
+2. Create issue with `discovered-blocker` AND `needs-review` labels
 3. Update current issue's "Blocked by:" section
-4. Remove `ready-for-implementation`
+4. Remove `ready-for-implementation` from current issue
 5. Post BLOCKED status
-6. blocker-resolved.yml will re-enable when blocker closes
+6. Blocker gets reviewed and implemented (has needs-review)
+7. blocker-resolved.yml adds needs-review to current issue when blocker closes
 ```
 
 ### Stale Detection
 
 `claude-stale-check.yml` runs every 2 hours:
+- Finds issues with `needs-review` but no review activity after 2 hours
 - Finds issues with `ready-for-implementation` but no PR/status after 2 hours
 - Detects orphan `claude/*` branches without PRs (creates draft PR to capture work)
 - Identifies stuck PRs with `needs-human-review` for 24+ hours
+
+Stale issues get `needs-attention` label added for visibility.
 
 ## Epic-Driven Development
 
@@ -453,13 +465,17 @@ Without `PAT_WORKFLOW_TRIGGER`, bot-created comments won't trigger other workflo
 
 ## Quick Reference: Starting Work on an Epic
 
-1. **Create epic issue** with `type:epic` and `status:active` labels
+1. **Create epic issue** with `type:epic` label
 2. **Create all issues** from roadmap with:
    - `epic:your-epic-name` label
    - "Blocked by: #X, #Y" section in body
    - Clear acceptance criteria
-3. **Add `needs-review`** to the first unblocked issue
-4. **Automation takes over**: review → implement → PR → merge → next issue
+3. **Add `status:active`** label to the epic
+4. **Automation takes over**:
+   - `epic-start.yml` adds `needs-review` to first unblocked issue
+   - Review → implement → PR → merge
+   - `blocker-resolved.yml` adds `needs-review` to next unblocked issue
+   - Chain continues until all issues complete
 
 ## Edge Case Handling
 

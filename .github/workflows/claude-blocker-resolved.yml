@@ -63,29 +63,27 @@ jobs:
                 # Check if it had ready-for-implementation before (was waiting)
                 LABELS=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json labels --jq '.labels[].name')
 
-                # Only re-add if it doesn't already have ready-for-implementation
-                # and doesn't have needs-clarification or needs-breakdown
-                if ! echo "$LABELS" | grep -q "ready-for-implementation"; then
-                  if echo "$LABELS" | grep -qE "needs-clarification|needs-breakdown"; then
-                    echo "  Issue needs clarification/breakdown, not re-enabling"
-                  else
-                    # Add ready-for-implementation and trigger
-                    gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "ready-for-implementation"
+                # Only re-add if it doesn't already have needs-review or ready-for-implementation
+                # and doesn't have needs-clarification, needs-breakdown, or quick-fix
+                if echo "$LABELS" | grep -qE "needs-review|ready-for-implementation"; then
+                  echo "  Already has needs-review or ready-for-implementation label"
+                elif echo "$LABELS" | grep -qE "needs-clarification|needs-breakdown"; then
+                  echo "  Issue needs clarification/breakdown, not re-enabling"
+                elif echo "$LABELS" | grep -q "quick-fix"; then
+                  echo "  Issue is quick-fix, handled by batch-fix workflow"
+                else
+                  # Add needs-review to trigger just-in-time review before implementation
+                  gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-review"
 
-                    gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+                  gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
           ## Blockers Resolved
 
           Issue #$CLOSED_ISSUE has been closed, and all blocking issues are now resolved.
 
-          Re-enabling this issue for implementation.
-
-          @claude Please implement this issue.
+          Adding \`needs-review\` label to trigger review before implementation.
           EOF
           )"
-                    echo "  Re-enabled #$ISSUE_NUMBER for implementation"
-                  fi
-                else
-                  echo "  Already has ready-for-implementation label"
+                  echo "  Added needs-review to #$ISSUE_NUMBER"
                 fi
               fi
             fi

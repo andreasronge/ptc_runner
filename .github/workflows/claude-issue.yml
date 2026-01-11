@@ -166,8 +166,10 @@ jobs:
             When stopping for scope issues:
             1. Post status (see Step 6) with result: INCOMPLETE
             2. Add `needs-breakdown` label and explain how to split
-            3. If discovered blocker: create issue with `discovered-blocker` label,
-               update this issue's "Blocked by:" section, remove `ready-for-implementation`
+            3. If discovered blocker:
+               - Create issue with `discovered-blocker` AND `needs-review` labels
+               - Update this issue's "Blocked by:" section
+               - Remove `ready-for-implementation` from this issue
 
             ## Step 4: Check for Existing PR (Duplicate Detection)
 
