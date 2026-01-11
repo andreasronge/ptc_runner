@@ -61,9 +61,11 @@ jobs:
 
       - name: Update epic and enforce phase ordering
         if: steps.epic.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@beta
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Issue #${{ github.event.issue.number }} ("${{ github.event.issue.title }}") was just closed.
             Epic: #${{ steps.epic.outputs.epic_number }}
@@ -92,5 +94,4 @@ jobs:
             - Use `gh issue edit ISSUE --add-label "needs-review"` to trigger
             - Be concise in any comments
 
-          allowed_tools: Bash,Read,Glob,Grep
-          claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 15'
+          claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 15 --allowed-tools "Bash,Read,Glob,Grep"'
