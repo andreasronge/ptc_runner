@@ -1,0 +1,169 @@
+name: Claude Stale Check
+
+on:
+  schedule:
+    # Run every 2 hours
+    - cron: '0 */2 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  check-stale:
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Check for stale implementations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Checking for stale implementations ==="
+
+          # Find issues with ready-for-implementation but no PR and no recent activity
+          STALE_ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "ready-for-implementation" \
+            --state open \
+            --json number,title,updatedAt,labels \
+            --jq '[.[] | select(.labels | map(.name) | index("needs-attention") | not)]')
+
+          echo "$STALE_ISSUES" | jq -c '.[]' | while read -r issue; do
+            ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
+            ISSUE_TITLE=$(echo "$issue" | jq -r '.title')
+            UPDATED=$(echo "$issue" | jq -r '.updatedAt')
+
+            # Check if updated more than 2 hours ago
+            UPDATED_EPOCH=$(date -d "$UPDATED" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$UPDATED" +%s 2>/dev/null || echo 0)
+            NOW_EPOCH=$(date +%s)
+            HOURS_AGO=$(( (NOW_EPOCH - UPDATED_EPOCH) / 3600 ))
+
+            if [ "$HOURS_AGO" -ge 2 ]; then
+              # Check if there's a linked PR
+              LINKED_PR=$(gh pr list \
+                --repo "${{ github.repository }}" \
+                --state open \
+                --json number,body \
+                --jq "[.[] | select(.body | test(\"#$ISSUE_NUMBER\"))] | .[0].number")
+
+              # Check if there's a status comment
+              HAS_STATUS=$(gh issue view "$ISSUE_NUMBER" --json comments \
+                --jq '[.comments[] | select(.body | contains("claude-implementation-status"))] | length')
+
+              if [ -z "$LINKED_PR" ] && [ "$HAS_STATUS" -eq 0 ]; then
+                echo "Issue #$ISSUE_NUMBER is stale (${HOURS_AGO}h without activity or status)"
+
+                # Add needs-attention label
+                gh issue edit "$ISSUE_NUMBER" --add-label "needs-attention"
+
+                gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
+          ## Stale Implementation Detected
+
+          This issue has \`ready-for-implementation\` but:
+          - No linked PR found
+          - No implementation status comment
+          - No activity for ${HOURS_AGO} hours
+
+          **Possible causes:**
+          - Implementation workflow didn't run
+          - Workflow was interrupted
+          - Claude forgot to post status
+
+          **To retry:** Remove and re-add \`ready-for-implementation\` label, or comment \`@claude Please implement this issue.\`
+          EOF
+          )"
+              fi
+            fi
+          done
+
+      - name: Check for orphan branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Checking for orphan Claude branches ==="
+
+          # List remote branches matching claude/* pattern
+          CLAUDE_BRANCHES=$(git ls-remote --heads "https://github.com/${{ github.repository }}.git" 'refs/heads/claude/*' | awk '{print $2}' | sed 's|refs/heads/||')
+
+          for branch in $CLAUDE_BRANCHES; do
+            # Extract issue number from branch name (claude/123-description)
+            ISSUE_NUMBER=$(echo "$branch" | sed -n 's/claude\/\([0-9]*\)-.*/\1/p')
+
+            if [ -n "$ISSUE_NUMBER" ]; then
+              # Check if there's an open PR for this branch
+              PR_EXISTS=$(gh pr list \
+                --repo "${{ github.repository }}" \
+                --head "$branch" \
+                --state open \
+                --json number \
+                --jq 'length')
+
+              if [ "$PR_EXISTS" -eq 0 ]; then
+                echo "Orphan branch found: $branch (no open PR)"
+
+                # Check if the linked issue is still open
+                ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state' 2>/dev/null || echo "NOTFOUND")
+
+                if [ "$ISSUE_STATE" = "OPEN" ]; then
+                  # Create a draft PR to capture the work
+                  echo "Creating draft PR for orphan branch $branch"
+
+                  gh pr create \
+                    --repo "${{ github.repository }}" \
+                    --head "$branch" \
+                    --base main \
+                    --title "[Draft] Recovered work for #$ISSUE_NUMBER" \
+                    --body "$(cat <<EOF
+          ## Recovered Branch
+
+          This draft PR was automatically created to capture work from an orphan branch.
+
+          **Issue:** #$ISSUE_NUMBER
+          **Branch:** \`$branch\`
+
+          This branch existed without an associated PR. Please review the changes
+          and either:
+          1. Complete the implementation and mark ready for review
+          2. Close if the work is no longer needed
+
+          ---
+          *Automatically created by stale check workflow*
+          EOF
+          )" \
+                    --draft || echo "Failed to create PR (may already exist or branch has no commits)"
+                fi
+              fi
+            fi
+          done
+
+      - name: Check for stuck PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Checking for stuck PRs ==="
+
+          # Find PRs with needs-second-opinion or needs-attention that are old
+          STUCK_PRS=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --json number,title,updatedAt,labels \
+            --jq '[.[] | select(.labels | map(.name) | any(. == "needs-human-review" or . == "needs-attention"))]')
+
+          echo "$STUCK_PRS" | jq -c '.[]' | while read -r pr; do
+            PR_NUMBER=$(echo "$pr" | jq -r '.number')
+            UPDATED=$(echo "$pr" | jq -r '.updatedAt')
+
+            # Check if updated more than 24 hours ago
+            UPDATED_EPOCH=$(date -d "$UPDATED" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$UPDATED" +%s 2>/dev/null || echo 0)
+            NOW_EPOCH=$(date +%s)
+            HOURS_AGO=$(( (NOW_EPOCH - UPDATED_EPOCH) / 3600 ))
+
+            if [ "$HOURS_AGO" -ge 24 ]; then
+              echo "PR #$PR_NUMBER has been stuck for ${HOURS_AGO} hours"
+              # Just log - don't spam comments on human-review items
+            fi
+          done
+
+          echo "Stale check complete"

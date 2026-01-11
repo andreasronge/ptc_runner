@@ -1,0 +1,94 @@
+name: Claude Blocker Resolved
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  unblock-dependents:
+    # When an issue closes, check if it was blocking other issues
+    # and re-enable them for implementation
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+
+    steps:
+      - name: Find and unblock dependent issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOSED_ISSUE: ${{ github.event.issue.number }}
+        run: |
+          echo "Issue #$CLOSED_ISSUE closed, checking for dependent issues..."
+
+          # Search for open issues that reference this one in "Blocked by:" section
+          # GitHub search doesn't support exact body matching, so we search and filter
+          POTENTIAL_DEPENDENTS=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --json number,body \
+            --limit 100)
+
+          # Process each issue to check if it's blocked by the closed issue
+          echo "$POTENTIAL_DEPENDENTS" | jq -c '.[]' | while read -r issue; do
+            ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
+            ISSUE_BODY=$(echo "$issue" | jq -r '.body')
+
+            # Check if this issue has a "Blocked by:" section referencing our closed issue
+            if echo "$ISSUE_BODY" | grep -iE "blocked by:.*#$CLOSED_ISSUE|blocked by:.*#$CLOSED_ISSUE" > /dev/null; then
+              echo "Found dependent issue: #$ISSUE_NUMBER"
+
+              # Check if ALL blockers are now resolved
+              ALL_RESOLVED=true
+              BLOCKERS=$(echo "$ISSUE_BODY" | grep -oE '#[0-9]+' | grep -v "^#$ISSUE_NUMBER$" | sort -u || true)
+
+              for blocker in $BLOCKERS; do
+                BLOCKER_NUM=$(echo "$blocker" | tr -d '#')
+                # Skip if this is just a reference, not in Blocked by section
+                # We need to check if this blocker appears in the Blocked by section
+                BLOCKED_SECTION=$(echo "$ISSUE_BODY" | grep -iA5 "blocked by:" | head -10 || true)
+                if echo "$BLOCKED_SECTION" | grep -q "#$BLOCKER_NUM"; then
+                  BLOCKER_STATE=$(gh issue view "$BLOCKER_NUM" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                  if [ "$BLOCKER_STATE" != "CLOSED" ]; then
+                    echo "  Still blocked by #$BLOCKER_NUM ($BLOCKER_STATE)"
+                    ALL_RESOLVED=false
+                    break
+                  fi
+                fi
+              done
+
+              if [ "$ALL_RESOLVED" = "true" ]; then
+                echo "All blockers resolved for #$ISSUE_NUMBER - re-enabling"
+
+                # Check if it had ready-for-implementation before (was waiting)
+                LABELS=$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')
+
+                # Only re-add if it doesn't already have ready-for-implementation
+                # and doesn't have needs-clarification or needs-breakdown
+                if ! echo "$LABELS" | grep -q "ready-for-implementation"; then
+                  if echo "$LABELS" | grep -qE "needs-clarification|needs-breakdown"; then
+                    echo "  Issue needs clarification/breakdown, not re-enabling"
+                  else
+                    # Add ready-for-implementation and trigger
+                    gh issue edit "$ISSUE_NUMBER" --add-label "ready-for-implementation"
+
+                    gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
+          ## Blockers Resolved
+
+          Issue #$CLOSED_ISSUE has been closed, and all blocking issues are now resolved.
+
+          Re-enabling this issue for implementation.
+
+          @claude Please implement this issue.
+          EOF
+          )"
+                    echo "  Re-enabled #$ISSUE_NUMBER for implementation"
+                  fi
+                else
+                  echo "  Already has ready-for-implementation label"
+                fi
+              fi
+            fi
+          done
+
+          echo "Blocker resolution check complete"
