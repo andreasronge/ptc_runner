@@ -41,7 +41,12 @@ This was the blocking dependency. Now complete - subsequent issues can proceed.
 
 ## Phase 1: PTC-Lisp Enhancements
 
-### Issue #2: Namespace auto-fallback resolution
+### ~~Issue #2: Namespace auto-fallback resolution~~ ⏸️ DEFERRED
+
+> **Decision:** Deferred from this epic. Implicit resolution adds complexity with high regression risk for modest benefit. Explicit namespaces (`tool/search`, `data/products`) are unambiguous and not painful in practice. See [#609](https://github.com/andreasronge/ptc_runner/issues/609).
+
+<details>
+<summary>Original spec (preserved for future reference)</summary>
 
 Implement bare name resolution to `tool/` or `data/` namespaces when no local definition exists.
 
@@ -72,9 +77,7 @@ Implement bare name resolution to `tool/` or `data/` namespaces when no local de
 - Explicit namespace `data/foo` bypasses local shadowing
 - Ambiguous reference error message includes both namespaces
 
-**Blocked by:** #1
-
-**Blocks:** #7, #8, #9
+</details>
 
 ---
 
