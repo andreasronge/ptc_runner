@@ -19,9 +19,10 @@ jobs:
 
     permissions:
       issues: write
+      actions: read
 
     steps:
-      - name: Update epic and trigger next phase
+      - name: Update epic and trigger next issue
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
           CLOSED_ISSUE: ${{ github.event.issue.number }}
@@ -94,8 +95,39 @@ jobs:
           echo "First incomplete phase: $CURRENT_PHASE"
           echo "Unchecked issues:$PHASE_ISSUES"
 
-          # Check each issue and trigger if unblocked
-          TRIGGERED=""
+          # Check if there's already a running/queued workflow
+          echo ""
+          echo "=== Checking for running workflows ==="
+          RUNNING_WORKFLOWS=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --status in_progress \
+            --json name,status \
+            --jq '[.[] | select(.name | test("Issue Review|Issue Implementation"))] | length')
+
+          QUEUED_WORKFLOWS=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --status queued \
+            --json name,status \
+            --jq '[.[] | select(.name | test("Issue Review|Issue Implementation"))] | length')
+
+          PENDING_WORKFLOWS=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --status pending \
+            --json name,status \
+            --jq '[.[] | select(.name | test("Issue Review|Issue Implementation"))] | length')
+
+          TOTAL_ACTIVE=$((RUNNING_WORKFLOWS + QUEUED_WORKFLOWS + PENDING_WORKFLOWS))
+          echo "Active workflows: $TOTAL_ACTIVE (running: $RUNNING_WORKFLOWS, queued: $QUEUED_WORKFLOWS, pending: $PENDING_WORKFLOWS)"
+
+          if [ "$TOTAL_ACTIVE" -gt 0 ]; then
+            echo "Workflows already active, not triggering new issues"
+            exit 0
+          fi
+
+          # Find ONE issue to trigger (first unblocked one)
+          echo ""
+          echo "=== Finding next issue to trigger ==="
+
           for ISSUE_NUM in $PHASE_ISSUES; do
             echo ""
             echo "--- Checking #$ISSUE_NUM ---"
@@ -112,18 +144,11 @@ jobs:
               continue
             fi
 
-            # Skip if already has needs-review or ready-for-implementation
-            if echo "$ISSUE_LABELS" | grep -qE "needs-review|ready-for-implementation"; then
-              echo "  Already queued ($ISSUE_LABELS), skipping"
-              continue
-            fi
-
-            # Check blockers
+            # Check blockers first
             BLOCKED_SECTION=$(echo "$ISSUE_BODY" | grep -iA10 "blocked by:" | head -15 || true)
             ALL_RESOLVED=true
 
             if [ -n "$BLOCKED_SECTION" ]; then
-              # Extract issue numbers from blocked section
               BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE "#[0-9]+" | tr -d '#' | sort -u)
 
               for BLOCKER in $BLOCKERS; do
@@ -136,18 +161,29 @@ jobs:
               done
             fi
 
-            if [ "$ALL_RESOLVED" = "true" ]; then
+            if [ "$ALL_RESOLVED" != "true" ]; then
+              continue
+            fi
+
+            # Issue is unblocked - check if it needs triggering
+            if echo "$ISSUE_LABELS" | grep -qE "needs-review|ready-for-implementation"; then
+              # Has label but no workflow running - re-trigger by cycling the label
+              echo "  Has label but no workflow running - re-triggering"
+              gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --remove-label "needs-review" 2>/dev/null || true
+              gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --remove-label "ready-for-implementation" 2>/dev/null || true
+              sleep 1
+              gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-review"
+              echo "  ✅ Re-triggered #$ISSUE_NUM"
+              exit 0
+            else
+              # Add needs-review label
               echo "  ✅ All blockers resolved - adding needs-review"
               gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-review"
-              TRIGGERED="$TRIGGERED #$ISSUE_NUM"
+              echo "  Triggered #$ISSUE_NUM"
+              exit 0
             fi
           done
 
-          # Summary
           echo ""
           echo "=== Summary ==="
-          if [ -n "$TRIGGERED" ]; then
-            echo "Triggered issues:$TRIGGERED"
-          else
-            echo "No issues triggered (all blocked or already queued)"
-          fi
+          echo "No issues to trigger (all blocked or closed)"
