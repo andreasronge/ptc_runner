@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Prompt.Tools do
+defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
   @moduledoc """
   Tool schema section generation for SubAgent prompts.
 
@@ -29,13 +29,13 @@ defmodule PtcRunner.SubAgent.Prompt.Tools do
   ## Examples
 
       iex> tools = %{"add" => fn %{x: x, y: y} -> x + y end}
-      iex> schemas = PtcRunner.SubAgent.Prompt.Tools.generate(tools)
+      iex> schemas = PtcRunner.SubAgent.SystemPrompt.Tools.generate(tools)
       iex> schemas =~ "# Available Tools"
       true
 
       iex> tools = %{"search" => fn _ -> [] end}
       iex> catalog = %{"email_agent" => nil}
-      iex> schemas = PtcRunner.SubAgent.Prompt.Tools.generate(tools, catalog)
+      iex> schemas = PtcRunner.SubAgent.SystemPrompt.Tools.generate(tools, catalog)
       iex> schemas =~ "## Tools for planning (do not call)"
       true
 

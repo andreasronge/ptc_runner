@@ -2,7 +2,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.Prompt
+  alias PtcRunner.SubAgent.SystemPrompt
 
   describe "customization" do
     test "prefix prepends to generated prompt" do
@@ -12,7 +12,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: %{prefix: "You are an expert analyst."}
         )
 
-      prompt = Prompt.generate(agent, context: %{data: [1, 2, 3]})
+      prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.starts_with?(prompt, "You are an expert analyst.")
       assert prompt =~ "# Role"
@@ -26,7 +26,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: %{suffix: "Always explain your reasoning."}
         )
 
-      prompt = Prompt.generate(agent, context: %{data: [1, 2, 3]})
+      prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.ends_with?(prompt, "Always explain your reasoning.")
       assert prompt =~ "# Role"
@@ -43,7 +43,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           }
         )
 
-      prompt = Prompt.generate(agent, context: %{data: [1, 2, 3]})
+      prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.starts_with?(prompt, "You are an expert analyst.")
       assert String.ends_with?(prompt, "Always explain your reasoning.")
@@ -59,7 +59,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: %{language_spec: custom_lang}
         )
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt =~ custom_lang
       refute prompt =~ "Clojure-inspired"
@@ -72,7 +72,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: %{language_spec: :single_shot}
         )
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
       assert prompt =~ "PTC-Lisp"
       assert prompt =~ "PTC Extensions"
       # single_shot should not have memory docs
@@ -91,7 +91,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
         )
 
       prompt =
-        Prompt.generate(agent,
+        SystemPrompt.generate(agent,
           context: %{},
           resolution_context: %{turn: 2, model: :test, memory: %{}, messages: []}
         )
@@ -108,7 +108,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: %{output_format: custom_output}
         )
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt =~ custom_output
       # Check the Output Format section was replaced (not in code examples elsewhere)
@@ -124,7 +124,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: transformer
         )
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt == String.upcase(prompt)
       assert prompt =~ "# ROLE"
@@ -139,7 +139,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
           system_prompt: override
         )
 
-      prompt = Prompt.generate(agent, context: %{data: 123})
+      prompt = SystemPrompt.generate(agent, context: %{data: 123})
 
       assert prompt == override
       refute prompt =~ "# Role"
@@ -148,7 +148,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
     test "nil system_prompt uses default generation" do
       agent = SubAgent.new(prompt: "Test", system_prompt: nil)
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt =~ "## Role"
       assert prompt =~ "thinking:"

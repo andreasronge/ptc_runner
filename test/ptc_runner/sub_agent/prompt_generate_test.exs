@@ -2,16 +2,16 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.Prompt
+  alias PtcRunner.SubAgent.SystemPrompt
 
-  doctest PtcRunner.SubAgent.Prompt
+  doctest PtcRunner.SubAgent.SystemPrompt
 
   describe "generate/2" do
     test "generates complete system prompt with all sections" do
       agent = SubAgent.new(prompt: "Process data", tools: %{"search" => fn _ -> [] end})
       context = %{user: "Alice"}
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       # Check all major sections are present
       assert prompt =~ "## Role"
@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       agent = SubAgent.new(prompt: "Test")
       context = %{user_id: 123, name: "Bob"}
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       assert prompt =~ "ctx/user_id"
       assert prompt =~ "ctx/name"
@@ -38,7 +38,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       tools = %{"search" => fn _ -> [] end, "fetch" => fn _ -> %{} end}
       agent = SubAgent.new(prompt: "Test", tools: tools)
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt =~ "### search"
       assert prompt =~ "### fetch"
@@ -48,7 +48,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       agent = SubAgent.new(prompt: "Find emails for {{user}}")
       context = %{user: "Alice"}
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       assert prompt =~ "Find emails for Alice"
     end
@@ -57,7 +57,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       agent = SubAgent.new(prompt: "Find emails for {{user}}")
       context = %{}
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       # Should keep original template if expansion fails
       assert prompt =~ "Find emails for {{user}}"
@@ -66,7 +66,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "works with empty context and no tools" do
       agent = SubAgent.new(prompt: "Simple task")
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt =~ "# Role"
       assert prompt =~ "Simple task"
@@ -77,7 +77,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "generates error recovery prompt" do
       error = %{type: :parse_error, message: "Unexpected token at position 45"}
 
-      recovery = Prompt.generate_error_recovery_prompt(error)
+      recovery = SystemPrompt.generate_error_recovery_prompt(error)
 
       assert recovery =~ "# Previous Turn Error"
       assert recovery =~ "parse_error"
@@ -88,7 +88,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "handles missing error fields" do
       error = %{}
 
-      recovery = Prompt.generate_error_recovery_prompt(error)
+      recovery = SystemPrompt.generate_error_recovery_prompt(error)
 
       assert recovery =~ "# Previous Turn Error"
       assert recovery =~ "unknown_error"
@@ -98,7 +98,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       agent = SubAgent.new(prompt: "Test")
       error = %{type: :parse_error, message: "Bad syntax"}
 
-      prompt = Prompt.generate(agent, context: %{}, error_context: error)
+      prompt = SystemPrompt.generate(agent, context: %{}, error_context: error)
 
       assert prompt =~ "# Role"
       assert prompt =~ "# Previous Turn Error"
@@ -110,7 +110,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "does not truncate when no limit set" do
       long_prompt = String.duplicate("x", 10_000)
 
-      result = Prompt.truncate_if_needed(long_prompt, nil)
+      result = SystemPrompt.truncate_if_needed(long_prompt, nil)
 
       assert result == long_prompt
     end
@@ -118,7 +118,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "does not truncate when under limit" do
       short_prompt = "Short prompt"
 
-      result = Prompt.truncate_if_needed(short_prompt, %{max_chars: 1000})
+      result = SystemPrompt.truncate_if_needed(short_prompt, %{max_chars: 1000})
 
       assert result == short_prompt
     end
@@ -127,7 +127,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "truncates when over limit" do
       long_prompt = String.duplicate("x", 1000)
 
-      result = Prompt.truncate_if_needed(long_prompt, %{max_chars: 100})
+      result = SystemPrompt.truncate_if_needed(long_prompt, %{max_chars: 100})
 
       assert String.length(result) > 100
       assert String.length(result) < 300
@@ -138,7 +138,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "truncation preserves beginning of prompt" do
       prompt = "# Role\n\nImportant content" <> String.duplicate("x", 1000)
 
-      result = Prompt.truncate_if_needed(prompt, %{max_chars: 100})
+      result = SystemPrompt.truncate_if_needed(prompt, %{max_chars: 100})
 
       assert result =~ "# Role"
       assert result =~ "Important content"
@@ -161,7 +161,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       context = Map.new(1..50, fn i -> {"key_#{i}", "value_#{i}"} end)
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       assert String.length(prompt) < 1000
       assert prompt =~ "truncated"
@@ -184,7 +184,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       context = %{user: "Alice", emails: [%{id: 1, subject: "Urgent"}]}
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       # Role section
       assert prompt =~ "## Role"
@@ -214,7 +214,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
           signature: "(x :int) -> {count :int, ids [:string]}"
         )
 
-      prompt = Prompt.generate(agent, context: %{x: 10})
+      prompt = SystemPrompt.generate(agent, context: %{x: 10})
 
       assert prompt =~ "# Expected Output"
       assert prompt =~ "Your final answer must match this format: `{count :int, ids [:string]}`"
@@ -223,7 +223,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
     test "omits Expected Output section when signature is nil" do
       agent = SubAgent.new(prompt: "Test")
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       refute prompt =~ "# Expected Output"
     end
@@ -231,29 +231,29 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
     test "handles different return types in examples" do
       # Int
       agent = SubAgent.new(prompt: "T", signature: ":int")
-      assert Prompt.generate(agent) =~ "(return 42)"
+      assert SystemPrompt.generate(agent) =~ "(return 42)"
 
       # String
       agent = SubAgent.new(prompt: "T", signature: ":string")
-      assert Prompt.generate(agent) =~ "(return \"result\")"
+      assert SystemPrompt.generate(agent) =~ "(return \"result\")"
 
       # Boolean
       agent = SubAgent.new(prompt: "T", signature: ":bool")
-      assert Prompt.generate(agent) =~ "(return true)"
+      assert SystemPrompt.generate(agent) =~ "(return true)"
 
       # List
       agent = SubAgent.new(prompt: "T", signature: "[:int]")
-      assert Prompt.generate(agent) =~ "(return [])"
+      assert SystemPrompt.generate(agent) =~ "(return [])"
 
       # Nested Map
       agent = SubAgent.new(prompt: "T", signature: "{a {b :int}}")
-      assert Prompt.generate(agent) =~ "(return {:a {:b 42}})"
+      assert SystemPrompt.generate(agent) =~ "(return {:a {:b 42}})"
     end
 
     test "handles firewalled fields in signatures" do
       # Firewalled fields should be visible in the expected output format
       agent = SubAgent.new(prompt: "T", signature: "{_id :int, status :string}")
-      prompt = Prompt.generate(agent)
+      prompt = SystemPrompt.generate(agent)
 
       assert prompt =~ "{_id :int, status :string}"
       assert prompt =~ "(return {:_id 42, :status \"result\"})"
@@ -268,7 +268,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       context = %{x: 5, y: 3}
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       assert prompt =~ "Calculate 5 + 3"
       assert prompt =~ "ctx/x"
@@ -284,7 +284,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       agent = SubAgent.new(prompt: "Test", tools: tools)
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       # Should not error and should include the tool
       assert prompt =~ "very_long_named_tool_with_lots_of_words"
@@ -300,7 +300,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
         }
       }
 
-      prompt = Prompt.generate(SubAgent.new(prompt: "Test"), context: context)
+      prompt = SystemPrompt.generate(SubAgent.new(prompt: "Test"), context: context)
 
       # Should handle gracefully without erroring
       assert prompt =~ "ctx/config"
@@ -317,7 +317,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
           tool_catalog: catalog
         )
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       # Should have both sections
       assert prompt =~ "## Tools you can call"
@@ -337,7 +337,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
           tool_catalog: catalog
         )
 
-      prompt = Prompt.generate(agent, context: %{})
+      prompt = SystemPrompt.generate(agent, context: %{})
 
       # Should show standard return/fail tools
       assert prompt =~ "## Tools you can call"

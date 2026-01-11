@@ -73,7 +73,7 @@ defmodule PtcRunner.SubAgent.Loop do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{Prompt, Telemetry}
+  alias PtcRunner.SubAgent.{SystemPrompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -646,13 +646,13 @@ defmodule PtcRunner.SubAgent.Loop do
   # System prompt generation - static sections only (cacheable)
   # Dynamic sections (data inventory, tools, expected output) are in the first user message
   defp build_system_prompt(agent, _context, resolution_context, _received_field_descriptions) do
-    Prompt.generate_system(agent, resolution_context: resolution_context)
+    SystemPrompt.generate_system(agent, resolution_context: resolution_context)
   end
 
   # Build the first user message with dynamic context prepended to mission
   defp build_first_user_message(agent, run_opts, expanded_mission) do
     context_prompt =
-      Prompt.generate_context(agent,
+      SystemPrompt.generate_context(agent,
         context: run_opts.context,
         received_field_descriptions: run_opts.received_field_descriptions
       )

@@ -1,11 +1,11 @@
-defmodule PtcRunner.SubAgent.Prompt do
+defmodule PtcRunner.SubAgent.SystemPrompt do
   @moduledoc """
   System prompt generation for SubAgent LLM interactions.
 
   Orchestrates prompt generation by combining sections from sub-modules:
-  - `Prompt.DataInventory` - Context variables with types and samples
-  - `Prompt.Tools` - Available tool schemas and signatures
-  - `Prompt.Output` - Expected return format from signature
+  - `SystemPrompt.DataInventory` - Context variables with types and samples
+  - `SystemPrompt.Tools` - Available tool schemas and signatures
+  - `SystemPrompt.Output` - Expected return format from signature
 
   ## Prompt Caching Architecture
 
@@ -39,7 +39,7 @@ defmodule PtcRunner.SubAgent.Prompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Add {{x}} and {{y}}")
       iex> context = %{x: 5, y: 3}
-      iex> prompt = PtcRunner.SubAgent.Prompt.generate(agent, context: context)
+      iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: context)
       iex> prompt =~ "## Role"
       true
       iex> prompt =~ "ctx/x"
@@ -52,10 +52,10 @@ defmodule PtcRunner.SubAgent.Prompt do
   alias PtcRunner.Lisp.Prompts
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.MissionExpander
-  alias PtcRunner.SubAgent.Prompt.DataInventory
-  alias PtcRunner.SubAgent.Prompt.Output
-  alias PtcRunner.SubAgent.Prompt.Tools
   alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.SubAgent.SystemPrompt.DataInventory
+  alias PtcRunner.SubAgent.SystemPrompt.Output
+  alias PtcRunner.SubAgent.SystemPrompt.Tools
 
   @output_format """
   # Output Format
@@ -80,7 +80,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   ## Examples
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Process data")
-      iex> prompt = PtcRunner.SubAgent.Prompt.generate(agent, context: %{user: "Alice"})
+      iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: %{user: "Alice"})
       iex> prompt =~ "## Role" and prompt =~ "thinking:"
       true
 
@@ -125,7 +125,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   ## Examples
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Test")
-      iex> system = PtcRunner.SubAgent.Prompt.generate_system(agent)
+      iex> system = PtcRunner.SubAgent.SystemPrompt.generate_system(agent)
       iex> system =~ "## Role" and system =~ "# Output Format"
       true
       iex> system =~ "# Data Inventory"
@@ -167,7 +167,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   ## Examples
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Test", tools: %{"search" => fn _ -> [] end})
-      iex> context_prompt = PtcRunner.SubAgent.Prompt.generate_context(agent, context: %{x: 1})
+      iex> context_prompt = PtcRunner.SubAgent.SystemPrompt.generate_context(agent, context: %{x: 1})
       iex> context_prompt =~ "# Data Inventory" and context_prompt =~ "# Available Tools"
       true
       iex> context_prompt =~ "# Mission"
@@ -208,15 +208,15 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Prompt.resolve_language_spec("custom prompt", %{})
+      iex> PtcRunner.SubAgent.SystemPrompt.resolve_language_spec("custom prompt", %{})
       "custom prompt"
 
-      iex> spec = PtcRunner.SubAgent.Prompt.resolve_language_spec(:single_shot, %{})
+      iex> spec = PtcRunner.SubAgent.SystemPrompt.resolve_language_spec(:single_shot, %{})
       iex> is_binary(spec) and String.contains?(spec, "PTC-Lisp")
       true
 
       iex> callback = fn ctx -> if ctx.turn > 1, do: "multi", else: "single" end
-      iex> PtcRunner.SubAgent.Prompt.resolve_language_spec(callback, %{turn: 1})
+      iex> PtcRunner.SubAgent.SystemPrompt.resolve_language_spec(callback, %{turn: 1})
       "single"
 
   """
@@ -243,7 +243,7 @@ defmodule PtcRunner.SubAgent.Prompt do
               as: :generate
 
   @doc """
-  Generate tool schemas section. Delegates to `PtcRunner.SubAgent.Prompt.Tools.generate/3`.
+  Generate tool schemas section. Delegates to `PtcRunner.SubAgent.SystemPrompt.Tools.generate/3`.
 
   The `multi_turn?` parameter controls whether `return`/`fail` tools are included.
   Defaults to `true` for backward compatibility.
@@ -257,13 +257,13 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Prompt.apply_customization("base", nil)
+      iex> PtcRunner.SubAgent.SystemPrompt.apply_customization("base", nil)
       "base"
 
-      iex> PtcRunner.SubAgent.Prompt.apply_customization("base", "override")
+      iex> PtcRunner.SubAgent.SystemPrompt.apply_customization("base", "override")
       "override"
 
-      iex> PtcRunner.SubAgent.Prompt.apply_customization("base", fn p -> "PREFIX\\n" <> p end)
+      iex> PtcRunner.SubAgent.SystemPrompt.apply_customization("base", fn p -> "PREFIX\\n" <> p end)
       "PREFIX\\nbase"
 
   """
@@ -295,7 +295,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   ## Examples
 
       iex> error = %{type: :parse_error, message: "Unexpected token"}
-      iex> PtcRunner.SubAgent.Prompt.generate_error_recovery_prompt(error) =~ "Previous Turn Error"
+      iex> PtcRunner.SubAgent.SystemPrompt.generate_error_recovery_prompt(error) =~ "Previous Turn Error"
       true
 
   """
@@ -325,10 +325,10 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Prompt.truncate_if_needed("short", nil)
+      iex> PtcRunner.SubAgent.SystemPrompt.truncate_if_needed("short", nil)
       "short"
 
-      iex> result = PtcRunner.SubAgent.Prompt.truncate_if_needed(String.duplicate("x", 1000), %{max_chars: 100})
+      iex> result = PtcRunner.SubAgent.SystemPrompt.truncate_if_needed(String.duplicate("x", 1000), %{max_chars: 100})
       iex> result =~ "truncated"
       true
 

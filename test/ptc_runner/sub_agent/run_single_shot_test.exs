@@ -4,7 +4,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
   alias PtcRunner.SubAgent
 
   describe "run/2 - single-shot mode" do
-    test "single-shot uses Prompt.generate with same structure as loop mode" do
+    test "single-shot uses SystemPrompt.generate with same structure as loop mode" do
       # Verify that single-shot mode uses the same prompt generation as loop mode
       agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
       context = %{x: 5, y: 3}
@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert_received {:llm_input, input}
       system_prompt = input.system
 
-      # Single-shot mode should now use full Prompt.generate, which includes:
+      # Single-shot mode should now use full SystemPrompt.generate, which includes:
       assert system_prompt =~ "## Role"
       assert system_prompt =~ "Write programs that accomplish the user's mission"
       assert system_prompt =~ "thinking:"

@@ -21,7 +21,7 @@ defmodule PtcRunner.MigrationGuard do
 
   # Uncomment when starting Phase 3
   # assert_module_deleted(PtcRunner.Prompt, "CLN-002")
-  # assert_module_deleted(PtcRunner.SubAgent.Prompt, "CLN-004")
+  # CLN-004 DONE: SubAgent.Prompt renamed to SubAgent.SystemPrompt
   # assert_module_deleted(PtcRunner.SubAgent.Template, "CLN-005")
   # assert_module_deleted(PtcRunner.Lisp.Prompts, "CLN-006")
 

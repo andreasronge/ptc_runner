@@ -80,11 +80,11 @@ defmodule Mix.Tasks.Code.Scout do
 
   defp print_system_prompt(query_string) do
     alias CodeScout.Agent
-    alias PtcRunner.SubAgent.Prompt
+    alias PtcRunner.SubAgent.SystemPrompt
 
     agent = Agent.new()
     context = %{"query" => query_string}
-    system_prompt = Prompt.generate(agent, context: context)
+    system_prompt = SystemPrompt.generate(agent, context: context)
 
     Mix.shell().info("\n" <> String.duplicate("=", 60))
     Mix.shell().info("SYSTEM PROMPT")

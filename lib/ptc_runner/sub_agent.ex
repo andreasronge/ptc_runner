@@ -674,12 +674,12 @@ defmodule PtcRunner.SubAgent do
       messages: messages
     }
 
-    # Use Prompt.generate for consistency with loop mode
+    # Use SystemPrompt.generate for consistency with loop mode
     # Pass received field descriptions for rendering in prompt
-    alias PtcRunner.SubAgent.Prompt
+    alias PtcRunner.SubAgent.SystemPrompt
 
     system_prompt =
-      Prompt.generate(agent,
+      SystemPrompt.generate(agent,
         context: context,
         resolution_context: resolution_context,
         received_field_descriptions: received_field_descriptions
@@ -1056,9 +1056,9 @@ defmodule PtcRunner.SubAgent do
   def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
 
-    # Generate system prompt using existing Prompt module
-    alias PtcRunner.SubAgent.{MissionExpander, Prompt}
-    system_prompt = Prompt.generate(agent, context: context)
+    # Generate system prompt using SystemPrompt module
+    alias PtcRunner.SubAgent.{MissionExpander, SystemPrompt}
+    system_prompt = SystemPrompt.generate(agent, context: context)
 
     # Expand user message template
     {:ok, user_message} = MissionExpander.expand(agent.prompt, context, on_missing: :keep)

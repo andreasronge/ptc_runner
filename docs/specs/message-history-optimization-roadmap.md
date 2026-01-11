@@ -406,19 +406,21 @@ Each rename is atomic (one commit). Can be done in parallel or sequentially.
 
 ---
 
-### Issue #15: Rename SubAgent.Prompt → SubAgent.SystemPrompt
+### Issue #15: Rename SubAgent.Prompt → SubAgent.SystemPrompt ✅ DONE
 
 **Requirements:**
-- BRK-005: Module rename
-- CLN-004
+- BRK-005: Module rename ✅
+- CLN-004 ✅
 
 **Files:**
-- Rename `lib/ptc_runner/sub_agent/prompt.ex` → `lib/ptc_runner/sub_agent/system_prompt.ex`
-- Update all references
+- Rename `lib/ptc_runner/sub_agent/prompt.ex` → `lib/ptc_runner/sub_agent/system_prompt.ex` ✅
+- Update all references ✅
 
 **Blocked by:** #1
 
 **Blocks:** #22
+
+**Implemented:** PR #624
 
 ---
 

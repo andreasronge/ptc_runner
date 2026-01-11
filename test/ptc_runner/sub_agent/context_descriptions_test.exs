@@ -2,7 +2,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.Prompt
+  alias PtcRunner.SubAgent.SystemPrompt
 
   describe "SubAgent.new/1" do
     test "accepts context_descriptions" do
@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
     end
   end
 
-  describe "Prompt.generate/2 with context_descriptions" do
+  describe "SystemPrompt.generate/2 with context_descriptions" do
     test "includes context_descriptions in Data Inventory" do
       agent =
         SubAgent.new(
@@ -44,7 +44,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
         question: "What is the cheapest laptop?"
       }
 
-      prompt = Prompt.generate(agent, context: context)
+      prompt = SystemPrompt.generate(agent, context: context)
 
       assert prompt =~ "ctx/products"
       assert prompt =~ "— List of product maps with {id, name, price, category}"
@@ -74,7 +74,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
       }
 
       prompt =
-        Prompt.generate(agent,
+        SystemPrompt.generate(agent,
           context: context,
           received_field_descriptions: received_field_descriptions
         )
@@ -97,7 +97,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
           context_descriptions: %{"products" => "Description with string key"}
         )
 
-      prompt = Prompt.generate(agent, context: %{"products" => []})
+      prompt = SystemPrompt.generate(agent, context: %{"products" => []})
       assert prompt =~ "— Description with string key"
     end
 
@@ -108,7 +108,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
           context_descriptions: %{products: "Atom key description"}
         )
 
-      prompt = Prompt.generate(agent, context: %{"products" => []})
+      prompt = SystemPrompt.generate(agent, context: %{"products" => []})
       assert prompt =~ "— Atom key description"
     end
   end

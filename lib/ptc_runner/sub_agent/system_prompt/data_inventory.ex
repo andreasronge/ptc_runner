@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Prompt.DataInventory do
+defmodule PtcRunner.SubAgent.SystemPrompt.DataInventory do
   @moduledoc """
   Data inventory section generation for SubAgent prompts.
 
@@ -31,7 +31,7 @@ defmodule PtcRunner.SubAgent.Prompt.DataInventory do
   ## Examples
 
       iex> context = %{user_id: 123, name: "Alice"}
-      iex> inventory = PtcRunner.SubAgent.Prompt.DataInventory.generate(context, nil)
+      iex> inventory = PtcRunner.SubAgent.SystemPrompt.DataInventory.generate(context, nil)
       iex> inventory =~ "ctx/user_id"
       true
       iex> inventory =~ "ctx/name"
