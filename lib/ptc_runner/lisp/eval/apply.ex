@@ -67,9 +67,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     {:error, {:arity_error, "set expects 1 argument, got #{length(args)}"}}
   end
 
-  # Closure application (5-element tuple format with turn_history)
+  # Closure application (6-element tuple format with turn_history and metadata)
   defp do_apply_fun(
-         {:closure, patterns, _body, _env, _th} = closure,
+         {:closure, patterns, _body, _env, _th, _meta} = closure,
          args,
          %EvalContext{} = eval_ctx,
          do_eval_fn
@@ -327,7 +327,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   """
   @spec closure_to_fun(term(), EvalContext.t(), (term(), EvalContext.t() -> term())) :: term()
   def closure_to_fun(
-        {:closure, patterns, body, closure_env, closure_turn_history},
+        {:closure, patterns, body, closure_env, closure_turn_history, _metadata},
         %EvalContext{} = eval_context,
         do_eval_fn
       ) do
@@ -569,12 +569,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # ============================================================
 
   defp execute_closure(closure, args, eval_ctx, do_eval_fn) do
-    {:closure, patterns, _body, _env, _th} = closure
+    {:closure, patterns, _body, _env, _th, _meta} = closure
     do_execute_closure(closure, patterns, args, eval_ctx, do_eval_fn)
   end
 
   defp do_execute_closure(
-         {:closure, _closure_patterns, body, closure_env, closure_turn_history} = closure,
+         {:closure, _closure_patterns, body, closure_env, closure_turn_history, _meta} = closure,
          binding_patterns,
          args,
          %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
@@ -594,6 +594,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
         case do_eval_fn.(body, closure_ctx) do
           {:ok, result, final_ctx} ->
+            # Capture return type and update user_ns if this closure is a named function
+            final_ctx = update_closure_return_type(closure, result, final_ctx)
             # Restore caller's environment, keep updated prints/user_ns
             {:ok, result, %{final_ctx | env: caller_ctx.env}}
 
@@ -608,7 +610,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     {:recur_signal, new_args, prints} ->
       # For recur, variadic functions behave like fixed-arity functions
       # where the & rest pattern is the last parameter.
-      {:closure, closure_patterns, _, _, _} = closure
+      {:closure, closure_patterns, _, _, _, _} = closure
 
       recur_patterns =
         case closure_patterns do
@@ -640,6 +642,43 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           {:error, {:arity_mismatch, expected, actual}}
       end
   end
+
+  # Update closure metadata with return type if closure exists in user_ns
+  defp update_closure_return_type(
+         {:closure, params, body, env, th, _old_meta} = _closure,
+         result,
+         %EvalContext{user_ns: user_ns} = ctx
+       ) do
+    return_type = derive_type(result)
+
+    # Find entries in user_ns that match this closure (same params, body, env, th)
+    updated_user_ns =
+      Enum.reduce(user_ns, user_ns, fn
+        {name, {:closure, ^params, ^body, ^env, ^th, old_meta}}, acc ->
+          new_meta = Map.put(old_meta, :return_type, return_type)
+          Map.put(acc, name, {:closure, params, body, env, th, new_meta})
+
+        _, acc ->
+          acc
+      end)
+
+    %{ctx | user_ns: updated_user_ns}
+  end
+
+  # Derive type label from a value
+  defp derive_type(nil), do: "nil"
+  defp derive_type(true), do: "boolean"
+  defp derive_type(false), do: "boolean"
+  defp derive_type(n) when is_integer(n), do: "integer"
+  defp derive_type(n) when is_float(n), do: "float"
+  defp derive_type(s) when is_binary(s), do: "string"
+  defp derive_type(a) when is_atom(a), do: "keyword"
+  defp derive_type(l) when is_list(l), do: "list[#{length(l)}]"
+  defp derive_type(%MapSet{} = s), do: "set[#{MapSet.size(s)}]"
+  defp derive_type(m) when is_map(m), do: "map[#{map_size(m)}]"
+  defp derive_type({:closure, _, _, _, _, _}), do: "fn"
+  defp derive_type(f) when is_function(f), do: "fn"
+  defp derive_type(_), do: "unknown"
 
   defp bind_args({:variadic, leading, rest_pattern}, args) do
     {leading_args, rest_args} = Enum.split(args, length(leading))

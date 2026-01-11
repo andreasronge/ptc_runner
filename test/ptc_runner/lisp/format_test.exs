@@ -7,23 +7,28 @@ defmodule PtcRunner.Lisp.FormatTest do
 
   describe "to_string/2 with closures" do
     test "formats closure with single parameter" do
-      closure = {:closure, [{:var, :x}], nil, %{}, []}
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
       assert Format.to_string(closure) == "#fn[x]"
     end
 
     test "formats closure with multiple parameters" do
-      closure = {:closure, [{:var, :x}, {:var, :y}, {:var, :z}], nil, %{}, []}
+      closure = {:closure, [{:var, :x}, {:var, :y}, {:var, :z}], nil, %{}, [], %{}}
       assert Format.to_string(closure) == "#fn[x y z]"
     end
 
     test "formats zero-param closure" do
-      closure = {:closure, [], nil, %{}, []}
+      closure = {:closure, [], nil, %{}, [], %{}}
       assert Format.to_string(closure) == "#fn[]"
     end
 
     test "formats closure with destructuring pattern as underscore" do
-      closure = {:closure, [{:destructure, {:keys, [:a, :b], []}}], nil, %{}, []}
+      closure = {:closure, [{:destructure, {:keys, [:a, :b], []}}], nil, %{}, [], %{}}
       assert Format.to_string(closure) == "#fn[_]"
+    end
+
+    test "formats closure with metadata" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{return_type: "integer"}}
+      assert Format.to_string(closure) == "#fn[x]"
     end
   end
 
@@ -74,12 +79,12 @@ defmodule PtcRunner.Lisp.FormatTest do
 
   describe "to_string/2 with nested values" do
     test "formats closure nested in map" do
-      closure = {:closure, [{:var, :x}], nil, %{}, []}
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
       assert Format.to_string(%{f: closure}) == "%{f: #fn[x]}"
     end
 
     test "formats closure nested in list" do
-      closure = {:closure, [{:var, :x}], nil, %{}, []}
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
       assert Format.to_string([1, closure, 3]) == "[1, #fn[x], 3]"
     end
 
@@ -88,7 +93,7 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
 
     test "formats deeply nested closures" do
-      closure = {:closure, [{:var, :n}], nil, %{}, []}
+      closure = {:closure, [{:var, :n}], nil, %{}, [], %{}}
       result = Format.to_string(%{outer: %{inner: closure}})
       assert result =~ "#fn[n]"
     end
@@ -198,7 +203,7 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
 
     test "options are ignored for closures" do
-      closure = {:closure, [{:var, :x}], nil, %{}, []}
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
       assert Format.to_string(closure, pretty: true, limit: 5) == "#fn[x]"
     end
 
