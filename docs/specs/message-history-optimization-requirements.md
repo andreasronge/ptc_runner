@@ -11,7 +11,7 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | ID | Requirement | Notes |
 |----|-------------|-------|
 | PRE-001 | ~~Issue #603 (Messages stored in Step) must be completed before implementation~~ | ✅ Complete (closed 2026-01-09) |
-| PRE-002 | PTC-Lisp: Auto-fallback resolution for bare names to `tool/` or `data/` | See NS-004 to NS-006 |
+| PRE-002 | ~~PTC-Lisp: Auto-fallback resolution for bare names to `tool/` or `data/`~~ | ⏸️ Deferred - explicit namespaces sufficient |
 | PRE-003 | PTC-Lisp: Return type capture for user-defined functions when called | For user/ prelude display |
 
 ## Breaking Changes
@@ -84,12 +84,12 @@ Required changes to the demo application (`demo/`):
 | NS-001 | `tool/` namespace for provided tools (side effects) | e.g., `(tool/fetch-users "admin")` |
 | NS-002 | `data/` namespace for provided input data (read-only) | e.g., `data/products` |
 | NS-003 | `user/` namespace for LLM definitions (prelude) | Grows each turn with def/defn |
-| NS-004 | Auto-fallback: bare name resolves to `tool/` if no local definition exists | |
-| NS-005 | Auto-fallback: bare name resolves to `data/` if no local definition exists | |
-| NS-006 | Local definitions take precedence over fallback | |
-| NS-007 | Ambiguous reference (both `tool/foo` and `data/foo` exist) raises runtime exception | Error: `{:error, {:ambiguous_reference, "..."}}` |
+| ~~NS-004~~ | ~~Auto-fallback: bare name resolves to `tool/` if no local definition exists~~ | ⏸️ Deferred |
+| ~~NS-005~~ | ~~Auto-fallback: bare name resolves to `data/` if no local definition exists~~ | ⏸️ Deferred |
+| ~~NS-006~~ | ~~Local definitions take precedence over fallback~~ | ⏸️ Deferred |
+| ~~NS-007~~ | ~~Ambiguous reference (both `tool/foo` and `data/foo` exist) raises runtime exception~~ | ⏸️ Deferred |
 | NS-008 | Initial `input_data` keys shown in `data/` section | Unified format with user definitions |
-| NS-009 | Explicit namespace access (`data/foo`) bypasses local shadowing | LLM can always access shadowed values via full namespace |
+| ~~NS-009~~ | ~~Explicit namespace access (`data/foo`) bypasses local shadowing~~ | ⏸️ Deferred |
 | NS-010 | Turn 1: `user/` section empty or omitted | REPL with no prelude loaded |
 | NS-011 | Turn N+1: `user/` section shows accumulated definitions | Prelude grows each turn |
 | NS-012 | `tool/` and `data/` sections are stable (cacheable) | Only `user/` changes between turns |

@@ -247,4 +247,3 @@ end
 ## Cache Lifetime
 
 Anthropic caches expire after **5 minutes** of inactivity. The cache is keyed on the exact prefix, so any change to the system prompt invalidates the cache.
-
