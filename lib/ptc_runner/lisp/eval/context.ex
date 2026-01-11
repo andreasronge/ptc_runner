@@ -23,6 +23,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   ]
 
   @max_loop_limit 10_000
+  @max_print_length 2000
 
   @typedoc """
   Tool call record for tracing.
@@ -81,10 +82,19 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   @doc """
   Appends a print message to the context.
+
+  Long messages are truncated to #{@max_print_length} characters (TRN-011).
   """
   @spec append_print(t(), String.t()) :: t()
   def append_print(%__MODULE__{prints: prints} = context, message) do
-    %{context | prints: [message | prints]}
+    truncated =
+      if String.length(message) > @max_print_length do
+        String.slice(message, 0, @max_print_length) <> "..."
+      else
+        message
+      end
+
+    %{context | prints: [truncated | prints]}
   end
 
   @doc """
