@@ -31,14 +31,17 @@ A `Turn` represents a single LLM interaction cycle. Turns are **immutable** once
 ```elixir
 %Turn{
   number: pos_integer(),
-  program: String.t(),
+  raw_response: String.t(),  # full LLM output (always captured)
+  program: String.t(),       # extracted code
   result: term(),
   prints: [String.t()],
   tool_calls: [tool_call()],
-  memory: map(),           # snapshot after this turn
+  memory: map(),             # snapshot after this turn
   success?: boolean()
 }
 ```
+
+Note: `raw_response` captures the complete LLM output including any reasoning/commentary outside the code block. This is always captured (no debug flag needed). The system prompt is NOT stored per-turn since it's static - use `SubAgent.Prompt.generate_system/2` to view it.
 
 ### Compression as a Render Function
 
@@ -368,7 +371,18 @@ Essential for:
 
 ## Failed Turns
 
-**Failed turns are NOT compressed.** When a turn fails, the full code is preserved so the LLM sees exactly what it tried and why it failed.
+Failed turns use **conditional collapsing** based on recovery status:
+
+| Current turn | Error history behavior |
+|--------------|----------------------|
+| **Succeeds** | Collapse all previous errors → clean single USER message |
+| **Fails** | Show most recent error turn (limit: 1) |
+
+### Rationale
+
+Once the LLM successfully recovers from an error, old broken code becomes noise. But while still failing, recent error context helps recovery.
+
+### Still Failing (show error)
 
 ```
 {mission}
@@ -397,7 +411,30 @@ Error: undefined symbol 'broken-code'
 Turns left: 3
 ```
 
-Multiple failed turns each keep their full code blocks.
+### After Recovery (errors collapsed)
+
+Once a turn succeeds, all previous error turns are collapsed. The message returns to the clean format:
+
+```
+{mission}
+
+;; === tool/ ===
+(tool/fetch-data key)            ; key:string -> map
+
+;; === data/ ===
+data/config                      ; map[3]
+
+;; === user/ (your prelude) ===
+users                            ; = list[5], sample: {:name "Alice"}
+result                           ; = map[2], sample: {:status "ok"}
+
+;; Tool calls made:
+;   fetch-data("users")
+
+Turns left: 2
+```
+
+No error sections shown - the LLM has recovered and old mistakes are irrelevant.
 
 ## Compression Rules
 
@@ -405,7 +442,7 @@ Multiple failed turns each keep their full code blocks.
 |---------|----------|
 | Mission (original task) | Always at the top of USER message |
 | Successful turn results | Compressed to summary |
-| Failed turn code | Kept full (LLM needs to see broken code) |
+| Failed turn code | Conditional: shown if still failing, collapsed after recovery |
 | Tool calls | Accumulated, limited to most recent N |
 | println output | Accumulated, limited to most recent N calls |
 | SYSTEM prompt | Unchanged |
@@ -486,23 +523,30 @@ If the LLM writes `fetch-users` without namespace and no local definition exists
 
 ## Debug and Tracing
 
-Compression is for the **LLM prompt only**. Full history is always preserved:
+Compression is for the **LLM prompt only**. Full history is always preserved in `step.turns`.
 
-| Purpose | Data Source |
-|---------|-------------|
-| LLM prompt | `Compression.to_messages(turns, memory, opts)` |
-| Debugging | `step.turns` (full Turn structs) |
-| Turn count | `length(step.turns)` |
+### print_trace API
 
-The turns list contains complete history:
 ```elixir
-turns: [
-  %Turn{number: 1, program: "(def x ...)", prints: [...], ...},
-  %Turn{number: 2, program: "(return y)", prints: [...], ...}
-]
+SubAgent.Debug.print_trace(step)                        # programs + results
+SubAgent.Debug.print_trace(step, raw: true)             # + raw_response (LLM reasoning)
+SubAgent.Debug.print_trace(step, view: :compressed)     # what LLM sees
+SubAgent.Debug.print_trace(step, usage: true)           # add token stats
 ```
 
-When building the LLM prompt, we render turns via the compression strategy. When debugging, we use the full turns directly.
+| Option | Values | Description |
+|--------|--------|-------------|
+| `view` | `:turns` (default), `:compressed` | Perspective |
+| `raw` | `boolean` | Include `raw_response` in turns view |
+| `usage` | `boolean` | Add token statistics |
+
+### System Prompt
+
+The system prompt is static and NOT stored per-turn. To view it:
+
+```elixir
+SubAgent.Prompt.generate_system(agent)
+```
 
 ## Resolved Design Decisions
 
@@ -510,7 +554,7 @@ When building the LLM prompt, we render turns via the compression strategy. When
 
 **Turn count source**: Always `length(turns)`, never derived from message count (which varies by compression strategy).
 
-**Error handling**: All failed turns keep their full code. This prevents the LLM from cycling through the same mistakes.
+**Error handling**: Failed turns use conditional collapsing. While still failing, the most recent error is shown (limit: 1). After recovery, all error turns are collapsed. This balances error context with token efficiency.
 
 **Accumulated definitions**: Show all definitions from all previous turns, except when redefined - only show the latest. Order follows definition order.
 
