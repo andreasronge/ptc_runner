@@ -18,7 +18,8 @@ jobs:
     steps:
       - name: Find and trigger first unblocked issue
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Use PAT so that adding needs-review label triggers issue-review workflow
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
           EPIC_NUMBER: ${{ github.event.issue.number }}
         run: |
           echo "Epic #$EPIC_NUMBER activated, finding first unblocked issue..."

@@ -16,7 +16,8 @@ jobs:
     steps:
       - name: Find and unblock dependent issues
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Use PAT so that adding needs-review label triggers issue-review workflow
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
           CLOSED_ISSUE: ${{ github.event.issue.number }}
         run: |
           echo "Issue #$CLOSED_ISSUE closed, checking for dependent issues..."
