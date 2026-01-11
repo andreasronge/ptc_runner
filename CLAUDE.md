@@ -13,6 +13,17 @@ This is a **0.x library** — expect breaking changes. Backward compatibility is
 - Simplify aggressively
 - Don't add compatibility shims
 
+## Current Work
+
+**Active epic:** Message History Optimization (see `docs/specs/message-history-optimization-roadmap.md`)
+
+The codebase may contain intentional duplication during this phased refactoring:
+- Dual-write patterns (e.g., `Step.trace` and `Step.turns` coexist)
+- Backward-compat shims (e.g., `prompt:` and `mission:` both work)
+- Old code kept to avoid breaking tests mid-refactor
+
+**Don't "fix" this duplication** - it will be cleaned up in the final phase. Check the roadmap before removing seemingly dead code.
+
 ## Tech Stack
 
 - **Language**: Elixir 1.19+ / Erlang OTP 28+
@@ -64,7 +75,6 @@ Programs execute in isolated BEAM processes with timeout (1s) and memory limits 
 - **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - Language reference
 - **[Testing Guidelines](docs/guidelines/testing-guidelines.md)** - Test quality and patterns
 - **[Planning Guidelines](docs/guidelines/planning-guidelines.md)** - Issue review and feature planning
-- **[Roadmap Guidelines](docs/guidelines/roadmap-guidelines.md)** - Multi-issue feature planning
 - **[GitHub Workflows](docs/guidelines/github-workflows.md)** - PM workflow, epics, and automation
 - **[Documentation Guidelines](docs/guidelines/documentation-guidelines.md)** - Writing docs and guides
 
