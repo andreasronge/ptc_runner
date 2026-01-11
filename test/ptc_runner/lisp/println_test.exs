@@ -96,4 +96,41 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     # Prints are NOT captured (same as pmap - HOF side effects lost)
     assert step.prints == []
   end
+
+  test "println output truncated at 2000 characters (TRN-011)" do
+    # Generate a string longer than 2000 chars
+    long_string = String.duplicate("x", 2500)
+
+    source = """
+    (println "#{long_string}")
+    """
+
+    {:ok, step} = Lisp.run(source)
+    [output] = step.prints
+    assert String.length(output) == 2003
+    assert String.ends_with?(output, "...")
+    assert String.starts_with?(output, "xxx")
+  end
+
+  test "multiple long println calls each truncated independently" do
+    long_a = String.duplicate("a", 2100)
+    long_b = String.duplicate("b", 2100)
+
+    source = """
+    (println "#{long_a}")
+    (println "#{long_b}")
+    """
+
+    {:ok, step} = Lisp.run(source)
+    assert length(step.prints) == 2
+
+    [first, second] = step.prints
+    assert String.length(first) == 2003
+    assert String.starts_with?(first, "aaa")
+    assert String.ends_with?(first, "...")
+
+    assert String.length(second) == 2003
+    assert String.starts_with?(second, "bbb")
+    assert String.ends_with?(second, "...")
+  end
 end
