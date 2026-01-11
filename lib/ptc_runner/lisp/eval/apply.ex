@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Runtime.Math
+  alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
 
@@ -665,20 +666,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     %{ctx | user_ns: updated_user_ns}
   end
 
-  # Derive type label from a value
-  defp derive_type(nil), do: "nil"
-  defp derive_type(true), do: "boolean"
-  defp derive_type(false), do: "boolean"
-  defp derive_type(n) when is_integer(n), do: "integer"
-  defp derive_type(n) when is_float(n), do: "float"
-  defp derive_type(s) when is_binary(s), do: "string"
-  defp derive_type(a) when is_atom(a), do: "keyword"
-  defp derive_type(l) when is_list(l), do: "list[#{length(l)}]"
-  defp derive_type(%MapSet{} = s), do: "set[#{MapSet.size(s)}]"
-  defp derive_type(m) when is_map(m), do: "map[#{map_size(m)}]"
-  defp derive_type({:closure, _, _, _, _, _}), do: "fn"
-  defp derive_type(f) when is_function(f), do: "fn"
-  defp derive_type(_), do: "unknown"
+  defp derive_type(value), do: TypeVocabulary.type_of(value)
 
   defp bind_args({:variadic, leading, rest_pattern}, args) do
     {leading_args, rest_args} = Enum.split(args, length(leading))
