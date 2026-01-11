@@ -55,7 +55,7 @@ jobs:
           echo "Found active epic: #$EPIC_NUMBER"
 
           # Get epic body
-          EPIC_BODY=$(gh issue view "$EPIC_NUMBER" --json body --jq '.body')
+          EPIC_BODY=$(gh issue view "$EPIC_NUMBER" --repo "${{ github.repository }}" --json body --jq '.body')
 
           # Check if the issue is referenced in the epic (as checkbox)
           if echo "$EPIC_BODY" | grep -q "\- \[ \] #$ISSUE_NUMBER"; then
@@ -66,7 +66,7 @@ jobs:
 
             # Update the epic
             echo "$NEW_BODY" > /tmp/epic-body.md
-            gh issue edit "$EPIC_NUMBER" --body-file /tmp/epic-body.md
+            gh issue edit "$EPIC_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/epic-body.md
 
             echo "✅ Updated epic #$EPIC_NUMBER - checked off #$ISSUE_NUMBER"
           else
