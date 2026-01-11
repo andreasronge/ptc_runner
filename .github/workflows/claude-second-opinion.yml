@@ -11,6 +11,7 @@ jobs:
     if: github.event.label.name == 'needs-second-opinion'
 
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     concurrency:
       group: claude-automation
@@ -26,7 +27,44 @@ jobs:
       MIX_ENV: test
 
     steps:
+      - name: Check for repeated second opinion (terminal state)
+        id: terminal-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+
+          # Check if second opinion already attempted
+          if echo "$PR_BODY" | grep -q "<!-- second-opinion-attempted -->"; then
+            echo "is_terminal=true" >> $GITHUB_OUTPUT
+            echo "::warning::Second opinion already attempted - escalating to human review"
+
+            # Add terminal state label
+            gh pr edit "$PR_NUMBER" --add-label "needs-human-review"
+            gh pr edit "$PR_NUMBER" --remove-label "needs-second-opinion" || true
+
+            gh pr comment "$PR_NUMBER" --body "$(cat <<'EOF'
+          ## Automation Exhausted
+
+          Both regular fix attempts and second opinion review have been unable to resolve this PR.
+
+          **This PR requires human intervention.**
+
+          The `needs-human-review` label has been added. A maintainer should:
+          1. Review the technical issues described in previous comments
+          2. Decide on the approach
+          3. Either fix manually or provide specific guidance
+
+          Remove `needs-human-review` to allow automation to retry.
+          EOF
+          )"
+          else
+            echo "is_terminal=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Get PR details
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
@@ -43,7 +81,24 @@ jobs:
           ISSUE_NUMBER=$(echo "$PR_DATA" | jq -r '.body' | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K\d+' | head -1 || true)
           echo "linked_issue=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
 
+      - name: Mark second opinion attempted
+        if: steps.terminal-check.outputs.is_terminal != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+
+          # Add marker to PR body
+          NEW_BODY="$PR_BODY
+
+          <!-- second-opinion-attempted -->"
+
+          echo "$NEW_BODY" > /tmp/pr-body.md
+          gh pr edit "$PR_NUMBER" --body-file /tmp/pr-body.md
+
       - name: Checkout PR branch
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -51,18 +106,22 @@ jobs:
           token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Install git pre-commit hook
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         run: |
           cp scripts/pre-commit .git/hooks/pre-commit
           chmod +x .git/hooks/pre-commit
 
       - name: Setup Elixir environment
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         uses: ./.github/actions/setup-elixir
 
       - name: Setup Claude Code
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
       - name: Gather context for fresh review
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         id: context
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,6 +147,7 @@ jobs:
           echo "context_ready=true" >> $GITHUB_OUTPUT
 
       - name: Run Claude Second Opinion
+        if: steps.terminal-check.outputs.is_terminal != 'true'
         id: claude
         uses: anthropics/claude-code-action@v1
         env:
@@ -166,7 +226,7 @@ jobs:
           show_full_output: true
 
       - name: Remove trigger label
-        if: always()
+        if: always() && steps.terminal-check.outputs.is_terminal != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -174,7 +234,7 @@ jobs:
 
       # Safety net: push any unpushed commits
       - name: Push unpushed commits
-        if: always()
+        if: always() && steps.terminal-check.outputs.is_terminal != 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
