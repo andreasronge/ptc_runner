@@ -18,27 +18,15 @@ jobs:
       cancel-in-progress: false
 
     permissions:
-      contents: read
       issues: write
-      id-token: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Get epic info
-        id: epic
+      - name: Update epic and trigger next phase
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+          CLOSED_ISSUE: ${{ github.event.issue.number }}
         run: |
-          # Extract epic label
-          EPIC_LABEL=$(echo '${{ toJSON(github.event.issue.labels) }}' | jq -r '.[] | select(.name | startswith("epic:")) | .name' | head -1)
-
-          if [ -z "$EPIC_LABEL" ]; then
-            echo "No epic label found"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          echo "Issue #$CLOSED_ISSUE closed, updating epic..."
 
           # Find the active epic
           EPIC_NUMBER=$(gh issue list \
@@ -50,48 +38,116 @@ jobs:
             --jq '.[0].number')
 
           if [ -z "$EPIC_NUMBER" ] || [ "$EPIC_NUMBER" = "null" ]; then
-            echo "No active epic found"
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "No active epic found, skipping"
             exit 0
           fi
 
-          echo "epic_number=$EPIC_NUMBER" >> $GITHUB_OUTPUT
-          echo "epic_label=$EPIC_LABEL" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "Found active epic: #$EPIC_NUMBER"
 
-      - name: Update epic and enforce phase ordering
-        if: steps.epic.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1
-        env:
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            Issue #${{ github.event.issue.number }} ("${{ github.event.issue.title }}") was just closed.
-            Epic: #${{ steps.epic.outputs.epic_number }}
+          # Get epic body
+          EPIC_BODY=$(gh issue view "$EPIC_NUMBER" --repo "${{ github.repository }}" --json body --jq '.body')
 
-            ## Your Tasks
+          # Check off the completed issue
+          if echo "$EPIC_BODY" | grep -q "\- \[ \] #$CLOSED_ISSUE"; then
+            echo "Checking off #$CLOSED_ISSUE in epic..."
+            NEW_BODY=$(echo "$EPIC_BODY" | sed "s/- \[ \] #$CLOSED_ISSUE/- [x] #$CLOSED_ISSUE/g")
+            echo "$NEW_BODY" > /tmp/epic-body.md
+            gh issue edit "$EPIC_NUMBER" --repo "${{ github.repository }}" --body-file /tmp/epic-body.md
+            echo "✅ Checked off #$CLOSED_ISSUE"
 
-            1. **Check off the completed issue in the epic**
-               - Get the epic body: `gh issue view ${{ steps.epic.outputs.epic_number }} --json body --jq '.body'`
-               - Replace `- [ ] #${{ github.event.issue.number }}` with `- [x] #${{ github.event.issue.number }}`
-               - Update: `gh issue edit ${{ steps.epic.outputs.epic_number }} --body-file /tmp/epic-body.md`
+            # Re-read the updated body
+            EPIC_BODY="$NEW_BODY"
+          fi
 
-            2. **Analyze phase structure and trigger next issues**
-               - Parse the epic markdown to identify phases (### Phase N: ...)
-               - Find the FIRST phase that still has unchecked items (`- [ ]`)
-               - For each unchecked issue in that phase:
-                 - Check if it has a "Blocked by:" section with open blockers
-                 - Use `gh issue view ISSUE_NUM --json state` to check blocker status
-                 - If ALL blockers are closed (or no blockers), add `needs-review` label
-               - Do NOT trigger issues from later phases until current phase is complete
+          # Find first incomplete phase and its unchecked issues
+          echo ""
+          echo "=== Analyzing phase structure ==="
 
-            3. **Post a brief status comment on the epic** (optional, only if you triggered new issues)
+          # Extract phases and find first with unchecked items
+          CURRENT_PHASE=""
+          PHASE_ISSUES=""
 
-            ## Rules
-            - Only trigger issues from the FIRST incomplete phase
-            - Respect "Blocked by:" dependencies within the phase
-            - Use `gh issue edit ISSUE --add-label "needs-review"` to trigger
-            - Be concise in any comments
+          while IFS= read -r line; do
+            # Check for phase header
+            if echo "$line" | grep -qE "^### Phase [0-9]+"; then
+              PHASE_NAME=$(echo "$line" | sed 's/### //')
+              # If we already found unchecked issues in a previous phase, stop
+              if [ -n "$PHASE_ISSUES" ]; then
+                break
+              fi
+              CURRENT_PHASE="$PHASE_NAME"
+              PHASE_ISSUES=""
+            fi
 
-          claude_args: '--model claude-sonnet-4-5-20250929 --max-turns 15 --allowed-tools "Bash,Read,Glob,Grep"'
+            # Check for unchecked issue in current phase
+            if [ -n "$CURRENT_PHASE" ] && echo "$line" | grep -qE "^- \[ \] #[0-9]+"; then
+              ISSUE_NUM=$(echo "$line" | grep -oE "#[0-9]+" | head -1 | tr -d '#')
+              PHASE_ISSUES="$PHASE_ISSUES $ISSUE_NUM"
+            fi
+          done <<< "$EPIC_BODY"
+
+          if [ -z "$PHASE_ISSUES" ]; then
+            echo "No incomplete phases found - epic may be complete!"
+            exit 0
+          fi
+
+          echo "First incomplete phase: $CURRENT_PHASE"
+          echo "Unchecked issues:$PHASE_ISSUES"
+
+          # Check each issue and trigger if unblocked
+          TRIGGERED=""
+          for ISSUE_NUM in $PHASE_ISSUES; do
+            echo ""
+            echo "--- Checking #$ISSUE_NUM ---"
+
+            # Get issue details
+            ISSUE_DATA=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json state,labels,body)
+            ISSUE_STATE=$(echo "$ISSUE_DATA" | jq -r '.state')
+            ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels[].name' | tr '\n' ' ')
+            ISSUE_BODY=$(echo "$ISSUE_DATA" | jq -r '.body')
+
+            # Skip if already closed
+            if [ "$ISSUE_STATE" = "CLOSED" ]; then
+              echo "  Already closed, skipping"
+              continue
+            fi
+
+            # Skip if already has needs-review or ready-for-implementation
+            if echo "$ISSUE_LABELS" | grep -qE "needs-review|ready-for-implementation"; then
+              echo "  Already queued ($ISSUE_LABELS), skipping"
+              continue
+            fi
+
+            # Check blockers
+            BLOCKED_SECTION=$(echo "$ISSUE_BODY" | grep -iA10 "blocked by:" | head -15 || true)
+            ALL_RESOLVED=true
+
+            if [ -n "$BLOCKED_SECTION" ]; then
+              # Extract issue numbers from blocked section
+              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE "#[0-9]+" | tr -d '#' | sort -u)
+
+              for BLOCKER in $BLOCKERS; do
+                BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                if [ "$BLOCKER_STATE" != "CLOSED" ]; then
+                  echo "  Still blocked by #$BLOCKER ($BLOCKER_STATE)"
+                  ALL_RESOLVED=false
+                  break
+                fi
+              done
+            fi
+
+            if [ "$ALL_RESOLVED" = "true" ]; then
+              echo "  ✅ All blockers resolved - adding needs-review"
+              gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-review"
+              TRIGGERED="$TRIGGERED #$ISSUE_NUM"
+            fi
+          done
+
+          # Summary
+          echo ""
+          echo "=== Summary ==="
+          if [ -n "$TRIGGERED" ]; then
+            echo "Triggered issues:$TRIGGERED"
+          else
+            echo "No issues triggered (all blocked or already queued)"
+          fi
