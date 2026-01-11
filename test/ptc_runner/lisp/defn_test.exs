@@ -161,16 +161,16 @@ defmodule PtcRunner.Lisp.DefnTest do
       {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
       assert result == %Var{name: :twice}
-      # Functions are stored as closures, not native Elixir functions
-      assert {:closure, _, _, _, _} = user_ns[:twice]
+      # Functions are stored as closures (6-tuple with metadata)
+      assert {:closure, _, _, _, _, %{}} = user_ns[:twice]
     end
 
     test "function persists in user_ns" do
       ast = {:def, :greet, {:fn, [], {:string, "hello"}}}
       {:ok, _result, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
 
-      # Functions are stored as closures, not native Elixir functions
-      assert {:closure, _, _, _, _} = user_ns[:greet]
+      # Functions are stored as closures (6-tuple with metadata)
+      assert {:closure, _, _, _, _, %{}} = user_ns[:greet]
     end
 
     test "function can reference other user-defined symbols" do
@@ -207,8 +207,8 @@ defmodule PtcRunner.Lisp.DefnTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :twice}
-      # Functions are stored as closures, not native Elixir functions
-      assert {:closure, _, _, _, _} = user_ns[:twice]
+      # Functions are stored as closures (6-tuple with metadata)
+      assert {:closure, _, _, _, _, %{}} = user_ns[:twice]
     end
 
     test "defined function can be called" do
@@ -325,6 +325,110 @@ defmodule PtcRunner.Lisp.DefnTest do
       {:ok, %{return: result}} = Lisp.run(source2, memory: user_ns1, context: ctx)
 
       assert result == [%{amount: 7000}, %{amount: 10_000}]
+    end
+  end
+
+  # ============================================================
+  # Return type capture tests
+  # ============================================================
+
+  describe "return type capture" do
+    test "captures return type after function call" do
+      # Define twice, call it, verify return type captured
+      source = "(do (defn twice [x] (* x 2)) (twice 5))"
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
+
+      assert result == 10
+
+      # Verify closure has return_type in metadata
+      {:closure, _, _, _, _, metadata} = user_ns[:twice]
+      assert metadata.return_type == "integer"
+    end
+
+    test "function without call has no return type" do
+      source = "(defn unused [x] (* x 2))"
+      {:ok, %{memory: user_ns}} = Lisp.run(source)
+
+      {:closure, _, _, _, _, metadata} = user_ns[:unused]
+      # No return_type key since never called
+      refute Map.has_key?(metadata, :return_type)
+    end
+
+    test "last call determines return type" do
+      # Call with different return types, last one wins
+      source = "(do (defn flexible [x] x) (flexible 42) (flexible \"hello\"))"
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
+
+      assert result == "hello"
+
+      {:closure, _, _, _, _, metadata} = user_ns[:flexible]
+      assert metadata.return_type == "string"
+    end
+
+    test "captures various return types" do
+      # Test integer
+      {:ok, %{memory: ns1}} = Lisp.run("(do (defn f [] 42) (f))")
+      {:closure, _, _, _, _, %{return_type: type1}} = ns1[:f]
+      assert type1 == "integer"
+
+      # Test float
+      {:ok, %{memory: ns2}} = Lisp.run("(do (defn f [] 3.14) (f))")
+      {:closure, _, _, _, _, %{return_type: type2}} = ns2[:f]
+      assert type2 == "float"
+
+      # Test string
+      {:ok, %{memory: ns3}} = Lisp.run(~S|(do (defn f [] "hello") (f))|)
+      {:closure, _, _, _, _, %{return_type: type3}} = ns3[:f]
+      assert type3 == "string"
+
+      # Test boolean
+      {:ok, %{memory: ns4}} = Lisp.run("(do (defn f [] true) (f))")
+      {:closure, _, _, _, _, %{return_type: type4}} = ns4[:f]
+      assert type4 == "boolean"
+
+      # Test nil
+      {:ok, %{memory: ns5}} = Lisp.run("(do (defn f [] nil) (f))")
+      {:closure, _, _, _, _, %{return_type: type5}} = ns5[:f]
+      assert type5 == "nil"
+
+      # Test keyword
+      {:ok, %{memory: ns6}} = Lisp.run("(do (defn f [] :foo) (f))")
+      {:closure, _, _, _, _, %{return_type: type6}} = ns6[:f]
+      assert type6 == "keyword"
+
+      # Test list
+      {:ok, %{memory: ns7}} = Lisp.run("(do (defn f [] [1 2 3]) (f))")
+      {:closure, _, _, _, _, %{return_type: type7}} = ns7[:f]
+      assert type7 == "list[3]"
+
+      # Test map
+      {:ok, %{memory: ns8}} = Lisp.run("(do (defn f [] {:a 1 :b 2}) (f))")
+      {:closure, _, _, _, _, %{return_type: type8}} = ns8[:f]
+      assert type8 == "map[2]"
+    end
+
+    test "captures return type across turns" do
+      # Turn 1: define function
+      {:ok, %{memory: user_ns1}} = Lisp.run("(defn twice [x] (* x 2))")
+
+      # Verify no return type yet
+      {:closure, _, _, _, _, metadata1} = user_ns1[:twice]
+      refute Map.has_key?(metadata1, :return_type)
+
+      # Turn 2: call function
+      {:ok, %{memory: user_ns2}} = Lisp.run("(twice 5)", memory: user_ns1)
+
+      # Verify return type captured
+      {:closure, _, _, _, _, metadata2} = user_ns2[:twice]
+      assert metadata2.return_type == "integer"
+    end
+
+    test "captures return type for function returning function" do
+      source = "(do (defn make-adder [n] (fn [x] (+ x n))) (make-adder 5))"
+      {:ok, %{memory: user_ns}} = Lisp.run(source)
+
+      {:closure, _, _, _, _, metadata} = user_ns[:"make-adder"]
+      assert metadata.return_type == "fn"
     end
   end
 end

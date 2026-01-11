@@ -3,14 +3,14 @@ defmodule PtcRunner.Lisp.Format do
   Format PTC-Lisp values for human/LLM display.
 
   Handles special Lisp types that should not expose internal implementation:
-  - Closures: `{:closure, params, body, env, history}` → `#fn[x y]`
+  - Closures: `{:closure, params, body, env, history, metadata}` → `#fn[x y]`
   - Builtins: `{:normal, fun}` etc. → `#<builtin>`
 
   Works recursively, so closures nested in maps/lists are also formatted.
 
   ## Examples
 
-      iex> PtcRunner.Lisp.Format.to_string({:closure, [{:var, :x}], nil, %{}, []})
+      iex> PtcRunner.Lisp.Format.to_string({:closure, [{:var, :x}], nil, %{}, [], %{}})
       "#fn[x]"
 
       iex> PtcRunner.Lisp.Format.to_string({:normal, &Enum.map/2})
@@ -66,7 +66,7 @@ defmodule PtcRunner.Lisp.Format do
       iex> PtcRunner.Lisp.Format.to_string(42)
       "42"
 
-      iex> PtcRunner.Lisp.Format.to_string({:closure, [{:var, :x}, {:var, :y}], nil, %{}, []})
+      iex> PtcRunner.Lisp.Format.to_string({:closure, [{:var, :x}, {:var, :y}], nil, %{}, [], %{}})
       "#fn[x y]"
 
       iex> PtcRunner.Lisp.Format.to_string({:var, :my_var})
@@ -75,7 +75,7 @@ defmodule PtcRunner.Lisp.Format do
       iex> PtcRunner.Lisp.Format.to_string([1, 2, 3], limit: 2)
       "[1, 2, ...]"
 
-      iex> PtcRunner.Lisp.Format.to_string(%{f: {:closure, [{:var, :x}], nil, %{}, []}})
+      iex> PtcRunner.Lisp.Format.to_string(%{f: {:closure, [{:var, :x}], nil, %{}, [], %{}}})
       "%{f: #fn[x]}"
   """
   @spec to_string(term(), keyword()) :: String.t()
@@ -115,7 +115,7 @@ defmodule PtcRunner.Lisp.Format do
       iex> PtcRunner.Lisp.Format.to_clojure(%{"name" => "Alice", "age" => 30})
       {~s({"age" 30 "name" "Alice"}), false}
 
-      iex> PtcRunner.Lisp.Format.to_clojure({:closure, [{:var, :x}], nil, %{}, []})
+      iex> PtcRunner.Lisp.Format.to_clojure({:closure, [{:var, :x}], nil, %{}, [], %{}})
       {"#fn[x]", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure({:var, :x})
@@ -307,7 +307,13 @@ defmodule PtcRunner.Lisp.Format do
   end
 
   # Recursively replace internal types with inspectable wrappers
+  # Handle both 5-tuple (legacy) and 6-tuple (with metadata) closures
   defp sanitize({:closure, params, _body, _env, _history}) do
+    names = Enum.map_join(params, " ", &extract_param_name/1)
+    %Fn{params: names}
+  end
+
+  defp sanitize({:closure, params, _body, _env, _history, _metadata}) do
     names = Enum.map_join(params, " ", &extract_param_name/1)
     %Fn{params: names}
   end
