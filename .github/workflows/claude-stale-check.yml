@@ -49,16 +49,16 @@ jobs:
                 --jq "[.[] | select(.body | test(\"#$ISSUE_NUMBER\"))] | .[0].number")
 
               # Check if there's a status comment
-              HAS_STATUS=$(gh issue view "$ISSUE_NUMBER" --json comments \
+              HAS_STATUS=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json comments \
                 --jq '[.comments[] | select(.body | contains("claude-implementation-status"))] | length')
 
               if [ -z "$LINKED_PR" ] && [ "$HAS_STATUS" -eq 0 ]; then
                 echo "Issue #$ISSUE_NUMBER is stale (${HOURS_AGO}h without activity or status)"
 
                 # Add needs-attention label
-                gh issue edit "$ISSUE_NUMBER" --add-label "needs-attention"
+                gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-attention"
 
-                gh issue comment "$ISSUE_NUMBER" --body "$(cat <<EOF
+                gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
           ## Stale Implementation Detected
 
           This issue has \`ready-for-implementation\` but:
@@ -104,7 +104,7 @@ jobs:
                 echo "Orphan branch found: $branch (no open PR)"
 
                 # Check if the linked issue is still open
-                ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state' 2>/dev/null || echo "NOTFOUND")
+                ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "NOTFOUND")
 
                 if [ "$ISSUE_STATE" = "OPEN" ]; then
                   # Create a draft PR to capture the work
