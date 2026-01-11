@@ -276,7 +276,15 @@ jobs:
             **Guidelines:**
             - Fix only what was asked - no refactoring, no unrelated fixes
             - Run `mix precommit` before committing - NEVER use `--no-verify`
-            - Commit and push, then post a summary comment
+            - Commit and push, then post a summary comment with EXACTLY this format:
+              ```
+              ## Fix Summary
+
+              ✅ **Issue Fixed:** [brief description]
+
+              [details of what was changed]
+              ```
+              The `## Fix Summary` header is REQUIRED - automation depends on it.
 
             **TODO/Skip Protocol (when tests fail for out-of-scope issues):**
 
