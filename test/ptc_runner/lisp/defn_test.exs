@@ -428,7 +428,7 @@ defmodule PtcRunner.Lisp.DefnTest do
       {:ok, %{memory: user_ns}} = Lisp.run(source)
 
       {:closure, _, _, _, _, metadata} = user_ns[:"make-adder"]
-      assert metadata.return_type == "fn"
+      assert metadata.return_type == "#fn[...]"
     end
   end
 end
