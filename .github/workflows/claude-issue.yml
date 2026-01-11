@@ -150,14 +150,22 @@ jobs:
 
             ## Step 3: Scope Check (IMPORTANT)
 
-            Before implementing, verify scope is manageable:
-            - If implementation requires >10 files changed (excluding tests): STOP
-            - If implementation requires >500 lines added: STOP
-            - If you discover a prerequisite not in "Blocked by:": STOP
+            Before implementing, assess whether the issue scope is appropriate:
+
+            **Signs of scope creep (STOP and report):**
+            - Changes spanning multiple unrelated modules or subsystems
+            - Discovering substantial prerequisite work not mentioned in the issue
+            - The implementation feels like 2-3 separate issues bundled together
+            - Non-mechanical changes touching areas unrelated to the issue's focus
+
+            **NOT scope creep (proceed normally):**
+            - Mechanical changes across many files (renames, import updates, type fixes)
+            - Related changes that naturally flow from the core implementation
+            - Test files matching the implementation scope
 
             When stopping for scope issues:
-            1. Post status comment (see Step 5) with result: INCOMPLETE
-            2. Add `needs-breakdown` label if too large
+            1. Post status (see Step 6) with result: INCOMPLETE
+            2. Add `needs-breakdown` label and explain how to split
             3. If discovered blocker: create issue with `discovered-blocker` label,
                update this issue's "Blocked by:" section, remove `ready-for-implementation`
 
