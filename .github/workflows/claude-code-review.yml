@@ -299,4 +299,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr edit ${{ github.event.pull_request.number }} --add-label "spec-change-detected"
-          echo "::notice::Spec changes detected - added label for tracking"
+          gh pr edit ${{ github.event.pull_request.number }} --add-label "needs-second-opinion"
+          echo "::notice::Spec changes detected - routing to second opinion review"
