@@ -43,6 +43,7 @@ Brief description of what this epic accomplishes.
 - **Just-in-time issues**: Don't create all issues upfront - create them as work progresses
 - **Label child issues**: Add `epic:name` label to issues belonging to this epic
 - **Deferred docs**: For phased refactorings with dual-write/backward-compat, defer doc updates to the final cleanup issue
+- **Epic tracks progress, not specs**: Don't mark items as "✅ Complete" in spec documents - the epic checkboxes are the single source of truth for progress. Specs document requirements/architecture, not status.
 
 ## Task Sizing
 
