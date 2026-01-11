@@ -16,6 +16,7 @@ jobs:
         contains(toJSON(github.event.issue.labels), 'ready-for-implementation')
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     concurrency:
       group: claude-automation
@@ -160,7 +161,18 @@ jobs:
             3. If discovered blocker: create issue with `discovered-blocker` label,
                update this issue's "Blocked by:" section, remove `ready-for-implementation`
 
-            ## Step 4: Implement
+            ## Step 4: Check for Existing PR (Duplicate Detection)
+
+            Before creating a new PR, check if one already exists:
+            ```bash
+            EXISTING_PR=$(gh pr list --head "claude/${{ github.event.issue.number }}-" --state open --json number,url --jq '.[0]')
+            ```
+            If a PR exists:
+            - Update the existing PR instead of creating a new one
+            - Push to the existing branch
+            - Post a comment noting continued work
+
+            ## Step 5: Implement
 
             ${{ steps.test-feedback.outputs.has_failures == 'true' && format('### Current Test Failures
 
@@ -190,70 +202,75 @@ jobs:
             - Create a GH issue with `from-pr-review` and `needs-review` labels
             - Skip the test with `@tag :skip` and a comment referencing the issue
 
-            ## Step 5: MANDATORY Exit Status (ALWAYS DO THIS)
+            ## Step 6: MANDATORY Status Update (ALWAYS DO THIS)
 
-            Before finishing, you MUST post a status comment. This is required
+            You MUST update the issue body with automation state. This is required
             even if you encounter errors or cannot complete the implementation.
 
+            First, get the current issue body, then append/update the automation state section:
             ```bash
-            gh issue comment ${{ github.event.issue.number }} --body "$(cat <<'EOF'
-            <!-- claude-implementation-status -->
-            ## Implementation Result: [SUCCESS|INCOMPLETE|BLOCKED]
+            # Get current body and update automation state
+            CURRENT_BODY=$(gh issue view ${{ github.event.issue.number }} --json body --jq '.body')
 
-            **PR:** #NNN | None created
-            **Branch:** `claude/${{ github.event.issue.number }}-xxx` | None
+            # Remove old automation state if present
+            CLEAN_BODY=$(echo "$CURRENT_BODY" | sed '/^## Automation State/,/^## /{ /^## Automation State/d; /^## /!d; }' | sed '/<!-- automation-state:/d')
 
-            ### Work Completed
-            - [x] Read issue and spec
-            - [x] Checked dependencies
-            - [ ] Implementation complete
-            - [ ] Tests passing
-            - [ ] PR created
+            # Create new body with automation state
+            cat > /tmp/issue-body.md << 'ISSUE_EOF'
+            $CLEAN_BODY
 
-            ### Details
-            [What was done, what remains, any blockers discovered]
+            ## Automation State
+            <!-- automation-state: {"status":"[SUCCESS|INCOMPLETE|BLOCKED]","pr":null,"branch":"claude/${{ github.event.issue.number }}-xxx","attempts":1} -->
 
-            ### Suggested Next Steps
-            - [If INCOMPLETE/BLOCKED: what needs to happen next]
-            EOF
-            )"
+            | Field | Value |
+            |-------|-------|
+            | Status | `[SUCCESS\|INCOMPLETE\|BLOCKED]` |
+            | PR | #NNN or None |
+            | Branch | `claude/${{ github.event.issue.number }}-xxx` |
+            | Attempts | 1 |
+
+            **Details:** [What was done, what remains, blockers discovered]
+
+            **Next Steps:** [If not SUCCESS: what needs to happen]
+            ISSUE_EOF
+
+            gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md
             ```
 
-            **Result meanings:**
+            **Status meanings:**
             - SUCCESS: PR created, all work complete
             - INCOMPLETE: Stopped due to scope/complexity/errors (explain why)
             - BLOCKED: Open dependencies prevent implementation
 
-            NEVER include "@claude" in comments except this status comment is final.
+            NEVER include "@claude" in comments.
 
           claude_args: '--model claude-opus-4-5-20251101 --max-turns 200 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
           show_full_output: true
 
-      # Verify status comment was posted
+      # Verify status was updated in issue body
       - name: Verify implementation status
         if: always()
         id: verify-status
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Check if status comment exists
-          STATUS_COMMENT=$(gh issue view $ISSUE_NUMBER --json comments \
-            --jq '.comments[] | select(.body | contains("claude-implementation-status")) | .body' \
-            | tail -1)
+          # Check if automation state exists in issue body
+          ISSUE_BODY=$(gh issue view $ISSUE_NUMBER --json body --jq '.body')
 
-          if [ -z "$STATUS_COMMENT" ]; then
-            echo "status_posted=false" >> $GITHUB_OUTPUT
-            echo "::warning::No implementation status comment found"
-          else
+          if echo "$ISSUE_BODY" | grep -q "<!-- automation-state:"; then
             echo "status_posted=true" >> $GITHUB_OUTPUT
 
-            # Extract result
-            RESULT=$(echo "$STATUS_COMMENT" | grep -o "Implementation Result: [A-Z]*" | cut -d: -f2 | tr -d ' ')
+            # Extract status from JSON
+            STATUS_JSON=$(echo "$ISSUE_BODY" | grep -o '<!-- automation-state: {[^}]*}' | sed 's/<!-- automation-state: //')
+            RESULT=$(echo "$STATUS_JSON" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
             echo "result=$RESULT" >> $GITHUB_OUTPUT
             echo "Implementation result: $RESULT"
+          else
+            echo "status_posted=false" >> $GITHUB_OUTPUT
+            echo "::warning::No automation state found in issue body"
           fi
 
-      # Post fallback status if Claude didn't
+      # Post fallback status if Claude didn't update issue body
       - name: Post fallback status
         if: always() && steps.verify-status.outputs.status_posted == 'false'
         env:
@@ -262,35 +279,39 @@ jobs:
           # Check for branch and PR
           BRANCH_NAME="claude/${ISSUE_NUMBER}-"
           BRANCH=$(git branch -r --list "origin/${BRANCH_NAME}*" | head -1 | tr -d ' ')
+          BRANCH_SHORT=$(echo "$BRANCH" | sed 's|origin/||' | tr -d ' ')
 
           PR_NUMBER=""
-          if [ -n "$BRANCH" ]; then
-            BRANCH_SHORT=$(echo "$BRANCH" | sed 's|origin/||')
-            PR_NUMBER=$(gh pr list --head "$BRANCH_SHORT" --json number --jq '.[0].number')
+          if [ -n "$BRANCH_SHORT" ]; then
+            PR_NUMBER=$(gh pr list --head "$BRANCH_SHORT" --json number --jq '.[0].number' 2>/dev/null || echo "")
           fi
 
-          gh issue comment $ISSUE_NUMBER --body "$(cat <<EOF
-          <!-- claude-implementation-status -->
-          ## Implementation Result: INCOMPLETE
+          # Get current issue body
+          CURRENT_BODY=$(gh issue view $ISSUE_NUMBER --json body --jq '.body')
 
-          **PR:** ${PR_NUMBER:-None created}
-          **Branch:** \`${BRANCH:-None}\`
+          # Remove any partial automation state
+          CLEAN_BODY=$(echo "$CURRENT_BODY" | sed '/^## Automation State/,$d')
 
-          ### Work Completed
-          - [x] Read issue and spec
-          - [ ] Implementation complete (workflow interrupted)
-          - [ ] Tests passing
-          - [ ] PR created
+          # Create updated body with fallback status
+          cat > /tmp/issue-body.md << EOF
+          $CLEAN_BODY
 
-          ### Details
-          The implementation workflow was interrupted before completion.
-          Check workflow logs for details.
+          ## Automation State
+          <!-- automation-state: {"status":"INCOMPLETE","pr":${PR_NUMBER:-null},"branch":"${BRANCH_SHORT:-null}","attempts":1,"interrupted":true} -->
 
-          ### Suggested Next Steps
-          - Review any partial work in the branch
-          - Re-trigger with \`@claude Please continue implementing this issue.\`
+          | Field | Value |
+          |-------|-------|
+          | Status | \`INCOMPLETE\` |
+          | PR | ${PR_NUMBER:-None} |
+          | Branch | \`${BRANCH_SHORT:-None}\` |
+          | Attempts | 1 |
+
+          **Details:** Workflow interrupted before completion (timeout or error). Check workflow logs.
+
+          **Next Steps:** Re-trigger with \`@claude Please continue implementing this issue.\`
           EOF
-          )"
+
+          gh issue edit $ISSUE_NUMBER --body-file /tmp/issue-body.md
 
           # Add needs-attention label
           gh issue edit $ISSUE_NUMBER --add-label "needs-attention" || true

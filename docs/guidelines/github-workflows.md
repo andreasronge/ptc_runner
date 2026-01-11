@@ -100,32 +100,47 @@ This document describes the Claude-powered GitHub workflows for autonomous issue
 
 ## Robustness Features
 
-### Mandatory Exit Status
+### Timeout Handling
 
-Every implementation run MUST post a status comment, even on failure:
+All Claude workflows have explicit timeouts to prevent runaway jobs:
+
+| Workflow | Timeout |
+|----------|---------|
+| `claude-issue.yml` | 45 minutes |
+| `claude-pr-fix.yml` | 30 minutes |
+| `claude-second-opinion.yml` | 45 minutes |
+
+If a workflow times out, the fallback status handler posts an INCOMPLETE status.
+
+### Structured Automation State
+
+State is stored in issue/PR body (not comments) using JSON metadata:
 
 ```markdown
-<!-- claude-implementation-status -->
-## Implementation Result: SUCCESS | INCOMPLETE | BLOCKED
+## Automation State
+<!-- automation-state: {"status":"INCOMPLETE","pr":123,"branch":"claude/45-feature","attempts":2} -->
 
-**PR:** #123 | None created
-**Branch:** `claude/45-feature-name` | None
-
-### Work Completed
-- [x] Read issue and spec
-- [x] Checked dependencies
-- [ ] Implementation complete
-- [ ] Tests passing
-- [ ] PR created
-
-### Details
-[What was done, what remains, blockers discovered]
-
-### Suggested Next Steps
-- [What needs to happen next]
+| Field | Value |
+|-------|-------|
+| Status | `INCOMPLETE` |
+| PR | #123 |
+| Branch | `claude/45-feature` |
+| Attempts | 2 |
 ```
 
-If Claude doesn't post status, the workflow posts a fallback and adds `needs-attention`.
+**Why body instead of comments:**
+- Comments can be deleted, breaking state tracking
+- Body sections survive edits and are API-updatable
+- Single source of truth per issue/PR
+
+**PR fix tracking:**
+```markdown
+## Fix Automation State
+<!-- fix-state: {"attempts":2} -->
+Fix attempts: 2/3
+```
+
+If Claude doesn't update status, the workflow posts a fallback and adds `needs-attention`.
 
 ### Protected Files (Anti-Cheating)
 
@@ -160,10 +175,28 @@ When stopping:
 
 ### Fix Attempt Tracking
 
-PR fixes track attempts via comment count:
-- After 3 failed `@claude fix` attempts → escalate to `needs-second-opinion`
+PR fixes track attempts via structured state in PR body (not comment counting):
+- Attempt counter stored in `<!-- fix-state: {"attempts":N} -->`
+- After 3 attempts → escalate to `needs-second-opinion`
 - Second opinion uses fresh Claude context (no sunk cost bias)
-- Can try different approach or escalate to human
+- If second opinion also fails → escalate to `needs-human-review` (terminal state)
+
+**Escalation chain:**
+```
+fix attempt 1 → fix attempt 2 → fix attempt 3 → second opinion → human review
+```
+
+### Duplicate PR Detection
+
+Before creating a new PR, implementation checks for existing PRs:
+```bash
+gh pr list --head "claude/${issue_number}-" --state open
+```
+
+If a PR exists:
+- Updates existing PR instead of creating duplicate
+- Pushes to existing branch
+- Posts comment noting continued work
 
 ### Discovered Blocker Protocol
 
@@ -234,6 +267,21 @@ The implementation workflow:
 
 ## Labels Reference
 
+### Label Priority (Conflict Resolution)
+
+When multiple labels are present, this priority order applies:
+
+| Priority | Label | Effect |
+|----------|-------|--------|
+| 1 (highest) | `needs-human-review` | **Stops all automation immediately** |
+| 2 | `do-not-auto-merge` | Prevents merge but allows fixes |
+| 3 | `needs-second-opinion` | Escalates to fresh context review |
+| 4 | `needs-attention` | Flags for retry/investigation |
+| 5 (lowest) | `ready-for-implementation` | Enables automation |
+
+**Example:** If an issue has both `ready-for-implementation` and `needs-human-review`,
+automation will NOT proceed because `needs-human-review` has higher priority.
+
 ### Trigger Labels
 | Label | Purpose |
 |-------|---------|
@@ -295,9 +343,15 @@ This ensures:
 ### Loop Prevention
 
 - PR fixes max 3 attempts before escalating to second opinion
+- Second opinion max 1 attempt before escalating to human (terminal state)
 - `needs-human-review` label stops all automation
 - Concurrency group prevents parallel execution
 - Stale check runs on schedule, not on every event
+- Structured state in body prevents counter manipulation via comment deletion
+
+**Terminal states (require human intervention):**
+- `needs-human-review` label present
+- Second opinion already attempted (marked in PR body)
 
 ## Recovery Procedures
 
