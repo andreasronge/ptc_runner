@@ -10,7 +10,7 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 
 | ID | Requirement | Notes |
 |----|-------------|-------|
-| PRE-001 | Issue #603 (Messages stored in Step) must be completed before implementation | Blocking dependency |
+| PRE-001 | ~~Issue #603 (Messages stored in Step) must be completed before implementation~~ | ✅ Complete (closed 2026-01-09) |
 | PRE-002 | PTC-Lisp: Auto-fallback resolution for bare names to `tool/` or `data/` | See NS-004 to NS-006 |
 | PRE-003 | PTC-Lisp: Return type capture for user-defined functions when called | For user/ prelude display |
 
@@ -531,4 +531,5 @@ Add `lib/ptc_runner/migration_guard.ex` with compile-time guards. Uncomment each
 | CHG-036 | Roadmap: Issue #2 now requires edge case tests for regression risk |
 | CHG-037 | Roadmap: Issue #17 now requires get/1 API verification |
 | CHG-038 | Added Uncompressed Mode section (UCM-001 to UCM-010) |
+| CHG-039 | PRE-001 (#603) marked complete (closed 2026-01-09) |
 
