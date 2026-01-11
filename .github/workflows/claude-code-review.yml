@@ -100,6 +100,56 @@ jobs:
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
+      - name: Check protected files
+        if: steps.merge-check.outputs.merge_ok == 'true'
+        id: protected-files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Define protected file patterns
+          PROTECTED_PATTERNS=(
+            "docs/specs/"
+            "docs/guidelines/"
+            ".github/workflows/"
+            ".credo.exs"
+            ".formatter.exs"
+          )
+
+          # Get list of changed files
+          CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+
+          PROTECTED_CHANGED=""
+          for pattern in "${PROTECTED_PATTERNS[@]}"; do
+            MATCHES=$(echo "$CHANGED_FILES" | grep "^$pattern" || true)
+            if [ -n "$MATCHES" ]; then
+              PROTECTED_CHANGED="$PROTECTED_CHANGED$MATCHES"$'\n'
+            fi
+          done
+
+          if [ -n "$PROTECTED_CHANGED" ]; then
+            echo "has_protected=true" >> $GITHUB_OUTPUT
+            echo "Protected files changed:"
+            echo "$PROTECTED_CHANGED"
+
+            # Store list for later
+            {
+              echo 'files<<EOF'
+              echo "$PROTECTED_CHANGED"
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
+
+            # Check if spec files specifically changed
+            if echo "$PROTECTED_CHANGED" | grep -q "docs/specs/"; then
+              echo "has_spec_changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_spec_changes=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_protected=false" >> $GITHUB_OUTPUT
+            echo "has_spec_changes=false" >> $GITHUB_OUTPUT
+            echo "No protected files changed"
+          fi
+
       - name: Check file sizes
         if: steps.merge-check.outputs.merge_ok == 'true'
         id: file-sizes
@@ -165,6 +215,21 @@ jobs:
 
             ${{ steps.file-sizes.outputs.FILE_SIZE_REPORT }}
 
+            ${{ steps.protected-files.outputs.has_protected == 'true' && format('## ⚠️ Protected Files Changed
+
+            The following protected files were modified:
+            ```
+            {0}
+            ```
+
+            **Review these changes carefully:**
+            - Spec changes (`docs/specs/`): Is this a legitimate spec update or implementation avoidance?
+            - Guideline changes: Are these process improvements or shortcuts?
+            - Workflow changes: Are these automation improvements?
+            - Linter config changes: Are these necessary or disabling valid checks?
+
+            ', steps.protected-files.outputs.files) || '' }}
+
             ## Instructions
 
             1. Read `docs/guidelines/pr-review-guidelines.md` for complete review guidelines
@@ -191,8 +256,30 @@ jobs:
             - Flag as "Suggestion (Optional)" with recommendation to split into smaller modules
             - Only flag if the PR added significant lines to the file (not just minor edits to already-large files)
 
+            **CRITICAL - Spec Change Detection (Anti-Cheating)**:
+            If spec files (`docs/specs/*.md`) are modified:
+            1. Read the ORIGINAL spec (use `git show origin/main:path/to/spec.md`)
+            2. Compare with the new version
+            3. Determine if this is:
+               - **LEGITIMATE**: Discovered gap/error in spec, necessary clarification
+               - **AVOIDANCE**: Weakening requirements to match implementation
+            4. Signs of avoidance:
+               - Spec change removes or weakens requirements
+               - Spec change adds exceptions for edge cases
+               - Implementation doesn't match original spec, but new spec matches implementation
+            5. If AVOIDANCE detected: Flag as "MUST FIX" - revert spec, fix implementation
+            6. If LEGITIMATE: Note in review that spec update is justified
+
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
 
           # Enable full output for debugging
           show_full_output: true
+
+      - name: Label spec changes
+        if: steps.merge-check.outputs.merge_ok == 'true' && steps.protected-files.outputs.has_spec_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr edit ${{ github.event.pull_request.number }} --add-label "spec-change-detected"
+          echo "::notice::Spec changes detected - added label for tracking"

@@ -110,6 +110,51 @@ jobs:
         id: setup-claude
         uses: ./.github/actions/setup-claude-code
 
+      - name: Check fix attempt count
+        if: steps.pr-branch.outputs.is_fork != 'true'
+        id: fix-count
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ steps.pr-branch.outputs.pr_number }}"
+
+          # Count @claude fix comments (each represents a fix attempt)
+          FIX_ATTEMPTS=$(gh pr view "$PR_NUMBER" --json comments \
+            --jq '[.comments[] | select(.body | test("@claude.*fix"; "i"))] | length')
+
+          echo "attempt_count=$FIX_ATTEMPTS" >> $GITHUB_OUTPUT
+          echo "Current fix attempt count: $FIX_ATTEMPTS"
+
+          # If 3+ attempts, escalate to second opinion
+          if [ "$FIX_ATTEMPTS" -ge 3 ]; then
+            echo "max_attempts_reached=true" >> $GITHUB_OUTPUT
+            echo "::warning::Max fix attempts reached ($FIX_ATTEMPTS) - will escalate to second opinion"
+          else
+            echo "max_attempts_reached=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Escalate to second opinion
+        if: steps.pr-branch.outputs.is_fork != 'true' && steps.fix-count.outputs.max_attempts_reached == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ steps.pr-branch.outputs.pr_number }}"
+
+          gh pr comment "$PR_NUMBER" --body "$(cat <<'EOF'
+          ## Fix Attempts Exhausted
+
+          Multiple fix attempts have been made on this PR without success.
+          Escalating to second opinion review for a fresh perspective.
+
+          The `needs-second-opinion` label has been added to trigger a review
+          with fresh context that may identify a different approach.
+          EOF
+          )"
+
+          gh pr edit "$PR_NUMBER" --add-label "needs-second-opinion"
+          echo "::notice::Escalated to second opinion review"
+          exit 0
+
       - name: Run tests and capture failures
         if: steps.pr-branch.outputs.is_fork != 'true'
         id: test-feedback
@@ -167,7 +212,7 @@ jobs:
           fi
 
       - name: Run Claude Code
-        if: steps.pr-branch.outputs.is_fork != 'true'
+        if: steps.pr-branch.outputs.is_fork != 'true' && steps.fix-count.outputs.max_attempts_reached != 'true'
         id: claude
         uses: anthropics/claude-code-action@v1
         env:
@@ -216,7 +261,7 @@ jobs:
 
       # Safety net: push any unpushed commits and remove workflow files
       - name: Push unpushed commits
-        if: always() && steps.pr-branch.outputs.is_fork != 'true'
+        if: always() && steps.pr-branch.outputs.is_fork != 'true' && steps.fix-count.outputs.max_attempts_reached != 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |

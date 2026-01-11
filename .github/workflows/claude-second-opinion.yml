@@ -1,0 +1,191 @@
+name: Claude Second Opinion
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  second-opinion:
+    # Triggered when needs-second-opinion label is added
+    # Provides fresh context review when fix attempts are exhausted
+    if: github.event.label.name == 'needs-second-opinion'
+
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: claude-automation
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Get PR details
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName,title,body)
+
+          echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "head_ref=$(echo "$PR_DATA" | jq -r '.headRefName')" >> $GITHUB_OUTPUT
+          echo "base_ref=$(echo "$PR_DATA" | jq -r '.baseRefName')" >> $GITHUB_OUTPUT
+          echo "title=$(echo "$PR_DATA" | jq -r '.title')" >> $GITHUB_OUTPUT
+
+          # Extract linked issue if present
+          ISSUE_NUMBER=$(echo "$PR_DATA" | jq -r '.body' | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K\d+' | head -1 || true)
+          echo "linked_issue=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+
+      - name: Install git pre-commit hook
+        run: |
+          cp scripts/pre-commit .git/hooks/pre-commit
+          chmod +x .git/hooks/pre-commit
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Setup Claude Code
+        id: setup-claude
+        uses: ./.github/actions/setup-claude-code
+
+      - name: Gather context for fresh review
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+
+          # Get the diff
+          gh pr diff "$PR_NUMBER" > /tmp/pr_diff.txt
+
+          # Get all review comments (previous attempts)
+          gh pr view "$PR_NUMBER" --json comments \
+            --jq '.comments[] | "[\(.author.login)] \(.body)"' > /tmp/pr_comments.txt
+
+          # Get original issue if linked
+          ISSUE="${{ steps.pr.outputs.linked_issue }}"
+          if [ -n "$ISSUE" ]; then
+            gh issue view "$ISSUE" --json body,title \
+              --jq '"# Issue #\(.number): \(.title)\n\n\(.body)"' > /tmp/issue.txt
+          else
+            echo "No linked issue found" > /tmp/issue.txt
+          fi
+
+          echo "context_ready=true" >> $GITHUB_OUTPUT
+
+      - name: Run Claude Second Opinion
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
+
+          prompt: |
+            # Second Opinion Review - Fresh Context
+
+            **PR #${{ steps.pr.outputs.number }}**: ${{ steps.pr.outputs.title }}
+
+            You are providing a SECOND OPINION on this PR. Previous fix attempts have failed.
+            You have FRESH CONTEXT - use this to identify issues the previous attempts missed.
+
+            ## Your Advantages
+            - You don't have the "sunk cost" bias of previous attempts
+            - You can see patterns the original implementer might have missed
+            - You can suggest completely different approaches
+
+            ## Step 1: Understand the Original Intent
+
+            Read the linked issue (if any):
+            ```
+            $(cat /tmp/issue.txt)
+            ```
+
+            ## Step 2: Review Previous Attempts
+
+            These comments show what was tried before:
+            ```
+            $(head -100 /tmp/pr_comments.txt)
+            ```
+
+            ## Step 3: Analyze the Current State
+
+            Check:
+            - `gh pr diff ${{ steps.pr.outputs.number }}` - current changes
+            - Run `mix test` - what's failing?
+            - Run `mix compile --warnings-as-errors` - any warnings?
+
+            ## Step 4: Decide Your Action
+
+            Choose ONE:
+
+            **A. FIX IT** - You see a different solution:
+            - Implement your fix
+            - Run `mix precommit`
+            - Commit and push
+            - Post comment explaining your different approach
+
+            **B. ISSUE IS FLAWED** - The original issue/spec has problems:
+            - Post comment explaining what's wrong with the requirements
+            - Add `needs-clarification` label to the linked issue
+            - Remove `needs-second-opinion` label
+
+            **C. ESCALATE** - Genuinely needs human decision:
+            - Post detailed technical analysis
+            - Explain the tradeoffs
+            - Add `needs-human-review` label
+            - Remove `needs-second-opinion` label
+
+            ## Anti-Patterns to Avoid
+
+            DO NOT:
+            - Modify spec files to match broken implementation
+            - Disable or skip tests without creating tracking issues
+            - Weaken linting rules
+            - Make the same fix attempts as before
+
+            NEVER include "@claude" in comments.
+
+          claude_args: '--model claude-opus-4-5-20251101 --max-turns 100 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
+          show_full_output: true
+
+      - name: Remove trigger label
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr edit ${{ steps.pr.outputs.number }} --remove-label "needs-second-opinion" || true
+
+      # Safety net: push any unpushed commits
+      - name: Push unpushed commits
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        run: |
+          HEAD_REF="${{ steps.pr.outputs.head_ref }}"
+
+          # Re-configure git auth
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          # Push if there are unpushed commits
+          if git log "origin/${HEAD_REF}..HEAD" --oneline 2>/dev/null | grep -q .; then
+            echo "Pushing unpushed commits..."
+            git push origin "HEAD:${HEAD_REF}"
+            echo "::notice::Pushed commits from second opinion review"
+          fi
