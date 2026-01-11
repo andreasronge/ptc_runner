@@ -163,15 +163,23 @@ When protected files change:
 
 ### Scope Guards
 
-Implementation stops if:
-- More than 10 files need changing (excluding tests)
-- More than 500 lines would be added
-- Discovered blocker not in "Blocked by:" section
+Implementation stops for scope creep (principle-based, not hard thresholds):
+
+**Signs of scope creep:**
+- Changes spanning multiple unrelated modules or subsystems
+- Discovering substantial prerequisite work not in the issue
+- Implementation feels like 2-3 separate issues bundled together
+- Non-mechanical changes touching areas unrelated to the issue's focus
+
+**NOT scope creep (proceed normally):**
+- Mechanical changes across many files (renames, import updates, type fixes)
+- Related changes that naturally flow from the core implementation
+- Test files matching the implementation scope
 
 When stopping:
 1. Posts INCOMPLETE status
-2. Adds `needs-breakdown` or creates blocker issue
-3. Updates "Blocked by:" section if needed
+2. Adds `needs-breakdown` and explains how to split
+3. If discovered blocker: creates issue, updates "Blocked by:" section
 
 ### Fix Attempt Tracking
 
