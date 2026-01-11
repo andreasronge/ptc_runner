@@ -198,6 +198,35 @@ If a PR exists:
 - Pushes to existing branch
 - Posts comment noting continued work
 
+### TODO/Skip Tag Protocol
+
+All TODOs, FIXMEs, and skipped tests MUST reference a GitHub issue.
+
+**Required format:**
+```elixir
+# TODO(#123): Explanation of what needs to be done
+# FIXME(#123): Explanation of the bug
+
+@tag :skip  # Skipped: #123 - reason why test is skipped
+
+# credo:disable-for-next-line Credo.Check.Name - #123
+```
+
+**Before adding a TODO:**
+1. Search for existing issues: `gh issue list --search "keyword" --state open`
+2. If none exists, create one with `tech-debt` and `from-pr-review` labels
+3. Reference the issue number in the code
+
+**Code review enforcement:**
+- PRs with unreferenced TODOs are flagged as "MUST FIX"
+- Pattern checked: `TODO` without `(#\d+)`, `@tag :skip` without `#\d+`
+
+**Why this matters:**
+- Prevents untracked technical debt
+- Enables prioritization via issue labels
+- Avoids duplicate issues for same problem
+- Creates audit trail of when/why debt was introduced
+
 ### Discovered Blocker Protocol
 
 When implementation discovers prerequisite work:
@@ -316,6 +345,7 @@ automation will NOT proceed because `needs-human-review` has higher priority.
 | `from-pr-review` | Issue created from PR review |
 | `discovered-blocker` | Found during implementation, blocks another issue |
 | `quick-fix` | Trivial fix, batched by batch-fix workflow |
+| `tech-debt` | Technical debt tracked via TODO/FIXME in code |
 
 ## Concurrency Control
 

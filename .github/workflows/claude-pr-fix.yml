@@ -278,9 +278,22 @@ jobs:
             - Run `mix precommit` before committing - NEVER use `--no-verify`
             - Commit and push, then post a summary comment
 
-            **When tests fail for non-trivial out-of-scope issues:**
-            - Create a GH issue with `from-pr-review` and `needs-review` labels, then skip the test with `@tag :skip` and a comment referencing the issue
-            - Never bypass tests without tracking - each skipped test must reference an issue
+            **TODO/Skip Protocol (when tests fail for out-of-scope issues):**
+
+            1. Search for existing issue: `gh issue list --search "keyword" --state open --limit 5`
+            2. Create issue if none exists:
+               ```bash
+               gh issue create --title "[Tech Debt] description" \
+                 --label "tech-debt" --label "from-pr-review" \
+                 --body "Found during PR #${{ steps.pr-branch.outputs.pr_number }} fix."
+               ```
+            3. Reference issue in code (REQUIRED format):
+               ```elixir
+               @tag :skip  # Skipped: #123 - reason
+               # TODO(#123): description
+               ```
+
+            **NEVER add TODO/FIXME/@tag :skip without an issue reference.**
 
             NEVER include "@claude" in comments.
 
