@@ -673,6 +673,8 @@ Delete all deprecated fields and dual-write code after all consumers have migrat
 - MigrationGuard CLN-001 uncommented and passes
 - All tests pass
 - E2E tests pass
+- Documentation updated to reflect final API (deferred from earlier issues)
+- Remove "Current Work" section from CLAUDE.md
 
 **Blocked by:** #23
 
