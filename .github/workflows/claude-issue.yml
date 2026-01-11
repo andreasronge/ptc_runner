@@ -198,9 +198,37 @@ jobs:
             - `.credo.exs`, `.formatter.exs` - Linter configs
             If you MUST change these, explain why in the PR description.
 
-            **When tests fail for non-trivial out-of-scope issues:**
-            - Create a GH issue with `from-pr-review` and `needs-review` labels
-            - Skip the test with `@tag :skip` and a comment referencing the issue
+            ## TODO and Skip Tag Protocol (IMPORTANT)
+
+            When you need to add TODOs, skip tests, or disable linting:
+
+            **Step 1: Search for existing issues first**
+            ```bash
+            gh issue list --search "keyword describing the problem" --state open --limit 5
+            ```
+
+            **Step 2: Create issue if none exists**
+            ```bash
+            gh issue create --title "[Tech Debt] Brief description" \
+              --label "tech-debt" --label "from-pr-review" \
+              --body "Source: \`path/to/file.ex:LINE\`
+
+            Description of what needs to be fixed/cleaned up.
+
+            Found during implementation of #${{ github.event.issue.number }}."
+            ```
+
+            **Step 3: Reference issue in code (REQUIRED)**
+            ```elixir
+            # TODO(#123): Explanation of what needs to be done
+            # FIXME(#123): Explanation of the bug
+
+            @tag :skip  # Skipped: #123 - reason why test is skipped
+
+            # credo:disable-for-next-line Credo.Check.Name - #123
+            ```
+
+            **NEVER add TODO/FIXME/@tag :skip without an issue reference.**
 
             ## Step 6: MANDATORY Status Update (ALWAYS DO THIS)
 

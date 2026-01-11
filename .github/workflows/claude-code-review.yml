@@ -270,6 +270,23 @@ jobs:
             5. If AVOIDANCE detected: Flag as "MUST FIX" - revert spec, fix implementation
             6. If LEGITIMATE: Note in review that spec update is justified
 
+            **CRITICAL - TODO/Skip Tag Audit**:
+            Check the diff for any new TODOs, FIXMEs, or skipped tests:
+            ```bash
+            gh pr diff ${{ github.event.pull_request.number }} | grep -E '^\+.*(TODO|FIXME|@tag :skip)'
+            ```
+
+            For each match, verify it has a proper issue reference:
+            - `TODO(#123)` or `FIXME(#123)` - must have `(#N)` format
+            - `@tag :skip` - must have `#N` in a comment on same or adjacent line
+            - `credo:disable` - must have `#N` reference
+
+            **Flag as "MUST FIX" if found without issue reference:**
+            - "TODO without issue reference at line X. Use format: `# TODO(#123): description`"
+            - "@tag :skip without issue reference. Add comment: `# Skipped: #123 - reason`"
+
+            This prevents untracked technical debt from accumulating in the codebase.
+
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           claude_args: '--model claude-opus-4-5-20251101 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
 
