@@ -7,7 +7,9 @@ on:
 jobs:
   unblock-dependents:
     # When an issue closes, check if it was blocking other issues
-    # and re-enable them for implementation
+    # Skip if it's an epic issue - epic-update.yml handles those with phase-aware ordering
+    if: "!contains(toJSON(github.event.issue.labels), 'epic:')"
+
     runs-on: ubuntu-latest
 
     permissions:
