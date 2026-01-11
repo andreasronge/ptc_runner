@@ -22,7 +22,7 @@ Extracted from [message-history-optimization.md](./message-history-optimization.
 | BRK-002 | Step field rename | `trace` | `turns` | Structured turn data replaces raw trace |
 | BRK-003 | Module rename | `PtcRunner.Prompt` | `PtcRunner.Template` | It's a template struct, not "the prompt" |
 | BRK-004 | Sigil rename | `~PROMPT` | `~T` | Matches Template naming |
-| BRK-005 | Module rename | `SubAgent.Prompt` | `SubAgent.SystemPrompt` | Explicitly about system prompt |
+| BRK-005 | Module rename | `SubAgent.Prompt` | `SubAgent.SystemPrompt` | Explicitly about system prompt - DONE |
 | BRK-006 | Module rename | `SubAgent.Template` | `SubAgent.MissionExpander` | Clearer purpose |
 | BRK-007 | Module rename | `Lisp.Prompts` | `Lisp.LanguageSpec` | It's the language reference |
 | BRK-008 | Debug option removed | `debug: true` required | Always captured | `raw_response` always in Turn |
@@ -459,7 +459,7 @@ Add `lib/ptc_runner/migration_guard.ex` with compile-time guards. Uncomment each
 |----|--------|------------|------------|
 | CLN-002 | `PtcRunner.Prompt` module | `PtcRunner.Template` | CLN-001 |
 | CLN-003 | `~PROMPT` sigil | `~T` sigil | CLN-002 |
-| CLN-004 | `PtcRunner.SubAgent.Prompt` module | `SubAgent.SystemPrompt` | CLN-001 |
+| CLN-004 | `PtcRunner.SubAgent.Prompt` module | `SubAgent.SystemPrompt` | CLN-001 - DONE |
 | CLN-005 | `PtcRunner.SubAgent.Template` module | `SubAgent.MissionExpander` | CLN-001 |
 | CLN-006 | `PtcRunner.Lisp.Prompts` module | `Lisp.LanguageSpec` | CLN-001 |
 

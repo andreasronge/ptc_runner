@@ -227,5 +227,5 @@ IO.puts(preview.user)    # Expanded user prompt
 
 - [Core Concepts](subagent-concepts.md) - Context, memory, and firewalls
 - [Advanced Topics](subagent-advanced.md) - System prompt structure details
-- `PtcRunner.SubAgent.Prompt` - API reference for prompt generation
+- `PtcRunner.SubAgent.SystemPrompt` - API reference for prompt generation
 - `PtcRunner.Lisp.Prompts` - Available prompt profiles

@@ -41,7 +41,7 @@ A `Turn` represents a single LLM interaction cycle. Turns are **immutable** once
 }
 ```
 
-Note: `raw_response` captures the complete LLM output including any reasoning/commentary outside the code block. This is always captured (no debug flag needed). The system prompt is NOT stored per-turn since it's static - use `SubAgent.Prompt.generate_system/2` to view it.
+Note: `raw_response` captures the complete LLM output including any reasoning/commentary outside the code block. This is always captured (no debug flag needed). The system prompt is NOT stored per-turn since it's static - use `SubAgent.SystemPrompt.generate_system/2` to view it.
 
 ### Compression as a Render Function
 
@@ -545,7 +545,7 @@ SubAgent.Debug.print_trace(step, usage: true)           # add token stats
 The system prompt is static and NOT stored per-turn. To view it:
 
 ```elixir
-SubAgent.Prompt.generate_system(agent)
+SubAgent.SystemPrompt.generate_system(agent)
 ```
 
 ## Uncompressed Mode
