@@ -177,21 +177,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Check if triage posted @claude fix requests
-          FIX_REQUESTS=$(gh pr view ${{ steps.pr.outputs.number }} \
+          # Get all comments
+          COMMENTS=$(gh pr view ${{ steps.pr.outputs.number }} \
             --repo "${{ github.repository }}" \
-            --json comments \
-            | jq '[.comments[] | select(.body | test("@claude.*fix"; "i"))] | length')
+            --json comments)
 
-          echo "fix_count=$FIX_REQUESTS" >> $GITHUB_OUTPUT
-          if [ "$FIX_REQUESTS" -gt 0 ]; then
-            echo "has_fixes=true" >> $GITHUB_OUTPUT
+          # Count fix requests (@claude.*fix)
+          FIX_REQUESTS=$(echo "$COMMENTS" | jq '[.comments[] | select(.body | test("@claude.*fix"; "i"))] | length')
+
+          # Count fix completions (## Fix Summary)
+          FIX_COMPLETIONS=$(echo "$COMMENTS" | jq '[.comments[] | select(.body | test("## Fix Summary"))] | length')
+
+          echo "fix_requests=$FIX_REQUESTS" >> $GITHUB_OUTPUT
+          echo "fix_completions=$FIX_COMPLETIONS" >> $GITHUB_OUTPUT
+
+          # Pending fixes = requests that don't have corresponding completions
+          if [ "$FIX_REQUESTS" -gt "$FIX_COMPLETIONS" ]; then
+            echo "has_pending_fixes=true" >> $GITHUB_OUTPUT
+            echo "Pending fixes: $FIX_REQUESTS requests, $FIX_COMPLETIONS completions"
           else
-            echo "has_fixes=false" >> $GITHUB_OUTPUT
+            echo "has_pending_fixes=false" >> $GITHUB_OUTPUT
+            echo "All fixes resolved: $FIX_REQUESTS requests, $FIX_COMPLETIONS completions"
           fi
 
       - name: Enable auto-merge
-        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true' && steps.check-fixes.outputs.has_fixes != 'true'
+        if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true' && steps.check-fixes.outputs.has_pending_fixes != 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER }}
         run: |
@@ -204,7 +214,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ steps.check-fixes.outputs.has_fixes }}" = "true" ]; then
+          if [ "${{ steps.check-fixes.outputs.has_pending_fixes }}" = "true" ]; then
             STATE="failure"
             DESC="Fixes pending"
           else
