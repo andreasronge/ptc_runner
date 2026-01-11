@@ -1,21 +1,16 @@
 # Epic Creation Guidelines
 
-An epic is a GitHub issue that serves as the source of truth for the PM workflow. It contains specification references, a task list with checkboxes, and progress tracking.
+An epic is a GitHub issue that serves as the source of truth for a feature. It links to specs, tracks progress via checkboxes, and coordinates related issues.
 
-## When to Create an Epic
+## Labels
 
-- Starting a new major feature or initiative
-- Beginning a new phase of work
-- Consolidating related work items into a tracked plan
+| Label | Purpose |
+|-------|---------|
+| `type:epic` | Marks this issue as an epic |
+| `status:active` | Current epic (only one at a time) |
+| `epic:name` | Put on child issues (e.g., `epic:message-history`) |
 
-## Required Labels
-
-- `type:epic` - Identifies the issue as an epic
-- `status:active` - Marks it as the current epic (only one at a time)
-
-**Important**: Remove `status:active` from any existing epic before adding it to a new one.
-
-## Epic Structure
+## Structure
 
 ```markdown
 # [Epic Name]
@@ -24,53 +19,41 @@ An epic is a GitHub issue that serves as the source of truth for the PM workflow
 Brief description of what this epic accomplishes.
 
 ## Specification Documents
-- [Primary Spec](https://github.com/OWNER/REPO/blob/main/docs/spec-name.md) - Main implementation guide
-- [Related Doc](https://github.com/OWNER/REPO/blob/main/docs/related.md) - Supporting documentation
+- [Primary Spec](https://github.com/OWNER/REPO/blob/main/docs/specs/spec-name.md)
 
 ## Progress
 
 ### Phase 1: [Phase Name]
-- [ ] Task description (PM will create issue)
-- [ ] Another task
+- [ ] Task description
+- [ ] #123 - Existing issue (if already created)
+- [x] #124 - Completed
 
 ### Phase 2: [Phase Name]
 - [ ] Next phase tasks...
 
-## Notes
-Special instructions, blockers, or decisions for PM.
+## Discovered Issues
+- #130 - Found during implementation
 ```
-
-## Task Format
-
-| Format | Meaning |
-|--------|---------|
-| `- [ ] Task description` | PM will create an issue when it's time to work on this |
-| `- [ ] #123 - Task title` | Existing issue (only if already created) |
-| `- [x] #123 - Task title` | Completed |
-
-## Philosophy
-
-**Keep it lightweight.** Don't create GitHub issues upfront - let the PM create them just-in-time as work progresses. The epic is a roadmap, not a detailed project plan.
-
-- Write tasks as brief descriptions, not detailed specs
-- Trust the PM to read the spec docs and create well-formed issues
-- Only link existing issues if they already exist (e.g., `from-pr-review` tech debt)
-- The PM will refine tasks into proper issues with test plans, edge cases, etc.
-
-**Right-sizing tasks**: When you do specify tasks upfront, keep them at the right granularity:
-- Each task should deliver user-visible value (testable via E2E test)
-- Each task should fit in one PR (typically 100-500 lines)
-- See [Issue Creation Guidelines - Sizing](issue-creation-guidelines.md#sizing-guidelines) for detailed sizing criteria
 
 ## Guidelines
 
-- **Phase ordering**: PM completes phases sequentially (Phase 1 before Phase 2)
-- **Spec references**: Link to specification documents - PM reads these when creating issues
-- **One active epic**: Only one epic should have `status:active` at a time
-- **Use full GitHub URLs**: Relative paths like `docs/spec.md` don't work in GitHub issues. Always use full URLs: `https://github.com/OWNER/REPO/blob/main/docs/spec.md`
+- **One active epic**: Remove `status:active` from old epic before adding to new
+- **Full URLs**: Use `https://github.com/...` not relative paths (they don't work in issues)
+- **Phases are sequential**: Complete Phase 1 before Phase 2
+- **Just-in-time issues**: Don't create all issues upfront - create them as work progresses
+- **Label child issues**: Add `epic:name` label to issues belonging to this epic
+- **Deferred docs**: For phased refactorings with dual-write/backward-compat, defer doc updates to the final cleanup issue
+
+## Task Sizing
+
+Each task should:
+- Deliver testable value (can write an E2E test)
+- Fit in one PR (typically 100-500 lines)
+- Have clear boundaries
+
+See [Issue Creation Guidelines](issue-creation-guidelines.md) for more on sizing.
 
 ## References
 
-- [PM Workflow Instructions](../../.claude/commands/pm-workflow.md)
-- [GitHub Workflows Overview](github-workflows.md)
-- [Issue Creation Guidelines](issue-creation-guidelines.md)
+- [GitHub Workflows](github-workflows.md) - How automation interacts with epics
+- [Issue Creation Guidelines](issue-creation-guidelines.md) - Writing issues

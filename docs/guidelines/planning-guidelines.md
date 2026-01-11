@@ -7,10 +7,10 @@ This document defines **how to review and evaluate GitHub issues** before they'r
 **Audience**: Anyone reviewing issues (claude-issue-review workflow, maintainers).
 
 **Relationship to other docs**:
-- Reviews issues created following `issue-creation-guidelines.md` (template & quality)
-- The PM workflow (`pm-workflow.md`) triggers reviews by adding `needs-review` label
+- Reviews issues created following `issue-creation-guidelines.md`
+- Triggered when `needs-review` label is added to an issue
 
-**Used by**: `claude-issue-review.yml` workflow when reviewing issues.
+**Used by**: `claude-issue-review.yml` workflow.
 
 ## When to Use This Document
 
@@ -40,11 +40,9 @@ Before diving into the 9-point checklist, verify these basics:
 - Do the referenced patterns actually exist in the codebase?
 
 ### Documentation Impact
-If the issue changes public API or behavior, verify it identifies which docs need updating:
-- `docs/reference/ptc-json-specification.md` - JSON DSL operations
-- `docs/ptc-lisp-specification.md` - PTC-Lisp operations
-- `README.md` - Public API, installation
-- Module `@moduledoc`/`@doc` - Function signatures
+If the issue changes public API or behavior, note which docs will need updating.
+
+**For phased refactorings** (dual-write, backward-compat shims): defer doc updates until cleanup phase completes. Documenting transitional states creates churn and confusion.
 
 ## Issue Review Checklist (9 Areas)
 
@@ -145,5 +143,4 @@ When reviewing an issue, structure your response as:
 ## References
 
 - [Issue Creation Guidelines](issue-creation-guidelines.md) - How to write well-specified issues
-- [Roadmap Guidelines](roadmap-guidelines.md) - Planning multi-issue features
 - [Testing Guidelines](testing-guidelines.md) - Test quality and patterns
