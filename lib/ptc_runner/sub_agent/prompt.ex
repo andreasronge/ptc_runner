@@ -51,11 +51,11 @@ defmodule PtcRunner.SubAgent.Prompt do
 
   alias PtcRunner.Lisp.Prompts
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.MissionExpander
   alias PtcRunner.SubAgent.Prompt.DataInventory
   alias PtcRunner.SubAgent.Prompt.Output
   alias PtcRunner.SubAgent.Prompt.Tools
   alias PtcRunner.SubAgent.Signature
-  alias PtcRunner.SubAgent.Template
 
   @output_format """
   # Output Format
@@ -404,7 +404,7 @@ defmodule PtcRunner.SubAgent.Prompt do
   end
 
   defp expand_mission(prompt, context) do
-    case Template.expand(prompt, context) do
+    case MissionExpander.expand(prompt, context) do
       {:ok, expanded} -> expanded
       {:error, {:missing_keys, _keys}} -> prompt
     end

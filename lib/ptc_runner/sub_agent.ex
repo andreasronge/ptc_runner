@@ -536,9 +536,9 @@ defmodule PtcRunner.SubAgent do
   defp validate_chain_keys!(%PtcRunner.Step{fail: fail}, _agent) when fail != nil, do: :ok
 
   defp validate_chain_keys!(%PtcRunner.Step{return: return}, %__MODULE__{signature: sig}) do
-    alias PtcRunner.SubAgent.Template
+    alias PtcRunner.SubAgent.MissionExpander
 
-    required_keys = Template.extract_signature_params(sig)
+    required_keys = MissionExpander.extract_signature_params(sig)
 
     # Handle non-map return values (no keys available)
     provided_keys =
@@ -790,8 +790,8 @@ defmodule PtcRunner.SubAgent do
 
   # Expand template placeholders with context values
   defp expand_template(prompt, context) when is_map(context) do
-    alias PtcRunner.SubAgent.Template
-    {:ok, result} = Template.expand(prompt, context, on_missing: :keep)
+    alias PtcRunner.SubAgent.MissionExpander
+    {:ok, result} = MissionExpander.expand(prompt, context, on_missing: :keep)
     result
   end
 
@@ -1057,11 +1057,11 @@ defmodule PtcRunner.SubAgent do
     context = Keyword.get(opts, :context, %{})
 
     # Generate system prompt using existing Prompt module
-    alias PtcRunner.SubAgent.{Prompt, Template}
+    alias PtcRunner.SubAgent.{MissionExpander, Prompt}
     system_prompt = Prompt.generate(agent, context: context)
 
     # Expand user message template
-    {:ok, user_message} = Template.expand(agent.prompt, context, on_missing: :keep)
+    {:ok, user_message} = MissionExpander.expand(agent.prompt, context, on_missing: :keep)
 
     # Tool schemas - extract from agent.tools
     tool_schemas =

@@ -638,8 +638,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Expand template placeholders with context values
   defp expand_template(prompt, context) when is_map(context) do
-    alias PtcRunner.SubAgent.Template
-    {:ok, result} = Template.expand(prompt, context, on_missing: :keep)
+    alias PtcRunner.SubAgent.MissionExpander
+    {:ok, result} = MissionExpander.expand(prompt, context, on_missing: :keep)
     result
   end
 
