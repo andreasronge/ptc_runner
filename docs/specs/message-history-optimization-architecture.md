@@ -10,6 +10,19 @@ This feature introduces the following breaking changes:
 |--------|------|-----|-----------|
 | SubAgent field | `prompt` | `mission` | More semantic - describes the task |
 | Step field | `trace` | `turns` | Structured turn data replaces raw trace |
+| Debug option | `debug: true` required | Always captured | `raw_response` always in Turn |
+| Debug API | `messages:`, `system:` | `view:`, `raw:` | Simpler, orthogonal options |
+
+### Demo Migration
+
+| File | Change | Action |
+|------|--------|--------|
+| `agent.ex` | `prompt:` → `mission:` | Update `SubAgent.new()` calls |
+| `agent.ex` | `step.trace` → `step.turns` | Update `extract_program_from_trace/1` to use `Turn.program` |
+| `prompts.ex` | `Lisp.Prompts` → `Lisp.LanguageSpec` | Update alias |
+| `agent.ex` | System prompt is now static | Move role prefix to `system_prompt: %{prefix: ...}` |
+| `cli_base.ex` | `preview_prompt` output changes | Data/tools now in USER message (expected) |
+| `*_cli.ex` | `print_trace` API changes | Update to new options (`raw:`, `view:`) |
 
 ## Module Restructure
 
@@ -206,10 +219,13 @@ defmodule PtcRunner.Turn do
   A single LLM interaction cycle in multi-turn execution.
 
   Turns are immutable once created. The turns list is append-only.
+  `raw_response` is always captured (no debug flag needed).
+  System prompt is NOT stored - it's static, use `SubAgent.Prompt.generate_system/2`.
   """
 
   defstruct [
     :number,
+    :raw_response,
     :program,
     :result,
     :prints,
@@ -220,6 +236,7 @@ defmodule PtcRunner.Turn do
 
   @type t :: %__MODULE__{
     number: pos_integer(),
+    raw_response: String.t(),
     program: String.t(),
     result: term(),
     prints: [String.t()],
@@ -229,10 +246,11 @@ defmodule PtcRunner.Turn do
   }
 
   @doc "Create a successful turn"
-  @spec success(pos_integer(), String.t(), term(), map(), keyword()) :: t()
-  def success(number, program, result, memory, opts \\ []) do
+  @spec success(pos_integer(), String.t(), String.t(), term(), map(), keyword()) :: t()
+  def success(number, raw_response, program, result, memory, opts \\ []) do
     %__MODULE__{
       number: number,
+      raw_response: raw_response,
       program: program,
       result: result,
       prints: Keyword.get(opts, :prints, []),
@@ -243,10 +261,11 @@ defmodule PtcRunner.Turn do
   end
 
   @doc "Create a failed turn"
-  @spec failure(pos_integer(), String.t(), term(), map(), keyword()) :: t()
-  def failure(number, program, error, memory, opts \\ []) do
+  @spec failure(pos_integer(), String.t(), String.t(), term(), map(), keyword()) :: t()
+  def failure(number, raw_response, program, error, memory, opts \\ []) do
     %__MODULE__{
       number: number,
+      raw_response: raw_response,
       program: program,
       result: error,
       prints: Keyword.get(opts, :prints, []),
@@ -349,7 +368,8 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
   Default compression strategy.
 
   Accumulates all successful turn context into a single USER message.
-  Failed turns are preserved with full code.
+  Failed turns use conditional collapsing: shown while still failing,
+  collapsed after recovery.
 
   Message structure:
   ```
@@ -399,6 +419,10 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
     all_prints = Enum.flat_map(successful, & &1.prints)
     has_println = all_prints != []
 
+    # Conditional collapsing: only show errors if last turn failed
+    last_turn = List.last(turns)
+    show_errors = last_turn && !last_turn.success?
+
     parts = [
       config.mission,
       Namespace.render(%{
@@ -409,7 +433,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
       }),
       ExecutionHistory.render_tool_calls(all_tool_calls, config.tool_call_limit),
       ExecutionHistory.render_output(all_prints, config.println_limit, has_println),
-      format_failed_turns(failed),
+      if(show_errors, do: format_failed_turns(failed), else: nil),
       format_turns_left(config.turns_left)
     ]
 
@@ -423,9 +447,13 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
     Enum.split_with(turns, & &1.success?)
   end
 
+  # Conditional collapsing: show most recent error only if still failing
   defp format_failed_turns([]), do: nil
   defp format_failed_turns(failed_turns) do
-    Enum.map(failed_turns, fn turn ->
+    # Only show most recent failed turn (limit: 1)
+    [turn] = Enum.take(failed_turns, -1)
+    [turn]
+    |> Enum.map(fn turn ->
       """
       ---
       Your previous attempt:
@@ -736,10 +764,11 @@ defmodule PtcRunner.SubAgent.Loop do
     # Execute code
     case execute(response, state) do
       {:continue, lisp_step} ->
-        # Create immutable turn record
+        # Create immutable turn record (raw_response always captured)
         turn = Turn.success(
           state.turn_number + 1,
-          extract_program(response),
+          response,                    # raw_response
+          extract_program(response),   # program
           lisp_step.return,
           lisp_step.memory,
           prints: lisp_step.prints,
@@ -756,12 +785,13 @@ defmodule PtcRunner.SubAgent.Loop do
         loop(agent, llm, new_state)
 
       {:error, lisp_step} ->
-        # Create failed turn record
+        # Create failed turn record (raw_response always captured)
         # lisp_step.fail contains %{reason: atom, message: string}
         turn = Turn.failure(
           state.turn_number + 1,
-          extract_program(response),
-          lisp_step.fail,  # Store the full fail map
+          response,                    # raw_response
+          extract_program(response),   # program
+          lisp_step.fail,              # Store the full fail map
           lisp_step.memory,
           prints: lisp_step.prints,
           tool_calls: lisp_step.tool_calls
@@ -812,6 +842,7 @@ Execute turn N
 ┌─────────────────────────────────────────┐
 │ Create Turn struct:                      │
 │ - number: N                              │
+│ - raw_response: "..." (always captured)  │
 │ - program: "..."                         │
 │ - result: term()                         │
 │ - prints: [...]                          │
@@ -847,11 +878,12 @@ to_messages(turns, memory, opts)
       │
       ├──────────────────┐
       ▼                  ▼
-┌─────────────┐    ┌─────────────┐
-│ Successful  │    │ Failed      │
-│ → Summary   │    │ → Full code │
-└─────────────┘    └─────────────┘
-      │                  │
+┌─────────────┐    ┌─────────────────────┐
+│ Successful  │    │ Failed              │
+│ → Summary   │    │ → Conditional:      │
+└─────────────┘    │   Last failed? Show │
+      │            │   Recovered? Hide   │
+      │            └─────────────────────┘
       └────────┬─────────┘
                ▼
 ┌─────────────────────────────────────────┐
@@ -864,7 +896,7 @@ to_messages(turns, memory, opts)
 │ │ ; Defined: ...                      │ │
 │ │ ; Output: ...                       │ │
 │ │                                     │ │
-│ │ --- (failed turns if any) ---       │ │
+│ │ --- (last error, if still failing)  │ │
 │ │                                     │ │
 │ │ Turns left: N                       │ │
 │ └─────────────────────────────────────┘ │
