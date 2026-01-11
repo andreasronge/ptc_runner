@@ -24,12 +24,14 @@ jobs:
         run: |
           echo "Epic #$EPIC_NUMBER activated, finding first unblocked issue..."
 
-          # Get all open issues with epic:* labels
+          # Get all open issues with epic:* labels, sorted by number ascending
+          # (so earlier issues/phases are checked first)
           EPIC_ISSUES=$(gh issue list \
             --repo "${{ github.repository }}" \
             --state open \
             --json number,body,labels \
-            --limit 100)
+            --limit 100 \
+            | jq 'sort_by(.number)')
 
           # Save to file to avoid subshell issues
           echo "$EPIC_ISSUES" > /tmp/epic_issues.json
