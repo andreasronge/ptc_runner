@@ -38,7 +38,7 @@ defmodule PtcRunner.Lisp.Eval do
           | map()
           | MapSet.t()
           | function()
-          | {:closure, [CoreAST.pattern()], CoreAST.t(), env(), list()}
+          | {:closure, [CoreAST.pattern()], CoreAST.t(), env(), list(), map()}
 
   @type runtime_error ::
           {:unbound_var, atom()}
@@ -308,7 +308,8 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:fn, params, body}, %EvalContext{} = eval_ctx) do
     # Capture the current environment and turn history (lexical scoping)
     # We also capture the user_ns snapshot as before.
-    {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history}, eval_ctx}
+    # Metadata starts empty; return_type is populated when closure is called
+    {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history, %{}}, eval_ctx}
   end
 
   # ============================================================
@@ -715,7 +716,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Convert a closure to a zero-arity Erlang function for use in pcalls
   defp pcalls_fn_to_erlang(
-         {:closure, [], body, closure_env, turn_history},
+         {:closure, [], body, closure_env, turn_history, _metadata},
          %EvalContext{} = eval_ctx
        ) do
     fn ->
@@ -737,7 +738,10 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  defp pcalls_fn_to_erlang({:closure, params, _body, _closure_env, _turn_history}, %EvalContext{}) do
+  defp pcalls_fn_to_erlang(
+         {:closure, params, _body, _closure_env, _turn_history, _metadata},
+         %EvalContext{}
+       ) do
     arity = length(params)
     raise "pcalls requires zero-arity thunks, got function with arity #{arity}"
   end
