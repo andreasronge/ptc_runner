@@ -25,17 +25,17 @@ Input for creating GitHub issues. Each issue section contains requirements to im
 
 ## Phase 0: Foundation
 
-### Issue #1: Messages stored in Step (PRE-001)
+### Issue #1: Messages stored in Step (PRE-001) ✅ COMPLETE
 
-**Existing issue:** #603
+**Existing issue:** #603 (closed 2026-01-09)
 
-This is the blocking dependency. All other issues depend on this.
+This was the blocking dependency. Now complete - subsequent issues can proceed.
 
 **Requirements:** PRE-001
 
-**Blocked by:** None
+**Status:** ✅ Complete
 
-**Blocks:** All subsequent issues
+**Blocks:** All subsequent issues (now unblocked)
 
 ---
 
@@ -683,7 +683,7 @@ Delete all deprecated fields and dual-write code after all consumers have migrat
 ## Dependency Graph
 
 ```
-#1 (PRE-001: Messages in Step)
+#1 (PRE-001: Messages in Step) ✅
 ├── #2 (Namespace auto-fallback)
 │   ├── #7 (Namespace.Tool)
 │   └── #8 (Namespace.Data) ──┐

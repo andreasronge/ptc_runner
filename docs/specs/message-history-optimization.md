@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- [#603 - Messages should be stored in Step](https://github.com/andreasronge/ptc_runner/issues/603) must be completed first.
+- ~~[#603 - Messages should be stored in Step](https://github.com/andreasronge/ptc_runner/issues/603)~~ ✅ Complete (closed 2026-01-09)
 
 ## Problem Statement
 
