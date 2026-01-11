@@ -5,7 +5,7 @@ defmodule PtcRunner.SubAgent.SigilsTest do
   import Kernel, except: [sigil_T: 2]
   import PtcRunner.SubAgent.Sigils
 
-  alias PtcRunner.SubAgent.Template, as: TemplateExpander
+  alias PtcRunner.SubAgent.MissionExpander
   alias PtcRunner.Template
 
   # Note: doctest is not used because the ~T sigil conflicts with Elixir's built-in
@@ -73,7 +73,7 @@ defmodule PtcRunner.SubAgent.SigilsTest do
       assert %{path: ["sender", "name"], type: :simple} in template.placeholders
 
       {:ok, expanded} =
-        TemplateExpander.expand(
+        MissionExpander.expand(
           template.template,
           %{user: "alice", sender: %{name: "bob"}}
         )

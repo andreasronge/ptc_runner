@@ -34,7 +34,7 @@ defmodule PtcRunner.SubAgent.Sigils do
       You have {{items.count}} items.
       \"\"\"
 
-  Use `PtcRunner.SubAgent.Template.expand/2` to expand the template with values.
+  Use `PtcRunner.SubAgent.MissionExpander.expand/2` to expand the template with values.
 
   ## Note on Elixir's Built-in ~T Sigil
 
@@ -50,7 +50,7 @@ defmodule PtcRunner.SubAgent.Sigils do
   the Time sigil, or explicitly qualify the Time sigil with `import Kernel, only: [sigil_T: 2]`.
   """
 
-  alias PtcRunner.SubAgent.Template, as: TemplateExpander
+  alias PtcRunner.SubAgent.MissionExpander
   alias PtcRunner.Template
 
   @doc """
@@ -70,7 +70,7 @@ defmodule PtcRunner.SubAgent.Sigils do
 
   """
   defmacro sigil_T({:<<>>, _meta, [template]}, _modifiers) do
-    placeholders = TemplateExpander.extract_placeholders(template)
+    placeholders = MissionExpander.extract_placeholders(template)
 
     quote do
       %Template{
