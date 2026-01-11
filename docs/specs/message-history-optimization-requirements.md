@@ -254,6 +254,138 @@ Error: {error_message}
 | SS-001 | No compression for `max_turns: 1` | |
 | SS-002 | `max_turns` defaults to 5 if not specified | |
 
+## Uncompressed Mode (compression: false)
+
+When compression is disabled, the LLM sees full turn history as USER/ASSISTANT pairs instead of coalesced summaries.
+
+### Core Requirements
+
+| ID | Requirement | Notes |
+|----|-------------|-------|
+| UCM-001 | Static SYSTEM prompt used | Per ARC-011 |
+| UCM-002 | Tool/ and data/ namespaces in first USER message | Per ARC-009 |
+| UCM-003 | Turn history uses USER/ASSISTANT message pairs | One pair per completed turn |
+| UCM-004 | ASSISTANT messages contain full program code | Not summarized |
+| UCM-005 | USER messages after turns contain execution feedback | Result + output |
+| UCM-006 | No user/ prelude section | LLM sees definitions in ASSISTANT history |
+| UCM-007 | No println_limit or tool_call_limit | Full output preserved |
+| UCM-008 | Error handling: show full error with code | No conditional collapsing |
+| UCM-009 | "Turns left: N" in most recent USER message | Before current turn |
+| UCM-010 | Mission appears only in first USER message | Not repeated |
+
+### Message Array Structure
+
+```
+[SYSTEM]      Static language spec + output format
+[USER]        Mission + tool/ + data/
+[ASSISTANT]   Turn 1 code (full program)
+[USER]        Turn 1 feedback
+[ASSISTANT]   Turn 2 code (full program)
+[USER]        Turn 2 feedback + "Turns left: N"
+[ASSISTANT]   (current turn - LLM generates this)
+```
+
+### Execution Feedback Format (USER messages after turns)
+
+**Successful turn:**
+```
+Result: {value}
+
+;; Output:
+{println output if any}
+```
+
+**Failed turn:**
+```
+Error: {error_message}
+
+;; Output:
+{println output if any}
+```
+
+**Final turn indicator (in last USER before current):**
+```
+Result: {value}
+
+Turns left: 2
+```
+
+Or for final turn:
+```
+Result: {value}
+
+FINAL TURN - you must call (return result) or (fail reason) now.
+```
+
+### Example: Turn 3 with compression: false
+
+```
+[SYSTEM]
+You are a PTC-Lisp interpreter...
+(static language spec)
+
+[USER]
+Find well-reviewed products in stock
+
+;; === tool/ ===
+tool/search-reviews(query) -> string
+tool/get-inventory() -> map
+
+;; === data/ ===
+data/products                    ; list[7], sample: {:name "Laptop", :price 1200}
+
+[ASSISTANT]
+```clojure
+(def electronics (filter (fn [p] (= (:category p) "Electronics")) data/products))
+(def reviews (tool/search-reviews "Electronics"))
+(println "Found" (count electronics) "electronics products")
+```
+
+[USER]
+Result: "Found 4 electronics products"
+
+;; Output:
+Found 4 electronics products
+
+[ASSISTANT]
+```clojure
+(def inventory (tool/get-inventory))
+(def in-stock (filter (fn [p] (get inventory (:id p))) electronics))
+(println "In stock:" (count in-stock))
+```
+
+[USER]
+Result: "In stock: 3"
+
+;; Output:
+In stock: 3
+
+Turns left: 3
+
+[ASSISTANT]
+(LLM generates turn 3 code here)
+```
+
+### Comparison: Compressed vs Uncompressed
+
+| Aspect | Compressed (SingleUserCoalesced) | Uncompressed |
+|--------|----------------------------------|--------------|
+| Message count | 2-3 (SYSTEM, USER, [ASSISTANT]) | 2 + 2*turns |
+| Previous code visible | No (summarized) | Yes (full programs) |
+| user/ prelude section | Yes (accumulated definitions) | No (visible in code) |
+| Tool calls listed | Yes (`;; Tool calls made:`) | No (visible in code) |
+| println output | Accumulated with limit | Full, per-turn |
+| Error history | Conditional collapsing | Full error shown |
+| Token usage | Lower (summaries) | Higher (full history) |
+| Use case | Production, token-efficient | Debugging, simple agents |
+
+### When to Use Uncompressed
+
+- **Debugging**: See exactly what code the LLM wrote each turn
+- **Simple agents**: Few turns where full history fits in context
+- **Analysis**: Understanding LLM behavior patterns
+- **Testing**: Verify compression doesn't change behavior
+
 ## Debug and Tracing
 
 | ID | Requirement | Notes |
@@ -398,4 +530,5 @@ Add `lib/ptc_runner/migration_guard.ex` with compile-time guards. Uncomment each
 | CHG-035 | Roadmap: Added Issue #24 (Phase 9) for final cleanup |
 | CHG-036 | Roadmap: Issue #2 now requires edge case tests for regression risk |
 | CHG-037 | Roadmap: Issue #17 now requires get/1 API verification |
+| CHG-038 | Added Uncompressed Mode section (UCM-001 to UCM-010) |
 

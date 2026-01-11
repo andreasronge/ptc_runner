@@ -548,6 +548,30 @@ The system prompt is static and NOT stored per-turn. To view it:
 SubAgent.Prompt.generate_system(agent)
 ```
 
+## Uncompressed Mode
+
+When `compression: false` (the default), the LLM sees full turn history as USER/ASSISTANT pairs:
+
+```
+[SYSTEM]      Static language spec (same as compressed)
+[USER]        Mission + tool/ + data/
+[ASSISTANT]   Turn 1 code (full)
+[USER]        Turn 1 result + output
+[ASSISTANT]   Turn 2 code (full)
+[USER]        Turn 2 result + output + "Turns left: N"
+```
+
+Key differences from compressed mode:
+- **Full code visible**: ASSISTANT messages contain complete programs
+- **USER/ASSISTANT pairs**: One pair per turn instead of single coalesced USER
+- **No user/ prelude**: Definitions visible in ASSISTANT history
+- **No limits**: Full println output and tool calls preserved
+- **No conditional collapsing**: Full errors shown
+
+Use uncompressed mode for debugging, simple agents, or verifying compression behavior.
+
+See [requirements](./message-history-optimization-requirements.md#uncompressed-mode-compression-false) for full specification.
+
 ## Resolved Design Decisions
 
 **Append-only turns**: Turns are immutable once created. The compression strategy is a pure render function that transforms turns to messages on demand.
