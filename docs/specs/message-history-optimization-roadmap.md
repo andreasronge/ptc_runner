@@ -388,19 +388,21 @@ Default strategy that accumulates all context into single USER message.
 
 Each rename is atomic (one commit). Can be done in parallel or sequentially.
 
-### Issue #14: Rename PtcRunner.Prompt → PtcRunner.Template
+### Issue #14: Rename PtcRunner.Prompt → PtcRunner.Template ✅ COMPLETE
+
+**Status:** ✅ Complete (PR created for #622)
 
 **Requirements:**
-- BRK-003: Module rename
-- BRK-004: Sigil `~PROMPT` → `~T`
-- CLN-002, CLN-003
+- BRK-003: Module rename ✅
+- BRK-004: Sigil `~PROMPT` → `~T` ✅
+- CLN-002, CLN-003 ✅
 
 **Files:**
-- Rename `lib/ptc_runner/prompt.ex` → `lib/ptc_runner/template.ex`
-- Update all references
-- Update sigil definition
+- ✅ Renamed `lib/ptc_runner/prompt.ex` → `lib/ptc_runner/template.ex`
+- ✅ Updated all references
+- ✅ Updated sigil definition
 
-**Blocked by:** #1
+**Blocked by:** #1 (complete)
 
 **Blocks:** #22
 

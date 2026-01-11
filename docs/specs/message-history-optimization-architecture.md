@@ -32,8 +32,8 @@ This feature requires restructuring prompt-related modules for clarity. The curr
 
 | Current | New | Rationale |
 |---------|-----|-----------|
-| `PtcRunner.Prompt` | `PtcRunner.Template` | It's a template struct, not "the prompt" |
-| `~PROMPT` sigil | `~T` | Matches Template naming |
+| ~~`PtcRunner.Prompt`~~ | `PtcRunner.Template` | ✅ Complete (#622) |
+| ~~`~PROMPT`~~ sigil | `~T` | ✅ Complete (#622) |
 | `SubAgent.Prompt` | `SubAgent.SystemPrompt` | Explicitly about system prompt |
 | `SubAgent.Template` | `SubAgent.MissionExpander` | Clearer purpose |
 | `Lisp.Prompts` | `Lisp.LanguageSpec` | It's the PTC-Lisp language reference |
@@ -949,11 +949,11 @@ to_messages(turns, memory, opts)
 ## Implementation Order
 
 1. **Phase 1: Module Refactoring** (can be done independently)
-   - Rename `PtcRunner.Prompt` → `PtcRunner.Template`
+   - ~~Rename `PtcRunner.Prompt` → `PtcRunner.Template`~~ ✅ Complete (#622)
    - Rename `SubAgent.Prompt` → `SubAgent.SystemPrompt`
    - Rename `SubAgent.Template` → `SubAgent.MissionExpander`
    - Rename `Lisp.Prompts` → `Lisp.LanguageSpec`
-   - Update `~PROMPT` sigil to `~T`
+   - ~~Update `~PROMPT` sigil to `~T`~~ ✅ Complete (#622)
    - Move tools/data rendering out of SystemPrompt
 
 2. **Phase 2: Core Types**
