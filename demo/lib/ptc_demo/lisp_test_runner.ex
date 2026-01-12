@@ -142,6 +142,7 @@ defmodule PtcDemo.LispTestRunner do
     * `:runs` - Number of times to run all tests (default: 1)
     * `:validate_clojure` - Validate generated programs against Babashka (default: false)
     * `:compression` - Enable message history compression (default: false)
+    * `:filter` - Filter tests by type: :multi_turn, :single_turn, or :all (default: :all)
 
   ## Examples
 
@@ -153,6 +154,7 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all(runs: 3)
       PtcDemo.LispTestRunner.run_all(validate_clojure: true)
       PtcDemo.LispTestRunner.run_all(compression: true)
+      PtcDemo.LispTestRunner.run_all(filter: :multi_turn, compression: true)
   """
   def run_all(opts \\ []) do
     agent_mod = Keyword.get(opts, :agent, Agent)
@@ -171,6 +173,7 @@ defmodule PtcDemo.LispTestRunner do
     runs = Keyword.get(opts, :runs, 1)
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
     compression = Keyword.get(opts, :compression, false)
+    filter = Keyword.get(opts, :filter, :all)
 
     # Check Babashka availability if Clojure validation requested
     clojure_available = check_clojure_validation(validate_clojure)
@@ -211,7 +214,19 @@ defmodule PtcDemo.LispTestRunner do
         IO.puts("Compression: enabled")
       end
 
+      if filter != :all do
+        IO.puts("Filter: #{filter}")
+      end
+
       IO.puts("")
+    end
+
+    # Get filtered test cases
+    cases = filter_test_cases(test_cases(), filter)
+
+    if cases == [] do
+      IO.puts("No tests match filter: #{filter}")
+      System.halt(0)
     end
 
     # Run tests multiple times if requested
@@ -220,6 +235,7 @@ defmodule PtcDemo.LispTestRunner do
         run_single_batch(
           run_num,
           runs,
+          cases,
           data_mode,
           prompt_profile,
           verbose,
@@ -260,6 +276,7 @@ defmodule PtcDemo.LispTestRunner do
   defp run_single_batch(
          run_num,
          total_runs,
+         cases,
          data_mode,
          prompt_profile,
          verbose,
@@ -274,7 +291,7 @@ defmodule PtcDemo.LispTestRunner do
     start_time = System.monotonic_time(:millisecond)
 
     results =
-      test_cases()
+      cases
       |> Enum.with_index(1)
       |> Enum.map(fn {test_case, index} ->
         # Reset context before each test to get clean attempt count
@@ -289,7 +306,7 @@ defmodule PtcDemo.LispTestRunner do
         run_test(
           test_case,
           index,
-          length(test_cases()),
+          length(cases),
           verbose,
           false,
           agent_mod,
@@ -471,6 +488,17 @@ defmodule PtcDemo.LispTestRunner do
   end
 
   # Private functions
+
+  # Filter test cases by type
+  defp filter_test_cases(cases, :all), do: cases
+
+  defp filter_test_cases(cases, :multi_turn) do
+    Enum.filter(cases, fn tc -> Map.get(tc, :max_turns, 1) > 1 end)
+  end
+
+  defp filter_test_cases(cases, :single_turn) do
+    Enum.filter(cases, fn tc -> Map.get(tc, :max_turns, 1) == 1 end)
+  end
 
   # Select appropriate prompt for test type
   defp prompt_for_test(test_case, :auto) do

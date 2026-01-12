@@ -35,6 +35,7 @@ defmodule PtcDemo.LispCLI do
     runs = opts[:runs]
     validate_clojure = opts[:validate_clojure]
     compression = Map.get(opts, :compression, false)
+    filter = Map.get(opts, :filter, :all)
 
     # Resolve model early so we can check if it's a local provider
     resolved_model = if model, do: CLIBase.resolve_model(model), else: nil
@@ -81,7 +82,8 @@ defmodule PtcDemo.LispCLI do
         validate_clojure: validate_clojure,
         test_index: test_index,
         prompt: prompt_profile,
-        compression: compression
+        compression: compression,
+        filter: filter
       )
     else
       IO.puts(
@@ -459,6 +461,8 @@ defmodule PtcDemo.LispCLI do
       mix lisp --test=14           Run a single test by index
       mix lisp --test --verbose    Run tests with detailed output
       mix lisp --test --runs=3     Run tests multiple times
+      mix lisp --test --filter=multi_turn   Run only multi-turn tests
+      mix lisp --test --filter=single_turn  Run only single-turn tests
       mix lisp --model=<name>      Start with specific model
       mix lisp --prompt=<name>     Start with prompt profile (minimal, single_shot, etc.)
       mix lisp --prompt=a,b        Compare multiple prompts (e.g., --prompt=minimal,default)

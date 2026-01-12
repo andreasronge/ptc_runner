@@ -250,6 +250,7 @@ mix lisp --help        # Show all available options
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
 | `--compression` | Enable message compression (coalesces history into single message) |
+| `--filter=<type>` | Filter tests: `multi_turn`, `single_turn`, or `all` (default: all) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--validate-clojure` | Validate generated programs against Babashka |
@@ -265,6 +266,7 @@ mix lisp --prompt=single_shot             # Use single-shot prompt explicitly
 mix lisp --test --model=deepseek -v       # Test with DeepSeek
 mix lisp --test --validate-clojure        # Validate syntax with Babashka
 mix lisp --debug                          # Debug mode to see full LLM responses
+mix lisp --test --filter=multi_turn --compression  # Multi-turn tests with compression
 ```
 
 ## Prompt Profiles
