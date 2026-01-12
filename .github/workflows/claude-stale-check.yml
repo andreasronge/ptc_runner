@@ -170,7 +170,7 @@ jobs:
             Use `gh` commands to inspect issues, check blockers, and take corrective action
             (add labels, fix issue bodies, post comments). Be concise.
 
-          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Read,Glob,Grep,Bash,TodoWrite"'
+          claude_args: '--model claude-sonnet-4-5-20250929 --allowed-tools "Read,Glob,Grep,Bash,TodoWrite"'
 
   # Parallel job for orphan branch recovery (doesn't need Claude)
   check-orphans:
