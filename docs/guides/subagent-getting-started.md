@@ -300,7 +300,7 @@ For reusable agents, create the struct separately:
 ```elixir
 # Define once
 product_finder = PtcRunner.SubAgent.new(
-  prompt: "Find the most expensive product",
+  mission: "Find the most expensive product",
   signature: "{name :string, price :float}",
   tools: product_tools,
   max_turns: 5
@@ -318,7 +318,7 @@ SubAgents support additional optional fields for documentation and output contro
 
 ```elixir
 PtcRunner.SubAgent.new(
-  prompt: "Find products matching {{query}}",
+  mission: "Find products matching {{query}}",
   signature: "(query :string) -> [{name :string, price :float}]",
   tools: product_tools,
 
