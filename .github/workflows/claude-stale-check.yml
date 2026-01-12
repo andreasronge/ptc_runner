@@ -14,7 +14,7 @@ jobs:
       stuck_issues_summary: ${{ steps.detect.outputs.stuck_issues_summary }}
 
     permissions:
-      issues: read
+      issues: write  # Need write to add needs-attention label as fallback
       pull-requests: read
       contents: read
 
@@ -116,6 +116,22 @@ jobs:
           if [ "$HAS_ISSUES" = "true" ]; then
             echo ""
             echo "=== Issues requiring attention: $STUCK_ISSUES ==="
+
+            # Fallback: Add needs-attention label immediately (doesn't need Claude)
+            # This ensures visibility even if claude-diagnose job can't run
+            for ISSUE in $STUCK_ISSUES; do
+              # Extract issue number (remove annotations like "(stale-review)")
+              ISSUE_NUM=$(echo "$ISSUE" | grep -oE '[0-9]+')
+              if [ -n "$ISSUE_NUM" ]; then
+                # Check if already has needs-attention
+                HAS_LABEL=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json labels \
+                  --jq '.labels[].name' | grep -q "needs-attention" && echo "yes" || echo "no")
+                if [ "$HAS_LABEL" = "no" ]; then
+                  echo "Adding needs-attention to #$ISSUE_NUM"
+                  gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-attention" || true
+                fi
+              fi
+            done
           else
             echo "No stuck issues detected"
           fi
