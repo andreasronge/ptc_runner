@@ -35,6 +35,7 @@ defmodule PtcRunner.SubAgent do
   - `context_descriptions` - map() | nil, descriptions for context variables (keys are field names)
   - `format_options` - keyword list controlling output truncation (see `t:format_options/0`)
   - `float_precision` - non_neg_integer(), decimal places for floats in results and context (default: 2)
+  - `compression` - compression_opts(), compression strategy for turn history (default: nil)
 
   ## Tool Resolution
 
@@ -131,6 +132,19 @@ defmodule PtcRunner.SubAgent do
   @type llm_registry :: %{atom() => llm_callback()}
 
   @typedoc """
+  Compression strategy configuration.
+
+  Can be:
+  - `nil` or `false` - Compression disabled (default)
+  - `true` - Use default strategy (`SingleUserCoalesced`) with default options
+  - `Module` - Use custom strategy module with default options
+  - `{Module, opts}` - Use custom strategy module with custom options
+
+  See `PtcRunner.SubAgent.Compression` for details.
+  """
+  @type compression_opts :: nil | false | true | module() | {module(), keyword()}
+
+  @typedoc """
   Output format options for truncation and display.
 
   Fields:
@@ -168,7 +182,8 @@ defmodule PtcRunner.SubAgent do
           field_descriptions: map() | nil,
           context_descriptions: map() | nil,
           format_options: format_options(),
-          float_precision: non_neg_integer()
+          float_precision: non_neg_integer(),
+          compression: compression_opts()
         }
 
   alias PtcRunner.SubAgent.LLMResolver
@@ -195,6 +210,7 @@ defmodule PtcRunner.SubAgent do
     :description,
     :field_descriptions,
     :context_descriptions,
+    :compression,
     tools: %{},
     max_turns: 5,
     memory_limit: 1_048_576,
@@ -240,6 +256,7 @@ defmodule PtcRunner.SubAgent do
   - `context_descriptions` - Map of context variable names to descriptions (shown in Data Inventory)
   - `format_options` - Keyword list controlling output truncation (merged with defaults)
   - `float_precision` - Non-negative integer for decimal places in floats (default: 2)
+  - `compression` - Compression strategy for turn history (see `t:compression_opts/0`)
 
   ## Returns
 

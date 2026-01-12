@@ -73,7 +73,7 @@ defmodule PtcRunner.SubAgent.Loop do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{SystemPrompt, Telemetry}
+  alias PtcRunner.SubAgent.{Compression, SystemPrompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -273,15 +273,21 @@ defmodule PtcRunner.SubAgent.Loop do
         messages: state.messages
       }
 
+      # Build system prompt
+      system_prompt =
+        build_system_prompt(
+          agent,
+          state.context,
+          resolution_context,
+          state.received_field_descriptions
+        )
+
+      # Build messages - use compression if enabled and turn > 1
+      messages = build_llm_messages(agent, state, system_prompt)
+
       llm_input = %{
-        system:
-          build_system_prompt(
-            agent,
-            state.context,
-            resolution_context,
-            state.received_field_descriptions
-          ),
-        messages: state.messages,
+        system: system_prompt,
+        messages: messages,
         turn: state.turn,
         tool_names: Map.keys(agent.tools),
         cache: state.cache
@@ -712,6 +718,61 @@ defmodule PtcRunner.SubAgent.Loop do
     [context_prompt, "# Mission\n\n#{expanded_mission}"]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
+  end
+
+  # Build messages for LLM input
+  # Uses compression strategy if enabled and turn > 1; otherwise uses accumulated messages
+  defp build_llm_messages(agent, state, system_prompt) do
+    # Normalize compression option
+    {strategy, opts} = Compression.normalize(agent.compression)
+
+    # Use compressed messages if:
+    # 1. Compression strategy is enabled (not nil)
+    # 2. We're past turn 1 (have history to compress)
+    # 3. Not in single-shot mode (SS-001: max_turns == 1 skips compression)
+    if strategy && state.turn > 1 && agent.max_turns > 1 do
+      build_compressed_messages(agent, state, system_prompt, strategy, opts)
+    else
+      # Uncompressed mode - use accumulated messages as-is
+      state.messages
+    end
+  end
+
+  # Build compressed messages using the strategy
+  defp build_compressed_messages(agent, state, system_prompt, strategy, opts) do
+    # Gather completed turns from state.turns (stored in reverse order)
+    turns = Enum.reverse(state.turns)
+
+    # Normalize tools for compression (use the same normalization as execution)
+    normalized_tools =
+      Enum.map(agent.tools, fn {name, format} ->
+        case PtcRunner.Tool.new(name, format) do
+          {:ok, tool} -> {name, tool}
+          {:error, _} -> {name, %PtcRunner.Tool{name: to_string(name), signature: nil}}
+        end
+      end)
+      |> Map.new()
+
+    # Calculate turns left for the indicator
+    turns_left = agent.max_turns - state.turn
+
+    # Build compression options with context
+    compression_opts =
+      opts
+      |> Keyword.put(:mission, expand_template(agent.mission, state.context))
+      |> Keyword.put(:system_prompt, system_prompt)
+      |> Keyword.put(:tools, normalized_tools)
+      |> Keyword.put(:data, state.context)
+      |> Keyword.put(:turns_left, turns_left)
+
+    # Call the compression strategy
+    # Strategy returns [%{role: :system, ...}, %{role: :user, ...}]
+    compressed_messages = strategy.to_messages(turns, state.memory, compression_opts)
+
+    # Extract just the user message(s) since system prompt is passed separately
+    # The loop sends system prompt via llm_input.system, not in messages
+    compressed_messages
+    |> Enum.reject(fn msg -> msg.role == :system end)
   end
 
   # Calculate approximate memory size in bytes
