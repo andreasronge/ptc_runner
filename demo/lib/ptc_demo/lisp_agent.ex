@@ -24,4 +24,6 @@ defmodule PtcDemo.LispAgent do
   defdelegate set_model(model), to: PtcDemo.Agent
   defdelegate preset_models(), to: PtcDemo.Agent
   defdelegate detect_model(), to: PtcDemo.Agent
+  defdelegate compression(), to: PtcDemo.Agent
+  defdelegate set_compression(compression), to: PtcDemo.Agent
 end

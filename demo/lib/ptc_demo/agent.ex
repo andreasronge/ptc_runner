@@ -33,6 +33,7 @@ defmodule PtcDemo.Agent do
     :model,
     :data_mode,
     :prompt_profile,
+    :compression,
     :datasets,
     :last_program,
     :last_result,
@@ -131,6 +132,28 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
+  Get the current compression setting.
+
+  Returns `false` (disabled), `true` (default strategy), or `{module, opts}`.
+  """
+  def compression do
+    GenServer.call(__MODULE__, :compression)
+  end
+
+  @doc """
+  Set the compression strategy.
+
+  Accepts:
+  - `false` or `nil` - disable compression
+  - `true` - enable with default strategy (SingleUserCoalesced)
+  - `module` - use a specific compression module
+  - `{module, opts}` - use module with custom options
+  """
+  def set_compression(compression) do
+    GenServer.call(__MODULE__, {:set_compression, compression})
+  end
+
+  @doc """
   Available preset models for easy switching.
   """
   def preset_models do
@@ -164,6 +187,7 @@ defmodule PtcDemo.Agent do
     model = resolve_model_from_env()
     data_mode = Keyword.get(opts, :data_mode, :schema)
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
+    compression = Keyword.get(opts, :compression, false)
 
     # Note: documents not included in ctx - use search tool instead
     datasets = %{
@@ -178,6 +202,7 @@ defmodule PtcDemo.Agent do
        model: model,
        data_mode: data_mode,
        prompt_profile: prompt_profile,
+       compression: compression,
        datasets: datasets,
        last_program: nil,
        last_result: nil,
@@ -195,8 +220,9 @@ defmodule PtcDemo.Agent do
     # Signature for return type validation (explicit or inferred from expect)
     signature = Keyword.get(opts, :signature) || infer_signature(Keyword.get(opts, :expect))
 
-    # Build the SubAgent with requested max_turns and signature
-    agent = build_agent(state.data_mode, state.prompt_profile, max_turns, signature)
+    # Build the SubAgent with requested max_turns, signature, and compression
+    agent =
+      build_agent(state.data_mode, state.prompt_profile, state.compression, max_turns, signature)
 
     # Build context with datasets (memory is handled internally by SubAgent)
     context = Map.merge(state.datasets, %{"question" => question})
@@ -316,9 +342,19 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call(:system_prompt, _from, state) do
-    agent = build_agent(state.data_mode, state.prompt_profile)
+    agent = build_agent(state.data_mode, state.prompt_profile, state.compression)
     preview = SubAgent.preview_prompt(agent, context: state.datasets)
     {:reply, preview.system, state}
+  end
+
+  @impl true
+  def handle_call(:compression, _from, state) do
+    {:reply, state.compression, state}
+  end
+
+  @impl true
+  def handle_call({:set_compression, compression}, _from, state) do
+    {:reply, :ok, %{state | compression: compression}}
   end
 
   @impl true
@@ -346,14 +382,19 @@ defmodule PtcDemo.Agent do
 
   # --- Private Functions ---
 
-  defp build_agent(data_mode, prompt_profile, max_turns \\ @max_turns, signature \\ nil) do
+  defp build_agent(data_mode, prompt_profile, compression) do
+    build_agent(data_mode, prompt_profile, compression, @max_turns, nil)
+  end
+
+  defp build_agent(data_mode, prompt_profile, compression, max_turns, signature) do
     SubAgent.new(
-      mission: "{{question}}",
+      prompt: "{{question}}",
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
       tools: build_tools(),
       context_descriptions: context_descriptions_for(data_mode),
-      system_prompt: build_system_prompt(prompt_profile, max_turns)
+      system_prompt: build_system_prompt(prompt_profile, max_turns),
+      compression: compression
     )
   end
 

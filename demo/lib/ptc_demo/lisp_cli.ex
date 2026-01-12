@@ -34,6 +34,7 @@ defmodule PtcDemo.LispCLI do
     report_path = opts[:report]
     runs = opts[:runs]
     validate_clojure = opts[:validate_clojure]
+    compression = Map.get(opts, :compression, false)
 
     # Resolve model early so we can check if it's a local provider
     resolved_model = if model, do: CLIBase.resolve_model(model), else: nil
@@ -50,7 +51,12 @@ defmodule PtcDemo.LispCLI do
         true -> prompt_profile
       end
 
-    {:ok, _pid} = PtcDemo.LispAgent.start_link(data_mode: data_mode, prompt: initial_prompt)
+    {:ok, _pid} =
+      PtcDemo.LispAgent.start_link(
+        data_mode: data_mode,
+        prompt: initial_prompt,
+        compression: compression
+      )
 
     # Set model if specified
     if resolved_model do
@@ -59,7 +65,11 @@ defmodule PtcDemo.LispCLI do
 
     # Handle comparison mode (multiple prompts)
     if run_tests && prompts_for_comparison do
-      run_comparison_and_exit(prompts_for_comparison, verbose: verbose, data_mode: data_mode)
+      run_comparison_and_exit(prompts_for_comparison,
+        verbose: verbose,
+        data_mode: data_mode,
+        compression: compression
+      )
     end
 
     # Run tests if --test flag is present
@@ -70,14 +80,16 @@ defmodule PtcDemo.LispCLI do
         runs: runs,
         validate_clojure: validate_clojure,
         test_index: test_index,
-        prompt: prompt_profile
+        prompt: prompt_profile,
+        compression: compression
       )
     else
       IO.puts(
         banner(
           PtcDemo.LispAgent.model(),
           PtcDemo.LispAgent.data_mode(),
-          PtcDemo.LispAgent.prompt_profile()
+          PtcDemo.LispAgent.prompt_profile(),
+          PtcDemo.LispAgent.compression()
         )
       )
 
@@ -224,6 +236,51 @@ defmodule PtcDemo.LispCLI do
     loop(opts)
   end
 
+  defp handle_input("/compression", opts) do
+    compression = PtcDemo.LispAgent.compression()
+    status = if compression, do: "enabled", else: "disabled"
+    IO.puts("   [Compression: #{status}]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/compression on", opts) do
+    PtcDemo.LispAgent.set_compression(true)
+    IO.puts("   [Compression enabled - message history will be coalesced]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/compression off", opts) do
+    PtcDemo.LispAgent.set_compression(false)
+    IO.puts("   [Compression disabled - full message history preserved]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/compression " <> _invalid, opts) do
+    IO.puts("   [Unknown option. Use: /compression, /compression on, or /compression off]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/debug", opts) do
+    status = if opts[:debug], do: "enabled", else: "disabled"
+    IO.puts("   [Debug mode: #{status}]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/debug on", opts) do
+    IO.puts("   [Debug mode enabled - will show raw LLM responses]\n")
+    loop(Keyword.put(opts, :debug, true))
+  end
+
+  defp handle_input("/debug off", opts) do
+    IO.puts("   [Debug mode disabled]\n")
+    loop(Keyword.put(opts, :debug, false))
+  end
+
+  defp handle_input("/debug " <> _invalid, opts) do
+    IO.puts("   [Unknown option. Use: /debug, /debug on, or /debug off]\n")
+    loop(opts)
+  end
+
   defp handle_input("/datasets", opts) do
     IO.puts("\nAvailable datasets:")
 
@@ -337,7 +394,7 @@ defmodule PtcDemo.LispCLI do
     loop(opts)
   end
 
-  defp banner(model, data_mode, prompt_profile) do
+  defp banner(model, data_mode, prompt_profile, compression) do
     data_mode_desc =
       case data_mode do
         :schema -> "schema (LLM receives full schema)"
@@ -345,6 +402,7 @@ defmodule PtcDemo.LispCLI do
       end
 
     prompt_desc = "#{prompt_profile}"
+    compression_desc = if compression, do: "enabled", else: "disabled"
 
     """
 
@@ -356,9 +414,10 @@ defmodule PtcDemo.LispCLI do
     |  never entering LLM context. Only small results return.         |
     +-----------------------------------------------------------------+
 
-    Model:  #{model}
-    Data:   #{data_mode_desc}
-    Prompt: #{prompt_desc}
+    Model:       #{model}
+    Data:        #{data_mode_desc}
+    Prompt:      #{prompt_desc}
+    Compression: #{compression_desc}
 
     Type /help for commands, /examples for sample queries.
     """
@@ -384,6 +443,12 @@ defmodule PtcDemo.LispCLI do
       /prompt <name>   - Switch prompt profile (default, minimal, single_shot, multi_turn)
       /model           - Show current model and available presets
       /model <name>    - Switch model (haiku, gemini, deepseek, kimi, gpt)
+      /compression     - Show current compression setting
+      /compression on  - Enable message history compression
+      /compression off - Disable message history compression
+      /debug           - Show current debug mode setting
+      /debug on        - Enable debug mode (show raw LLM responses)
+      /debug off       - Disable debug mode
       /reset           - Clear conversation context, stats, and reset to schema mode
       /quit            - Exit
 
@@ -401,6 +466,9 @@ defmodule PtcDemo.LispCLI do
       mix lisp --list-models       Show available models and exit
       mix lisp --list-prompts      Show available prompt profiles and exit
       mix lisp --show-prompt       Show system prompt and exit
+      mix lisp --compression       Start with compression enabled
+      mix lisp --no-compression    Start with compression disabled (default)
+      mix lisp --debug             Start with debug mode enabled (show raw LLM responses)
     """
   end
 
