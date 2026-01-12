@@ -41,13 +41,10 @@ defmodule PtcRunner.SubAgent.SystemPrompt.DataInventory do
   @spec generate(map(), Signature.signature() | nil, map() | nil) :: String.t()
   def generate(context, context_signature \\ nil, field_descriptions \\ nil)
 
+  # Return empty string when no data - don't show a placeholder
   def generate(context, _context_signature, _field_descriptions)
       when map_size(context) == 0 do
-    """
-    # Data Inventory
-
-    No data available in context.
-    """
+    ""
   end
 
   def generate(context, context_signature, field_descriptions) do

@@ -915,7 +915,8 @@ defmodule PtcRunner.SubAgent do
       trace_mode: trace_mode,
       context: lisp_result |> elem(1) |> Map.get(:context, %{}),
       memory: %{},
-      messages: llm_input.messages,
+      # Metrics.build_turn looks for :current_messages, not :messages
+      current_messages: llm_input.messages,
       current_system_prompt: system_prompt
     }
 
