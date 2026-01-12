@@ -214,6 +214,7 @@ mix json [options]
 | `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
+| `--compression` | Enable message compression (coalesces history into single message) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 
@@ -248,6 +249,7 @@ mix lisp --help        # Show all available options
 | `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
+| `--compression` | Enable message compression (coalesces history into single message) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--validate-clojure` | Validate generated programs against Babashka |
@@ -327,6 +329,8 @@ PtcDemo.LispTestRunner.run_comparison([:single_shot, :multi_turn])
 | `/mode` | Show/change data mode (schema/explore) |
 | `/model` | Show/change model |
 | `/prompt` | Show/change prompt profile |
+| `/compression` | Show/toggle message compression (`on`/`off`) |
+| `/debug` | Show/toggle debug mode (`on`/`off`) |
 | `/system` | Show system prompt |
 | `/context` | Show conversation history |
 | `/reset` | Clear conversation context and stats |
