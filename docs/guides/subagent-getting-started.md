@@ -142,6 +142,8 @@ SubAgent is provider-agnostic. You supply a callback function:
 llm = fn %{system: system, messages: messages} ->
   # Call your LLM provider here
   {:ok, response_text}
+  # Or include token counts for usage stats:
+  # {:ok, %{content: response_text, tokens: %{input: 100, output: 50}}}
 end
 
 PtcRunner.SubAgent.run(prompt, llm: llm, signature: "...")
@@ -209,12 +211,15 @@ defmodule MyApp.LLM do
 
   def callback(model \\ "openrouter:anthropic/claude-haiku-4.5") do
     fn %{system: system, messages: messages} ->
-      # Prepend system prompt to messages
       full_messages = [%{role: :system, content: system} | messages]
 
       case ReqLLM.generate_text(model, full_messages, receive_timeout: @timeout) do
-        {:ok, %ReqLLM.Response{} = response} ->
-          {:ok, ReqLLM.Response.text(response)}
+        {:ok, %ReqLLM.Response{} = r} ->
+          usage = ReqLLM.Response.usage(r)
+          {:ok, %{
+            content: ReqLLM.Response.text(r),
+            tokens: %{input: usage[:input_tokens] || 0, output: usage[:output_tokens] || 0}
+          }}
 
         {:error, reason} ->
           {:error, reason}
