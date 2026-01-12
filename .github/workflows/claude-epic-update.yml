@@ -144,14 +144,21 @@ jobs:
               continue
             fi
 
-            # Check blockers first
-            BLOCKED_SECTION=$(echo "$ISSUE_BODY" | grep -iA10 "blocked by:" | head -15 || true)
+            # Check blockers first - only parse lines that start with "Blocked by:" or list items under it
+            # Stop at "Blocks:" or other sections to avoid false positives
+            BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
             ALL_RESOLVED=true
 
             if [ -n "$BLOCKED_SECTION" ]; then
               BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE "#[0-9]+" | tr -d '#' | sort -u)
 
               for BLOCKER in $BLOCKERS; do
+                # Skip self-references (issue blocking itself is invalid)
+                if [ "$BLOCKER" = "$ISSUE_NUM" ]; then
+                  echo "  WARNING: Issue #$ISSUE_NUM references itself as blocker - ignoring"
+                  continue
+                fi
+
                 BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
                 if [ "$BLOCKER_STATE" != "CLOSED" ]; then
                   echo "  Still blocked by #$BLOCKER ($BLOCKER_STATE)"

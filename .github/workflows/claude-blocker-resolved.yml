@@ -42,21 +42,23 @@ jobs:
               echo "Found dependent issue: #$ISSUE_NUMBER"
 
               # Check if ALL blockers are now resolved
+              # Only parse lines in "Blocked by:" section, stop at "Blocks:" or other sections
               ALL_RESOLVED=true
-              BLOCKERS=$(echo "$ISSUE_BODY" | grep -oE '#[0-9]+' | grep -v "^#$ISSUE_NUMBER$" | sort -u || true)
+              BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
+              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
 
-              for blocker in $BLOCKERS; do
-                BLOCKER_NUM=$(echo "$blocker" | tr -d '#')
-                # Skip if this is just a reference, not in Blocked by section
-                # We need to check if this blocker appears in the Blocked by section
-                BLOCKED_SECTION=$(echo "$ISSUE_BODY" | grep -iA5 "blocked by:" | head -10 || true)
-                if echo "$BLOCKED_SECTION" | grep -q "#$BLOCKER_NUM"; then
-                  BLOCKER_STATE=$(gh issue view "$BLOCKER_NUM" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
-                  if [ "$BLOCKER_STATE" != "CLOSED" ]; then
-                    echo "  Still blocked by #$BLOCKER_NUM ($BLOCKER_STATE)"
-                    ALL_RESOLVED=false
-                    break
-                  fi
+              for BLOCKER_NUM in $BLOCKERS; do
+                # Skip self-references (issue blocking itself is invalid)
+                if [ "$BLOCKER_NUM" = "$ISSUE_NUMBER" ]; then
+                  echo "  WARNING: Issue #$ISSUE_NUMBER references itself as blocker - ignoring"
+                  continue
+                fi
+
+                BLOCKER_STATE=$(gh issue view "$BLOCKER_NUM" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                if [ "$BLOCKER_STATE" != "CLOSED" ]; then
+                  echo "  Still blocked by #$BLOCKER_NUM ($BLOCKER_STATE)"
+                  ALL_RESOLVED=false
+                  break
                 fi
               done
 
