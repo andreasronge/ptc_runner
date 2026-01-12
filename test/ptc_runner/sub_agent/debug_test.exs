@@ -2,7 +2,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
   use ExUnit.Case, async: true
   import ExUnit.CaptureIO
 
-  alias PtcRunner.{Step, SubAgent}
+  alias PtcRunner.{Step, SubAgent, Turn}
   alias PtcRunner.SubAgent.Debug
 
   describe "preview_prompt/2" do
@@ -58,36 +58,39 @@ defmodule PtcRunner.SubAgent.DebugTest do
     end
   end
 
-  describe "debug mode" do
-    test "captures llm_response and llm_feedback in trace with debug: true" do
+  describe "raw_response always captured in turns" do
+    test "turns always contain raw_response" do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
 
       llm = fn %{turn: t} ->
         case t do
           1 ->
-            {:ok, ~S|```clojure
+            {:ok, ~S|Some reasoning here
+
+```clojure
 {:intermediate "value"}
 ```|}
 
           2 ->
-            {:ok, ~S|```clojure
+            {:ok, ~S|Final reasoning
+
+```clojure
 (return {:done true})
 ```|}
         end
       end
 
-      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, debug: true)
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{})
 
-      # Trace should contain llm_response and llm_feedback
-      [turn1, turn2] = step.trace
-      assert turn1.llm_response =~ "intermediate"
-      assert turn1.llm_feedback != nil
-      assert turn2.llm_response =~ "return"
-      # Last turn has no feedback (it's terminating)
-      assert turn2.llm_feedback == nil
+      # Turns should always contain raw_response (no debug: true needed)
+      [turn1, turn2] = step.turns
+      assert turn1.raw_response =~ "intermediate"
+      assert turn1.raw_response =~ "Some reasoning here"
+      assert turn2.raw_response =~ "return"
+      assert turn2.raw_response =~ "Final reasoning"
     end
 
-    test "does not capture llm_response when debug: false" do
+    test "debug: option is no longer required" do
       agent = SubAgent.new(prompt: "Test", max_turns: 2)
 
       llm = fn _ ->
@@ -96,26 +99,17 @@ defmodule PtcRunner.SubAgent.DebugTest do
 ```|}
       end
 
-      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, debug: false)
+      # With or without debug:, turns capture raw_response
+      {:ok, step_no_debug} = SubAgent.run(agent, llm: llm, context: %{})
+      {:ok, step_with_debug} = SubAgent.run(agent, llm: llm, context: %{}, debug: true)
 
-      # Trace entries should not have llm_response when debug is false
-      [turn1] = step.trace
-      refute Map.has_key?(turn1, :llm_response)
-    end
+      [turn_no_debug] = step_no_debug.turns
+      [turn_with_debug] = step_with_debug.turns
 
-    test "debug: true captures extra trace fields" do
-      agent = SubAgent.new(prompt: "Test", max_turns: 2)
-      llm = fn _ -> {:ok, ~S|(return {:done true})|} end
-
-      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{foo: 1}, debug: true)
-
-      [turn1] = step.trace
-      assert Map.has_key?(turn1, :context_snapshot)
-      assert Map.has_key?(turn1, :memory_snapshot)
-      assert Map.has_key?(turn1, :full_prompt)
-      assert Map.has_key?(turn1, :llm_response)
-      assert Map.has_key?(turn1, :llm_feedback)
-      assert turn1.context_snapshot == %{foo: 1}
+      # Both have raw_response
+      assert turn_no_debug.raw_response != nil
+      assert turn_with_debug.raw_response != nil
+      assert turn_no_debug.raw_response == turn_with_debug.raw_response
     end
   end
 
@@ -131,8 +125,8 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm, trace: true)
 
-      assert is_list(step.trace)
-      assert length(step.trace) == 1
+      assert is_list(step.turns)
+      assert length(step.turns) == 1
     end
 
     test "trace: false disables tracing" do
@@ -146,7 +140,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm, trace: false)
 
-      assert step.trace == nil
+      assert step.turns == nil
     end
 
     test "trace: :on_error keeps trace only on failure" do
@@ -161,7 +155,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
       {:ok, step} = SubAgent.run(agent, llm: llm, trace: :on_error)
 
       # Success - no trace
-      assert step.trace == nil
+      assert step.turns == nil
     end
 
     test "trace: :on_error keeps trace when execution fails" do
@@ -176,27 +170,23 @@ defmodule PtcRunner.SubAgent.DebugTest do
       {:error, step} = SubAgent.run(agent, llm: llm, trace: :on_error)
 
       # Failure - trace should be present
-      assert is_list(step.trace)
-      assert length(step.trace) == 1
+      assert is_list(step.turns)
+      assert length(step.turns) == 1
     end
   end
 
-  describe "Debug.print_trace/1" do
+  describe "Debug.print_trace/2 with turns" do
     test "prints trace for successful execution" do
-      trace = [
-        %{
-          turn: 1,
-          program: "(+ 1 2)",
-          result: 3,
-          tool_calls: []
-        }
+      turns = [
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
       ]
 
       step = %Step{
         return: 3,
         fail: nil,
         memory: %{},
-        trace: trace,
+        trace: nil,
+        turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
 
@@ -207,43 +197,14 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert output =~ "Result:"
     end
 
-    test "handles step with no trace" do
-      step = %Step{
-        return: 3,
-        fail: nil,
-        memory: %{},
-        trace: nil,
-        usage: %{duration_ms: 100, memory_bytes: 0}
-      }
-
-      output = capture_io(fn -> Debug.print_trace(step) end)
-
-      assert output =~ "No trace available"
-    end
-
-    test "handles empty trace" do
-      step = %Step{
-        return: 3,
-        fail: nil,
-        memory: %{},
-        trace: [],
-        usage: %{duration_ms: 100, memory_bytes: 0}
-      }
-
-      output = capture_io(fn -> Debug.print_trace(step) end)
-
-      assert output =~ "Empty trace"
-    end
-
-    test "truncates long programs" do
-      long_program = String.duplicate("(+ 1 2) ", 50)
-
+    test "handles step with no turns (falls back to trace)" do
       trace = [
         %{
           turn: 1,
-          program: long_program,
+          program: "(+ 1 2)",
           result: 3,
-          tool_calls: []
+          tool_calls: [],
+          prints: []
         }
       ]
 
@@ -252,6 +213,163 @@ defmodule PtcRunner.SubAgent.DebugTest do
         fail: nil,
         memory: %{},
         trace: trace,
+        turns: nil,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step) end)
+
+      assert output =~ "Turn 1"
+      assert output =~ "(+ 1 2)"
+    end
+
+    test "handles step with no trace and no turns" do
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: nil,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step) end)
+
+      assert output =~ "No trace available"
+    end
+
+    test "handles empty turns" do
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: [],
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step) end)
+
+      assert output =~ "Empty trace"
+    end
+
+    test "raw: true includes raw_response" do
+      turns = [
+        Turn.success(
+          1,
+          "Some reasoning here\n\n```clojure\n(+ 1 2)\n```",
+          "(+ 1 2)",
+          3,
+          [],
+          [],
+          %{}
+        )
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: turns,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, raw: true) end)
+
+      assert output =~ "Raw Response:"
+      assert output =~ "Some reasoning here"
+    end
+
+    test "raw: false (default) omits raw_response" do
+      turns = [
+        Turn.success(
+          1,
+          "Some reasoning here\n\n```clojure\n(+ 1 2)\n```",
+          "(+ 1 2)",
+          3,
+          [],
+          [],
+          %{}
+        )
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: turns,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step) end)
+
+      refute output =~ "Raw Response:"
+      refute output =~ "Some reasoning here"
+    end
+
+    test "view: :compressed shows compressed format" do
+      turns = [
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: turns,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, view: :compressed) end)
+
+      assert output =~ "Compressed View"
+      assert output =~ "[system]"
+      assert output =~ "[user]"
+    end
+
+    test "usage: true shows token stats" do
+      turns = [
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: turns,
+        usage: %{
+          duration_ms: 100,
+          memory_bytes: 0,
+          input_tokens: 500,
+          output_tokens: 100,
+          total_tokens: 600
+        }
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      assert output =~ "Usage"
+      assert output =~ "Input tokens:"
+      assert output =~ "500"
+    end
+
+    test "truncates long programs" do
+      long_program = String.duplicate("(+ 1 2) ", 50)
+
+      turns = [
+        Turn.success(1, "```clojure\n#{long_program}\n```", long_program, 3, [], [], %{})
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: nil,
+        turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
 
@@ -262,13 +380,70 @@ defmodule PtcRunner.SubAgent.DebugTest do
     end
   end
 
+  describe "Debug.print_trace/2 backward compatibility with trace" do
+    test "works with legacy trace format" do
+      trace = [
+        %{
+          turn: 1,
+          program: "(+ 1 2)",
+          result: 3,
+          tool_calls: [],
+          prints: []
+        }
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: trace,
+        turns: nil,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step) end)
+
+      assert output =~ "Turn 1"
+      assert output =~ "(+ 1 2)"
+      assert output =~ "Result:"
+    end
+
+    test "raw: true with legacy trace shows reasoning" do
+      trace = [
+        %{
+          turn: 1,
+          program: "(+ 1 2)",
+          result: 3,
+          tool_calls: [],
+          prints: [],
+          llm_response: "I'll add 1 and 2\n\n```clojure\n(+ 1 2)\n```"
+        }
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        trace: trace,
+        turns: nil,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, raw: true) end)
+
+      assert output =~ "Raw Response:"
+      assert output =~ "I'll add 1 and 2"
+    end
+  end
+
   describe "Debug.print_chain/1" do
     test "prints multiple steps in chain" do
       step1 = %Step{
         return: %{value: 10},
         fail: nil,
         memory: %{},
-        trace: [%{turn: 1, program: "(+ 5 5)", result: 10, tool_calls: []}],
+        trace: nil,
+        turns: [Turn.success(1, "(+ 5 5)", "(+ 5 5)", 10, [], [], %{})],
         usage: %{duration_ms: 50, memory_bytes: 0}
       }
 
@@ -276,7 +451,8 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 20},
         fail: nil,
         memory: %{},
-        trace: [%{turn: 1, program: "(* ctx/value 2)", result: 20, tool_calls: []}],
+        trace: nil,
+        turns: [Turn.success(1, "(* ctx/value 2)", "(* ctx/value 2)", 20, [], [], %{})],
         usage: %{duration_ms: 75, memory_bytes: 0}
       }
 
@@ -294,7 +470,8 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 10},
         fail: nil,
         memory: %{},
-        trace: [],
+        trace: nil,
+        turns: [],
         usage: %{duration_ms: 50, memory_bytes: 0}
       }
 
@@ -302,14 +479,15 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: nil,
         fail: %{reason: :test_error, message: "Test failure"},
         memory: %{},
-        trace: [],
+        trace: nil,
+        turns: [],
         usage: %{duration_ms: 75, memory_bytes: 0}
       }
 
       output = capture_io(fn -> Debug.print_chain([step1, step2]) end)
 
-      assert output =~ "✓"
-      assert output =~ "✗"
+      assert output =~ "ok"
+      assert output =~ "X"
       assert output =~ "test_error"
       assert output =~ "Test failure"
     end
