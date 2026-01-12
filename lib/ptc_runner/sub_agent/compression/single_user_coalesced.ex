@@ -13,7 +13,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
   ## Content Order in USER Message
 
   1. Mission text (always first, never removed)
-  2. Namespace sections (tool/, data/, user/)
+  2. Namespace sections (tools, data/, user/)
   3. Expected output (return format from signature)
   4. Execution history (tool calls made, println output)
   5. Conditional error display (only if last turn failed)
