@@ -42,10 +42,10 @@ jobs:
               echo "Found dependent issue: #$ISSUE_NUMBER"
 
               # Check if ALL blockers are now resolved
-              # Only parse lines in "Blocked by:" section, stop at "Blocks:" or other sections
+              # Only extract from the "Blocked by:" line itself
               ALL_RESOLVED=true
-              BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
-              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+              BLOCKED_LINE=$(echo "$ISSUE_BODY" | grep -i "blocked by:" | head -1 || true)
+              BLOCKERS=$(echo "$BLOCKED_LINE" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
 
               for BLOCKER_NUM in $BLOCKERS; do
                 # Skip self-references (issue blocking itself is invalid)

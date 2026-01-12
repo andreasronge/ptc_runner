@@ -54,10 +54,10 @@ jobs:
 
               # Check if issue has no automation labels
               if ! echo "$ISSUE_LABELS" | grep -qE "needs-review|ready-for-implementation|needs-attention|needs-clarification|needs-breakdown"; then
-                # Check blockers
+                # Check blockers - only extract from the "Blocked by:" line itself
                 ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json body --jq '.body')
-                BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
-                BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+                BLOCKED_LINE=$(echo "$ISSUE_BODY" | grep -i "blocked by:" | head -1 || true)
+                BLOCKERS=$(echo "$BLOCKED_LINE" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
 
                 ALL_RESOLVED=true
                 for BLOCKER in $BLOCKERS; do
