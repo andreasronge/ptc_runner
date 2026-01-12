@@ -210,6 +210,7 @@ defmodule PtcRunner.SubAgent.Loop do
       messages: [%{role: :user, content: first_user_message}],
       context: run_opts.context,
       trace: [],
+      turns: [],
       start_time: System.monotonic_time(:millisecond),
       memory: %{},
       last_fail: nil,
@@ -313,6 +314,8 @@ defmodule PtcRunner.SubAgent.Loop do
             | usage: Metrics.build_final_usage(state, duration_ms, 0),
               trace:
                 Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true),
+              turns:
+                Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
               messages: build_collected_messages(state, state.messages)
           }
 
@@ -481,6 +484,15 @@ defmodule PtcRunner.SubAgent.Loop do
             llm_feedback: error_message
           )
 
+        # Build Turn struct (failure turn)
+        turn =
+          Metrics.build_turn(state, response, code, lisp_step.fail,
+            success?: false,
+            prints: lisp_step.prints,
+            tool_calls: lisp_step.tool_calls,
+            memory: lisp_step.memory
+          )
+
         new_state = %{
           state
           | turn: state.turn + 1,
@@ -491,6 +503,7 @@ defmodule PtcRunner.SubAgent.Loop do
                   %{role: :user, content: error_message}
                 ],
             trace: [trace_entry | state.trace],
+            turns: [turn | state.turns],
             memory: lisp_step.memory,
             last_fail: lisp_step.fail,
             remaining_turns: state.remaining_turns - 1
@@ -540,6 +553,15 @@ defmodule PtcRunner.SubAgent.Loop do
             prints: lisp_step.prints
           )
 
+        # Build Turn struct (failure turn)
+        turn =
+          Metrics.build_turn(state, response, code, fail_args,
+            success?: false,
+            prints: lisp_step.prints,
+            tool_calls: lisp_step.tool_calls,
+            memory: lisp_step.memory
+          )
+
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
         error_step = Step.error(:failed, inspect(fail_args), lisp_step.memory)
@@ -553,6 +575,12 @@ defmodule PtcRunner.SubAgent.Loop do
             trace:
               Metrics.apply_trace_filter(
                 Enum.reverse([trace_entry | state.trace]),
+                state.trace_mode,
+                true
+              ),
+            turns:
+              Metrics.apply_trace_filter(
+                Enum.reverse([turn | state.turns]),
                 state.trace_mode,
                 true
               ),
@@ -577,6 +605,15 @@ defmodule PtcRunner.SubAgent.Loop do
                 prints: lisp_step.prints
               )
 
+            # Build Turn struct (success turn - loop continues)
+            turn =
+              Metrics.build_turn(state, response, code, lisp_step.return,
+                success?: true,
+                prints: lisp_step.prints,
+                tool_calls: lisp_step.tool_calls,
+                memory: lisp_step.memory
+              )
+
             # Update turn history with truncated result (keep last 3)
             truncated_result = ResponseHandler.truncate_for_history(lisp_step.return)
             updated_history = update_turn_history(state.turn_history, truncated_result)
@@ -591,6 +628,7 @@ defmodule PtcRunner.SubAgent.Loop do
                       %{role: :user, content: execution_result}
                     ],
                 trace: [trace_entry | state.trace],
+                turns: [turn | state.turns],
                 memory: lisp_step.memory,
                 # Context stays immutable - memory values become available as symbols
                 last_fail: nil,
@@ -609,6 +647,15 @@ defmodule PtcRunner.SubAgent.Loop do
                 prints: lisp_step.prints
               )
 
+            # Build Turn struct (failure turn - memory limit exceeded)
+            turn =
+              Metrics.build_turn(state, response, code, lisp_step.return,
+                success?: false,
+                prints: lisp_step.prints,
+                tool_calls: lisp_step.tool_calls,
+                memory: lisp_step.memory
+              )
+
             duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
             error_msg =
@@ -625,6 +672,12 @@ defmodule PtcRunner.SubAgent.Loop do
                 trace:
                   Metrics.apply_trace_filter(
                     Enum.reverse([trace_entry | state.trace]),
+                    state.trace_mode,
+                    true
+                  ),
+                turns:
+                  Metrics.apply_trace_filter(
+                    Enum.reverse([turn | state.turns]),
                     state.trace_mode,
                     true
                   ),
@@ -703,6 +756,7 @@ defmodule PtcRunner.SubAgent.Loop do
       step
       | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
         trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true),
+        turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
         messages: build_collected_messages(state, state.messages)
     }
 
@@ -724,6 +778,15 @@ defmodule PtcRunner.SubAgent.Loop do
         prints: lisp_step.prints
       )
 
+    # Build Turn struct (success turn - final)
+    turn =
+      Metrics.build_turn(state, response, code, lisp_step.return,
+        success?: true,
+        prints: lisp_step.prints,
+        tool_calls: lisp_step.tool_calls,
+        memory: lisp_step.memory
+      )
+
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
     # Include the final assistant response in messages
@@ -735,6 +798,12 @@ defmodule PtcRunner.SubAgent.Loop do
         trace:
           Metrics.apply_trace_filter(
             Enum.reverse([trace_entry | state.trace]),
+            state.trace_mode,
+            false
+          ),
+        turns:
+          Metrics.apply_trace_filter(
+            Enum.reverse([turn | state.turns]),
             state.trace_mode,
             false
           ),
@@ -756,6 +825,15 @@ defmodule PtcRunner.SubAgent.Loop do
         prints: lisp_step.prints
       )
 
+    # Build Turn struct (failure turn - validation error)
+    turn =
+      Metrics.build_turn(state, response, code, lisp_step.return,
+        success?: false,
+        prints: lisp_step.prints,
+        tool_calls: lisp_step.tool_calls,
+        memory: lisp_step.memory
+      )
+
     new_state = %{
       state
       | turn: state.turn + 1,
@@ -766,6 +844,7 @@ defmodule PtcRunner.SubAgent.Loop do
               %{role: :user, content: error_message}
             ],
         trace: [trace_entry | state.trace],
+        turns: [turn | state.turns],
         memory: lisp_step.memory,
         last_fail: nil,
         remaining_turns: state.remaining_turns - 1
