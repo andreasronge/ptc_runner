@@ -206,6 +206,18 @@ defmodule PtcDemo.CLIBase do
         arg == "--no-compression" ->
           Map.put(acc, :compression, false)
 
+        String.starts_with?(arg, "--filter=") ->
+          filter_str = String.replace_prefix(arg, "--filter=", "")
+
+          case filter_str do
+            "multi_turn" -> Map.put(acc, :filter, :multi_turn)
+            "single_turn" -> Map.put(acc, :filter, :single_turn)
+            "all" -> Map.put(acc, :filter, :all)
+            _ ->
+              IO.puts("Error: --filter must be one of: multi_turn, single_turn, all")
+              System.halt(1)
+          end
+
         String.starts_with?(arg, "--model") ->
           IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
           System.halt(1)
@@ -272,6 +284,7 @@ defmodule PtcDemo.CLIBase do
     Test Options:
       --test                  Run all automated tests
       --test=N                Run a single test by index (e.g., --test=16)
+      --filter=TYPE           Filter tests: multi_turn, single_turn, or all (default: all)
       --runs=N                Run tests N times (e.g., --runs=3)
       --report                Generate markdown report (auto-named)
       --report=FILE           Generate report with custom filename
