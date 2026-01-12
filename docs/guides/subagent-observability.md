@@ -83,47 +83,18 @@ SubAgent.run(agent, llm: llm, trace: false)
 By default, multi-turn agents send full conversation history to the LLM. Enable compression to reduce token usage:
 
 ```elixir
-# Enable default compression (SingleUserCoalesced)
 SubAgent.run(agent, llm: llm, compression: true)
-
-# Explicit strategy
-SubAgent.run(agent, llm: llm, compression: SingleUserCoalesced)
-
-# Strategy with limits
-SubAgent.run(agent, llm: llm, compression: {SingleUserCoalesced, println_limit: 10})
 ```
 
-### How Compression Works
-
-The `SingleUserCoalesced` strategy coalesces turn history into a single USER message:
-
-| Content | Handling |
-|---------|----------|
-| Mission | Always shown first |
-| `tool/` namespace | Available tools with signatures |
-| `data/` namespace | Input context data |
-| `user/` namespace | Accumulated definitions (your prelude) |
-| Tool calls | Most recent N calls (FIFO) |
-| Output | Most recent N println lines (FIFO) |
-| Errors | Shown only if still failing; collapsed after recovery |
-
-### Compression Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `println_limit` | 15 | Max println calls shown |
-| `tool_call_limit` | 20 | Max tool calls shown |
-
-### Debugging Compression
-
-To see what the LLM receives with compression enabled:
+To see what the LLM receives with compression:
 
 ```elixir
-{:ok, step} = SubAgent.run(agent, llm: llm, compression: true)
 SubAgent.Debug.print_trace(step, view: :compressed)
 ```
 
 Full turn history is always preserved in `step.turns` regardless of compression.
+
+> **Full guide:** See [Message Compression](subagent-compression.md) for details on how compression works and implementing custom strategies.
 
 ## Telemetry Events
 
@@ -167,6 +138,7 @@ System.convert_time_unit(duration, :native, :millisecond)
 
 ## See Also
 
+- [Message Compression](subagent-compression.md) - Reduce token usage in multi-turn agents
 - [Troubleshooting](subagent-troubleshooting.md) - Common issues and debugging
 - [Testing](subagent-testing.md) - Mock LLMs and test strategies
 - `PtcRunner.SubAgent.Telemetry.span/3` - Telemetry module with event reference
