@@ -10,16 +10,11 @@ ptc_runner already has:
 - Step chaining for pipeline composition
 - Comprehensive telemetry events (`[:ptc_runner, :sub_agent, :turn|:tool|:llm, :start|:stop]`)
 - SubAgent composition via `as_tool/2`
+- **v0.5 Observability**: Turn struct with tool_calls/prints, Debug API, message compression
 
 ## Known Gaps
 
-### Tool Call Tracking Not Captured in Traces
-
-The trace infrastructure exists but `tool_calls` is always `[]`. Tool execution happens inside the Sandbox/Lisp eval layer without collection. Fix would involve:
-1. Capture tool calls inside eval context
-2. Track name, args, result, duration per call
-3. Return tool_calls list to Loop
-4. Pass to `Metrics.build_trace_entry`
+_No critical gaps at this time. See v0.6+ for planned features._
 
 ---
 
@@ -379,12 +374,15 @@ Features that would make ptc_runner unique in the LLM tooling ecosystem:
 ## Suggested Release Plan
 
 ```
-v0.5: Observability & Debugging
-  - Fix tool call tracking in traces (done)
-  - Add messages to Step (opt-in)
-  - Document existing telemetry
-  - Lisp error attribution (line/column in generated code)
-  - Step introspection (trace field with turns, tool_calls)
+v0.5: Observability & Debugging ✅ COMPLETE
+  - Fix tool call tracking in traces ✅
+  - Add messages to Step (opt-in via collect_messages: true) ✅
+  - Document existing telemetry ✅
+  - Lisp error attribution (line/column in error messages) ✅
+  - Step introspection (step.turns with Turn structs, tool_calls, prints) ✅
+  - Message compression (SingleUserCoalesced strategy, compression: option) ✅
+  - Turn struct for immutable per-turn history ✅
+  - Debug API (print_trace with view: :compressed, messages: true, etc.) ✅
   Architecture: Pure library (no processes)
 
 v0.6: State Management
