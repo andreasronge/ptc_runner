@@ -192,6 +192,102 @@ jobs:
             fi
           done
 
+      - name: Diagnose epic blocker issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Diagnosing epic blocker issues ==="
+
+          # Find the active epic
+          EPIC_NUMBER=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "type:epic" \
+            --label "status:active" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -z "$EPIC_NUMBER" ] || [ "$EPIC_NUMBER" = "null" ]; then
+            echo "No active epic found, skipping diagnostics"
+          else
+            echo "Active epic: #$EPIC_NUMBER"
+
+            # Get all open epic issues
+            EPIC_LABEL=$(gh issue view "$EPIC_NUMBER" --repo "${{ github.repository }}" --json labels --jq '.labels[] | select(.name | startswith("epic:")) | .name' | head -1 || echo "")
+
+            if [ -z "$EPIC_LABEL" ]; then
+              # Try to derive label from title
+              EPIC_LABEL="epic:message-history"
+            fi
+
+            echo "Checking issues with label: $EPIC_LABEL"
+
+            EPIC_ISSUES=$(gh issue list \
+              --repo "${{ github.repository }}" \
+              --label "$EPIC_LABEL" \
+              --state open \
+              --json number,title,labels \
+              --jq '.[] | "\(.number)|\(.title)|\(.labels | map(.name) | join(","))"')
+
+            echo ""
+            echo "Open epic issues and their status:"
+            echo "─────────────────────────────────────"
+
+            while IFS='|' read -r ISSUE_NUM ISSUE_TITLE ISSUE_LABELS; do
+              [ -z "$ISSUE_NUM" ] && continue
+
+              # Check if issue has automation labels
+              HAS_REVIEW=$(echo "$ISSUE_LABELS" | grep -q "needs-review" && echo "yes" || echo "no")
+              HAS_READY=$(echo "$ISSUE_LABELS" | grep -q "ready-for-implementation" && echo "yes" || echo "no")
+              HAS_ATTENTION=$(echo "$ISSUE_LABELS" | grep -q "needs-attention" && echo "yes" || echo "no")
+
+              # Get blockers
+              ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json body --jq '.body')
+              BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
+              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+
+              echo ""
+              echo "#$ISSUE_NUM: $ISSUE_TITLE"
+              echo "  Labels: needs-review=$HAS_REVIEW, ready=$HAS_READY, attention=$HAS_ATTENTION"
+
+              if [ -n "$BLOCKERS" ]; then
+                echo "  Blockers:"
+                for BLOCKER in $BLOCKERS; do
+                  if [ "$BLOCKER" = "$ISSUE_NUM" ]; then
+                    echo "    ⚠️  #$BLOCKER (SELF-REFERENCE - BUG!)"
+                  else
+                    BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                    if [ "$BLOCKER_STATE" = "CLOSED" ]; then
+                      echo "    ✅ #$BLOCKER ($BLOCKER_STATE)"
+                    else
+                      echo "    ❌ #$BLOCKER ($BLOCKER_STATE)"
+                    fi
+                  fi
+                done
+              else
+                echo "  Blockers: none"
+              fi
+
+              # Flag issues that should have labels but don't
+              if [ "$HAS_REVIEW" = "no" ] && [ "$HAS_READY" = "no" ] && [ "$HAS_ATTENTION" = "no" ]; then
+                # Check if all blockers are resolved
+                ALL_RESOLVED=true
+                for BLOCKER in $BLOCKERS; do
+                  [ "$BLOCKER" = "$ISSUE_NUM" ] && continue
+                  BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                  [ "$BLOCKER_STATE" != "CLOSED" ] && ALL_RESOLVED=false && break
+                done
+
+                if [ "$ALL_RESOLVED" = "true" ]; then
+                  echo "  ⚠️  POTENTIAL STUCK: No labels but all blockers resolved!"
+                fi
+              fi
+            done <<< "$EPIC_ISSUES"
+
+            echo ""
+            echo "─────────────────────────────────────"
+          fi
+
       - name: Check for stuck PRs
         env:
           GH_TOKEN: ${{ github.token }}
