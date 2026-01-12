@@ -301,7 +301,7 @@ defmodule PtcRunner.TracerTest do
     test "adds nested_call entry with tool call and child step data" do
       tracer = Tracer.new()
       tool_call = %{name: "sub_agent", args: %{prompt: "test"}}
-      child_step = %{return: "result", trace: [%{turn: 1}]}
+      child_step = %{return: "result", turns: [%{turn: 1}]}
 
       tracer = Tracer.record_nested_call(tracer, tool_call, child_step)
       [entry] = Tracer.entries(tracer)
@@ -310,25 +310,25 @@ defmodule PtcRunner.TracerTest do
       assert entry.data.name == "sub_agent"
       assert entry.data.args == %{prompt: "test"}
       assert entry.data.result.return == "result"
-      assert entry.data.result.nested_trace == [%{turn: 1}]
+      assert entry.data.result.nested_turns == [%{turn: 1}]
     end
 
     test "works with Step struct" do
       tracer = Tracer.new()
       tool_call = %{name: "agent", args: %{}}
-      child_step = %PtcRunner.Step{return: "value", trace: [%{turn: 1}]}
+      child_step = %PtcRunner.Step{return: "value", turns: [%{turn: 1}]}
 
       tracer = Tracer.record_nested_call(tracer, tool_call, child_step)
       [entry] = Tracer.entries(tracer)
 
       assert entry.data.result.return == "value"
-      assert entry.data.result.nested_trace == [%{turn: 1}]
+      assert entry.data.result.nested_turns == [%{turn: 1}]
     end
 
     test "on finalized tracer raises FunctionClauseError" do
       tracer = Tracer.new() |> Tracer.finalize()
       tool_call = %{name: "agent", args: %{}}
-      child_step = %{return: "result", trace: []}
+      child_step = %{return: "result", turns: []}
 
       assert_raise FunctionClauseError, fn ->
         # credo:disable-for-next-line Credo.Check.Refactor.Apply

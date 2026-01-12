@@ -173,17 +173,25 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, flex_get(ctx, key), eval_ctx}
   end
 
-  # Define binding in user namespace: (def name value)
+  # Define binding in user namespace: (def name value opts)
   # Returns the var, not the value (Clojure semantics)
-  defp do_eval({:def, name, value_ast}, %EvalContext{} = eval_ctx) do
+  # Opts may contain :docstring which is merged into closure metadata for functions
+  defp do_eval({:def, name, value_ast, opts}, %EvalContext{} = eval_ctx) do
     if Env.builtin?(name) do
       {:error, {:cannot_shadow_builtin, name}}
     else
       with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+        # Merge docstring into closure metadata if value is a closure
+        value = merge_docstring_into_closure(value, opts)
         new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
         {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
       end
     end
+  end
+
+  # Backward compatibility: 3-tuple format without opts
+  defp do_eval({:def, name, value_ast}, %EvalContext{} = eval_ctx) do
+    do_eval({:def, name, value_ast, %{}}, eval_ctx)
   end
 
   # Sequential evaluation: do
@@ -528,6 +536,16 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
   # Evaluation helpers
   # ============================================================
+
+  # Merge docstring from def opts into closure metadata
+  defp merge_docstring_into_closure(
+         {:closure, params, body, env, turn_history, metadata},
+         %{docstring: docstring}
+       ) do
+    {:closure, params, body, env, turn_history, Map.put(metadata, :docstring, docstring)}
+  end
+
+  defp merge_docstring_into_closure(value, _opts), do: value
 
   # Build args map from a list of evaluated arguments for tool calls.
   # - Single map argument: pass through as-is

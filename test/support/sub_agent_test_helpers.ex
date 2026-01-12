@@ -9,7 +9,7 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
   Creates a test SubAgent with default configuration.
 
   ## Options
-  - `:prompt` - Agent prompt (default: "Test")
+  - `:mission` - Agent mission (default: "Test")
   - `:tools` - Tool map (default: %{})
   - `:max_turns` - Maximum turns (default: 2)
   - Plus any other SubAgent options (`:max_depth`, `:timeout`, etc.)
@@ -17,11 +17,11 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
   ## Examples
 
       iex> agent = PtcRunner.TestSupport.SubAgentTestHelpers.test_agent()
-      iex> agent.prompt
+      iex> agent.mission
       "Test"
 
       iex> agent = PtcRunner.TestSupport.SubAgentTestHelpers.test_agent(prompt: "Custom")
-      iex> agent.prompt
+      iex> agent.mission
       "Custom"
   """
   def test_agent(opts \\ []) do

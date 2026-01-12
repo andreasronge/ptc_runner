@@ -50,7 +50,7 @@ defmodule PtcRunner.SubAgent.Compression do
   - `turns_left` - Remaining turns for the agent
   """
   @type opts :: [
-          mission: String.t(),
+          prompt: String.t(),
           system_prompt: String.t(),
           tools: map(),
           data: map(),

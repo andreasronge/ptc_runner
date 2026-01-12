@@ -18,7 +18,11 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       assert is_binary(preview.system)
       assert preview.system =~ "PTC-Lisp"
-      assert preview.user == "Find emails for alice"
+      # System prompt is cacheable - does NOT include mission
+      refute preview.system =~ "# Mission"
+      # User message includes context sections + mission
+      assert preview.user =~ "# Mission"
+      assert preview.user =~ "Find emails for alice"
       assert length(preview.tool_schemas) == 1
       assert hd(preview.tool_schemas).name == "list_emails"
     end
@@ -43,18 +47,22 @@ defmodule PtcRunner.SubAgent.DebugTest do
       preview = SubAgent.preview_prompt(agent)
 
       assert is_binary(preview.system)
-      assert preview.user == "Do something"
+      # User message includes context sections + mission
+      assert preview.user =~ "# Mission"
+      assert preview.user =~ "Do something"
       assert preview.tool_schemas == []
     end
 
-    test "generates system prompt with data inventory" do
+    test "generates user message with data inventory" do
       agent = SubAgent.new(prompt: "Process {{data}}")
 
       preview =
         SubAgent.preview_prompt(agent, context: %{data: [1, 2, 3], user_id: 123})
 
-      assert preview.system =~ "ctx/data"
-      assert preview.system =~ "ctx/user_id"
+      # Data inventory is in user message (not system) for cacheability
+      assert preview.user =~ "ctx/data"
+      assert preview.user =~ "ctx/user_id"
+      refute preview.system =~ "ctx/data"
     end
   end
 
@@ -185,7 +193,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -197,38 +204,11 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert output =~ "Result:"
     end
 
-    test "handles step with no turns (falls back to trace)" do
-      trace = [
-        %{
-          turn: 1,
-          program: "(+ 1 2)",
-          result: 3,
-          tool_calls: [],
-          prints: []
-        }
-      ]
-
+    test "handles step with no turns" do
       step = %Step{
         return: 3,
         fail: nil,
         memory: %{},
-        trace: trace,
-        turns: nil,
-        usage: %{duration_ms: 100, memory_bytes: 0}
-      }
-
-      output = capture_io(fn -> Debug.print_trace(step) end)
-
-      assert output =~ "Turn 1"
-      assert output =~ "(+ 1 2)"
-    end
-
-    test "handles step with no trace and no turns" do
-      step = %Step{
-        return: 3,
-        fail: nil,
-        memory: %{},
-        trace: nil,
         turns: nil,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -243,7 +223,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: [],
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -270,7 +249,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -298,7 +276,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -318,7 +295,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -330,6 +306,53 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert output =~ "[user]"
     end
 
+    test "view: :compressed includes actual mission text (MSG-007)" do
+      # This tests the spec requirement that the mission is NEVER removed
+      # See docs/specs/message-history-optimization.md line 450:
+      # "CRITICAL: The mission is NEVER removed."
+      agent = SubAgent.new(prompt: "What is the sum of the first 5 prime numbers?")
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(return {:sum 28, :primes [2 3 5 7 11]})
+```|}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      output = capture_io(fn -> Debug.print_trace(step, view: :compressed) end)
+
+      # The actual mission text should appear in the compressed view,
+      # not a placeholder like "(mission)"
+      assert output =~ "What is the sum of the first 5 prime numbers?"
+      refute output =~ "(mission)"
+    end
+
+    test "view: :compressed includes tool definitions" do
+      # This tests that tool/ namespace appears in compressed view
+      # See docs/specs/message-history-optimization.md lines 258-259
+      agent =
+        SubAgent.new(
+          prompt: "List the expenses",
+          tools: %{"list_expenses" => fn _ -> [%{amount: 100}] end}
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(def expenses (ctx/list_expenses))
+(return {:total (count expenses)})
+```|}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      output = capture_io(fn -> Debug.print_trace(step, view: :compressed) end)
+
+      # Tool namespace should appear in compressed view
+      assert output =~ ";; === tool/ ==="
+      assert output =~ "tool/list_expenses"
+    end
+
     test "usage: true shows token stats" do
       turns = [
         Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
@@ -339,7 +362,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: turns,
         usage: %{
           duration_ms: 100,
@@ -368,7 +390,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: 3,
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: turns,
         usage: %{duration_ms: 100, memory_bytes: 0}
       }
@@ -380,69 +401,12 @@ defmodule PtcRunner.SubAgent.DebugTest do
     end
   end
 
-  describe "Debug.print_trace/2 backward compatibility with trace" do
-    test "works with legacy trace format" do
-      trace = [
-        %{
-          turn: 1,
-          program: "(+ 1 2)",
-          result: 3,
-          tool_calls: [],
-          prints: []
-        }
-      ]
-
-      step = %Step{
-        return: 3,
-        fail: nil,
-        memory: %{},
-        trace: trace,
-        turns: nil,
-        usage: %{duration_ms: 100, memory_bytes: 0}
-      }
-
-      output = capture_io(fn -> Debug.print_trace(step) end)
-
-      assert output =~ "Turn 1"
-      assert output =~ "(+ 1 2)"
-      assert output =~ "Result:"
-    end
-
-    test "raw: true with legacy trace shows reasoning" do
-      trace = [
-        %{
-          turn: 1,
-          program: "(+ 1 2)",
-          result: 3,
-          tool_calls: [],
-          prints: [],
-          llm_response: "I'll add 1 and 2\n\n```clojure\n(+ 1 2)\n```"
-        }
-      ]
-
-      step = %Step{
-        return: 3,
-        fail: nil,
-        memory: %{},
-        trace: trace,
-        turns: nil,
-        usage: %{duration_ms: 100, memory_bytes: 0}
-      }
-
-      output = capture_io(fn -> Debug.print_trace(step, raw: true) end)
-
-      assert output =~ "Raw Response:"
-      assert output =~ "I'll add 1 and 2"
-    end
-  end
-
   describe "Debug.print_chain/1" do
     test "prints multiple steps in chain" do
       step1 = %Step{
         return: %{value: 10},
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: [Turn.success(1, "(+ 5 5)", "(+ 5 5)", 10, [], [], %{})],
         usage: %{duration_ms: 50, memory_bytes: 0}
       }
@@ -451,7 +415,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 20},
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: [Turn.success(1, "(* ctx/value 2)", "(* ctx/value 2)", 20, [], [], %{})],
         usage: %{duration_ms: 75, memory_bytes: 0}
       }
@@ -470,7 +433,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 10},
         fail: nil,
         memory: %{},
-        trace: nil,
         turns: [],
         usage: %{duration_ms: 50, memory_bytes: 0}
       }
@@ -479,7 +441,6 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: nil,
         fail: %{reason: :test_error, message: "Test failure"},
         memory: %{},
-        trace: nil,
         turns: [],
         usage: %{duration_ms: 75, memory_bytes: 0}
       }

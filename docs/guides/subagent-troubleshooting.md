@@ -285,6 +285,43 @@ If you don't see "Output:" in the trace, either no `println` was called or the L
 
 See [Core Concepts](subagent-concepts.md) for the full state persistence documentation.
 
+## Side Effects Lost in Parallel/HOF Execution
+
+**Symptom:** `println` output or tool calls inside `pmap`, `map`, `filter`, or other higher-order functions don't appear in the trace.
+
+**Cause:** When closures are passed to higher-order functions (HOFs) or executed in parallel (`pmap`, `pcalls`), side effects like `println` and tool calls are discarded. This is a known limitation of the current architecture.
+
+**Why this happens:** Higher-order functions convert PTC-Lisp closures to Erlang functions for execution. The evaluation context (which tracks prints and tool calls) is not threaded back from these function calls. For parallel execution, merging side effects from multiple concurrent branches would require complex ordering semantics.
+
+**Solutions:**
+
+1. **Use `doseq` for side-effectful iterations:**
+   ```clojure
+   ;; DON'T: println inside map (output lost)
+   (map (fn [x] (println x) (+ x 1)) items)
+
+   ;; DO: Use doseq for side effects
+   (doseq [x items] (println x))
+   (map (fn [x] (+ x 1)) items)
+   ```
+
+2. **Separate side effects from transformations:**
+   ```clojure
+   ;; Process data first
+   (def results (map process-item items))
+   ;; Then observe
+   (println "Processed:" (count results))
+   ```
+
+3. **For debugging parallel code**, use explicit `println` before/after parallel operations:
+   ```clojure
+   (println "Starting parallel processing...")
+   (def results (pmap expensive-fn items))
+   (println "Finished with" (count results) "results")
+   ```
+
+**Note:** This limitation only affects observability (what appears in the trace). The actual computation results from closures are returned correctly. Tool calls inside parallel execution still execute - they just aren't tracked in the turn's tool call history.
+
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage

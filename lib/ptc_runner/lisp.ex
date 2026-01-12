@@ -252,7 +252,7 @@ defmodule PtcRunner.Lisp do
             memory: memory,
             signature: nil,
             usage: metrics,
-            trace: nil,
+            turns: nil,
             trace_id: nil,
             parent_trace_id: nil,
             field_descriptions: nil,
@@ -370,7 +370,7 @@ defmodule PtcRunner.Lisp do
       memory: memory,
       signature: nil,
       usage: nil,
-      trace: nil,
+      turns: nil,
       prints: Enum.reverse(prints),
       tool_calls: Enum.reverse(tool_calls)
     }

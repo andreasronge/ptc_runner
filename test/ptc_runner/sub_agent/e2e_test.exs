@@ -63,7 +63,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
       agent =
         SubAgent.new(
           prompt: "What is the total of all :amount values in ctx/orders?",
-          signature: "(orders [{:amount :int}]) -> :int",
+          signature: "(orders [{amount :int}]) -> :int",
           max_turns: 1,
           system_prompt: LanguageSpec.get(@prompt_profile)
         )

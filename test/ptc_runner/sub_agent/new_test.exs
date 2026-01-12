@@ -56,20 +56,20 @@ defmodule PtcRunner.SubAgent.NewTest do
     end
 
     test "raises when mission is missing" do
-      assert_raise ArgumentError, "mission is required", fn ->
+      assert_raise ArgumentError, "prompt is required", fn ->
         SubAgent.new(tools: %{})
       end
 
-      assert_raise ArgumentError, "mission is required", fn ->
+      assert_raise ArgumentError, "prompt is required", fn ->
         SubAgent.new([])
       end
 
-      assert_raise ArgumentError, "mission is required", fn ->
+      assert_raise ArgumentError, "prompt is required", fn ->
         SubAgent.new(max_turns: 10)
       end
     end
 
-    test "raises when prompt is not a string" do
+    test "raises when mission is not a string" do
       assert_raise ArgumentError, "prompt must be a string", fn ->
         SubAgent.new(prompt: 123)
       end
@@ -318,7 +318,9 @@ defmodule PtcRunner.SubAgent.NewTest do
     end
 
     test "format_options merges with defaults" do
-      agent = SubAgent.new(prompt: "Test", format_options: [feedback_limit: 5, result_limit: 100])
+      agent =
+        SubAgent.new(prompt: "Test", format_options: [feedback_limit: 5, result_limit: 100])
+
       # User overrides
       assert agent.format_options[:feedback_limit] == 5
       assert agent.format_options[:result_limit] == 100

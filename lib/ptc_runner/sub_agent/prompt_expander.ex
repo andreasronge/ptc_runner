@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.MissionExpander do
+defmodule PtcRunner.SubAgent.PromptExpander do
   @moduledoc """
   Template string expansion with placeholder validation.
 
@@ -15,16 +15,16 @@ defmodule PtcRunner.SubAgent.MissionExpander do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("Hello {{name}}", %{name: "Alice"})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("Hello {{name}}", %{name: "Alice"})
       {:ok, "Hello Alice"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("User {{user.name}}", %{user: %{name: "Bob"}})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("User {{user.name}}", %{user: %{name: "Bob"}})
       {:ok, "User Bob"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("Hello {{name}}", %{})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("Hello {{name}}", %{})
       {:error, {:missing_keys, ["name"]}}
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholders("Hello {{name}}, you have {{items.count}} items")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholders("Hello {{name}}, you have {{items.count}} items")
       [%{path: ["name"], type: :simple}, %{path: ["items", "count"], type: :simple}]
 
   """
@@ -40,16 +40,16 @@ defmodule PtcRunner.SubAgent.MissionExpander do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholders("Hello {{name}}")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholders("Hello {{name}}")
       [%{path: ["name"], type: :simple}]
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholders("{{user.name}} has {{count}} items")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholders("{{user.name}} has {{count}} items")
       [%{path: ["user", "name"], type: :simple}, %{path: ["count"], type: :simple}]
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholders("No placeholders here")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholders("No placeholders here")
       []
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholders("{{name}} and {{name}}")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholders("{{name}} and {{name}}")
       [%{path: ["name"], type: :simple}]
 
   """
@@ -71,16 +71,16 @@ defmodule PtcRunner.SubAgent.MissionExpander do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholder_names("Hello {{name}}")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholder_names("Hello {{name}}")
       ["name"]
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholder_names("{{user.name}} has {{count}} items")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholder_names("{{user.name}} has {{count}} items")
       ["user.name", "count"]
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholder_names("No placeholders here")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholder_names("No placeholders here")
       []
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_placeholder_names("{{name}} and {{name}}")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholder_names("{{name}} and {{name}}")
       ["name"]
 
   """
@@ -99,13 +99,13 @@ defmodule PtcRunner.SubAgent.MissionExpander do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_signature_params("(user :string) -> :string")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_signature_params("(user :string) -> :string")
       ["user"]
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_signature_params("(name :string, age :int) -> :string")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_signature_params("(name :string, age :int) -> :string")
       ["name", "age"]
 
-      iex> PtcRunner.SubAgent.MissionExpander.extract_signature_params("invalid signature")
+      iex> PtcRunner.SubAgent.PromptExpander.extract_signature_params("invalid signature")
       []
 
   """
@@ -141,31 +141,31 @@ defmodule PtcRunner.SubAgent.MissionExpander do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("Hello {{name}}", %{name: "Alice"})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("Hello {{name}}", %{name: "Alice"})
       {:ok, "Hello Alice"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("Count: {{count}}", %{count: 42})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("Count: {{count}}", %{count: 42})
       {:ok, "Count: 42"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("{{a.b.c}}", %{a: %{b: %{c: "deep"}}})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("{{a.b.c}}", %{a: %{b: %{c: "deep"}}})
       {:ok, "deep"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("Hello", %{})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("Hello", %{})
       {:ok, "Hello"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("", %{})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("", %{})
       {:ok, ""}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("{{missing}}", %{})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("{{missing}}", %{})
       {:error, {:missing_keys, ["missing"]}}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("{{a}} and {{b}}", %{a: "1"})
+      iex> PtcRunner.SubAgent.PromptExpander.expand("{{a}} and {{b}}", %{a: "1"})
       {:error, {:missing_keys, ["b"]}}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("{{missing}}", %{}, on_missing: :keep)
+      iex> PtcRunner.SubAgent.PromptExpander.expand("{{missing}}", %{}, on_missing: :keep)
       {:ok, "{{missing}}"}
 
-      iex> PtcRunner.SubAgent.MissionExpander.expand("{{a}} and {{b}}", %{a: "1"}, on_missing: :keep)
+      iex> PtcRunner.SubAgent.PromptExpander.expand("{{a}} and {{b}}", %{a: "1"}, on_missing: :keep)
       {:ok, "1 and {{b}}"}
 
   """

@@ -18,6 +18,10 @@ Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_prot
 Add your API key in the Secrets panel (`ss`) for cloud models. Ollama works without a key.
 
 ```elixir
+IEx.Helpers.recompile()
+```
+
+```elixir
 api_key = System.get_env("LB_OPENROUTER_API_KEY") || System.get_env("OPENROUTER_API_KEY")
 if api_key, do: System.put_env("OPENROUTER_API_KEY", api_key)
 if(api_key, do: "API key configured", else: "No API key - Ollama only")
@@ -77,6 +81,10 @@ alias PtcRunner.SubAgent.Debug
 
 Debug.print_trace(step)
 step.return
+```
+
+```elixir
+Debug.print_trace(step, view: :compressed)
 ```
 
 See [print_trace/2](https://hexdocs.pm/ptc_runner/PtcRunner.SubAgent.Debug.html#print_trace/2) for trace options (`messages`, `system`, `usage`).
@@ -147,11 +155,16 @@ Kino.DataTable.new(expenses)
   tools: tools,
   signature: "{total :float}",
   llm: my_llm,
+  compression: true,
   debug: true
 )
 
 Debug.print_trace(step)
 step.return
+```
+
+```elixir
+Debug.print_trace(step, messages: true)
 ```
 
 ## Interactive Query
@@ -178,3 +191,5 @@ end
 * [Playground](ptc_runner_playground.livemd) - PTC-Lisp basics
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [PTC-Lisp Spec](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html)
+
+<!-- livebook:{"offset":4949,"stamp":{"token":"XCP.BU3ISgVeNGOdIqi5BzJhI4sPIWdeLfeVryV1f551AiRHKOu-UQDbOxHsBVLSy7p-CF0JI_24UNcukieipLuLNp8ebqP6CaEqPWndFJQWNkm7KcATQuMSEN5H4BCY","version":2}} -->

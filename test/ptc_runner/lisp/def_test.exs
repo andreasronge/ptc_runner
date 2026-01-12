@@ -18,19 +18,19 @@ defmodule PtcRunner.Lisp.DefTest do
   # ============================================================
 
   describe "analyzer: def" do
-    test "(def name value) analyzes to {:def, name, analyzed_value}" do
+    test "(def name value) analyzes to {:def, name, analyzed_value, opts}" do
       raw = {:list, [{:symbol, :def}, {:symbol, :x}, 42]}
-      assert {:ok, {:def, :x, 42}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :x, 42, %{}}} = Analyze.analyze(raw)
     end
 
-    test "(def name docstring value) ignores docstring" do
+    test "(def name docstring value) preserves docstring in opts" do
       raw = {:list, [{:symbol, :def}, {:symbol, :x}, {:string, "doc"}, 42]}
-      assert {:ok, {:def, :x, 42}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :x, 42, %{docstring: "doc"}}} = Analyze.analyze(raw)
     end
 
     test "def analyzes the value expression" do
       raw = {:list, [{:symbol, :def}, {:symbol, :result}, {:symbol, :x}]}
-      assert {:ok, {:def, :result, {:var, :x}}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :result, {:var, :x}, %{}}} = Analyze.analyze(raw)
     end
 
     test "def requires a symbol for name" do

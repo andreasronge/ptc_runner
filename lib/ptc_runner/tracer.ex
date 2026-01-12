@@ -31,9 +31,9 @@ defmodule PtcRunner.Tracer do
       merged = Tracer.merge_parallel(parent, children)
       usage = Tracer.aggregate_usage(merged)
 
-  > **Note:** `Step.trace` is always a list `[trace_entry()]`. The merged map
+  > **Note:** `Step.turns` is always a list of `Turn` structs. The merged map
   > structure returned by `merge_parallel/2` is a **separate aggregation result**,
-  > not a replacement for `Step.trace`.
+  > not a replacement for `Step.turns`.
 
   ## Nested Traces
 
@@ -302,13 +302,13 @@ defmodule PtcRunner.Tracer do
   @doc """
   Record a nested SubAgent execution within a tool call.
 
-  Adds a `:nested_call` entry with the tool call and child step's return value and trace.
+  Adds a `:nested_call` entry with the tool call and child step's return value and turns.
 
   ## Examples
 
       iex> tracer = PtcRunner.Tracer.new()
-      iex> tool_call = %{name: "sub_agent", args: %{prompt: "test"}}
-      iex> child_step = %{return: "result", trace: [%{turn: 1}]}
+      iex> tool_call = %{name: "sub_agent", args: %{mission: "test"}}
+      iex> child_step = %{return: "result", turns: [%{turn: 1}]}
       iex> tracer = PtcRunner.Tracer.record_nested_call(tracer, tool_call, child_step)
       iex> [entry] = PtcRunner.Tracer.entries(tracer)
       iex> entry.type
@@ -322,7 +322,7 @@ defmodule PtcRunner.Tracer do
     nested_tool_call =
       Map.put(tool_call, :result, %{
         return: child_step.return || child_step[:return],
-        nested_trace: child_step.trace || child_step[:trace]
+        nested_turns: child_step.turns || child_step[:turns]
       })
 
     add_entry(tracer, %{

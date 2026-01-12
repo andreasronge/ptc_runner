@@ -180,12 +180,12 @@ defmodule PtcRunner.SubAgent.LLMTool do
 
   # Validate that prompt placeholders match signature parameters
   defp validate_prompt_placeholders!(opts) do
-    alias PtcRunner.SubAgent.MissionExpander
+    alias PtcRunner.SubAgent.PromptExpander
 
     with {:ok, prompt} <- Keyword.fetch(opts, :prompt),
          {:ok, signature} <- Keyword.fetch(opts, :signature) do
-      placeholders = MissionExpander.extract_placeholder_names(prompt)
-      signature_params = MissionExpander.extract_signature_params(signature)
+      placeholders = PromptExpander.extract_placeholder_names(prompt)
+      signature_params = PromptExpander.extract_signature_params(signature)
 
       case placeholders -- signature_params do
         [] ->

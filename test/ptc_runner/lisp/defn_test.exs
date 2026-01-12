@@ -24,10 +24,10 @@ defmodule PtcRunner.Lisp.DefnTest do
       raw =
         {:list, [{:symbol, :defn}, {:symbol, :twice}, {:vector, [{:symbol, :x}]}, {:symbol, :x}]}
 
-      assert {:ok, {:def, :twice, {:fn, [{:var, :x}], {:var, :x}}}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :twice, {:fn, [{:var, :x}], {:var, :x}}, %{}}} = Analyze.analyze(raw)
     end
 
-    test "(defn name docstring [params] body) ignores docstring" do
+    test "(defn name docstring [params] body) preserves docstring" do
       # (defn twice "Doubles a number" [x] (* x 2))
       raw =
         {:list,
@@ -39,13 +39,15 @@ defmodule PtcRunner.Lisp.DefnTest do
            {:symbol, :x}
          ]}
 
-      assert {:ok, {:def, :twice, {:fn, [{:var, :x}], {:var, :x}}}} = Analyze.analyze(raw)
+      assert {:ok,
+              {:def, :twice, {:fn, [{:var, :x}], {:var, :x}}, %{docstring: "Doubles a number"}}} =
+               Analyze.analyze(raw)
     end
 
     test "defn with zero params works" do
       # (defn greeting [] "hello")
       raw = {:list, [{:symbol, :defn}, {:symbol, :greeting}, {:vector, []}, {:string, "hello"}]}
-      assert {:ok, {:def, :greeting, {:fn, [], {:string, "hello"}}}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :greeting, {:fn, [], {:string, "hello"}}, %{}}} = Analyze.analyze(raw)
     end
 
     test "defn with multiple params works" do
@@ -59,7 +61,7 @@ defmodule PtcRunner.Lisp.DefnTest do
            {:list, [{:symbol, :+}, {:symbol, :a}, {:symbol, :b}, {:symbol, :c}]}
          ]}
 
-      assert {:ok, {:def, :add, {:fn, [{:var, :a}, {:var, :b}, {:var, :c}], call}}} =
+      assert {:ok, {:def, :add, {:fn, [{:var, :a}, {:var, :b}, {:var, :c}], call}, %{}}} =
                Analyze.analyze(raw)
 
       assert {:call, {:var, :+}, [{:var, :a}, {:var, :b}, {:var, :c}]} = call
@@ -77,7 +79,9 @@ defmodule PtcRunner.Lisp.DefnTest do
            {:symbol, :x}
          ]}
 
-      assert {:ok, {:def, :"do-stuff", {:fn, [{:var, :x}], {:do, bodies}}}} = Analyze.analyze(raw)
+      assert {:ok, {:def, :"do-stuff", {:fn, [{:var, :x}], {:do, bodies}}, %{}}} =
+               Analyze.analyze(raw)
+
       assert length(bodies) == 2
     end
 
@@ -94,7 +98,10 @@ defmodule PtcRunner.Lisp.DefnTest do
            {:symbol, :x}
          ]}
 
-      assert {:ok, {:def, :"do-stuff", {:fn, [{:var, :x}], {:do, bodies}}}} = Analyze.analyze(raw)
+      assert {:ok,
+              {:def, :"do-stuff", {:fn, [{:var, :x}], {:do, bodies}}, %{docstring: "Does stuff"}}} =
+               Analyze.analyze(raw)
+
       assert length(bodies) == 2
     end
 
@@ -325,6 +332,48 @@ defmodule PtcRunner.Lisp.DefnTest do
       {:ok, %{return: result}} = Lisp.run(source2, memory: user_ns1, context: ctx)
 
       assert result == [%{amount: 7000}, %{amount: 10_000}]
+    end
+  end
+
+  # ============================================================
+  # Docstring capture tests
+  # ============================================================
+
+  describe "docstring capture" do
+    test "defn with docstring stores it in closure metadata" do
+      source = ~S|(defn twice "Doubles a number" [x] (* x 2))|
+      {:ok, %{memory: user_ns}} = Lisp.run(source)
+
+      {:closure, _, _, _, _, metadata} = user_ns[:twice]
+      assert metadata.docstring == "Doubles a number"
+    end
+
+    test "defn without docstring has no docstring in metadata" do
+      source = "(defn twice [x] (* x 2))"
+      {:ok, %{memory: user_ns}} = Lisp.run(source)
+
+      {:closure, _, _, _, _, metadata} = user_ns[:twice]
+      refute Map.has_key?(metadata, :docstring)
+    end
+
+    test "docstring persists across turns" do
+      # Turn 1: define function with docstring
+      {:ok, %{memory: user_ns1}} = Lisp.run(~S|(defn greet "Says hello" [] "hello")|)
+
+      # Turn 2: docstring should still be there
+      {:ok, %{memory: user_ns2}} = Lisp.run("(greet)", memory: user_ns1)
+
+      {:closure, _, _, _, _, metadata} = user_ns2[:greet]
+      assert metadata.docstring == "Says hello"
+    end
+
+    test "docstring and return type both captured" do
+      source = ~S|(do (defn add "Adds two numbers" [a b] (+ a b)) (add 1 2))|
+      {:ok, %{memory: user_ns}} = Lisp.run(source)
+
+      {:closure, _, _, _, _, metadata} = user_ns[:add]
+      assert metadata.docstring == "Adds two numbers"
+      assert metadata.return_type == "integer"
     end
   end
 
