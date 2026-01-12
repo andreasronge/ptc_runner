@@ -101,8 +101,10 @@ defmodule PtcDemo.CLIBase do
     - --show-prompt: show system prompt and exit
     - --validate-clojure: validate generated programs against Babashka
     - --no-validate-clojure: skip Clojure validation
+    - --compression: enable message history compression
+    - --no-compression: disable message history compression (default)
 
-  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure
+  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure, :compression
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -197,6 +199,12 @@ defmodule PtcDemo.CLIBase do
               IO.puts("Error: --runs must be a positive integer (e.g., --runs=3)")
               System.halt(1)
           end
+
+        arg == "--compression" ->
+          Map.put(acc, :compression, true)
+
+        arg == "--no-compression" ->
+          Map.put(acc, :compression, false)
 
         String.starts_with?(arg, "--model") ->
           IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
