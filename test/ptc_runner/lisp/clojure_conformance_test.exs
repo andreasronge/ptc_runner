@@ -11,9 +11,11 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
   use ExUnit.Case, async: true
   import PtcRunner.TestSupport.ClojureTestHelpers
 
-  setup_all do
-    require_babashka()
-    :ok
+  alias PtcRunner.Lisp.ClojureValidator
+
+  # Skip all tests in this module if babashka is not available
+  unless ClojureValidator.available?() do
+    @moduletag skip: "Babashka not installed. Run: mix ptc.install_babashka"
   end
 
   describe "Clojure conformance - arithmetic" do

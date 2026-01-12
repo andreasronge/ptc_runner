@@ -5,10 +5,13 @@ defmodule PtcRunner.SubAgent.Debug do
   Provides functions to pretty-print execution traces and agent chains,
   making it easier to understand what happened during agent execution.
 
-  ## Raw Response
+  ## Raw Mode
 
-  Turn structs always capture `raw_response` (the full LLM output including reasoning).
-  Use `print_trace(step, raw: true)` to include this in the output.
+  Use `print_trace(step, raw: true)` to see the complete LLM interaction:
+  - **Raw Input**: Messages sent to the LLM (excluding system prompt)
+  - **Raw Response**: Full LLM output including reasoning
+
+  For all messages including the system prompt, use `messages: true` instead.
 
   ## View Modes
 
@@ -23,8 +26,11 @@ defmodule PtcRunner.SubAgent.Debug do
       {:ok, step} = SubAgent.run(agent, llm: llm)
       SubAgent.Debug.print_trace(step)
 
-      # Include raw LLM response (reasoning)
+      # Include raw input and raw response
       SubAgent.Debug.print_trace(step, raw: true)
+
+      # Show all messages including system prompt
+      SubAgent.Debug.print_trace(step, messages: true)
 
       # Show compressed view (what LLM sees)
       SubAgent.Debug.print_trace(step, view: :compressed)
@@ -52,8 +58,8 @@ defmodule PtcRunner.SubAgent.Debug do
   - `step` - A `%Step{}` struct with trace data
   - `opts` - Keyword list of options:
     - `view` - `:turns` (default) or `:compressed` - perspective to render
-    - `raw` - Include `raw_response` in turns view (default: `false`)
-    - `messages` - Show messages sent to LLM for each turn (default: `false`)
+    - `raw` - Include raw input (messages, excluding system prompt) and raw response (default: `false`)
+    - `messages` - Show all messages sent to LLM including system prompt (default: `false`)
     - `usage` - Show token usage summary after the trace (default: `false`)
 
   ## Examples
@@ -100,8 +106,8 @@ defmodule PtcRunner.SubAgent.Debug do
     case view do
       :turns ->
         show_raw = Keyword.get(opts, :raw, false)
-        show_messages = Keyword.get(opts, :messages, false)
-        Enum.each(turns, &print_turn(&1, show_raw, show_messages))
+        show_all_messages = Keyword.get(opts, :messages, false)
+        Enum.each(turns, &print_turn(&1, show_raw, show_all_messages))
 
       :compressed ->
         print_compressed_view(step)
@@ -156,7 +162,7 @@ defmodule PtcRunner.SubAgent.Debug do
   # Private Helpers - Turn-based (new format)
   # ============================================================
 
-  defp print_turn(%Turn{} = turn, show_raw, show_messages) do
+  defp print_turn(%Turn{} = turn, show_raw, show_all_messages) do
     # Build header with message count indicator
     msg_indicator =
       case turn.messages do
@@ -170,32 +176,26 @@ defmodule PtcRunner.SubAgent.Debug do
       "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
     )
 
-    # Print messages sent to LLM if requested
-    if show_messages and turn.messages do
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Messages sent to LLM:#{ansi(:reset)}")
+    # Print messages sent to LLM
+    # - show_all_messages: show all messages including system prompt
+    # - show_raw: show messages excluding system prompt and placeholder content
+    if (show_all_messages or show_raw) and turn.messages do
+      messages_to_show =
+        if show_all_messages do
+          turn.messages
+        else
+          # For raw mode, exclude system messages and placeholder content
+          Enum.reject(turn.messages, fn msg ->
+            Map.get(msg, :role) == :system or placeholder_message?(msg)
+          end)
+        end
 
-      Enum.each(turn.messages, fn msg ->
-        role = Map.get(msg, :role, :unknown)
-        content = Map.get(msg, :content, "")
-        char_count = String.length(content)
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:bold)}[#{role}]#{ansi(:reset)} (#{char_count} chars)"
-        )
-
-        # Print each line of content with proper box formatting
-        content
-        |> String.split("\n")
-        |> Enum.each(fn line ->
-          truncated_line = truncate_line(line, 500)
-
-          IO.puts(
-            "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}#{truncated_line}#{ansi(:reset)}"
-          )
-        end)
-      end)
-
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
+      unless Enum.empty?(messages_to_show) do
+        label = if show_all_messages, do: "Messages sent to LLM:", else: "Raw Input:"
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}#{label}#{ansi(:reset)}")
+        Enum.each(messages_to_show, &print_message/1)
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
+      end
     end
 
     # Print raw response (reasoning) if requested
@@ -472,20 +472,25 @@ defmodule PtcRunner.SubAgent.Debug do
       )
     end
 
-    if usage[:total_tokens] do
+    # Show system prompt size with ratio of input tokens
+    if usage[:system_prompt_tokens] && usage.system_prompt_tokens > 0 do
+      ratio_str = format_system_prompt_ratio(usage)
+
       IO.puts(
-        "#{ansi(:cyan)}|#{ansi(:reset)}   Total tokens:  #{format_number(usage.total_tokens)}"
+        "#{ansi(:cyan)}|#{ansi(:reset)}   System prompt: #{format_number(usage.system_prompt_tokens)} #{ansi(:dim)}(est. size#{ratio_str})#{ansi(:reset)}"
       )
     end
 
-    if usage[:system_prompt_tokens] && usage.system_prompt_tokens > 0 do
+    if usage[:memory_bytes] && usage.memory_bytes > 0 do
       IO.puts(
-        "#{ansi(:cyan)}|#{ansi(:reset)}   System prompt: #{format_number(usage.system_prompt_tokens)} #{ansi(:dim)}(est.)#{ansi(:reset)}"
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Memory:        #{format_bytes(usage.memory_bytes)}"
       )
     end
 
     if usage[:duration_ms] do
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Duration:      #{usage.duration_ms}ms")
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Duration:      #{format_number(usage.duration_ms)}ms"
+      )
     end
 
     if usage[:turns] do
@@ -494,6 +499,27 @@ defmodule PtcRunner.SubAgent.Debug do
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
   end
+
+  # Calculate system prompt ratio of input tokens
+  defp format_system_prompt_ratio(usage) do
+    turns = Map.get(usage, :turns, 1)
+    input_tokens = Map.get(usage, :input_tokens, 0)
+    system_prompt_tokens = Map.get(usage, :system_prompt_tokens, 0)
+
+    if turns > 0 and input_tokens > 0 and system_prompt_tokens > 0 do
+      # System prompt is sent with each turn
+      total_system_tokens = system_prompt_tokens * turns
+      ratio = Float.round(total_system_tokens / input_tokens * 100, 0) |> trunc()
+      ", ~#{ratio}% of input"
+    else
+      ""
+    end
+  end
+
+  # Format bytes to human-readable string
+  defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
+  defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
+  defp format_bytes(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MB"
 
   # Format number with thousand separators
   defp format_number(n) when is_integer(n) do
@@ -505,6 +531,37 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   defp format_number(n), do: "#{n}"
+
+  # Print a single message with role and content
+  defp print_message(msg) do
+    role = Map.get(msg, :role, :unknown)
+    content = Map.get(msg, :content, "")
+    char_count = String.length(content)
+
+    IO.puts(
+      "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:bold)}[#{role}]#{ansi(:reset)} (#{char_count} chars)"
+    )
+
+    # Print each line of content with proper box formatting
+    content
+    |> String.split("\n")
+    |> Enum.each(&print_message_line/1)
+  end
+
+  defp print_message_line(line) do
+    truncated_line = truncate_line(line, 500)
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}#{truncated_line}#{ansi(:reset)}")
+  end
+
+  # Check if a message contains only placeholder content (no real data)
+  # These are filtered out in raw mode to reduce noise
+  # Note: Tools are in the system prompt (already filtered), so we only check data inventory
+  defp placeholder_message?(msg) do
+    content = Map.get(msg, :content, "")
+
+    # Check for empty data inventory placeholder (ctx/ namespace)
+    String.contains?(content, "No data available in context")
+  end
 
   # ANSI color helpers
   defp ansi(:reset), do: IO.ANSI.reset()
