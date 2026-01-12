@@ -273,8 +273,6 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       assert prompt =~ "Calculate 5 + 3"
       assert prompt =~ "ctx/x"
       assert prompt =~ "ctx/y"
-      # Should still show return/fail tools
-      assert prompt =~ "### return"
     end
 
     test "handles very long tool names gracefully" do
@@ -339,11 +337,10 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      # Should show standard return/fail tools
-      assert prompt =~ "## Tools you can call"
-      assert prompt =~ "### return"
-      assert prompt =~ "### fail"
-      # And the catalog section
+      # return/fail are in system prompt section, not in Available Tools
+      refute prompt =~ "### return"
+      refute prompt =~ "### fail"
+      # But the catalog section should be present
       assert prompt =~ "## Tools for planning (do not call)"
       assert prompt =~ "### email_agent"
     end
