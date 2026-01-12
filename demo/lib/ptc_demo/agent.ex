@@ -210,18 +210,18 @@ defmodule PtcDemo.Agent do
            debug: debug
          ) do
       {:ok, step} ->
-        # Show trace: verbose shows program + usage, debug adds full messages
-        if debug or verbose, do: SubAgent.Debug.print_trace(step, messages: debug, usage: verbose)
+        # Show trace: verbose shows program + usage, debug adds raw LLM responses
+        if debug or verbose, do: SubAgent.Debug.print_trace(step, raw: debug, usage: verbose)
 
         result = step.return
         new_memory = step.memory || %{}
-        program = extract_program_from_trace(step.trace)
+        program = extract_program_from_turns(step.turns)
 
         # Update usage stats
         new_usage = add_usage(state.usage, step.usage)
 
         # Track ALL programs from this ask (for multi-turn visibility)
-        all_programs = extract_all_programs_from_trace(step.trace)
+        all_programs = extract_all_programs_from_turns(step.turns)
         new_programs = state.programs_history ++ all_programs
 
         # Format answer - if it's the raw value, format it nicely
@@ -242,17 +242,17 @@ defmodule PtcDemo.Agent do
          }}
 
       {:error, step} ->
-        # Print trace on error for debugging (use messages: true if debug mode)
-        if debug or verbose, do: SubAgent.Debug.print_trace(step, messages: debug)
+        # Print trace on error for debugging (use raw: true if debug mode)
+        if debug or verbose, do: SubAgent.Debug.print_trace(step, raw: debug)
 
         error_msg = format_error(step.fail)
         if verbose, do: IO.puts("   [Error] #{error_msg}")
 
         new_usage = add_usage(state.usage, step.usage)
 
-        # Extract programs from trace for debugging - same as success path
-        all_programs = extract_all_programs_from_trace(step.trace)
-        program = extract_program_from_trace(step.trace)
+        # Extract programs from turns for debugging - same as success path
+        all_programs = extract_all_programs_from_turns(step.turns)
+        program = extract_program_from_turns(step.turns)
         new_programs = state.programs_history ++ all_programs
 
         {:reply, {:error, error_msg},
@@ -348,7 +348,7 @@ defmodule PtcDemo.Agent do
 
   defp build_agent(data_mode, prompt_profile, max_turns \\ @max_turns, signature \\ nil) do
     SubAgent.new(
-      prompt: "{{question}}",
+      mission: "{{question}}",
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
       tools: build_tools(),
@@ -431,22 +431,22 @@ defmodule PtcDemo.Agent do
   defp format_error_reason(reason) when is_atom(reason), do: "#{reason}"
   defp format_error_reason(reason), do: inspect(reason)
 
-  defp extract_program_from_trace(nil), do: nil
-  defp extract_program_from_trace([]), do: nil
+  defp extract_program_from_turns(nil), do: nil
+  defp extract_program_from_turns([]), do: nil
 
-  defp extract_program_from_trace(trace) when is_list(trace) do
-    case List.last(trace) do
+  defp extract_program_from_turns(turns) when is_list(turns) do
+    case List.last(turns) do
       %{program: program} -> program
       _ -> nil
     end
   end
 
-  # Extract ALL programs from trace (for multi-turn visibility)
-  defp extract_all_programs_from_trace(nil), do: []
-  defp extract_all_programs_from_trace([]), do: []
+  # Extract ALL programs from turns (for multi-turn visibility)
+  defp extract_all_programs_from_turns(nil), do: []
+  defp extract_all_programs_from_turns([]), do: []
 
-  defp extract_all_programs_from_trace(trace) when is_list(trace) do
-    Enum.map(trace, fn
+  defp extract_all_programs_from_turns(turns) when is_list(turns) do
+    Enum.map(turns, fn
       %{program: program, result: result} -> {program, result}
       %{program: program} -> {program, nil}
       _ -> nil
