@@ -191,5 +191,3 @@ end
 * [Playground](ptc_runner_playground.livemd) - PTC-Lisp basics
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [PTC-Lisp Spec](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html)
-
-<!-- livebook:{"offset":5018,"stamp":{"token":"XCP.TrOV6GCfAW5BuXXnk1vnw4AyngSJcWwXAvhAtQxtm-YlILnU6dfh2781rY5nFttGvqunhCzivkUz2pPV7KAnMTbuqwg2vS8fabcImMGCmiPhuECUIMHdrHqe03lC","version":2}} -->
