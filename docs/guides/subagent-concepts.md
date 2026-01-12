@@ -1,20 +1,18 @@
 # Core Concepts
 
-This guide covers the foundational concepts of SubAgents: context management, the firewall convention, memory, and error handling.
+This guide covers the foundational concepts for library users: context management, the firewall convention, and how agents complete their work.
 
-## Quick Example
+## How SubAgents Work
 
-A typical SubAgent program calls a tool and returns the result:
+When you call `SubAgent.run/2`, the library:
 
-```clojure
-(let [data (ctx/fetch-items {:category ctx/category})]
-  (return (filter (where :price < 100) data)))
-```
+1. Sends your prompt and context to the LLM
+2. The LLM generates a PTC-Lisp program (a Clojure subset)
+3. The program executes in a sandboxed environment
+4. Results are validated against your signature
+5. On success, `{:ok, step}` returns with `step.return` containing the result
 
-Key points:
-- `ctx/category`: Accesses the input context.
-- `ctx/fetch-items`: Invokes a tool with an argument map.
-- `return`: Completes the mission with the final value.
+You don't write PTC-Lisp - the LLM does. You configure the agent with Elixir.
 
 ## The Context Firewall
 
@@ -38,7 +36,7 @@ The parent only sees what the signature exposes. Heavy data stays inside the Sub
 
 ## The Firewall Convention (`_` prefix)
 
-Fields prefixed with `_` are **firewalled**:
+Fields prefixed with `_` are **firewalled** - available to your Elixir code but hidden from LLM prompts:
 
 ```elixir
 signature: "{summary :string, count :int, _email_ids [:int]}"
@@ -48,9 +46,7 @@ Visibility rules:
 
 | Location | Normal Fields | Firewalled (`_`) |
 |----------|---------------|------------------|
-| Lisp context (`ctx/`) | Full value | Full value |
-| LLM prompt history | Visible | Hidden (`<Firewalled>`) |
-| Parent LLM schema | Visible | Omitted |
+| LLM prompt history | Visible | Hidden |
 | Elixir `step.return` | Included | Included |
 
 The firewall protects LLM context windows, not your Elixir code. Your application always has full access.
@@ -70,24 +66,20 @@ step1.return.summary     #=> "Found 3 urgent emails"
 step1.return.count       #=> 3
 step1.return._email_ids  #=> [101, 102, 103]  # Available to Elixir!
 
-# Step 2: Process those emails
-# The _email_ids are available in ctx/ even though the LLM can't "see" them
+# Step 2: Chain to next agent
 {:ok, step2} = PtcRunner.SubAgent.run(
   "Draft replies for these {{count}} urgent emails",
-  context: step1,  # Auto-chains return + signature
+  context: step1,  # Auto-chains return data
   tools: drafting_tools,
   llm: llm
 )
 ```
 
-In Step 2, the LLM:
-- **Knows** there are 3 emails (public data)
-- **Cannot see** the actual IDs in its prompt
-- **Can use** `ctx/_email_ids` in its generated programs
+In Step 2, the LLM knows there are 3 emails (public) but cannot see the actual IDs (firewalled). The generated program can still access them if needed.
 
-## Context (`ctx/`)
+## Context
 
-Values passed to `context:` are available via the `ctx/` prefix in PTC-Lisp:
+Values passed to `context:` become available to the LLM's generated programs:
 
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
@@ -96,15 +88,6 @@ Values passed to `context:` are available via the `ctx/` prefix in PTC-Lisp:
   tools: order_tools,
   llm: llm
 )
-```
-
-The LLM can reference these in its programs:
-
-```clojure
-(ctx/get-order {:id ctx/order_id})
-(if (= ctx/customer_tier "gold")
-  (ctx/apply-discount {:rate 0.1})
-  nil)
 ```
 
 ### Template Expansion
@@ -117,137 +100,25 @@ context: %{user: %{name: "Alice"}, topic: "billing"}
 # Expands to: "Find emails for Alice about billing"
 ```
 
-Every placeholder must have a matching context key or signature parameter.
-
 ### Chaining Context
 
-When passing a previous `Step` to `context:`, both the return data and signature are extracted:
+When passing a previous `Step` to `context:`, the return data is automatically extracted:
 
 ```elixir
 # These are equivalent:
-run(prompt, context: step1.return, context_signature: step1.signature)
+run(prompt, context: step1.return)
 run(prompt, context: step1)  # Auto-extraction
 ```
 
-## State Persistence (`def`/`defn`)
+## How Agents Complete
 
-Each agent has private state persisting across turns within a single `run`. Use `def` to store values and `defn` to define functions:
+Agents complete their work in one of two ways:
 
-```clojure
-;; Store intermediate results
-(def processed-ids [1 2 3])
+### Single-turn (Expression Result)
 
-;; Access as plain symbol
-processed-ids
-
-;; Define reusable functions
-(defn suspicious? [expense]
-  (> (:amount expense) 5000))
-```
-
-State is:
-- **Scoped per-agent** - SubAgents don't share state with parents or siblings
-- **Turn-persistent** - Survives across turns within one `run` call
-- **Hidden from prompts** - Not shown in LLM conversation history
-
-Use state for:
-- Caching expensive computations
-- Tracking state across turns
-- Storing data too large for context
-
-### Result Feedback
-
-The program's return value determines what the LLM sees in subsequent turns. Use `def` to store large data while showing only a summary as feedback:
-
-**Store and summarize:**
-```clojure
-(def all-users (ctx/fetch-users {}))
-(str "Stored " (count all-users) " users")
-;; LLM sees: "Stored 500 users"
-;; all-users = full dataset (accessible via programs)
-```
-
-This is the core value of PTC: large datasets stay in BEAM memory via `def`, LLM only sees compact summaries as the expression result. The `_` prefix firewalls *input* data; explicit `def` storage and expression results control *output* data.
-
-> **See also:** `PtcRunner.Lisp` module docs for the full state specification.
-
-## Error Handling
-
-SubAgents handle errors at three levels:
-
-### 1. Turn Errors (Recoverable)
-
-Syntax errors, tool failures, and validation errors are fed back to the LLM. It sees the error and can adapt:
-
-```clojure
-;; Check if previous turn failed
-(if ctx/fail
-  (ctx/cleanup {:failed_op (:op ctx/fail)})
-  (ctx/proceed ctx/items))
-```
-
-The `ctx/fail` structure:
+For simple tasks with `max_turns: 1`, the LLM's expression result is returned directly:
 
 ```elixir
-%{
-  reason: :parse_error | :tool_error | :validation_error,
-  message: "Human-readable description",
-  op: "tool_name",      # If tool-related
-  details: %{}          # Additional context
-}
-```
-
-### 2. Mission Failures (Explicit)
-
-When the agent determines it cannot complete the mission, it calls `fail`:
-
-```clojure
-(let [user (ctx/get-user {:id 123})]
-  (if (nil? user)
-    (fail {:reason :not_found
-           :message "User 123 does not exist"})
-    (ctx/process user)))
-```
-
-Result: `{:error, step}` where `step.fail` contains the error.
-
-### 3. System Crashes
-
-Programming bugs in your tool functions follow "let it crash" - they're returned as internal errors for developer investigation.
-
-## Built-in Special Forms
-
-Every SubAgent has two built-in special forms for termination:
-
-### `return` - Mission Success
-
-```clojure
-(return {:name "Widget" :price 99.99})
-```
-
-- Validates data against the signature
-- If invalid, the LLM sees the error and can retry
-- On success, the loop ends and `run/2` returns `{:ok, step}`
-
-### `fail` - Mission Failure
-
-```clojure
-(fail {:reason :not_found :message "No matching items"})
-```
-
-- Terminates the loop immediately
-- `run/2` returns `{:error, step}` with `step.fail` populated
-
-## Execution Behavior
-
-SubAgent behavior is determined explicitly by `max_turns` and `tools`:
-
-### Single-turn Execution
-
-For classification or mapping tasks with one LLM call:
-
-```elixir
-# max_turns: 1, no tools
 {:ok, step} = PtcRunner.SubAgent.run(
   "Classify this text: {{text}}",
   signature: "{category :string, confidence :float}",
@@ -255,16 +126,15 @@ For classification or mapping tasks with one LLM call:
   max_turns: 1,
   llm: llm
 )
+
+step.return  #=> %{category: "positive", confidence: 0.95}
 ```
 
-The LLM provides one or more expressions; no `return` call needed.
+### Multi-turn (Explicit Return)
 
-### Agentic Loop
-
-For multi-turn investigation with tools:
+For agentic tasks with tools, the LLM must explicitly signal completion. It does this by calling `return` or `fail` in its generated program:
 
 ```elixir
-# max_turns > 1, with tools
 {:ok, step} = PtcRunner.SubAgent.run(
   "Find the report with highest anomaly score",
   signature: "{report_id :int, reasoning :string}",
@@ -274,31 +144,55 @@ For multi-turn investigation with tools:
 )
 ```
 
-Full agentic loop requiring explicit `return` or `fail`.
+The agent loops until the LLM's program calls `return` with valid data, or `fail` to abort.
 
-**Note:** `max_turns > 1` without tools enables multi-turn exploration where map results merge into memory for iterative analysis.
+## Error Handling
 
-## Float Precision
+SubAgents handle errors at three levels:
 
-Floats are rounded to 2 decimal places by default (e.g., `3.33` instead of `3.3333333333333335`). Configure via `float_precision:` option. See [`SubAgent.new/1`](PtcRunner.SubAgent.html#new/1) for details.
+### 1. Turn Errors (Recoverable)
+
+Syntax errors, tool failures, and validation errors are fed back to the LLM. It sees the error and can adapt in the next turn.
+
+### 2. Mission Failures (Explicit)
+
+When the LLM determines it cannot complete the task, it calls `fail`. Your code receives:
+
+```elixir
+{:error, step} = SubAgent.run(...)
+step.fail  #=> %{reason: :not_found, message: "User does not exist"}
+```
+
+### 3. System Crashes
+
+Programming bugs in your tool functions follow "let it crash" - they're returned as internal errors for investigation.
+
+## Multi-turn State
+
+In multi-turn agents, the LLM can store values that persist across turns. This happens automatically - values defined in one turn are available in subsequent turns.
+
+From your perspective as a library user:
+- **You see** the final result in `step.return`
+- **You see** execution history in `step.turns`
+- **You don't need** to manage intermediate state
+
+The LLM handles state internally to cache tool results, track progress, and avoid redundant work.
 
 ## Defaults
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `max_turns` | `5` | Maximum LLM turns before timeout |
-| `timeout` | `5000` | Per-turn timeout (ms) |
+| `timeout` | `5000` | Per-turn sandbox timeout (ms) |
 | `mission_timeout` | `60000` | Total mission timeout (ms) |
-| `prompt_limit` | `%{list: 5, string: 1000}` | Truncation limits for prompts |
-| `float_precision` | `2` | Decimal places for floats in results and Data Inventory |
-| `compression` | `false` | Enable message history compression (opt-in) |
+| `float_precision` | `2` | Decimal places for floats in results |
+| `compression` | `false` | Enable message history compression |
 
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
-- [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
-- [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
+- [Observability](subagent-observability.md) - Debug mode, compression, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
-- [Advanced Topics](subagent-advanced.md) - ReAct patterns and the compile pattern
+- [Advanced Topics](subagent-advanced.md) - Prompt structure and internals
 - `PtcRunner.SubAgent` - API reference
