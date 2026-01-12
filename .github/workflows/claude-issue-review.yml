@@ -89,13 +89,24 @@ jobs:
             - Dependencies identified
             - Your recommendation (ready, needs-clarification, or needs-breakdown)
 
-            ## Step 5: Add Labels
+            ## Step 5: Take Action
 
-            Using `gh issue edit --add-label`:
-            - `ready-for-implementation` if issue is well-defined and ready
+            Based on your review, do ONE of:
+
+            **A. Already done** - If the work already exists in the codebase:
+            ```bash
+            gh issue close ${{ github.event.issue.number }} --comment "Closing: functionality already exists. [brief explanation]"
+            ```
+
+            **B. Ready** - If issue is well-defined and ready:
+            - Add `ready-for-implementation` label
+            - Continue to Step 6
+
+            **C. Needs work** - Add appropriate label:
             - `needs-clarification` if important details are missing
-            - `needs-breakdown` if issue should be split into smaller issues
-            - `bug` / `enhancement` / `documentation` based on issue type
+            - `needs-breakdown` if issue should be split
+
+            Also add type labels: `bug` / `enhancement` / `documentation`
 
             ## Step 6: Trigger Implementation (if approved)
 
