@@ -196,8 +196,8 @@ defmodule PtcRunner.SubAgent.Loop do
     calculated_deadline =
       run_opts.mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
-    # Expand template in prompt (mission)
-    expanded_prompt = expand_template(agent.prompt, run_opts.context)
+    # Expand template in mission
+    expanded_prompt = expand_template(agent.mission, run_opts.context)
 
     # Build first user message with dynamic context prepended
     # This includes data inventory, tool schemas, expected output, plus the mission

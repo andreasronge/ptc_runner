@@ -55,16 +55,16 @@ defmodule PtcRunner.SubAgent.NewTest do
       assert agent.tools == %{}
     end
 
-    test "raises when prompt is missing" do
-      assert_raise ArgumentError, "prompt is required", fn ->
+    test "raises when mission is missing" do
+      assert_raise ArgumentError, "mission is required", fn ->
         SubAgent.new(tools: %{})
       end
 
-      assert_raise ArgumentError, "prompt is required", fn ->
+      assert_raise ArgumentError, "mission is required", fn ->
         SubAgent.new([])
       end
 
-      assert_raise ArgumentError, "prompt is required", fn ->
+      assert_raise ArgumentError, "mission is required", fn ->
         SubAgent.new(max_turns: 10)
       end
     end
