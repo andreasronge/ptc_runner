@@ -381,5 +381,41 @@ jobs:
           if git log origin/main..HEAD --oneline 2>/dev/null | grep -q .; then
             echo "Pushing unpushed commits..."
             git push -u origin HEAD
+            echo "branch_pushed=true" >> $GITHUB_OUTPUT
+            echo "branch_name=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
             echo "::notice::Pushed commits"
+          fi
+
+      - name: Create PR if branch was pushed but no PR exists
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        run: |
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          [ "$CURRENT_BRANCH" = "main" ] && exit 0
+
+          # Check if PR already exists for this branch
+          EXISTING_PR=$(gh pr list --head "$CURRENT_BRANCH" --state open --json number --jq '.[0].number')
+
+          if [ -z "$EXISTING_PR" ]; then
+            echo "No PR exists for branch $CURRENT_BRANCH, creating one..."
+
+            # Get issue title for PR title
+            ISSUE_TITLE=$(gh issue view ${{ env.ISSUE_NUMBER }} --json title --jq '.title')
+
+            gh pr create \
+              --head "$CURRENT_BRANCH" \
+              --base main \
+              --title "$ISSUE_TITLE" \
+              --body "$(cat <<EOF
+          Closes #${{ env.ISSUE_NUMBER }}
+
+          This PR was created by the fallback mechanism after Claude's push succeeded
+          but PR creation failed (likely due to GitHub App permission issues).
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          EOF
+          )" || echo "::warning::Could not create PR"
+          else
+            echo "PR #$EXISTING_PR already exists for branch $CURRENT_BRANCH"
           fi
