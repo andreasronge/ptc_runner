@@ -2,16 +2,16 @@
 
 Integrate SubAgent with logging, metrics, and debugging tools.
 
-## Trace Inspection
+## Turn History
 
-Every `Step` includes a `trace` field with per-turn execution history:
+Every `Step` includes a `turns` field with immutable per-turn execution history:
 
 ```elixir
 {:ok, step} = SubAgent.run(agent, llm: llm)
 
-for entry <- step.trace do
-  IO.puts("Turn #{entry.turn}: #{entry.program}")
-  IO.puts("  Tools: #{inspect(Enum.map(entry.tool_calls, & &1.name))}")
+for turn <- step.turns do
+  IO.puts("Turn #{turn.number}: #{turn.program}")
+  IO.puts("  Tools: #{inspect(Enum.map(turn.tool_calls, & &1.name))}")
 end
 
 # Aggregated metrics
@@ -19,28 +19,50 @@ step.usage.duration_ms
 step.usage.total_tokens
 ```
 
+Each `Turn` struct captures:
+- `number` - Turn index (1-based)
+- `raw_response` - Full LLM output including reasoning
+- `program` - Extracted PTC-Lisp code
+- `result` - Execution result
+- `prints` - Output from `println` calls
+- `tool_calls` - Tools invoked with args and results
+- `memory` - State snapshot after this turn
+- `success?` - Whether the turn succeeded
+
 ## Debug Mode
 
-Enable debug mode to capture full LLM messages for troubleshooting:
+Use `print_trace/2` to visualize execution:
 
 ```elixir
-{:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
+{:ok, step} = SubAgent.run(agent, llm: llm)
 
-# Compact view
+# Default: show programs and results
 SubAgent.Debug.print_trace(step)
 
-# Full LLM messages (what was sent/received)
+# Include raw LLM output (reasoning/commentary)
+SubAgent.Debug.print_trace(step, raw: true)
+
+# Show what the LLM sees (compressed format)
+SubAgent.Debug.print_trace(step, view: :compressed)
+
+# Show actual messages sent to LLM
 SubAgent.Debug.print_trace(step, messages: true)
 
 # Include token usage
-SubAgent.Debug.print_trace(step, messages: true, usage: true)
+SubAgent.Debug.print_trace(step, usage: true)
 ```
 
-With `messages: true`, each turn shows:
-- **Assistant Message** - Raw LLM output
-- **Program** - Extracted PTC-Lisp code
-- **Result** - Full execution result (before truncation)
-- **User Message** - Feedback sent to LLM (after truncation)
+### View Options
+
+| Option | Description |
+|--------|-------------|
+| `view: :turns` | (default) Show programs + results from Turn structs |
+| `view: :compressed` | Show what LLM sees when compression is enabled |
+| `raw: true` | Include `raw_response` in turns view |
+| `messages: true` | Show full messages sent to LLM each turn |
+| `usage: true` | Add token statistics after trace |
+
+Options can be combined: `print_trace(step, messages: true, usage: true)`.
 
 > **Full API:** See `PtcRunner.SubAgent.Debug.print_trace/2`.
 
@@ -55,6 +77,53 @@ SubAgent.run(agent, llm: llm, trace: :on_error)
 # Disable tracing entirely
 SubAgent.run(agent, llm: llm, trace: false)
 ```
+
+## Message Compression
+
+By default, multi-turn agents send full conversation history to the LLM. Enable compression to reduce token usage:
+
+```elixir
+# Enable default compression (SingleUserCoalesced)
+SubAgent.run(agent, llm: llm, compression: true)
+
+# Explicit strategy
+SubAgent.run(agent, llm: llm, compression: SingleUserCoalesced)
+
+# Strategy with limits
+SubAgent.run(agent, llm: llm, compression: {SingleUserCoalesced, println_limit: 10})
+```
+
+### How Compression Works
+
+The `SingleUserCoalesced` strategy coalesces turn history into a single USER message:
+
+| Content | Handling |
+|---------|----------|
+| Mission | Always shown first |
+| `tool/` namespace | Available tools with signatures |
+| `data/` namespace | Input context data |
+| `user/` namespace | Accumulated definitions (your prelude) |
+| Tool calls | Most recent N calls (FIFO) |
+| Output | Most recent N println lines (FIFO) |
+| Errors | Shown only if still failing; collapsed after recovery |
+
+### Compression Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `println_limit` | 15 | Max println calls shown |
+| `tool_call_limit` | 20 | Max tool calls shown |
+
+### Debugging Compression
+
+To see what the LLM receives with compression enabled:
+
+```elixir
+{:ok, step} = SubAgent.run(agent, llm: llm, compression: true)
+SubAgent.Debug.print_trace(step, view: :compressed)
+```
+
+Full turn history is always preserved in `step.turns` regardless of compression.
 
 ## Telemetry Events
 

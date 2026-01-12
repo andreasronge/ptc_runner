@@ -177,19 +177,22 @@ Other error scenarios follow the same pattern: validation errors (wrong return t
 
 ## Debugging with print_trace
 
-During development and testing, you can use `debug: true` and `SubAgent.Debug.print_trace/2` to see exactly what happened:
+During development and testing, use `SubAgent.Debug.print_trace/2` to see exactly what happened:
 
 ```elixir
-{:ok, step} = SubAgent.run(agent, llm: llm, debug: true)
+{:ok, step} = SubAgent.run(agent, llm: llm)
 
 # Show a compact view of the execution
 SubAgent.Debug.print_trace(step)
 
-# Show a detailed view including full LLM messages and the system prompt
+# Include raw LLM output (reasoning/commentary)
+SubAgent.Debug.print_trace(step, raw: true)
+
+# Show full LLM messages including the system prompt
 SubAgent.Debug.print_trace(step, messages: true)
 ```
 
-In the detailed view (`messages: true`), you'll see the **System Prompt** for each turn, the raw LLM output, and the feedback sent back to the LLM (if applicable). This is essential for debugging prompt issues or tool definition errors.
+With `messages: true`, you'll see the **System Prompt**, the raw LLM output, and the feedback sent to the LLM. This is essential for debugging prompt issues or tool definition errors.
 
 ## See Also
 

@@ -211,39 +211,55 @@ File.write!("agents/scorer.lisp", compiled.source)
 )
 ```
 
-## System Prompt Structure
+## Prompt Structure
 
 Understanding what the LLM receives helps debug unexpected behavior.
 
-### Prompt Sections
+### Message Layout
 
-1. **Role & Purpose** - Defines the agent as a PTC-Lisp generator
+| Message | Content | Caching |
+|---------|---------|---------|
+| **SYSTEM** | Role, language reference, `return`/`fail` usage, output format | Static (cacheable) |
+| **USER** | Mission + namespaces + execution history + turns left | Partial (tool/data stable) |
 
-2. **Data Inventory** - Generated from `context_signature`:
-   ```
-   DATA INVENTORY (Available in ctx/):
-   - results ([:map]): List of research results
-   - _token ([:string]): Firewalled access tokens
-   ```
+**Note:** With compression enabled, tools and data are in the USER message (not SYSTEM) to leverage prompt caching on the stable content.
 
-3. **Tools** - Generated from the `tools` map (signatures + descriptions):
-   ```
-   AVAILABLE TOOLS:
-   - search(query :string) -> [:map]
-     Search for items matching query.
-   - return(data :any) -> stops loop
-   - fail(params {...}) -> stops loop
-   ```
+### Namespace Model
 
-4. **Language Reference** - PTC-Lisp syntax, built-ins, control flow
+The USER message presents three namespaces:
 
-5. **Output Format** - Instructions for thought + code block format
+```clojure
+;; === tool/ ===
+(tool/search query)              ; query:string -> [:map]
 
-6. **Boundary Reminders** - Prevents conversational filler
+;; === data/ ===
+data/products                    ; list[7], sample: {:name "Laptop"}
+
+;; === user/ (your prelude) ===
+cached-results                   ; = list[5], sample: {:id 1}
+```
+
+| Namespace | Meaning | Mutable? |
+|-----------|---------|----------|
+| `tool/` | Available tools (side effects) | No (external) |
+| `data/` | Input context (read-only) | No (external) |
+| `user/` | Your definitions (prelude) | Yes (grows each turn) |
+
+### Viewing the Prompt
+
+```elixir
+# Preview without executing
+preview = SubAgent.preview_prompt(agent, context: %{})
+IO.puts(preview.system)
+IO.puts(preview.user)
+
+# After execution, see compressed view
+SubAgent.Debug.print_trace(step, view: :compressed)
+```
 
 ### Strict Termination
 
-If the LLM provides text without a code block or terminal tool call:
+If the LLM provides text without a code block or terminal form:
 
 1. Loop records the reasoning
 2. Appends: *"Your mission is still active. Provide a PTC-Lisp program or call 'return'."*

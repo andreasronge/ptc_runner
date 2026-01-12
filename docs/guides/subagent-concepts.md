@@ -291,6 +291,7 @@ Floats are rounded to 2 decimal places by default (e.g., `3.33` instead of `3.33
 | `mission_timeout` | `60000` | Total mission timeout (ms) |
 | `prompt_limit` | `%{list: 5, string: 1000}` | Truncation limits for prompts |
 | `float_precision` | `2` | Decimal places for floats in results and Data Inventory |
+| `compression` | `false` | Enable message history compression (opt-in) |
 
 ## See Also
 

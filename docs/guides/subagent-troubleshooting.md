@@ -28,8 +28,8 @@ Common issues and solutions when working with SubAgents.
 
 3. **Check the trace** to see what the agent is doing:
    ```elixir
-   {:error, step} = SubAgent.run(prompt, debug: true, llm: llm)
-   SubAgent.Debug.print_trace(step.trace)
+   {:error, step} = SubAgent.run(prompt, llm: llm)
+   SubAgent.Debug.print_trace(step)
    ```
 
 ## Validation Errors (Wrong Return Type)
@@ -63,7 +63,7 @@ Common issues and solutions when working with SubAgents.
 
 3. **Inspect what the agent returned**:
    ```elixir
-   {:error, step} = SubAgent.run(prompt, debug: true, llm: llm)
+   {:error, step} = SubAgent.run(prompt, llm: llm)
    IO.inspect(step.fail, label: "Validation error")
    ```
 
@@ -95,7 +95,7 @@ Common issues and solutions when working with SubAgents.
    preview = SubAgent.preview_prompt(agent, context: %{})
    IO.puts(preview.system)  # Should list available tools
    ```
-   Or inspect it in the trace of an executed agent (requires `debug: true`):
+   Or inspect it after execution:
    ```elixir
    SubAgent.Debug.print_trace(step, messages: true)
    ```
@@ -122,7 +122,15 @@ Common issues and solutions when working with SubAgents.
    )
    ```
 
-3. **Process in stages** - fetch data in one agent, analyze in another:
+3. **Enable compression** for multi-turn agents:
+   ```elixir
+   PtcRunner.SubAgent.run(prompt,
+     compression: true,  # Coalesces history into single USER message
+     llm: llm
+   )
+   ```
+
+4. **Process in stages** - fetch data in one agent, analyze in another:
    ```elixir
    {:ok, step1} = SubAgent.run("Fetch relevant data", tools: fetch_tools, ...)
    {:ok, step2} = SubAgent.run("Analyze this data", context: step1, ...)
@@ -136,9 +144,9 @@ Common issues and solutions when working with SubAgents.
 
 **Solutions:**
 
-1. **Enable debug mode** to see exactly what the LLM is receiving and returning:
+1. **Enable message view** to see exactly what the LLM is receiving and returning:
    ```elixir
-   {:error, step} = SubAgent.run(prompt, debug: true, llm: llm)
+   {:error, step} = SubAgent.run(prompt, llm: llm)
    # Show full LLM messages including the system prompt
    SubAgent.Debug.print_trace(step, messages: true)
    ```
@@ -189,7 +197,7 @@ Options can be combined: `print_trace(step, messages: true, usage: true)`.
 When debugging multi-turn agents, `println` output appears in the trace under "Output:":
 
 ```elixir
-{:ok, step} = SubAgent.run(prompt, llm: llm, debug: true)
+{:ok, step} = SubAgent.run(prompt, llm: llm)
 SubAgent.Debug.print_trace(step)
 ```
 
@@ -222,10 +230,10 @@ If you don't see "Output:" in the trace, either no `println` was called or the L
    - Lists instead of vectors: `'(1 2 3)` should be `[1 2 3]`
    - Missing else branch: `(if cond then)` should be `(if cond then nil)`
 
-2. **Enable debug mode** to see raw LLM output:
+2. **View raw LLM output** to see what the LLM generated:
    ```elixir
-   {:error, step} = SubAgent.run(prompt, debug: true, llm: llm)
-   SubAgent.Debug.print_trace(step.trace)
+   {:error, step} = SubAgent.run(prompt, llm: llm)
+   SubAgent.Debug.print_trace(step, raw: true)
    ```
 
 3. **The agent retries automatically** - parse errors are shown to the LLM for correction. If it keeps failing, the prompt or model may need adjustment.
