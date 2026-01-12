@@ -42,21 +42,13 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       assert context_prompt =~ "{count :int}"
     end
 
-    test "includes return/fail tools for multi-turn mode" do
+    test "return/fail are NOT in context (they are in system prompt)" do
+      # return/fail are documented in system prompt, not in user context
       agent = SubAgent.new(prompt: "Test", max_turns: 5)
 
       context_prompt = SystemPrompt.generate_context(agent, context: %{})
 
-      assert context_prompt =~ "### return"
-      assert context_prompt =~ "### fail"
-    end
-
-    test "omits return/fail tools for single-shot mode" do
-      agent = SubAgent.new(prompt: "Test", max_turns: 1)
-
-      context_prompt = SystemPrompt.generate_context(agent, context: %{})
-
-      # Single-shot should NOT have return/fail
+      # return/fail should NOT be in context - they're in system prompt
       refute context_prompt =~ "### return"
       refute context_prompt =~ "### fail"
     end
@@ -204,9 +196,10 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       schemas = SystemPrompt.generate_tool_schemas(%{})
 
       assert schemas =~ "# Available Tools"
-      # Even with no user tools, should show return/fail
-      assert schemas =~ "### return"
-      assert schemas =~ "### fail"
+      assert schemas =~ "No tools available"
+      # return/fail are in system prompt, not here
+      refute schemas =~ "### return"
+      refute schemas =~ "### fail"
     end
 
     test "generates catalog section when tool_catalog is provided" do
@@ -241,13 +234,14 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       refute schemas =~ "Tools for planning"
     end
 
-    test "catalog with no callable tools still shows return/fail" do
+    test "catalog with no callable tools shows planning section" do
       catalog = %{"email_agent" => nil}
 
       schemas = SystemPrompt.generate_tool_schemas(%{}, catalog)
 
-      assert schemas =~ "### return"
-      assert schemas =~ "### fail"
+      # return/fail are in system prompt, not here
+      refute schemas =~ "### return"
+      refute schemas =~ "### fail"
       assert schemas =~ "## Tools for planning (do not call)"
       assert schemas =~ "### email_agent"
     end
@@ -292,30 +286,15 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       assert schemas =~ "User-defined tool"
     end
 
-    test "includes return and fail tools" do
+    test "return/fail are NOT in tool schemas (they are in system prompt)" do
       tools = %{"custom" => fn _ -> :ok end}
 
       schemas = SystemPrompt.generate_tool_schemas(tools)
 
-      assert schemas =~ "### return"
-      assert schemas =~ "### fail"
-      assert schemas =~ "exit-success"
-      assert schemas =~ "exit-error"
-    end
-
-    test "does not duplicate return/fail if already present" do
-      tools = %{"return" => fn _ -> :ok end, "fail" => fn _ -> :error end}
-
-      schemas = SystemPrompt.generate_tool_schemas(tools)
-
-      # Count occurrences of "### return"
-      return_count =
-        schemas
-        |> String.split("### return")
-        |> length()
-        |> Kernel.-(1)
-
-      assert return_count == 1
+      # return/fail are documented in system prompt, not in tool schemas
+      refute schemas =~ "### return"
+      refute schemas =~ "### fail"
+      assert schemas =~ "### custom"
     end
 
     test "sorts tools alphabetically" do

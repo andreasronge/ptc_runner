@@ -43,26 +43,13 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
   @spec generate(map(), map() | nil, boolean()) :: String.t()
   def generate(tools, tool_catalog \\ nil, multi_turn? \\ true)
 
-  def generate(tools, tool_catalog, multi_turn?) when map_size(tools) == 0 do
-    # Only show return/fail in multi-turn mode
-    standard_tools = if multi_turn?, do: format_return_fail_tools(), else: ""
+  def generate(tools, tool_catalog, _multi_turn?) when map_size(tools) == 0 do
+    # No user-defined tools - return/fail are already documented in system prompt
+    callable_section = """
+    # Available Tools
 
-    callable_section =
-      if standard_tools == "" do
-        """
-        # Available Tools
-
-        No tools available.
-        """
-      else
-        """
-        # Available Tools
-
-        ## Tools you can call
-
-        #{standard_tools}
-        """
-      end
+    No tools available.
+    """
 
     # Add catalog section if present
     catalog_section = generate_catalog_section(tool_catalog)
@@ -74,36 +61,25 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
     end
   end
 
-  def generate(tools, tool_catalog, multi_turn?) do
+  def generate(tools, tool_catalog, _multi_turn?) do
     # Normalize tools to %Tool{} structs so signatures are rendered
     normalized_tools =
       tools
       |> Enum.map(fn {name, format} -> {name, normalize_tool_for_prompt(name, format)} end)
       |> Map.new()
 
-    # Format user tools
+    # Format user tools only - return/fail are already documented in system prompt
     tool_docs =
       normalized_tools
       |> Enum.sort_by(fn {name, _} -> name end)
       |> Enum.map_join("\n\n", fn {name, tool} -> format_tool(name, tool) end)
-
-    # Only add return/fail in multi-turn mode
-    standard_tools = if multi_turn?, do: format_return_fail_tools(tools), else: ""
-
-    tools_section =
-      if tool_docs == "" do
-        standard_tools
-      else
-        tool_docs <>
-          if standard_tools != "", do: "\n\n" <> standard_tools, else: ""
-      end
 
     callable_section = """
     # Available Tools
 
     ## Tools you can call
 
-    #{tools_section}
+    #{tool_docs}
     """
 
     # Add catalog section if present
@@ -116,47 +92,12 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
     end
   end
 
-  # Format return/fail tools, optionally excluding if already present in user tools
-  defp format_return_fail_tools(user_tools \\ %{}) do
-    [
-      unless Map.has_key?(user_tools, "return") do
-        format_tool("return")
-      end,
-      unless Map.has_key?(user_tools, "fail") do
-        format_tool("fail")
-      end
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n\n")
-  end
-
   # ============================================================
   # Private Helpers - Tool Formatting
   # ============================================================
 
-  # 1-arity format_tool for special tools and fallback
-  defp format_tool("return") do
-    """
-    ### return
-    ```
-    return(data :any) -> :exit-success
-    ```
-    Complete the mission successfully. Return the required data.
-    """
-  end
-
-  defp format_tool("fail") do
-    """
-    ### fail
-    ```
-    fail(error {:reason :keyword, :message :string, :op :string?, :details :map?}) -> :exit-error
-    ```
-    Terminate with an error. Use when the mission cannot be completed.
-    """
-  end
-
+  # Fallback for tool names without struct (used by tool_catalog)
   defp format_tool(name) do
-    # Fallback for tool names without struct (used by tool_catalog)
     """
     ### #{name}
     ```
