@@ -257,15 +257,27 @@ When implementation discovers prerequisite work:
 7. blocker-resolved.yml adds needs-review to current issue when blocker closes
 ```
 
-### Stale Detection
+### Stale Detection & Self-Healing
 
-`claude-stale-check.yml` runs every 2 hours:
-- Finds issues with `needs-review` but no review activity after 2 hours
-- Finds issues with `ready-for-implementation` but no PR/status after 2 hours
-- Detects orphan `claude/*` branches without PRs (creates draft PR to capture work)
-- Identifies stuck PRs with `needs-human-review` for 24+ hours
+`claude-stale-check.yml` runs every 2 hours with a hybrid bash + Claude approach:
 
-Stale issues get `needs-attention` label added for visibility.
+**Detection (bash, always runs, no concurrency group):**
+- Epic issues with no labels but all blockers resolved
+- Issues with `needs-review` but no review activity after 2 hours
+- Issues with `ready-for-implementation` but no PR/status after 2 hours
+- Adds `needs-attention` label for visibility
+
+**Claude fix (only if issues detected):**
+- Gets the list of stuck issues from detection
+- Reads `docs/guidelines/github-workflows.md` to understand the system
+- Figures out what's wrong and fixes it (add labels, fix issue bodies, re-trigger)
+- Uses `claude-automation` concurrency group
+
+**Orphan recovery (parallel, no Claude):**
+- Detects `claude/*` branches without PRs → creates draft PRs
+- Logs stuck PRs with `needs-human-review` for 24+ hours
+
+This design ensures visibility (`needs-attention` label) even if Claude can't run.
 
 ## Epic-Driven Development
 
@@ -303,16 +315,28 @@ The epic issue is the single source of truth for project progress:
 Issues track dependencies in their body:
 
 ```markdown
-## Blocked by
-- #123 - Must complete first
-- #124 - Provides required API
+## Dependencies
+
+- **Blocked by:** #123, #124
+- **Blocks:** #125, #126
 ```
 
+**Parsing rules:**
+- Only `#number` references in the "Blocked by:" line/section are considered blockers
+- The parser stops at "Blocks:" or other sections to avoid false positives
+- Self-references are ignored (issue can't block itself)
+
+**Common pitfalls to avoid:**
+- Don't put issue numbers in "Blocks:" that match the current issue (typos cause self-blocking)
+- Don't reference PRs or closed issues in prose near "Blocked by:" (may be parsed as blockers)
+- Keep "Blocked by:" and "Blocks:" sections clearly separated
+
 The implementation workflow:
-1. Reads "Blocked by:" section
-2. Checks if each blocker is closed
-3. If any blocker is open: posts BLOCKED status, removes label, stops
-4. When blocker closes: `blocker-resolved.yml` re-enables dependent issues
+1. Reads "Blocked by:" section (stops at "Blocks:" or next heading)
+2. Skips self-references
+3. Checks if each blocker is closed
+4. If any blocker is open: posts BLOCKED status, removes label, stops
+5. When blocker closes: `blocker-resolved.yml` re-enables dependent issues
 
 ## Labels Reference
 
