@@ -118,6 +118,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   Returns only the language reference and output format - these sections rarely
   change across different questions and benefit from prompt caching.
 
+  This function has an alias `generate_static/2` for semantic clarity.
+
   ## Options
 
   - `:resolution_context` - Map with turn/model/memory/messages for language_spec callbacks
@@ -150,6 +152,14 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     # Apply truncation if prompt_limit is set
     truncate_if_needed(customized_prompt, agent.prompt_limit)
   end
+
+  @doc """
+  Alias for `generate_system/2` for semantic clarity.
+
+  See `generate_system/2` for documentation.
+  """
+  @spec generate_static(SubAgent.t(), keyword()) :: String.t()
+  def generate_static(agent, opts \\ []), do: generate_system(agent, opts)
 
   @doc """
   Generate dynamic context sections (prepended to user message).

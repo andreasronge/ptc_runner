@@ -78,4 +78,12 @@ defmodule PtcRunner.SubAgent.PromptGenerateSystemTest do
       assert String.ends_with?(system, ">>")
     end
   end
+
+  describe "generate_static/2" do
+    test "is an alias for generate_system/2" do
+      agent = SubAgent.new(prompt: "Test task", tools: %{"search" => fn _ -> [] end})
+
+      assert SystemPrompt.generate_static(agent) == SystemPrompt.generate_system(agent)
+    end
+  end
 end
