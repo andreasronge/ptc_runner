@@ -87,10 +87,8 @@ defmodule PtcRunner.SubAgent.Loop do
     - `cache` - Enable prompt caching (default: false). When true, the LLM callback receives
       `cache: true` in its input map. The callback should pass this to the provider to enable
       caching of system prompts for cost savings on multi-turn agents.
-    - `debug` - Enable debug mode (default: false). When enabled, trace entries store exact message contents:
-      - `llm_response` - The assistant message (LLM output, stored as-is)
-      - `llm_feedback` - The user message (execution feedback, after truncation)
-      Use `SubAgent.Debug.print_trace(step, messages: true)` to view the conversation.
+    - `debug` - Deprecated, no longer needed. Turn structs always capture `raw_response`.
+      Use `SubAgent.Debug.print_trace(step, raw: true)` to view full LLM output.
     - `trace` - Trace filtering: true (always), false (never), :on_error (only on failure) (default: true)
     - `collect_messages` - Capture full conversation history in Step.messages (default: false).
       When enabled, messages are in OpenAI format: `[%{role: :system | :user | :assistant, content: String.t()}]`
