@@ -22,7 +22,8 @@ jobs:
       - name: Detect stuck issues
         id: detect
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Use PAT so label changes trigger other workflows
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
           echo "=== Detecting stuck issues ==="
           STUCK_ISSUES=""
@@ -117,20 +118,10 @@ jobs:
             echo ""
             echo "=== Issues requiring attention: $STUCK_ISSUES ==="
 
-            # Fallback: Add needs-attention label immediately (doesn't need Claude)
-            # This ensures visibility even if claude-diagnose job can't run
+            # Add needs-attention for visibility (in case Claude can't run)
             for ISSUE in $STUCK_ISSUES; do
-              # Extract issue number (remove annotations like "(stale-review)")
               ISSUE_NUM=$(echo "$ISSUE" | grep -oE '[0-9]+')
-              if [ -n "$ISSUE_NUM" ]; then
-                # Check if already has needs-attention
-                HAS_LABEL=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json labels \
-                  --jq '.labels[].name' | grep -q "needs-attention" && echo "yes" || echo "no")
-                if [ "$HAS_LABEL" = "no" ]; then
-                  echo "Adding needs-attention to #$ISSUE_NUM"
-                  gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-attention" || true
-                fi
-              fi
+              [ -n "$ISSUE_NUM" ] && gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-attention" 2>/dev/null || true
             done
           else
             echo "No stuck issues detected"
