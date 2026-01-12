@@ -397,7 +397,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
-    mission = expand_mission(agent.prompt, context)
+    mission = expand_mission(agent.mission, context)
 
     # Combine all sections
     # language_ref contains role, rules, and language reference from priv/prompts/

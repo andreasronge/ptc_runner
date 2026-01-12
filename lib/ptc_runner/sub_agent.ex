@@ -17,7 +17,7 @@ defmodule PtcRunner.SubAgent do
 
   ## Fields
 
-  - `prompt` - String.t(), required, template with `{{placeholder}}` support
+  - `mission` - String.t(), required, template with `{{placeholder}}` support (describes the task)
   - `signature` - String.t() | nil, optional, contract for inputs/outputs
   - `tools` - map(), callable tools (default: %{})
   - `max_turns` - pos_integer(), maximum LLM calls (default: 5)
@@ -62,9 +62,9 @@ defmodule PtcRunner.SubAgent do
 
   ## Examples
 
-  Minimal SubAgent with just a prompt:
-      iex> agent = PtcRunner.SubAgent.new(prompt: "Analyze the data")
-      iex> agent.prompt
+  Minimal SubAgent with just a mission:
+      iex> agent = PtcRunner.SubAgent.new(mission: "Analyze the data")
+      iex> agent.mission
       "Analyze the data"
       iex> agent.max_turns
       5
@@ -74,15 +74,20 @@ defmodule PtcRunner.SubAgent do
   SubAgent with all options:
       iex> email_tools = %{"list_emails" => fn _args -> [] end}
       iex> agent = PtcRunner.SubAgent.new(
-      ...>   prompt: "Find urgent emails for {{user}}",
+      ...>   mission: "Find urgent emails for {{user}}",
       ...>   signature: "(user :string) -> {count :int, _ids [:int]}",
       ...>   tools: email_tools,
       ...>   max_turns: 10
       ...> )
-      iex> agent.prompt
+      iex> agent.mission
       "Find urgent emails for {{user}}"
       iex> agent.max_turns
       10
+
+  Backward compatibility with `prompt:`:
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Legacy prompt")
+      iex> agent.mission  # prompt: normalizes to mission:
+      "Legacy prompt"
   """
 
   @typedoc """
@@ -144,7 +149,8 @@ defmodule PtcRunner.SubAgent do
         ]
 
   @type t :: %__MODULE__{
-          prompt: String.t(),
+          mission: String.t(),
+          prompt: String.t() | nil,
           signature: String.t() | nil,
           parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
@@ -176,6 +182,7 @@ defmodule PtcRunner.SubAgent do
   ]
 
   defstruct [
+    :mission,
     :prompt,
     :signature,
     :parsed_signature,
@@ -212,7 +219,9 @@ defmodule PtcRunner.SubAgent do
 
   ## Required Options
 
-  - `prompt` - String template describing what to accomplish (supports `{{placeholder}}` expansion)
+  - `mission` - String template describing what to accomplish (supports `{{placeholder}}` expansion)
+
+  Note: `prompt:` is accepted for backward compatibility and normalized to `mission:`.
 
   ## Optional Options
 
@@ -238,17 +247,17 @@ defmodule PtcRunner.SubAgent do
 
   ## Raises
 
-  - `ArgumentError` - if prompt is missing or not a string, max_turns is not positive, tools is not a map, any optional field has an invalid type, or prompt placeholders don't match signature parameters (when signature is provided)
+  - `ArgumentError` - if mission is missing or not a string, max_turns is not positive, tools is not a map, any optional field has an invalid type, or mission placeholders don't match signature parameters (when signature is provided)
 
   ## Examples
 
-      iex> agent = PtcRunner.SubAgent.new(prompt: "Analyze the data")
-      iex> agent.prompt
+      iex> agent = PtcRunner.SubAgent.new(mission: "Analyze the data")
+      iex> agent.mission
       "Analyze the data"
 
       iex> email_tools = %{"list_emails" => fn _args -> [] end}
       iex> agent = PtcRunner.SubAgent.new(
-      ...>   prompt: "Find urgent emails for {{user}}",
+      ...>   mission: "Find urgent emails for {{user}}",
       ...>   signature: "(user :string) -> {count :int, _ids [:int]}",
       ...>   tools: email_tools,
       ...>   max_turns: 10
@@ -260,6 +269,22 @@ defmodule PtcRunner.SubAgent do
   def new(opts) when is_list(opts) do
     alias PtcRunner.SubAgent.{Signature, Validator}
     Validator.validate!(opts)
+
+    # Normalize prompt -> mission for backward compat
+    # If mission: is provided, use it; else fall back to prompt:
+    opts =
+      case {Keyword.fetch(opts, :mission), Keyword.fetch(opts, :prompt)} do
+        {{:ok, _}, _} ->
+          # mission: provided, keep prompt: for backward compat if present
+          opts
+
+        {:error, {:ok, prompt}} ->
+          # Only prompt: provided, copy to mission:
+          Keyword.put(opts, :mission, prompt)
+
+        _ ->
+          opts
+      end
 
     # Parse signature if provided (cached for loop return validation)
     # Note: Validator.validate! already ensures signature parses correctly
@@ -364,7 +389,7 @@ defmodule PtcRunner.SubAgent do
   def run(agent_or_prompt, opts \\ [])
 
   # String convenience form - creates agent inline
-  def run(prompt, opts) when is_binary(prompt) do
+  def run(mission, opts) when is_binary(mission) do
     # Extract struct fields from opts
     struct_opts =
       opts
@@ -379,7 +404,7 @@ defmodule PtcRunner.SubAgent do
         :llm,
         :system_prompt
       ])
-      |> Keyword.put(:prompt, prompt)
+      |> Keyword.put(:mission, mission)
 
     agent = new(struct_opts)
 
@@ -394,6 +419,7 @@ defmodule PtcRunner.SubAgent do
         :mission_timeout,
         :llm_retry,
         :system_prompt,
+        :mission,
         :prompt
       ])
 
@@ -661,8 +687,8 @@ defmodule PtcRunner.SubAgent do
        ) do
     collect_messages = Keyword.get(opts, :collect_messages, false)
 
-    # Expand template in prompt
-    expanded_prompt = expand_template(agent.prompt, context)
+    # Expand template in mission
+    expanded_prompt = expand_template(agent.mission, context)
 
     # Build resolution context for language_spec callbacks
     messages = [%{role: :user, content: expanded_prompt}]
@@ -1061,7 +1087,7 @@ defmodule PtcRunner.SubAgent do
     system_prompt = SystemPrompt.generate(agent, context: context)
 
     # Expand user message template
-    {:ok, user_message} = MissionExpander.expand(agent.prompt, context, on_missing: :keep)
+    {:ok, user_message} = MissionExpander.expand(agent.mission, context, on_missing: :keep)
 
     # Tool schemas - extract from agent.tools
     tool_schemas =

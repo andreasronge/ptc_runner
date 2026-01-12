@@ -20,11 +20,12 @@ defmodule PtcRunner.SubAgent.Validator do
     :ok
   end
 
-  # Validate that required fields are present
+  # Validate that required fields are present (accept both mission: and prompt:)
   defp validate_required_fields!(opts) do
-    case Keyword.fetch(opts, :prompt) do
-      {:ok, _} -> :ok
-      :error -> raise ArgumentError, "prompt is required"
+    case {Keyword.fetch(opts, :mission), Keyword.fetch(opts, :prompt)} do
+      {{:ok, _}, _} -> :ok
+      {:error, {:ok, _}} -> :ok
+      {:error, :error} -> raise ArgumentError, "mission is required"
     end
   end
 
@@ -49,6 +50,14 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   defp validate_prompt!(opts) do
+    # Validate mission: if present
+    case Keyword.fetch(opts, :mission) do
+      {:ok, mission} when is_binary(mission) -> :ok
+      {:ok, _} -> raise ArgumentError, "mission must be a string"
+      :error -> :ok
+    end
+
+    # Validate prompt: if present (for backward compat)
     case Keyword.fetch(opts, :prompt) do
       {:ok, prompt} when is_binary(prompt) -> :ok
       {:ok, _} -> raise ArgumentError, "prompt must be a string"
@@ -149,13 +158,20 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  # Validate that prompt placeholders match signature parameters
+  # Validate that mission/prompt placeholders match signature parameters
   defp validate_prompt_placeholders!(opts) do
     alias PtcRunner.SubAgent.MissionExpander
 
-    with {:ok, prompt} <- Keyword.fetch(opts, :prompt),
+    # Get mission text (prefer mission: over prompt: for backward compat)
+    mission_text =
+      case Keyword.fetch(opts, :mission) do
+        {:ok, m} -> m
+        :error -> Keyword.get(opts, :prompt)
+      end
+
+    with mission when is_binary(mission) <- mission_text,
          {:ok, signature} <- Keyword.fetch(opts, :signature) do
-      placeholders = MissionExpander.extract_placeholder_names(prompt)
+      placeholders = MissionExpander.extract_placeholder_names(mission)
       signature_params = MissionExpander.extract_signature_params(signature)
 
       case placeholders -- signature_params do
