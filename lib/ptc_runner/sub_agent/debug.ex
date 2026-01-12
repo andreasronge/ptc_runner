@@ -555,13 +555,8 @@ defmodule PtcRunner.SubAgent.Debug do
 
   # Check if a message contains only placeholder content (no real data)
   # These are filtered out in raw mode to reduce noise
-  # Note: Tools are in the system prompt (already filtered), so we only check data inventory
-  defp placeholder_message?(msg) do
-    content = Map.get(msg, :content, "")
-
-    # Check for empty data inventory placeholder (data/ namespace)
-    String.contains?(content, "No data available in context")
-  end
+  # Returns false for all messages - placeholder text is no longer generated
+  defp placeholder_message?(_msg), do: false
 
   # ANSI color helpers
   defp ansi(:reset), do: IO.ANSI.reset()

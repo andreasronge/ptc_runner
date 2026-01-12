@@ -498,6 +498,53 @@ defmodule PtcRunner.SubAgent.DebugTest do
   end
 
   describe "print_trace/2 integration" do
+    test "raw: true shows Raw Input for turn 1 even with empty context" do
+      # Regression test: Turn 1 was missing "Raw Input" when:
+      # 1. Single-shot mode (max_turns == 1) with no tools used run_single_shot
+      #    which didn't set :current_messages in state
+      # 2. Empty context no longer shows "No data available" placeholder
+      agent = SubAgent.new(prompt: "Do something useful", max_turns: 1)
+
+      llm = fn _input ->
+        {:ok, "```clojure\n(+ 1 2)\n```"}
+      end
+
+      # Run with empty context (no context: option)
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      output = capture_io(fn -> Debug.print_trace(step, raw: true) end)
+
+      # Turn 1 should show Raw Input
+      assert output =~ "Raw Input:"
+      assert output =~ "[user]"
+      assert output =~ "Do something useful"
+      # Empty context should NOT show placeholder text
+      refute output =~ "No data available"
+    end
+
+    test "raw: true shows Raw Input for turn 1 with tools but empty data context" do
+      # Tests the specific scenario from the bug report:
+      # tools provided but no context: option
+      agent =
+        SubAgent.new(
+          prompt: "Calculate expenses",
+          tools: %{"list_expenses" => fn _ -> [%{amount: 100}] end},
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, "```clojure\n(tool/list_expenses)\n```"}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      output = capture_io(fn -> Debug.print_trace(step, raw: true) end)
+
+      # Should show Raw Input with both mission and tools
+      assert output =~ "Raw Input:"
+      assert output =~ "Calculate expenses"
+    end
+
     test "usage stats are populated from actual SubAgent run" do
       agent = SubAgent.new(prompt: "Add two numbers", max_turns: 1)
 

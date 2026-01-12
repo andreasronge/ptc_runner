@@ -133,7 +133,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
     test "handles empty context" do
       inventory = SystemPrompt.generate_data_inventory(%{}, nil)
 
-      assert inventory =~ "No data available"
+      # Empty context returns empty string, no placeholder text
+      assert inventory == ""
     end
 
     test "sorts keys alphabetically" do
