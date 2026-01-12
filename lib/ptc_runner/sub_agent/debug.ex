@@ -53,6 +53,7 @@ defmodule PtcRunner.SubAgent.Debug do
   - `opts` - Keyword list of options:
     - `view` - `:turns` (default) or `:compressed` - perspective to render
     - `raw` - Include `raw_response` in turns view (default: `false`)
+    - `messages` - Show messages sent to LLM for each turn (default: `false`)
     - `usage` - Show token usage summary after the trace (default: `false`)
 
   ## Examples
@@ -70,6 +71,10 @@ defmodule PtcRunner.SubAgent.Debug do
       iex> PtcRunner.SubAgent.Debug.print_trace(step, view: :compressed)
       :ok
 
+      # Show messages sent to LLM (verify compression)
+      iex> PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
+      :ok
+
       # Show token usage
       iex> PtcRunner.SubAgent.Debug.print_trace(step, usage: true)
       :ok
@@ -78,15 +83,9 @@ defmodule PtcRunner.SubAgent.Debug do
   @spec print_trace(Step.t(), keyword()) :: :ok
   def print_trace(step, opts \\ [])
 
-  # Handle nil turns - fall back to trace for backward compatibility
-  def print_trace(%Step{turns: nil, trace: nil}, _opts) do
+  def print_trace(%Step{turns: nil}, _opts) do
     IO.puts("No trace available (trace disabled or not yet executed)")
     :ok
-  end
-
-  def print_trace(%Step{turns: nil, trace: trace} = step, opts) when is_list(trace) do
-    # Backward compatibility: use trace if turns not available
-    print_trace_from_trace(step, opts)
   end
 
   def print_trace(%Step{turns: []}, _opts) do
@@ -101,35 +100,12 @@ defmodule PtcRunner.SubAgent.Debug do
     case view do
       :turns ->
         show_raw = Keyword.get(opts, :raw, false)
-        Enum.each(turns, &print_turn(&1, show_raw))
+        show_messages = Keyword.get(opts, :messages, false)
+        Enum.each(turns, &print_turn(&1, show_raw, show_messages))
 
       :compressed ->
         print_compressed_view(step)
     end
-
-    if show_usage and usage do
-      print_usage_summary(usage)
-    end
-
-    :ok
-  end
-
-  # Backward compatibility: handle old trace format
-  defp print_trace_from_trace(%Step{trace: nil}, _opts) do
-    IO.puts("No trace available (trace disabled or not yet executed)")
-    :ok
-  end
-
-  defp print_trace_from_trace(%Step{trace: []}, _opts) do
-    IO.puts("Empty trace")
-    :ok
-  end
-
-  defp print_trace_from_trace(%Step{trace: trace, usage: usage}, opts) when is_list(trace) do
-    show_raw = Keyword.get(opts, :raw, false)
-    show_usage = Keyword.get(opts, :usage, false)
-
-    Enum.each(trace, &print_legacy_turn(&1, show_raw))
 
     if show_usage and usage do
       print_usage_summary(usage)
@@ -180,12 +156,47 @@ defmodule PtcRunner.SubAgent.Debug do
   # Private Helpers - Turn-based (new format)
   # ============================================================
 
-  defp print_turn(%Turn{} = turn, show_raw) do
-    header = " Turn #{turn.number} "
+  defp print_turn(%Turn{} = turn, show_raw, show_messages) do
+    # Build header with message count indicator
+    msg_indicator =
+      case turn.messages do
+        nil -> ""
+        msgs when is_list(msgs) -> " (#{length(msgs)} msgs)"
+      end
+
+    header = " Turn #{turn.number}#{msg_indicator} "
 
     IO.puts(
       "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
     )
+
+    # Print messages sent to LLM if requested
+    if show_messages and turn.messages do
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Messages sent to LLM:#{ansi(:reset)}")
+
+      Enum.each(turn.messages, fn msg ->
+        role = Map.get(msg, :role, :unknown)
+        content = Map.get(msg, :content, "")
+        char_count = String.length(content)
+
+        IO.puts(
+          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:bold)}[#{role}]#{ansi(:reset)} (#{char_count} chars)"
+        )
+
+        # Print each line of content with proper box formatting
+        content
+        |> String.split("\n")
+        |> Enum.each(fn line ->
+          truncated_line = truncate_line(line, 500)
+
+          IO.puts(
+            "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}#{truncated_line}#{ansi(:reset)}"
+          )
+        end)
+      end)
+
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
+    end
 
     # Print raw response (reasoning) if requested
     if show_raw and turn.raw_response do
@@ -260,7 +271,7 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   # Print compressed view using SingleUserCoalesced compression
-  defp print_compressed_view(%Step{turns: turns, memory: memory}) do
+  defp print_compressed_view(%Step{turns: turns, memory: memory, prompt: prompt, tools: tools}) do
     header = " Compressed View "
 
     IO.puts(
@@ -271,8 +282,8 @@ defmodule PtcRunner.SubAgent.Debug do
     messages =
       SingleUserCoalesced.to_messages(turns, memory,
         system_prompt: "(system prompt omitted)",
-        mission: "(mission)",
-        tools: %{},
+        prompt: prompt || "(mission not available)",
+        tools: tools || %{},
         data: %{},
         turns_left: 0
       )
@@ -290,112 +301,6 @@ defmodule PtcRunner.SubAgent.Debug do
       end)
 
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
-    end)
-
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
-  end
-
-  # ============================================================
-  # Private Helpers - Legacy trace format (backward compat)
-  # ============================================================
-
-  defp print_legacy_turn(turn_entry, show_raw) do
-    turn_num = Map.get(turn_entry, :turn, 0)
-    program = Map.get(turn_entry, :program, "")
-    result = Map.get(turn_entry, :result, nil)
-    tool_calls = Map.get(turn_entry, :tool_calls, [])
-    prints = Map.get(turn_entry, :prints, [])
-    llm_response = Map.get(turn_entry, :llm_response)
-    reasoning = Map.get(turn_entry, :reasoning)
-
-    header = " Turn #{turn_num} "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-    )
-
-    # Print raw response/reasoning if requested and available
-    if show_raw do
-      cond do
-        llm_response ->
-          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Raw Response:#{ansi(:reset)}")
-
-          llm_response
-          |> String.split("\n")
-          |> Enum.each(fn line ->
-            IO.puts(
-              "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}#{truncate_line(line, 80)}#{ansi(:reset)}"
-            )
-          end)
-
-          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
-
-        reasoning ->
-          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Reasoning:#{ansi(:reset)}")
-
-          reasoning
-          |> String.split("\n")
-          |> Enum.each(fn line ->
-            IO.puts(
-              "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}#{truncate_line(line, 80)}#{ansi(:reset)}"
-            )
-          end)
-
-          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
-
-        true ->
-          :ok
-      end
-    end
-
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
-
-    # Print program with indentation
-    program
-    |> String.split("\n")
-    |> Enum.each(fn line ->
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{truncate_line(line, 80)}")
-    end)
-
-    # Print tool calls if any
-    unless Enum.empty?(tool_calls) do
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Tools:#{ansi(:reset)}")
-
-      Enum.each(tool_calls, fn call ->
-        tool_name = Map.get(call, :name, "unknown")
-        tool_args = Map.get(call, :args, %{})
-        tool_result = Map.get(call, :result, nil)
-
-        args_str = format_compact(tool_args)
-        result_str = format_compact(tool_result)
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}->#{ansi(:reset)} #{tool_name}(#{args_str})"
-        )
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:green)}<-#{ansi(:reset)} #{result_str}"
-        )
-      end)
-    end
-
-    # Print println output if any
-    unless Enum.empty?(prints) do
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Output:#{ansi(:reset)}")
-
-      Enum.each(prints, fn line ->
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:yellow)}#{truncate_line(line, 80)}#{ansi(:reset)}"
-        )
-      end)
-    end
-
-    # Print result
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Result:#{ansi(:reset)}")
-    result_lines = format_result(result)
-
-    Enum.each(result_lines, fn line ->
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{truncate_line(line, 80)}")
     end)
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
@@ -441,9 +346,8 @@ defmodule PtcRunner.SubAgent.Debug do
     end
   end
 
-  # Get turn count from either turns or trace
+  # Get turn count from turns
   defp get_turn_count(%Step{turns: turns}) when is_list(turns), do: length(turns)
-  defp get_turn_count(%Step{trace: trace}) when is_list(trace), do: length(trace)
   defp get_turn_count(_step), do: 0
 
   # ============================================================

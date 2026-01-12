@@ -100,6 +100,23 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def describe_type(x) when is_function(x), do: "function"
   def describe_type(_), do: "unknown"
 
+  # Special forms that require parentheses - bare symbols will fail with :unbound_var
+  @special_forms MapSet.new([
+                   :return,
+                   :fail,
+                   :let,
+                   :if,
+                   :fn,
+                   :when,
+                   :"if-let",
+                   :"when-let",
+                   :cond,
+                   :do,
+                   :and,
+                   :or,
+                   :not
+                 ])
+
   @doc """
   Formats closure errors with helpful messages.
   """
@@ -108,6 +125,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     var_str = to_string(name)
 
     cond do
+      # Check if it's a special form used without parentheses
+      MapSet.member?(@special_forms, name) ->
+        "Undefined variable: #{var_str}. Hint: '#{var_str}' is a special form, use (#{var_str} ...) with parentheses"
+
       # Check for common underscore/hyphen confusion
       String.contains?(var_str, "_") ->
         suggested = String.replace(var_str, "_", "-")
