@@ -76,14 +76,14 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
   end
 
   describe "namespace rendering" do
-    test "renders tool/ namespace when tools provided" do
+    test "renders tools namespace when tools provided" do
       opts =
         base_opts()
         |> Keyword.put(:tools, %{"search" => make_tool("search", "(q :string) -> :string")})
 
       [_system, user] = SingleUserCoalesced.to_messages([], %{}, opts)
 
-      assert String.contains?(user.content, ";; === tool/ ===")
+      assert String.contains?(user.content, ";; === tools ===")
       assert String.contains?(user.content, "tool/search")
     end
 
@@ -325,7 +325,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
       [_system, user] = SingleUserCoalesced.to_messages([], %{}, opts)
 
       assert String.contains?(user.content, "Test mission")
-      assert String.contains?(user.content, ";; === tool/ ===")
+      assert String.contains?(user.content, ";; === tools ===")
       assert String.contains?(user.content, ";; === data/ ===")
     end
   end

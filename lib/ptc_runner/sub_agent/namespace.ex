@@ -3,9 +3,9 @@ defmodule PtcRunner.SubAgent.Namespace do
   Renders namespaces for the USER message (REPL with Prelude model).
 
   Coordinates rendering of:
-  - tool/  : Available tools (from agent config, stable)
-  - data/  : Input data (from agent config, stable)
-  - user/  : LLM definitions (prelude, grows each turn)
+  - tool/ : Available tools (from agent config, stable)
+  - data/ : Input data (from agent config, stable)
+  - user/ : LLM definitions (prelude, grows each turn)
   """
 
   alias PtcRunner.SubAgent.Namespace.{Data, Tool, User}
@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.Namespace do
 
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string) -> :string"}
       iex> PtcRunner.SubAgent.Namespace.render(%{tools: %{"search" => tool}})
-      ";; === tool/ ===\\ntool/search(query) -> string"
+      ";; === tools ===\\ntool/search(query) -> string"
 
       iex> PtcRunner.SubAgent.Namespace.render(%{data: %{count: 42}})
       ";; === data/ ===\\ndata/count                    ; integer, sample: 42"

@@ -349,7 +349,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
       output = capture_io(fn -> Debug.print_trace(step, view: :compressed) end)
 
       # Tool namespace should appear in compressed view
-      assert output =~ ";; === tool/ ==="
+      assert output =~ ";; === tools ==="
       assert output =~ "tool/list_expenses"
     end
 
@@ -377,6 +377,42 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert output =~ "Usage"
       assert output =~ "Input tokens:"
       assert output =~ "500"
+    end
+
+    test "usage: true shows memory and system prompt ratio" do
+      turns = [
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{}),
+        Turn.success(2, "```clojure\n(+ 3 4)\n```", "(+ 3 4)", 7, [], [], %{})
+      ]
+
+      step = %Step{
+        return: 7,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{
+          duration_ms: 250,
+          memory_bytes: 1_500_000,
+          input_tokens: 1000,
+          output_tokens: 200,
+          system_prompt_tokens: 400,
+          turns: 2
+        }
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      # Check memory is shown in human-readable format
+      assert output =~ "Memory:"
+      assert output =~ "1.4" or output =~ "1.5"
+      assert output =~ "MB"
+
+      # Check system prompt shows size and ratio
+      # 400 tokens * 2 turns = 800 tokens = 80% of 1000 input tokens
+      assert output =~ "System prompt:"
+      assert output =~ "400"
+      assert output =~ "est. size"
+      assert output =~ "~80% of input"
     end
 
     test "truncates long programs" do
@@ -458,6 +494,86 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       # Should not crash, just return empty
       assert output == ""
+    end
+  end
+
+  describe "print_trace/2 integration" do
+    test "usage stats are populated from actual SubAgent run" do
+      agent = SubAgent.new(prompt: "Add two numbers", max_turns: 1)
+
+      llm = fn _input ->
+        {:ok, %{content: "```clojure\n(+ 1 2)\n```", tokens: %{input: 500, output: 50}}}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      # Verify usage is populated
+      assert step.usage.duration_ms >= 0
+      assert step.usage.memory_bytes >= 0
+      assert step.usage.input_tokens == 500
+      assert step.usage.output_tokens == 50
+
+      # Verify print_trace works with real data
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      assert output =~ "Input tokens:"
+      assert output =~ "500"
+      assert output =~ "Output tokens:"
+      assert output =~ "50"
+    end
+
+    test "multi-turn agent populates correct usage stats" do
+      agent = SubAgent.new(prompt: "Calculate sum", max_turns: 3)
+
+      # Simulate multi-turn: first turn returns value, second turn uses *1
+      llm = fn %{turn: turn} ->
+        response =
+          case turn do
+            1 -> "(do 42)"
+            2 -> "(return *1)"
+            _ -> "(fail \"unexpected\")"
+          end
+
+        {:ok, %{content: "```clojure\n#{response}\n```", tokens: %{input: 600, output: 30}}}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      # Verify multi-turn stats
+      assert step.usage.turns == 2
+      assert step.usage.input_tokens == 1200
+      assert step.usage.output_tokens == 60
+      assert step.usage.llm_requests == 2
+      assert step.usage.system_prompt_tokens > 0
+
+      # Verify ratio calculation works with multiple turns
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      assert output =~ "Turns:"
+      assert output =~ "2"
+      # Should show ratio since we have system_prompt_tokens and multiple turns
+      assert output =~ "% of input"
+    end
+
+    test "print_trace shows memory when present" do
+      agent = SubAgent.new(prompt: "Return a list", max_turns: 1)
+
+      llm = fn _input ->
+        # Return something that uses some memory
+        {:ok, %{content: "```clojure\n(range 100)\n```", tokens: %{input: 400, output: 20}}}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      # Memory should be captured from sandbox execution
+      assert step.usage.memory_bytes >= 0
+
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      # Memory line should appear if memory_bytes > 0
+      if step.usage.memory_bytes > 0 do
+        assert output =~ "Memory:"
+      end
     end
   end
 end

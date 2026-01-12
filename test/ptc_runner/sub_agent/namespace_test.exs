@@ -18,11 +18,11 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       assert Namespace.render(config) == nil
     end
 
-    test "renders tool/ section only when tools present" do
+    test "renders tools section only when tools present" do
       config = %{tools: %{"search" => make_tool("search", "(q :string) -> :string")}}
       result = Namespace.render(config)
 
-      assert result == ";; === tool/ ===\ntool/search(q) -> string"
+      assert result == ";; === tools ===\ntool/search(q) -> string"
     end
 
     test "renders data/ section only when data present" do
@@ -50,11 +50,11 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       sections = String.split(result, "\n\n")
 
       assert length(sections) == 2
-      assert String.starts_with?(Enum.at(sections, 0), ";; === tool/ ===")
+      assert String.starts_with?(Enum.at(sections, 0), ";; === tools ===")
       assert String.starts_with?(Enum.at(sections, 1), ";; === data/ ===")
     end
 
-    test "maintains section order: tool/ -> data/ -> user/" do
+    test "maintains section order: tools -> data/ -> user/" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
 
       config = %{
@@ -68,7 +68,7 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       sections = String.split(result, "\n\n")
 
       assert length(sections) == 3
-      assert String.starts_with?(Enum.at(sections, 0), ";; === tool/ ===")
+      assert String.starts_with?(Enum.at(sections, 0), ";; === tools ===")
       assert String.starts_with?(Enum.at(sections, 1), ";; === data/ ===")
       assert String.starts_with?(Enum.at(sections, 2), ";; === user/ (your prelude) ===")
     end
@@ -85,7 +85,7 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
 
       # Should only have data section, no blank lines from empty sections
       assert result == ";; === data/ ===\ndata/val                    ; integer, sample: 5"
-      refute String.contains?(result, ";; === tool/ ===")
+      refute String.contains?(result, ";; === tools ===")
       refute String.contains?(result, ";; === user/")
     end
 

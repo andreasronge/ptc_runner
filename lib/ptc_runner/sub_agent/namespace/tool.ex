@@ -1,14 +1,16 @@
 defmodule PtcRunner.SubAgent.Namespace.Tool do
-  @moduledoc "Renders the tool/ namespace section."
+  @moduledoc "Renders available tools for the USER message namespace section."
 
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.Signature.Renderer
 
   @doc """
-  Render tool/ namespace section for USER message.
+  Render tools section for USER message.
 
   Returns `nil` for empty tools maps, otherwise a formatted string with header
-  and entries showing tool name, parameters, and return type.
+  and entries showing tool calling syntax with parameters and return type.
+
+  Tools are called using `tool/` prefix: `(tool/tool-name {:param value})`
 
   ## Examples
 
@@ -17,11 +19,11 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
 
       iex> tool = %PtcRunner.Tool{name: "get-inventory", signature: "-> :map"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"get-inventory" => tool})
-      ";; === tool/ ===\\ntool/get-inventory() -> map"
+      ";; === tools ===\\ntool/get-inventory() -> map"
 
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string, limit :int) -> [:string]"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"search" => tool})
-      ";; === tool/ ===\\ntool/search(query, limit) -> [string]"
+      ";; === tools ===\\ntool/search(query, limit) -> [string]"
   """
   @spec render(map()) :: String.t() | nil
   def render(tools) when map_size(tools) == 0, do: nil
@@ -32,7 +34,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
       |> Enum.sort_by(fn {name, _} -> name end)
       |> Enum.map(fn {_name, tool} -> format_tool(tool) end)
 
-    [";; === tool/ ===" | lines] |> Enum.join("\n")
+    [";; === tools ===" | lines] |> Enum.join("\n")
   end
 
   defp format_tool(%{name: name, signature: signature}) do

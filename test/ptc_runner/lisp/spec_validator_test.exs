@@ -2,7 +2,6 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
   use ExUnit.Case
 
   alias PtcRunner.Lisp.SpecValidator
-  import PtcRunner.TestSupport.ClojureTestHelpers
 
   describe "extract_examples/0" do
     test "returns map with examples from spec" do
@@ -572,12 +571,12 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     end
   end
 
+  # Check babashka availability at compile time to conditionally skip
+  @babashka_available PtcRunner.Lisp.ClojureValidator.available?()
+
   describe "Clojure conformance" do
     @describetag :clojure
-
-    setup do
-      require_babashka()
-    end
+    @describetag skip: if(!@babashka_available, do: "Babashka not installed")
 
     test "all spec examples are valid Clojure syntax" do
       {:ok, result} = SpecValidator.extract_examples()
