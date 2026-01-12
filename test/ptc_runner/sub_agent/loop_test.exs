@@ -934,4 +934,220 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert length(step.messages) == 3
     end
   end
+
+  describe "compression option" do
+    test "compression: nil (default) uses uncompressed messages" do
+      agent = test_agent(max_turns: 3)
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{turn: turn, messages: messages} ->
+        Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
+
+        case turn do
+          1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+
+      # Check that turn 2 has accumulated messages (uncompressed)
+      log = Agent.get(messages_log, & &1)
+      {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
+      # Uncompressed: user, assistant, user (feedback)
+      assert length(turn2_messages) == 3
+    end
+
+    test "compression: true uses SingleUserCoalesced on turn > 1" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 3,
+          compression: true
+        )
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{turn: turn, messages: messages} ->
+        Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
+
+        case turn do
+          1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+
+      log = Agent.get(messages_log, & &1)
+
+      # Turn 1 should have 1 message (first user message)
+      {1, turn1_messages} = Enum.find(log, fn {turn, _} -> turn == 1 end)
+      assert length(turn1_messages) == 1
+
+      # Turn 2 should have only 1 message (compressed USER message)
+      # because compression coalesces history into a single user message
+      {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
+      assert length(turn2_messages) == 1
+      assert hd(turn2_messages).role == :user
+    end
+
+    test "compression: {Strategy, opts} passes custom options" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 3,
+          compression: {PtcRunner.SubAgent.Compression.SingleUserCoalesced, println_limit: 5}
+        )
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+    end
+
+    test "compression: false disables compression" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 3,
+          compression: false
+        )
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{turn: turn, messages: messages} ->
+        Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
+
+        case turn do
+          1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+
+      log = Agent.get(messages_log, & &1)
+
+      # Turn 2 should have accumulated messages (uncompressed)
+      {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
+      # Uncompressed: user, assistant, user (feedback)
+      assert length(turn2_messages) == 3
+    end
+
+    test "compression is skipped for max_turns: 1 (SS-001)" do
+      # Even with compression enabled, single-shot mode should skip it
+      agent =
+        SubAgent.new(
+          prompt: "Single-shot task",
+          tools: %{},
+          max_turns: 1,
+          compression: true
+        )
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{messages: messages} ->
+        Agent.update(messages_log, fn log -> [messages | log] end)
+        {:ok, "```clojure\n(return {:result 42})\n```"}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+
+      # Single turn - only 1 user message
+      log = Agent.get(messages_log, & &1)
+      assert length(log) == 1
+      assert length(hd(log)) == 1
+    end
+
+    test "compression includes turns indicator" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 5,
+          compression: true
+        )
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{turn: turn, messages: messages} ->
+        Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
+
+        case turn do
+          1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, _step} = Loop.run(agent, llm: llm, context: %{})
+
+      log = Agent.get(messages_log, & &1)
+      {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
+
+      # Compressed message should include turns indicator
+      user_message = hd(turn2_messages)
+      assert user_message.content =~ "Turns left:"
+    end
+
+    test "compressed view includes execution history" do
+      tools = %{
+        "get-value" => {fn _ -> 42 end, description: "Gets a value"}
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task with tools",
+          tools: tools,
+          max_turns: 3,
+          compression: true
+        )
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{turn: turn, messages: messages} ->
+        Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
+
+        case turn do
+          1 -> {:ok, "```clojure\n(ctx/get-value {})\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{result: 42}
+
+      log = Agent.get(messages_log, & &1)
+      {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
+
+      # Compressed message should include execution history with tool call
+      user_message = hd(turn2_messages)
+      assert user_message.content =~ "get-value"
+    end
+  end
 end
