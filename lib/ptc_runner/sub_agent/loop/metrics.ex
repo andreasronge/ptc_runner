@@ -6,11 +6,13 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Token accumulation across LLM calls
   - Final usage statistics (duration, memory, turns, tokens)
   - Trace entry construction with optional debug info
+  - Turn struct construction for execution history
   - Trace filtering based on execution result
   """
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
+  alias PtcRunner.Turn
 
   @doc """
   Estimate token count for a text string.
@@ -241,4 +243,65 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def apply_trace_filter(trace, true = _trace_mode, _is_error), do: trace
   def apply_trace_filter(trace, :on_error = _trace_mode, true = _is_error), do: trace
   def apply_trace_filter(_trace, :on_error = _trace_mode, false = _is_error), do: nil
+
+  @doc """
+  Build a Turn struct for the current execution cycle.
+
+  Creates either a success or failure Turn based on the `success?` option.
+
+  ## Parameters
+
+  - `state` - Current loop state (used for turn number)
+  - `raw_response` - Full LLM response text
+  - `program` - PTC-Lisp program that was executed (or nil if parsing failed)
+  - `result` - Execution result or error
+  - `opts` - Keyword options:
+    - `success?` - Whether this turn succeeded (default: true)
+    - `prints` - Captured println output (default: [])
+    - `tool_calls` - Tool invocations made during this turn (default: [])
+    - `memory` - Memory state after this turn (default: state.memory)
+
+  ## Returns
+
+  A `%Turn{}` struct.
+  """
+  @spec build_turn(map(), String.t(), String.t() | nil, term(), keyword()) :: Turn.t()
+  def build_turn(state, raw_response, program, result, opts \\ []) do
+    success? = Keyword.get(opts, :success?, true)
+    prints = Keyword.get(opts, :prints, [])
+    tool_calls = Keyword.get(opts, :tool_calls, [])
+    memory = Keyword.get(opts, :memory, state.memory)
+
+    # Convert tool_calls to Turn's simplified format
+    simplified_tool_calls =
+      Enum.map(tool_calls, fn tc ->
+        %{
+          name: tc.name,
+          args: tc.args,
+          result: tc.result
+        }
+      end)
+
+    if success? do
+      Turn.success(
+        state.turn,
+        raw_response,
+        program,
+        result,
+        prints,
+        simplified_tool_calls,
+        memory
+      )
+    else
+      Turn.failure(
+        state.turn,
+        raw_response,
+        program,
+        result,
+        prints,
+        simplified_tool_calls,
+        memory
+      )
+    end
+  end
 end

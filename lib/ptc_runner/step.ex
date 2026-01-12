@@ -50,7 +50,18 @@ defmodule PtcRunner.Step do
 
   Execution trace for debugging (SubAgent only). See `t:trace_entry/0` for the structure.
 
+  **DEPRECATED**: Use `turns` field instead. This field is kept for backward compatibility
+  during migration and will be removed in a future version.
+
   - **Type:** `[t:trace_entry/0] | nil`
+  - **Set when:** SubAgent execution
+  - **Nil when:** Lisp execution
+
+  ### `turns`
+
+  List of Turn structs capturing each LLM interaction cycle. See `PtcRunner.Turn`.
+
+  - **Type:** `[PtcRunner.Turn.t()] | nil`
   - **Set when:** SubAgent execution
   - **Nil when:** Lisp execution
 
@@ -176,6 +187,7 @@ defmodule PtcRunner.Step do
     :signature,
     :usage,
     :trace,
+    :turns,
     :trace_id,
     :parent_trace_id,
     :field_descriptions,
@@ -289,6 +301,7 @@ defmodule PtcRunner.Step do
           signature: String.t() | nil,
           usage: usage() | nil,
           trace: [trace_entry()] | nil,
+          turns: [PtcRunner.Turn.t()] | nil,
           trace_id: String.t() | nil,
           parent_trace_id: String.t() | nil,
           field_descriptions: map() | nil,
@@ -318,6 +331,7 @@ defmodule PtcRunner.Step do
       signature: nil,
       usage: nil,
       trace: nil,
+      turns: nil,
       trace_id: nil,
       parent_trace_id: nil,
       field_descriptions: nil,
@@ -371,6 +385,7 @@ defmodule PtcRunner.Step do
       signature: nil,
       usage: nil,
       trace: nil,
+      turns: nil,
       trace_id: nil,
       parent_trace_id: nil,
       field_descriptions: nil,
