@@ -98,11 +98,18 @@ jobs:
             gh issue close ${{ github.event.issue.number }} --comment "Closing: functionality already exists. [brief explanation]"
             ```
 
-            **B. Ready** - If issue is well-defined and ready:
+            **B. Ready and unblocked** - If issue is well-defined AND all blockers are closed:
             - Add `ready-for-implementation` label
             - Continue to Step 6
 
-            **C. Needs work** - Add appropriate label:
+            **C. Ready but blocked** - If issue is ready BUT has open blockers:
+            - Do NOT add `ready-for-implementation` to this issue
+            - For each open blocker, check if it has automation labels (`needs-review`, `ready-for-implementation`)
+            - If a blocker has no automation label, trigger it: `gh issue edit BLOCKER_NUM --add-label "needs-review"`
+            - This cascades the review through the dependency chain
+            - Watch for cycles: if blocker references this issue, don't trigger (would loop forever)
+
+            **D. Needs work** - Add appropriate label:
             - `needs-clarification` if important details are missing
             - `needs-breakdown` if issue should be split
 
