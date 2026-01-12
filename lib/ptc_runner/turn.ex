@@ -15,6 +15,7 @@ defmodule PtcRunner.Turn do
   - `tool_calls` - Tool invocations made during this turn
   - `memory` - Accumulated definitions after this turn
   - `success?` - Whether the turn succeeded
+  - `messages` - Messages sent to the LLM for this turn (for debugging/verification)
 
   ## Constructors
 
@@ -32,7 +33,8 @@ defmodule PtcRunner.Turn do
     :prints,
     :tool_calls,
     :memory,
-    :success?
+    :success?,
+    :messages
   ]
 
   @typedoc """
@@ -50,6 +52,15 @@ defmodule PtcRunner.Turn do
         }
 
   @typedoc """
+  A message sent to the LLM.
+
+  Fields:
+  - `role`: Message role (:system, :user, or :assistant)
+  - `content`: Message content
+  """
+  @type message :: %{role: :system | :user | :assistant, content: String.t()}
+
+  @typedoc """
   Turn struct capturing one LLM interaction cycle.
 
   One of `success?` will be true or false:
@@ -64,7 +75,8 @@ defmodule PtcRunner.Turn do
           prints: [String.t()],
           tool_calls: [tool_call()],
           memory: map(),
-          success?: boolean()
+          success?: boolean(),
+          messages: [message()] | nil
         }
 
   @doc """
@@ -88,9 +100,10 @@ defmodule PtcRunner.Turn do
           term(),
           [String.t()],
           [tool_call()],
-          map()
+          map(),
+          [message()] | nil
         ) :: t()
-  def success(number, raw_response, program, result, prints, tool_calls, memory) do
+  def success(number, raw_response, program, result, prints, tool_calls, memory, messages \\ nil) do
     %__MODULE__{
       number: number,
       raw_response: raw_response,
@@ -99,7 +112,8 @@ defmodule PtcRunner.Turn do
       prints: prints,
       tool_calls: tool_calls,
       memory: memory,
-      success?: true
+      success?: true,
+      messages: messages
     }
   end
 
@@ -126,9 +140,10 @@ defmodule PtcRunner.Turn do
           term(),
           [String.t()],
           [tool_call()],
-          map()
+          map(),
+          [message()] | nil
         ) :: t()
-  def failure(number, raw_response, program, error, prints, tool_calls, memory) do
+  def failure(number, raw_response, program, error, prints, tool_calls, memory, messages \\ nil) do
     %__MODULE__{
       number: number,
       raw_response: raw_response,
@@ -137,7 +152,8 @@ defmodule PtcRunner.Turn do
       prints: prints,
       tool_calls: tool_calls,
       memory: memory,
-      success?: false
+      success?: false,
+      messages: messages
     }
   end
 end

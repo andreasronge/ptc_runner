@@ -171,65 +171,6 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   end
 
   @doc """
-  Build a trace entry with optional debug information.
-
-  ## Parameters
-
-  - `state` - Current loop state
-  - `program` - The PTC-Lisp program that was executed
-  - `result` - Execution result
-  - `tool_calls` - List of tool calls made during execution
-  - `opts` - Optional keyword list with:
-    - `llm_response` - Raw LLM response text (debug mode only)
-    - `llm_feedback` - Formatted feedback sent back to LLM (debug mode only)
-
-  ## Returns
-
-  Trace entry map with turn number, program, result, and tool_calls.
-  In debug mode, also includes llm_response, llm_feedback, context_snapshot,
-  memory_snapshot, and full_prompt.
-  """
-  @spec build_trace_entry(map(), String.t(), term(), list(), keyword()) :: map()
-  def build_trace_entry(state, program, result, tool_calls, opts \\ []) do
-    llm_response = Keyword.get(opts, :llm_response)
-
-    base = %{
-      turn: state.turn,
-      program: program,
-      reasoning: extract_reasoning(llm_response),
-      result: result,
-      tool_calls: tool_calls,
-      prints: Keyword.get(opts, :prints, []),
-      feedback_truncated: Keyword.get(opts, :feedback_truncated, false)
-    }
-
-    if state.debug do
-      Map.merge(base, %{
-        llm_response: llm_response,
-        llm_feedback: Keyword.get(opts, :llm_feedback),
-        system_prompt: Map.get(state, :current_system_prompt),
-        context_snapshot: state.context,
-        memory_snapshot: state.memory,
-        full_prompt: List.last(state.messages)
-      })
-    else
-      base
-    end
-  end
-
-  # Extract reasoning from LLM response (everything except the code block)
-  defp extract_reasoning(nil), do: nil
-
-  defp extract_reasoning(response) do
-    result =
-      response
-      |> String.replace(~r/```clojure\n.*?```/s, "")
-      |> String.trim()
-
-    if result == "", do: nil, else: result
-  end
-
-  @doc """
   Apply trace filtering based on trace_mode and execution result.
 
   ## Filter Modes
@@ -251,7 +192,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
   ## Parameters
 
-  - `state` - Current loop state (used for turn number)
+  - `state` - Current loop state (used for turn number and messages)
   - `raw_response` - Full LLM response text
   - `program` - PTC-Lisp program that was executed (or nil if parsing failed)
   - `result` - Execution result or error
@@ -271,6 +212,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     prints = Keyword.get(opts, :prints, [])
     tool_calls = Keyword.get(opts, :tool_calls, [])
     memory = Keyword.get(opts, :memory, state.memory)
+    # Get messages from state (set by loop before LLM call)
+    messages = Map.get(state, :current_messages)
 
     # Convert tool_calls to Turn's simplified format
     simplified_tool_calls =
@@ -290,7 +233,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         result,
         prints,
         simplified_tool_calls,
-        memory
+        memory,
+        messages
       )
     else
       Turn.failure(
@@ -300,7 +244,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         result,
         prints,
         simplified_tool_calls,
-        memory
+        memory,
+        messages
       )
     end
   end

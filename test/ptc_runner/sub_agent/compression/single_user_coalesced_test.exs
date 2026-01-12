@@ -10,7 +10,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
   defp base_opts do
     [
-      mission: "Test mission",
+      prompt: "Test mission",
       system_prompt: "Test system prompt",
       tools: %{},
       data: %{},
@@ -327,6 +327,45 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
       assert String.contains?(user.content, "Test mission")
       assert String.contains?(user.content, ";; === tool/ ===")
       assert String.contains?(user.content, ";; === data/ ===")
+    end
+  end
+
+  describe "expected output section" do
+    test "includes Expected Output when signature is provided" do
+      opts =
+        base_opts()
+        |> Keyword.put(:signature, "() -> {total :float}")
+
+      [_system, user] = SingleUserCoalesced.to_messages([], %{}, opts)
+
+      assert String.contains?(user.content, "# Expected Output")
+      assert String.contains?(user.content, "{total :float}")
+      assert String.contains?(user.content, "(return {:total 3.14})")
+    end
+
+    test "omits Expected Output when signature is nil" do
+      opts = Keyword.put(base_opts(), :signature, nil)
+      [_system, user] = SingleUserCoalesced.to_messages([], %{}, opts)
+
+      refute String.contains?(user.content, "# Expected Output")
+    end
+
+    test "omits Expected Output when signature is missing from opts" do
+      [_system, user] = SingleUserCoalesced.to_messages([], %{}, base_opts())
+
+      refute String.contains?(user.content, "# Expected Output")
+    end
+
+    test "includes field descriptions in Expected Output when provided" do
+      opts =
+        base_opts()
+        |> Keyword.put(:signature, "() -> {total :float}")
+        |> Keyword.put(:field_descriptions, %{total: "The calculated total amount"})
+
+      [_system, user] = SingleUserCoalesced.to_messages([], %{}, opts)
+
+      assert String.contains?(user.content, "# Expected Output")
+      assert String.contains?(user.content, "The calculated total amount")
     end
   end
 end

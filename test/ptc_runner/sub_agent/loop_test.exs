@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       assert step.return == %{result: 8}
       assert step.fail == nil
-      assert length(step.trace) == 1
+      assert length(step.turns) == 1
       assert step.usage.turns == 1
     end
 
@@ -58,7 +58,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
       assert step.return == %{result: 42}
-      assert length(step.trace) == 2
+      assert length(step.turns) == 2
       assert step.usage.turns == 2
     end
 
@@ -131,7 +131,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.trace |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
+      assert step.turns |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
     end
 
     test "extracts code from lisp code block" do
@@ -144,7 +144,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.trace |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
+      assert step.turns |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
     end
 
     test "falls back to raw s-expression" do
@@ -153,7 +153,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
       llm = fn _ -> {:ok, ~S|(return {:value 42})|} end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.trace |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
+      assert step.turns |> hd() |> Map.get(:program) == ~S|(return {:value 42})|
     end
   end
 
@@ -365,28 +365,6 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert length(turn2_messages) == 3
       assert Enum.at(turn2_messages, 1).role == :assistant
       assert Enum.at(turn2_messages, 2).role == :user
-    end
-  end
-
-  describe "run/2 trace entries" do
-    test "builds trace entries correctly" do
-      agent = test_agent()
-
-      llm = fn _ ->
-        {:ok, ~S|```clojure
-(return {:value (+ 1 2)})
-```|}
-      end
-
-      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-
-      assert length(step.trace) == 1
-
-      trace_entry = hd(step.trace)
-      assert trace_entry.turn == 1
-      assert trace_entry.program == ~S|(return {:value (+ 1 2)})|
-      assert trace_entry.result == %{value: 3}
-      assert trace_entry.tool_calls == []
     end
   end
 
@@ -1148,6 +1126,89 @@ defmodule PtcRunner.SubAgent.LoopTest do
       # Compressed message should include execution history with tool call
       user_message = hd(turn2_messages)
       assert user_message.content =~ "get-value"
+    end
+
+    test "compression option works with string form of SubAgent.run/2" do
+      # Regression test: compression option was being dropped in string form
+      tools = %{"get-value" => fn _ -> 42 end}
+
+      messages_log = Agent.start_link(fn -> [] end) |> elem(1)
+
+      llm = fn %{turn: turn, messages: messages} ->
+        Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
+
+        case turn do
+          1 -> {:ok, "```clojure\n(ctx/get-value {})\n```"}
+          2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      # Use string form of run/2 with compression: true
+      {:ok, step} =
+        SubAgent.run(
+          "Do multi-turn task",
+          tools: tools,
+          max_turns: 3,
+          compression: true,
+          llm: llm
+        )
+
+      assert step.return == %{result: 42}
+
+      # Verify compression was actually applied - turn 2 should have 1 message
+      log = Agent.get(messages_log, & &1)
+      {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
+
+      # With compression, turn 2 should have exactly 1 user message (compressed)
+      assert length(turn2_messages) == 1
+      assert hd(turn2_messages).role == :user
+    end
+
+    test "return validation error is stored in turn result for compressed mode" do
+      # Regression test: validation error message was lost during compression
+      # The LLM needs to see the actual error, not just the invalid return value
+      agent =
+        SubAgent.new(
+          prompt: "Return a float",
+          signature: "{value :float}",
+          max_turns: 3,
+          compression: true
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            # Return integer instead of float - should fail validation
+            {:ok, "```clojure\n(return {:value 0})\n```"}
+
+          2 ->
+            # Check that the error message is in the compressed user message
+            user_msg = hd(messages)
+
+            # The compressed message should contain the validation error
+            assert user_msg.content =~ "expected float" or
+                     user_msg.content =~ "Return type validation failed",
+                   "Expected validation error in compressed message, got: #{String.slice(user_msg.content, 0, 500)}"
+
+            # Now return correct type
+            {:ok, "```clojure\n(return {:value 1.0})\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return {:value 0.0})\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{value: 1.0}
+      assert length(step.turns) == 2
+
+      # Verify turn 1 was marked as failure with proper error info
+      [turn1, _turn2] = step.turns
+      assert turn1.success? == false
+      assert turn1.result.reason == :return_validation_failed
+      assert turn1.result.message =~ "expected float"
     end
   end
 end

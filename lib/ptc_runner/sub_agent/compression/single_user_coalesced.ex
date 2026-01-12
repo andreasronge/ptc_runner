@@ -14,9 +14,10 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
 
   1. Mission text (always first, never removed)
   2. Namespace sections (tool/, data/, user/)
-  3. Execution history (tool calls made, println output)
-  4. Conditional error display (only if last turn failed)
-  5. Turns indicator ("Turns left: N" or "FINAL TURN - ...")
+  3. Expected output (return format from signature)
+  4. Execution history (tool calls made, println output)
+  5. Conditional error display (only if last turn failed)
+  6. Turns indicator ("Turns left: N" or "FINAL TURN - ...")
 
   ## Error Handling
 
@@ -30,6 +31,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
 
   alias PtcRunner.SubAgent.Namespace
   alias PtcRunner.SubAgent.Namespace.ExecutionHistory
+  alias PtcRunner.SubAgent.{Signature, SystemPrompt.Output}
   alias PtcRunner.Turn
 
   @impl true
@@ -45,12 +47,14 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
   end
 
   defp build_user_content(turns, memory, opts) do
-    mission = opts[:mission] || ""
+    prompt = opts[:prompt] || ""
     tools = opts[:tools] || %{}
     data = opts[:data] || %{}
     println_limit = opts[:println_limit] || 15
     tool_call_limit = opts[:tool_call_limit] || 20
     turns_left = opts[:turns_left] || 0
+    signature = opts[:signature]
+    field_descriptions = opts[:field_descriptions]
 
     # Split turns into successful and failed
     {successful_turns, failed_turns} = Enum.split_with(turns, & &1.success?)
@@ -71,6 +75,9 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
         has_println: has_println
       })
 
+    # Expected output section (from signature)
+    expected_output = build_expected_output(signature, field_descriptions)
+
     tool_calls_section =
       ExecutionHistory.render_tool_calls(accumulated_tool_calls, tool_call_limit)
 
@@ -84,7 +91,15 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
     turns_indicator = build_turns_indicator(turns_left)
 
     # Assemble sections with blank line separators
-    [mission, namespaces, tool_calls_section, output_section, error_section, turns_indicator]
+    [
+      prompt,
+      namespaces,
+      expected_output,
+      tool_calls_section,
+      output_section,
+      error_section,
+      turns_indicator
+    ]
     |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
   end
@@ -95,6 +110,24 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
       tool.name == "println"
     end)
   end
+
+  # Build expected output section from signature (compact format for compressed turns)
+  defp build_expected_output(nil, _field_descriptions), do: nil
+
+  defp build_expected_output(signature_str, field_descriptions) when is_binary(signature_str) do
+    case Signature.parse(signature_str) do
+      {:ok, parsed_sig} -> build_expected_output(parsed_sig, field_descriptions)
+      {:error, _} -> nil
+    end
+  end
+
+  defp build_expected_output({:signature, _, _} = signature, field_descriptions) do
+    output = Output.generate(signature, field_descriptions)
+    # Trim trailing newlines for cleaner joining
+    String.trim_trailing(output)
+  end
+
+  defp build_expected_output(_, _), do: nil
 
   # Build error section based on conditional collapsing rules:
   # - If last turn failed: show most recent error only

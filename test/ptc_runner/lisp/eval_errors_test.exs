@@ -364,4 +364,47 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg =~ "expected map"
     end
   end
+
+  describe "format_closure_error hints" do
+    alias PtcRunner.Lisp.Eval.Helpers
+
+    test "provides hint for special forms used without parentheses" do
+      # When user writes `return` instead of `(return ...)`
+      msg = Helpers.format_closure_error({:unbound_var, :return})
+
+      assert msg =~ "Hint:"
+      assert msg =~ "special form"
+      assert msg =~ "(return ...)"
+    end
+
+    test "provides hint for if special form without parentheses" do
+      msg = Helpers.format_closure_error({:unbound_var, :if})
+
+      assert msg =~ "Hint:"
+      assert msg =~ "special form"
+      assert msg =~ "(if ...)"
+    end
+
+    test "provides hint for let special form without parentheses" do
+      msg = Helpers.format_closure_error({:unbound_var, :let})
+
+      assert msg =~ "Hint:"
+      assert msg =~ "special form"
+      assert msg =~ "(let ...)"
+    end
+
+    test "provides hint for fail special form without parentheses" do
+      msg = Helpers.format_closure_error({:unbound_var, :fail})
+
+      assert msg =~ "Hint:"
+      assert msg =~ "special form"
+      assert msg =~ "(fail ...)"
+    end
+
+    test "no special form hint for regular undefined variables" do
+      msg = Helpers.format_closure_error({:unbound_var, :my_var})
+
+      refute msg =~ "special form"
+    end
+  end
 end

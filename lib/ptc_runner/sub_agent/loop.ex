@@ -195,7 +195,10 @@ defmodule PtcRunner.SubAgent.Loop do
       run_opts.mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
     # Expand template in mission
-    expanded_prompt = expand_template(agent.mission, run_opts.context)
+    expanded_prompt = expand_template(agent.prompt, run_opts.context)
+
+    # Normalize tools for Step.tools (used by Debug.print_trace compressed view)
+    normalized_tools = normalize_tools_for_step(agent.tools)
 
     # Build first user message with dynamic context prepended
     # This includes data inventory, tool schemas, expected output, plus the mission
@@ -207,7 +210,6 @@ defmodule PtcRunner.SubAgent.Loop do
       turn: 1,
       messages: [%{role: :user, content: first_user_message}],
       context: run_opts.context,
-      trace: [],
       turns: [],
       start_time: System.monotonic_time(:millisecond),
       memory: %{},
@@ -235,7 +237,11 @@ defmodule PtcRunner.SubAgent.Loop do
       # Field descriptions received from upstream agent in a chain
       received_field_descriptions: run_opts.received_field_descriptions,
       # System prompt for message collection (set on first turn)
-      collected_system_prompt: nil
+      collected_system_prompt: nil,
+      # Expanded prompt for Step.prompt (used by Debug.print_trace)
+      expanded_prompt: expanded_prompt,
+      # Normalized tools for Step.tools (used by Debug.print_trace compressed view)
+      normalized_tools: normalized_tools
     }
 
     loop(agent, run_opts.llm, initial_state)
@@ -296,11 +302,12 @@ defmodule PtcRunner.SubAgent.Loop do
       # Call LLM with telemetry and retry logic
       case call_llm_with_telemetry(llm, llm_input, state, agent) do
         {:ok, %{content: content, tokens: tokens}} ->
-          # Accumulate tokens and store system prompt for debugging
+          # Accumulate tokens and store system prompt + messages for debugging
           state_with_metadata =
             state
             |> Metrics.accumulate_tokens(tokens)
             |> Map.put(:current_system_prompt, llm_input.system)
+            |> Map.put(:current_messages, messages)
             |> maybe_add_system_prompt_tokens(llm_input.system)
 
           result = handle_llm_response(content, agent, llm, state_with_metadata)
@@ -316,11 +323,11 @@ defmodule PtcRunner.SubAgent.Loop do
           step_with_metrics = %{
             step
             | usage: Metrics.build_final_usage(state, duration_ms, 0),
-              trace:
-                Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true),
               turns:
                 Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-              messages: build_collected_messages(state, state.messages)
+              messages: build_collected_messages(state, state.messages),
+              prompt: state.expanded_prompt,
+              tools: state.normalized_tools
           }
 
           # Emit turn stop on error
@@ -479,15 +486,6 @@ defmodule PtcRunner.SubAgent.Loop do
           ResponseHandler.format_error_for_llm(lisp_step.fail)
           |> TurnFeedback.append_turn_info(agent, state)
 
-        # Build trace entry for failed execution (show error message, not nil)
-        error_result = {:error, lisp_step.fail.message}
-
-        trace_entry =
-          Metrics.build_trace_entry(state, code, error_result, lisp_step.tool_calls,
-            llm_response: response,
-            llm_feedback: error_message
-          )
-
         # Build Turn struct (failure turn)
         turn =
           Metrics.build_turn(state, response, code, lisp_step.fail,
@@ -506,7 +504,6 @@ defmodule PtcRunner.SubAgent.Loop do
                   %{role: :assistant, content: response},
                   %{role: :user, content: error_message}
                 ],
-            trace: [trace_entry | state.trace],
             turns: [turn | state.turns],
             memory: lisp_step.memory,
             last_fail: lisp_step.fail,
@@ -550,13 +547,6 @@ defmodule PtcRunner.SubAgent.Loop do
         # Explicit fail was actually executed - complete with error, no feedback
         {:__ptc_fail__, fail_args} = lisp_step.return
 
-        trace_entry =
-          Metrics.build_trace_entry(state, code, fail_args, lisp_step.tool_calls,
-            llm_response: response,
-            llm_feedback: nil,
-            prints: lisp_step.prints
-          )
-
         # Build Turn struct (failure turn)
         turn =
           Metrics.build_turn(state, response, code, fail_args,
@@ -576,19 +566,15 @@ defmodule PtcRunner.SubAgent.Loop do
         final_step = %{
           error_step
           | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
-            trace:
-              Metrics.apply_trace_filter(
-                Enum.reverse([trace_entry | state.trace]),
-                state.trace_mode,
-                true
-              ),
             turns:
               Metrics.apply_trace_filter(
                 Enum.reverse([turn | state.turns]),
                 state.trace_mode,
                 true
               ),
-            messages: build_collected_messages(state, final_messages)
+            messages: build_collected_messages(state, final_messages),
+            prompt: state.expanded_prompt,
+            tools: state.normalized_tools
         }
 
         {:error, final_step}
@@ -598,16 +584,8 @@ defmodule PtcRunner.SubAgent.Loop do
         # Check memory limit before continuing
         case check_memory_limit(lisp_step.memory, agent.memory_limit) do
           {:ok, _size} ->
-            # Calculate feedback before building trace entry
-            {execution_result, feedback_truncated} = TurnFeedback.format(agent, state, lisp_step)
-
-            trace_entry =
-              Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
-                llm_response: response,
-                llm_feedback: execution_result,
-                feedback_truncated: feedback_truncated,
-                prints: lisp_step.prints
-              )
+            # Calculate feedback
+            {execution_result, _feedback_truncated} = TurnFeedback.format(agent, state, lisp_step)
 
             # Build Turn struct (success turn - loop continues)
             turn =
@@ -631,7 +609,6 @@ defmodule PtcRunner.SubAgent.Loop do
                       %{role: :assistant, content: response},
                       %{role: :user, content: execution_result}
                     ],
-                trace: [trace_entry | state.trace],
                 turns: [turn | state.turns],
                 memory: lisp_step.memory,
                 # Context stays immutable - memory values become available as symbols
@@ -644,13 +621,6 @@ defmodule PtcRunner.SubAgent.Loop do
 
           {:error, :memory_limit_exceeded, actual_size} ->
             # Memory limit exceeded - return error
-            trace_entry =
-              Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
-                llm_response: response,
-                llm_feedback: nil,
-                prints: lisp_step.prints
-              )
-
             # Build Turn struct (failure turn - memory limit exceeded)
             turn =
               Metrics.build_turn(state, response, code, lisp_step.return,
@@ -673,19 +643,15 @@ defmodule PtcRunner.SubAgent.Loop do
             final_step = %{
               error_step
               | usage: Metrics.build_final_usage(state, duration_ms, actual_size),
-                trace:
-                  Metrics.apply_trace_filter(
-                    Enum.reverse([trace_entry | state.trace]),
-                    state.trace_mode,
-                    true
-                  ),
                 turns:
                   Metrics.apply_trace_filter(
                     Enum.reverse([turn | state.turns]),
                     state.trace_mode,
                     true
                   ),
-                messages: build_collected_messages(state, final_messages)
+                messages: build_collected_messages(state, final_messages),
+                prompt: state.expanded_prompt,
+                tools: state.normalized_tools
             }
 
             {:error, final_step}
@@ -695,8 +661,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Expand template placeholders with context values
   defp expand_template(prompt, context) when is_map(context) do
-    alias PtcRunner.SubAgent.MissionExpander
-    {:ok, result} = MissionExpander.expand(prompt, context, on_missing: :keep)
+    alias PtcRunner.SubAgent.PromptExpander
+    {:ok, result} = PromptExpander.expand(prompt, context, on_missing: :keep)
     result
   end
 
@@ -759,11 +725,13 @@ defmodule PtcRunner.SubAgent.Loop do
     # Build compression options with context
     compression_opts =
       opts
-      |> Keyword.put(:mission, expand_template(agent.mission, state.context))
+      |> Keyword.put(:prompt, expand_template(agent.prompt, state.context))
       |> Keyword.put(:system_prompt, system_prompt)
       |> Keyword.put(:tools, normalized_tools)
       |> Keyword.put(:data, state.context)
       |> Keyword.put(:turns_left, turns_left)
+      |> Keyword.put(:signature, agent.signature)
+      |> Keyword.put(:field_descriptions, agent.field_descriptions)
 
     # Call the compression strategy
     # Strategy returns [%{role: :system, ...}, %{role: :user, ...}]
@@ -814,9 +782,10 @@ defmodule PtcRunner.SubAgent.Loop do
     step_with_metrics = %{
       step
       | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
-        trace: Metrics.apply_trace_filter(Enum.reverse(state.trace), state.trace_mode, true),
         turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-        messages: build_collected_messages(state, state.messages)
+        messages: build_collected_messages(state, state.messages),
+        prompt: state.expanded_prompt,
+        tools: state.normalized_tools
     }
 
     {:error, step_with_metrics}
@@ -830,13 +799,6 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Build success step for return/single-shot termination
   defp build_success_step(code, response, lisp_step, state, agent) do
-    trace_entry =
-      Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
-        llm_response: response,
-        llm_feedback: nil,
-        prints: lisp_step.prints
-      )
-
     # Build Turn struct (success turn - final)
     turn =
       Metrics.build_turn(state, response, code, lisp_step.return,
@@ -854,12 +816,6 @@ defmodule PtcRunner.SubAgent.Loop do
     final_step = %{
       lisp_step
       | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
-        trace:
-          Metrics.apply_trace_filter(
-            Enum.reverse([trace_entry | state.trace]),
-            state.trace_mode,
-            false
-          ),
         turns:
           Metrics.apply_trace_filter(
             Enum.reverse([turn | state.turns]),
@@ -867,7 +823,9 @@ defmodule PtcRunner.SubAgent.Loop do
             false
           ),
         field_descriptions: agent.field_descriptions,
-        messages: build_collected_messages(state, final_messages)
+        messages: build_collected_messages(state, final_messages),
+        prompt: state.expanded_prompt,
+        tools: state.normalized_tools
     }
 
     {:ok, final_step}
@@ -877,16 +835,18 @@ defmodule PtcRunner.SubAgent.Loop do
   defp handle_return_validation_error(code, response, lisp_step, state, agent, llm, errors) do
     error_message = ReturnValidation.format_error_for_llm(agent, lisp_step.return, errors)
 
-    trace_entry =
-      Metrics.build_trace_entry(state, code, lisp_step.return, lisp_step.tool_calls,
-        llm_response: response,
-        llm_feedback: error_message,
-        prints: lisp_step.prints
-      )
+    # Build validation error info for the turn (so compression can show the actual error)
+    validation_error = %{
+      reason: :return_validation_failed,
+      message: error_message,
+      actual_value: lisp_step.return,
+      errors: errors
+    }
 
     # Build Turn struct (failure turn - validation error)
+    # Store the validation error (not just the return value) so compression shows the actual error
     turn =
-      Metrics.build_turn(state, response, code, lisp_step.return,
+      Metrics.build_turn(state, response, code, validation_error,
         success?: false,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
@@ -902,7 +862,6 @@ defmodule PtcRunner.SubAgent.Loop do
               %{role: :assistant, content: response},
               %{role: :user, content: error_message}
             ],
-        trace: [trace_entry | state.trace],
         turns: [turn | state.turns],
         memory: lisp_step.memory,
         last_fail: nil,
@@ -924,5 +883,20 @@ defmodule PtcRunner.SubAgent.Loop do
       nil -> messages
       system_prompt -> [%{role: :system, content: system_prompt} | messages]
     end
+  end
+
+  # ============================================================
+  # Tool Normalization for Step
+  # ============================================================
+
+  # Normalize tools to %{name => %Tool{}} for Step.tools (used by Debug compressed view)
+  defp normalize_tools_for_step(tools) do
+    Enum.map(tools, fn {name, format} ->
+      case PtcRunner.Tool.new(name, format) do
+        {:ok, tool} -> {name, tool}
+        {:error, _} -> {name, %PtcRunner.Tool{name: to_string(name), signature: nil}}
+      end
+    end)
+    |> Map.new()
   end
 end
