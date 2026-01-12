@@ -94,22 +94,26 @@ In **single-shot mode**, the LLM's expression is evaluated and returned directly
 
 ## Debugging Execution
 
-To see exactly what the agent is doing, enable debug mode and use `PtcRunner.SubAgent.Debug.print_trace/1`:
+To see what the agent is doing, use `PtcRunner.SubAgent.Debug.print_trace/2`:
 
 ```elixir
-{:ok, step} = SubAgent.run(prompt, llm: my_llm, debug: true)
+{:ok, step} = SubAgent.run(prompt, llm: my_llm)
 PtcRunner.SubAgent.Debug.print_trace(step)
 ```
 
-For a detailed view including the system prompt (instructions and tool definitions) and raw conversation history, use the `messages: true` option:
+For more detail, include raw LLM output (reasoning) or the actual messages sent:
 
 ```elixir
+# Include LLM reasoning/commentary
+PtcRunner.SubAgent.Debug.print_trace(step, raw: true)
+
+# Show full messages sent to LLM
 PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
 ```
 
 This is essential for identifying why a model might be failing or ignoring tool instructions.
 
-> **More options:** See [Observability](subagent-observability.md) for telemetry, trace filtering, and production tips.
+> **More options:** See [Observability](subagent-observability.md) for compression, telemetry, and production tips.
 
 ## Signatures (Optional)
 
@@ -300,7 +304,7 @@ For reusable agents, create the struct separately:
 ```elixir
 # Define once
 product_finder = PtcRunner.SubAgent.new(
-  mission: "Find the most expensive product",
+  prompt: "Find the most expensive product",
   signature: "{name :string, price :float}",
   tools: product_tools,
   max_turns: 5
@@ -318,7 +322,7 @@ SubAgents support additional optional fields for documentation and output contro
 
 ```elixir
 PtcRunner.SubAgent.new(
-  mission: "Find products matching {{query}}",
+  prompt: "Find products matching {{query}}",
   signature: "(query :string) -> [{name :string, price :float}]",
   tools: product_tools,
 
