@@ -7,7 +7,164 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  check-stale:
+  detect-issues:
+    runs-on: ubuntu-latest
+    outputs:
+      has_stuck_issues: ${{ steps.detect.outputs.has_stuck_issues }}
+      stuck_issues_summary: ${{ steps.detect.outputs.stuck_issues_summary }}
+
+    permissions:
+      issues: read
+      pull-requests: read
+      contents: read
+
+    steps:
+      - name: Detect stuck issues
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Detecting stuck issues ==="
+          STUCK_ISSUES=""
+          HAS_ISSUES="false"
+
+          # Find the active epic
+          EPIC_NUMBER=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "type:epic" \
+            --label "status:active" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -n "$EPIC_NUMBER" ] && [ "$EPIC_NUMBER" != "null" ]; then
+            echo "Active epic: #$EPIC_NUMBER"
+
+            # Get epic issues
+            EPIC_ISSUES=$(gh issue list \
+              --repo "${{ github.repository }}" \
+              --label "epic:message-history" \
+              --state open \
+              --json number,labels \
+              --jq '.[] | "\(.number)|\(.labels | map(.name) | join(","))"')
+
+            while IFS='|' read -r ISSUE_NUM ISSUE_LABELS; do
+              [ -z "$ISSUE_NUM" ] && continue
+
+              # Check if issue has no automation labels
+              if ! echo "$ISSUE_LABELS" | grep -qE "needs-review|ready-for-implementation|needs-attention|needs-clarification|needs-breakdown"; then
+                # Check blockers
+                ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json body --jq '.body')
+                BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
+                BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+
+                ALL_RESOLVED=true
+                for BLOCKER in $BLOCKERS; do
+                  [ "$BLOCKER" = "$ISSUE_NUM" ] && continue
+                  BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+                  [ "$BLOCKER_STATE" != "CLOSED" ] && ALL_RESOLVED=false && break
+                done
+
+                if [ "$ALL_RESOLVED" = "true" ]; then
+                  echo "STUCK: #$ISSUE_NUM - no labels but all blockers resolved"
+                  STUCK_ISSUES="$STUCK_ISSUES #$ISSUE_NUM"
+                  HAS_ISSUES="true"
+                fi
+              fi
+            done <<< "$EPIC_ISSUES"
+          fi
+
+          # Check for stale needs-review (2+ hours without activity)
+          STALE_REVIEWS=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "needs-review" \
+            --state open \
+            --json number,updatedAt \
+            --jq '.[] | select((now - (.updatedAt | fromdateiso8601)) > 7200) | .number')
+
+          for ISSUE_NUM in $STALE_REVIEWS; do
+            HAS_REVIEW=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json comments \
+              --jq '[.comments[] | select(.body | test("recommendation|ready-for-implementation|needs-clarification"; "i"))] | length')
+            if [ "$HAS_REVIEW" -eq 0 ]; then
+              echo "STALE REVIEW: #$ISSUE_NUM"
+              STUCK_ISSUES="$STUCK_ISSUES #$ISSUE_NUM(stale-review)"
+              HAS_ISSUES="true"
+            fi
+          done
+
+          # Check for stale ready-for-implementation (2+ hours without PR/status)
+          STALE_IMPL=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "ready-for-implementation" \
+            --state open \
+            --json number,updatedAt \
+            --jq '.[] | select((now - (.updatedAt | fromdateiso8601)) > 7200) | .number')
+
+          for ISSUE_NUM in $STALE_IMPL; do
+            HAS_STATUS=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json comments \
+              --jq '[.comments[] | select(.body | contains("claude-implementation-status"))] | length')
+            if [ "$HAS_STATUS" -eq 0 ]; then
+              echo "STALE IMPLEMENTATION: #$ISSUE_NUM"
+              STUCK_ISSUES="$STUCK_ISSUES #$ISSUE_NUM(stale-impl)"
+              HAS_ISSUES="true"
+            fi
+          done
+
+          echo "has_stuck_issues=$HAS_ISSUES" >> $GITHUB_OUTPUT
+          echo "stuck_issues_summary=$STUCK_ISSUES" >> $GITHUB_OUTPUT
+
+          if [ "$HAS_ISSUES" = "true" ]; then
+            echo ""
+            echo "=== Issues requiring attention: $STUCK_ISSUES ==="
+          else
+            echo "No stuck issues detected"
+          fi
+
+  claude-diagnose:
+    needs: detect-issues
+    if: needs.detect-issues.outputs.has_stuck_issues == 'true'
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: claude-automation
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Claude Code
+        id: setup-claude
+        uses: ./.github/actions/setup-claude-code
+
+      - name: Claude diagnoses and fixes stuck issues
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
+          prompt: |
+            STUCK ISSUES: ${{ needs.detect-issues.outputs.stuck_issues_summary }}
+
+            These issues appear stuck in the automation pipeline. Read `docs/guidelines/github-workflows.md`
+            to understand the workflow, then investigate each issue and fix whatever is blocking it.
+
+            Use `gh` commands to inspect issues, check blockers, and take corrective action
+            (add labels, fix issue bodies, post comments). Be concise.
+
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Read,Glob,Grep,Bash,TodoWrite"'
+
+  # Parallel job for orphan branch recovery (doesn't need Claude)
+  check-orphans:
     runs-on: ubuntu-latest
 
     permissions:
@@ -16,122 +173,6 @@ jobs:
       contents: read
 
     steps:
-      - name: Check for stale implementations
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "=== Checking for stale implementations ==="
-
-          # Find issues with ready-for-implementation but no PR and no recent activity
-          STALE_ISSUES=$(gh issue list \
-            --repo "${{ github.repository }}" \
-            --label "ready-for-implementation" \
-            --state open \
-            --json number,title,updatedAt,labels \
-            --jq '[.[] | select(.labels | map(.name) | index("needs-attention") | not)]')
-
-          echo "$STALE_ISSUES" | jq -c '.[]' | while read -r issue; do
-            ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
-            ISSUE_TITLE=$(echo "$issue" | jq -r '.title')
-            UPDATED=$(echo "$issue" | jq -r '.updatedAt')
-
-            # Check if updated more than 2 hours ago
-            UPDATED_EPOCH=$(date -d "$UPDATED" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$UPDATED" +%s 2>/dev/null || echo 0)
-            NOW_EPOCH=$(date +%s)
-            HOURS_AGO=$(( (NOW_EPOCH - UPDATED_EPOCH) / 3600 ))
-
-            if [ "$HOURS_AGO" -ge 2 ]; then
-              # Check if there's a linked PR
-              LINKED_PR=$(gh pr list \
-                --repo "${{ github.repository }}" \
-                --state open \
-                --json number,body \
-                --jq "[.[] | select(.body | test(\"#$ISSUE_NUMBER\"))] | .[0].number")
-
-              # Check if there's a status comment
-              HAS_STATUS=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json comments \
-                --jq '[.comments[] | select(.body | contains("claude-implementation-status"))] | length')
-
-              if [ -z "$LINKED_PR" ] && [ "$HAS_STATUS" -eq 0 ]; then
-                echo "Issue #$ISSUE_NUMBER is stale (${HOURS_AGO}h without activity or status)"
-
-                # Add needs-attention label
-                gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-attention"
-
-                gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
-          ## Stale Implementation Detected
-
-          This issue has \`ready-for-implementation\` but:
-          - No linked PR found
-          - No implementation status comment
-          - No activity for ${HOURS_AGO} hours
-
-          **Possible causes:**
-          - Implementation workflow didn't run
-          - Workflow was interrupted
-          - Claude forgot to post status
-
-          **To retry:** Remove and re-add \`ready-for-implementation\` label, or comment \`@claude Please implement this issue.\`
-          EOF
-          )"
-              fi
-            fi
-          done
-
-      - name: Check for stale reviews
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "=== Checking for stale reviews ==="
-
-          # Find issues with needs-review but no activity for 2+ hours
-          # This catches cases where issue-review.yml failed or didn't run
-          STALE_REVIEWS=$(gh issue list \
-            --repo "${{ github.repository }}" \
-            --label "needs-review" \
-            --state open \
-            --json number,title,updatedAt,labels \
-            --jq '[.[] | select(.labels | map(.name) | index("needs-attention") | not)]')
-
-          echo "$STALE_REVIEWS" | jq -c '.[]' | while read -r issue; do
-            ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
-            ISSUE_TITLE=$(echo "$issue" | jq -r '.title')
-            UPDATED=$(echo "$issue" | jq -r '.updatedAt')
-
-            # Check if updated more than 2 hours ago
-            UPDATED_EPOCH=$(date -d "$UPDATED" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$UPDATED" +%s 2>/dev/null || echo 0)
-            NOW_EPOCH=$(date +%s)
-            HOURS_AGO=$(( (NOW_EPOCH - UPDATED_EPOCH) / 3600 ))
-
-            if [ "$HOURS_AGO" -ge 2 ]; then
-              # Check if issue-review.yml has posted a review comment
-              HAS_REVIEW=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json comments \
-                --jq '[.comments[] | select(.body | test("recommendation|ready-for-implementation|needs-clarification"; "i"))] | length')
-
-              if [ "$HAS_REVIEW" -eq 0 ]; then
-                echo "Issue #$ISSUE_NUMBER has stale needs-review (${HOURS_AGO}h without review)"
-
-                # Add needs-attention label
-                gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-attention"
-
-                gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
-          ## Stale Review Detected
-
-          This issue has \`needs-review\` but:
-          - No review comment found
-          - No activity for ${HOURS_AGO} hours
-
-          **Possible causes:**
-          - Issue review workflow didn't run
-          - Workflow was interrupted or failed
-
-          **To retry:** Remove and re-add \`needs-review\` label.
-          EOF
-          )"
-              fi
-            fi
-          done
-
       - name: Check for orphan branches
         env:
           GH_TOKEN: ${{ github.token }}
@@ -192,103 +233,7 @@ jobs:
             fi
           done
 
-      - name: Diagnose epic blocker issues
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "=== Diagnosing epic blocker issues ==="
-
-          # Find the active epic
-          EPIC_NUMBER=$(gh issue list \
-            --repo "${{ github.repository }}" \
-            --label "type:epic" \
-            --label "status:active" \
-            --state open \
-            --json number \
-            --jq '.[0].number')
-
-          if [ -z "$EPIC_NUMBER" ] || [ "$EPIC_NUMBER" = "null" ]; then
-            echo "No active epic found, skipping diagnostics"
-          else
-            echo "Active epic: #$EPIC_NUMBER"
-
-            # Get all open epic issues
-            EPIC_LABEL=$(gh issue view "$EPIC_NUMBER" --repo "${{ github.repository }}" --json labels --jq '.labels[] | select(.name | startswith("epic:")) | .name' | head -1 || echo "")
-
-            if [ -z "$EPIC_LABEL" ]; then
-              # Try to derive label from title
-              EPIC_LABEL="epic:message-history"
-            fi
-
-            echo "Checking issues with label: $EPIC_LABEL"
-
-            EPIC_ISSUES=$(gh issue list \
-              --repo "${{ github.repository }}" \
-              --label "$EPIC_LABEL" \
-              --state open \
-              --json number,title,labels \
-              --jq '.[] | "\(.number)|\(.title)|\(.labels | map(.name) | join(","))"')
-
-            echo ""
-            echo "Open epic issues and their status:"
-            echo "─────────────────────────────────────"
-
-            while IFS='|' read -r ISSUE_NUM ISSUE_TITLE ISSUE_LABELS; do
-              [ -z "$ISSUE_NUM" ] && continue
-
-              # Check if issue has automation labels
-              HAS_REVIEW=$(echo "$ISSUE_LABELS" | grep -q "needs-review" && echo "yes" || echo "no")
-              HAS_READY=$(echo "$ISSUE_LABELS" | grep -q "ready-for-implementation" && echo "yes" || echo "no")
-              HAS_ATTENTION=$(echo "$ISSUE_LABELS" | grep -q "needs-attention" && echo "yes" || echo "no")
-
-              # Get blockers
-              ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json body --jq '.body')
-              BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
-              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
-
-              echo ""
-              echo "#$ISSUE_NUM: $ISSUE_TITLE"
-              echo "  Labels: needs-review=$HAS_REVIEW, ready=$HAS_READY, attention=$HAS_ATTENTION"
-
-              if [ -n "$BLOCKERS" ]; then
-                echo "  Blockers:"
-                for BLOCKER in $BLOCKERS; do
-                  if [ "$BLOCKER" = "$ISSUE_NUM" ]; then
-                    echo "    ⚠️  #$BLOCKER (SELF-REFERENCE - BUG!)"
-                  else
-                    BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
-                    if [ "$BLOCKER_STATE" = "CLOSED" ]; then
-                      echo "    ✅ #$BLOCKER ($BLOCKER_STATE)"
-                    else
-                      echo "    ❌ #$BLOCKER ($BLOCKER_STATE)"
-                    fi
-                  fi
-                done
-              else
-                echo "  Blockers: none"
-              fi
-
-              # Flag issues that should have labels but don't
-              if [ "$HAS_REVIEW" = "no" ] && [ "$HAS_READY" = "no" ] && [ "$HAS_ATTENTION" = "no" ]; then
-                # Check if all blockers are resolved
-                ALL_RESOLVED=true
-                for BLOCKER in $BLOCKERS; do
-                  [ "$BLOCKER" = "$ISSUE_NUM" ] && continue
-                  BLOCKER_STATE=$(gh issue view "$BLOCKER" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
-                  [ "$BLOCKER_STATE" != "CLOSED" ] && ALL_RESOLVED=false && break
-                done
-
-                if [ "$ALL_RESOLVED" = "true" ]; then
-                  echo "  ⚠️  POTENTIAL STUCK: No labels but all blockers resolved!"
-                fi
-              fi
-            done <<< "$EPIC_ISSUES"
-
-            echo ""
-            echo "─────────────────────────────────────"
-          fi
-
-      - name: Check for stuck PRs
+      - name: Log stuck PRs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
