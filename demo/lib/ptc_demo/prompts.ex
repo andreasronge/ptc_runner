@@ -2,7 +2,7 @@ defmodule PtcDemo.Prompts do
   @moduledoc """
   Prompt profiles for testing different LLM instruction styles.
 
-  This module delegates to `PtcRunner.Lisp.Prompts` for standard prompts.
+  This module delegates to `PtcRunner.Lisp.LanguageSpec` for standard language specs.
 
   Different prompts can be useful for:
   - Testing model capabilities with varying levels of detail
@@ -29,7 +29,7 @@ defmodule PtcDemo.Prompts do
       PtcDemo.Prompts.list()
   """
 
-  alias PtcRunner.Lisp.Prompts, as: LibPrompts
+  alias PtcRunner.Lisp.LanguageSpec, as: LibLanguageSpec
 
   @doc """
   Get a prompt profile by name.
@@ -54,7 +54,7 @@ defmodule PtcDemo.Prompts do
 
   # Delegate standard prompts to the library
   def get(profile) when profile in [:single_shot, :multi_turn, :base, :addon_memory] do
-    LibPrompts.get(profile)
+    LibLanguageSpec.get(profile)
   end
 
   @doc """
@@ -129,7 +129,7 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec version(atom()) :: pos_integer()
-  def version(profile), do: LibPrompts.version(profile)
+  def version(profile), do: LibLanguageSpec.version(profile)
 
   @doc """
   Get metadata for a prompt profile.
@@ -144,7 +144,7 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec metadata(atom()) :: map()
-  def metadata(profile), do: LibPrompts.metadata(profile)
+  def metadata(profile), do: LibLanguageSpec.metadata(profile)
 
   @doc """
   Check if a prompt profile is archived.
@@ -156,7 +156,7 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec archived?(atom()) :: boolean()
-  def archived?(profile), do: LibPrompts.archived?(profile)
+  def archived?(profile), do: LibLanguageSpec.archived?(profile)
 
   @doc """
   List only current (non-archived) prompt profiles.
@@ -170,6 +170,6 @@ defmodule PtcDemo.Prompts do
   """
   @spec list_current() :: [atom()]
   def list_current do
-    LibPrompts.list_current()
+    LibLanguageSpec.list_current()
   end
 end
