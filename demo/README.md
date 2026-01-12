@@ -652,7 +652,7 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 mix lisp --debug --prompt=multi_turn
 ```
 
-After an error, use `SubAgent.Debug.print_trace(step, messages: true)` to see:
+After an error, use `SubAgent.Debug.print_trace(step, raw: true)` to see:
 - The full LLM response (before code extraction)
 - What feedback was sent back to the LLM
 - How truncation affected the data
