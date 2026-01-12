@@ -158,6 +158,8 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Use PAT for git operations to avoid GitHub App workflow permission issues
+          github_token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
           path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
           prompt: |
             STUCK ISSUES: ${{ needs.detect-issues.outputs.stuck_issues_summary }}
