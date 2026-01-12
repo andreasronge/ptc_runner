@@ -12,7 +12,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
 
   @moduletag :e2e
 
-  alias PtcRunner.Lisp.Prompts
+  alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.SubAgent
   alias PtcRunner.TestSupport.LispLLMClient
   alias PtcRunner.TestSupport.LLM
@@ -37,7 +37,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
           signature: "() -> :int",
           max_turns: 1,
           # String override completely replaces generated prompt (no return/fail tools)
-          system_prompt: Prompts.get(@prompt_profile)
+          system_prompt: LanguageSpec.get(@prompt_profile)
         )
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback())
@@ -50,7 +50,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
           prompt: "How many items are in ctx/items?",
           signature: "(items [:any]) -> :int",
           max_turns: 1,
-          system_prompt: Prompts.get(@prompt_profile)
+          system_prompt: LanguageSpec.get(@prompt_profile)
         )
 
       context = %{"items" => [1, 2, 3, 4, 5]}
@@ -65,7 +65,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
           prompt: "What is the total of all :amount values in ctx/orders?",
           signature: "(orders [{:amount :int}]) -> :int",
           max_turns: 1,
-          system_prompt: Prompts.get(@prompt_profile)
+          system_prompt: LanguageSpec.get(@prompt_profile)
         )
 
       context = %{"orders" => [%{"amount" => 10}, %{"amount" => 20}, %{"amount" => 30}]}

@@ -1014,7 +1014,7 @@ Developers can customize the system prompt via the `system_prompt` field. This e
 | Form | Description |
 |------|-------------|
 | `String.t()` | Custom language specification string (used as-is) |
-| `atom()` | Resolved via `PtcRunner.Lisp.Prompts.get!/1` (e.g., `:minimal`, `:default`) |
+| `atom()` | Resolved via `PtcRunner.Lisp.LanguageSpec.get!/1` (e.g., `:minimal`, `:default`) |
 | `fn ctx -> String.t()` | Callback called per-turn with context map |
 
 **Callback context (for function form):**
@@ -1057,8 +1057,8 @@ SubAgent.new(
   signature: "(data :map) -> {result :map}",
   system_prompt: %{
     language_spec: fn ctx ->
-      alias PtcRunner.Lisp.Prompts
-      if ctx.turn > 1, do: Prompts.get(:multi_turn), else: Prompts.get(:minimal)
+      alias PtcRunner.Lisp.LanguageSpec
+      if ctx.turn > 1, do: LanguageSpec.get(:multi_turn), else: LanguageSpec.get(:minimal)
     end
   }
 )

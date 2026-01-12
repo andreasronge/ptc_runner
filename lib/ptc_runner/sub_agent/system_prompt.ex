@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   ## Language Spec
 
   The `:language_spec` option can be:
-  - **Atom** - Resolved via `PtcRunner.Lisp.Prompts.get!/1`
+  - **Atom** - Resolved via `PtcRunner.Lisp.LanguageSpec.get!/1`
   - **String** - Used as-is
   - **Callback** - `fn ctx -> "prompt" end`
 
@@ -49,7 +49,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   require Logger
 
-  alias PtcRunner.Lisp.Prompts
+  alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.MissionExpander
   alias PtcRunner.SubAgent.Signature
@@ -226,7 +226,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   def resolve_language_spec(spec, _context) when is_binary(spec), do: spec
 
   def resolve_language_spec(spec, _context) when is_atom(spec) do
-    Prompts.get!(spec)
+    LanguageSpec.get!(spec)
   end
 
   def resolve_language_spec(spec, context) when is_function(spec, 1) do
@@ -427,7 +427,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         }
 
       _ ->
-        {Prompts.get(default_spec), @output_format}
+        {LanguageSpec.get(default_spec), @output_format}
     end
   end
 

@@ -1,84 +1,84 @@
-defmodule PtcRunner.Lisp.PromptsTest do
+defmodule PtcRunner.Lisp.LanguageSpecTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Lisp.Prompts
+  alias PtcRunner.Lisp.LanguageSpec
 
-  doctest Prompts
+  doctest LanguageSpec
 
   describe "get/1" do
     test "returns single_shot prompt (base + single_shot addon)" do
-      prompt = Prompts.get(:single_shot)
+      prompt = LanguageSpec.get(:single_shot)
       assert is_binary(prompt)
       assert String.contains?(prompt, "PTC-Lisp")
       assert String.contains?(prompt, "Single-Shot")
     end
 
     test "returns multi_turn prompt (base + multi_turn addon)" do
-      prompt = Prompts.get(:multi_turn)
+      prompt = LanguageSpec.get(:multi_turn)
       assert is_binary(prompt)
       assert String.contains?(prompt, "PTC-Lisp")
       assert String.contains?(prompt, "Multi-Turn")
       # multi_turn is longer than single_shot
-      assert String.length(prompt) > String.length(Prompts.get(:single_shot))
+      assert String.length(prompt) > String.length(LanguageSpec.get(:single_shot))
     end
 
     test "returns base snippet" do
-      prompt = Prompts.get(:base)
+      prompt = LanguageSpec.get(:base)
       assert is_binary(prompt)
       assert String.contains?(prompt, "PTC-Lisp")
     end
 
     test "returns addon_single_shot snippet" do
-      prompt = Prompts.get(:addon_single_shot)
+      prompt = LanguageSpec.get(:addon_single_shot)
       assert is_binary(prompt)
       assert String.contains?(prompt, "Single-Shot")
     end
 
     test "returns addon_multi_turn snippet" do
-      prompt = Prompts.get(:addon_multi_turn)
+      prompt = LanguageSpec.get(:addon_multi_turn)
       assert is_binary(prompt)
       assert String.contains?(prompt, "State Persistence")
     end
 
     test "returns nil for unknown prompt" do
-      assert Prompts.get(:nonexistent) == nil
+      assert LanguageSpec.get(:nonexistent) == nil
     end
   end
 
   describe "get!/1" do
     test "returns prompt for valid key" do
-      prompt = Prompts.get!(:single_shot)
+      prompt = LanguageSpec.get!(:single_shot)
       assert is_binary(prompt)
     end
 
     test "raises for unknown prompt" do
       assert_raise ArgumentError, ~r/Unknown prompt: :nonexistent/, fn ->
-        Prompts.get!(:nonexistent)
+        LanguageSpec.get!(:nonexistent)
       end
     end
   end
 
   describe "compositions" do
     test "single_shot equals base + addon_single_shot" do
-      base = Prompts.get(:base)
-      addon = Prompts.get(:addon_single_shot)
+      base = LanguageSpec.get(:base)
+      addon = LanguageSpec.get(:addon_single_shot)
       expected = base <> "\n\n" <> addon
 
-      assert Prompts.get(:single_shot) == expected
+      assert LanguageSpec.get(:single_shot) == expected
     end
 
     test "multi_turn equals base + addon_multi_turn" do
-      base = Prompts.get(:base)
-      addon = Prompts.get(:addon_multi_turn)
+      base = LanguageSpec.get(:base)
+      addon = LanguageSpec.get(:addon_multi_turn)
       expected = base <> "\n\n" <> addon
 
-      assert Prompts.get(:multi_turn) == expected
+      assert LanguageSpec.get(:multi_turn) == expected
     end
   end
 
   describe "list/0" do
     test "returns list of available prompts" do
-      keys = Prompts.list()
+      keys = LanguageSpec.list()
       assert :single_shot in keys
       assert :multi_turn in keys
       assert :base in keys
@@ -89,7 +89,7 @@ defmodule PtcRunner.Lisp.PromptsTest do
 
   describe "list_with_descriptions/0" do
     test "returns list of {key, description} tuples" do
-      items = Prompts.list_with_descriptions()
+      items = LanguageSpec.list_with_descriptions()
       assert is_list(items)
 
       # Check structure
@@ -106,64 +106,64 @@ defmodule PtcRunner.Lisp.PromptsTest do
 
   describe "version/1" do
     test "returns a positive integer for base" do
-      version = Prompts.version(:base)
+      version = LanguageSpec.version(:base)
       assert is_integer(version)
       assert version >= 1
     end
 
     test "compositions return the same version as their base snippet" do
-      base_v = Prompts.version(:base)
-      assert Prompts.version(:single_shot) == base_v
-      assert Prompts.version(:multi_turn) == base_v
+      base_v = LanguageSpec.version(:base)
+      assert LanguageSpec.version(:single_shot) == base_v
+      assert LanguageSpec.version(:multi_turn) == base_v
     end
 
     test "raises for unknown prompt" do
       assert_raise ArgumentError, ~r/Unknown prompt: :nonexistent/, fn ->
-        Prompts.version(:nonexistent)
+        LanguageSpec.version(:nonexistent)
       end
     end
   end
 
   describe "metadata/1" do
     test "returns metadata for single_shot (from base)" do
-      meta = Prompts.metadata(:single_shot)
+      meta = LanguageSpec.metadata(:single_shot)
       assert is_map(meta)
     end
 
     test "returns metadata for base" do
-      meta = Prompts.metadata(:base)
+      meta = LanguageSpec.metadata(:base)
       assert is_map(meta)
     end
 
     test "raises for unknown prompt" do
       assert_raise ArgumentError, ~r/Unknown prompt: :nonexistent/, fn ->
-        Prompts.metadata(:nonexistent)
+        LanguageSpec.metadata(:nonexistent)
       end
     end
   end
 
   describe "archived?/1" do
     test "returns false for compositions" do
-      refute Prompts.archived?(:single_shot)
-      refute Prompts.archived?(:multi_turn)
+      refute LanguageSpec.archived?(:single_shot)
+      refute LanguageSpec.archived?(:multi_turn)
     end
 
     test "returns false for current snippets" do
-      refute Prompts.archived?(:base)
-      refute Prompts.archived?(:addon_single_shot)
-      refute Prompts.archived?(:addon_multi_turn)
+      refute LanguageSpec.archived?(:base)
+      refute LanguageSpec.archived?(:addon_single_shot)
+      refute LanguageSpec.archived?(:addon_multi_turn)
     end
 
     test "raises for unknown prompt" do
       assert_raise ArgumentError, ~r/Unknown prompt: :nonexistent/, fn ->
-        Prompts.archived?(:nonexistent)
+        LanguageSpec.archived?(:nonexistent)
       end
     end
   end
 
   describe "list_current/0" do
     test "returns list of current (non-archived) prompts" do
-      keys = Prompts.list_current()
+      keys = LanguageSpec.list_current()
       assert :single_shot in keys
       assert :multi_turn in keys
       assert :base in keys
@@ -172,8 +172,8 @@ defmodule PtcRunner.Lisp.PromptsTest do
     end
 
     test "list_current is subset of list" do
-      all_keys = Prompts.list()
-      current_keys = Prompts.list_current()
+      all_keys = LanguageSpec.list()
+      current_keys = LanguageSpec.list_current()
 
       for key <- current_keys do
         assert key in all_keys

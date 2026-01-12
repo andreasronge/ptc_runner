@@ -1,11 +1,11 @@
-defmodule PtcRunner.Lisp.Prompts do
+defmodule PtcRunner.Lisp.LanguageSpec do
   @moduledoc """
-  Prompt loader for PTC-Lisp language references.
+  Language specification loader for PTC-Lisp.
 
-  Loads prompt snippets from `priv/prompts/` directory at compile time and
+  Loads language spec snippets from `priv/prompts/` directory at compile time and
   provides compositions for common use cases.
 
-  ## Available Prompts
+  ## Available Specs
 
   | Key | Description |
   |-----|-------------|
@@ -22,7 +22,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Version Metadata
 
-  Prompt files can include optional metadata headers:
+  Spec files can include optional metadata headers:
 
       <!-- version: 2 -->
       <!-- date: 2025-01-15 -->
@@ -33,18 +33,18 @@ defmodule PtcRunner.Lisp.Prompts do
   ## Usage
 
       # For single-turn queries
-      PtcRunner.Lisp.Prompts.get(:single_shot)
+      PtcRunner.Lisp.LanguageSpec.get(:single_shot)
 
       # For multi-turn conversations
-      PtcRunner.Lisp.Prompts.get(:multi_turn)
+      PtcRunner.Lisp.LanguageSpec.get(:multi_turn)
 
       # Raw snippets for custom compositions
-      PtcRunner.Lisp.Prompts.get(:base) <> my_custom_addon
+      PtcRunner.Lisp.LanguageSpec.get(:base) <> my_custom_addon
 
       # Use in SubAgent
       SubAgent.new(
         prompt: "...",
-        system_prompt: %{language_spec: PtcRunner.Lisp.Prompts.get(:single_shot)}
+        system_prompt: %{language_spec: PtcRunner.Lisp.LanguageSpec.get(:single_shot)}
       )
   """
 
@@ -162,11 +162,11 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> prompt = PtcRunner.Lisp.Prompts.get(:single_shot)
+      iex> prompt = PtcRunner.Lisp.LanguageSpec.get(:single_shot)
       iex> is_binary(prompt)
       true
 
-      iex> prompt = PtcRunner.Lisp.Prompts.get(:multi_turn)
+      iex> prompt = PtcRunner.Lisp.LanguageSpec.get(:multi_turn)
       iex> String.contains?(prompt, "State Persistence")
       true
 
@@ -202,7 +202,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> prompt = PtcRunner.Lisp.Prompts.get!(:single_shot)
+      iex> prompt = PtcRunner.Lisp.LanguageSpec.get!(:single_shot)
       iex> is_binary(prompt)
       true
 
@@ -245,7 +245,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> meta = PtcRunner.Lisp.Prompts.metadata(:base)
+      iex> meta = PtcRunner.Lisp.LanguageSpec.metadata(:base)
       iex> is_map(meta)
       true
 
@@ -272,7 +272,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> PtcRunner.Lisp.Prompts.archived?(:single_shot)
+      iex> PtcRunner.Lisp.LanguageSpec.archived?(:single_shot)
       false
 
   """
@@ -297,7 +297,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> keys = PtcRunner.Lisp.Prompts.list()
+      iex> keys = PtcRunner.Lisp.LanguageSpec.list()
       iex> :single_shot in keys
       true
       iex> :multi_turn in keys
@@ -316,7 +316,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> keys = PtcRunner.Lisp.Prompts.list_current()
+      iex> keys = PtcRunner.Lisp.LanguageSpec.list_current()
       iex> :single_shot in keys
       true
       iex> :base in keys
@@ -343,7 +343,7 @@ defmodule PtcRunner.Lisp.Prompts do
 
   ## Examples
 
-      iex> list = PtcRunner.Lisp.Prompts.list_with_descriptions()
+      iex> list = PtcRunner.Lisp.LanguageSpec.list_with_descriptions()
       iex> Enum.any?(list, fn {k, _} -> k == :single_shot end)
       true
 

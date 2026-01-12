@@ -90,7 +90,7 @@ defmodule PtcRunner.SubAgent do
 
   Can be:
   - String: used as-is
-  - Atom: resolved via `PtcRunner.Lisp.Prompts.get!/1` (e.g., `:minimal`, `:default`)
+  - Atom: resolved via `PtcRunner.Lisp.LanguageSpec.get!/1` (e.g., `:minimal`, `:default`)
   - Function: callback receiving context map with `:turn`, `:model`, `:memory`, `:messages`
   """
   @type language_spec :: String.t() | atom() | (map() -> String.t())
