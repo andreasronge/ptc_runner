@@ -1,10 +1,7 @@
 name: Claude Stale Check
 
 on:
-  schedule:
-    # Run every 2 hours
-    - cron: '0 */2 * * *'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual trigger only
 
 jobs:
   detect-issues:
