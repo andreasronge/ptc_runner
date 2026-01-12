@@ -144,13 +144,12 @@ jobs:
               continue
             fi
 
-            # Check blockers first - only parse lines that start with "Blocked by:" or list items under it
-            # Stop at "Blocks:" or other sections to avoid false positives
-            BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/^[#*-]*[[:space:]]*\*\*[Bb]locks\|^##\|^$/p' | head -5 || true)
+            # Check blockers - only extract from the "Blocked by:" line itself
+            BLOCKED_LINE=$(echo "$ISSUE_BODY" | grep -i "blocked by:" | head -1 || true)
             ALL_RESOLVED=true
 
-            if [ -n "$BLOCKED_SECTION" ]; then
-              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE "#[0-9]+" | tr -d '#' | sort -u)
+            if [ -n "$BLOCKED_LINE" ]; then
+              BLOCKERS=$(echo "$BLOCKED_LINE" | grep -oE "#[0-9]+" | tr -d '#' | sort -u)
 
               for BLOCKER in $BLOCKERS; do
                 # Skip self-references (issue blocking itself is invalid)
