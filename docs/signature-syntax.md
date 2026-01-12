@@ -105,7 +105,7 @@ signature: "{summary :string, count :int, _email_ids [:int]}"
 ```
 
 Firewalled fields:
-- **Available** in Lisp context (`ctx/_email_ids`)
+- **Available** in Lisp context (`data/_email_ids`)
 - **Available** to Elixir code (`step.return._email_ids`)
 - **Hidden** from LLM prompt text (shown as `<Firewalled>`)
 - **Hidden** from parent LLM when agent is used as tool
@@ -141,7 +141,7 @@ signature: "[{id :int, title :string}]"
 
 ```elixir
 signature: "(user_id :int) -> {name :string, orders [:map]}"
-# Called as: (ctx/agent {:user_id 123})
+# Called as: (tool/agent {:user_id 123})
 # Returns: {:name "Alice" :orders [...]}
 ```
 
@@ -172,7 +172,7 @@ When a tool is called, inputs are validated against signature parameters:
 
 ```elixir
 # Signature: (id :int, name :string) -> :bool
-# Tool call: (ctx/check {:id "42" :name "Alice"})
+# Tool call: (tool/check {:id "42" :name "Alice"})
 
 # Behavior:
 # 1. Coerce "42" -> 42 (string to int, with warning)

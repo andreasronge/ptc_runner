@@ -97,7 +97,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
 
       ```clojure
       (real-example 1)  ; => 1
-      (illustrative ctx/data)  ; => ...
+      (illustrative data/items)  ; => ...
       ```
       """
 
@@ -611,7 +611,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
       {:ok, result} = SpecValidator.extract_examples()
 
       # Filter out examples that:
-      # - use ctx/ (needs special handling)
+      # - use data/ or tool/ (needs special handling - requires context/tools)
       # - reference undefined functions like do-something (Clojure analyzes dead code)
       # - use PTC-Lisp extension functions (floor, ceil, round, trunc, pmap, pcalls are not standard Clojure)
       # - compare character literals to strings (PTC-Lisp represents chars as strings internally)
@@ -619,7 +619,7 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
         result.examples
         |> Enum.reject(fn {code, _expected, _section} ->
           # Character literal equality with strings is a PTC-Lisp extension (§3.5)
-          String.contains?(code, "ctx/") or
+          String.contains?(code, "data/") or String.contains?(code, "tool/") or
             String.contains?(code, "do-something") or
             Regex.match?(~r/\(floor\s/, code) or
             Regex.match?(~r/\(ceil\s/, code) or

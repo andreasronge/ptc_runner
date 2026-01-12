@@ -357,7 +357,7 @@ defmodule PtcRunner.SubAgent do
 
       # Using a SubAgent struct
       iex> agent = PtcRunner.SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
-      iex> llm = fn %{messages: [%{content: _prompt}]} -> {:ok, "```clojure\\n(+ ctx/x ctx/y)\\n```"} end
+      iex> llm = fn %{messages: [%{content: _prompt}]} -> {:ok, "```clojure\\n(+ data/x data/y)\\n```"} end
       iex> {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{x: 5, y: 3})
       iex> step.return
       8
@@ -548,8 +548,8 @@ defmodule PtcRunner.SubAgent do
       iex> mock_llm = fn %{messages: msgs} ->
       ...>   content = msgs |> List.last() |> Map.get(:content)
       ...>   cond do
-      ...>     content =~ "Double" -> {:ok, "```clojure\\n{:result (* 2 ctx/n)}\\n```"}
-      ...>     content =~ "Add 10" -> {:ok, "```clojure\\n{:final (+ ctx/result 10)}\\n```"}
+      ...>     content =~ "Double" -> {:ok, "```clojure\\n{:result (* 2 data/n)}\\n```"}
+      ...>     content =~ "Add 10" -> {:ok, "```clojure\\n{:final (+ data/result 10)}\\n```"}
       ...>   end
       ...> end
       iex> result = PtcRunner.SubAgent.run!(doubler, llm: mock_llm, context: %{n: 5})
@@ -620,7 +620,7 @@ defmodule PtcRunner.SubAgent do
   end
 
   # Validates that tool names don't conflict with context data keys.
-  # Conflicts would cause undefined behavior in the ctx/ namespace.
+  # Conflicts would cause undefined behavior in the tool/ and data/ namespaces.
   defp validate_tool_data_conflict!(tools, _raw_context) when map_size(tools) == 0 do
     # No tools, no conflict possible
     :ok
@@ -648,7 +648,7 @@ defmodule PtcRunner.SubAgent do
 
     if MapSet.size(conflicts) > 0 do
       conflict_name = conflicts |> MapSet.to_list() |> List.first()
-      raise ArgumentError, "ctx/#{conflict_name} is both a tool and data - rename one"
+      raise ArgumentError, "#{conflict_name} is both a tool and data - rename one"
     end
 
     :ok

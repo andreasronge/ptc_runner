@@ -79,8 +79,8 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
   defp build_tools_for_source(source) do
     base_tools = %{"test_tool" => fn _args -> :result end}
 
-    # Match ctx/tool-name patterns in generated source
-    Regex.scan(~r/\(ctx\/([a-z0-9_-]+)/, source)
+    # Match tool/tool-name patterns in generated source
+    Regex.scan(~r/\(tool\/([a-z0-9_-]+)/, source)
     |> Enum.reduce(base_tools, fn [_full, tool_name], acc ->
       Map.put_new(acc, tool_name, fn _args -> :result end)
     end)

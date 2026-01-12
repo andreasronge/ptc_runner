@@ -258,16 +258,16 @@ defmodule PtcRunner.Lisp.DefnTest do
       assert result == 42
     end
 
-    test "defn can reference ctx/ data" do
-      source = "(do (defn get-rate [] ctx/rate) (get-rate))"
+    test "defn can reference data/ data" do
+      source = "(do (defn get-rate [] data/rate) (get-rate))"
       ctx = %{rate: 0.15}
       {:ok, %{return: result}} = Lisp.run(source, context: ctx)
 
       assert result == 0.15
     end
 
-    test "defn can call ctx/ tools" do
-      source = "(do (defn search-for [q] (ctx/search {:query q})) (search-for \"test\"))"
+    test "defn can call tool/ tools" do
+      source = "(do (defn search-for [q] (tool/search {:query q})) (search-for \"test\"))"
       tools = %{"search" => fn %{query: q} -> [%{query: q}] end}
       {:ok, %{return: result}} = Lisp.run(source, tools: tools)
 
@@ -326,8 +326,8 @@ defmodule PtcRunner.Lisp.DefnTest do
       source1 = "(defn expensive? [e] (> (:amount e) 5000))"
       {:ok, %{memory: user_ns1}} = Lisp.run(source1)
 
-      # Turn 2: use function with ctx data
-      source2 = "(filter expensive? ctx/expenses)"
+      # Turn 2: use function with data
+      source2 = "(filter expensive? data/expenses)"
       ctx = %{expenses: [%{amount: 3000}, %{amount: 7000}, %{amount: 10_000}]}
       {:ok, %{return: result}} = Lisp.run(source2, memory: user_ns1, context: ctx)
 

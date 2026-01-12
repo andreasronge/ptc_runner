@@ -257,12 +257,12 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
 
   describe "tool integration" do
     test "apply with tool call via analyzer support" do
-      # If we want (apply ctx/test-tool [arg-map]) to work,
+      # If we want (apply tool/test-tool [arg-map]) to work,
       # we might need to update the analyzer to recognize this pattern.
       # For now, let's see what happens if we use a closure that calls the tool.
       env = Env.initial()
-      # (apply (fn [args] (ctx/test-tool args)) [{:x 1}])
-      tool_call = {:ctx_call, :test_tool, [{:var, :args}]}
+      # (apply (fn [args] (tool/test-tool args)) [{:x 1}])
+      tool_call = {:tool_call, :test_tool, [{:var, :args}]}
       closure = {:fn, [{:var, :args}], tool_call}
       ast = {:call, {:var, :apply}, [closure, {:vector, [{:map, [{{:keyword, :x}, 1}]}]}]}
 

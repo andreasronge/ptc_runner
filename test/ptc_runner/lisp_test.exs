@@ -16,11 +16,11 @@ defmodule PtcRunner.LispTest do
   describe "context access" do
     test "accesses context variables" do
       assert {:ok, %{return: 10, memory: %{}}} =
-               Lisp.run("ctx/x", context: %{x: 10})
+               Lisp.run("data/x", context: %{x: 10})
     end
 
     test "context access returns nil for missing keys" do
-      assert {:ok, %{return: nil, memory: %{}}} = Lisp.run("ctx/missing")
+      assert {:ok, %{return: nil, memory: %{}}} = Lisp.run("data/missing")
     end
   end
 
@@ -125,7 +125,7 @@ defmodule PtcRunner.LispTest do
 
     test "vector with context access" do
       assert {:ok, %{return: [10, 20], memory: %{}}} =
-               Lisp.run("[ctx/x ctx/y]", context: %{x: 10, y: 20})
+               Lisp.run("[data/x data/y]", context: %{x: 10, y: 20})
     end
   end
 
@@ -142,19 +142,19 @@ defmodule PtcRunner.LispTest do
 
     test "map with context values" do
       assert {:ok, %{return: %{x: 10}, memory: %{}}} =
-               Lisp.run("{:x ctx/x}", context: %{x: 10})
+               Lisp.run("{:x data/x}", context: %{x: 10})
     end
   end
 
   describe "keyword as function" do
     test "extract key from map" do
       assert {:ok, %{return: "Alice", memory: %{}}} =
-               Lisp.run("(:name ctx/user)", context: %{user: %{name: "Alice"}})
+               Lisp.run("(:name data/user)", context: %{user: %{name: "Alice"}})
     end
 
     test "extract with default" do
       assert {:ok, %{return: "default", memory: %{}}} =
-               Lisp.run("(:missing ctx/user \"default\")", context: %{user: %{}})
+               Lisp.run("(:missing data/user \"default\")", context: %{user: %{}})
     end
 
     test "extract from nil" do
@@ -164,7 +164,7 @@ defmodule PtcRunner.LispTest do
 
   describe "where predicates" do
     test "equality predicate" do
-      source = "(filter (where :status = \"active\") ctx/items)"
+      source = "(filter (where :status = \"active\") data/items)"
       ctx = %{items: [%{status: "active"}, %{status: "inactive"}]}
 
       assert {:ok, %{return: [%{status: "active"}], memory: %{}}} =
@@ -172,7 +172,7 @@ defmodule PtcRunner.LispTest do
     end
 
     test "greater than predicate" do
-      source = "(filter (where :age > 18) ctx/items)"
+      source = "(filter (where :age > 18) data/items)"
       ctx = %{items: [%{age: 20}, %{age: 15}]}
 
       assert {:ok, %{return: [%{age: 20}], memory: %{}}} =
@@ -180,7 +180,7 @@ defmodule PtcRunner.LispTest do
     end
 
     test "truthy predicate" do
-      source = "(filter (where :active) ctx/items)"
+      source = "(filter (where :active) data/items)"
       ctx = %{items: [%{active: true}, %{active: false}, %{active: nil}]}
 
       assert {:ok, %{return: [%{active: true}], memory: %{}}} =
@@ -190,7 +190,7 @@ defmodule PtcRunner.LispTest do
 
   describe "predicate combinators" do
     test "all-of combines predicates" do
-      source = "(filter (all-of (where :a = 1) (where :b = 2)) ctx/items)"
+      source = "(filter (all-of (where :a = 1) (where :b = 2)) data/items)"
       ctx = %{items: [%{a: 1, b: 2}, %{a: 1, b: 3}, %{a: 2, b: 2}]}
 
       assert {:ok, %{return: [%{a: 1, b: 2}], memory: %{}}} =
@@ -198,7 +198,7 @@ defmodule PtcRunner.LispTest do
     end
 
     test "empty all-of is true" do
-      source = "(filter (all-of) ctx/items)"
+      source = "(filter (all-of) data/items)"
       ctx = %{items: [%{a: 1}, %{a: 2}]}
 
       assert {:ok, %{return: [%{a: 1}, %{a: 2}], memory: %{}}} =
@@ -206,7 +206,7 @@ defmodule PtcRunner.LispTest do
     end
 
     test "empty any-of is false" do
-      source = "(filter (any-of) ctx/items)"
+      source = "(filter (any-of) data/items)"
       ctx = %{items: [%{a: 1}, %{a: 2}]}
       assert {:ok, %{return: [], memory: %{}}} = Lisp.run(source, context: ctx)
     end
@@ -257,14 +257,14 @@ defmodule PtcRunner.LispTest do
       tools = %{"greet" => fn _args -> "hello" end}
 
       assert {:ok, %{return: "hello", memory: %{}}} =
-               Lisp.run("(ctx/greet)", tools: tools)
+               Lisp.run("(tool/greet)", tools: tools)
     end
 
     test "gives helpful message for unknown tool" do
       tools = %{"greet" => fn _args -> "hello" end}
 
       assert {:error, %{fail: %{reason: :unknown_tool, message: msg}}} =
-               Lisp.run("(ctx/unknown)", tools: tools)
+               Lisp.run("(tool/unknown)", tools: tools)
 
       assert msg =~ "Unknown tool: unknown"
       assert msg =~ "Available tools: greet"
@@ -274,14 +274,14 @@ defmodule PtcRunner.LispTest do
       tools = %{"kaboom" => fn _args -> {:error, "boom"} end}
 
       assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
-               Lisp.run("(ctx/kaboom)", tools: tools)
+               Lisp.run("(tool/kaboom)", tools: tools)
 
       assert msg =~ "Tool 'kaboom' failed: \"boom\""
     end
 
     test "gives helpful message for unknown tool with no tools" do
       assert {:error, %{fail: %{reason: :unknown_tool, message: msg}}} =
-               Lisp.run("(ctx/unknown)", tools: %{})
+               Lisp.run("(tool/unknown)", tools: %{})
 
       assert msg =~ "No tools available"
     end
@@ -292,7 +292,7 @@ defmodule PtcRunner.LispTest do
       }
 
       assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
-               Lisp.run("(ctx/kaboom)", tools: tools)
+               Lisp.run("(tool/kaboom)", tools: tools)
 
       assert msg =~ "Tool 'kaboom' failed: \"unexpected error\""
     end

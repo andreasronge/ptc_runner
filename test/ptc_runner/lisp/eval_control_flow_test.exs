@@ -17,11 +17,11 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
 
     test "context access" do
       ctx = %{user: "alice"}
-      assert {:ok, "alice", %{}} = Eval.eval({:ctx, :user}, ctx, %{}, %{}, &dummy_tool/2)
+      assert {:ok, "alice", %{}} = Eval.eval({:data, :user}, ctx, %{}, %{}, &dummy_tool/2)
     end
 
     test "context access returns nil if key missing" do
-      assert {:ok, nil, %{}} = Eval.eval({:ctx, :missing}, %{}, %{}, %{}, &dummy_tool/2)
+      assert {:ok, nil, %{}} = Eval.eval({:data, :missing}, %{}, %{}, %{}, &dummy_tool/2)
     end
   end
 

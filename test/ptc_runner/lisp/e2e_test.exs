@@ -115,7 +115,7 @@ defmodule PtcRunner.Lisp.E2ETest do
   describe "juxt function combinator" do
     test "multi-criteria sorting with juxt" do
       # Sort by priority (ascending) then name (ascending)
-      program = "(sort-by (juxt :priority :name) ctx/tasks)"
+      program = "(sort-by (juxt :priority :name) data/tasks)"
 
       context = %{
         tasks: [
@@ -196,7 +196,7 @@ defmodule PtcRunner.Lisp.E2ETest do
         v * 2
       end
 
-      program = "(pmap #(ctx/slow-process {:value %}) [1 2 3 4 5])"
+      program = "(pmap #(tool/slow-process {:value %}) [1 2 3 4 5])"
 
       {time_us, {:ok, %Step{return: result}}} =
         :timer.tc(fn ->
@@ -275,9 +275,9 @@ defmodule PtcRunner.Lisp.E2ETest do
 
       program = """
       (pcalls
-        #(ctx/get-user {:id 1})
-        #(ctx/get-stats {:id 2})
-        #(ctx/get-config {}))
+        #(tool/get-user {:id 1})
+        #(tool/get-stats {:id 2})
+        #(tool/get-config {}))
       """
 
       {time_us, {:ok, %Step{return: result}}} =

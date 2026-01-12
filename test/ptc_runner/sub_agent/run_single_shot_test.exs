@@ -12,7 +12,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       # Capture what the LLM receives in single-shot mode
       llm = fn input ->
         send(self(), {:llm_input, input})
-        {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"}
+        {:ok, "```clojure\n(+ data/x data/y)\n```"}
       end
 
       {:ok, _step} = SubAgent.run(agent, llm: llm, context: context)
@@ -25,8 +25,8 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert system_prompt =~ "Write programs that accomplish the user's mission"
       assert system_prompt =~ "thinking:"
       assert system_prompt =~ "# Data Inventory"
-      assert system_prompt =~ "ctx/x"
-      assert system_prompt =~ "ctx/y"
+      assert system_prompt =~ "data/x"
+      assert system_prompt =~ "data/y"
       assert system_prompt =~ "# Available Tools"
       assert system_prompt =~ "# Output Format"
       assert system_prompt =~ "# Mission"
@@ -93,7 +93,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
     test "executes with template expansion" do
       agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
-      llm = fn _input -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+      llm = fn _input -> {:ok, "```clojure\n(+ data/x data/y)\n```"} end
 
       {:ok, step} = SubAgent.run(agent, llm: llm, context: %{x: 10, y: 5})
 
@@ -102,7 +102,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
     test "executes with string keys in context" do
       agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
-      llm = fn _input -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+      llm = fn _input -> {:ok, "```clojure\n(+ data/x data/y)\n```"} end
 
       {:ok, step} = SubAgent.run(agent, llm: llm, context: %{"x" => 7, "y" => 3})
 
@@ -227,7 +227,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
     test "collect_messages: true with template expansion" do
       agent = SubAgent.new(prompt: "Calculate {{x}} + {{y}}", max_turns: 1)
-      llm = fn _input -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+      llm = fn _input -> {:ok, "```clojure\n(+ data/x data/y)\n```"} end
 
       {:ok, step} = SubAgent.run(agent, llm: llm, context: %{x: 10, y: 5}, collect_messages: true)
 

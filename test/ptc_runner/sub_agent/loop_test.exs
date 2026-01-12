@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(return {:result (+ ctx/x ctx/y)})
+(return {:result (+ data/x data/y)})
 ```|}
       end
 
@@ -249,7 +249,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
         case turn do
           1 -> {:ok, ~S|```clojure
-(ctx/get-value {:key "x"})
+(tool/get-value {:key "x"})
 ```|}
           2 -> {:ok, ~S|```clojure
 (return {:result {:value 42}})
@@ -266,7 +266,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
   end
 
   describe "run/2 with context and memory" do
-    test "provides context via ctx/ namespace" do
+    test "provides context via data/ namespace" do
       agent =
         SubAgent.new(
           prompt: "Use context",
@@ -276,7 +276,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(return {:value (get ctx/data "key")})
+(return {:value (get data/data "key")})
 ```|}
       end
 
@@ -285,7 +285,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.return == %{value: "value"}
     end
 
-    test "makes previous turn error available as ctx/fail" do
+    test "makes previous turn error available as data/fail" do
       turn_counter = :counters.new(1, [:atomics])
 
       agent =
@@ -303,16 +303,16 @@ defmodule PtcRunner.SubAgent.LoopTest do
             {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"}
 
           2 ->
-            # On turn 2, ctx/fail should be available
+            # On turn 2, data/fail should be available
             {:ok, ~S|```clojure
-(return {:fail ctx/fail})
+(return {:fail data/fail})
 ```|}
         end
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      # The second turn should successfully access ctx/fail
+      # The second turn should successfully access data/fail
       assert is_map(step.return)
       assert Map.has_key?(step.return, :fail)
       assert is_map(step.return.fail)
@@ -460,7 +460,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(return {:sum (+ ctx/x ctx/y)})
+(return {:sum (+ data/x data/y)})
 ```|}
       end
 
@@ -489,7 +489,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(if (> ctx/n 0)
+(if (> data/n 0)
   (return {:sign :positive})
   (return {:sign :non-positive}))
 ```|}
@@ -521,7 +521,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(fail {:error (str "code: " ctx/code)})
+(fail {:error (str "code: " data/code)})
 ```|}
       end
 
@@ -634,7 +634,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
             # V2: Use def to explicitly store data in memory
             # This will exceed the memory limit
             {:ok, ~S|```clojure
-(def large-data (ctx/get-large {}))
+(def large-data (tool/get-large {}))
 ```|}
 
           _ ->
@@ -1110,7 +1110,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
 
         case turn do
-          1 -> {:ok, "```clojure\n(ctx/get-value {})\n```"}
+          1 -> {:ok, "```clojure\n(tool/get-value {})\n```"}
           2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
           _ -> {:ok, "```clojure\n(return :done)\n```"}
         end
@@ -1138,7 +1138,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
         Agent.update(messages_log, fn log -> [{turn, messages} | log] end)
 
         case turn do
-          1 -> {:ok, "```clojure\n(ctx/get-value {})\n```"}
+          1 -> {:ok, "```clojure\n(tool/get-value {})\n```"}
           2 -> {:ok, "```clojure\n(return {:result 42})\n```"}
           _ -> {:ok, "```clojure\n(return :done)\n```"}
         end

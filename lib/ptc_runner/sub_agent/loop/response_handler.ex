@@ -284,23 +284,23 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   @doc """
   Check if code contains a call to a specific tool.
 
-  Recognizes ctx/ syntax `(ctx/tool-name ...)` and
+  Recognizes tool/ syntax `(tool/tool-name ...)` and
   shorthand syntax for return/fail `(return ...)` / `(fail ...)`.
   """
   @spec contains_call?(String.t(), String.t()) :: boolean()
   def contains_call?(code, tool_name) do
-    # Tool names may appear in either form in ctx/ namespace:
-    # - "get-users" as ctx/get-users
-    # - "get_users" as ctx/get_users
+    # Tool names may appear in either form in tool/ namespace:
+    # - "get-users" as tool/get-users
+    # - "get_users" as tool/get_users
     # We check for the tool name as-is (with underscore or hyphen)
-    ctx_match = Regex.match?(~r/\(ctx\/#{Regex.escape(tool_name)}[\s\{\)]/, code)
+    tool_match = Regex.match?(~r/\(tool\/#{Regex.escape(tool_name)}[\s\{\)]/, code)
 
     # Shorthand only for return and fail
     shorthand_match =
       tool_name in ["return", "fail"] and
         Regex.match?(~r/\(#{tool_name}[\s\{]/, code)
 
-    ctx_match or shorthand_match
+    tool_match or shorthand_match
   end
 
   @doc """

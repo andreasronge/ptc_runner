@@ -47,7 +47,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
     test "count items in context" do
       agent =
         SubAgent.new(
-          prompt: "How many items are in ctx/items?",
+          prompt: "How many items are in data/items?",
           signature: "(items [:any]) -> :int",
           max_turns: 1,
           system_prompt: LanguageSpec.get(@prompt_profile)
@@ -62,7 +62,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
     test "sum field in context" do
       agent =
         SubAgent.new(
-          prompt: "What is the total of all :amount values in ctx/orders?",
+          prompt: "What is the total of all :amount values in data/orders?",
           signature: "(orders [{amount :int}]) -> :int",
           max_turns: 1,
           system_prompt: LanguageSpec.get(@prompt_profile)

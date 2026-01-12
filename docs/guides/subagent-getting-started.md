@@ -386,7 +386,7 @@ Use `defn` to define reusable functions:
 
 ```clojure
 (defn expensive? [item] (> (:price item) 1000))
-(filter expensive? ctx/items)
+(filter expensive? data/items)
 ```
 
 State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-concepts.md) for details.

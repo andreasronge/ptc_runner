@@ -237,7 +237,7 @@ defmodule PtcRunner.Lisp.DefTest do
     end
 
     test "def with tool call result" do
-      source = "(def results (ctx/search {:query \"test\"}))"
+      source = "(def results (tool/search {:query \"test\"}))"
       tools = %{"search" => fn _args -> [%{id: 1}, %{id: 2}] end}
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source, tools: tools)
 
@@ -261,8 +261,8 @@ defmodule PtcRunner.Lisp.DefTest do
       assert step.fail.message =~ "filter"
     end
 
-    test "def can shadow ctx names but ctx/ prefix still works" do
-      source = "(do (def expenses []) [expenses ctx/expenses])"
+    test "def can shadow data names but data/ prefix still works" do
+      source = "(do (def expenses []) [expenses data/expenses])"
       ctx = %{expenses: [%{id: 1}]}
       {:ok, %{return: result}} = Lisp.run(source, context: ctx)
 

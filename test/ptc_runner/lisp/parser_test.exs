@@ -67,7 +67,8 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "namespaced symbols" do
-      assert {:ok, {:ns_symbol, :ctx, :input}} = Parser.parse("ctx/input")
+      assert {:ok, {:ns_symbol, :data, :input}} = Parser.parse("data/input")
+      assert {:ok, {:ns_symbol, :tool, :search}} = Parser.parse("tool/search")
       assert {:ok, {:ns_symbol, :foo, :bar}} = Parser.parse("foo/bar")
     end
 
@@ -184,13 +185,13 @@ defmodule PtcRunner.Lisp.ParserTest do
   describe "complex expressions" do
     test "threading macro" do
       source = """
-      (->> ctx/products
+      (->> data/products
            (filter (where :in-stock))
            (sort-by :price)
            (take 10))
       """
 
-      assert {:ok, {:list, [{:symbol, :"->>"}, {:ns_symbol, :ctx, :products} | _]}} =
+      assert {:ok, {:list, [{:symbol, :"->>"}, {:ns_symbol, :data, :products} | _]}} =
                Parser.parse(source)
     end
 

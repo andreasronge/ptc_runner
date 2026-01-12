@@ -237,7 +237,7 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
 
   defp ptc_compatible?({code, _expected, _section}) do
     # Skip examples with PTC-specific features
-    ptc_specific = ["ctx/", "where", "all-of", "any-of", "none-of", "call"]
+    ptc_specific = ["tool/", "data/", "where", "all-of", "any-of", "none-of", "call"]
     not Enum.any?(ptc_specific, &String.contains?(code, &1))
   end
 

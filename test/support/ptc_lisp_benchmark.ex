@@ -97,14 +97,14 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
         level: 1,
         task: "Filter products where price is greater than 100",
         context_description:
-          "ctx/products contains a list of products with :name and :price fields"
+          "data/products contains a list of products with :name and :price fields"
       },
       %{
         name: "simple_count",
         level: 1,
         task: "Count the number of active users",
         context_description:
-          "ctx/users contains a list of users with :name and :active (boolean) fields"
+          "data/users contains a list of users with :name and :active (boolean) fields"
       },
 
       # Level 2: Medium (pipelines, multiple operations)
@@ -114,13 +114,13 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
         task:
           "Get the top 5 highest-paid employees (filter salary > 50000, sort by salary descending, take 5)",
         context_description:
-          "ctx/employees contains a list with :name, :department, and :salary fields"
+          "data/employees contains a list with :name, :department, and :salary fields"
       },
       %{
         name: "aggregate_sum",
         level: 2,
         task: "Calculate the total amount of all completed orders",
-        context_description: "ctx/orders contains a list with :id, :amount, and :status fields"
+        context_description: "data/orders contains a list with :id, :amount, and :status fields"
       },
 
       # Level 3: Hard (predicates, combinators, conditionals)
@@ -130,14 +130,14 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
         task:
           "Find all products that are either in the 'electronics' category OR cost more than 500, but exclude any that are out of stock",
         context_description:
-          "ctx/products has :name, :category, :price, and :in_stock (boolean) fields"
+          "data/products has :name, :category, :price, and :in_stock (boolean) fields"
       },
       %{
         name: "conditional_logic",
         level: 3,
         task:
           "Categorize each order as 'small' (amount < 100), 'medium' (100-500), or 'large' (> 500). Return a list of maps with :id and :size",
-        context_description: "ctx/orders contains a list with :id and :amount fields"
+        context_description: "data/orders contains a list with :id and :amount fields"
       },
 
       # Level 4: Complex (tool calls, memory, closures)
@@ -164,21 +164,21 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
         level: 5,
         task: "Filter to only active users (where :active is true)",
         context_description:
-          "ctx/users contains a list of users with :name, :email, and :active (boolean) fields. Note: Use explicit equality check with operator."
+          "data/users contains a list of users with :name, :email, and :active (boolean) fields. Note: Use explicit equality check with operator."
       },
       %{
         name: "edge_range_check",
         level: 5,
         task: "Find all products with price between 100 and 500 (inclusive on both ends)",
         context_description:
-          "ctx/products contains a list with :name and :price fields. Note: PTC-Lisp only supports 2-arity comparisons, not 3-arity range syntax."
+          "data/products contains a list with :name and :price fields. Note: PTC-Lisp only supports 2-arity comparisons, not 3-arity range syntax."
       },
       %{
         name: "edge_multi_field_extract",
         level: 5,
         task: "Extract :id and :name from each order into a new list of maps",
         context_description:
-          "ctx/orders contains a list with :id, :name, :amount, and :status fields. Note: If using fn, destructuring must be in let bindings, not fn parameters."
+          "data/orders contains a list with :id, :name, :amount, and :status fields. Note: If using fn, destructuring must be in let bindings, not fn parameters."
       }
     ]
   end

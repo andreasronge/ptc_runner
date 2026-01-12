@@ -25,7 +25,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # let binding, map literal with pluck
       # V2: just returns the map, no implicit memory merge
       source = ~S"""
-      (let [high-paid (->> (ctx/find-employees {})
+      (let [high-paid (->> (tool/find-employees {})
                            (filter (where :salary > 100000)))]
         {:emails (pluck :email high-paid)
          :high-paid high-paid
@@ -58,7 +58,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Tests behavior when filter produces empty list
       # V2: returns count directly, no implicit memory
       source = ~S"""
-      (let [results (->> (ctx/search {})
+      (let [results (->> (tool/search {})
                          (filter (where :active = true)))]
         (count results))
       """
@@ -101,7 +101,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Tests that comparison with nil doesn't error and filters correctly
       # V2: returns count directly, no implicit memory
       source = ~S"""
-      (let [filtered (->> ctx/items
+      (let [filtered (->> data/items
                          (filter (where :age > 18)))]
         (count filtered))
       """
@@ -132,7 +132,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     test "thread-last with multiple transformations" do
       # Thread-last: value goes as last argument
       source = ~S"""
-      (->> (ctx/get-numbers {})
+      (->> (tool/get-numbers {})
            (filter (where :value > 1))
            first
            (:name))
@@ -154,7 +154,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "cond desugars to nested if correctly" do
       source = ~S"""
-      (let [x ctx/x]
+      (let [x data/x]
         (cond
           (> x 10) "big"
           (> x 5) "medium"
@@ -173,7 +173,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "map destructuring in let bindings" do
       source = ~S"""
-      (let [{:keys [name age]} ctx/user]
+      (let [{:keys [name age]} data/user]
         {:name name
          :age age})
       """
@@ -194,7 +194,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # V2: no :return special handling, just return filtered list directly
       source = ~S"""
       (let [threshold 100]
-        (filter (fn [x] (> (:price x) threshold)) ctx/products))
+        (filter (fn [x] (> (:price x) threshold)) data/products))
       """
 
       ctx = %{
@@ -217,7 +217,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # This tests that renaming bindings {bind-name :key} now work
       # This is now a valid feature matching Clojure destructuring conventions
       source = ~S"""
-      (map (fn [{item :id}] item) ctx/items)
+      (map (fn [{item :id}] item) data/items)
       """
 
       ctx = %{items: [%{id: 1}, %{id: 2}]}
@@ -229,7 +229,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "juxt enables multi-criteria sorting" do
       source = ~S"""
-      (sort-by (juxt :priority :name) ctx/tasks)
+      (sort-by (juxt :priority :name) data/tasks)
       """
 
       ctx = %{
@@ -251,7 +251,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
 
     test "juxt with map extracts multiple values" do
-      source = "(map (juxt :x :y) ctx/points)"
+      source = "(map (juxt :x :y) data/points)"
 
       ctx = %{points: [%{x: 1, y: 2}, %{x: 3, y: 4}]}
 

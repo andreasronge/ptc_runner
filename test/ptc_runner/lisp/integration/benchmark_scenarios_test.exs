@@ -17,7 +17,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 1 - simple_filter" do
     test "filters products where price > 100" do
       source = ~S"""
-      (filter (where :price > 100) ctx/products)
+      (filter (where :price > 100) data/products)
       """
 
       ctx = %{
@@ -40,7 +40,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 1 - simple_count" do
     test "counts active users" do
       source = ~S"""
-      (count (filter (where :active) ctx/users))
+      (count (filter (where :active) data/users))
       """
 
       ctx = %{
@@ -64,7 +64,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 2 - pipeline_filter_sort" do
     test "gets top 5 highest-paid employees" do
       source = ~S"""
-      (->> ctx/employees
+      (->> data/employees
            (filter (where :salary > 50000))
            (sort-by :salary >)
            (take 5))
@@ -95,7 +95,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 2 - aggregate_sum" do
     test "calculates total of completed orders" do
       source = ~S"""
-      (->> ctx/orders
+      (->> data/orders
            (filter (where :status = "completed"))
            (sum-by :amount))
       """
@@ -121,7 +121,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 3 - predicate_combinator" do
     test "finds electronics OR expensive, excluding out of stock" do
       source = ~S"""
-      (->> ctx/products
+      (->> data/products
            (filter (all-of
                      (any-of (where :category = "electronics")
                              (where :price > 500))
@@ -148,7 +148,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 3 - conditional_logic" do
     test "categorizes orders by size" do
       source = ~S"""
-      (->> ctx/orders
+      (->> data/orders
            (map (fn [order]
                   {:id (:id order)
                    :size (cond
@@ -180,7 +180,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 4 - tool_call_transform" do
     test "fetches premium users and returns emails" do
       source = ~S"""
-      (->> (ctx/get-users {})
+      (->> (tool/get-users {})
            (filter (where :tier = "premium"))
            (pluck :email))
       """
@@ -206,7 +206,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       # V2: maps return as-is, no implicit memory merge
       # Use def for explicit storage if needed across turns
       source = ~S"""
-      (let [high-value (->> (ctx/get-orders {})
+      (let [high-value (->> (tool/get-orders {})
                             (filter (where :amount > 1000)))]
         {:count (count high-value)
          :high_value_orders high-value})
@@ -240,7 +240,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 5 - edge_truthy_check" do
     test "filters active users with explicit equality" do
       source = ~S"""
-      (filter (where :active = true) ctx/users)
+      (filter (where :active = true) data/users)
       """
 
       ctx = %{
@@ -261,7 +261,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
 
     test "filters active users with truthy check" do
       source = ~S"""
-      (filter (where :active) ctx/users)
+      (filter (where :active) data/users)
       """
 
       ctx = %{
@@ -287,7 +287,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       source = ~S"""
       (filter (all-of (where :price >= 100)
                       (where :price <= 500))
-              ctx/products)
+              data/products)
       """
 
       ctx = %{
@@ -310,7 +310,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 5 - edge_multi_field_extract" do
     test "extracts id and name from orders using map" do
       source = ~S"""
-      (->> ctx/orders
+      (->> data/orders
            (map (fn [o] {:id (:id o) :name (:name o)})))
       """
 
@@ -331,7 +331,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
 
     test "extracts fields using let destructuring" do
       source = ~S"""
-      (->> ctx/orders
+      (->> data/orders
            (map (fn [o]
                   (let [{:keys [id name]} o]
                     {:id id :name name}))))

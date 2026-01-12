@@ -16,13 +16,13 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalBindingsTest do
         {:list,
          [
            {:symbol, :"if-let"},
-           {:vector, [{:symbol, :user}, {:list, [{:ns_symbol, :ctx, :find}]}]},
+           {:vector, [{:symbol, :user}, {:list, [{:ns_symbol, :tool, :find}]}]},
            {:symbol, :user},
            {:string, "not found"}
          ]}
 
       assert {:ok,
-              {:let, [{:binding, {:var, :user}, {:ctx_call, :find, []}}],
+              {:let, [{:binding, {:var, :user}, {:tool_call, :find, []}}],
                {:if, {:var, :user}, {:var, :user}, {:string, "not found"}}}} =
                Analyze.analyze(raw)
     end
@@ -82,12 +82,12 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalBindingsTest do
         {:list,
          [
            {:symbol, :"when-let"},
-           {:vector, [{:symbol, :user}, {:list, [{:ns_symbol, :ctx, :find}]}]},
+           {:vector, [{:symbol, :user}, {:list, [{:ns_symbol, :tool, :find}]}]},
            {:list, [{:symbol, :upper}, {:symbol, :user}]}
          ]}
 
       assert {:ok,
-              {:let, [{:binding, {:var, :user}, {:ctx_call, :find, []}}],
+              {:let, [{:binding, {:var, :user}, {:tool_call, :find, []}}],
                {:if, {:var, :user}, {:call, {:var, :upper}, [{:var, :user}]}, nil}}} =
                Analyze.analyze(raw)
     end

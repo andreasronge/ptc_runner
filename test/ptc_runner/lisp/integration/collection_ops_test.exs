@@ -18,7 +18,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       ]
 
       program = """
-      (->> ctx/expenses
+      (->> data/expenses
            (group-by :category)
            (map (fn [[category items]]
                   {:category category
@@ -42,7 +42,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "update-vals" do
     test "counts items per group after group-by" do
       source = ~S"""
-      (-> (group-by :status ctx/orders)
+      (-> (group-by :status data/orders)
           (update-vals count))
       """
 
@@ -65,7 +65,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "sums amounts per category after group-by" do
       source = ~S"""
-      (-> (group-by :category ctx/expenses)
+      (-> (group-by :category data/expenses)
           (update-vals (fn [items] (sum-by :amount items))))
       """
 
@@ -107,7 +107,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       # Common mistake: using ->> (thread-last) with update-vals
       # which puts the map as the last argument instead of first
       source = ~S"""
-      (->> ctx/orders
+      (->> data/orders
            (group-by :status)
            (update-vals count))
       """
@@ -207,13 +207,13 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "keywords as functions in HOFs" do
     test "map with keyword extracts field values" do
       items = [%{name: "Alice"}, %{name: "Bob"}]
-      {:ok, %Step{return: result}} = Lisp.run("(map :name ctx/items)", context: %{items: items})
+      {:ok, %Step{return: result}} = Lisp.run("(map :name data/items)", context: %{items: items})
       assert result == ["Alice", "Bob"]
     end
 
     test "mapv with keyword extracts field values" do
       items = [%{name: "Alice"}, %{name: "Bob"}]
-      {:ok, %Step{return: result}} = Lisp.run("(mapv :name ctx/items)", context: %{items: items})
+      {:ok, %Step{return: result}} = Lisp.run("(mapv :name data/items)", context: %{items: items})
       assert result == ["Alice", "Bob"]
     end
 
@@ -225,7 +225,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       ]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(filter :active ctx/items)", context: %{items: items})
+        Lisp.run("(filter :active data/items)", context: %{items: items})
 
       assert length(result) == 2
       assert Enum.all?(result, & &1.active)
@@ -241,7 +241,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       ]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(filter :value ctx/items)", context: %{items: items})
+        Lisp.run("(filter :value data/items)", context: %{items: items})
 
       # nil and false are falsy, 0 and "" are truthy
       assert length(result) == 3
@@ -251,7 +251,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{active: true}, %{active: false}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(remove :active ctx/items)", context: %{items: items})
+        Lisp.run("(remove :active data/items)", context: %{items: items})
 
       assert length(result) == 1
       assert hd(result).active == false
@@ -261,7 +261,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{special: false}, %{special: true}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(find :special ctx/items)", context: %{items: items})
+        Lisp.run("(find :special data/items)", context: %{items: items})
 
       assert result == %{special: true}
     end
@@ -270,7 +270,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{active: true}, %{active: true}, %{active: false}, %{active: true}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(take-while :active ctx/items)", context: %{items: items})
+        Lisp.run("(take-while :active data/items)", context: %{items: items})
 
       assert length(result) == 2
     end
@@ -279,7 +279,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{active: true}, %{active: true}, %{active: false}, %{active: true}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(drop-while :active ctx/items)", context: %{items: items})
+        Lisp.run("(drop-while :active data/items)", context: %{items: items})
 
       assert length(result) == 2
       assert hd(result).active == false
@@ -289,7 +289,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{email: "a@b.com"}, %{email: "c@d.com"}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(pluck :email ctx/items)", context: %{items: items})
+        Lisp.run("(pluck :email data/items)", context: %{items: items})
 
       assert result == ["a@b.com", "c@d.com"]
     end
@@ -298,7 +298,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{score: 3}, %{score: 1}, %{score: 2}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(sort-by :score ctx/items)", context: %{items: items})
+        Lisp.run("(sort-by :score data/items)", context: %{items: items})
 
       assert Enum.map(result, & &1.score) == [1, 2, 3]
     end
@@ -307,7 +307,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{active: false}, %{active: true}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(some :active ctx/items)", context: %{items: items})
+        Lisp.run("(some :active data/items)", context: %{items: items})
 
       assert result == true
     end
@@ -316,7 +316,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{active: false}, %{active: nil}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(some :active ctx/items)", context: %{items: items})
+        Lisp.run("(some :active data/items)", context: %{items: items})
 
       assert result == nil
     end
@@ -325,7 +325,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{valid: true}, %{valid: "yes"}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(every? :valid ctx/items)", context: %{items: items})
+        Lisp.run("(every? :valid data/items)", context: %{items: items})
 
       assert result == true
     end
@@ -334,7 +334,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{valid: true}, %{valid: nil}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(every? :valid ctx/items)", context: %{items: items})
+        Lisp.run("(every? :valid data/items)", context: %{items: items})
 
       assert result == false
     end
@@ -343,7 +343,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{error: nil}, %{error: false}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(not-any? :error ctx/items)", context: %{items: items})
+        Lisp.run("(not-any? :error data/items)", context: %{items: items})
 
       assert result == true
     end
@@ -352,7 +352,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       items = [%{error: nil}, %{error: "oops"}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(not-any? :error ctx/items)", context: %{items: items})
+        Lisp.run("(not-any? :error data/items)", context: %{items: items})
 
       assert result == false
     end

@@ -97,8 +97,8 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       mock_llm =
         routing_llm([
-          {"Double", "```clojure\n{:result (* 2 ctx/n)}\n```"},
-          {{:turn, 1}, "```clojure\n(ctx/double {:n ctx/value})\n```"},
+          {"Double", "```clojure\n{:result (* 2 data/n)}\n```"},
+          {{:turn, 1}, "```clojure\n(tool/double {:n data/value})\n```"},
           {{:turn, 2}, "```clojure\n(return {:result 42})\n```"},
           {{:turn, 3}, "```clojure\n(return {:result 42})\n```"}
         ])
@@ -119,7 +119,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
     test "tool execution - child uses bound LLM over parent LLM" do
       # Bind a specific LLM to the tool
-      child_llm = fn _input -> {:ok, "```clojure\nctx/x\n```"} end
+      child_llm = fn _input -> {:ok, "```clojure\ndata/x\n```"} end
 
       %{parent: parent} =
         parent_child_agents(
@@ -131,7 +131,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       # Different parent LLM - on first turn call child, on second turn return result
       parent_llm =
         routing_llm([
-          {{:turn, 1}, "```clojure\n(ctx/child {:x 99})\n```"},
+          {{:turn, 1}, "```clojure\n(tool/child {:x 99})\n```"},
           {{:turn, 2}, "```clojure\n(return {:value 99})\n```"}
         ])
 
@@ -157,7 +157,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       parent_llm =
         routing_llm([
-          {{:turn, 1}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 1}, "```clojure\n(tool/child {})\n```"},
           {{:turn, 2}, "```clojure\n(return {:value 100})\n```"}
         ])
 
@@ -178,7 +178,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       parent_llm =
         routing_llm([
           {"Return 42", "```clojure\n42\n```"},
-          {{:turn, 1}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 1}, "```clojure\n(tool/child {})\n```"},
           {{:turn, 2}, "```clojure\n(return {:value 42})\n```"},
           {{:turn, 3}, "```clojure\n(return {:value 42})\n```"}
         ])
@@ -199,8 +199,8 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       llm =
         routing_llm([
           {"Always return nothing", "```clojure\n(+ 1 1)\n```"},
-          {{:turn, 1}, "```clojure\n(ctx/child {})\n```"},
-          {{:turn, 2}, "```clojure\n(ctx/child {})\n```"},
+          {{:turn, 1}, "```clojure\n(tool/child {})\n```"},
+          {{:turn, 2}, "```clojure\n(tool/child {})\n```"},
           {{:turn, 3}, "```clojure\n(return {:error \"child_failed\"})\n```"}
         ])
 
@@ -241,10 +241,10 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
             {:ok, "```clojure\n1\n```"}
 
           content =~ "Call grandchild" ->
-            {:ok, "```clojure\n(ctx/grandchild {})\n```"}
+            {:ok, "```clojure\n(tool/grandchild {})\n```"}
 
           content =~ "Call child" ->
-            {:ok, "```clojure\n(ctx/child {})\n```"}
+            {:ok, "```clojure\n(tool/child {})\n```"}
 
           true ->
             # For any other input, return the value via return call
@@ -282,10 +282,10 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
         cond do
           content =~ "Call grandchild" and turn == 1 ->
-            {:ok, "```clojure\n(ctx/grandchild {})\n```"}
+            {:ok, "```clojure\n(tool/grandchild {})\n```"}
 
           content =~ "Call child" and turn == 1 ->
-            {:ok, "```clojure\n(ctx/child {})\n```"}
+            {:ok, "```clojure\n(tool/child {})\n```"}
 
           true ->
             {:ok, "```clojure\n(return {:value 1})\n```"}

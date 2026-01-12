@@ -311,7 +311,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       llm = fn %{turn: turn} ->
         case turn do
-          1 -> {:ok, ~S|(ctx/helper {:x 5})|}
+          1 -> {:ok, ~S|(tool/helper {:x 5})|}
           _ -> {:ok, ~S|(return {:done true})|}
         end
       end
@@ -347,7 +347,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       agent = SubAgent.new(prompt: "Test", tools: %{"crasher" => failing_fn}, max_turns: 1)
 
       llm = fn _ ->
-        {:ok, ~S|(ctx/crasher {:x 1})|}
+        {:ok, ~S|(tool/crasher {:x 1})|}
       end
 
       {:error, _step} = SubAgent.run(agent, llm: llm)
@@ -380,7 +380,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
             {:ok,
              %{
                content:
-                 ~S|(ctx/helper {:list ctx/list :string ctx/string :map ctx/map :small 42})|,
+                 ~S|(tool/helper {:list data/list :string data/string :map data/map :small 42})|,
                tokens: %{}
              }}
 
@@ -412,7 +412,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       helper_fn = fn _ -> result end
 
       agent = SubAgent.new(prompt: "Test", tools: %{"helper" => helper_fn}, max_turns: 1)
-      llm = fn _ -> {:ok, ~S|(ctx/helper {})|} end
+      llm = fn _ -> {:ok, ~S|(tool/helper {})|} end
 
       {:ok, _step} = SubAgent.run(agent, llm: llm)
 
@@ -440,7 +440,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       llm = fn %{turn: turn} ->
         case turn do
-          1 -> {:ok, ~S|(ctx/counter {:n 5})|}
+          1 -> {:ok, ~S|(tool/counter {:n 5})|}
           _ -> {:ok, ~S|(return {:value 42})|}
         end
       end

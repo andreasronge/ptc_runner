@@ -52,14 +52,14 @@ my_llm =
   if Code.ensure_loaded?(LLMClient) do
     fn %{system: system, messages: messages} ->
       case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 60_000) do
-        {:ok, r} -> {:ok, r.content}
+        {:ok, r} -> {:ok, r}  # Return full response with tokens
         error -> error
       end
     end
   else
     fn %{system: system, messages: messages} ->
       case ReqLLM.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 30_000) do
-        {:ok, r} -> {:ok, ReqLLM.Response.text(r)}
+        {:ok, r} -> {:ok, %{content: ReqLLM.Response.text(r), tokens: ReqLLM.Response.usage(r)}}
         error -> error
       end
     end
@@ -164,7 +164,7 @@ step.return
 ```
 
 ```elixir
-Debug.print_trace(step, messages: true)
+Debug.print_trace(step, raw: true)
 ```
 
 ## Interactive Query
@@ -192,4 +192,4 @@ end
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [PTC-Lisp Spec](https://hexdocs.pm/ptc_runner/ptc-lisp-specification.html)
 
-<!-- livebook:{"offset":4949,"stamp":{"token":"XCP.BU3ISgVeNGOdIqi5BzJhI4sPIWdeLfeVryV1f551AiRHKOu-UQDbOxHsBVLSy7p-CF0JI_24UNcukieipLuLNp8ebqP6CaEqPWndFJQWNkm7KcATQuMSEN5H4BCY","version":2}} -->
+<!-- livebook:{"offset":5018,"stamp":{"token":"XCP.TrOV6GCfAW5BuXXnk1vnw4AyngSJcWwXAvhAtQxtm-YlILnU6dfh2781rY5nFttGvqunhCzivkUz2pPV7KAnMTbuqwg2vS8fabcImMGCmiPhuECUIMHdrHqe03lC","version":2}} -->

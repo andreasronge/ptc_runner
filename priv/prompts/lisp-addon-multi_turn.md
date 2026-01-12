@@ -22,8 +22,8 @@ Respond with EXACTLY ONE ```clojure code block per turn. Use `(println ...)` to 
 **Multiple tool calls per turn.** You can call several tools in one program to gather data efficiently:
 
 ```clojure
-(def users (ctx/get-users {:role "admin"}))
-(def logs (ctx/get-logs {:level "error"}))
+(def users (tool/get-users {:role "admin"}))
+(def logs (tool/get-logs {:level "error"}))
 (println "users:" (count users) "logs:" (count logs))
 ```
 
@@ -34,7 +34,7 @@ For complex tasks, think through each step:
 Reason: I need to find active items, but I don't know the response structure yet. Let me fetch and inspect.
 
 ```clojure
-(def data (ctx/get-items {:status "active"}))
+(def data (tool/get-items {:status "active"}))
 (println "keys:" (keys data))
 (println "first:" (first (:items data)))
 ```
@@ -70,8 +70,8 @@ Reason: I have 5 item IDs. The user asked for active items, and I've verified th
 ### State Persistence
 
 ```clojure
-(def results (ctx/fetch-data {:id 123}))  ; stored across turns
-results                                    ; access in later turns
+(def results (tool/fetch-data {:id 123}))  ; stored across turns
+results                                     ; access in later turns
 ```
 
 ### Accessing Previous Results

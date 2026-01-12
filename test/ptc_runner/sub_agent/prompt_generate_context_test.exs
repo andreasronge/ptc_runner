@@ -15,8 +15,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       # Should have dynamic sections
       assert context_prompt =~ "# Data Inventory"
       assert context_prompt =~ "# Available Tools"
-      assert context_prompt =~ "ctx/user"
-      assert context_prompt =~ "ctx/count"
+      assert context_prompt =~ "data/user"
+      assert context_prompt =~ "data/count"
       assert context_prompt =~ "### search"
 
       # Should NOT have static sections
@@ -75,8 +75,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "# Data Inventory"
-      assert inventory =~ "ctx/user_id"
-      assert inventory =~ "ctx/name"
+      assert inventory =~ "data/user_id"
+      assert inventory =~ "data/name"
       assert inventory =~ "123"
       assert inventory =~ "\"Alice\""
     end
@@ -86,7 +86,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
 
       inventory = SystemPrompt.generate_data_inventory(context, nil)
 
-      assert inventory =~ "ctx/user"
+      assert inventory =~ "data/user"
       # Should show map keys
       assert inventory =~ "{id, name}"
     end
@@ -96,7 +96,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
 
       inventory = SystemPrompt.generate_data_inventory(context, nil)
 
-      assert inventory =~ "ctx/items"
+      assert inventory =~ "data/items"
       # Should show sample with count
       assert inventory =~ "5 items"
     end
@@ -106,7 +106,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
 
       inventory = SystemPrompt.generate_data_inventory(context, nil)
 
-      assert inventory =~ "ctx/items"
+      assert inventory =~ "data/items"
       assert inventory =~ "[]"
     end
 
@@ -125,7 +125,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       inventory = SystemPrompt.generate_data_inventory(context, nil)
 
       assert inventory =~ "[Firewalled]"
-      assert inventory =~ "ctx/_token"
+      assert inventory =~ "data/_token"
       assert inventory =~ "[Hidden]"
       refute inventory =~ "secret"
     end
@@ -144,20 +144,20 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       # Extract the lines
       lines = String.split(inventory, "\n")
 
-      # Find ctx/ lines
-      ctx_lines =
+      # Find data/ lines
+      data_lines =
         lines
-        |> Enum.filter(&String.contains?(&1, "ctx/"))
+        |> Enum.filter(&String.contains?(&1, "data/"))
         |> Enum.map(fn line ->
           # Extract key name
-          case Regex.run(~r/ctx\/(\w+)/, line) do
+          case Regex.run(~r/data\/(\w+)/, line) do
             [_, key] -> key
             _ -> nil
           end
         end)
         |> Enum.reject(&is_nil/1)
 
-      assert ctx_lines == ["a", "m", "z"]
+      assert data_lines == ["a", "m", "z"]
     end
 
     test "uses signature types when available" do
@@ -319,8 +319,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       assert schemas =~ "### search"
       # The signature should be rendered, not just "User-defined tool"
       assert schemas =~ "search(query :string, limit :int) -> [{id :int}]"
-      # Should include usage example with ctx/ prefix
-      assert schemas =~ "Example: `(ctx/search {:query \"...\" :limit 10})`"
+      # Should include usage example with tool/ prefix
+      assert schemas =~ "Example: `(tool/search {:query \"...\" :limit 10})`"
     end
 
     test "renders tool with keyword options signature and description" do
@@ -366,9 +366,9 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       # Signature should NOT show "args" parameter name
       refute schemas =~ "search(args"
       # Signature should show fields directly
-      assert schemas =~ "ctx/search({query :string, limit :int?}) -> [:map]"
+      assert schemas =~ "tool/search({query :string, limit :int?}) -> [:map]"
       # Example should expand fields, not show {:args {...}}
-      assert schemas =~ ~s|Example: `(ctx/search {:query "..." :limit 10})`|
+      assert schemas =~ ~s|Example: `(tool/search {:query "..." :limit 10})`|
       refute schemas =~ ":args"
     end
   end

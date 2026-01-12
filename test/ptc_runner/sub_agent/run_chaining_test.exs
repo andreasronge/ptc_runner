@@ -75,12 +75,12 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         cond do
           content =~ "Double" ->
             {:ok, ~S|```clojure
-{:result (* 2 ctx/n)}
+{:result (* 2 data/n)}
 ```|}
 
           content =~ "Add 10" ->
             {:ok, ~S|```clojure
-{:final (+ ctx/result 10)}
+{:final (+ data/result 10)}
 ```|}
         end
       end
@@ -107,7 +107,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
 
           content =~ "Use 99" ->
             {:ok, ~S|```clojure
-{:result (* 2 ctx/value)}
+{:result (* 2 data/value)}
 ```|}
 
           true ->
@@ -198,17 +198,17 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         cond do
           content =~ "Start with" ->
             {:ok, ~S|```clojure
-{:value ctx/x}
+{:value data/x}
 ```|}
 
           content =~ "Double" ->
             {:ok, ~S|```clojure
-{:doubled (* 2 ctx/value)}
+{:doubled (* 2 data/value)}
 ```|}
 
           content =~ "Add 5" ->
             {:ok, ~S|```clojure
-{:final (+ ctx/doubled 5)}
+{:final (+ data/doubled 5)}
 ```|}
         end
       end
@@ -260,13 +260,13 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         content = msgs |> List.last() |> Map.get(:content)
 
         if content =~ "Double" do
-          {:ok, "```clojure\n{:result (* 2 ctx/n)}\n```"}
+          {:ok, "```clojure\n{:result (* 2 data/n)}\n```"}
         else
           # Verify description appears in system prompt (from agent_a's output)
           assert system =~ "The doubled value",
                  "Expected 'The doubled value' description in system prompt"
 
-          {:ok, "```clojure\n{:final (+ ctx/result 10)}\n```"}
+          {:ok, "```clojure\n{:final (+ data/result 10)}\n```"}
         end
       end
 
@@ -317,14 +317,14 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
               :ets.insert(descriptions_seen, {:b_saw_a, true})
             end
 
-            {:ok, "```clojure\n{:y (* 2 ctx/x)}\n```"}
+            {:ok, "```clojure\n{:y (* 2 data/x)}\n```"}
 
           content =~ "Triple" ->
             if system =~ "Description from B" do
               :ets.insert(descriptions_seen, {:c_saw_b, true})
             end
 
-            {:ok, "```clojure\n{:z (* 3 ctx/y)}\n```"}
+            {:ok, "```clojure\n{:z (* 3 data/y)}\n```"}
         end
       end
 
@@ -364,7 +364,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         if content =~ "Return value" do
           {:ok, "```clojure\n{:x 5}\n```"}
         else
-          {:ok, "```clojure\n{:y (* 2 ctx/x)}\n```"}
+          {:ok, "```clojure\n{:y (* 2 data/x)}\n```"}
         end
       end
 
@@ -397,7 +397,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
           max_turns: 1
         )
 
-      mock_llm = fn _ -> {:ok, "```clojure\n(+ ctx/x ctx/y)\n```"} end
+      mock_llm = fn _ -> {:ok, "```clojure\n(+ data/x data/y)\n```"} end
 
       # Should not raise
       result = SubAgent.then!(step, agent, llm: mock_llm)
@@ -454,7 +454,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
       step = %PtcRunner.Step{return: %{foo: 1, bar: 2}, fail: nil, memory: %{}}
       agent = SubAgent.new(prompt: "Use {{foo}}", signature: "(foo :int) -> :int", max_turns: 1)
 
-      mock_llm = fn _ -> {:ok, "```clojure\nctx/foo\n```"} end
+      mock_llm = fn _ -> {:ok, "```clojure\ndata/foo\n```"} end
 
       # Should work - atom :foo should match signature param "foo"
       result = SubAgent.then!(step, agent, llm: mock_llm)

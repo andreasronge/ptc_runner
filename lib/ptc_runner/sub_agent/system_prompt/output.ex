@@ -92,7 +92,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   defp generate_return_example_value(:string), do: "\"result\""
   defp generate_return_example_value(:bool), do: "true"
   defp generate_return_example_value(:keyword), do: ":ok"
-  defp generate_return_example_value(:any), do: "nil"
+  defp generate_return_example_value(:any), do: "..."
   defp generate_return_example_value(:map), do: "{}"
 
   defp generate_return_example_value({:optional, type}) do

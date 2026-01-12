@@ -119,7 +119,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
     """
     ### #{name}
     ```
-    ctx/#{name}#{display_sig}
+    tool/#{name}#{display_sig}
     ```
     #{desc_line}
     #{example}
@@ -164,7 +164,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
   # We display it as:
   #   ({query :string, limit :int?}) -> ...
   #
-  # This matches how the tool is actually called: (ctx/search {:query "..."})
+  # This matches how the tool is actually called: (tool/search {:query "..."})
   defp simplify_signature_for_display(sig) do
     case Signature.parse(sig) do
       {:ok, {:signature, [{_param_name, {:map, fields}}], return_type}} when is_list(fields) ->
@@ -208,11 +208,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
     case Signature.parse(sig) do
       {:ok, {:signature, [], _return_type}} ->
         # No parameters
-        "Example: `(ctx/#{name})`"
+        "Example: `(tool/#{name})`"
 
       {:ok, {:signature, params, _return_type}} ->
         args = generate_example_args(params)
-        "Example: `(ctx/#{name} {#{args}})`"
+        "Example: `(tool/#{name} {#{args}})`"
 
       {:error, _} ->
         ""
