@@ -78,8 +78,8 @@ defmodule PtcRunner.SubAgent.Compiler do
     # Run the agent once to derive the PTC-Lisp program
     case SubAgent.run(agent, Keyword.put(opts, :context, sample)) do
       {:ok, step} ->
-        # Extract the final program from the trace
-        source = extract_final_program(step.trace)
+        # Extract the final program from the turns
+        source = extract_final_program(step.turns)
 
         # Build executor function that runs the compiled program
         # Include system tools (return/fail) as they're needed at runtime
@@ -146,9 +146,9 @@ defmodule PtcRunner.SubAgent.Compiler do
   defp add_field_descriptions({:error, step}, field_descs),
     do: %{step | field_descriptions: field_descs}
 
-  # Extracts the final PTC-Lisp program from the trace
-  defp extract_final_program(trace) when is_list(trace) do
-    trace
+  # Extracts the final PTC-Lisp program from the turns
+  defp extract_final_program(turns) when is_list(turns) do
+    turns
     |> List.last()
     |> Map.get(:program)
   end

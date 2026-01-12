@@ -51,7 +51,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.MissionExpander
+  alias PtcRunner.SubAgent.PromptExpander
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.SystemPrompt.DataInventory
   alias PtcRunner.SubAgent.SystemPrompt.Output
@@ -397,7 +397,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
-    mission = expand_mission(agent.mission, context)
+    mission = expand_prompt(agent.prompt, context)
 
     # Combine all sections
     # language_ref contains role, rules, and language reference from priv/prompts/
@@ -413,8 +413,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     |> Enum.join("\n\n")
   end
 
-  defp expand_mission(prompt, context) do
-    case MissionExpander.expand(prompt, context) do
+  defp expand_prompt(prompt, context) do
+    case PromptExpander.expand(prompt, context) do
       {:ok, expanded} -> expanded
       {:error, {:missing_keys, _keys}} -> prompt
     end

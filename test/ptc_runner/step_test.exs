@@ -9,7 +9,7 @@ defmodule PtcRunner.StepTest do
         memory: %{"processed" => true},
         signature: "() -> {count :int}",
         usage: %{duration_ms: 100, memory_bytes: 1024},
-        trace: []
+        turns: []
       }
 
       assert step.return == %{count: 5}
@@ -17,7 +17,7 @@ defmodule PtcRunner.StepTest do
       assert step.memory == %{"processed" => true}
       assert step.signature == "() -> {count :int}"
       assert step.usage == %{duration_ms: 100, memory_bytes: 1024}
-      assert step.trace == []
+      assert step.turns == []
     end
 
     test "supports pattern matching on successful step" do
@@ -47,7 +47,7 @@ defmodule PtcRunner.StepTest do
       assert step.memory == %{"processed_ids" => [1, 2, 3]}
       assert step.signature == nil
       assert step.usage == nil
-      assert step.trace == nil
+      assert step.turns == nil
     end
 
     test "creates successful step with empty return" do
@@ -88,7 +88,7 @@ defmodule PtcRunner.StepTest do
       assert step.memory == %{}
       assert step.signature == nil
       assert step.usage == nil
-      assert step.trace == nil
+      assert step.turns == nil
     end
 
     test "creates failed step with various error reasons" do
@@ -254,69 +254,6 @@ defmodule PtcRunner.StepTest do
       assert step.usage == usage
       assert !Map.has_key?(step.usage, :turns)
       assert !Map.has_key?(step.usage, :input_tokens)
-    end
-  end
-
-  describe "trace field structure" do
-    setup do
-      base_step = %PtcRunner.Step{
-        return: %{count: 1},
-        fail: nil,
-        memory: %{}
-      }
-
-      %{base_step: base_step}
-    end
-
-    test "trace field contains list of trace entries", %{base_step: base_step} do
-      tool_call = %{
-        name: "search",
-        args: %{"q" => "urgent"},
-        result: [%{"id" => 1, "subject" => "Urgent"}],
-        error: nil,
-        timestamp: DateTime.utc_now(),
-        duration_ms: 100
-      }
-
-      trace_entry = %{
-        turn: 1,
-        program: "(call \"search\" {:q \"urgent\"})",
-        result: [%{"id" => 1}],
-        tool_calls: [tool_call]
-      }
-
-      step = %{base_step | trace: [trace_entry]}
-
-      assert length(step.trace) == 1
-      assert hd(step.trace).turn == 1
-      assert hd(step.trace).program == "(call \"search\" {:q \"urgent\"})"
-    end
-
-    test "trace field can contain multiple entries", %{base_step: base_step} do
-      trace_entry_1 = %{
-        turn: 1,
-        program: "(call \"search\" {:q \"urgent\"})",
-        result: [%{"id" => 1}],
-        tool_calls: []
-      }
-
-      trace_entry_2 = %{
-        turn: 2,
-        program: "(call \"return\" {:count 1})",
-        result: %{count: 1},
-        tool_calls: []
-      }
-
-      step = %{base_step | trace: [trace_entry_1, trace_entry_2]}
-
-      assert length(step.trace) == 2
-      assert Enum.map(step.trace, & &1.turn) == [1, 2]
-    end
-
-    test "trace can be nil (for Lisp execution)" do
-      step = PtcRunner.Step.ok(%{}, %{})
-
-      assert step.trace == nil
     end
   end
 

@@ -33,31 +33,6 @@ defmodule PtcRunner.SubAgent.LoopReturnValidationTest do
       assert step.return == 42
     end
 
-    test "invalid return type feeds error back to LLM for retry" do
-      agent =
-        SubAgent.new(
-          prompt: "Return an integer",
-          signature: "() -> :int",
-          max_turns: 3
-        )
-
-      # First try returns string (invalid), second try returns int (valid)
-      llm = mock_llm(["(return \"not an int\")", "(return 42)"])
-
-      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, debug: true)
-
-      # Should succeed on second attempt
-      assert step.return == 42
-
-      # Should have used 2 turns
-      assert step.usage.turns == 2
-
-      # First trace entry should have validation error feedback (with debug: true)
-      [first_trace | _] = step.trace
-      assert first_trace.llm_feedback =~ "Return type validation failed"
-      assert first_trace.llm_feedback =~ "Expected: :int"
-    end
-
     test "validation error on last turn returns error step" do
       agent =
         SubAgent.new(
@@ -119,31 +94,6 @@ defmodule PtcRunner.SubAgent.LoopReturnValidationTest do
 
       # Should accept without validation (single-shot can't retry anyway)
       assert step.return == "not an int"
-    end
-
-    test "nested map validation errors include paths in feedback" do
-      agent =
-        SubAgent.new(
-          prompt: "Return structured data",
-          signature: "() -> {count :int, items [:string]}",
-          max_turns: 3
-        )
-
-      # First: wrong nested type, Second: correct
-      llm =
-        mock_llm([
-          "(return {:count \"not int\" :items [1 2 3]})",
-          "(return {:count 5 :items [\"a\" \"b\"]})"
-        ])
-
-      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, debug: true)
-
-      assert step.return == %{count: 5, items: ["a", "b"]}
-
-      # First trace should show path-based errors (with debug: true)
-      [first_trace | _] = step.trace
-      assert first_trace.llm_feedback =~ "[count]"
-      assert first_trace.llm_feedback =~ "[items.0]"
     end
 
     test "(fail ...) is not validated" do

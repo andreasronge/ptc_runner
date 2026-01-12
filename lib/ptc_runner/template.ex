@@ -21,7 +21,7 @@ defmodule PtcRunner.Template do
   because the two sigils are used in different contexts (template strings
   vs time literals with square brackets like `~T[00:00:00]`).
 
-  See `PtcRunner.SubAgent.MissionExpander` for template expansion functionality.
+  See `PtcRunner.SubAgent.PromptExpander` for template expansion functionality.
   """
 
   @type placeholder :: %{path: [String.t()], type: :simple | :iteration}

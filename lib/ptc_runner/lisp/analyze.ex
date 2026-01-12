@@ -854,14 +854,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # (def name value)
   defp analyze_def([{:symbol, name}, value_ast], _tail?) do
     with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:def, name, value}}
+      {:ok, {:def, name, value, %{}}}
     end
   end
 
-  # (def name docstring value) - docstring is ignored but allowed for Clojure compat
-  defp analyze_def([{:symbol, name}, {:string, _docstring}, value_ast], _tail?) do
+  # (def name docstring value) - docstring preserved for user/ namespace display
+  defp analyze_def([{:symbol, name}, {:string, docstring}, value_ast], _tail?) do
     with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:def, name, value}}
+      {:ok, {:def, name, value, %{docstring: docstring}}}
     end
   end
 
@@ -890,7 +890,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_defn(
          [
            {:symbol, name},
-           {:string, _docstring},
+           {:string, docstring},
            {:vector, _} = params_ast,
            first_body | rest_body
          ],
@@ -900,7 +900,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
     with {:ok, params} <- analyze_fn_params(params_ast),
          {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:def, name, {:fn, params, body}}}
+      {:ok, {:def, name, {:fn, params, body}, %{docstring: docstring}}}
     end
   end
 
@@ -910,7 +910,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
     with {:ok, params} <- analyze_fn_params(params_ast),
          {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:def, name, {:fn, params, body}}}
+      {:ok, {:def, name, {:fn, params, body}, %{}}}
     end
   end
 

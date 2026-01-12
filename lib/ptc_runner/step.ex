@@ -46,17 +46,6 @@ defmodule PtcRunner.Step do
   - **Set when:** Execution completed (success or failure after running)
   - **Nil when:** Early validation failure (before execution)
 
-  ### `trace`
-
-  Execution trace for debugging (SubAgent only). See `t:trace_entry/0` for the structure.
-
-  **DEPRECATED**: Use `turns` field instead. This field is kept for backward compatibility
-  during migration and will be removed in a future version.
-
-  - **Type:** `[t:trace_entry/0] | nil`
-  - **Set when:** SubAgent execution
-  - **Nil when:** Lisp execution
-
   ### `turns`
 
   List of Turn structs capturing each LLM interaction cycle. See `PtcRunner.Turn`.
@@ -186,14 +175,15 @@ defmodule PtcRunner.Step do
     :memory,
     :signature,
     :usage,
-    :trace,
     :turns,
     :trace_id,
     :parent_trace_id,
     :field_descriptions,
     :prints,
     :tool_calls,
-    :messages
+    :messages,
+    :prompt,
+    :tools
   ]
 
   @typedoc """
@@ -255,24 +245,6 @@ defmodule PtcRunner.Step do
         }
 
   @typedoc """
-  Single turn's execution history.
-
-  Fields:
-  - `turn`: Turn number
-  - `program`: PTC-Lisp program executed
-  - `result`: Result of executing the program
-  - `tool_calls`: List of tool calls made during this turn
-  - `feedback_truncated`: Whether feedback to LLM was truncated
-  """
-  @type trace_entry :: %{
-          turn: pos_integer(),
-          program: String.t(),
-          result: term(),
-          tool_calls: [tool_call()],
-          feedback_truncated: boolean()
-        }
-
-  @typedoc """
   A single message in OpenAI format.
 
   Fields:
@@ -300,14 +272,15 @@ defmodule PtcRunner.Step do
           memory: map(),
           signature: String.t() | nil,
           usage: usage() | nil,
-          trace: [trace_entry()] | nil,
           turns: [PtcRunner.Turn.t()] | nil,
           trace_id: String.t() | nil,
           parent_trace_id: String.t() | nil,
           field_descriptions: map() | nil,
           prints: [String.t()],
           tool_calls: [tool_call()],
-          messages: [message()] | nil
+          messages: [message()] | nil,
+          prompt: String.t() | nil,
+          tools: map() | nil
         }
 
   @doc """
@@ -330,7 +303,6 @@ defmodule PtcRunner.Step do
       memory: memory,
       signature: nil,
       usage: nil,
-      trace: nil,
       turns: nil,
       trace_id: nil,
       parent_trace_id: nil,
@@ -369,7 +341,7 @@ defmodule PtcRunner.Step do
         memory: %{},
         signature: nil,
         usage: nil,
-        trace: nil,
+        turns: nil,
         trace_id: nil,
         parent_trace_id: nil,
         field_descriptions: nil
@@ -384,7 +356,6 @@ defmodule PtcRunner.Step do
       memory: memory,
       signature: nil,
       usage: nil,
-      trace: nil,
       turns: nil,
       trace_id: nil,
       parent_trace_id: nil,

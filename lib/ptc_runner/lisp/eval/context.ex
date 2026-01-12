@@ -141,4 +141,19 @@ defmodule PtcRunner.Lisp.Eval.Context do
   def merge_env(%__MODULE__{} = context, bindings) do
     %{context | env: Map.merge(context.env, bindings)}
   end
+
+  @doc """
+  Merges two contexts, specifically combining prints and tool calls.
+  Used to merge results from parallel execution branches (pmap, pcalls).
+  """
+  @spec merge(t(), t()) :: t()
+  def merge(ctx1, ctx2) do
+    %{
+      ctx1
+      | prints: ctx2.prints ++ ctx1.prints,
+        tool_calls: ctx2.tool_calls ++ ctx1.tool_calls,
+        user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
+        iteration_count: ctx1.iteration_count + ctx2.iteration_count
+    }
+  end
 end

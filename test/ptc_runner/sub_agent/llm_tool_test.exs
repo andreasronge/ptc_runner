@@ -101,7 +101,7 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
       assert tool.tools == nil
     end
 
-    test "raises when prompt is missing" do
+    test "raises when mission is missing" do
       assert_raise ArgumentError, "prompt is required", fn ->
         LLMTool.new(signature: ":string")
       end
@@ -116,13 +116,13 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
         LLMTool.new(prompt: "Test")
       end
 
-      # When both are missing, prompt is checked first
+      # When both are missing, mission is checked first
       assert_raise ArgumentError, "prompt is required", fn ->
         LLMTool.new([])
       end
     end
 
-    test "raises when prompt is not a string" do
+    test "raises when mission is not a string" do
       assert_raise ArgumentError, "prompt must be a string", fn ->
         LLMTool.new(prompt: 123, signature: ":string")
       end
@@ -140,7 +140,7 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
       end
     end
 
-    test "raises when prompt is empty string" do
+    test "raises when mission is empty string" do
       assert_raise ArgumentError, "prompt cannot be empty", fn ->
         LLMTool.new(prompt: "", signature: ":string")
       end
