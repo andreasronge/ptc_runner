@@ -23,14 +23,14 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
       PTC_TEST_MODEL=haiku mix test test/ptc_runner/lisp/e2e_test.exs --include e2e
   """
 
-  alias PtcRunner.Lisp.Prompts
+  alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.TestSupport.LLM
   alias PtcRunner.TestSupport.LLMSupport
 
   @doc """
   Generates a PTC-Lisp program from a natural language task description.
 
-  Uses the compact `PtcRunner.Lisp.Prompts.get(:single_shot)` reference to guide
+  Uses the compact `PtcRunner.Lisp.LanguageSpec.get(:single_shot)` reference to guide
   the LLM in generating valid PTC-Lisp code.
 
   ## Arguments
@@ -46,7 +46,7 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
     prompt = """
     You are generating a PTC-Lisp program for data transformation.
 
-    #{Prompts.get(:single_shot)}
+    #{LanguageSpec.get(:single_shot)}
 
     Available data (access via ctx/):
     - ctx/products - list of product maps with keys: name, price, category, in_stock

@@ -78,9 +78,9 @@ SubAgent.new(
   system_prompt: %{
     language_spec: fn ctx ->
       if ctx.turn == 1 do
-        PtcRunner.Lisp.Prompts.get(:single_shot)
+        PtcRunner.Lisp.LanguageSpec.get(:single_shot)
       else
-        PtcRunner.Lisp.Prompts.get(:multi_turn)
+        PtcRunner.Lisp.LanguageSpec.get(:multi_turn)
       end
     end
   }
@@ -103,7 +103,7 @@ Different models may need different prompt styles:
 ```elixir
 defmodule MyApp.Prompts do
   def language_spec_for_model(ctx) do
-    base = PtcRunner.Lisp.Prompts.get(:single_shot)
+    base = PtcRunner.Lisp.LanguageSpec.get(:single_shot)
 
     case ctx.model do
       :gemini ->
@@ -147,11 +147,11 @@ Build on top of library prompts:
 
 ```elixir
 defmodule MyApp.Prompts do
-  alias PtcRunner.Lisp.Prompts
+  alias PtcRunner.Lisp.LanguageSpec
 
   def with_domain_context do
     """
-    #{Prompts.get(:single_shot)}
+    #{LanguageSpec.get(:single_shot)}
 
     ## Domain Context
 
@@ -228,4 +228,4 @@ IO.puts(preview.user)    # Expanded user prompt
 - [Core Concepts](subagent-concepts.md) - Context, memory, and firewalls
 - [Advanced Topics](subagent-advanced.md) - System prompt structure details
 - `PtcRunner.SubAgent.SystemPrompt` - API reference for prompt generation
-- `PtcRunner.Lisp.Prompts` - Available prompt profiles
+- `PtcRunner.Lisp.LanguageSpec` - Available language spec profiles
