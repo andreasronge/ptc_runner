@@ -91,7 +91,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(return (ctx/child {}))
+(return (tool/child {}))
 ```|}
       end
 
@@ -123,7 +123,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         end,
         sonnet: fn %{messages: _} ->
           {:ok, ~S|```clojure
-(return (ctx/child {}))
+(return (tool/child {}))
 ```|}
         end
       }
@@ -153,7 +153,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(ctx/catalog_tool {})
+(tool/catalog_tool {})
 ```|}
 
           2 ->
@@ -188,7 +188,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(return (ctx/shared {}))
+(return (tool/shared {}))
 ```|}
       end
 
@@ -213,7 +213,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(ctx/ok_tool {})
+(tool/ok_tool {})
 ```|}
 
           2 ->
@@ -242,7 +242,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(ctx/raw_tool {})
+(tool/raw_tool {})
 ```|}
 
           2 ->
@@ -273,7 +273,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(ctx/error_tool {})
+(tool/error_tool {})
 ```|}
 
           2 ->
@@ -313,7 +313,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         case turn do
           1 ->
             {:ok, ~S|```clojure
-(ctx/crash_tool {})
+(tool/crash_tool {})
 ```|}
 
           2 ->
@@ -351,7 +351,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
           # Sonnet calls child on first turn
           if input.turn == 1 do
-            {:ok, ~S|(ctx/child_tool {})|}
+            {:ok, ~S|(tool/child_tool {})|}
           else
             {:ok, ~S|(return {:from "sonnet"})|}
           end

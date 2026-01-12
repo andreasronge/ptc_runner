@@ -318,42 +318,42 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
       raw = {:list, [{:symbol, :call}, {:string, "get-users"}]}
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
       assert msg =~ "deprecated"
-      assert msg =~ "ctx/"
+      assert msg =~ "tool/"
     end
   end
 
-  describe "ctx/tool invocation syntax" do
-    test "ctx/tool with no args" do
-      raw = {:list, [{:ns_symbol, :ctx, :"get-users"}]}
-      assert {:ok, {:ctx_call, :"get-users", []}} = Analyze.analyze(raw)
+  describe "tool/ invocation syntax" do
+    test "tool/ with no args" do
+      raw = {:list, [{:ns_symbol, :tool, :"get-users"}]}
+      assert {:ok, {:tool_call, :"get-users", []}} = Analyze.analyze(raw)
     end
 
-    test "ctx/tool with map arg" do
+    test "tool/ with map arg" do
       raw =
-        {:list, [{:ns_symbol, :ctx, :search}, {:map, [{{:keyword, :query}, {:string, "test"}}]}]}
+        {:list, [{:ns_symbol, :tool, :search}, {:map, [{{:keyword, :query}, {:string, "test"}}]}]}
 
-      assert {:ok, {:ctx_call, :search, [{:map, [{{:keyword, :query}, {:string, "test"}}]}]}} =
+      assert {:ok, {:tool_call, :search, [{:map, [{{:keyword, :query}, {:string, "test"}}]}]}} =
                Analyze.analyze(raw)
     end
 
-    test "ctx/tool with multiple args" do
+    test "tool/ with multiple args" do
       raw =
-        {:list, [{:ns_symbol, :ctx, :"fetch-user"}, 123, {:keyword, :include_details}]}
+        {:list, [{:ns_symbol, :tool, :"fetch-user"}, 123, {:keyword, :include_details}]}
 
-      assert {:ok, {:ctx_call, :"fetch-user", [123, {:keyword, :include_details}]}} =
+      assert {:ok, {:tool_call, :"fetch-user", [123, {:keyword, :include_details}]}} =
                Analyze.analyze(raw)
     end
 
-    test "ctx/tool with nested expression args" do
+    test "tool/ with nested expression args" do
       raw =
         {:list,
          [
-           {:ns_symbol, :ctx, :search},
+           {:ns_symbol, :tool, :search},
            {:map, [{{:keyword, :query}, {:list, [{:symbol, :str}, {:string, "test"}]}}]}
          ]}
 
       assert {:ok,
-              {:ctx_call, :search,
+              {:tool_call, :search,
                [{:map, [{{:keyword, :query}, {:call, {:var, :str}, [{:string, "test"}]}}]}]}} =
                Analyze.analyze(raw)
     end

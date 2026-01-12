@@ -61,7 +61,7 @@ end
 test "multi-turn agent" do
   mock = TestHelpers.scripted_llm([
     "(call \"search\" {:query \"test\"})",
-    "(return {:count (count ctx/results)})"
+    "(return {:count (count data/results)})"
   ])
 
   {:ok, step} = SubAgent.run(

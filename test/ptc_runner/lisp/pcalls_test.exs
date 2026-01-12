@@ -167,13 +167,13 @@ defmodule PtcRunner.Lisp.PcallsTest do
           %{theme: "dark"}
       end
 
-      # (pcalls #(ctx/get-user {:id 1}) #(ctx/get-stats {:id 2}) #(ctx/get-config {}))
+      # (pcalls #(tool/get-user {:id 1}) #(tool/get-stats {:id 2}) #(tool/get-config {}))
       ast =
         {:pcalls,
          [
-           {:fn, [], {:ctx_call, :"get-user", [{:map, [{{:keyword, :id}, 1}]}]}},
-           {:fn, [], {:ctx_call, :"get-stats", [{:map, [{{:keyword, :id}, 2}]}]}},
-           {:fn, [], {:ctx_call, :"get-config", [{:map, []}]}}
+           {:fn, [], {:tool_call, :"get-user", [{:map, [{{:keyword, :id}, 1}]}]}},
+           {:fn, [], {:tool_call, :"get-stats", [{:map, [{{:keyword, :id}, 2}]}]}},
+           {:fn, [], {:tool_call, :"get-config", [{:map, []}]}}
          ]}
 
       assert {:ok, [%{name: "User1"}, %{count: 20}, %{theme: "dark"}], %{}} =

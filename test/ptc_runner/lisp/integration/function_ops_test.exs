@@ -16,7 +16,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
   describe "builtins as HOF arguments" do
     test "sort-by with > comparator for descending order" do
       source = ~S"""
-      (sort-by :price > ctx/products)
+      (sort-by :price > data/products)
       """
 
       ctx = %{
@@ -34,7 +34,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
 
     test "sort-by with < comparator for ascending order" do
       source = ~S"""
-      (sort-by :name < ctx/users)
+      (sort-by :name < data/users)
       """
 
       ctx = %{
@@ -332,7 +332,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       {:ok, %Step{return: result}} =
         Lisp.run(
           """
-          (let [response ctx/response]
+          (let [response data/response]
             (* (parse-double (:price response))
                (parse-long (:quantity response))))
           """,

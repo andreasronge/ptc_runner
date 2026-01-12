@@ -119,13 +119,13 @@ defmodule PtcRunner.Lisp.AnalyzeDataTypesTest do
       assert {:ok, {:var, :is_valid?}} = Analyze.analyze({:symbol, :is_valid?})
     end
 
-    test "ctx namespace symbol" do
-      assert {:ok, {:ctx, :input}} = Analyze.analyze({:ns_symbol, :ctx, :input})
+    test "data namespace symbol" do
+      assert {:ok, {:data, :input}} = Analyze.analyze({:ns_symbol, :data, :input})
     end
 
-    test "multiple ctx symbols" do
-      assert {:ok, {:ctx, :data}} = Analyze.analyze({:ns_symbol, :ctx, :data})
-      assert {:ok, {:ctx, :query}} = Analyze.analyze({:ns_symbol, :ctx, :query})
+    test "multiple data symbols" do
+      assert {:ok, {:data, :data}} = Analyze.analyze({:ns_symbol, :data, :data})
+      assert {:ok, {:data, :query}} = Analyze.analyze({:ns_symbol, :data, :query})
     end
   end
 end

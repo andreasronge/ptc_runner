@@ -111,7 +111,7 @@ defmodule PtcRunner.SubAgent.RunTest do
     end
 
     test "string form with context" do
-      llm = fn _input -> {:ok, "```clojure\n(+ ctx/a ctx/b)\n```"} end
+      llm = fn _input -> {:ok, "```clojure\n(+ data/a data/b)\n```"} end
 
       {:ok, step} =
         SubAgent.run("Add {{a}} and {{b}}", max_turns: 1, llm: llm, context: %{a: 3, b: 4})
@@ -124,7 +124,7 @@ defmodule PtcRunner.SubAgent.RunTest do
     test "raises when tool name conflicts with context data key" do
       agent = SubAgent.new(prompt: "test", tools: %{"search" => fn _ -> :ok end})
 
-      assert_raise ArgumentError, ~r/ctx\/search is both a tool and data/, fn ->
+      assert_raise ArgumentError, ~r/search is both a tool and data/, fn ->
         SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: %{search: "data"})
       end
     end
@@ -132,7 +132,7 @@ defmodule PtcRunner.SubAgent.RunTest do
     test "raises when tool name conflicts with context data key (atom key)" do
       agent = SubAgent.new(prompt: "test", tools: %{"query" => fn _ -> :ok end})
 
-      assert_raise ArgumentError, ~r/ctx\/query is both a tool and data/, fn ->
+      assert_raise ArgumentError, ~r/query is both a tool and data/, fn ->
         SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: %{query: "value"})
       end
     end
@@ -149,7 +149,7 @@ defmodule PtcRunner.SubAgent.RunTest do
 
     test "succeeds with empty tools (no conflict possible)" do
       agent = SubAgent.new(prompt: "Use {{search}}", max_turns: 1)
-      llm = fn _ -> {:ok, "```clojure\nctx/search\n```"} end
+      llm = fn _ -> {:ok, "```clojure\ndata/search\n```"} end
 
       {:ok, step} = SubAgent.run(agent, llm: llm, context: %{search: "data"})
       assert step.return == "data"
@@ -167,7 +167,7 @@ defmodule PtcRunner.SubAgent.RunTest do
       agent = SubAgent.new(prompt: "test", tools: %{"result" => fn _ -> :ok end})
       step_context = %PtcRunner.Step{return: %{result: 42}, fail: nil, memory: %{}}
 
-      assert_raise ArgumentError, ~r/ctx\/result is both a tool and data/, fn ->
+      assert_raise ArgumentError, ~r/result is both a tool and data/, fn ->
         SubAgent.run(agent, llm: fn _ -> {:ok, "42"} end, context: step_context)
       end
     end

@@ -11,7 +11,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
 
   describe "invalid programs - parse errors" do
     test "missing closing paren" do
-      source = "(filter (where :active ctx/users"
+      source = "(filter (where :active data/users"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "unbalanced parentheses"
@@ -50,7 +50,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
 
     test "unknown tool returns unknown_tool error" do
       # Tool calls to unregistered tools return error tuple with specific reason
-      source = ~S|(ctx/unknown-tool {})|
+      source = ~S|(tool/unknown-tool {})|
 
       assert {:error, %Step{fail: %{reason: :unknown_tool, message: message}}} =
                Lisp.run(source)
@@ -60,14 +60,14 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
     end
 
     test "deprecated call syntax returns clear error message" do
-      # The (call "tool" args) syntax is deprecated, use (ctx/tool-name args) instead
+      # The (call "tool" args) syntax is deprecated, use (tool/tool-name args) instead
       source = ~S|(call "search" {:query "foo"})|
 
       assert {:error, %Step{fail: %{reason: :invalid_form, message: message}}} =
                Lisp.run(source)
 
       assert message =~ "deprecated"
-      assert message =~ "ctx/"
+      assert message =~ "tool/"
     end
   end
 
@@ -109,7 +109,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
     test "where with field and value but missing operator" do
       # LLMs often write (where :field value) expecting equality
       # but where requires explicit operator: (where :field = value)
-      source = ~S|(filter (where :status "active") ctx/items)|
+      source = ~S|(filter (where :status "active") data/items)|
       ctx = %{items: [%{status: "active"}]}
 
       assert {:error, %Step{fail: %{reason: :invalid_where_form, message: message}}} =

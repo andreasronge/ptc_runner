@@ -38,7 +38,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | Extension | Description |
 |-----------|-------------|
 | Implicit `do` | Multiple expressions in `fn`, `let`, `when`, `when-let` bodies (§5, §13.2) |
-| `ctx/path` | Namespace-qualified access to context data (§9) |
+| `data/path`, `tool/name` | Namespace-qualified access to context data and tool invocation (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
@@ -95,9 +95,9 @@ special-initial = + | - | * | / | < | > | = | ? | !
 special-rest    = special-initial | - | _ | /
 ```
 
-Note: `/` appears in both `special-initial` (for the division operator) and `special-rest` (for namespaced symbols like `ctx/bar`).
+Note: `/` appears in both `special-initial` (for the division operator) and `special-rest` (for namespaced symbols like `data/bar` or `tool/search`).
 
-Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `ctx/bar`
+Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `data/bar`, `tool/search`
 
 Reserved symbols (cannot be redefined): `nil`, `true`, `false`
 
@@ -712,7 +712,7 @@ Evaluates expressions in order, returning the value of the last expression:
 
 ```clojure
 1 2 3                             ; => 3 (not needed at top level)
-(ctx/log {:msg "hi"})             ; => result of log call
+(tool/log {:msg "hi"})            ; => result of log call
 (do)                              ; => nil
 ```
 
@@ -733,12 +733,12 @@ Binds a name to a value in the user namespace, persisting across turns:
 - Value is evaluated before binding
 - Binding persists until session ends or redefined
 - Cannot shadow builtin function names (returns error)
-- Can shadow ctx names, but `ctx/` prefix still works
+- Can shadow data names, but `data/` prefix still works
 
 ```clojure
 (def x 42)                        ; => #'x (x = 42)
 (def threshold 5000)              ; => #'threshold
-(def results (ctx/search {}))     ; => ...
+(def results (tool/search {}))    ; => ...
 
 ; Redefinition
 (def x 1)                         ; x = 1
@@ -777,7 +777,7 @@ Syntactic sugar for defining named functions in the user namespace:
 - Creates or overwrites the function binding in user namespace
 - Functions persist across turns via user namespace
 - Can reference other user-defined symbols and functions
-- Can access `ctx/` data and call `ctx/` tools
+- Can access `data/` data and call `tool/` tools
 - Cannot shadow builtin function names (returns error)
 
 ```clojure
@@ -788,15 +788,15 @@ Syntactic sugar for defining named functions in the user namespace:
 ; Use defined function (single evaluation with implicit do)
 (defn twice [x] (* x 2)) (twice 21)   ; => 42
 
-; Reference ctx/ data
-(defn expensive? [e] (> (:amount e) ctx/threshold))
+; Reference data/ data
+(defn expensive? [e] (> (:amount e) data/threshold))
 
 ; Reference other defs (single evaluation)
 (def rate 0.1) (defn apply-rate [x] (* x rate)) (apply-rate 100)  ; => 10.0
 
 ; With higher-order functions
 (defn expensive? [e] (> (:amount e) 5000))
-(filter expensive? ctx/expenses)   ; => filtered list
+(filter expensive? data/expenses)  ; => filtered list
 ```
 
 **Multiple body expressions (implicit do):**
@@ -812,7 +812,7 @@ Syntactic sugar for defining named functions in the user namespace:
 (defn expensive? [e] (> (:amount e) 5000))
 
 ; Turn 2: Use function (passed via memory)
-(filter expensive? ctx/expenses)
+(filter expensive? data/expenses)
 ```
 
 **Destructuring in parameters:**
@@ -1250,7 +1250,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ```clojure
 (map :name users)                    ; extract :name from each
 (pmap :name users)                   ; same, but parallel execution
-(pcalls #(ctx/get-user) #(ctx/get-stats))  ; parallel heterogeneous calls
+(pcalls #(tool/get-user) #(tool/get-stats))  ; parallel heterogeneous calls
 (mapv :name users)                   ; same, ensures vector
 (map-indexed (fn [i x] [i x]) ["a" "b"]) ; => [[0 "a"] [1 "b"]]
 (select-keys user [:name :email])    ; pick keys from map
@@ -1263,7 +1263,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 ```clojure
 ;; Process multiple items in parallel - much faster for I/O-bound tasks
-(pmap #(ctx/fetch-data {:id %}) item-ids)
+(pmap #(tool/fetch-data {:id %}) item-ids)
 
 ;; Closures work - captures outer scope at evaluation time
 (let [factor 10]
@@ -1283,9 +1283,9 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ```clojure
 ;; Fetch multiple pieces of data in parallel
 (let [[user stats config] (pcalls
-                            #(ctx/get-user {:id ctx/user-id})
-                            #(ctx/get-stats {:id ctx/user-id})
-                            #(ctx/get-config {}))]
+                            #(tool/get-user {:id data/user-id})
+                            #(tool/get-stats {:id data/user-id})
+                            #(tool/get-config {}))]
   {:user user :stats stats :config config})
 
 ;; Simple parallel computations
@@ -2057,7 +2057,7 @@ The `println` function is the **only way to inspect values** during multi-turn S
 - Returns `nil`.
 
 ```clojure
-(def results (ctx/search {:q "test"}))
+(def results (tool/search {:q "test"}))
 (println "Found:" (count results))      ; shown in feedback
 (println "First:" (first results))      ; shown in feedback
 results                                  ; NOT shown - use println to inspect
@@ -2147,9 +2147,9 @@ Programs have access to data and functions through **namespaced symbols** and **
 | Access Pattern | Source | Description |
 |----------------|--------|-------------|
 | Plain symbols | Stored values | Values from map returns (defined via `def` form) |
-| `ctx/` | Current request context | Current request context (read-only) |
+| `data/` | Current request context | Current request context (read-only) |
+| `tool/` | Tool invocation | Call registered tools |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
-| `(ctx/tool-name ...)` | Tool invocation | Call registered tools |
 
 ### 9.2 Persistent Values — User Namespace symbols
 
@@ -2164,7 +2164,7 @@ query-count        ; access symbol defined via (def query-count ...)
 Stored values are **read-only during evaluation** unless redefined via `def`. To update a value for the next turn, use `def` in your program (see Section 16).
 
 ```clojure
-(def new-orders (ctx/get-orders {:since "2024-01-01"}))
+(def new-orders (tool/get-orders {:since "2024-01-01"}))
 (def orders (concat orders new-orders))
 orders ; return current total
 ```
@@ -2178,20 +2178,20 @@ query-count
 ```
 
 
-### 9.3 Context Access — `ctx/`
+### 9.3 Context Access — `data/`
 
-Read from current request context using the `ctx/` namespace prefix:
+Read from current request context using the `data/` namespace prefix:
 
 ```clojure
-ctx/input                 ; get :input from context
-ctx/user-id               ; get :user-id from context
-ctx/request-id            ; get :request-id from context
+data/input                ; get :input from context
+data/user-id              ; get :user-id from context
+data/request-id           ; get :request-id from context
 ```
 
 Context is **per-request** data passed by the host. It does not persist across turns.
 
 ```clojure
-(->> ctx/expenses
+(->> data/expenses
      (filter (where :category = "travel"))
      (sum-by :amount))
 ```
@@ -2223,36 +2223,36 @@ Access results from previous turns using the turn history symbols:
   0)
 
 ;; Compare current with previous
-(> (count ctx/items) (count *1))
+(> (count data/items) (count *1))
 ```
 
 **For reliable multi-turn patterns**, use `(def name value)` to store values in the User Namespace. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
 
-### 9.5 Tool Invocation — `ctx/tool-name`
+### 9.5 Tool Invocation — `tool/tool-name`
 
-Invoke registered tools using the `ctx/` namespace:
+Invoke registered tools using the `tool/` namespace:
 
 ```clojure
-(ctx/tool-name)                    ; no arguments
-(ctx/tool-name args-map)           ; with arguments
+(tool/tool-name)                   ; no arguments
+(tool/tool-name args-map)          ; with arguments
 ```
 
 **Syntax:**
-- Tool names become atoms in `ctx/` namespace: `ctx/tool-name`
+- Tool names become atoms in `tool/` namespace: `tool/tool-name`
 - Arguments follow these rules:
-  - No arguments: `(ctx/get-users)`
-  - Single map argument is passed through: `(ctx/fetch {:id 123})`
-  - Multiple arguments are wrapped: `(ctx/transform arg1 arg2)` → `{:args [arg1 arg2]}`
+  - No arguments: `(tool/get-users)`
+  - Single map argument is passed through: `(tool/fetch {:id 123})`
+  - Multiple arguments are wrapped: `(tool/transform arg1 arg2)` → `{:args [arg1 arg2]}`
 
 **Examples:**
 ```clojure
-(ctx/get-users)                    ; no arguments
-(ctx/search {:query "budget"})     ; single map argument
-(ctx/fetch {:id 123})              ; with parameters
-(ctx/search {:query "foo" :limit 10})
+(tool/get-users)                   ; no arguments
+(tool/search {:query "budget"})    ; single map argument
+(tool/fetch {:id 123})             ; with parameters
+(tool/search {:query "foo" :limit 10})
 
 ;; Store tool result for later use
-(let [users (ctx/get-users)]
+(let [users (tool/get-users)]
   (->> users
        (filter (where :active))
        (count)))
@@ -2304,7 +2304,7 @@ When a namespaced function doesn't exist as a built-in, the analyzer provides he
 ;; Error: project is not available. Set functions: set, set?, vec, vector, contains?, intersection, union, difference
 ```
 
-**Note:** The `ctx/` namespace is reserved for context access and tool invocation. Clojure-style namespaces cannot be used for these purposes.
+**Note:** The `data/` and `tool/` namespaces are reserved for context access and tool invocation respectively. Clojure-style namespaces cannot be used for these purposes.
 
 ---
 
@@ -2315,7 +2315,7 @@ When a namespaced function doesn't exist as a built-in, the analyzer provides he
 Filter expenses by category and sum amounts:
 
 ```clojure
-(->> ctx/expenses
+(->> data/expenses
      (filter (where :category = "travel"))
      (sum-by :amount))
 ```
@@ -2327,13 +2327,13 @@ Returns a number. No memory update (non-map result).
 Find the cheapest product:
 
 ```clojure
-(min-by :price ctx/products)
+(min-by :price data/products)
 ```
 
 Find employee with most years:
 
 ```clojure
-(max-by :years-employed ctx/employees)
+(max-by :years-employed data/employees)
 ```
 
 ### 10.3 Sort and Limit
@@ -2341,7 +2341,7 @@ Find employee with most years:
 Get top 5 products by price:
 
 ```clojure
-(->> ctx/products
+(->> data/products
      (sort-by :price >)
      (take 5))
 ```
@@ -2351,9 +2351,9 @@ Get top 5 products by price:
 Get all product names:
 
 ```clojure
-(pluck :name ctx/products)
+(pluck :name data/products)
 ;; or
-(map :name ctx/products)
+(map :name data/products)
 ```
 
 ### 10.5 Conditional Classification
@@ -2361,7 +2361,7 @@ Get all product names:
 Classify invoice by total:
 
 ```clojure
-(let [{:keys [total]} ctx/invoice]
+(let [{:keys [total]} data/invoice]
   (cond
     (> total 1000) "high-value"
     (> total 100)  "medium-value"
@@ -2373,7 +2373,7 @@ Classify invoice by total:
 Find eligible orders (high value, premium status, not flagged):
 
 ```clojure
-(->> ctx/orders
+(->> data/orders
      (filter (all-of (where :total > 100)
                      (any-of (where :status = "vip")
                              (where :status = "premium"))
@@ -2385,7 +2385,7 @@ Find eligible orders (high value, premium status, not flagged):
 Get names and emails of active users:
 
 ```clojure
-(->> ctx/users
+(->> data/users
      (filter (where :active))
      (mapv (fn [u] (select-keys u [:name :email]))))
 ```
@@ -2395,8 +2395,8 @@ Get names and emails of active users:
 Join orders with user information:
 
 ```clojure
-(let [users (ctx/get-users)
-      orders (ctx/get-orders)]
+(let [users (tool/get-users)
+      orders (tool/get-orders)]
   (->> orders
        (filter (where :total > 100))
        (mapv (fn [order]
@@ -2409,7 +2409,7 @@ Join orders with user information:
 Sum expenses by category:
 
 ```clojure
-(let [by-category (group-by :category ctx/expenses)]
+(let [by-category (group-by :category data/expenses)]
   (->> (keys by-category)
        (mapv (fn [cat]
                {:category cat
@@ -2421,13 +2421,13 @@ Sum expenses by category:
 Get email from nested user profile:
 
 ```clojure
-(get-in ctx/user [:profile :contact :email])
+(get-in data/user [:profile :contact :email])
 ```
 
 Filter by nested field:
 
 ```clojure
-(->> ctx/users
+(->> data/users
      (filter (where [:profile :verified] = true)))
 ```
 
@@ -2531,8 +2531,8 @@ Aggregation functions require numeric field values:
 `and` and `or` short-circuit:
 
 ```clojure
-(and false (ctx/expensive))  ; "expensive" not called
-(or true (ctx/expensive))    ; "expensive" not called
+(and false (tool/expensive))  ; "expensive" not called
+(or true (tool/expensive))   ; "expensive" not called
 ```
 
 ### 11.7 Keyword as Function with Default
@@ -2571,8 +2571,8 @@ Maps can be called as functions with a keyword argument:
 Tool calls are evaluated in left-to-right order and never reordered:
 
 ```clojure
-(let [a (ctx/tool-1)    ; called first
-      b (ctx/tool-2)]   ; called second
+(let [a (tool/tool-1)   ; called first
+      b (tool/tool-2)]  ; called second
   [a b])
 ```
 
@@ -2633,7 +2633,7 @@ type-error at line 5:
   'sum-by' expected a collection, got string: "not a list"
 
   Context: items was bound at line 2:
-    (let [items ctx/data] ...)
+    (let [items data/data] ...)
 ```
 
 ### 12.3 Common Errors and Hints
@@ -2818,12 +2818,12 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 ```
 
 **Grammar notes:**
-- `/` is allowed in symbols for namespaced access (`ctx/bar`)
+- `/` is allowed in symbols for namespaced access (`data/bar`, `tool/bar`)
 - `/` is NOT allowed in keywords (`:foo/bar` is invalid)
 - The operator position in `list-expr` accepts any expression, enabling:
   - `(:name user)` — keyword as function
   - `((fn [x] x) 42)` — anonymous function application
-  - `(ctx/tool args)` — tool invocation
+  - `(tool/tool-name args)` — tool invocation
 
 **Tokenization precedence:** When a token could match multiple grammar rules, literals take precedence over symbols:
 1. `nil`, `true`, `false` → reserved literals (not symbols)
@@ -2858,7 +2858,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 
 Programs should produce identical results when run in:
 1. PTC-Lisp interpreter (Elixir)
-2. Clojure (with stub implementations for `ctx/`, `call`, `where`, etc.)
+2. Clojure (with stub implementations for `data/`, `tool/`, `call`, `where`, etc.)
 
 ---
 
@@ -2869,7 +2869,7 @@ This section specifies how PTC-Lisp programs interact with persistent memory acr
 ### 16.1 Core Principle: Functional Transactions
 
 Programs are **pure functions** that:
-- Read from stored values (plain symbols) and `ctx/` namespace
+- Read from stored values (plain symbols) and `data/` namespace
 - Return a result value
 - The result determines stored value updates
 
@@ -2923,7 +2923,7 @@ The program's return value is passed through unchanged. Storage is explicit via 
 
 ```clojure
 ;; Returns a number - nothing stored
-(->> ctx/expenses
+(->> data/expenses
      (filter (where :category = "travel"))
      (sum-by :amount))
 ```
@@ -2932,7 +2932,7 @@ The program's return value is passed through unchanged. Storage is explicit via 
 
 ```clojure
 ;; Store values explicitly, return a result
-(def high-paid (->> (ctx/find-employees {})
+(def high-paid (->> (tool/find-employees {})
                     (filter (where :salary > 100000))))
 (def last-query "employees")
 (pluck :email high-paid)
@@ -2950,8 +2950,8 @@ Maps return as-is, no special handling:
 ```clojure
 ;; Returns a map - nothing stored unless you use def
 {:summary "Query complete"
- :count (count ctx/items)
- :items ctx/items}
+ :count (count data/items)
+ :items data/items}
 ```
 
 Return value = `{:summary "Query complete", :count 5, :items [...]}`, no symbols stored.
@@ -3023,7 +3023,7 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 **Turn 1:** Find high-paid employees and store with def
 
 ```clojure
-(def high-paid (->> (ctx/find-employees {})
+(def high-paid (->> (tool/find-employees {})
                     (filter (where :salary > 100000))))
 (count high-paid)
 ```
@@ -3044,7 +3044,7 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 
 ```clojure
 (def orders (let [ids (pluck :id high-paid)]
-              (ctx/get-orders {:employee-ids ids})))
+              (tool/get-orders {:employee-ids ids})))
 {:orders-count (count orders)}
 ```
 
@@ -3147,7 +3147,7 @@ The LLM receives this error and can generate a corrected program.
 | JSON DSL | PTC-Lisp |
 |----------|----------|
 | `{"op": "literal", "value": 42}` | `42` |
-| `{"op": "load", "name": "x"}` | `ctx/x` |
+| `{"op": "load", "name": "x"}` | `data/x` |
 | `{"op": "var", "name": "x"}` | `x` (let-bound) or `memory/x` (persistent) |
 | `{"op": "pipe", "steps": [...]}` | `(->> ...)` |
 | `{"op": "filter", "where": ...}` | `(filter pred coll)` |
@@ -3159,7 +3159,7 @@ The LLM receives this error and can generate a corrected program.
 | `{"op": "get", "path": ["a", "b"]}` | `(get-in m [:a :b])` |
 | `{"op": "let", "name": "x", ...}` | `(let [x ...] ...)` |
 | `{"op": "if", ...}` | `(if cond then else)` |
-| `{"op": "call", "tool": "t"}` | `(ctx/t)` |
+| `{"op": "call", "tool": "t"}` | `(tool/t)` |
 | `{"op": "and", "conditions": [...]}` | `(and ...)` |
 | `{"op": "merge", "objects": [...]}` | `(merge ...)` |
 
@@ -3172,7 +3172,7 @@ The LLM receives this error and can generate a corrected program.
 When the interpreter encounters a symbol, it resolves in this order:
 
 1. **Local bindings** — `let`-bound variables in current scope
-2. **Namespaced symbols** — `memory/x`, `ctx/y`
+2. **Namespaced symbols** — `memory/x`, `data/y`, `tool/z`
 3. **Built-in functions** — `filter`, `map`, `count`, etc.
 
 ### Namespace Symbols
@@ -3180,7 +3180,8 @@ When the interpreter encounters a symbol, it resolves in this order:
 | Pattern | Resolves To |
 |---------|-------------|
 | `memory/foo` | `(get env.memory :foo)` |
-| `ctx/bar` | `(get env.ctx :bar)` |
+| `data/bar` | `(get env.data :bar)` |
+| `tool/baz` | Tool invocation |
 | `foo` | Local binding or built-in |
 
 ### Example
@@ -3189,18 +3190,18 @@ When the interpreter encounters a symbol, it resolves in this order:
 (let [x 10]                    ; x is local
   (+ x                         ; resolves to local x (10)
      memory/x                  ; resolves to env.memory[:x]
-     ctx/x))                   ; resolves to env.ctx[:x]
+     data/x))                  ; resolves to env.data[:x]
 ```
 
 ### Whole Map Access
 
-The bare symbols `memory` and `ctx` are **not accessible** as whole maps. Only namespaced access is allowed:
+The bare symbols `memory` and `data` are **not accessible** as whole maps. Only namespaced access is allowed:
 
 ```clojure
 memory/foo     ; OK - access :foo key
-ctx/bar        ; OK - access :bar key
+data/bar       ; OK - access :bar key
 memory         ; ERROR - cannot access whole memory map
-ctx            ; ERROR - cannot access whole ctx map
+data           ; ERROR - cannot access whole data map
 (keys memory)  ; ERROR - memory is not a value
 ```
 
@@ -3236,7 +3237,7 @@ For examples that cannot be automatically validated, use these markers:
 
 - **TODO** — The feature is documented but the implementation is incomplete. Running the example would fail.
 - **BUG** — The example documents expected behavior but currently fails due to a known bug.
-- **...** — The example requires external context (tools, ctx/memory data) that isn't available during automated testing. These are illustrative examples showing usage patterns.
+- **...** — The example requires external context (tools, data/memory data) that isn't available during automated testing. These are illustrative examples showing usage patterns.
 
 ### Running Validation
 

@@ -46,9 +46,9 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
 
       prompt = SystemPrompt.generate(agent, context: context)
 
-      assert prompt =~ "ctx/products"
+      assert prompt =~ "data/products"
       assert prompt =~ "— List of product maps with {id, name, price, category}"
-      assert prompt =~ "ctx/question"
+      assert prompt =~ "data/question"
       assert prompt =~ "— The user's question to answer"
     end
 
@@ -79,14 +79,14 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
           received_field_descriptions: received_field_descriptions
         )
 
-      assert prompt =~ "ctx/products"
+      assert prompt =~ "data/products"
       assert prompt =~ "— Upstream description"
       refute prompt =~ "Local description"
 
-      assert prompt =~ "ctx/local_only"
+      assert prompt =~ "data/local_only"
       assert prompt =~ "— Only here"
 
-      assert prompt =~ "ctx/upstream_only"
+      assert prompt =~ "data/upstream_only"
       assert prompt =~ "— From upstream"
     end
 

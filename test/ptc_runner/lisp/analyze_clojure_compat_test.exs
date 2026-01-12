@@ -181,7 +181,7 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
       assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
       assert msg =~ "unknown namespace"
       assert msg =~ "my_ns"
-      assert msg =~ "ctx/"
+      assert msg =~ "tool/"
     end
 
     test "unknown namespace in call position" do
@@ -192,15 +192,15 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     end
   end
 
-  describe "ctx namespace still works" do
-    test "ctx/input still works as context access" do
-      raw = {:ns_symbol, :ctx, :input}
-      assert {:ok, {:ctx, :input}} = Analyze.analyze(raw)
+  describe "data and tool namespaces still work" do
+    test "data/input still works as context access" do
+      raw = {:ns_symbol, :data, :input}
+      assert {:ok, {:data, :input}} = Analyze.analyze(raw)
     end
 
-    test "ctx/tool-name in call position still works" do
-      raw = {:list, [{:ns_symbol, :ctx, :search}, {:map, []}]}
-      assert {:ok, {:ctx_call, :search, [{:map, []}]}} = Analyze.analyze(raw)
+    test "tool/tool-name in call position still works" do
+      raw = {:list, [{:ns_symbol, :tool, :search}, {:map, []}]}
+      assert {:ok, {:tool_call, :search, [{:map, []}]}} = Analyze.analyze(raw)
     end
   end
 

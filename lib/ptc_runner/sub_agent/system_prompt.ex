@@ -42,7 +42,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: context)
       iex> prompt =~ "## Role"
       true
-      iex> prompt =~ "ctx/x"
+      iex> prompt =~ "data/x"
       true
 
   """
@@ -324,7 +324,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     Please ensure your response:
     1. Contains a ```clojure code block
     2. Uses valid s-expression syntax
-    3. Calls tools with (ctx/tool-name args)
+    3. Calls tools with (tool/tool-name args)
 
     Please fix the issue and try again.
     """

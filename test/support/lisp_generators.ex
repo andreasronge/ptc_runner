@@ -113,10 +113,10 @@ defmodule PtcRunner.TestSupport.LispGenerators do
     ])
   end
 
-  @doc "Generate a context namespace access"
-  def gen_ctx_access do
+  @doc "Generate a data namespace access"
+  def gen_data_access do
     gen_identifier()
-    |> map(&{:ns_symbol, :ctx, String.to_atom(&1)})
+    |> map(&{:ns_symbol, :data, String.to_atom(&1)})
   end
 
   # ============================================================
@@ -160,7 +160,7 @@ defmodule PtcRunner.TestSupport.LispGenerators do
       {3, gen_string()},
       {3, gen_keyword()},
       {2, gen_variable_from_scope(scope)},
-      {2, gen_ctx_access()}
+      {2, gen_data_access()}
     ])
   end
 
@@ -340,12 +340,12 @@ defmodule PtcRunner.TestSupport.LispGenerators do
     gen_leaf_expr([])
   end
 
-  @doc "Generate tool call with mocked tool using ctx/ syntax"
+  @doc "Generate tool call with mocked tool using tool/ syntax"
   def gen_tool_call(depth, scope) do
     bind(gen_identifier(), fn tool_name ->
       bind(gen_map(depth, scope), fn args_map ->
-        # Use ctx/ namespace syntax: (ctx/tool-name args-map)
-        constant({:list, [{:ns_symbol, :ctx, String.to_atom(tool_name)}, args_map]})
+        # Use tool/ namespace syntax: (tool/tool-name args-map)
+        constant({:list, [{:ns_symbol, :tool, String.to_atom(tool_name)}, args_map]})
       end)
     end)
   end

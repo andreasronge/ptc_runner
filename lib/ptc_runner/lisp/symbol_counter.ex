@@ -30,7 +30,6 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :"all-of",
                   :"any-of",
                   :"none-of",
-                  :call,
                   :return,
                   :fail,
                   # Comparison operators
@@ -41,7 +40,8 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :>=,
                   :<=,
                   # Namespaces
-                  :ctx,
+                  :data,
+                  :tool,
                   # Common keywords
                   :else
                 ])
@@ -92,7 +92,7 @@ defmodule PtcRunner.Lisp.SymbolCounter do
   end
 
   defp collect_symbols({:ns_symbol, _ns, key}, acc) when is_atom(key) do
-    # Namespaced symbols like ctx/foo - count the key part
+    # Namespaced symbols like tool/foo or data/foo - count the key part
     if MapSet.member?(@core_symbols, key) do
       acc
     else

@@ -98,12 +98,12 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
   ## Examples
 
       iex> llm = PtcRunner.TestSupport.SubAgentTestHelpers.routing_llm([
-      ...>   {"Double", "```clojure\\n(* 2 ctx/n)\\n```"},
-      ...>   {{:turn, 1}, "```clojure\\n(ctx/double {:n 5})\\n```"}
+      ...>   {"Double", "```clojure\\n(* 2 data/n)\\n```"},
+      ...>   {{:turn, 1}, "```clojure\\n(tool/double {:n 5})\\n```"}
       ...> ])
       iex> {:ok, response} = llm.(%{messages: [%{content: "Double 5"}], turn: 1})
       iex> response
-      "```clojure\\n(* 2 ctx/n)\\n```"
+      "```clojure\\n(* 2 data/n)\\n```"
   """
   def routing_llm(routes) do
     fn %{messages: msgs, turn: turn} ->

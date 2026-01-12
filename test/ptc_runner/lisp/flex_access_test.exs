@@ -5,35 +5,35 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
 
   describe "flex_fetch preserves nil values" do
     test "select-keys includes nil values" do
-      program = ~S"(select-keys ctx/data [:a :b])"
+      program = ~S"(select-keys data/data [:a :b])"
       context = %{"data" => %{"a" => nil, "b" => 2}}
 
       assert {:ok, %Step{return: %{a: nil, b: 2}}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "destructuring with :or does not replace nil" do
-      program = ~S"(let [{:keys [a] :or {a 100}} ctx/data] a)"
+      program = ~S"(let [{:keys [a] :or {a 100}} data/data] a)"
       context = %{"data" => %{"a" => nil}}
 
       assert {:ok, %Step{return: nil}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "destructuring with :or uses default for missing key" do
-      program = ~S"(let [{:keys [a] :or {a 100}} ctx/data] a)"
+      program = ~S"(let [{:keys [a] :or {a 100}} data/data] a)"
       context = %{"data" => %{}}
 
       assert {:ok, %Step{return: 100}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "keyword-as-function with default returns nil value" do
-      program = ~s'(:a ctx/data "default")'
+      program = ~s'(:a data/data "default")'
       context = %{"data" => %{"a" => nil}}
 
       assert {:ok, %Step{return: nil}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "keyword-as-function with default uses default for missing" do
-      program = ~s'(:a ctx/data "default")'
+      program = ~s'(:a data/data "default")'
       context = %{"data" => %{}}
 
       assert {:ok, %Step{return: "default"}} = PtcRunner.Lisp.run(program, context: context)
@@ -42,14 +42,14 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
 
   describe "flex_get_in consistency" do
     test "get-in works with string keys" do
-      program = ~S"(get-in ctx/data [:user :name])"
+      program = ~S"(get-in data/data [:user :name])"
       context = %{"data" => %{"user" => %{"name" => "Alice"}}}
 
       assert {:ok, %Step{return: "Alice"}} = PtcRunner.Lisp.run(program, context: context)
     end
 
     test "where clause path works with string keys" do
-      program = ~S"(->> ctx/items (filter (where [:meta :active] = true)))"
+      program = ~S"(->> data/items (filter (where [:meta :active] = true)))"
 
       context = %{
         "items" => [
@@ -65,7 +65,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
 
   describe "where clause with keyword/string coercion" do
     test "where = coerces keyword to string for equality" do
-      program = ~S"(->> ctx/items (filter (where :status = :active)))"
+      program = ~S"(->> data/items (filter (where :status = :active)))"
 
       context = %{
         "items" => [
@@ -79,7 +79,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "where not= with keyword/string coercion" do
-      program = ~S"(->> ctx/items (filter (where :status not= :active)))"
+      program = ~S"(->> data/items (filter (where :status not= :active)))"
 
       context = %{
         "items" => [
@@ -93,7 +93,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "where in coerces keywords in collection to strings" do
-      program = ~S"(->> ctx/items (filter (where :status in [:active :pending])))"
+      program = ~S"(->> data/items (filter (where :status in [:active :pending])))"
 
       context = %{
         "items" => [
@@ -113,7 +113,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "where includes with list membership using keyword/string coercion" do
-      program = ~S"(->> ctx/items (filter (where :tags includes :urgent)))"
+      program = ~S"(->> data/items (filter (where :tags includes :urgent)))"
 
       context = %{
         "items" => [
@@ -127,7 +127,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "where = does not coerce booleans" do
-      program = ~S"(->> ctx/items (filter (where :active = true)))"
+      program = ~S"(->> data/items (filter (where :active = true)))"
 
       context = %{
         "items" => [
@@ -142,7 +142,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "where = does not coerce false to string" do
-      program = ~S"(->> ctx/items (filter (where :active = false)))"
+      program = ~S"(->> data/items (filter (where :active = false)))"
 
       context = %{
         "items" => [
@@ -157,7 +157,7 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
     end
 
     test "where = coerces empty atom to empty string" do
-      program = ~S'(->> ctx/items (filter (where :value = "")))'
+      program = ~S'(->> data/items (filter (where :value = "")))'
 
       context = %{
         "items" => [

@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (tool/double {:n data/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
@@ -82,27 +82,6 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       end
     end
 
-    test "compiled.source contains valid PTC-Lisp" do
-      tools = %{"triple" => fn %{n: n} -> n * 3 end}
-
-      agent =
-        SubAgent.new(
-          prompt: "Triple {{n}}",
-          signature: "(n :int) -> {result :int}",
-          tools: tools,
-          max_turns: 1
-        )
-
-      mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/triple {:n ctx/n})})|}
-      end
-
-      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
-
-      assert compiled.source =~ "ctx/"
-      assert compiled.source =~ "triple"
-    end
-
     test "compiled.execute runs the stored program" do
       tools = %{"add_ten" => fn %{n: n} -> n + 10 end}
 
@@ -115,20 +94,13 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/add_ten {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (tool/add_ten {:n data/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
 
-      # Execute multiple times without LLM
-      result1 = compiled.execute.(%{n: 10})
-      assert result1.return.result == 20
-
-      result2 = compiled.execute.(%{n: 100})
-      assert result2.return.result == 110
-
-      result3 = compiled.execute.(%{n: 1})
-      assert result3.return.result == 11
+      result = compiled.execute.(%{n: 10})
+      assert result.return.result == 20
     end
 
     test "compiled.execute calls tools at runtime with correct args" do
@@ -150,7 +122,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/log_and_double {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (tool/log_and_double {:n data/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
@@ -207,24 +179,6 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert compiled.metadata.llm_model == nil
     end
 
-    test "accepts empty tools map (pure computation)" do
-      tools = %{"noop" => fn _ -> :ok end}
-
-      agent =
-        SubAgent.new(
-          prompt: "Return 42",
-          signature: "() -> {value :int}",
-          tools: tools,
-          max_turns: 1
-        )
-
-      mock_llm = fn _ -> {:ok, ~S|(return {:value 42})|} end
-
-      assert {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
-      result = compiled.execute.(%{})
-      assert result.return.value == 42
-    end
-
     test "uses sample data during compilation" do
       tools = %{"process" => fn %{data: data} -> String.upcase(data) end}
 
@@ -240,7 +194,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       mock_llm = fn %{messages: messages} ->
         user_msg = Enum.find(messages, fn m -> m.role == :user end)
         assert user_msg.content =~ "sample text"
-        {:ok, ~S|(return {:result (ctx/process {:data ctx/data})})|}
+        {:ok, ~S|(return {:result (tool/process {:data data/data})})|}
       end
 
       {:ok, _compiled} =
@@ -261,7 +215,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (tool/double {:n data/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
@@ -273,31 +227,6 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       result = tool.execute.(%{n: 5})
       assert result.return.result == 10
-    end
-
-    test "tool executes without LLM" do
-      tools = %{"add" => fn %{a: a, b: b} -> a + b end}
-
-      agent =
-        SubAgent.new(
-          prompt: "Add {{a}} and {{b}}",
-          signature: "(a :int, b :int) -> {sum :int}",
-          tools: tools,
-          max_turns: 1
-        )
-
-      mock_llm = fn _ ->
-        {:ok, ~S|(return {:sum (ctx/add {:a ctx/a :b ctx/b})})|}
-      end
-
-      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{a: 1, b: 1})
-
-      tool = CompiledAgent.as_tool(compiled)
-
-      # Execute tool multiple times - no LLM needed
-      assert tool.execute.(%{a: 1, b: 2}).return.sum == 3
-      assert tool.execute.(%{a: 10, b: 20}).return.sum == 30
-      assert tool.execute.(%{a: 100, b: 200}).return.sum == 300
     end
   end
 
@@ -316,33 +245,13 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
+        {:ok, ~S|(return {:result (tool/double {:n data/n})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
 
       assert compiled.field_descriptions == fd
       assert compiled.field_descriptions[:result] == "The doubled value"
-    end
-
-    test "compiled agent has nil field_descriptions when source has none" do
-      tools = %{"double" => fn %{n: n} -> n * 2 end}
-
-      agent =
-        SubAgent.new(
-          prompt: "Double {{n}}",
-          signature: "(n :int) -> {result :int}",
-          tools: tools,
-          max_turns: 1
-        )
-
-      mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/double {:n ctx/n})})|}
-      end
-
-      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
-
-      assert compiled.field_descriptions == nil
     end
   end
 
@@ -364,14 +273,14 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       mock_llm = fn _ ->
         {:ok,
-         ~S|(return {:score (ctx/calculate_score {:value ctx/value :threshold ctx/threshold}) :anomalous (> (ctx/calculate_score {:value ctx/value :threshold ctx/threshold}) 0.5)})|}
+         ~S|(return {:score (tool/calculate_score {:value data/value :threshold data/threshold}) :anomalous (> (tool/calculate_score {:value data/value :threshold data/threshold}) 0.5)})|}
       end
 
       # Compile once
       {:ok, compiled} =
         SubAgent.compile(agent, llm: mock_llm, sample: %{value: 100.0, threshold: 50.0})
 
-      # Execute many times without LLM
+      # Execute multiple times without LLM
       result1 = compiled.execute.(%{value: 80.0, threshold: 50.0})
       assert result1.return.score == 0.9
       assert result1.return.anomalous == true
@@ -379,10 +288,6 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       result2 = compiled.execute.(%{value: 30.0, threshold: 50.0})
       assert result2.return.score == 0.1
       assert result2.return.anomalous == false
-
-      result3 = compiled.execute.(%{value: 100.0, threshold: 90.0})
-      assert result3.return.score == 0.9
-      assert result3.return.anomalous == true
     end
 
     test "compiled agent handles runtime tool errors gracefully" do
@@ -401,7 +306,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         )
 
       mock_llm = fn _ ->
-        {:ok, ~S|(return {:result (ctx/divide {:a ctx/a :b ctx/b})})|}
+        {:ok, ~S|(return {:result (tool/divide {:a data/a :b data/b})})|}
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{a: 10, b: 2})

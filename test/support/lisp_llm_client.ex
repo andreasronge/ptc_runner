@@ -48,10 +48,10 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
 
     #{LanguageSpec.get(:single_shot)}
 
-    Available data (access via ctx/):
-    - ctx/products - list of product maps with keys: name, price, category, in_stock
-    - ctx/orders - list of order maps with keys: id, status, total, product_category
-    - ctx/employees - list of employee maps with keys: name, department, salary
+    Available data (access via data/):
+    - data/products - list of product maps with keys: name, price, category, in_stock
+    - data/orders - list of order maps with keys: id, status, total, product_category
+    - data/employees - list of employee maps with keys: name, department, salary
 
     Task: #{task}
 

@@ -18,7 +18,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
 
     test "non-map result with context" do
       assert {:ok, %{return: 10, memory: %{}}} =
-               Lisp.run("ctx/x", context: %{x: 10})
+               Lisp.run("data/x", context: %{x: 10})
     end
 
     test "non-map result with initial memory" do

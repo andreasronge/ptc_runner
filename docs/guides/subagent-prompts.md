@@ -8,7 +8,7 @@ SubAgent generates a system prompt with these sections:
 
 1. **Role & Purpose** - Defines agent as PTC-Lisp generator
 2. **Rules** - Boundaries for code generation
-3. **Data Inventory** - Typed view of `ctx/` variables
+3. **Data Inventory** - Typed view of `data/` variables
 4. **Tool Schemas** - Available tools with signatures
 5. **Language Reference** - PTC-Lisp syntax (customizable)
 6. **Output Format** - Code block requirements (customizable)
@@ -125,7 +125,7 @@ defmodule MyApp.Prompts do
 
     ```clojure
     ;; Filtering with multiple conditions
-    (->> ctx/orders
+    (->> data/orders
          (filter (all-of (where :status = "pending")
                          (where :total > 100)))
          (count))
@@ -157,7 +157,7 @@ defmodule MyApp.Prompts do
 
     - Orders have statuses: pending, shipped, delivered, cancelled
     - Products belong to categories: electronics, clothing, food
-    - Use `ctx/current_user` for permission checks
+    - Use `data/current_user` for permission checks
     """
   end
 end

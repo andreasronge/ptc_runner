@@ -30,7 +30,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:set, [t()]}
           # Variables and namespace access
           | {:var, atom()}
-          | {:ctx, atom()}
+          | {:data, atom()}
           # Function call: f(args...)
           | {:call, t(), [t()]}
           # Let bindings: (let [p1 v1 p2 v2 ...] body)
@@ -50,10 +50,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Control flow signals
           | {:return, t()}
           | {:fail, t()}
-          # Builtin call (other tools)
-          | {:builtin_call, String.t(), t()}
-          # Tool invocation via ctx namespace: (ctx/tool-name args...)
-          | {:ctx_call, atom(), [t()]}
+          # Tool invocation via tool/ namespace: (tool/name args...)
+          | {:tool_call, atom(), [t()]}
           # Define binding in user namespace: (def name value) with optional metadata
           | {:def, atom(), t(), map()}
           # Tail recursion: loop and recur

@@ -16,7 +16,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       assert String.starts_with?(prompt, "You are an expert analyst.")
       assert prompt =~ "# Role"
-      assert prompt =~ "ctx/data"
+      assert prompt =~ "data/data"
     end
 
     test "suffix appends to generated prompt" do
@@ -30,7 +30,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       assert String.ends_with?(prompt, "Always explain your reasoning.")
       assert prompt =~ "# Role"
-      assert prompt =~ "ctx/data"
+      assert prompt =~ "data/data"
     end
 
     test "prefix and suffix work together" do
@@ -47,7 +47,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       assert String.starts_with?(prompt, "You are an expert analyst.")
       assert String.ends_with?(prompt, "Always explain your reasoning.")
-      assert prompt =~ "ctx/data"
+      assert prompt =~ "data/data"
     end
 
     test "language_spec replaces language section" do

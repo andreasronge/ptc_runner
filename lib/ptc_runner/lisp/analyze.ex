@@ -97,7 +97,7 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp do_analyze({:ns_symbol, :ctx, key}, _tail?), do: {:ok, {:ctx, key}}
+  defp do_analyze({:ns_symbol, :data, key}, _tail?), do: {:ok, {:data, key}}
 
   # Clojure-style namespaces: normalize to built-in or provide helpful error
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
@@ -181,8 +181,8 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :call}, _rest, _list, _tail?) do
     {:error,
      {:invalid_form,
-      "(call \"tool\" args) is deprecated, use (ctx/tool-name args) instead. " <>
-        "Example: (call \"search\" {:query \"foo\"}) becomes (ctx/search {:query \"foo\"})"}}
+      "(call \"tool\" args) is deprecated, use (tool/name args) instead. " <>
+        "Example: (call \"search\" {:query \"foo\"}) becomes (tool/search {:query \"foo\"})"}}
   end
 
   defp dispatch_list_form({:symbol, :return}, rest, _list, tail?), do: analyze_return(rest, tail?)
@@ -190,9 +190,9 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :def}, rest, _list, tail?), do: analyze_def(rest, tail?)
   defp dispatch_list_form({:symbol, :defn}, rest, _list, tail?), do: analyze_defn(rest, tail?)
 
-  # Tool invocation via ctx namespace: (ctx/tool-name args...)
-  defp dispatch_list_form({:ns_symbol, :ctx, tool_name}, rest, _list, tail?),
-    do: analyze_ctx_call(tool_name, rest, tail?)
+  # Tool invocation via tool/ namespace: (tool/name args...)
+  defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
+    do: analyze_tool_call(tool_name, rest, tail?)
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
@@ -814,12 +814,12 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # Tool invocation via ctx namespace: (ctx/tool-name args...)
+  # Tool invocation via tool/ namespace: (tool/name args...)
   # ============================================================
 
-  defp analyze_ctx_call(tool_name, arg_asts, _tail?) do
+  defp analyze_tool_call(tool_name, arg_asts, _tail?) do
     with {:ok, args} <- analyze_list(arg_asts) do
-      {:ok, {:ctx_call, tool_name, args}}
+      {:ok, {:tool_call, tool_name, args}}
     end
   end
 
@@ -1045,7 +1045,8 @@ defmodule PtcRunner.Lisp.Analyze do
          {:invalid_form, "#{func} is not available. #{category_name} functions: #{available}"}}
 
       true ->
-        {:error, {:invalid_form, "unknown namespace #{ns}/ in #{ns}/#{func}. Use ctx/ for tools"}}
+        {:error,
+         {:invalid_form, "unknown namespace #{ns}/. Use tool/ for tools, data/ for input data"}}
     end
   end
 

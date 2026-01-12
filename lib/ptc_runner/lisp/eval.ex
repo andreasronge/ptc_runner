@@ -168,8 +168,8 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Context access: ctx/input → ctx[:input]
-  defp do_eval({:ctx, key}, %EvalContext{ctx: ctx} = eval_ctx) do
+  # Data access: data/input → ctx[:input]
+  defp do_eval({:data, key}, %EvalContext{ctx: ctx} = eval_ctx) do
     {:ok, flex_get(ctx, key), eval_ctx}
   end
 
@@ -507,18 +507,8 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Builtin calls (other tools)
-  defp do_eval(
-         {:builtin_call, tool_name, args_ast},
-         %EvalContext{tool_exec: tool_exec} = eval_ctx
-       ) do
-    with {:ok, args_map, eval_ctx2} <- do_eval(args_ast, eval_ctx) do
-      record_tool_call(tool_name, args_map, tool_exec, eval_ctx2)
-    end
-  end
-
-  # Tool invocation via ctx namespace: (ctx/tool-name args...)
-  defp do_eval({:ctx_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
+  # Tool invocation via tool/ namespace: (tool/name args...)
+  defp do_eval({:tool_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     # Evaluate all arguments
     case eval_all(arg_asts, eval_ctx) do
       {:ok, arg_vals, eval_ctx2} ->

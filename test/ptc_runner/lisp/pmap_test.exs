@@ -140,9 +140,9 @@ defmodule PtcRunner.Lisp.PmapTest do
         v * 2
       end
 
-      # (pmap (fn [x] (ctx/process {:value x})) [1 2 3])
+      # (pmap (fn [x] (tool/process {:value x})) [1 2 3])
       fn_ast =
-        {:fn, [{:var, :x}], {:ctx_call, :process, [{:map, [{{:keyword, :value}, {:var, :x}}]}]}}
+        {:fn, [{:var, :x}], {:tool_call, :process, [{:map, [{{:keyword, :value}, {:var, :x}}]}]}}
 
       ast = {:pmap, fn_ast, {:vector, [1, 2, 3]}}
 

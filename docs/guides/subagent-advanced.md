@@ -9,8 +9,8 @@ The SubAgent loop naturally supports **ReAct** (Reason + Act). Each turn's resul
 ### Implicit Context Chaining
 
 ```
-Turn 1: LLM program -> execute -> result merged to ctx/
-Turn 2: LLM sees ctx/results, generates next program
+Turn 1: LLM program -> execute -> result merged to data/
+Turn 2: LLM sees data/results, generates next program
 Turn 3: LLM calls return with final answer
 ```
 
@@ -32,20 +32,20 @@ Turn 3: LLM calls return with final answer
 **Turn 1: Discovery**
 ```clojure
 ;; Store results in user namespace
-(def results (ctx/search-emails {:query "Acme Corp"}))
+(def results (tool/search-emails {:query "Acme Corp"}))
 ```
 
 The LLM sees in its next prompt:
 ```
 Program Result:
 {:results [{id: 101, subject: "Urgent...", _body: <Firewalled>}, ...]}
-(8 more items omitted. Full data available in ctx/results)
+(8 more items omitted. Full data available in data/results)
 ```
 
 **Turn 2: Filter and Return**
 ```clojure
-;; Process all results from ctx/results
-(let [urgent (filter (fn [e] (includes? (:subject e) "Urgent")) ctx/results)]
+;; Process all results from data/results
+(let [urgent (filter (fn [e] (includes? (:subject e) "Urgent")) data/results)]
   (return {
     :summary (str "Found " (count urgent) " urgent emails")
     :_ids (mapv :id urgent)
@@ -63,7 +63,7 @@ Program Result:
 | Memory | Full value | Hidden |
 
 When data is truncated, the system appends:
-> *"[98 more items omitted. Full data available in ctx/results]"*
+> *"[98 more items omitted. Full data available in data/results]"*
 
 ### Investigation Agents (Zero Tools)
 
@@ -88,10 +88,10 @@ The LLM can "walk" the data across turns:
 
 ```clojure
 ;; Turn 1: Extract summaries
-(mapv (fn [r] {:id (:id r) :score (:score r)}) ctx/reports)
+(mapv (fn [r] {:id (:id r) :score (:score r)}) data/reports)
 
 ;; Turn 2: Find max and get details
-(first (filter #(= (:id %) 123) ctx/reports))
+(first (filter #(= (:id %) 123) data/reports))
 
 ;; Turn 3: Return with reasoning
 (return {:report_id 123 :reasoning "..."})
@@ -142,7 +142,7 @@ When data is truncated in turn feedback, the system appends:
 > *"... (truncated)"*
 
 When lists are truncated in prompts, the system appends:
-> *"[98 more items omitted. Full data available in ctx/results]"*
+> *"[98 more items omitted. Full data available in data/results]"*
 
 ## Compile Pattern
 
@@ -270,8 +270,8 @@ If the LLM provides text without a code block or terminal form:
 ### Core
 
 ```clojure
-(ctx/tool {:arg value})        ; Call tool
-ctx/key                        ; Access context
+(tool/tool-name {:arg value})  ; Call tool
+data/key                       ; Access context
 (def key value)                ; Store value
 key                            ; Access stored value
 (defn name [args] body)        ; Define function

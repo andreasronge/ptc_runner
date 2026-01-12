@@ -60,9 +60,9 @@ defmodule PtcRunner.SubAgent.DebugTest do
         SubAgent.preview_prompt(agent, context: %{data: [1, 2, 3], user_id: 123})
 
       # Data inventory is in user message (not system) for cacheability
-      assert preview.user =~ "ctx/data"
-      assert preview.user =~ "ctx/user_id"
-      refute preview.system =~ "ctx/data"
+      assert preview.user =~ "data/data"
+      assert preview.user =~ "data/user_id"
+      refute preview.system =~ "data/data"
     end
   end
 
@@ -339,7 +339,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       llm = fn _ ->
         {:ok, ~S|```clojure
-(def expenses (ctx/list_expenses))
+(def expenses (tool/list_expenses))
 (return {:total (count expenses)})
 ```|}
       end
@@ -451,7 +451,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 20},
         fail: nil,
         memory: %{},
-        turns: [Turn.success(1, "(* ctx/value 2)", "(* ctx/value 2)", 20, [], [], %{})],
+        turns: [Turn.success(1, "(* data/value 2)", "(* data/value 2)", 20, [], [], %{})],
         usage: %{duration_ms: 75, memory_bytes: 0}
       }
 

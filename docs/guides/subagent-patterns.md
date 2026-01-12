@@ -55,7 +55,7 @@ agent_b = SubAgent.new(
   field_descriptions: %{final: "The final computed value"}
 )
 
-# When chained, agent_b's LLM sees "The doubled value" description for ctx/result
+# When chained, agent_b's LLM sees "The doubled value" description for data/result
 step_a = SubAgent.run!(agent_a, llm: llm, context: %{n: 5})
 step_b = SubAgent.then!(step_a, agent_b, llm: llm)
 
@@ -116,8 +116,8 @@ main_tools = %{
 The main agent sees typed tool signatures and can compose them:
 
 ```clojure
-(let [customer (ctx/customer-finder {:description "highest revenue"})
-      orders (ctx/order-fetcher {:customer_id (:customer_id customer)})]
+(let [customer (tool/customer-finder {:description "highest revenue"})
+      orders (tool/order-fetcher {:customer_id (:customer_id customer)})]
   (return {:summary (str "Found " (count orders) " orders")}))
 ```
 
@@ -201,10 +201,10 @@ tools = %{
 The main agent calls it like any other tool:
 
 ```clojure
-(let [emails (ctx/list_emails {:limit 10})]
+(let [emails (tool/list_emails {:limit 10})]
   (mapv (fn [e]
           (assoc e :eval
-            (ctx/evaluate_importance
+            (tool/evaluate_importance
               {:email e :customer_tier "Silver"})))
         emails))
 ```
@@ -293,9 +293,9 @@ tools = %{
 The LLM decides which tool sets each child needs:
 
 ```clojure
-(let [emails (ctx/spawn_agent {:prompt "Find urgent emails"
+(let [emails (tool/spawn_agent {:prompt "Find urgent emails"
                                 :tools ["email"]})
-      meetings (ctx/spawn_agent {:prompt "Schedule follow-ups"
+      meetings (tool/spawn_agent {:prompt "Schedule follow-ups"
                                   :tools ["calendar"]
                                   :context emails})]
   (return {:scheduled (count meetings)}))

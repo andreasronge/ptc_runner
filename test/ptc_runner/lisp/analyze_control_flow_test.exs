@@ -4,7 +4,7 @@ defmodule PtcRunner.Lisp.AnalyzeControlFlowTest do
   alias PtcRunner.Lisp.Analyze
 
   describe "(return value) syntactic sugar" do
-    test "desugars to builtin_call for return" do
+    test "analyzes to {:return, value}" do
       raw = {:list, [{:symbol, :return}, {:map, [{{:keyword, :result}, 42}]}]}
 
       assert {:ok, {:return, {:map, [{{:keyword, :result}, 42}]}}} =
@@ -35,7 +35,7 @@ defmodule PtcRunner.Lisp.AnalyzeControlFlowTest do
   end
 
   describe "(fail error) syntactic sugar" do
-    test "desugars to builtin_call for fail" do
+    test "analyzes to {:fail, value}" do
       raw = {:list, [{:symbol, :fail}, {:map, [{{:keyword, :reason}, {:keyword, :bad}}]}]}
 
       assert {:ok, {:fail, {:map, [{{:keyword, :reason}, {:keyword, :bad}}]}}} =

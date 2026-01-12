@@ -17,15 +17,15 @@ Use tools for external data; apply your own reasoning for analysis and computati
 
 Safe Clojure subset.
 
-### Context & Tools
+### Data & Tools
 ```clojure
-ctx/products                      ; read-only context data
-(ctx/search {:query "budget"})    ; tool invocation
-(def results (ctx/search {...}))  ; store result in variable
-(count results)                   ; access variable (no ctx/)
+data/products                      ; read-only input data
+(tool/search {:query "budget"})    ; tool invocation
+(def results (tool/search {...}))  ; store result in variable
+(count results)                    ; access variable (no data/)
 ```
 
-**Tip:** `(pmap #(ctx/tool {:id %}) ids)` runs tool calls concurrently.
+**Tip:** `(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
 
 ### PTC Extensions
 

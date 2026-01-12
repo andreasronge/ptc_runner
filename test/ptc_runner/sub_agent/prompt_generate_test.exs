@@ -30,8 +30,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: context)
 
-      assert prompt =~ "ctx/user_id"
-      assert prompt =~ "ctx/name"
+      assert prompt =~ "data/user_id"
+      assert prompt =~ "data/name"
     end
 
     test "includes tools in tool schemas" do
@@ -190,8 +190,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       assert prompt =~ "## Role"
 
       # Data inventory
-      assert prompt =~ "ctx/user"
-      assert prompt =~ "ctx/emails"
+      assert prompt =~ "data/user"
+      assert prompt =~ "data/emails"
 
       # Tools
       assert prompt =~ "search"
@@ -200,8 +200,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       # Mission with expanded template
       assert prompt =~ "Find urgent emails for Alice"
 
-      # PTC-Lisp reference (ctx/ syntax for tool invocation)
-      assert prompt =~ "(ctx/search"
+      # PTC-Lisp reference (tool/ syntax for tool invocation)
+      assert prompt =~ "(tool/search"
 
       # Output format
       assert prompt =~ "```clojure"
@@ -271,8 +271,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       prompt = SystemPrompt.generate(agent, context: context)
 
       assert prompt =~ "Calculate 5 + 3"
-      assert prompt =~ "ctx/x"
-      assert prompt =~ "ctx/y"
+      assert prompt =~ "data/x"
+      assert prompt =~ "data/y"
     end
 
     test "handles very long tool names gracefully" do
@@ -301,7 +301,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       prompt = SystemPrompt.generate(SubAgent.new(prompt: "Test"), context: context)
 
       # Should handle gracefully without erroring
-      assert prompt =~ "ctx/config"
+      assert prompt =~ "data/config"
     end
 
     test "generates prompt with both tools and tool_catalog" do

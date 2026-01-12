@@ -559,7 +559,7 @@ defmodule PtcRunner.SubAgent.Debug do
   defp placeholder_message?(msg) do
     content = Map.get(msg, :content, "")
 
-    # Check for empty data inventory placeholder (ctx/ namespace)
+    # Check for empty data inventory placeholder (data/ namespace)
     String.contains?(content, "No data available in context")
   end
 

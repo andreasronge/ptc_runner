@@ -88,8 +88,8 @@ defmodule PtcRunner.Lisp.FormatterTest do
   end
 
   describe "namespaced symbols" do
-    test "ctx namespace" do
-      assert Formatter.format({:ns_symbol, :ctx, :input}) == "ctx/input"
+    test "data namespace" do
+      assert Formatter.format({:ns_symbol, :data, :input}) == "data/input"
     end
 
     test "generic namespace" do

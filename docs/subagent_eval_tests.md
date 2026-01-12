@@ -13,7 +13,7 @@ Implementation plan for multi-turn and SubAgent tests in the demo folder.
 
 ### 1. Error Recovery (Self-Correction)
 
-**What we're testing:** Agent receives error feedback via `ctx/fail` and generates a corrected program.
+**What we're testing:** Agent receives error feedback via `data/fail` and generates a corrected program.
 
 **Implementation Clue: "Two-Turn Trap"**
 
@@ -145,7 +145,7 @@ Available keys: #{inspect(Map.keys(memory))}
 **Implementation Clue: Metadata Alongside Hidden Data**
 
 ```elixir
-# Test setup - what goes into ctx/
+# Test setup - what goes into data/
 context = %{
   # Visible to LLM in prompt
   customer_count: 150,
@@ -175,9 +175,9 @@ context = %{
 
 | Edge Case | Detection | Mitigation |
 |-----------|-----------|------------|
-| Helpful Narcissist | LLM says "I can't see the emails" | Prompt: "The runtime can access fields you cannot see. Use `ctx/_fieldname`." |
-| Data Leak | Program returns `(first ctx/_emails)` | Filter firewalled values from `:return` before next turn |
-| Probe Attempts | LLM tries `(println ctx/_emails)` | Sandbox blocks side-effect functions on firewalled data |
+| Helpful Narcissist | LLM says "I can't see the emails" | Prompt: "The runtime can access fields you cannot see. Use `data/_fieldname`." |
+| Data Leak | Program returns `(first data/_emails)` | Filter firewalled values from `:return` before next turn |
+| Probe Attempts | LLM tries `(println data/_emails)` | Sandbox blocks side-effect functions on firewalled data |
 
 **Firewall Leak Detection:**
 
@@ -199,9 +199,9 @@ end
 **Prompt Addition for Firewall Tests:**
 
 ```
-Some context fields are prefixed with '_' (e.g., ctx/_emails).
+Some context fields are prefixed with '_' (e.g., data/_emails).
 You cannot see their contents, but your programs CAN access them.
-The PTC runtime will evaluate expressions like (count ctx/_emails) correctly.
+The PTC runtime will evaluate expressions like (count data/_emails) correctly.
 Never try to return or display firewalled data directly.
 ```
 
@@ -587,7 +587,7 @@ What is the length of the products list? Return the total number of items.
 
 
 
-(count ctx/products)
+(count data/products)
 
 
 
@@ -605,7 +605,7 @@ Calculate the sum of all product prices. Just add up every price value.
 
 
 
-(sum-by :price ctx/products)
+(sum-by :price data/products)
 
 
 
@@ -622,7 +622,7 @@ Compute the average of all order totals. What is the mean value?
 
 
 
-(avg-by :total ctx/orders)
+(avg-by :total data/orders)
 
 
 
@@ -640,7 +640,7 @@ What is the average price of products with status 'archived'? If there are no su
 
 
 
-(if-let [filtered (filter (where :status = "archived") ctx/products)]
+(if-let [filtered (filter (where :status = "archived") data/products)]
   (avg-by :price filtered)
   0)
 
@@ -660,7 +660,7 @@ Get the name of the first product in the 'luxury' category. If no such product e
 
 
 
-(if-let [luxury-products (filter (where :category = "luxury") ctx/products)]
+(if-let [luxury-products (filter (where :category = "luxury") data/products)]
   (get (first luxury-products) :name)
   "none")
 
@@ -679,4 +679,4 @@ What is the total discount across all products?
 
 
 
-(sum-by :discount ctx/products)
+(sum-by :discount data/products)

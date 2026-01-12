@@ -182,25 +182,21 @@ defmodule PtcRunner.Lisp.SpecValidator do
   ## Returns
 
       [
-        {"def", "(def x 10)", :validation_error},
-        {"defn", "(defn foo [x] x)", :validation_error},
+        {"lazy-seq", "(lazy-seq [1])", :unbound_var},
+        {"partial", "(partial + 1)", :unbound_var},
         ...
       ]
   """
   @spec negative_tests() :: [tuple()]
   def negative_tests do
+    # Only features that remain unsupported per Section 13.1
+    # Removed: def, defn, #(), loop/recur, str, println (now supported)
     [
-      {"def", "(def x 10)", :validation_error},
-      {"defn", "(defn foo [x] x)", :validation_error},
-      {"#()", "#(+ % 1)", :parse_error},
-      {"loop/recur", "(loop [x 0] x)", :validation_error},
       {"lazy-seq", "(lazy-seq [1])", :unbound_var},
-      {"str", "(str \"a\" \"b\")", :unbound_var},
       {"partial", "(partial + 1)", :unbound_var},
       {"comp", "(comp inc inc)", :unbound_var},
       {"eval", "(eval (+ 1 2))", :unbound_var},
       {"read-string", "(read-string \"(+ 1 2)\")", :unbound_var},
-      {"println", "(println \"hi\")", :unbound_var},
       {"try", "(try 1)", :unbound_var}
     ]
   end

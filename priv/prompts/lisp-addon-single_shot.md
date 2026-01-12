@@ -18,7 +18,7 @@ thinking:
 The user wants electronics count. I'll filter products by category and count.
 
 ```clojure
-(->> ctx/products
+(->> data/products
      (filter (where :category = "electronics"))
      (count))
 ```

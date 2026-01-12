@@ -32,9 +32,9 @@ defmodule PtcRunner.SubAgent.SystemPrompt.DataInventory do
 
       iex> context = %{user_id: 123, name: "Alice"}
       iex> inventory = PtcRunner.SubAgent.SystemPrompt.DataInventory.generate(context, nil)
-      iex> inventory =~ "ctx/user_id"
+      iex> inventory =~ "data/user_id"
       true
-      iex> inventory =~ "ctx/name"
+      iex> inventory =~ "data/name"
       true
 
   """
@@ -74,13 +74,13 @@ defmodule PtcRunner.SubAgent.SystemPrompt.DataInventory do
         desc = get_field_description(key, field_descriptions)
         desc_note = if desc, do: " — #{desc}", else: ""
 
-        "| `ctx/#{key_str}` | `#{type_str}` | #{sample}#{firewalled_note}#{desc_note} |"
+        "| `data/#{key_str}` | `#{type_str}` | #{sample}#{firewalled_note}#{desc_note} |"
       end)
 
     header = """
     # Data Inventory
 
-    Available in `ctx/`:
+    Available in `data/`:
 
     | Key | Type | Sample |
     |-----|------|--------|

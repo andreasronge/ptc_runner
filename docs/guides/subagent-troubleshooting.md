@@ -205,7 +205,7 @@ Output:
 ```
 ┌─ Turn 1 ────────────────────────────────────────────────┐
 │ Program:
-│   (def results (ctx/search {:q "test"}))
+│   (def results (tool/search {:q "test"}))
 │   (println "Found:" (count results))
 │   results
 │ Output:
@@ -274,14 +274,14 @@ If you don't see "Output:" in the trace, either no `println` was called or the L
 1. **Use `def` to persist values**:
    ```clojure
    ;; This persists cached-data for later access
-   (def cached-data (ctx/fetch-data {}))
+   (def cached-data (tool/fetch-data {}))
    ```
 
 2. **Store and return different values**:
    ```clojure
    ;; Persists cached-data, returns a summary
    (do
-     (def cached-data (ctx/fetch-data {}))
+     (def cached-data (tool/fetch-data {}))
      (str "Stored " (count cached-data) " items"))
    ```
 

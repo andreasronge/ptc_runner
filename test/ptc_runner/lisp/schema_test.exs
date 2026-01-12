@@ -23,7 +23,8 @@ defmodule PtcRunner.Lisp.SchemaTest do
 
     test "documents context access" do
       prompt = LanguageSpec.get(:multi_turn)
-      assert prompt =~ "ctx/"
+      assert prompt =~ "data/"
+      assert prompt =~ "tool/"
     end
 
     test "documents restrictions" do
