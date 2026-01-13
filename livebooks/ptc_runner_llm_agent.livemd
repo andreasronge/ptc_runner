@@ -116,16 +116,34 @@ step.return
 Use `context` to pass data. Signatures validate the output structure:
 
 ```elixir
-{:ok, step} = PtcRunner.SubAgent.run(
-  "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
-  context: %{review: "Great product, fast shipping! Would buy again."},
-  signature: "(review :string) -> {sentiment :string, confidence :float}",
+review = "Great product, fast shipping! Would buy again."
+agent = PtcRunner.SubAgent.new(
+  prompt: "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
+  signature: "(review :string) -> {sentiment :string, confidence :float}"
+)
+"done"
+
+```
+
+```elixir
+PtcRunner.SubAgent.preview_prompt(agent, context: %{user: "alice"})
+```
+
+```elixir
+
+{_, step} = PtcRunner.SubAgent.run(agent,
   llm: my_llm,
-  debug: true
+  context: %{ review: review },
+  debug: true,
+  compression: true,
+  turns: 1
 )
 
-Debug.print_trace(step)
 step.return
+```
+
+```elixir
+Debug.print_trace(step, raw: true)
 ```
 
 ## With Tools
