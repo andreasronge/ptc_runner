@@ -117,5 +117,26 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       # With has_println: false, sample is shown
       assert String.contains?(result, "sample: 42")
     end
+
+    test "shows map field info in tool signature" do
+      # When a tool takes a structured map like %{path: String.t()},
+      # the rendered signature should show the required field names
+      # so the LLM knows what keys to use
+      config = %{
+        tools: %{
+          "read_file" => make_tool("read_file", "(map {path :string}) -> :string")
+        }
+      }
+
+      result = Namespace.render(config)
+
+      # Should show the field info, not just "map"
+      # The LLM needs to know to use {:path "..."} not {:file "..."}
+      assert String.contains?(result, "path"),
+             "Expected tool signature to show map field 'path', got: #{result}"
+
+      refute result =~ ~r/read_file\(map\)/,
+             "Tool signature should not show bare 'map' without field info"
+    end
   end
 end
