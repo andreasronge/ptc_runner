@@ -156,6 +156,31 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
+  describe "to_clojure/2 formats floats cleanly" do
+    test "avoids IEEE 754 noise" do
+      # 1.1 + 2.2 produces 3.3000000000000003 in Elixir
+      {result, false} = Format.to_clojure(1.1 + 2.2)
+      assert result == "3.3"
+    end
+
+    test "formats simple floats" do
+      assert {"3.14", false} = Format.to_clojure(3.14)
+      assert {"0.5", false} = Format.to_clojure(0.5)
+    end
+
+    test "formats large numbers" do
+      {result, false} = Format.to_clojure(1.0e20)
+      # Compact format uses decimal form, not scientific notation
+      assert result == "100000000000000000000.0"
+    end
+
+    test "formats small numbers" do
+      {result, false} = Format.to_clojure(1.0e-10)
+      # Compact format uses decimal form, not scientific notation
+      assert result == "0.0000000001"
+    end
+  end
+
   describe "to_clojure/2 with printable_limit on maps" do
     test "auto-reduces entry limit when budget is too small for all keys" do
       map = %{

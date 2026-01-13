@@ -97,6 +97,22 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "float - alias for double" do
+    test "converts integer to float" do
+      assert_lisp("(float 5)", 5.0)
+    end
+
+    test "float of float is identity" do
+      assert_lisp("(float 3.14)", 3.14)
+    end
+
+    test "handles special values" do
+      assert_lisp("(float Double/NaN)", :nan)
+      assert_lisp("(float Double/POSITIVE_INFINITY)", :infinity)
+      assert_lisp("(float Double/NEGATIVE_INFINITY)", :negative_infinity)
+    end
+  end
+
   defp assert_lisp(source, expected) do
     {:ok, %{return: result}} = PtcRunner.Lisp.run(source)
     assert result == expected
