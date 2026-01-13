@@ -513,4 +513,120 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
              }
     end
   end
+
+  # ==========================================================================
+  # Multi-arity map - Issue #667
+  # ==========================================================================
+
+  describe "multi-arity map" do
+    test "map with two collections using +" do
+      source = "(map + [1 2 3] [10 20 30])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [11, 22, 33]
+    end
+
+    test "map with three collections" do
+      source = "(map (fn [a b c] (+ a b c)) [1 2] [10 20] [100 200])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [111, 222]
+    end
+
+    test "map creating pairs with anonymous function" do
+      source = "(map (fn [a b] [a b]) [1 2] [:a :b])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, :a], [2, :b]]
+    end
+
+    test "map stops at shortest collection" do
+      source = "(map + [1 2 3 4 5] [10 20])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [11, 22]
+    end
+
+    test "map with nil collection returns empty" do
+      source = "(map + nil [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "map with empty collection returns empty" do
+      source = "(map + [] [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "mapv with two collections" do
+      source = "(mapv * [2 3 4] [5 6 7])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [10, 18, 28]
+    end
+
+    test "map with closure capturing scope" do
+      source = """
+      (let [factor 10]
+        (map (fn [a b] (* factor (+ a b))) [1 2] [3 4]))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [40, 60]
+    end
+  end
+
+  # ==========================================================================
+  # partition - Issue #667
+  # ==========================================================================
+
+  describe "partition" do
+    test "basic partition by n" do
+      source = "(partition 2 [1 2 3 4 5 6])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2], [3, 4], [5, 6]]
+    end
+
+    test "partition discards incomplete chunk" do
+      source = "(partition 3 [1 2 3 4 5 6 7 8])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2, 3], [4, 5, 6]]
+    end
+
+    test "partition with step creates sliding window" do
+      source = "(partition 2 1 [1 2 3 4])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2], [2, 3], [3, 4]]
+    end
+
+    test "partition with step larger than n" do
+      source = "(partition 2 3 [1 2 3 4 5 6 7])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2], [4, 5]]
+    end
+
+    test "partition nil returns empty" do
+      source = "(partition 2 nil)"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "partition empty returns empty" do
+      source = "(partition 2 [])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "partition with n larger than collection returns empty" do
+      source = "(partition 10 [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "consecutive month pairs pattern from issue #667" do
+      source = """
+      (let [months ["jan" "feb" "mar" "apr"]]
+        (partition 2 1 months))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [["jan", "feb"], ["feb", "mar"], ["mar", "apr"]]
+    end
+  end
 end

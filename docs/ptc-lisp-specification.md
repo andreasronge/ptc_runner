@@ -1240,9 +1240,13 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `map` | `(map f coll)` | Apply f to each item |
+| `map` | `(map f c1 c2)` | Apply f to pairs from c1, c2 |
+| `map` | `(map f c1 c2 c3)` | Apply f to triples |
 | `pmap` | `(pmap f coll)` | Apply f to each item in parallel |
 | `pcalls` | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
 | `mapv` | `(mapv f coll)` | Like map, returns vector |
+| `mapv` | `(mapv f c1 c2)` | Like map with two collections |
+| `mapv` | `(mapv f c1 c2 c3)` | Like map with three collections |
 | `map-indexed` | `(map-indexed f coll)` | Apply f to index and item |
 | `select-keys` | `(select-keys map keys)` | Pick specific keys |
 | `pluck` | `(pluck key coll)` | Extract single field from each item |
@@ -1255,7 +1259,17 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (map-indexed (fn [i x] [i x]) ["a" "b"]) ; => [[0 "a"] [1 "b"]]
 (select-keys user [:name :email])    ; pick keys from map
 (pluck :name users)                  ; shorthand for (map :name coll)
+
+;; Multi-arity map - parallel iteration over collections
+(map + [1 2 3] [10 20 30])           ; => [11 22 33]
+(map (fn [a b] [a b]) [1 2] [:a :b]) ; => [[1 :a] [2 :b]]
+(map + [1 2 3 4] [10 20])            ; => [11 22] (stops at shortest)
+
+;; 3-collection map requires explicit closure for variadic ops
+(map (fn [a b c] (+ a b c)) [1 2] [10 20] [100 200])  ; => [111 222]
 ```
+
+**Limitation:** Variadic builtins (`+`, `*`, `str`) don't work directly with 3-collection map—use explicit closures. See [#668](https://github.com/andreasronge/ptc_runner/issues/668).
 
 **Note:** Since PTC-Lisp has no lazy sequences (see Section 13.1), `map` and `mapv` are functionally identical—both return vectors. `mapv` is provided for Clojure compatibility and to make intent explicit.
 
@@ -1360,6 +1374,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `take-while` | `(take-while pred coll)` | Take while pred is true |
 | `drop-while` | `(drop-while pred coll)` | Drop while pred is true |
 | `distinct` | `(distinct coll)` | Remove duplicates |
+| `partition` | `(partition n coll)` | Chunk into groups of n |
+| `partition` | `(partition n step coll)` | Sliding window chunks |
 
 ```clojure
 (first [1 2 3])       ; => 1
@@ -1380,6 +1396,11 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (take 2 [1 2 3 4])    ; => [1 2]
 (drop 2 [1 2 3 4])    ; => [3 4]
 (distinct [1 2 1 3])  ; => [1 2 3]
+
+;; partition - chunk collection into groups
+(partition 2 [1 2 3 4 5 6])          ; => [[1 2] [3 4] [5 6]]
+(partition 3 [1 2 3 4 5])            ; => [[1 2 3]] (incomplete discarded)
+(partition 2 1 [1 2 3 4])            ; => [[1 2] [2 3] [3 4]] (sliding window)
 ```
 
 **take-while and drop-while with keywords:**
