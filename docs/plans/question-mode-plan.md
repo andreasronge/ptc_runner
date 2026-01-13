@@ -472,3 +472,188 @@ end
 4. **Memory handling for `:json` mode?**
    - `step.memory` = empty map (no memory accumulation)
    - Consistent with single-shot behavior
+
+---
+
+## Extended Callback Interface: Tool Calling Support
+
+### Background: Tool Calling Landscape
+
+Most LLM providers support tool/function calling with variations:
+- OpenAI: `tools` + `tool_calls` in response
+- Anthropic: `tools` + `tool_use` content blocks
+- Others: Similar patterns with field name differences
+
+**Key insight**: Tool calling is often more portable than `response_format: json_schema` across providers and aggregators like OpenRouter.
+
+### Extended Callback Interface
+
+```elixir
+# Full callback request (v0.6+)
+%{
+  system: String.t(),
+  messages: list(),
+  output: :ptc_lisp | :ptc_json | :json | :text,
+
+  # Structured output (current plan)
+  schema: json_schema_map() | nil,
+
+  # Tool calling support (new)
+  tools: [%{name: String.t(), description: String.t(), parameters: map()}] | nil,
+  tool_choice: :auto | :none | {:tool, String.t()} | nil
+}
+
+# Callback response (extended)
+%{
+  content: String.t() | nil,
+  tool_calls: [%{id: String.t(), name: String.t(), arguments: map()}] | nil,
+  tokens: %{input: integer(), output: integer()}
+}
+```
+
+### Tool Calling as Structured Output Mechanism
+
+For `:json` mode, instead of relying on `response_format` (not all providers support), use tool calling:
+
+```elixir
+def my_llm(%{output: :json, schema: schema} = req) when schema != nil do
+  # Force structured output via tool calling
+  tool = %{
+    name: "respond",
+    description: "Return your response",
+    parameters: schema
+  }
+
+  result = call_provider(req, tools: [tool], tool_choice: {:tool, "respond"})
+
+  # Extract tool arguments as JSON response
+  case result do
+    {:ok, %{tool_calls: [%{arguments: args}]}} ->
+      {:ok, %{content: Jason.encode!(args), tokens: result.tokens}}
+    other ->
+      other
+  end
+end
+```
+
+This makes `:json` mode work across more providers than native JSON schema support.
+
+### How Each Mode Uses Tool Calling
+
+| Mode | Uses tools? | Uses tool_choice? | Purpose |
+|------|-------------|-------------------|---------|
+| `:ptc_lisp` | No | No | LLM writes code |
+| `:ptc_json` | Optional | Optional | Schema-constrained code |
+| `:json` | Yes (schema as tool) | `{:tool, "respond"}` | Portable structured output |
+| `:text` | No | No | Raw text |
+
+---
+
+## Future Consideration: `:chat` Mode
+
+**Not in v0.6 scope**, but the callback interface extension enables a potential `:chat` mode for traditional tool-calling agents:
+
+```elixir
+SubAgent.new(
+  prompt: "You are a helpful assistant",
+  output: :chat,  # Future mode
+  tools: %{
+    get_weather: &Weather.get/1,
+    search_web: &Search.query/1
+  }
+)
+```
+
+Where `:chat` mode:
+- LLM can return text OR tool calls (not code)
+- Framework executes tool calls, feeds results back as messages
+- Loop until LLM returns final text
+- Traditional agentic loop, not PTC-Lisp
+
+**Why defer**: PtcRunner's differentiation is *programmatic* tool calling. `:chat` mode is what every other framework does. Users can build this on top of PtcRunner if needed.
+
+---
+
+## Future Consideration: `ask_user` Tool and Suspension
+
+The callback interface extension also enables human-in-the-loop patterns. This ties into v0.8 (Async Tools & Suspension).
+
+### The Pattern
+
+In a chat application, the main conversation is plain text. SubAgent orchestration is treated like an opaque "tool call":
+
+```
+┌─────────────────────────────────────────────────────┐
+│           Main Conversation (plain text)            │
+│  [{user, "Send email to John"},                     │
+│   {assistant, "Which John?"},      ← ask_user       │
+│   {user, "John Smith"},                             │
+│   {assistant, "Email sent!"}]                       │
+└─────────────────────────────────────────────────────┘
+                         │
+                         │ SubAgent call (opaque)
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│         SubAgent (:ptc_lisp, multi-turn)            │
+│  Turn 1: (let [contacts (search "John")]            │
+│            (if (> (len contacts) 1)                 │
+│              (ask_user "Which John?" contacts)))    │
+│          → SUSPENDS                                 │
+│                                                     │
+│  Turn 2: (send_email selected_john ...)             │
+│          → (return "Email sent")                    │
+└─────────────────────────────────────────────────────┘
+```
+
+### How It Works
+
+`ask_user` is a tool that **suspends** the SubAgent:
+
+```elixir
+# Tool returns special suspension marker
+def ask_user(question, options \\ nil) do
+  {:suspend, %{question: question, options: options}}
+end
+
+# SubAgent.run returns suspension state
+{:suspended, step, continuation}
+
+# Later, resume with user's answer
+{:ok, final_step} = SubAgent.resume(continuation, user_input: "John Smith")
+```
+
+### Relationship to v0.7 Async
+
+This is essentially the same mechanism as async tools:
+- `ask_user` suspends waiting for human input
+- `make_phone_call` suspends waiting for call completion
+- Both need: state serialization, continuation tokens, resume API
+
+**Decision**: Defer to v0.8, but the callback interface changes in v0.6 lay groundwork.
+
+---
+
+## Limitations and Anti-Patterns
+
+### Mixed-Mode Pipeline Caveats
+
+1. **Memory asymmetry**: `:json` mode returns `step.memory = %{}`. In chains like `:ptc_lisp → :json → :ptc_lisp`, memory accumulated in the first agent is not automatically passed through the `:json` step.
+
+2. **Type mismatches**: When piping complex `:ptc_lisp` output into a `:json` agent expecting simple input, ensure the context shape matches what the prompt expects.
+
+3. **`:text` mode fragility**: Piping unstructured text into agents expecting structured context may cause runtime surprises.
+
+### When NOT to Use Each Mode
+
+| Mode | Anti-pattern |
+|------|-------------|
+| `:json` | Complex multi-step orchestration (use `:ptc_lisp`) |
+| `:text` | When you need validation or structured data |
+| `:ptc_lisp` | Simple classification/extraction (overkill) |
+
+### `max_turns` Semantic Difference
+
+- `:ptc_lisp`/`:ptc_json`: `max_turns` = orchestration iterations (tool calls + reasoning)
+- `:json`: `max_turns` = validation retry budget (simpler)
+
+Don't assume they mean the same thing when switching modes.
