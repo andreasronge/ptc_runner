@@ -14,9 +14,15 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   end
 
   def parse_float(parts) do
-    parts
-    |> Enum.map_join(&to_string_part/1)
-    |> String.to_float()
+    str = Enum.map_join(parts, &to_string_part/1)
+
+    # Use Float.parse/1 instead of String.to_float/1 to handle
+    # scientific notation without decimal point (e.g., "1e5")
+    case Float.parse(str) do
+      {float, ""} -> float
+      {float, _rest} -> float
+      :error -> raise ArgumentError, "invalid float: #{str}"
+    end
   end
 
   defp to_string_part(part) when is_integer(part), do: <<part::utf8>>

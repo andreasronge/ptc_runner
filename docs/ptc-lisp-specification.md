@@ -46,7 +46,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `re-pattern` | Compile string to regex without literal syntax (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
-| `double`, `int` | Type coercion (to float / to integer) |
+| `float`, `double`, `int` | Type coercion (to float / to integer) |
 | `call` | Tool invocation special form (§9) |
 | Keyword/string coercion in `where` | `:status = :active` matches `"active"` (§7.6) |
 | Path-based `where` | `(where [:user :role] = :admin)` for nested access (§7.1) |
@@ -1680,6 +1680,7 @@ The `seq` function converts a collection to a sequence:
 | `floor` | `(floor x)` | Round toward -∞ |
 | `ceil` | `(ceil x)` | Round toward +∞ |
 | `round` | `(round x)` | Round to nearest integer |
+| `float` | `(float x)` | Alias for double (Clojure compat) |
 | `double` | `(double x)` | Type coercion (to float) |
 | `int` | `(int x)` | Type coercion (to integer) |
 
@@ -2783,7 +2784,8 @@ nil         = "nil" ;
 boolean     = "true" | "false" ;
 number      = integer | float ;
 integer     = ["-"] digit+ ;
-float       = ["-"] digit+ "." digit+ [exponent] ;
+float       = ["-"] digit+ "." digit+ [exponent]
+            | ["-"] digit+ exponent ;
 exponent    = ("e" | "E") ["+" | "-"] digit+ ;
 string      = '"' string-char* '"' ;
 string-char = escape-seq | (any char except '"', '\', and newline) ;

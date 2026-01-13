@@ -191,6 +191,10 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
+  # float/1 is an alias for double/1 for Clojure compatibility
+  # (Clojure has both float and double, but Elixir floats are always 64-bit)
+  def float(x), do: double(x)
+
   def int(x) do
     case x do
       :nan -> raise ArithmeticError, "cannot convert NaN to integer"

@@ -270,10 +270,22 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:program, [5, {:symbol, :.}]}} = Parser.parse("5.")
     end
 
-    test "exponent without decimal parses as two tokens" do
-      # We require digits.digits before exponent for scientific notation
-      # Without decimal, parses as integer followed by symbol
-      assert {:ok, {:program, [2, {:symbol, :e10}]}} = Parser.parse("2e10")
+    test "scientific notation without decimal point" do
+      # 1e5, 1e-5, 1e+5, 2E10 are all valid float literals
+      assert {:ok, 100_000.0} = Parser.parse("1e5")
+      assert {:ok, 1.0e-5} = Parser.parse("1e-5")
+      assert {:ok, 100_000.0} = Parser.parse("1e+5")
+      assert {:ok, 2.0e10} = Parser.parse("2e10")
+    end
+
+    test "negative scientific notation without decimal" do
+      assert {:ok, -100_000.0} = Parser.parse("-1e5")
+      assert {:ok, -1.0e-5} = Parser.parse("-1e-5")
+    end
+
+    test "case-insensitive exponent" do
+      assert {:ok, 500.0} = Parser.parse("5E2")
+      assert {:ok, 500.0} = Parser.parse("5e2")
     end
 
     test "positive sign on numbers" do
