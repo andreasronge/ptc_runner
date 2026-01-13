@@ -72,9 +72,9 @@ end
 SubAgent.run(agent, llm: llm_fn)
 ```
 
-### 7. Debug and Tracing
+### 7. Tracing
 
-Inspect agent behavior with `--trace` and `--debug` flags, or view the system prompt with `--system-prompt`.
+Inspect agent behavior with `--trace` (add `--verbose` for full messages), or view the system prompt with `--system-prompt`.
 
 ## Prerequisite
 
@@ -99,6 +99,14 @@ You can run the Code Scout via the Mix task:
 mix code.scout "Where is the Lisp evaluator implemented and what are its main functions?"
 ```
 
+### Max Turns
+
+By default, the agent runs for up to 10 turns. Use `--max-turns` (or `-m`) to change this:
+
+```bash
+mix code.scout "How does the sandbox work?" --max-turns 3
+```
+
 ### Tracing
 
 To see the agent's multi-turn reasoning and tool calls, use the `--trace` flag:
@@ -107,11 +115,27 @@ To see the agent's multi-turn reasoning and tool calls, use the `--trace` flag:
 mix code.scout "How are PTC-Lisp special forms handled?" --trace
 ```
 
-Add `--debug` to see full LLM messages and feedback:
+Add `--verbose` (or `-v`) to include full LLM messages:
 
 ```bash
-mix code.scout "Find the evaluator" --trace --debug
+mix code.scout "Find the evaluator" --trace --verbose
 ```
+
+Add `--raw` (or `-r`) to see the raw LLM response including thinking/reasoning before the program:
+
+```bash
+mix code.scout "Find the evaluator" --trace --raw
+```
+
+### Compression
+
+For multi-turn agents, use `--compression` (or `-c`) to coalesce message history into a compact format. This reduces token usage but may affect error recovery in complex queries:
+
+```bash
+mix code.scout "How does the sandbox work?" --compression
+```
+
+See [Message Compression](../../docs/guides/subagent-compression.md) for details on how compression works.
 
 ### Inspecting the System Prompt
 

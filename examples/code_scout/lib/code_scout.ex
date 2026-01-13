@@ -11,6 +11,22 @@ defmodule CodeScout do
   def query(query_string, opts \\ []) do
     agent = Agent.new()
 
+    # Apply compression option to agent if specified
+    agent =
+      if opts[:compression] do
+        %{agent | compression: true}
+      else
+        agent
+      end
+
+    # Apply max_turns option to agent if specified
+    agent =
+      if opts[:max_turns] do
+        %{agent | max_turns: opts[:max_turns]}
+      else
+        agent
+      end
+
     # Use LLMClient as the default generator
     model = opts[:model] || LLMClient.default_model()
 
@@ -30,6 +46,6 @@ defmodule CodeScout do
     # Merge query into context
     context = Map.put(opts[:context] || %{}, "query", query_string)
 
-    SubAgent.run(agent, [llm: llm_fn] ++ opts |> Keyword.put(:context, context))
+    SubAgent.run(agent, ([llm: llm_fn] ++ opts) |> Keyword.put(:context, context))
   end
 end

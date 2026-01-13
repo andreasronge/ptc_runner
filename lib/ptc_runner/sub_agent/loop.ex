@@ -289,7 +289,14 @@ defmodule PtcRunner.SubAgent.Loop do
         )
 
       # Build messages - use compression if enabled and turn > 1
-      messages = build_llm_messages(agent, state, system_prompt)
+      # Returns {messages, compression_stats | nil}
+      {messages, compression_stats} = build_llm_messages(agent, state, system_prompt)
+
+      # Store compression stats in state (will be used by build_final_usage)
+      state =
+        if compression_stats,
+          do: Map.put(state, :compression_stats, compression_stats),
+          else: state
 
       llm_input = %{
         system: system_prompt,
@@ -662,6 +669,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Build messages for LLM input
   # Uses compression strategy if enabled and turn > 1; otherwise uses accumulated messages
+  # Returns {messages, compression_stats | nil}
   defp build_llm_messages(agent, state, system_prompt) do
     # Normalize compression option
     {strategy, opts} = Compression.normalize(agent.compression)
@@ -673,12 +681,13 @@ defmodule PtcRunner.SubAgent.Loop do
     if strategy && state.turn > 1 && agent.max_turns > 1 do
       build_compressed_messages(agent, state, system_prompt, strategy, opts)
     else
-      # Uncompressed mode - use accumulated messages as-is
-      state.messages
+      # Uncompressed mode - use accumulated messages as-is, no compression stats
+      {state.messages, nil}
     end
   end
 
   # Build compressed messages using the strategy
+  # Returns {messages, compression_stats}
   defp build_compressed_messages(agent, state, system_prompt, strategy, opts) do
     # Gather completed turns from state.turns (stored in reverse order)
     turns = Enum.reverse(state.turns)
@@ -708,13 +717,16 @@ defmodule PtcRunner.SubAgent.Loop do
       |> Keyword.put(:field_descriptions, agent.field_descriptions)
 
     # Call the compression strategy
-    # Strategy returns [%{role: :system, ...}, %{role: :user, ...}]
-    compressed_messages = strategy.to_messages(turns, state.memory, compression_opts)
+    # Strategy returns {[%{role: :system, ...}, %{role: :user, ...}], stats}
+    {compressed_messages, stats} = strategy.to_messages(turns, state.memory, compression_opts)
 
     # Extract just the user message(s) since system prompt is passed separately
     # The loop sends system prompt via llm_input.system, not in messages
-    compressed_messages
-    |> Enum.reject(fn msg -> msg.role == :system end)
+    messages =
+      compressed_messages
+      |> Enum.reject(fn msg -> msg.role == :system end)
+
+    {messages, stats}
   end
 
   # Calculate approximate memory size in bytes

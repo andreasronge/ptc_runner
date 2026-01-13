@@ -59,11 +59,32 @@ defmodule PtcRunner.SubAgent.Compression do
           turns_left: non_neg_integer()
         ]
 
+  @typedoc """
+  Statistics about what compression did.
+
+  Returned alongside messages to report exactly what was dropped or collapsed.
+  """
+  @type stats :: %{
+          enabled: boolean(),
+          strategy: String.t(),
+          turns_compressed: non_neg_integer(),
+          tool_calls_total: non_neg_integer(),
+          tool_calls_shown: non_neg_integer(),
+          tool_calls_dropped: non_neg_integer(),
+          printlns_total: non_neg_integer(),
+          printlns_shown: non_neg_integer(),
+          printlns_dropped: non_neg_integer(),
+          error_turns_collapsed: non_neg_integer()
+        }
+
   @doc "Human-readable name for this compression strategy."
   @callback name() :: String.t()
 
   @doc """
-  Render turns into LLM messages.
+  Render turns into LLM messages with compression statistics.
+
+  Returns a tuple of `{messages, stats}` where stats reports exactly what
+  the compression did (items dropped, errors collapsed, etc.).
 
   Compression is a pure function - same inputs always produce the same output.
   Turn count is derived from `length(turns)`, not message count.
@@ -72,7 +93,7 @@ defmodule PtcRunner.SubAgent.Compression do
               turns :: [Turn.t()],
               memory :: map(),
               opts :: opts()
-            ) :: [message()]
+            ) :: {[message()], stats()}
 
   # Default strategy module - will be implemented in issue #620
   @default_strategy PtcRunner.SubAgent.Compression.SingleUserCoalesced

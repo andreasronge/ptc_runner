@@ -19,8 +19,22 @@ defmodule Mix.Tasks.Code.Scout do
 
     {opts, remaining_args, _} =
       OptionParser.parse(args,
-        switches: [trace: :boolean, debug: :boolean, system_prompt: :boolean],
-        aliases: [t: :trace, d: :debug, s: :system_prompt]
+        switches: [
+          trace: :boolean,
+          verbose: :boolean,
+          raw: :boolean,
+          system_prompt: :boolean,
+          compression: :boolean,
+          max_turns: :integer
+        ],
+        aliases: [
+          t: :trace,
+          v: :verbose,
+          r: :raw,
+          s: :system_prompt,
+          c: :compression,
+          m: :max_turns
+        ]
       )
 
     query_string = Enum.join(remaining_args, " ")
@@ -29,7 +43,7 @@ defmodule Mix.Tasks.Code.Scout do
       Mix.shell().error("Error: Please provide a query.")
 
       Mix.shell().info(
-        "Usage: mix code.scout \"Where is the Lisp evaluator?\" [--trace] [--system-prompt]"
+        "Usage: mix code.scout \"query\" [--trace] [--verbose] [--raw] [--compression] [--max-turns N] [--system-prompt]"
       )
     else
       if opts[:system_prompt] do
@@ -37,24 +51,31 @@ defmodule Mix.Tasks.Code.Scout do
       else
         Mix.shell().info("Code Scout is investigating: \"#{query_string}\"...")
 
-        # Pass debug and trace options to the query
-        # If trace is requested, we MUST enable debug to capture messages
         query_opts = [
-          debug: opts[:debug] || opts[:trace] || false,
-          trace: opts[:trace] || false
+          debug: opts[:trace] || false,
+          compression: opts[:compression] || false,
+          max_turns: opts[:max_turns] || 10
         ]
 
         case CodeScout.query(query_string, query_opts) do
           {:ok, step} ->
             if opts[:trace] do
-              PtcRunner.SubAgent.Debug.print_trace(step, messages: opts[:debug])
+              PtcRunner.SubAgent.Debug.print_trace(step,
+                messages: opts[:verbose],
+                raw: opts[:raw],
+                usage: true
+              )
             end
 
             print_result(step.return)
 
           {:error, step} ->
             if opts[:trace] do
-              PtcRunner.SubAgent.Debug.print_trace(step, messages: opts[:debug])
+              PtcRunner.SubAgent.Debug.print_trace(step,
+                messages: opts[:verbose],
+                raw: opts[:raw],
+                usage: true
+              )
             end
 
             Mix.shell().error("Code Scout failed!")
