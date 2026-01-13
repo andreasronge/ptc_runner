@@ -9,13 +9,13 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
   end
 
   describe "render/1" do
-    test "returns nil for empty config" do
-      assert Namespace.render(%{}) == nil
+    test "returns no tools message for empty config" do
+      assert Namespace.render(%{}) == ";; No tools available"
     end
 
-    test "returns nil when all sections are empty" do
+    test "returns no tools message when all sections are empty" do
       config = %{tools: %{}, data: %{}, memory: %{}, has_println: false}
-      assert Namespace.render(config) == nil
+      assert Namespace.render(config) == ";; No tools available"
     end
 
     test "renders tools section only when tools present" do
@@ -25,19 +25,20 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       assert result == ";; === tools ===\ntool/search(q) -> string"
     end
 
-    test "renders data/ section only when data present" do
+    test "renders data/ section with no tools message" do
       config = %{data: %{count: 42}}
       result = Namespace.render(config)
 
-      assert result == ";; === data/ ===\ndata/count                    ; integer, sample: 42"
+      assert result ==
+               ";; No tools available\n\n;; === data/ ===\ndata/count                    ; integer, sample: 42"
     end
 
-    test "renders user/ section only when memory present" do
+    test "renders user/ section with no tools message" do
       config = %{memory: %{total: 100}, has_println: false}
       result = Namespace.render(config)
 
       assert result ==
-               ";; === user/ (your prelude) ===\ntotal                         ; = integer, sample: 100"
+               ";; No tools available\n\n;; === user/ (your prelude) ===\ntotal                         ; = integer, sample: 100"
     end
 
     test "joins sections with blank lines" do
@@ -73,7 +74,7 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       assert String.starts_with?(Enum.at(sections, 2), ";; === user/ (your prelude) ===")
     end
 
-    test "omits nil sections from output" do
+    test "always includes tools section even when empty" do
       # Only data present, tools and memory empty
       config = %{
         tools: %{},
@@ -83,9 +84,11 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
 
       result = Namespace.render(config)
 
-      # Should only have data section, no blank lines from empty sections
-      assert result == ";; === data/ ===\ndata/val                    ; integer, sample: 5"
-      refute String.contains?(result, ";; === tools ===")
+      # Should have no tools message and data section
+      assert result ==
+               ";; No tools available\n\n;; === data/ ===\ndata/val                      ; integer, sample: 5"
+
+      assert String.contains?(result, ";; No tools available")
       refute String.contains?(result, ";; === user/")
     end
 
@@ -94,7 +97,8 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       config = %{data: %{x: 1}}
       result = Namespace.render(config)
 
-      assert result == ";; === data/ ===\ndata/x                    ; integer, sample: 1"
+      assert result ==
+               ";; No tools available\n\n;; === data/ ===\ndata/x                        ; integer, sample: 1"
     end
 
     test "passes has_println to User renderer" do

@@ -2,9 +2,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   @moduledoc """
   System prompt generation for SubAgent LLM interactions.
 
-  Orchestrates prompt generation by combining sections from sub-modules:
-  - `SystemPrompt.DataInventory` - Context variables with types and samples
-  - `SystemPrompt.Tools` - Available tool schemas and signatures
+  Orchestrates prompt generation by combining sections from:
+  - `Namespace` modules - Compact Lisp-style format for tools and data
   - `SystemPrompt.Output` - Expected return format from signature
 
   ## Prompt Caching Architecture
@@ -51,11 +50,10 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Namespace
   alias PtcRunner.SubAgent.PromptExpander
   alias PtcRunner.SubAgent.Signature
-  alias PtcRunner.SubAgent.SystemPrompt.DataInventory
   alias PtcRunner.SubAgent.SystemPrompt.Output
-  alias PtcRunner.SubAgent.SystemPrompt.Tools
 
   @output_format """
   # Output Format
@@ -178,7 +176,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Test", tools: %{"search" => fn _ -> [] end})
       iex> context_prompt = PtcRunner.SubAgent.SystemPrompt.generate_context(agent, context: %{x: 1})
-      iex> context_prompt =~ "# Data Inventory" and context_prompt =~ "# Available Tools"
+      iex> context_prompt =~ ";; === data/ ===" and context_prompt =~ ";; === tools ==="
       true
       iex> context_prompt =~ "# Mission"
       false
@@ -192,24 +190,27 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     # Parse signature if present
     context_signature = parse_signature(agent.signature)
 
-    # Determine if multi-turn mode
-    multi_turn? = agent.max_turns > 1
-
     # Merge agent context_descriptions into received_field_descriptions
     # Chained (received) descriptions take precedence (upstream agent knows better)
     all_field_descriptions =
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
-    # Generate dynamic sections
-    data_inventory =
-      DataInventory.generate(context, context_signature, all_field_descriptions)
+    # Use compact Namespace format (same as Turn 2+)
+    namespace_content =
+      Namespace.render(%{
+        tools: agent.tools,
+        data: context,
+        field_descriptions: all_field_descriptions,
+        context_signature: context_signature,
+        memory: %{},
+        has_println: false
+      })
 
-    tool_schemas = Tools.generate(agent.tools, multi_turn?)
-
+    # Expected output stays as markdown (shared with Turn 2+)
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
-    [data_inventory, tool_schemas, expected_output]
-    |> Enum.reject(&(&1 == ""))
+    [namespace_content, expected_output]
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
   end
 
@@ -241,25 +242,6 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   def resolve_language_spec(spec, context) when is_function(spec, 1) do
     spec.(context)
-  end
-
-  # Delegation to sub-modules for backward compatibility
-  defdelegate generate_data_inventory(
-                context,
-                context_signature \\ nil,
-                field_descriptions \\ nil
-              ),
-              to: DataInventory,
-              as: :generate
-
-  @doc """
-  Generate tool schemas section. Delegates to `PtcRunner.SubAgent.SystemPrompt.Tools.generate/2`.
-
-  The `multi_turn?` parameter controls whether `return`/`fail` tools are included.
-  Defaults to `true` for backward compatibility.
-  """
-  def generate_tool_schemas(tools, multi_turn? \\ true) do
-    Tools.generate(tools, multi_turn?)
   end
 
   @doc """
@@ -380,20 +362,21 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     # Get static sections (language_ref, output_fmt)
     {language_ref, output_fmt} = resolve_static_sections(agent, resolution_context)
 
-    # Determine if multi-turn mode
-    multi_turn? = agent.max_turns > 1
-
     # Merge agent context_descriptions into received_field_descriptions
     # Chained (received) descriptions take precedence (upstream agent knows better)
     all_field_descriptions =
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
-    # Generate sections
-    # Note: Role and Rules are now in priv/prompts/lisp-base.md (included via language_ref)
-    data_inventory =
-      DataInventory.generate(context, context_signature, all_field_descriptions)
-
-    tool_schemas = Tools.generate(agent.tools, multi_turn?)
+    # Use compact Namespace format (same as Turn 2+)
+    namespace_content =
+      Namespace.render(%{
+        tools: agent.tools,
+        data: context,
+        field_descriptions: all_field_descriptions,
+        context_signature: context_signature,
+        memory: %{},
+        has_println: false
+      })
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
@@ -403,13 +386,12 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     # language_ref contains role, rules, and language reference from priv/prompts/
     [
       language_ref,
-      data_inventory,
-      tool_schemas,
+      namespace_content,
       expected_output,
       output_fmt,
       "# Mission\n\n#{mission}"
     ]
-    |> Enum.reject(&(&1 == ""))
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
   end
 

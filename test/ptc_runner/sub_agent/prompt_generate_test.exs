@@ -17,8 +17,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       assert prompt =~ "## Role"
       assert prompt =~ "Write programs that accomplish the user's mission"
       assert prompt =~ "thinking:"
-      assert prompt =~ "# Data Inventory"
-      assert prompt =~ "# Available Tools"
+      assert prompt =~ ";; === data/ ==="
+      assert prompt =~ ";; === tools ==="
       assert prompt =~ "## PTC-Lisp"
       assert prompt =~ "# Output Format"
       assert prompt =~ "# Mission"
@@ -40,8 +40,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      assert prompt =~ "### search"
-      assert prompt =~ "### fetch"
+      assert prompt =~ "tool/search"
+      assert prompt =~ "tool/fetch"
     end
 
     test "expands mission template with context" do
