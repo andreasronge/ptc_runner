@@ -3,6 +3,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
 
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.Signature.Renderer
+  alias PtcRunner.Tool
 
   @doc """
   Render tools section for USER message.
@@ -11,6 +12,8 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
   and entries showing tool calling syntax with parameters and return type.
 
   Tools are called using `tool/` prefix: `(tool/tool-name {:param value})`
+
+  Accepts raw tool formats (fn, {fn, sig}, {fn, opts}) and normalizes them.
 
   ## Examples
 
@@ -24,6 +27,10 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string, limit :int) -> [:string]"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"search" => tool})
       ";; === tools ===\\ntool/search(query, limit) -> [string]"
+
+      iex> tool = %PtcRunner.Tool{name: "analyze", signature: "-> :map", description: "Analyze data"}
+      iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"analyze" => tool})
+      ";; === tools ===\\ntool/analyze() -> map  ; Analyze data"
   """
   @spec render(map()) :: String.t() | nil
   def render(tools) when map_size(tools) == 0, do: nil
@@ -31,17 +38,39 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
   def render(tools) do
     lines =
       tools
+      |> Enum.map(fn {name, format} -> {name, normalize_tool(name, format)} end)
+      |> Enum.reject(fn {_name, tool} -> is_nil(tool) end)
       |> Enum.sort_by(fn {name, _} -> name end)
       |> Enum.map(fn {_name, tool} -> format_tool(tool) end)
 
-    [";; === tools ===" | lines] |> Enum.join("\n")
+    case lines do
+      [] -> nil
+      _ -> [";; === tools ===" | lines] |> Enum.join("\n")
+    end
   end
 
-  defp format_tool(%{name: name, signature: signature}) do
+  # Normalize tool format to %Tool{} struct
+  defp normalize_tool(_name, %Tool{} = tool), do: tool
+
+  defp normalize_tool(name, format) do
+    case Tool.new(name, format) do
+      {:ok, tool} -> tool
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp format_tool(%{name: name, signature: signature, description: description}) do
     {params, return_type} = parse_signature(signature)
     params_str = Enum.map_join(params, ", ", fn {param_name, _type} -> param_name end)
     return_str = format_return_type(return_type)
-    "tool/#{name}(#{params_str}) -> #{return_str}"
+
+    base = "tool/#{name}(#{params_str}) -> #{return_str}"
+
+    case description do
+      nil -> base
+      "" -> base
+      desc -> "#{base}  ; #{desc}"
+    end
   end
 
   defp parse_signature(nil), do: {[], :any}

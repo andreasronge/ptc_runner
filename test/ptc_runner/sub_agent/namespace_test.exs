@@ -84,7 +84,7 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       result = Namespace.render(config)
 
       # Should only have data section, no blank lines from empty sections
-      assert result == ";; === data/ ===\ndata/val                    ; integer, sample: 5"
+      assert result == ";; === data/ ===\ndata/val                      ; integer, sample: 5"
       refute String.contains?(result, ";; === tools ===")
       refute String.contains?(result, ";; === user/")
     end
@@ -94,7 +94,7 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       config = %{data: %{x: 1}}
       result = Namespace.render(config)
 
-      assert result == ";; === data/ ===\ndata/x                    ; integer, sample: 1"
+      assert result == ";; === data/ ===\ndata/x                        ; integer, sample: 1"
     end
 
     test "passes has_println to User renderer" do

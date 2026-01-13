@@ -8,7 +8,6 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   """
 
   alias PtcRunner.SubAgent.Signature.Renderer
-  alias PtcRunner.SubAgent.SystemPrompt.DataInventory
 
   @doc """
   Generate the expected output section from signature.
@@ -77,10 +76,20 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   defp generate_output_field_descriptions(_return_type, _field_descriptions), do: ""
 
   defp get_field_description_for_list(name, field_descriptions) do
-    case DataInventory.get_field_description(name, field_descriptions) do
+    case get_field_description(name, field_descriptions) do
       nil -> []
       desc -> ["  - `#{name}`: #{desc}"]
     end
+  end
+
+  defp get_field_description(key, descriptions) when is_map(descriptions) do
+    # Try atom key first, then string key
+    key_atom = if is_atom(key), do: key, else: String.to_existing_atom(to_string(key))
+    key_str = to_string(key)
+
+    Map.get(descriptions, key_atom) || Map.get(descriptions, key_str)
+  rescue
+    ArgumentError -> Map.get(descriptions, to_string(key))
   end
 
   # ============================================================
