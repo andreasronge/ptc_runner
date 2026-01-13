@@ -151,7 +151,13 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(:infinity, _opts), do: {"##Inf", false}
   defp format_clojure(:negative_infinity, _opts), do: {"##-Inf", false}
   defp format_clojure(:nan, _opts), do: {"##NaN", false}
-  defp format_clojure(f, _opts) when is_float(f), do: {Float.to_string(f), false}
+  # Use compact formatting to avoid IEEE 754 noise in LLM feedback
+  # e.g., 1.1 + 2.2 formats as "3.3" not "3.3000000000000003"
+  defp format_clojure(f, _opts) when is_float(f) do
+    formatted = :erlang.float_to_binary(f, [:compact, decimals: 10])
+    {formatted, false}
+  end
+
   defp format_clojure(s, opts) when is_binary(s), do: format_clojure_string(s, opts)
   defp format_clojure(a, _opts) when is_atom(a), do: {":#{a}", false}
 

@@ -62,6 +62,14 @@ defmodule PtcRunner.Lisp.Parser do
     |> optional(sign)
     |> ascii_string([?0..?9], min: 1)
 
+  # Scientific notation without decimal point: 1e5, 1e-5, 1e+5, 2E10
+  # Must come before float_literal in choice to handle integer+exponent forms
+  integer_with_exponent =
+    optional(ascii_char([?-]))
+    |> ascii_string([?0..?9], min: 1)
+    |> concat(exponent)
+    |> reduce({ParserHelpers, :parse_float, []})
+
   float_literal =
     optional(ascii_char([?-]))
     |> ascii_string([?0..?9], min: 1)
@@ -199,6 +207,7 @@ defmodule PtcRunner.Lisp.Parser do
       nil_literal,
       true_literal,
       false_literal,
+      integer_with_exponent,
       float_literal,
       integer_literal,
       string_literal,
