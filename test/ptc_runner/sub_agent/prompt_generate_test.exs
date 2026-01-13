@@ -17,8 +17,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       assert prompt =~ "## Role"
       assert prompt =~ "Write programs that accomplish the user's mission"
       assert prompt =~ "thinking:"
-      assert prompt =~ "# Data Inventory"
-      assert prompt =~ "# Available Tools"
+      assert prompt =~ ";; === data/ ==="
+      assert prompt =~ ";; === tools ==="
       assert prompt =~ "## PTC-Lisp"
       assert prompt =~ "# Output Format"
       assert prompt =~ "# Mission"
@@ -40,8 +40,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      assert prompt =~ "### search"
-      assert prompt =~ "### fetch"
+      assert prompt =~ "tool/search"
+      assert prompt =~ "tool/fetch"
     end
 
     test "expands mission template with context" do
@@ -304,45 +304,6 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       assert prompt =~ "data/config"
     end
 
-    test "generates prompt with both tools and tool_catalog" do
-      tools = %{"search" => fn _ -> [] end}
-      catalog = %{"email_agent" => nil, "report_agent" => nil}
-
-      agent =
-        SubAgent.new(
-          prompt: "Find and process data",
-          tools: tools,
-          tool_catalog: catalog
-        )
-
-      prompt = SystemPrompt.generate(agent, context: %{})
-
-      # Should have both sections
-      assert prompt =~ "## Tools you can call"
-      assert prompt =~ "### search"
-      assert prompt =~ "## Tools for planning (do not call)"
-      assert prompt =~ "These tools are shown for context but cannot be called directly"
-      assert prompt =~ "### email_agent"
-      assert prompt =~ "### report_agent"
-    end
-
-    test "generates prompt with only tool_catalog (no callable tools)" do
-      catalog = %{"email_agent" => nil}
-
-      agent =
-        SubAgent.new(
-          prompt: "Review available agents",
-          tool_catalog: catalog
-        )
-
-      prompt = SystemPrompt.generate(agent, context: %{})
-
-      # return/fail are in system prompt section, not in Available Tools
-      refute prompt =~ "### return"
-      refute prompt =~ "### fail"
-      # But the catalog section should be present
-      assert prompt =~ "## Tools for planning (do not call)"
-      assert prompt =~ "### email_agent"
-    end
+    # Note: tool_catalog tests removed - feature is deprecated and will be removed
   end
 end

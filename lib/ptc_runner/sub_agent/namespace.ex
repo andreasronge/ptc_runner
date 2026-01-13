@@ -16,6 +16,8 @@ defmodule PtcRunner.SubAgent.Namespace do
   ## Config keys
   - `tools` - Map of tool name to tool struct (for tool/ namespace)
   - `data` - Map of input data (for data/ namespace)
+  - `field_descriptions` - Map of field names to description strings (for data/)
+  - `context_signature` - Parsed signature for type information (for data/)
   - `memory` - Map of LLM definitions (for user/ namespace)
   - `has_println` - Boolean, controls sample display in user/ namespace
 
@@ -38,9 +40,14 @@ defmodule PtcRunner.SubAgent.Namespace do
   """
   @spec render(map()) :: String.t() | nil
   def render(config) do
+    data_opts = [
+      field_descriptions: config[:field_descriptions],
+      context_signature: config[:context_signature]
+    ]
+
     [
       Tool.render(config[:tools] || %{}),
-      Data.render(config[:data] || %{}),
+      Data.render(config[:data] || %{}, data_opts),
       User.render(config[:memory] || %{}, config[:has_println] || false)
     ]
     |> Enum.reject(&is_nil/1)

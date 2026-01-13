@@ -47,9 +47,9 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
       prompt = SystemPrompt.generate(agent, context: context)
 
       assert prompt =~ "data/products"
-      assert prompt =~ "— List of product maps with {id, name, price, category}"
+      assert prompt =~ "-- List of product maps with {id, name, price, category}"
       assert prompt =~ "data/question"
-      assert prompt =~ "— The user's question to answer"
+      assert prompt =~ "-- The user's question to answer"
     end
 
     test "merges with received_field_descriptions, where received takes precedence" do
@@ -80,14 +80,14 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
         )
 
       assert prompt =~ "data/products"
-      assert prompt =~ "— Upstream description"
+      assert prompt =~ "-- Upstream description"
       refute prompt =~ "Local description"
 
       assert prompt =~ "data/local_only"
-      assert prompt =~ "— Only here"
+      assert prompt =~ "-- Only here"
 
       assert prompt =~ "data/upstream_only"
-      assert prompt =~ "— From upstream"
+      assert prompt =~ "-- From upstream"
     end
 
     test "handles string keys in context_descriptions" do
@@ -98,7 +98,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
         )
 
       prompt = SystemPrompt.generate(agent, context: %{"products" => []})
-      assert prompt =~ "— Description with string key"
+      assert prompt =~ "-- Description with string key"
     end
 
     test "matches atom description to string context key" do
@@ -109,7 +109,7 @@ defmodule PtcRunner.SubAgent.ContextDescriptionsTest do
         )
 
       prompt = SystemPrompt.generate(agent, context: %{"products" => []})
-      assert prompt =~ "— Atom key description"
+      assert prompt =~ "-- Atom key description"
     end
   end
 end

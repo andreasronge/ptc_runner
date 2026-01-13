@@ -24,10 +24,10 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert system_prompt =~ "## Role"
       assert system_prompt =~ "Write programs that accomplish the user's mission"
       assert system_prompt =~ "thinking:"
-      assert system_prompt =~ "# Data Inventory"
+      assert system_prompt =~ ";; === data/ ==="
       assert system_prompt =~ "data/x"
       assert system_prompt =~ "data/y"
-      assert system_prompt =~ "# Available Tools"
+      # Note: no tools configured, so tools section not present
       assert system_prompt =~ "# Output Format"
       assert system_prompt =~ "# Mission"
     end
