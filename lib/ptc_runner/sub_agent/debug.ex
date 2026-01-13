@@ -203,6 +203,7 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Raw Response:#{ansi(:reset)}")
 
       turn.raw_response
+      |> redact_program()
       |> String.split("\n")
       |> Enum.each(fn line ->
         IO.puts(
@@ -353,6 +354,13 @@ defmodule PtcRunner.SubAgent.Debug do
   # ============================================================
   # Private Helpers - Formatting
   # ============================================================
+
+  @doc false
+  # Replace code blocks with placeholder to avoid duplication with Program section.
+  # Exported for testing.
+  def redact_program(text) do
+    Regex.replace(~r/```(?:lisp|clojure)?\s*[\s\S]+?\s*```/, text, "[program: see below]")
+  end
 
   # Format result for display
   defp format_result(result) when is_binary(result) do

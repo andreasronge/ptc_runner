@@ -183,6 +183,103 @@ defmodule PtcRunner.SubAgent.DebugTest do
     end
   end
 
+  describe "redact_program/1" do
+    test "replaces clojure code block with placeholder" do
+      text = """
+      Some reasoning here
+
+      ```clojure
+      (def x 1)
+      (return {:value x})
+      ```
+      """
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "Some reasoning here"
+      assert result =~ "[program: see below]"
+      refute result =~ "(def x 1)"
+      refute result =~ "(return"
+    end
+
+    test "replaces lisp code block with placeholder" do
+      text = """
+      First I'll analyze the data.
+
+      ```lisp
+      (+ 1 2)
+      ```
+      """
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "First I'll analyze the data."
+      assert result =~ "[program: see below]"
+      refute result =~ "(+ 1 2)"
+    end
+
+    test "replaces unmarked code block with placeholder" do
+      text = """
+      Here's my solution:
+
+      ```
+      (return {:done true})
+      ```
+      """
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "Here's my solution:"
+      assert result =~ "[program: see below]"
+      refute result =~ "(return"
+    end
+
+    test "preserves text without code blocks" do
+      text = "Just some reasoning without any code."
+
+      result = Debug.redact_program(text)
+
+      assert result == text
+    end
+
+    test "handles multiple code blocks" do
+      text = """
+      First attempt:
+      ```clojure
+      (+ 1 2)
+      ```
+
+      Actually, let me try:
+      ```clojure
+      (return 3)
+      ```
+      """
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "First attempt:"
+      assert result =~ "Actually, let me try:"
+      # Both code blocks should be replaced
+      refute result =~ "(+ 1 2)"
+      refute result =~ "(return 3)"
+      # Should have two placeholders
+      assert length(String.split(result, "[program: see below]")) == 3
+    end
+
+    test "handles code block at start of text" do
+      text = """
+      ```clojure
+      (return {:value 42})
+      ```
+      """
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "[program: see below]"
+      refute result =~ "(return"
+    end
+  end
+
   describe "Debug.print_trace/2 with turns" do
     test "prints trace for successful execution" do
       turns = [
@@ -232,7 +329,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert output =~ "Empty trace"
     end
 
-    test "raw: true includes raw_response" do
+    test "raw: true includes raw_response with code block redacted" do
       turns = [
         Turn.success(
           1,
@@ -257,6 +354,13 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       assert output =~ "Raw Response:"
       assert output =~ "Some reasoning here"
+      # Code block in Raw Response should be replaced with placeholder
+      assert output =~ "[program: see below]"
+      # The program should NOT appear twice (once in Raw Response, once in Program)
+      # Raw Response should not contain the actual code block
+      refute Regex.match?(~r/Raw Response:.*\(+ 1 2\)/s, output)
+      # But Program section should still have the code
+      assert output =~ "Program:"
     end
 
     test "raw: false (default) omits raw_response" do
