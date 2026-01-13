@@ -41,7 +41,11 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate remove(pred, coll), to: Collection
   defdelegate find(pred, coll), to: Collection
   defdelegate map(f, coll), to: Collection
+  defdelegate map(f, coll1, coll2), to: Collection
+  defdelegate map(f, coll1, coll2, coll3), to: Collection
   defdelegate mapv(f, coll), to: Collection
+  defdelegate mapv(f, coll1, coll2), to: Collection
+  defdelegate mapv(f, coll1, coll2, coll3), to: Collection
   defdelegate map_indexed(f, coll), to: Collection
   defdelegate pluck(key, coll), to: Collection
   defdelegate sort(coll), to: Collection
@@ -70,6 +74,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate flatten(coll), to: Collection
   defdelegate zip(c1, c2), to: Collection
   defdelegate interleave(c1, c2), to: Collection
+  defdelegate partition(n, coll), to: Collection
+  defdelegate partition(n, step, coll), to: Collection
   defdelegate count(coll), to: Collection
   defdelegate empty?(coll), to: Collection
   defdelegate not_empty(coll), to: Collection

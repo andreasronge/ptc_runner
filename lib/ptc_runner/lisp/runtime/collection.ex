@@ -150,6 +150,53 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.map(coll, fn {k, v} -> f.([k, v]) end)
   end
 
+  # ============================================================
+  # Multi-arity map: (map f coll1 coll2) and (map f coll1 coll2 coll3)
+  # Clojure semantics: f receives individual args, stops at shortest
+  # ============================================================
+
+  def map(_f, nil, _coll2), do: []
+  def map(_f, _coll1, nil), do: []
+
+  def map(f, coll1, coll2) when is_function(f) and is_list(coll1) and is_list(coll2) do
+    Enum.zip_with(coll1, coll2, f)
+  end
+
+  def map(f, coll1, coll2) when is_function(f) and is_binary(coll1) and is_binary(coll2) do
+    Enum.zip_with(graphemes(coll1), graphemes(coll2), f)
+  end
+
+  def map(_f, nil, _c2, _c3), do: []
+  def map(_f, _c1, nil, _c3), do: []
+  def map(_f, _c1, _c2, nil), do: []
+
+  def map(f, coll1, coll2, coll3)
+      when is_function(f) and is_list(coll1) and is_list(coll2) and is_list(coll3) do
+    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> f.(a, b, c) end)
+  end
+
+  # Multi-arity mapv (identical to map since PTC-Lisp has no lazy sequences)
+
+  def mapv(_f, nil, _coll2), do: []
+  def mapv(_f, _coll1, nil), do: []
+
+  def mapv(f, coll1, coll2) when is_function(f) and is_list(coll1) and is_list(coll2) do
+    Enum.zip_with(coll1, coll2, f)
+  end
+
+  def mapv(f, coll1, coll2) when is_function(f) and is_binary(coll1) and is_binary(coll2) do
+    Enum.zip_with(graphemes(coll1), graphemes(coll2), f)
+  end
+
+  def mapv(_f, nil, _c2, _c3), do: []
+  def mapv(_f, _c1, nil, _c3), do: []
+  def mapv(_f, _c1, _c2, nil), do: []
+
+  def mapv(f, coll1, coll2, coll3)
+      when is_function(f) and is_list(coll1) and is_list(coll2) and is_list(coll3) do
+    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> f.(a, b, c) end)
+  end
+
   def map_indexed(f, coll) when is_list(coll) do
     with_index_map(coll, f)
   end
@@ -376,6 +423,34 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def interleave(c1, c2) when is_list(c1) and is_list(c2) do
     Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
   end
+
+  # ============================================================
+  # partition: chunk collection into groups
+  # ============================================================
+
+  # partition with 2 args: (partition n coll) - chunks of n, discards incomplete
+  def partition(n, coll) when is_integer(n) and n > 0 and is_list(coll) do
+    Enum.chunk_every(coll, n, n, :discard)
+  end
+
+  def partition(n, coll) when is_integer(n) and n > 0 and is_binary(coll) do
+    Enum.chunk_every(graphemes(coll), n, n, :discard)
+  end
+
+  def partition(_n, nil), do: []
+
+  # partition with 3 args: (partition n step coll) - sliding window
+  def partition(n, step, coll)
+      when is_integer(n) and n > 0 and is_integer(step) and step > 0 and is_list(coll) do
+    Enum.chunk_every(coll, n, step, :discard)
+  end
+
+  def partition(n, step, coll)
+      when is_integer(n) and n > 0 and is_integer(step) and step > 0 and is_binary(coll) do
+    Enum.chunk_every(graphemes(coll), n, step, :discard)
+  end
+
+  def partition(_n, _step, nil), do: []
 
   def count(%MapSet{} = set), do: MapSet.size(set)
 
