@@ -12,7 +12,6 @@ defmodule PtcRunner.SubAgent.NewTest do
       assert agent.max_turns == 5
       assert agent.tools == %{}
       assert agent.signature == nil
-      assert agent.tool_catalog == nil
       assert agent.prompt_limit == nil
       assert agent.mission_timeout == nil
       assert agent.llm_retry == nil
@@ -29,7 +28,6 @@ defmodule PtcRunner.SubAgent.NewTest do
           signature: "(user :string) -> {count :int, _ids [:int]}",
           tools: email_tools,
           max_turns: 10,
-          tool_catalog: %{"reference" => "schema"},
           prompt_limit: %{max_length: 1000},
           mission_timeout: 60_000,
           llm_retry: %{max_attempts: 3},
@@ -41,7 +39,6 @@ defmodule PtcRunner.SubAgent.NewTest do
       assert agent.signature == "(user :string) -> {count :int, _ids [:int]}"
       assert agent.tools == email_tools
       assert agent.max_turns == 10
-      assert agent.tool_catalog == %{"reference" => "schema"}
       assert agent.prompt_limit == %{max_length: 1000}
       assert agent.mission_timeout == 60_000
       assert agent.llm_retry == %{max_attempts: 3}
@@ -206,20 +203,6 @@ defmodule PtcRunner.SubAgent.NewTest do
 
       assert_raise ArgumentError, "llm_retry must be a map", fn ->
         SubAgent.new(prompt: "Test", llm_retry: 123)
-      end
-    end
-
-    test "raises when tool_catalog is not a map" do
-      assert_raise ArgumentError, "tool_catalog must be a map", fn ->
-        SubAgent.new(prompt: "Test", tool_catalog: [])
-      end
-
-      assert_raise ArgumentError, "tool_catalog must be a map", fn ->
-        SubAgent.new(prompt: "Test", tool_catalog: "not a map")
-      end
-
-      assert_raise ArgumentError, "tool_catalog must be a map", fn ->
-        SubAgent.new(prompt: "Test", tool_catalog: :atom)
       end
     end
 

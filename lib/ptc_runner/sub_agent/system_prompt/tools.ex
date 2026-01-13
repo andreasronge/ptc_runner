@@ -3,8 +3,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
   Tool schema section generation for SubAgent prompts.
 
   Generates the Available Tools section that shows all available tools
-  with their signatures and descriptions. Optionally includes a separate
-  "Tools for planning (do not call)" section for tools in the catalog.
+  with their signatures and descriptions.
   """
 
   alias PtcRunner.SubAgent.Signature
@@ -14,13 +13,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
   Generate the tool schemas section.
 
   Shows all available tools with their signatures and descriptions.
-  Optionally includes a separate "Tools for planning (do not call)" section
-  for tools in the catalog.
 
   ## Parameters
 
   - `tools` - Map of tool name to function
-  - `tool_catalog` - Optional map of tool names for planning (default: nil)
+  - `multi_turn?` - Whether this is a multi-turn context (default: true)
 
   ## Returns
 
@@ -33,35 +30,20 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
       iex> schemas =~ "# Available Tools"
       true
 
-      iex> tools = %{"search" => fn _ -> [] end}
-      iex> catalog = %{"email_agent" => nil}
-      iex> schemas = PtcRunner.SubAgent.SystemPrompt.Tools.generate(tools, catalog)
-      iex> schemas =~ "## Tools for planning (do not call)"
-      true
-
   """
-  @spec generate(map(), map() | nil, boolean()) :: String.t()
-  def generate(tools, tool_catalog \\ nil, multi_turn? \\ true)
+  @spec generate(map(), boolean()) :: String.t()
+  def generate(tools, multi_turn? \\ true)
 
-  def generate(tools, tool_catalog, _multi_turn?) when map_size(tools) == 0 do
+  def generate(tools, _multi_turn?) when map_size(tools) == 0 do
     # No user-defined tools - return/fail are already documented in system prompt
-    callable_section = """
+    """
     # Available Tools
 
     No tools available.
     """
-
-    # Add catalog section if present
-    catalog_section = generate_catalog_section(tool_catalog)
-
-    if catalog_section == "" do
-      callable_section
-    else
-      callable_section <> "\n" <> catalog_section
-    end
   end
 
-  def generate(tools, tool_catalog, _multi_turn?) do
+  def generate(tools, _multi_turn?) do
     # Normalize tools to %Tool{} structs so signatures are rendered
     normalized_tools =
       tools
@@ -74,29 +56,20 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
       |> Enum.sort_by(fn {name, _} -> name end)
       |> Enum.map_join("\n\n", fn {name, tool} -> format_tool(name, tool) end)
 
-    callable_section = """
+    """
     # Available Tools
 
     ## Tools you can call
 
     #{tool_docs}
     """
-
-    # Add catalog section if present
-    catalog_section = generate_catalog_section(tool_catalog)
-
-    if catalog_section == "" do
-      callable_section
-    else
-      callable_section <> "\n" <> catalog_section
-    end
   end
 
   # ============================================================
   # Private Helpers - Tool Formatting
   # ============================================================
 
-  # Fallback for tool names without struct (used by tool_catalog)
+  # Fallback for tool names without struct
   defp format_tool(name) do
     """
     ### #{name}
@@ -129,29 +102,6 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Tools do
   defp format_tool(name, _tool) do
     # For user-defined tools without signature, show basic signature
     format_tool(name)
-  end
-
-  # ============================================================
-  # Private Helpers - Catalog Section
-  # ============================================================
-
-  defp generate_catalog_section(nil), do: ""
-  defp generate_catalog_section(tool_catalog) when map_size(tool_catalog) == 0, do: ""
-
-  defp generate_catalog_section(tool_catalog) do
-    catalog_tools =
-      tool_catalog
-      |> Map.keys()
-      |> Enum.sort()
-      |> Enum.map_join("\n\n", fn name -> format_tool(name) end)
-
-    """
-    ## Tools for planning (do not call)
-
-    These tools are shown for context but cannot be called directly:
-
-    #{catalog_tools}
-    """
   end
 
   # ============================================================

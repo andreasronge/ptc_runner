@@ -303,46 +303,5 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       # Should handle gracefully without erroring
       assert prompt =~ "data/config"
     end
-
-    test "generates prompt with both tools and tool_catalog" do
-      tools = %{"search" => fn _ -> [] end}
-      catalog = %{"email_agent" => nil, "report_agent" => nil}
-
-      agent =
-        SubAgent.new(
-          prompt: "Find and process data",
-          tools: tools,
-          tool_catalog: catalog
-        )
-
-      prompt = SystemPrompt.generate(agent, context: %{})
-
-      # Should have both sections
-      assert prompt =~ "## Tools you can call"
-      assert prompt =~ "### search"
-      assert prompt =~ "## Tools for planning (do not call)"
-      assert prompt =~ "These tools are shown for context but cannot be called directly"
-      assert prompt =~ "### email_agent"
-      assert prompt =~ "### report_agent"
-    end
-
-    test "generates prompt with only tool_catalog (no callable tools)" do
-      catalog = %{"email_agent" => nil}
-
-      agent =
-        SubAgent.new(
-          prompt: "Review available agents",
-          tool_catalog: catalog
-        )
-
-      prompt = SystemPrompt.generate(agent, context: %{})
-
-      # return/fail are in system prompt section, not in Available Tools
-      refute prompt =~ "### return"
-      refute prompt =~ "### fail"
-      # But the catalog section should be present
-      assert prompt =~ "## Tools for planning (do not call)"
-      assert prompt =~ "### email_agent"
-    end
   end
 end

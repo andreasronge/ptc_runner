@@ -36,7 +36,6 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_mission_timeout!(opts)
     validate_signature!(opts)
     validate_llm_retry!(opts)
-    validate_tool_catalog!(opts)
     validate_prompt_limit!(opts)
     validate_memory_limit!(opts)
     validate_max_depth!(opts)
@@ -104,14 +103,6 @@ defmodule PtcRunner.SubAgent.Validator do
     case Keyword.fetch(opts, :llm_retry) do
       {:ok, retry} when is_map(retry) -> :ok
       {:ok, _} -> raise ArgumentError, "llm_retry must be a map"
-      :error -> :ok
-    end
-  end
-
-  defp validate_tool_catalog!(opts) do
-    case Keyword.fetch(opts, :tool_catalog) do
-      {:ok, catalog} when is_map(catalog) -> :ok
-      {:ok, _} -> raise ArgumentError, "tool_catalog must be a map"
       :error -> :ok
     end
   end

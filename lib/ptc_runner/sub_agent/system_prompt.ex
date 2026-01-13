@@ -204,7 +204,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     data_inventory =
       DataInventory.generate(context, context_signature, all_field_descriptions)
 
-    tool_schemas = Tools.generate(agent.tools, agent.tool_catalog, multi_turn?)
+    tool_schemas = Tools.generate(agent.tools, multi_turn?)
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
@@ -253,13 +253,13 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
               as: :generate
 
   @doc """
-  Generate tool schemas section. Delegates to `PtcRunner.SubAgent.SystemPrompt.Tools.generate/3`.
+  Generate tool schemas section. Delegates to `PtcRunner.SubAgent.SystemPrompt.Tools.generate/2`.
 
   The `multi_turn?` parameter controls whether `return`/`fail` tools are included.
   Defaults to `true` for backward compatibility.
   """
-  def generate_tool_schemas(tools, tool_catalog \\ nil, multi_turn? \\ true) do
-    Tools.generate(tools, tool_catalog, multi_turn?)
+  def generate_tool_schemas(tools, multi_turn? \\ true) do
+    Tools.generate(tools, multi_turn?)
   end
 
   @doc """
@@ -393,7 +393,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     data_inventory =
       DataInventory.generate(context, context_signature, all_field_descriptions)
 
-    tool_schemas = Tools.generate(agent.tools, agent.tool_catalog, multi_turn?)
+    tool_schemas = Tools.generate(agent.tools, multi_turn?)
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
