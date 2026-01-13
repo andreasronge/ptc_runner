@@ -252,7 +252,7 @@ Atoms like `:haiku` resolve via the `llm_registry` passed at the top-level `run/
 Let the LLM create SubAgents on-the-fly:
 
 ```elixir
-@tool_catalog %{
+@tool_registry %{
   "email" => %{
     "list_emails" => &MyApp.Email.list/1,
     "read_email" => &MyApp.Email.read/1
@@ -263,12 +263,12 @@ Let the LLM create SubAgents on-the-fly:
   }
 }
 
-def spawn_agent(args, catalog, llm) do
+def spawn_agent(args, registry, llm) do
   tool_names = args["tools"] || []
 
   selected_tools =
     tool_names
-    |> Enum.map(&Map.get(catalog, &1, %{}))
+    |> Enum.map(&Map.get(registry, &1, %{}))
     |> Enum.reduce(%{}, &Map.merge/2)
 
   {:ok, step} = SubAgent.run(
@@ -284,7 +284,7 @@ end
 # Register meta-tool
 tools = %{
   "spawn_agent" => {
-    fn args -> spawn_agent(args, @tool_catalog, llm) end,
+    fn args -> spawn_agent(args, @tool_registry, llm) end,
     "(prompt :string, tools [:string], context :map) -> :map"
   }
 }
@@ -412,40 +412,6 @@ PlanExecutor.run(plan, tool_registry, llm)
 | Complex multi-item | Plan then execute | LLM plans batching strategy |
 | Novel/exploratory | Dynamic `spawn_agent` | Flexibility to compose |
 | Production pipeline | Plan executor | Deterministic, auditable |
-
-## Planning Agents
-
-For complex tasks, have an agent generate a structured plan:
-
-```elixir
-planning_tools = %{
-  "create_plan" => fn args ->
-    %{status: "success", plan_id: "plan_123"}
-  end
-}
-
-# Domain tools shown for planning but not callable
-domain_tools = %{
-  "email-finder" => SubAgent.as_tool(...),
-  "reply-drafter" => SubAgent.as_tool(...)
-}
-
-{:ok, plan} = SubAgent.run(
-  """
-  Create a plan to:
-  1. Find all urgent emails
-  2. Draft acknowledgment replies
-
-  Use "create_plan" to submit. Each step needs:
-  :id, :prompt, :tools, :needs (dependencies), :output
-  """,
-  tools: planning_tools,
-  tool_catalog: domain_tools,  # Visible schemas, not callable
-  llm: llm
-)
-```
-
-The LLM sees tool schemas in `tool_catalog` for planning but can only call tools in `tools`.
 
 ## See Also
 

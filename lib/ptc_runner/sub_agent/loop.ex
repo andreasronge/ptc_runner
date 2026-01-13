@@ -426,47 +426,21 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Execute parsed code
   defp execute_code(code, response, agent, llm, state) do
-    # Check if code calls any catalog-only tools
-    case ResponseHandler.find_catalog_tool_call(code, agent.tools, agent.tool_catalog) do
-      {:error, catalog_tool_name} ->
-        # Feed error back to LLM with turn info
-        available_tools = Map.keys(agent.tools) |> Enum.sort() |> Enum.join(", ")
+    # Add last_fail to context if present
+    exec_context =
+      if state.last_fail do
+        Map.put(state.context, :fail, state.last_fail)
+      else
+        state.context
+      end
 
-        error_message =
-          "Error: Tool '#{catalog_tool_name}' is for planning only and cannot be called. Available tools: #{available_tools}"
-          |> TurnFeedback.append_turn_info(agent, state)
+    # Normalize SubAgentTool instances to functions with telemetry
+    normalized_tools = ToolNormalizer.normalize(agent.tools, state, agent)
 
-        new_state = %{
-          state
-          | turn: state.turn + 1,
-            messages:
-              state.messages ++
-                [
-                  %{role: :assistant, content: response},
-                  %{role: :user, content: error_message}
-                ],
-            remaining_turns: state.remaining_turns - 1
-        }
-
-        loop(agent, llm, new_state)
-
-      :ok ->
-        # Add last_fail to context if present
-        exec_context =
-          if state.last_fail do
-            Map.put(state.context, :fail, state.last_fail)
-          else
-            state.context
-          end
-
-        # Normalize SubAgentTool instances to functions with telemetry
-        normalized_tools = ToolNormalizer.normalize(agent.tools, state, agent)
-
-        execute_code_with_tools(code, response, agent, llm, state, exec_context, normalized_tools)
-    end
+    execute_code_with_tools(code, response, agent, llm, state, exec_context, normalized_tools)
   end
 
-  # Continue execution after tool_catalog check
+  # Execute code with normalized tools
   defp execute_code_with_tools(code, response, agent, llm, state, exec_context, all_tools) do
     lisp_opts = [
       context: exec_context,

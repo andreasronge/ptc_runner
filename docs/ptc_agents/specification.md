@@ -93,7 +93,6 @@ def new(opts)
 | `signature` | `String.t()` | Contract for inputs/outputs |
 | `tools` | `map()` | Callable tools |
 | `max_turns` | `pos_integer()` | Maximum LLM calls (default: 5) |
-| `tool_catalog` | `map()` | Schemas for planning (not callable) |
 | `prompt_limit` | `map()` | Truncation config for LLM view |
 | `mission_timeout` | `pos_integer()` | Max ms for entire execution |
 | `llm_retry` | `map()` | Infrastructure retries (network, 5xx) - does NOT use turns |
@@ -727,14 +726,6 @@ researcher = SubAgent.new(prompt: "...", signature: "...", description: "...", t
 | `SubAgent.as_tool(...)` | From agent | From prompt | Nested agents |
 
 Descriptions are shown to the LLM in the system prompt's tool schema section, helping it understand when and how to use each tool.
-
-### tools vs tool_catalog
-
-| Aspect | `tools` | `tool_catalog` |
-|--------|---------|----------------|
-| In prompt | "Tools you can call" | "Tools for planning (do not call)" |
-| Callable | Yes | No |
-| Use case | Execution | Planning visibility |
 
 ### LLMTool
 

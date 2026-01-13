@@ -248,62 +248,6 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   end
 
   @doc """
-  Check if code calls a catalog-only tool (not in executable tools).
-
-  ## Parameters
-
-  - `code` - The PTC-Lisp code to check
-  - `executable_tools` - Map of tools that can be executed
-  - `tool_catalog` - Map of planning-only tools
-
-  ## Returns
-
-  - `:ok` - No catalog-only tool calls found
-  - `{:error, tool_name}` - Found call to catalog-only tool
-  """
-  @spec find_catalog_tool_call(String.t(), map(), map() | nil) :: :ok | {:error, String.t()}
-  def find_catalog_tool_call(code, executable_tools, tool_catalog) do
-    # Only check if tool_catalog exists and is not empty
-    if tool_catalog && map_size(tool_catalog) > 0 do
-      # Find catalog-only tools (in catalog but not in executable tools)
-      catalog_only = Map.keys(tool_catalog) -- Map.keys(executable_tools)
-
-      # Check if code contains a call to any catalog-only tool
-      Enum.find_value(catalog_only, :ok, fn tool_name ->
-        if contains_call?(code, tool_name) do
-          {:error, tool_name}
-        else
-          nil
-        end
-      end)
-    else
-      :ok
-    end
-  end
-
-  @doc """
-  Check if code contains a call to a specific tool.
-
-  Recognizes tool/ syntax `(tool/tool-name ...)` and
-  shorthand syntax for return/fail `(return ...)` / `(fail ...)`.
-  """
-  @spec contains_call?(String.t(), String.t()) :: boolean()
-  def contains_call?(code, tool_name) do
-    # Tool names may appear in either form in tool/ namespace:
-    # - "get-users" as tool/get-users
-    # - "get_users" as tool/get_users
-    # We check for the tool name as-is (with underscore or hyphen)
-    tool_match = Regex.match?(~r/\(tool\/#{Regex.escape(tool_name)}[\s\{\)]/, code)
-
-    # Shorthand only for return and fail
-    shorthand_match =
-      tool_name in ["return", "fail"] and
-        Regex.match?(~r/\(#{tool_name}[\s\{]/, code)
-
-    tool_match or shorthand_match
-  end
-
-  @doc """
   Format error for LLM feedback.
   """
   @spec format_error_for_llm(map()) :: String.t()

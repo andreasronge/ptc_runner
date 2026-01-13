@@ -21,7 +21,6 @@ defmodule PtcRunner.SubAgent do
   - `signature` - String.t() | nil, optional, contract for inputs/outputs
   - `tools` - map(), callable tools (default: %{})
   - `max_turns` - pos_integer(), maximum LLM calls (default: 5)
-  - `tool_catalog` - map() | nil, schemas for planning (not callable)
   - `prompt_limit` - map() | nil, truncation config for LLM view
   - `mission_timeout` - pos_integer() | nil, max ms for entire execution
   - `llm_retry` - map() | nil, infrastructure retry config
@@ -163,7 +162,6 @@ defmodule PtcRunner.SubAgent do
           parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
           max_turns: pos_integer(),
-          tool_catalog: map() | nil,
           prompt_limit: map() | nil,
           mission_timeout: pos_integer() | nil,
           llm_retry: map() | nil,
@@ -194,7 +192,6 @@ defmodule PtcRunner.SubAgent do
     :prompt,
     :signature,
     :parsed_signature,
-    :tool_catalog,
     :prompt_limit,
     :mission_timeout,
     :llm_retry,
@@ -235,7 +232,6 @@ defmodule PtcRunner.SubAgent do
   - `signature` - String contract defining expected inputs and outputs
   - `tools` - Map of callable tools (default: %{})
   - `max_turns` - Positive integer for maximum LLM calls (default: 5)
-  - `tool_catalog` - Map of schemas for planning (not callable)
   - `prompt_limit` - Map with truncation config for LLM view
   - `mission_timeout` - Positive integer for max milliseconds for entire execution
   - `llm_retry` - Map with infrastructure retry config
@@ -387,7 +383,6 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :max_turns,
-        :tool_catalog,
         :prompt_limit,
         :mission_timeout,
         :llm_retry,
@@ -413,7 +408,6 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :max_turns,
-        :tool_catalog,
         :prompt_limit,
         :mission_timeout,
         :llm_retry,
