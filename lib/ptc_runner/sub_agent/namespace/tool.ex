@@ -62,7 +62,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
 
   defp format_tool(%{name: name, signature: signature, description: description}) do
     {params, return_type} = parse_signature(signature)
-    params_str = Enum.map_join(params, ", ", fn {param_name, _type} -> param_name end)
+    params_str = Enum.map_join(params, ", ", &format_param/1)
     return_str = format_return_type(return_type)
 
     base = "tool/#{name}(#{params_str}) -> #{return_str}"
@@ -73,6 +73,16 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
       desc -> "#{base}  ; #{desc}"
     end
   end
+
+  # Format a parameter for display
+  # For structured maps like {path :string}, show the field names
+  # so the LLM knows what keys to use
+  defp format_param({_param_name, {:map, fields}}) when is_list(fields) and fields != [] do
+    field_strs = Enum.map_join(fields, " ", fn {field_name, _type} -> field_name end)
+    "{#{field_strs}}"
+  end
+
+  defp format_param({param_name, _type}), do: param_name
 
   defp parse_signature(nil), do: {[], :any}
 
