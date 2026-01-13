@@ -385,7 +385,20 @@ v0.5: Observability & Debugging ✅ COMPLETE
   - Debug API (print_trace with view: :compressed, messages: true, etc.) ✅
   Architecture: Pure library (no processes)
 
-v0.6: State Management
+v0.6: Output Modes
+  - Add output: parameter (:ptc_lisp, :ptc_json, :json, :text)
+  - :json mode for direct structured data (classification, extraction)
+  - :text mode for free-form responses
+  - Extended callback interface: schema, tools, tool_choice
+  - Tool calling as portable structured output mechanism
+  - Signature to JSON Schema conversion
+  - JSON response parser (code blocks, raw JSON)
+  - Mode-specific prompt templates
+  - Validation rules per mode
+  See: docs/plans/question-mode-plan.md
+  Architecture: Pure library (no processes)
+
+v0.7: State Management
   - JSON serialization as default (Step <-> JSON)
   - Binary serialization as opt-in for high-throughput
   - Resume from serialized state
@@ -394,8 +407,9 @@ v0.6: State Management
   - Optional: AgentRegistry with child_spec/1 (user-supervised)
   Architecture: First child_spec components (opt-in)
 
-v0.7: Async Tools
+v0.8: Async Tools & Suspension
   - {:async, id, immediate_result} pattern
+  - {:suspend, question} pattern for human-in-the-loop (ask_user)
   - PendingStep struct
   - SubAgent.resume/3
   - PTC-Lisp (await id) form (required for multi-async patterns)
@@ -403,7 +417,7 @@ v0.7: Async Tools
   - PtcRunner.Supervisor convenience module
   Architecture: Full child_spec suite (still opt-in)
 
-v0.8: Streaming & Sessions
+v0.9: Streaming & Sessions
   - on_token callback
   - on_tool_start/end callbacks
   - LiveView helper module
@@ -416,6 +430,7 @@ v1.0: Production Ready
   - Phoenix/Oban integration guides
   - Performance benchmarks
   - Decide: auto-start Application or stay opt-in
+  - Consider: :chat mode for traditional tool-calling agents
   Architecture: Evaluate user feedback on OTP adoption
 ```
 
