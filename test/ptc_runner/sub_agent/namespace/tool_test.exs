@@ -9,8 +9,8 @@ defmodule PtcRunner.SubAgent.Namespace.ToolTest do
   end
 
   describe "render/1" do
-    test "returns nil for empty map" do
-      assert Tool.render(%{}) == nil
+    test "returns no tools message for empty map" do
+      assert Tool.render(%{}) == ";; No tools available"
     end
 
     test "renders single tool with signature" do
