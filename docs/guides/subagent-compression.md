@@ -130,6 +130,51 @@ SubAgent.Debug.print_trace(step)
 
 Full history is always preserved in `step.turns` regardless of compression.
 
+### Compression Statistics
+
+Use `usage: true` to see compression metrics:
+
+```elixir
+SubAgent.Debug.print_trace(step, usage: true)
+```
+
+This displays a compression section showing what was dropped:
+
+```
++- Compression -------------------------------------------+
+|   Strategy:     single-user-coalesced
+|   Turns:        9 compressed
+|   Tool calls:   20/25 shown (5 dropped)
+|   Printlns:     15/18 shown (3 dropped)
+|   Errors:       2 turn(s) collapsed
++---------------------------------------------------------+
+```
+
+The stats are also available programmatically in `step.usage.compression`:
+
+```elixir
+step.usage.compression
+# => %{
+#   enabled: true,
+#   strategy: "single-user-coalesced",
+#   turns_compressed: 9,
+#   tool_calls_total: 25,
+#   tool_calls_shown: 20,
+#   tool_calls_dropped: 5,
+#   printlns_total: 18,
+#   printlns_shown: 15,
+#   printlns_dropped: 3,
+#   error_turns_collapsed: 2
+# }
+```
+
+| Metric | Description |
+|--------|-------------|
+| `turns_compressed` | Number of turns coalesced into single message |
+| `tool_calls_dropped` | Tool calls exceeding `tool_call_limit` |
+| `printlns_dropped` | Println output exceeding `println_limit` |
+| `error_turns_collapsed` | Failed turns hidden from LLM (all if recovered, all but last if still failing) |
+
 ## When to Use Compression
 
 **Enable compression when:**
@@ -139,7 +184,7 @@ Full history is always preserved in `step.turns` regardless of compression.
 - LLM seems confused by seeing old program versions
 
 **Skip compression when:**
-- Single-turn agents (`max_turns: 1`)
+- Single-turn agents (`max_turns: 1`) — compression is automatically skipped even if enabled
 - Simple agents with few turns
 - Debugging (easier to see full history)
 

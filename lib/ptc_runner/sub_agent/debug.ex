@@ -115,6 +115,11 @@ defmodule PtcRunner.SubAgent.Debug do
 
     if show_usage and usage do
       print_usage_summary(usage)
+
+      # Print compression stats if available
+      if compression = Map.get(usage, :compression) do
+        print_compression_summary(compression)
+      end
     end
 
     :ok
@@ -179,7 +184,7 @@ defmodule PtcRunner.SubAgent.Debug do
     # Print messages sent to LLM
     # - show_all_messages: show all messages including system prompt
     # - show_raw: show messages excluding system prompt and placeholder content
-    if (show_all_messages or show_raw) and turn.messages do
+    if (show_all_messages || show_raw) and turn.messages do
       messages_to_show =
         if show_all_messages do
           turn.messages
@@ -280,7 +285,7 @@ defmodule PtcRunner.SubAgent.Debug do
     )
 
     # Use compression strategy to render what LLM would see
-    messages =
+    {messages, _stats} =
       SingleUserCoalesced.to_messages(turns, memory,
         system_prompt: "(system prompt omitted)",
         prompt: prompt || "(mission not available)",
@@ -503,6 +508,54 @@ defmodule PtcRunner.SubAgent.Debug do
 
     if usage[:turns] do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Turns:         #{usage.turns}")
+    end
+
+    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+  end
+
+  # Print compression statistics summary
+  defp print_compression_summary(compression) do
+    header = " Compression "
+
+    IO.puts(
+      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
+    )
+
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Strategy:     #{compression.strategy}")
+
+    IO.puts(
+      "#{ansi(:cyan)}|#{ansi(:reset)}   Turns:        #{compression.turns_compressed} compressed"
+    )
+
+    # Tool calls
+    if compression.tool_calls_total > 0 do
+      dropped_str =
+        if compression.tool_calls_dropped > 0,
+          do: " #{ansi(:yellow)}(#{compression.tool_calls_dropped} dropped)#{ansi(:reset)}",
+          else: ""
+
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Tool calls:   #{compression.tool_calls_shown}/#{compression.tool_calls_total} shown#{dropped_str}"
+      )
+    end
+
+    # Printlns
+    if compression.printlns_total > 0 do
+      dropped_str =
+        if compression.printlns_dropped > 0,
+          do: " #{ansi(:yellow)}(#{compression.printlns_dropped} dropped)#{ansi(:reset)}",
+          else: ""
+
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Printlns:     #{compression.printlns_shown}/#{compression.printlns_total} shown#{dropped_str}"
+      )
+    end
+
+    # Error turns collapsed
+    if compression.error_turns_collapsed > 0 do
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Errors:       #{compression.error_turns_collapsed} turn(s) collapsed"
+      )
     end
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")

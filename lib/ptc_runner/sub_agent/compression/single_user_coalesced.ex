@@ -38,15 +38,17 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
   def name, do: "single-user-coalesced"
 
   @impl true
-  @spec to_messages([Turn.t()], map(), keyword()) :: [PtcRunner.SubAgent.Compression.message()]
+  @spec to_messages([Turn.t()], map(), keyword()) ::
+          {[PtcRunner.SubAgent.Compression.message()], PtcRunner.SubAgent.Compression.stats()}
   def to_messages(turns, memory, opts) do
     system_msg = %{role: :system, content: opts[:system_prompt] || ""}
-    user_msg = %{role: :user, content: build_user_content(turns, memory, opts)}
+    {user_content, stats} = build_user_content_with_stats(turns, memory, opts)
+    user_msg = %{role: :user, content: user_content}
 
-    [system_msg, user_msg]
+    {[system_msg, user_msg], stats}
   end
 
-  defp build_user_content(turns, memory, opts) do
+  defp build_user_content_with_stats(turns, memory, opts) do
     prompt = opts[:prompt] || ""
     tools = opts[:tools] || %{}
     data = opts[:data] || %{}
@@ -62,6 +64,40 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
     # Accumulate tool_calls and prints from all successful turns
     accumulated_tool_calls = Enum.flat_map(successful_turns, & &1.tool_calls)
     accumulated_prints = Enum.flat_map(successful_turns, & &1.prints)
+
+    # Calculate totals before applying limits
+    tool_calls_total = length(accumulated_tool_calls)
+    printlns_total = length(accumulated_prints)
+
+    # Calculate shown counts (after limit applied)
+    tool_calls_shown = min(tool_calls_total, tool_call_limit)
+    printlns_shown = min(printlns_total, println_limit)
+
+    # Calculate error turns collapsed
+    last_turn = List.last(turns)
+    last_succeeded? = last_turn && last_turn.success?
+    failed_count = length(failed_turns)
+
+    error_turns_collapsed =
+      cond do
+        failed_count == 0 -> 0
+        last_succeeded? -> failed_count
+        true -> max(0, failed_count - 1)
+      end
+
+    # Build stats
+    stats = %{
+      enabled: true,
+      strategy: name(),
+      turns_compressed: length(turns),
+      tool_calls_total: tool_calls_total,
+      tool_calls_shown: tool_calls_shown,
+      tool_calls_dropped: tool_calls_total - tool_calls_shown,
+      printlns_total: printlns_total,
+      printlns_shown: printlns_shown,
+      printlns_dropped: printlns_total - printlns_shown,
+      error_turns_collapsed: error_turns_collapsed
+    }
 
     # Determine if any tool has println capability (used for output display)
     has_println = has_println_tool?(tools)
@@ -91,17 +127,20 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
     turns_indicator = build_turns_indicator(turns_left)
 
     # Assemble sections with blank line separators
-    [
-      prompt,
-      namespaces,
-      expected_output,
-      tool_calls_section,
-      output_section,
-      error_section,
-      turns_indicator
-    ]
-    |> Enum.reject(&(is_nil(&1) or &1 == ""))
-    |> Enum.join("\n\n")
+    content =
+      [
+        prompt,
+        namespaces,
+        expected_output,
+        tool_calls_section,
+        output_section,
+        error_section,
+        turns_indicator
+      ]
+      |> Enum.reject(&(is_nil(&1) or &1 == ""))
+      |> Enum.join("\n\n")
+
+    {content, stats}
   end
 
   # Check if any tool has println capability
