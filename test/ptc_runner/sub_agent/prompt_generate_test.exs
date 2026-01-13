@@ -303,7 +303,5 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       # Should handle gracefully without erroring
       assert prompt =~ "data/config"
     end
-
-    # Note: tool_catalog tests removed - feature is deprecated and will be removed
   end
 end
