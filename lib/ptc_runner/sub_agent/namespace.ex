@@ -21,24 +21,24 @@ defmodule PtcRunner.SubAgent.Namespace do
   - `memory` - Map of LLM definitions (for user/ namespace)
   - `has_println` - Boolean, controls sample display in user/ namespace
 
-  Returns `nil` if all sections are empty.
+  Always includes the tools section (showing available tools or "No tools available").
 
   ## Examples
 
       iex> PtcRunner.SubAgent.Namespace.render(%{})
-      nil
+      ";; No tools available"
 
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string) -> :string"}
       iex> PtcRunner.SubAgent.Namespace.render(%{tools: %{"search" => tool}})
       ";; === tools ===\\ntool/search(query) -> string"
 
       iex> PtcRunner.SubAgent.Namespace.render(%{data: %{count: 42}})
-      ";; === data/ ===\\ndata/count                    ; integer, sample: 42"
+      ";; No tools available\\n\\n;; === data/ ===\\ndata/count                    ; integer, sample: 42"
 
       iex> PtcRunner.SubAgent.Namespace.render(%{memory: %{total: 100}, has_println: false})
-      ";; === user/ (your prelude) ===\\ntotal                         ; = integer, sample: 100"
+      ";; No tools available\\n\\n;; === user/ (your prelude) ===\\ntotal                         ; = integer, sample: 100"
   """
-  @spec render(map()) :: String.t() | nil
+  @spec render(map()) :: String.t()
   def render(config) do
     data_opts = [
       field_descriptions: config[:field_descriptions],

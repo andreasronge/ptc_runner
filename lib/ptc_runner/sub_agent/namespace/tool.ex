@@ -8,8 +8,9 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
   @doc """
   Render tools section for USER message.
 
-  Returns `nil` for empty tools maps, otherwise a formatted string with header
-  and entries showing tool calling syntax with parameters and return type.
+  Returns a formatted string showing available tools or a message indicating
+  no tools are available. When tools exist, shows header and entries with
+  tool calling syntax, parameters, and return type.
 
   Tools are called using `tool/` prefix: `(tool/tool-name {:param value})`
 
@@ -18,7 +19,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
   ## Examples
 
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{})
-      nil
+      ";; No tools available"
 
       iex> tool = %PtcRunner.Tool{name: "get-inventory", signature: "-> :map"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"get-inventory" => tool})
@@ -32,8 +33,8 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"analyze" => tool})
       ";; === tools ===\\ntool/analyze() -> map  ; Analyze data"
   """
-  @spec render(map()) :: String.t() | nil
-  def render(tools) when map_size(tools) == 0, do: nil
+  @spec render(map()) :: String.t()
+  def render(tools) when map_size(tools) == 0, do: ";; No tools available"
 
   def render(tools) do
     lines =
@@ -44,7 +45,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
       |> Enum.map(fn {_name, tool} -> format_tool(tool) end)
 
     case lines do
-      [] -> nil
+      [] -> ";; No tools available"
       _ -> [";; === tools ===" | lines] |> Enum.join("\n")
     end
   end
