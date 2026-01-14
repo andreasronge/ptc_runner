@@ -177,6 +177,7 @@ defmodule PtcDemo.TestRunner.TestCase do
         expect: :map,
         signature: "(question :string) -> {highest :map, breakdown [:map]}",
         constraint: {:has_keys, [:highest, :breakdown]},
+        max_turns: 2,
         description:
           "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
       },
@@ -188,6 +189,7 @@ defmodule PtcDemo.TestRunner.TestCase do
             "Return their employee_id.",
         expect: :integer,
         constraint: {:between, 1, 200},
+        max_turns: 2,
         description: "Group by employee_id, filter rejected, find max count"
       }
     ]
