@@ -92,6 +92,33 @@ defmodule PtcRunner.Lisp.Runtime.RegexTest do
     end
   end
 
+  describe "re_split/2" do
+    test "splits by simple pattern" do
+      re = Regex.re_pattern(",")
+      assert ["a", "b", "c"] == Regex.re_split(re, "a,b,c")
+    end
+
+    test "splits by whitespace pattern" do
+      re = Regex.re_pattern("\\s+")
+      assert ["a", "b", "c"] == Regex.re_split(re, "a  b   c")
+    end
+
+    test "splits by newlines" do
+      re = Regex.re_pattern("\\r?\\n")
+      assert ["line1", "line2", "line3"] == Regex.re_split(re, "line1\nline2\r\nline3")
+    end
+
+    test "returns single element list when no match" do
+      re = Regex.re_pattern(",")
+      assert ["hello"] == Regex.re_split(re, "hello")
+    end
+
+    test "handles consecutive delimiters" do
+      re = Regex.re_pattern(",")
+      assert ["a", "", "b"] == Regex.re_split(re, "a,,b")
+    end
+  end
+
   describe "Safety Mechanisms" do
     test "LowLimitRegex aborts on match limit" do
       # Use the exact pattern and input that worked in re_test.exs

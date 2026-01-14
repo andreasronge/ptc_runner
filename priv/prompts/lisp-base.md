@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 18 -->
+<!-- version: 19 -->
 <!-- date: 2026-01-14 -->
-<!-- changes: Add take vs subs hint for strings -->
+<!-- changes: Add re-split hint for regex splitting -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -61,7 +61,7 @@ data/products                      ; read-only input data
 - No chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - No `some` — use `(first (filter pred coll))`
 - No `for` — use `map` with destructuring: `(map (fn [[k v]] ...) m)`
-- No regex literals (`#"..."`) — use `(re-pattern "\\d+")` then `re-find`/`re-matches`
+- No regex literals (`#"..."`) — use `(re-pattern "...")` with `re-find`/`re-matches`/`re-split`
 - `loop/recur` limited to 1000 iterations
 - No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!`, `doseq` — use `reduce`:
   ```clojure
@@ -92,5 +92,6 @@ data/products                      ; read-only input data
 | `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
+| `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |
 
 <!-- PTC_PROMPT_END -->
