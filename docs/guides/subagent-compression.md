@@ -208,6 +208,45 @@ step.usage.compression
 - Simple agents with few turns
 - Debugging (easier to see full history)
 
+## Compression in Practice
+
+> **Note**: The observations below are based on limited testing. Results will vary depending on task complexity, LLM model, and prompt design.
+
+### Observed Trade-offs
+
+In one example comparing a multi-turn agent with compression vs. a single-turn approach:
+
+| Aspect | With Compression | Without |
+|--------|------------------|---------|
+| Turns | 6 | 1 |
+| Tokens | ~18k input | ~2.4k input |
+| Duration | ~35s | ~14s |
+| Confidence | 92% | 60% |
+| Answer quality | Comprehensive | Incomplete |
+
+The single-turn approach was faster and cheaper, but produced an inaccurate answer. The compressed multi-turn approach allowed the LLM to:
+
+1. **Recover from errors** — When `distinct-by` failed (undefined), the next turn used `distinct` instead
+2. **Iterate systematically** — Read the right files after initial grep results
+3. **Build understanding** — Each turn refined the investigation based on previous findings
+
+### When Compression Helps Most
+
+Based on initial observations, compression appears most beneficial when:
+
+- **Tasks require exploration** — The LLM doesn't know upfront which files or data matter
+- **Errors are likely** — Syntax mistakes, undefined functions, or incorrect assumptions
+- **Quality matters more than speed** — The extra tokens/time pays off in accuracy
+
+### Potential Pitfalls
+
+Without compression (or with single-turn execution), we've observed:
+- LLMs attempting too much at once in a single massive program
+- Redundant tool calls when earlier results could have guided the search
+- Premature returns with low-confidence answers
+
+These patterns suggest that the iterative feedback loop enabled by compression helps the LLM stay on track.
+
 ## Implementing Custom Strategies
 
 For advanced use cases, you can implement the `Compression` behaviour:
