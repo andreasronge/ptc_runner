@@ -44,7 +44,7 @@ Reason: I need to find active items, but I don't know the response structure yet
 Reason: I now see the data, it has an :items key with maps containing :id. Let me extract and inspect the IDs before returning.
 
 ```clojure
-(def ids (pluck :id (:items data)))
+(def ids (map :id (:items data)))
 (println "Found" (count ids) "items:" ids)
 ```
 

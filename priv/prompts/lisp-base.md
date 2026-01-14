@@ -50,7 +50,6 @@ data/products                      ; read-only input data
 (avg-by :price products)          ; average
 (min-by :price products)          ; item with min (not value!)
 (max-by :salary employees)        ; item with max
-(pluck :name users)               ; ["Alice" "Bob" ...] from list of maps
 (contains? coll elem)             ; membership check (works on lists, sets, maps)
 ```
 
@@ -90,8 +89,7 @@ data/products                      ; read-only input data
 | `(apply max-by :field coll)` | `(max-by :field coll)` — max-by takes a collection directly |
 | `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
-| `(pluck :name user)` | `(:name user)` — pluck is for lists |
- | `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
+| `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
 
