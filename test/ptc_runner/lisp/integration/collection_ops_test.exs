@@ -629,4 +629,92 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == [["jan", "feb"], ["feb", "mar"], ["mar", "apr"]]
     end
   end
+
+  # ==========================================================================
+  # distinct-by - Get unique items by key
+  # ==========================================================================
+
+  describe "distinct-by" do
+    test "returns first item per unique key value" do
+      items = [
+        %{category: "food", name: "apple"},
+        %{category: "food", name: "banana"},
+        %{category: "drink", name: "water"}
+      ]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(distinct-by :category data/items)", context: %{items: items})
+
+      assert length(result) == 2
+      assert Enum.at(result, 0) == %{category: "food", name: "apple"}
+      assert Enum.at(result, 1) == %{category: "drink", name: "water"}
+    end
+
+    test "works with function as key extractor" do
+      source = "(distinct-by first [[\"a\" 1] [\"a\" 2] [\"b\" 3]])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [["a", 1], ["b", 3]]
+    end
+
+    test "returns empty list for empty collection" do
+      {:ok, %Step{return: result}} = Lisp.run("(distinct-by :x [])")
+      assert result == []
+    end
+
+    test "returns empty list for nil" do
+      {:ok, %Step{return: result}} = Lisp.run("(distinct-by :x nil)")
+      assert result == []
+    end
+
+    test "preserves order (first occurrence wins)" do
+      items = [
+        %{id: 1, status: "active"},
+        %{id: 2, status: "pending"},
+        %{id: 3, status: "active"},
+        %{id: 4, status: "pending"}
+      ]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(distinct-by :status data/items)", context: %{items: items})
+
+      assert length(result) == 2
+      assert Enum.at(result, 0).id == 1
+      assert Enum.at(result, 1).id == 2
+    end
+
+    test "works in threading macro" do
+      source = """
+      (->> [{:type "a" :val 1} {:type "b" :val 2} {:type "a" :val 3}]
+           (distinct-by :type)
+           (map :val))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 2]
+    end
+
+    test "treats nil as a valid distinct key value" do
+      items = [%{id: 1, status: nil}, %{id: 2, status: nil}, %{id: 3, status: "active"}]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(distinct-by :status data/items)", context: %{items: items})
+
+      assert length(result) == 2
+      assert Enum.at(result, 0).id == 1
+      assert Enum.at(result, 1).id == 3
+    end
+
+    test "supports nested path access" do
+      items = [
+        %{user: %{role: "admin"}},
+        %{user: %{role: "user"}},
+        %{user: %{role: "admin"}}
+      ]
+
+      {:ok, %Step{return: result}} =
+        Lisp.run("(distinct-by [:user :role] data/items)", context: %{items: items})
+
+      assert length(result) == 2
+    end
+  end
 end

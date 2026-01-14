@@ -613,6 +613,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def max_by(_key, nil), do: nil
 
+  def distinct_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
+    Enum.uniq_by(coll, keyfn)
+  end
+
+  def distinct_by(key, coll) when is_list(coll) do
+    Enum.uniq_by(coll, &FlexAccess.flex_get(&1, key))
+  end
+
+  def distinct_by(_key, nil), do: []
+
   @doc """
   Returns the x for which (f x) is greatest. Matches Clojure's max-key.
 

@@ -251,6 +251,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"avg-by", {:normal, &Runtime.avg_by/2}},
       {:"min-by", {:normal, &Runtime.min_by/2}},
       {:"max-by", {:normal, &Runtime.max_by/2}},
+      {:"distinct-by", {:normal, &Runtime.distinct_by/2}},
       {:"max-key", {:collect, &Runtime.max_key_variadic/1}},
       {:"min-key", {:collect, &Runtime.min_key_variadic/1}},
       {:"group-by", {:normal, &Runtime.group_by/2}},
