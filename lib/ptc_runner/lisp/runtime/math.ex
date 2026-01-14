@@ -115,12 +115,38 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     if neg, do: :negative_infinity, else: :infinity
   end
 
+  @doc """
+  Remainder with truncated division (toward zero).
+
+  The result has the same sign as the dividend (x).
+  Matches Clojure's `rem` function.
+  """
+  def remainder(x, y) do
+    cond do
+      SpecialValues.special?(x) or SpecialValues.special?(y) -> :nan
+      y == 0 -> raise ArithmeticError, "division by zero"
+      is_float(x) or is_float(y) -> :math.fmod(x, y)
+      true -> Kernel.rem(x, y)
+    end
+  end
+
+  @doc """
+  Modulus with floored division (toward negative infinity).
+
+  The result has the same sign as the divisor (y).
+  Matches Clojure's `mod` function.
+  """
   def mod(x, y) do
     cond do
       SpecialValues.special?(x) or SpecialValues.special?(y) -> :nan
       y == 0 -> raise ArithmeticError, "division by zero"
-      true -> rem(x, y)
+      is_float(x) or is_float(y) -> floored_mod_float(x, y)
+      true -> Integer.mod(x, y)
     end
+  end
+
+  defp floored_mod_float(x, y) do
+    x - y * :math.floor(x / y)
   end
 
   def inc(x) do

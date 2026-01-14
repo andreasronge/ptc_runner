@@ -131,6 +131,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate multiply(args), to: Math
   defdelegate divide(x, y), to: Math
   defdelegate mod(x, y), to: Math
+  defdelegate remainder(x, y), to: Math
   defdelegate inc(x), to: Math
   defdelegate dec(x), to: Math
   defdelegate abs(x), to: Math
