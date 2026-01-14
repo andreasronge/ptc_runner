@@ -110,18 +110,7 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
       {:match_limit_recursion, @recursion_limit}
     ]
 
-    case :re.split(input, mp, opts) do
-      parts when is_list(parts) ->
-        parts
-
-      {:error, :match_limit} ->
-        raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)"
-
-      {:error, :match_limit_recursion} ->
-        raise RuntimeError, "Regex recursion limit exceeded"
-
-      {:error, reason} ->
-        raise RuntimeError, "Regex execution error: #{inspect(reason)}"
-    end
+    # Unlike :re.run/3, :re.split/3 doesn't return error tuples - it always returns a list
+    :re.split(input, mp, opts)
   end
 end
