@@ -101,11 +101,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Special builtin: println
+  # Detects char lists (from `(take n string)`) and joins them back into strings
   defp do_apply_fun({:special, :println}, args, eval_ctx, _do_eval_fn) do
     message =
       Enum.map_join(args, " ", fn
         s when is_binary(s) -> s
-        v -> Format.to_clojure(v) |> elem(0)
+        v -> format_for_println(v)
       end)
 
     {:ok, nil, EvalContext.append_print(eval_ctx, message)}
@@ -504,6 +505,27 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # ============================================================
   # Internal Helpers
   # ============================================================
+
+  # Detect char lists (result of `(take n string)`) and join them for readable output
+  defp format_for_println(list) when is_list(list) do
+    if char_list?(list) do
+      Enum.join(list, "")
+    else
+      Format.to_clojure(list) |> elem(0)
+    end
+  end
+
+  defp format_for_println(v), do: Format.to_clojure(v) |> elem(0)
+
+  # A char list is a list where all elements are single-character strings
+  defp char_list?([]), do: false
+
+  defp char_list?(list) do
+    Enum.all?(list, fn
+      s when is_binary(s) -> String.length(s) == 1
+      _ -> false
+    end)
+  end
 
   defp last_arg_to_list(nil),
     do: {:error, {:type_error, "apply expects collection as last argument, got nil", nil}}

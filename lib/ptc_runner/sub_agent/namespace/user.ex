@@ -14,54 +14,73 @@ defmodule PtcRunner.SubAgent.Namespace.User do
   Functions are listed first, then values, both sorted alphabetically (DEF-009).
   Samples are only shown when `has_println` is false (SAM-001, SAM-002).
 
+  ## Options
+
+  - `:has_println` - Boolean, controls whether samples are shown (default: false)
+  - `:sample_limit` - Max items to show in collections (default: 3)
+  - `:sample_printable_limit` - Max chars for strings (default: 80)
+
   ## Examples
 
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{}, false)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{}, [])
       nil
 
       iex> closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, false)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, [])
       ";; === user/ (your prelude) ===\\n(double [x])"
 
       iex> closure = {:closure, [{:var, :x}], nil, %{}, [], %{return_type: "integer"}}
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, false)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, [])
       ";; === user/ (your prelude) ===\\n(double [x]) -> integer"
 
       iex> closure = {:closure, [{:var, :x}], nil, %{}, [], %{docstring: "Doubles x"}}
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, false)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, [])
       ";; === user/ (your prelude) ===\\n(double [x])                  ; \\"Doubles x\\""
 
       iex> closure = {:closure, [{:var, :x}], nil, %{}, [], %{docstring: "Doubles x", return_type: "integer"}}
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, false)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, [])
       ";; === user/ (your prelude) ===\\n(double [x])                  ; \\"Doubles x\\" -> integer"
 
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, false)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, [])
       ";; === user/ (your prelude) ===\\ntotal                         ; = integer, sample: 42"
 
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, true)
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, has_println: true)
       ";; === user/ (your prelude) ===\\ntotal                         ; = integer"
   """
-  @spec render(map(), boolean()) :: String.t() | nil
-  def render(memory, _has_println) when map_size(memory) == 0, do: nil
+  @spec render(map(), keyword()) :: String.t() | nil
+  def render(memory, _opts) when map_size(memory) == 0, do: nil
 
-  def render(memory, has_println) do
+  def render(memory, opts) do
     {functions, values} = partition_memory(memory)
 
-    function_lines = format_functions(functions)
-    value_lines = format_values(values, has_println)
+    # Return nil if no informative entries after filtering
+    if functions == [] and values == [] do
+      nil
+    else
+      function_lines = format_functions(functions)
+      value_lines = format_values(values, opts)
 
-    [";; === user/ (your prelude) ===" | function_lines ++ value_lines]
-    |> Enum.join("\n")
+      [";; === user/ (your prelude) ===" | function_lines ++ value_lines]
+      |> Enum.join("\n")
+    end
   end
 
   # Partition memory into functions (closures) and values
+  # Filters out uninformative values (nil, empty lists, empty maps)
   defp partition_memory(memory) do
     memory
+    |> Enum.reject(fn {_name, value} -> uninformative?(value) end)
     |> Enum.split_with(fn {_name, value} -> closure?(value) end)
     |> then(fn {fns, vals} ->
       {Enum.sort_by(fns, &elem(&1, 0)), Enum.sort_by(vals, &elem(&1, 0))}
     end)
   end
+
+  # Values that provide no useful information to the LLM
+  defp uninformative?(nil), do: true
+  defp uninformative?([]), do: true
+  defp uninformative?(map) when is_map(map) and map_size(map) == 0, do: true
+  defp uninformative?(_), do: false
 
   defp closure?({:closure, _, _, _, _, _}), do: true
   defp closure?({:closure, _, _, _, _}), do: true
@@ -132,7 +151,9 @@ defmodule PtcRunner.SubAgent.Namespace.User do
   defp get_return_type(_), do: nil
 
   # Format values: name ; = type with optional sample
-  defp format_values(values, has_println) do
+  defp format_values(values, opts) do
+    has_println = Keyword.get(opts, :has_println, false)
+
     Enum.map(values, fn {name, value} ->
       type_label = TypeVocabulary.type_of(value)
       name_str = Atom.to_string(name)
@@ -142,14 +163,16 @@ defmodule PtcRunner.SubAgent.Namespace.User do
       if has_println do
         "#{padded_name}; = #{type_label}"
       else
-        sample = format_sample(value)
+        sample = format_sample(value, opts)
         "#{padded_name}; = #{type_label}, sample: #{sample}"
       end
     end)
   end
 
-  defp format_sample(value) do
-    {str, _truncated} = Format.to_clojure(value, limit: 3, printable_limit: 80)
+  defp format_sample(value, opts) do
+    limit = Keyword.get(opts, :sample_limit, 3)
+    printable_limit = Keyword.get(opts, :sample_printable_limit, 80)
+    {str, _truncated} = Format.to_clojure(value, limit: limit, printable_limit: printable_limit)
     str
   end
 end

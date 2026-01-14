@@ -104,6 +104,8 @@ Once the LLM recovers from an error, old mistakes become noise and are hidden.
 |--------|---------|-------------|
 | `println_limit` | 15 | Most recent println calls shown |
 | `tool_call_limit` | 20 | Most recent tool calls shown |
+| `sample_limit` | 3 | Max items shown in list/map samples |
+| `sample_printable_limit` | 80 | Max chars for string samples |
 
 ```elixir
 SubAgent.run(prompt,
@@ -113,6 +115,24 @@ SubAgent.run(prompt,
 ```
 
 Older entries are dropped (FIFO) but preserved in `step.turns` for debugging.
+
+### Sample Limits
+
+The `sample_limit` and `sample_printable_limit` options control how values are displayed in the `data/` and `user/` namespace sections:
+
+```elixir
+# Default: truncated samples
+matches    ; = list[50], sample: [{:file "lib/ptc_runner/..." ...} ...] (showing first 3)
+
+# With higher limits: more context preserved
+SubAgent.run(prompt,
+  llm: llm,
+  compression: {SingleUserCoalesced, sample_limit: 10, sample_printable_limit: 200}
+)
+# Now shows: [{:file "lib/ptc_runner/lisp/eval.ex" ...} ...] (showing first 10)
+```
+
+Increase these limits when the LLM needs to see more context (e.g., full file paths in grep results).
 
 ## Debugging Compression
 
@@ -233,6 +253,8 @@ end
 | `:turns_left` | integer | Remaining turns |
 | `:println_limit` | integer | Max println entries |
 | `:tool_call_limit` | integer | Max tool call entries |
+| `:sample_limit` | integer | Max items in list/map samples |
+| `:sample_printable_limit` | integer | Max chars for string samples |
 | `:signature` | string | Output signature (if any) |
 
 ### Turn Struct Fields

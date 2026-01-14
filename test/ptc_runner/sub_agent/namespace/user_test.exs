@@ -6,13 +6,17 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
 
   describe "render/2" do
     test "returns nil for empty memory" do
-      assert User.render(%{}, false) == nil
-      assert User.render(%{}, true) == nil
+      assert User.render(%{}, []) == nil
+      assert User.render(%{}, has_println: true) == nil
+    end
+
+    test "returns nil when memory contains only uninformative values" do
+      assert User.render(%{a: nil, b: [], c: %{}}, []) == nil
     end
 
     test "renders single function without return type" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
-      result = User.render(%{double: closure}, false)
+      result = User.render(%{double: closure}, [])
 
       assert result =~ ";; === user/ (your prelude) ==="
       assert result =~ "(double [x])"
@@ -21,14 +25,14 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
 
     test "renders single function with return type" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{return_type: "integer"}}
-      result = User.render(%{double: closure}, false)
+      result = User.render(%{double: closure}, [])
 
       assert result =~ ";; === user/ (your prelude) ==="
       assert result =~ "(double [x]) -> integer"
     end
 
     test "renders single value with sample when has_println is false" do
-      result = User.render(%{total: 42}, false)
+      result = User.render(%{total: 42}, [])
 
       assert result =~ ";; === user/ (your prelude) ==="
       assert result =~ "total"
@@ -36,7 +40,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
     end
 
     test "renders single value without sample when has_println is true" do
-      result = User.render(%{total: 42}, true)
+      result = User.render(%{total: 42}, has_println: true)
 
       assert result =~ ";; === user/ (your prelude) ==="
       assert result =~ "total"
@@ -47,7 +51,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
     test "renders functions first, then values (DEF-009)" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
 
-      result = User.render(%{total: 42, double: closure}, false)
+      result = User.render(%{total: 42, double: closure}, [])
 
       lines = String.split(result, "\n")
       # First line is header
@@ -62,7 +66,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       closure_a = {:closure, [{:var, :x}], nil, %{}, [], %{}}
       closure_b = {:closure, [{:var, :y}], nil, %{}, [], %{}}
 
-      result = User.render(%{zebra: closure_a, alpha: closure_b}, false)
+      result = User.render(%{zebra: closure_a, alpha: closure_b}, [])
 
       lines = String.split(result, "\n")
       assert Enum.at(lines, 1) =~ "(alpha [y])"
@@ -70,7 +74,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
     end
 
     test "sorts values alphabetically" do
-      result = User.render(%{zebra: 1, alpha: 2}, false)
+      result = User.render(%{zebra: 1, alpha: 2}, [])
 
       lines = String.split(result, "\n")
       assert Enum.at(lines, 1) =~ "alpha"
@@ -79,7 +83,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
 
     test "renders variadic function with rest params" do
       closure = {:closure, {:variadic, [], {:var, :args}}, nil, %{}, [], %{}}
-      result = User.render(%{foo: closure}, false)
+      result = User.render(%{foo: closure}, [])
 
       assert result =~ "(foo [& args])"
     end
@@ -88,20 +92,20 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       closure =
         {:closure, {:variadic, [{:var, :a}, {:var, :b}], {:var, :rest}}, nil, %{}, [], %{}}
 
-      result = User.render(%{bar: closure}, false)
+      result = User.render(%{bar: closure}, [])
 
       assert result =~ "(bar [a b & rest])"
     end
 
     test "renders function with multiple params" do
       closure = {:closure, [{:var, :a}, {:var, :b}, {:var, :c}], nil, %{}, [], %{}}
-      result = User.render(%{add: closure}, false)
+      result = User.render(%{add: closure}, [])
 
       assert result =~ "(add [a b c])"
     end
 
     test "renders value with list type and truncated sample" do
-      result = User.render(%{items: [1, 2, 3, 4, 5]}, false)
+      result = User.render(%{items: [1, 2, 3, 4, 5]}, [])
 
       assert result =~ "items"
       assert result =~ "list[5]"
@@ -109,31 +113,38 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
     end
 
     test "renders value with map type" do
-      result = User.render(%{config: %{a: 1, b: 2}}, false)
+      result = User.render(%{config: %{a: 1, b: 2}}, [])
 
       assert result =~ "config"
       assert result =~ "map[2]"
       assert result =~ "sample: {:a 1 :b 2}"
     end
 
-    test "renders nil value" do
-      result = User.render(%{nothing: nil}, false)
+    test "filters out nil values (uninformative)" do
+      result = User.render(%{nothing: nil, something: 42}, [])
 
-      assert result =~ "nothing"
-      assert result =~ "; = nil, sample: nil"
+      refute result =~ "nothing"
+      assert result =~ "something"
+      assert result =~ "42"
     end
 
-    test "renders empty list value" do
-      result = User.render(%{empty: []}, false)
+    test "filters out empty list values (uninformative)" do
+      result = User.render(%{empty: [], items: [1, 2]}, [])
 
-      assert result =~ "empty"
-      assert result =~ "list[0]"
-      assert result =~ "sample: []"
+      refute result =~ "empty"
+      assert result =~ "items"
+    end
+
+    test "filters out empty map values (uninformative)" do
+      result = User.render(%{empty: %{}, config: %{a: 1}}, [])
+
+      refute result =~ "empty"
+      assert result =~ "config"
     end
 
     test "handles legacy 5-tuple closure" do
       closure = {:closure, [{:var, :x}], nil, %{}, []}
-      result = User.render(%{legacy: closure}, false)
+      result = User.render(%{legacy: closure}, [])
 
       assert result =~ "(legacy [x])"
       refute result =~ "->"
@@ -151,7 +162,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
             items: [1, 2, 3, 4, 5],
             total: 100
           },
-          false
+          []
         )
 
       lines = String.split(result, "\n")

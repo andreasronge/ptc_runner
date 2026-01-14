@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 16 -->
-<!-- date: 2026-01-09 -->
-<!-- changes: Added common mistake: apply max-by vs max-by (takes collection directly) -->
+<!-- version: 18 -->
+<!-- date: 2026-01-14 -->
+<!-- changes: Add take vs subs hint for strings -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -37,7 +37,8 @@ data/products                      ; read-only input data
 (where [:user :role] = "admin")   ; nested path
 (where :status in ["active" "pending"])  ; field value is one of these
 (where :id in user-ids)           ; field value in variable list
-(where :tags includes "urgent")   ; collection field contains value
+(where :tags includes "urgent")   ; collection/string field contains value
+(where :name includes "Smith")    ; string field contains substring
 (all-of pred1 pred2)              ; combine predicates (NOT and/or)
 (any-of pred1 pred2)
 (none-of pred)
@@ -77,6 +78,8 @@ data/products                      ; read-only input data
 | Wrong | Right |
 |-------|-------|
 | `(where :status "active")` | `(where :status = "active")` |
+| `(where :field (fn [x] ...))` | `(filter (fn [m] (... (:field m))) coll)` — where takes operators, not fns |
+| `(filter (where includes "x") strs)` | `(filter #(includes? % "x") strs)` — where is for maps |
 | `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
 | `(filter #(some ... ids) coll)` | `(filter (where :id in ids) coll)` |
 | `(max [1 2 3])` | `(apply max [1 2 3])` |
@@ -90,5 +93,6 @@ data/products                      ; read-only input data
 | `(pluck :name user)` | `(:name user)` — pluck is for lists |
  | `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
+| `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
 
 <!-- PTC_PROMPT_END -->

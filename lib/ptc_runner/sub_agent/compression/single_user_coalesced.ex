@@ -102,13 +102,19 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
     # Determine if any tool has println capability (used for output display)
     has_println = has_println_tool?(tools)
 
+    # Sample limits for namespace rendering (configurable via opts)
+    sample_limit = opts[:sample_limit] || 3
+    sample_printable_limit = opts[:sample_printable_limit] || 80
+
     # Build sections
     namespaces =
       Namespace.render(%{
         tools: tools,
         data: data,
         memory: memory,
-        has_println: has_println
+        has_println: has_println,
+        sample_limit: sample_limit,
+        sample_printable_limit: sample_printable_limit
       })
 
     # Expected output section (from signature)
