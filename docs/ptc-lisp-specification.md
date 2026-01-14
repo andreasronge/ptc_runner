@@ -41,7 +41,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `data/path`, `tool/name` | Namespace-qualified access to context data and tool invocation (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
-| `sum-by`, `avg-by`, `min-by`, `max-by` | Collection aggregators (§8) |
+| `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Collection aggregators (§8) |
 | `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
 | `re-pattern` | Compile string to regex without literal syntax (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
@@ -1160,7 +1160,7 @@ This distinction exists because `where` is designed for safe filtering over pote
 
 **Flexible Key Access — String and Atom Keys:**
 
-Field accessors in `where` and key-based functions (`sort-by`, `sum-by`, `avg-by`, `min-by`, `max-by`, `group-by`, `pluck`, `get`) support **bidirectional key matching**. This means:
+Field accessors in `where` and key-based functions (`sort-by`, `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by`, `group-by`, `pluck`, `get`) support **bidirectional key matching**. This means:
 - Atom keys in code (`:status`) match both atom and string keys in data
 - String keys in code (`"status"`) match both string and atom keys in data
 
@@ -1474,6 +1474,7 @@ The `seq` function converts a collection to a sequence:
 | `avg-by` | `(avg-by key coll)` | Average field values |
 | `min-by` | `(min-by key coll)` | Item with minimum field |
 | `max-by` | `(max-by key coll)` | Item with maximum field |
+| `distinct-by` | `(distinct-by key coll)` | Items with unique field values |
 | `min-key` | `(min-key f x y & more)` | Return x for which (f x) is least |
 | `max-key` | `(max-key f x y & more)` | Return x for which (f x) is greatest |
 | `group-by` | `(group-by keyfn coll)` | Group items by key |
@@ -1499,6 +1500,7 @@ The `seq` function converts a collection to a sequence:
 (min-by :price products)          ; item with lowest price
 (max-by :years employees)         ; item with highest years
 (group-by :category products)     ; map of category -> items
+(distinct-by :category products)  ; one item per category (first occurrence)
 (frequencies [:a :b :a :c :b :a]) ; => {:a 3, :b 2, :c 1}
 (frequencies "hello")                 ; => {"h" 1, "e" 1, "l" 2, "o" 1}
 (frequencies (pluck :status orders))  ; count orders by status
@@ -1506,6 +1508,7 @@ The `seq` function converts a collection to a sequence:
 (max-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; item with maximum second element
 (sum-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; => 5 (sum second elements)
 (group-by first [["a" 1] ["a" 2] ["b" 3]])  ; {"a" [["a" 1] ["a" 2]], "b" [["b" 3]]}
+(distinct-by first [["a" 1] ["a" 2] ["b" 3]])  ; [["a" 1] ["b" 3]] (first of each key)
 
 ;; max-key / min-key - compare variadic args using function
 (max-key count "a" "abc" "ab")              ; => "abc" (longest string)
@@ -2477,6 +2480,7 @@ Filter by nested field:
 | `(avg-by :x [])` | `[]` | `nil` |
 | `(min-by :x [])` | `[]` | `nil` |
 | `(max-by :x [])` | `[]` | `nil` |
+| `(distinct-by :x [])` | `[]` | `[]` |
 | `(filter pred [])` | `[]` | `[]` |
 | `(sort-by :x [])` | `[]` | `[]` |
 
