@@ -292,6 +292,7 @@ defmodule PtcRunner.Lisp.Env do
       {:*, {:variadic, &Runtime.Math.multiply/2, 1}},
       {:/, {:variadic_nonempty, :/, &Runtime.Math.divide/2}},
       {:mod, {:normal, &Runtime.mod/2}},
+      {:rem, {:normal, &Runtime.remainder/2}},
       {:inc, {:normal, &Runtime.inc/1}},
       {:dec, {:normal, &Runtime.dec/1}},
       {:abs, {:normal, &Runtime.abs/1}},

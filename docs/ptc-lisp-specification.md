@@ -1691,7 +1691,8 @@ The `seq` function converts a collection to a sequence:
 | `-` | `(- x y ...)` | Subtraction |
 | `*` | `(* x y ...)` | Multiplication |
 | `/` | `(/ x y)` | Division |
-| `mod` | `(mod x y)` | Modulo |
+| `mod` | `(mod x y)` | Modulo (floored division, result sign matches divisor) |
+| `rem` | `(rem x y)` | Remainder (truncated division, result sign matches dividend) |
 | `inc` | `(inc x)` | Add 1 |
 | `dec` | `(dec x)` | Subtract 1 |
 | `abs` | `(abs x)` | Absolute value |
@@ -1718,6 +1719,9 @@ The `seq` function converts a collection to a sequence:
 (/ 10 2)        ; => 5.0
 (/ 10 3)        ; => 3.333...
 (mod 10 3)      ; => 1
+(mod -10 3)     ; => 2   (sign matches divisor)
+(rem 10 3)      ; => 1
+(rem -10 3)     ; => -1  (sign matches dividend)
 (inc 5)         ; => 6
 (dec 5)         ; => 4
 (abs -5)        ; => 5

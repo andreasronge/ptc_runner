@@ -66,10 +66,34 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(min 42)")
     end
 
-    test "mod" do
+    test "mod with positive numbers" do
       assert_clojure_equivalent("(mod 10 3)")
       assert_clojure_equivalent("(mod 15 5)")
       assert_clojure_equivalent("(mod 7 2)")
+    end
+
+    test "mod with negative numbers (floored division)" do
+      # mod uses floored division - result has same sign as divisor
+      assert_clojure_equivalent("(mod -10 3)")
+      assert_clojure_equivalent("(mod 10 -3)")
+      assert_clojure_equivalent("(mod -10 -3)")
+      assert_clojure_equivalent("(mod -1 5)")
+      assert_clojure_equivalent("(mod 1 -5)")
+    end
+
+    test "rem with positive numbers" do
+      assert_clojure_equivalent("(rem 10 3)")
+      assert_clojure_equivalent("(rem 15 5)")
+      assert_clojure_equivalent("(rem 7 2)")
+    end
+
+    test "rem with negative numbers (truncated division)" do
+      # rem uses truncated division - result has same sign as dividend
+      assert_clojure_equivalent("(rem -10 3)")
+      assert_clojure_equivalent("(rem 10 -3)")
+      assert_clojure_equivalent("(rem -10 -3)")
+      assert_clojure_equivalent("(rem -1 5)")
+      assert_clojure_equivalent("(rem 1 -5)")
     end
   end
 
