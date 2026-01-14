@@ -40,15 +40,23 @@ defmodule PtcRunner.SubAgent.Namespace do
   """
   @spec render(map()) :: String.t()
   def render(config) do
-    data_opts = [
-      field_descriptions: config[:field_descriptions],
-      context_signature: config[:context_signature]
+    sample_opts = [
+      sample_limit: config[:sample_limit] || 3,
+      sample_printable_limit: config[:sample_printable_limit] || 80
     ]
+
+    data_opts =
+      [
+        field_descriptions: config[:field_descriptions],
+        context_signature: config[:context_signature]
+      ] ++ sample_opts
+
+    user_opts = [has_println: config[:has_println] || false] ++ sample_opts
 
     [
       Tool.render(config[:tools] || %{}),
       Data.render(config[:data] || %{}, data_opts),
-      User.render(config[:memory] || %{}, config[:has_println] || false)
+      User.render(config[:memory] || %{}, user_opts)
     ]
     |> Enum.reject(&is_nil/1)
     |> case do

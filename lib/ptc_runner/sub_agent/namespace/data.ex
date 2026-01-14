@@ -17,6 +17,8 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
 
   - `:field_descriptions` - Map of field names to description strings
   - `:context_signature` - Parsed signature for type information
+  - `:sample_limit` - Max items to show in collections (default: 3)
+  - `:sample_printable_limit` - Max chars for strings (default: 80)
 
   ## Examples
 
@@ -48,7 +50,7 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
       data
       |> Enum.sort_by(fn {name, _} -> to_string(name) end)
       |> Enum.map(fn {name, value} ->
-        format_entry(name, value, param_types, field_descriptions)
+        format_entry(name, value, param_types, field_descriptions, opts)
       end)
 
     [";; === data/ ===" | lines] |> Enum.join("\n")
@@ -62,7 +64,7 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
 
   defp extract_param_types(_), do: %{}
 
-  defp format_entry(name, value, param_types, field_descriptions) do
+  defp format_entry(name, value, param_types, field_descriptions, opts) do
     name_str = to_string(name)
     is_firewalled = String.starts_with?(name_str, "_")
 
@@ -76,7 +78,7 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
       if is_firewalled do
         "[Hidden] [Firewalled]"
       else
-        "sample: #{format_sample(value)}"
+        "sample: #{format_sample(value, opts)}"
       end
 
     desc_part =
@@ -112,8 +114,10 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
     ArgumentError -> Map.get(descriptions, to_string(key))
   end
 
-  defp format_sample(value) do
-    {str, _truncated} = Format.to_clojure(value, limit: 3, printable_limit: 80)
+  defp format_sample(value, opts) do
+    limit = Keyword.get(opts, :sample_limit, 3)
+    printable_limit = Keyword.get(opts, :sample_printable_limit, 80)
+    {str, _truncated} = Format.to_clojure(value, limit: limit, printable_limit: printable_limit)
     str
   end
 end

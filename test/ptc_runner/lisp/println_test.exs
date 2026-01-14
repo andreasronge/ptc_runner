@@ -133,4 +133,58 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert String.starts_with?(second, "bbb")
     assert String.ends_with?(second, "...")
   end
+
+  describe "char list detection (take on string)" do
+    test "println joins char list from (take n string)" do
+      source = ~S|(println (take 10 "hello world"))|
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == ["hello worl"]
+    end
+
+    test "println joins char list with mixed content" do
+      source = ~S|(println "File:" (take 5 "abcdefgh"))|
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == ["File: abcde"]
+    end
+
+    test "println does not join normal integer list" do
+      source = ~S|(println [1 2 3])|
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == ["[1 2 3]"]
+    end
+
+    test "println does not join empty list" do
+      source = ~S|(println [])|
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == ["[]"]
+    end
+
+    test "println does not join list of multi-char strings" do
+      source = ~S|(println ["hello" "world"])|
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == [~S|["hello" "world"]|]
+    end
+
+    test "println does not join mixed list (chars and non-chars)" do
+      source = ~S|(println ["a" 1 "b"])|
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == [~S|["a" 1 "b"]|]
+    end
+
+    test "println handles nested char list in expression" do
+      source = ~S|
+        (def content "defmodule Foo do\n  def bar, do: :ok\nend")
+        (println "First 20 chars:" (take 20 content))
+      |
+
+      {:ok, step} = Lisp.run(source)
+      assert step.prints == ["First 20 chars: defmodule Foo do\n  d"]
+    end
+  end
 end

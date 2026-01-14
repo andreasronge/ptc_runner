@@ -476,4 +476,108 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
       assert stats.printlns_total == 1
     end
   end
+
+  describe "sample limits (sample_limit, sample_printable_limit)" do
+    test "uses default sample_limit of 3 for memory values" do
+      memory = %{items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], memory, base_opts())
+
+      # Default shows first 3 items
+      assert String.contains?(user.content, "[1 2 3 ...] (10 items, showing first 3)")
+    end
+
+    test "respects custom sample_limit for memory values" do
+      memory = %{items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+      opts = Keyword.put(base_opts(), :sample_limit, 5)
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], memory, opts)
+
+      # Custom limit shows first 5 items
+      assert String.contains?(user.content, "[1 2 3 4 5 ...] (10 items, showing first 5)")
+    end
+
+    test "uses default sample_printable_limit of 80 for strings" do
+      long_string = String.duplicate("a", 100)
+      memory = %{text: long_string}
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], memory, base_opts())
+
+      # Default truncates at 80 chars
+      assert String.contains?(user.content, String.duplicate("a", 80) <> "...")
+      refute String.contains?(user.content, String.duplicate("a", 100))
+    end
+
+    test "respects custom sample_printable_limit for strings" do
+      long_string = String.duplicate("x", 200)
+      memory = %{text: long_string}
+      opts = Keyword.put(base_opts(), :sample_printable_limit, 150)
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], memory, opts)
+
+      # Custom limit shows 150 chars
+      assert String.contains?(user.content, String.duplicate("x", 150) <> "...")
+      refute String.contains?(user.content, String.duplicate("x", 200))
+    end
+
+    test "sample_limit applies to data/ namespace" do
+      data = %{numbers: [1, 2, 3, 4, 5, 6, 7]}
+      opts = Keyword.merge(base_opts(), data: data, sample_limit: 4)
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], %{}, opts)
+
+      assert String.contains?(user.content, "[1 2 3 4 ...] (7 items, showing first 4)")
+    end
+
+    test "sample_printable_limit applies to data/ namespace" do
+      long_path = "/very/long/path/to/some/deeply/nested/file/in/the/project/structure.ex"
+      data = %{file: long_path}
+      opts = Keyword.merge(base_opts(), data: data, sample_printable_limit: 30)
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], %{}, opts)
+
+      # Path should be truncated
+      assert String.contains?(user.content, "/very/long/path/to/some/deeply...")
+      refute String.contains?(user.content, "structure.ex")
+    end
+
+    test "higher limits preserve more context for file paths in maps" do
+      # Simulates grep results with file paths
+      matches = [
+        %{file: "lib/ptc_runner/lisp/eval.ex", line: 10},
+        %{file: "lib/ptc_runner/lisp/eval/apply.ex", line: 20},
+        %{file: "lib/ptc_runner/lisp/eval/helpers.ex", line: 30}
+      ]
+
+      memory = %{matches: matches}
+
+      # With low limits, file paths get truncated
+      low_opts = Keyword.merge(base_opts(), sample_limit: 2, sample_printable_limit: 40)
+      {[_system, user_low], _} = SingleUserCoalesced.to_messages([], memory, low_opts)
+
+      # With higher limits, more context is preserved
+      high_opts = Keyword.merge(base_opts(), sample_limit: 10, sample_printable_limit: 200)
+      {[_system, user_high], _} = SingleUserCoalesced.to_messages([], memory, high_opts)
+
+      # High limits should show full file paths
+      assert String.contains?(user_high.content, "lib/ptc_runner/lisp/eval.ex")
+      assert String.contains?(user_high.content, "lib/ptc_runner/lisp/eval/apply.ex")
+
+      # Low limits show fewer items
+      assert String.contains?(user_low.content, "showing first 2")
+    end
+
+    test "filters out uninformative values (nil, empty list, empty map)" do
+      memory = %{
+        empty_list: [],
+        empty_map: %{},
+        nil_value: nil,
+        useful_data: [1, 2, 3]
+      }
+
+      {[_system, user], _stats} = SingleUserCoalesced.to_messages([], memory, base_opts())
+
+      # Uninformative values should not appear
+      refute String.contains?(user.content, "empty_list")
+      refute String.contains?(user.content, "empty_map")
+      refute String.contains?(user.content, "nil_value")
+
+      # Useful data should appear
+      assert String.contains?(user.content, "useful_data")
+    end
+  end
 end
