@@ -93,4 +93,35 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
 
   defp unwrap([full]), do: full
   defp unwrap(matches) when is_list(matches), do: matches
+
+  @doc """
+  Split string by regex pattern.
+  Returns list of substrings.
+
+  ## Examples
+      (re-split (re-pattern "\\s+") "a  b   c") => ["a" "b" "c"]
+      (re-split (re-pattern ",") "a,b,c") => ["a" "b" "c"]
+  """
+  def re_split({:re_mp, mp, _, _}, s) when is_binary(s) do
+    input = truncate_input(s)
+
+    opts = [
+      {:match_limit, @match_limit},
+      {:match_limit_recursion, @recursion_limit}
+    ]
+
+    case :re.split(input, mp, opts) do
+      parts when is_list(parts) ->
+        parts
+
+      {:error, :match_limit} ->
+        raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)"
+
+      {:error, :match_limit_recursion} ->
+        raise RuntimeError, "Regex recursion limit exceeded"
+
+      {:error, reason} ->
+        raise RuntimeError, "Regex execution error: #{inspect(reason)}"
+    end
+  end
 end

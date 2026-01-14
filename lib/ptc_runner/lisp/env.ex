@@ -152,7 +152,7 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:regex) do
-    [:"re-pattern", :"re-find", :"re-matches", :regex?]
+    [:"re-pattern", :"re-find", :"re-matches", :"re-split", :regex?]
   end
 
   def builtins_by_category(:math) do
@@ -371,6 +371,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"re-pattern", {:normal, &Runtime.re_pattern/1}},
       {:"re-find", {:normal, &Runtime.re_find/2}},
       {:"re-matches", {:normal, &Runtime.re_matches/2}},
+      {:"re-split", {:normal, &Runtime.re_split/2}},
       {:regex?, {:normal, &Runtime.regex?/1}},
 
       # ============================================================

@@ -262,7 +262,13 @@ defmodule PtcRunner.Lisp.Parser do
     if Regex.match?(~r/#"/, source) do
       {:error,
        {:parse_error,
-        "regex literals (#\"...\") are not supported in PTC-Lisp. Use (re-pattern \"...\") with re-find/re-matches instead"}}
+        """
+        regex literals (#"...") are not supported. Use instead:
+        - (split s "delimiter") for literal delimiters
+        - (split-lines s) for newlines
+        - (re-split (re-pattern "\\\\s+") s) for regex patterns
+        - (re-find (re-pattern "...") s) for matching\
+        """}}
     else
       :ok
     end

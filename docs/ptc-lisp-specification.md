@@ -1926,6 +1926,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 | `re-pattern` | `(re-pattern s)` | Compile string `s` into an opaque regex object |
 | `re-find` | `(re-find re s)` | Returns the first match of `re` in `s` |
 | `re-matches` | `(re-matches re s)` | Returns match if `re` matches the **entire** string `s` |
+| `re-split` | `(re-split re s)` | Split string `s` by regex pattern `re` |
 | `regex?` | `(regex? x)` | Returns true if `x` is a regex object |
 
 **Opaque Regex Type:** Regexes do not have a literal syntax. They must be created using `re-pattern`. Internally, they are opaque objects that can be passed to functions but not inspected directly.
@@ -1940,7 +1941,11 @@ Regex functions provide validation and extraction capabilities. To ensure system
 (re-matches (re-pattern "\\d+") "123")          ; => "123"
 (re-matches (re-pattern "\\d+") "123abc")       ; => nil (not entire string)
 (re-find (re-pattern "(\\d+)-(\\d+)") "10-20")  ; => ["10-20" "10" "20"]
+(re-split (re-pattern "\\s+") "a  b   c")       ; => ["a" "b" "c"]
+(re-split (re-pattern ",") "a,b,c")             ; => ["a" "b" "c"]
 ```
+
+**Note:** Regex literals (`#"..."`) are not supported. Use `(re-pattern "...")` instead. For simple delimiter splitting, prefer `(split s "delimiter")` or `(split-lines s)` for newlines.
 
 **Safety Constraints:**
 - **Match Limit:** Regex execution is restricted to 100,000 backtracking steps. Exceeding this limit (e.g., due to ReDoS) terminates evaluation with an error.
