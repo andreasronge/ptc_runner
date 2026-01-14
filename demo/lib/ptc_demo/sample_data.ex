@@ -408,7 +408,7 @@ defmodule PtcDemo.SampleData do
       "orders" =>
         "Orders [{id, customer_id, product_id, quantity, total, status, payment_method, created_at}]",
       "employees" =>
-        "Employees [{id, name, department, level, salary, bonus, years_employed, remote}]",
+        "Employees [{id, name, department: engineering|sales|marketing|support|hr|finance, level: junior|mid|senior|lead|manager|director, salary, bonus, years_employed, remote: bool}]",
       "expenses" => "Expenses [{id, employee_id, category, amount, description, status, date}]"
     }
   end
