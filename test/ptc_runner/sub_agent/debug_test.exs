@@ -519,7 +519,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert output =~ "~80% of input"
     end
 
-    test "truncates long programs" do
+    test "wraps long programs across multiple lines" do
       long_program = String.duplicate("(+ 1 2) ", 50)
 
       turns = [
@@ -536,8 +536,9 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       output = capture_io(fn -> Debug.print_trace(step) end)
 
-      # Should contain truncation indicator
-      assert output =~ "..."
+      # Should wrap across multiple lines (output contains multiple Program: lines with content)
+      program_lines = output |> String.split("\n") |> Enum.filter(&(&1 =~ "(+ 1 2)"))
+      assert length(program_lines) > 1
     end
   end
 

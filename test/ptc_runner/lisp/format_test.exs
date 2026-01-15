@@ -194,9 +194,9 @@ defmodule PtcRunner.Lisp.FormatTest do
       # Budget of 90 chars can fit ~3 entries (30 chars each)
       {result, truncated} = Format.to_clojure(map, printable_limit: 90)
 
-      # Should show truncation indicator
+      # Should show truncation indicator (... at end)
       assert truncated
-      assert result =~ "(5 entries, showing first 3)"
+      assert result =~ "...}"
 
       # Should show some keys but not all
       refute result =~ ":key4"
@@ -234,6 +234,54 @@ defmodule PtcRunner.Lisp.FormatTest do
 
     test "options are ignored for builtins" do
       assert Format.to_string({:normal, &Enum.map/2}, pretty: true) == "#<builtin>"
+    end
+  end
+
+  describe "to_clojure/2 hidden field filtering" do
+    test "filters hidden keys in top-level maps" do
+      {result, _} = Format.to_clojure(%{id: 1, _secret: "hidden"})
+
+      assert result =~ ":id 1"
+      refute result =~ "_secret"
+      refute result =~ "hidden"
+    end
+
+    test "filters hidden keys in nested maps within lists" do
+      data = [%{id: 1, _secret: "hidden"}, %{id: 2, _token: "also-hidden"}]
+      {result, _} = Format.to_clojure(data)
+
+      assert result =~ ":id 1"
+      assert result =~ ":id 2"
+      refute result =~ "_secret"
+      refute result =~ "_token"
+      refute result =~ "hidden"
+      refute result =~ "also-hidden"
+    end
+
+    test "filters hidden keys in deeply nested structures" do
+      data = %{users: [%{name: "Alice", _password: "secret123"}]}
+      {result, _} = Format.to_clojure(data)
+
+      assert result =~ "Alice"
+      refute result =~ "_password"
+      refute result =~ "secret123"
+    end
+
+    test "respects filter_hidden: false option" do
+      {result, _} = Format.to_clojure(%{id: 1, _secret: "visible"}, filter_hidden: false)
+
+      assert result =~ ":id 1"
+      assert result =~ "_secret"
+      assert result =~ "visible"
+    end
+
+    test "handles string keys with underscore prefix" do
+      data = %{"id" => 1, "_secret" => "hidden"}
+      {result, _} = Format.to_clojure(data)
+
+      assert result =~ "\"id\" 1"
+      refute result =~ "_secret"
+      refute result =~ "hidden"
     end
   end
 end

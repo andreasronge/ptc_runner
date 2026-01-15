@@ -135,6 +135,14 @@ defmodule PtcRunner.Lisp.Format do
 
       iex> PtcRunner.Lisp.Format.to_clojure("very long string here", printable_limit: 10)
       {~s("very long ..."), true}
+
+      iex> {str, _} = PtcRunner.Lisp.Format.to_clojure(%{title: "Hello", _body: "secret"})
+      iex> str
+      ~s[{:title "Hello"}]
+
+      iex> {str, _} = PtcRunner.Lisp.Format.to_clojure(%{title: "Hello", _body: "secret"}, filter_hidden: false)
+      iex> str
+      ~s[{:_body "secret" :title "Hello"}]
   """
   @spec to_clojure(term(), keyword()) :: {String.t(), boolean()}
   def to_clojure(value, opts \\ []) do
@@ -216,8 +224,18 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(map, opts) when is_map(map) do
     limit = Keyword.get(opts, :limit, :infinity)
     printable_limit = Keyword.get(opts, :printable_limit, :infinity)
+    filter_hidden = Keyword.get(opts, :filter_hidden, true)
+
     # Sort keys for consistent output
-    entries = map |> Map.to_list() |> Enum.sort_by(&elem(&1, 0))
+    all_entries = map |> Map.to_list() |> Enum.sort_by(&elem(&1, 0))
+
+    # Filter out hidden fields (keys starting with _) for LLM output
+    entries =
+      if filter_hidden do
+        Enum.reject(all_entries, fn {k, _v} -> hidden_key?(k) end)
+      else
+        all_entries
+      end
 
     # Auto-reduce entry limit when printable_limit is too small for all entries
     # Each entry needs ~30 chars minimum (key ~10 + value preview ~20)
@@ -263,8 +281,7 @@ defmodule PtcRunner.Lisp.Format do
     formatted = Enum.join(formatted_items, " ")
 
     if map_truncated do
-      total = map_size(map)
-      {"{#{formatted} ...} (#{total} entries, showing first #{length(items)})", true}
+      {"{#{formatted} ...}", true}
     else
       {"{#{formatted}}", any_child_truncated}
     end
@@ -275,6 +292,11 @@ defmodule PtcRunner.Lisp.Format do
     list = Tuple.to_list(tuple)
     format_clojure(list, opts)
   end
+
+  # Check if a key should be hidden (starts with _)
+  defp hidden_key?(key) when is_atom(key), do: String.starts_with?(Atom.to_string(key), "_")
+  defp hidden_key?(key) when is_binary(key), do: String.starts_with?(key, "_")
+  defp hidden_key?(_key), do: false
 
   # Format map keys - atoms as keywords, strings as strings
   defp format_clojure_key(k) when is_atom(k), do: ":#{k}"
