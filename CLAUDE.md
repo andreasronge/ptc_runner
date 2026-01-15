@@ -33,7 +33,7 @@ mix format --check-formatted && mix compile --warnings-as-errors && mix test
 ## Project Structure
 
 - `docs/` - Specifications and guidelines
-- `demo/` - LLM integration testing and benchmarks
+- `demo/` - LLM integration testing and benchmarks (see `demo/README.md` for CLI options)
 - `priv/prompts/` - LLM prompt templates (compile-time; recompile after changes)
 
 ## Architecture
