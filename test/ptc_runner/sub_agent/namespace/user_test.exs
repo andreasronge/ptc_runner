@@ -175,5 +175,44 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       assert Enum.at(lines, 3) =~ "items"
       assert Enum.at(lines, 4) =~ "total"
     end
+
+    test "hides value with underscore-prefixed name" do
+      result = User.render(%{_secret: "token123"}, [])
+
+      # Type should be shown, but not the sample value
+      assert result =~ "_secret"
+      assert result =~ "; = string, [Hidden]"
+      refute result =~ "token123"
+      refute result =~ "sample:"
+    end
+
+    test "hides multiple underscore-prefixed values" do
+      result = User.render(%{_key: "abc", _token: 42, visible: "data"}, [])
+
+      assert result =~ "_key"
+      assert result =~ "; = string, [Hidden]"
+      assert result =~ "_token"
+      # _token is integer, should show type but [Hidden]
+      assert result =~ "; = integer, [Hidden]"
+      # visible should show sample
+      assert result =~ "visible"
+      assert result =~ "sample: \"data\""
+      # Hidden values should not appear
+      refute result =~ "abc"
+      refute result =~ " 42"
+    end
+
+    test "hides underscore-prefixed values even with has_println true" do
+      result = User.render(%{_secret: "token", normal: 5}, has_println: true)
+
+      # Hidden value shows [Hidden] regardless of has_println
+      assert result =~ "_secret"
+      assert result =~ "; = string, [Hidden]"
+      # Normal value should not show sample (has_println behavior)
+      assert result =~ "normal"
+      assert result =~ "; = integer"
+      refute result =~ "sample:"
+      refute result =~ "token"
+    end
   end
 end
