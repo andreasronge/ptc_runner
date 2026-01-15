@@ -10,8 +10,10 @@ defmodule PtcRunner.SubAgent.Debug do
   Use `print_trace(step, raw: true)` to see the complete LLM interaction:
   - **Raw Input**: Messages sent to the LLM (excluding system prompt)
   - **Raw Response**: Full LLM output including reasoning
+  - Lines shown exactly as-is (no wrapping or truncation)
 
   For all messages including the system prompt, use `messages: true` instead.
+  Note: `messages: true` wraps long lines to 160 chars.
 
   ## View Modes
 
@@ -46,6 +48,7 @@ defmodule PtcRunner.SubAgent.Debug do
   alias PtcRunner.Turn
 
   @box_width 60
+  @line_width 160
 
   @doc """
   Pretty-print a SubAgent execution trace.
@@ -107,7 +110,8 @@ defmodule PtcRunner.SubAgent.Debug do
       :turns ->
         show_raw = Keyword.get(opts, :raw, false)
         show_all_messages = Keyword.get(opts, :messages, false)
-        Enum.each(turns, &print_turn(&1, show_raw, show_all_messages))
+        raw_mode = show_raw and not show_all_messages
+        Enum.each(turns, &print_turn(&1, show_raw, show_all_messages, raw_mode))
 
       :compressed ->
         print_compressed_view(step)
@@ -167,7 +171,7 @@ defmodule PtcRunner.SubAgent.Debug do
   # Private Helpers - Turn-based (new format)
   # ============================================================
 
-  defp print_turn(%Turn{} = turn, show_raw, show_all_messages) do
+  defp print_turn(%Turn{} = turn, show_raw, show_all_messages, raw_mode) do
     # Build header with message count indicator
     msg_indicator =
       case turn.messages do
@@ -189,16 +193,16 @@ defmodule PtcRunner.SubAgent.Debug do
         if show_all_messages do
           turn.messages
         else
-          # For raw mode, exclude system messages and placeholder content
+          # For raw mode, exclude system messages
           Enum.reject(turn.messages, fn msg ->
-            Map.get(msg, :role) == :system or placeholder_message?(msg)
+            Map.get(msg, :role) == :system
           end)
         end
 
       unless Enum.empty?(messages_to_show) do
         label = if show_all_messages, do: "Messages sent to LLM:", else: "Raw Input:"
         IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}#{label}#{ansi(:reset)}")
-        Enum.each(messages_to_show, &print_message/1)
+        Enum.each(messages_to_show, &print_message(&1, raw_mode))
         IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
       end
     end
@@ -210,10 +214,9 @@ defmodule PtcRunner.SubAgent.Debug do
       turn.raw_response
       |> redact_program()
       |> String.split("\n")
+      |> fit_lines(raw_mode, @line_width)
       |> Enum.each(fn line ->
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}#{truncate_line(line, 80)}#{ansi(:reset)}"
-        )
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}#{line}#{ansi(:reset)}")
       end)
 
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
@@ -225,8 +228,9 @@ defmodule PtcRunner.SubAgent.Debug do
     if turn.program do
       turn.program
       |> String.split("\n")
+      |> fit_lines(raw_mode, @line_width)
       |> Enum.each(fn line ->
-        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{truncate_line(line, 80)}")
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
       end)
     else
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(parsing failed)#{ansi(:reset)}")
@@ -258,10 +262,10 @@ defmodule PtcRunner.SubAgent.Debug do
     unless Enum.empty?(turn.prints) do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Output:#{ansi(:reset)}")
 
-      Enum.each(turn.prints, fn line ->
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:yellow)}#{truncate_line(line, 80)}#{ansi(:reset)}"
-        )
+      turn.prints
+      |> fit_lines(raw_mode, @line_width)
+      |> Enum.each(fn line ->
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:yellow)}#{line}#{ansi(:reset)}")
       end)
     end
 
@@ -269,8 +273,10 @@ defmodule PtcRunner.SubAgent.Debug do
     IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Result:#{ansi(:reset)}")
     result_lines = format_result(turn.result)
 
-    Enum.each(result_lines, fn line ->
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{truncate_line(line, 80)}")
+    result_lines
+    |> fit_lines(raw_mode, @line_width)
+    |> Enum.each(fn line ->
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
     end)
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
@@ -456,12 +462,33 @@ defmodule PtcRunner.SubAgent.Debug do
     end
   end
 
-  # Truncate a line to max length
-  defp truncate_line(line, max_length) do
-    if String.length(line) > max_length do
-      String.slice(line, 0, max_length - 3) <> "..."
+  # Fit lines to max length - raw mode shows full lines, normal mode wraps
+  defp fit_lines(lines, raw_mode, max_length) do
+    if raw_mode do
+      # Raw mode: show lines exactly as-is, no wrapping or truncation
+      lines
     else
-      line
+      Enum.flat_map(lines, &wrap_line(&1, max_length))
+    end
+  end
+
+  # Wrap a line to max length, returning a list of wrapped lines
+  defp wrap_line(line, max_length) do
+    if String.length(line) <= max_length do
+      [line]
+    else
+      do_wrap_line(line, max_length, [])
+    end
+  end
+
+  defp do_wrap_line("", _max_length, acc), do: Enum.reverse(acc)
+
+  defp do_wrap_line(line, max_length, acc) do
+    if String.length(line) <= max_length do
+      Enum.reverse([line | acc])
+    else
+      {chunk, rest} = String.split_at(line, max_length)
+      do_wrap_line(rest, max_length, [chunk | acc])
     end
   end
 
@@ -594,7 +621,7 @@ defmodule PtcRunner.SubAgent.Debug do
   defp format_number(n), do: "#{n}"
 
   # Print a single message with role and content
-  defp print_message(msg) do
+  defp print_message(msg, raw_mode) do
     role = Map.get(msg, :role, :unknown)
     content = Map.get(msg, :content, "")
     char_count = String.length(content)
@@ -606,18 +633,11 @@ defmodule PtcRunner.SubAgent.Debug do
     # Print each line of content with proper box formatting
     content
     |> String.split("\n")
-    |> Enum.each(&print_message_line/1)
+    |> fit_lines(raw_mode, @line_width)
+    |> Enum.each(fn line ->
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}#{line}#{ansi(:reset)}")
+    end)
   end
-
-  defp print_message_line(line) do
-    truncated_line = truncate_line(line, 500)
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}#{truncated_line}#{ansi(:reset)}")
-  end
-
-  # Check if a message contains only placeholder content (no real data)
-  # These are filtered out in raw mode to reduce noise
-  # Returns false for all messages - placeholder text is no longer generated
-  defp placeholder_message?(_msg), do: false
 
   # ANSI color helpers
   defp ansi(:reset), do: IO.ANSI.reset()
