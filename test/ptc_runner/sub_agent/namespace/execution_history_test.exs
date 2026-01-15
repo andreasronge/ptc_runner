@@ -79,6 +79,38 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistoryTest do
       # Only name and args used in rendering
       assert result == ";; Tool calls made:\n;   search({:q \"test\"})"
     end
+
+    test "hides values for underscore-prefixed arg keys" do
+      calls = [%{name: "api_call", args: %{_token: "secret123", query: "data"}}]
+      result = ExecutionHistory.render_tool_calls(calls, 20)
+
+      # Hidden value should be replaced with "[Hidden]" (quoted string in Clojure format)
+      assert result =~ ":_token \"[Hidden]\""
+      # Non-hidden value should be shown
+      assert result =~ ":query \"data\""
+      # Secret value should NOT appear
+      refute result =~ "secret123"
+    end
+
+    test "hides multiple underscore-prefixed args" do
+      # Use only 2 args to avoid truncation (limit: 3 in format, but maps may show less)
+      calls = [%{name: "auth", args: %{_key: "key123", user: "alice"}}]
+      result = ExecutionHistory.render_tool_calls(calls, 20)
+
+      assert result =~ ":_key \"[Hidden]\""
+      assert result =~ ":user \"alice\""
+      refute result =~ "key123"
+    end
+
+    test "handles all hidden args" do
+      calls = [%{name: "secret_call", args: %{_a: 1, _b: 2}}]
+      result = ExecutionHistory.render_tool_calls(calls, 20)
+
+      assert result =~ ":_a \"[Hidden]\""
+      assert result =~ ":_b \"[Hidden]\""
+      refute result =~ ":_a 1"
+      refute result =~ ":_b 2"
+    end
   end
 
   describe "render_output/3" do
