@@ -409,12 +409,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
   defp atomize_value(value, _type), do: value
 
-  # Safe atom conversion - try existing atom first, then create
-  # This is safe because keys come from signature which is defined at compile time
+  # Safe atom conversion - try existing atom first, keep string if not found
+  # This prevents atom table exhaustion from LLM-generated keys
   defp safe_to_atom(string) when is_binary(string) do
     String.to_existing_atom(string)
   rescue
-    ArgumentError -> String.to_atom(string)
+    ArgumentError -> string
   end
 
   # Handle parse error - retry with feedback
