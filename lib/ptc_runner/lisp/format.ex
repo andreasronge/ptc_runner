@@ -173,6 +173,9 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(%Builtin{}, _opts), do: {"#<builtin>", false}
   defp format_clojure(%Var{name: name}, _opts), do: {"#'#{name}", false}
 
+  # Plain Elixir functions (e.g., returned by fnil with normal builtins)
+  defp format_clojure(f, _opts) when is_function(f), do: {"#<fn>", false}
+
   # Structs (other than our wrapper types) pass through to inspect
   defp format_clojure(%MapSet{} = set, opts) do
     limit = Keyword.get(opts, :limit, :infinity)
@@ -353,7 +356,8 @@ defmodule PtcRunner.Lisp.Format do
     do: %Builtin{}
 
   defp sanitize({:multi_arity, name, funs}) when is_atom(name) and is_tuple(funs), do: %Builtin{}
-  defp sanitize({:collect, fun}) when is_function(fun), do: %Builtin{}
+  # {:collect, fun} is used by fnil to wrap variadic functions - display as #fn
+  defp sanitize({:collect, fun}) when is_function(fun), do: %Fn{params: "..."}
 
   # Var references - convert to Var struct for display
   defp sanitize({:var, name}) when is_atom(name), do: %Var{name: name}
