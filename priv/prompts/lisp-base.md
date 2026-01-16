@@ -29,16 +29,7 @@ data/products                      ; read-only input data
 
 ### PTC Extensions
 
-**Predicate Builders** — for `filter`, `remove`, `find`:
 ```clojure
-(where :status = "active")        ; operator REQUIRED: = not= > < >= <= in includes
-(where :amount > 100)             ; comparison
-(where :deleted)                  ; truthy check
-(where [:user :role] = "admin")   ; nested path
-(where :status in ["active" "pending"])  ; field value is one of these
-(where :id in user-ids)           ; field value in variable list
-(where :tags includes "urgent")   ; collection/string field contains value
-(where :name includes "Smith")    ; string field contains substring
 (all-of pred1 pred2)              ; combine predicates (NOT and/or)
 (any-of pred1 pred2)
 (none-of pred)
@@ -76,11 +67,6 @@ data/products                      ; read-only input data
 
 | Wrong | Right |
 |-------|-------|
-| `(where :status "active")` | `(where :status = "active")` |
-| `(where :field (fn [x] ...))` | `(filter (fn [m] (... (:field m))) coll)` — where takes operators, not fns |
-| `(filter (where includes "x") strs)` | `(filter #(includes? % "x") strs)` — where is for maps |
-| `(and (where :a = 1) (where :b = 2))` | `(all-of (where :a = 1) (where :b = 2))` |
-| `(filter #(some ... ids) coll)` | `(filter (where :id in ids) coll)` |
 | `(max [1 2 3])` | `(apply max [1 2 3])` |
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` |
 | `(includes s "x")` | `(includes? s "x")` |
