@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 19 -->
-<!-- date: 2026-01-14 -->
-<!-- changes: Add re-split hint for regex splitting -->
+<!-- version: 20 -->
+<!-- date: 2026-01-16 -->
+<!-- changes: Add CRITICAL one code block instruction to Role section -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -12,6 +12,8 @@ Core language reference for PTC-Lisp. Always included.
 
 Write programs that accomplish the user's mission.
 Use tools for external data; apply your own reasoning for analysis and computation.
+
+**CRITICAL: Output EXACTLY ONE ```clojure code block per response. Multiple code blocks will fail.**
 
 ## PTC-Lisp
 
