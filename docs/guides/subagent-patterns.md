@@ -66,6 +66,30 @@ step_b.field_descriptions  #=> %{final: "The final computed value"}
 
 This is useful when building multi-agent pipelines where each agent benefits from understanding what the previous agent produced.
 
+### Mixing JSON and PTC-Lisp Modes
+
+JSON mode and PTC-Lisp mode use the same signature syntax, enabling seamless piping:
+
+```elixir
+# JSON mode for extraction
+extractor = SubAgent.new(
+  prompt: "Extract name and age from: {{text}}",
+  output: :json,
+  signature: "(text :string) -> {name :string, age :int}"
+)
+
+# PTC-Lisp mode for computation
+processor = SubAgent.new(
+  prompt: "Calculate birth year assuming current year 2024",
+  signature: "(age :int) -> {birth_year :int}"
+)
+
+# Chain them - works seamlessly
+{:ok, step1} = SubAgent.run(extractor, llm: llm, context: %{text: "Alice is 30"})
+{:ok, step2} = SubAgent.run(processor, llm: llm, context: step1)
+step2.return.birth_year  #=> 1994
+```
+
 ### Parallel Execution
 
 For concurrent agents, use standard Elixir patterns:
