@@ -40,6 +40,10 @@ defmodule LLMClient do
   defdelegate available?(model), to: LLMClient.Providers
   defdelegate requires_api_key?(model), to: LLMClient.Providers
 
+  # SubAgent callback functions
+  defdelegate callback(model_or_alias), to: LLMClient.Providers
+  defdelegate call(model, request), to: LLMClient.Providers
+
   # Registry functions
   defdelegate resolve(name), to: LLMClient.Registry
   defdelegate resolve!(name), to: LLMClient.Registry
