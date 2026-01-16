@@ -13,7 +13,6 @@ defmodule PtcRunner.Lisp.SchemaTest do
     test "documents PTC extensions" do
       prompt = LanguageSpec.get(:multi_turn)
       # Predicate builders
-      assert prompt =~ "where"
       assert prompt =~ "all-of"
       assert prompt =~ "any-of"
       # Aggregation

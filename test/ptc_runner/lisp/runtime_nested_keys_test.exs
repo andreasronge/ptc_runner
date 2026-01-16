@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
   use ExUnit.Case
 
   alias PtcRunner.Lisp.Runtime
+  alias PtcRunner.Lisp.Runtime.FlexAccess
 
   describe "flex_get_in - flexible nested key access" do
     test "flex_get_in with empty path returns data" do
@@ -269,6 +270,156 @@ defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
       data = %{"a" => %{x: 10}, a: %{x: 20}}
       result = Runtime.flex_update_in(data, [:a, :x], &(&1 + 5))
       assert result == %{"a" => %{x: 10}, a: %{x: 25}}
+    end
+  end
+
+  # ============================================================================
+  # List Index Support Tests
+  # ============================================================================
+
+  describe "flex_get_in - list index support" do
+    test "access list element by index" do
+      data = %{results: [%{title: "First"}, %{title: "Second"}]}
+      assert Runtime.flex_get_in(data, [:results, 0, :title]) == "First"
+      assert Runtime.flex_get_in(data, [:results, 1, :title]) == "Second"
+    end
+
+    test "root-level list access" do
+      data = [%{name: "A"}, %{name: "B"}]
+      assert Runtime.flex_get_in(data, [0, :name]) == "A"
+      assert Runtime.flex_get_in(data, [1, :name]) == "B"
+    end
+
+    test "mixed paths: map -> list -> map -> list" do
+      data = %{users: [%{scores: [10, 20, 30]}]}
+      assert Runtime.flex_get_in(data, [:users, 0, :scores, 2]) == 30
+    end
+
+    test "out of bounds index returns nil" do
+      assert Runtime.flex_get_in([1, 2, 3], [10]) == nil
+    end
+
+    test "negative index returns nil" do
+      assert Runtime.flex_get_in([1, 2, 3], [-1]) == nil
+    end
+
+    test "float index returns nil" do
+      assert Runtime.flex_get_in([1, 2, 3], [1.5]) == nil
+    end
+
+    test "string index on list returns nil" do
+      assert Runtime.flex_get_in([1, 2, 3], ["0"]) == nil
+    end
+
+    test "empty list returns nil for any index" do
+      assert Runtime.flex_get_in([], [0]) == nil
+    end
+  end
+
+  describe "flex_get - list index support" do
+    test "get element by index" do
+      assert Runtime.flex_get([1, 2, 3], 0) == 1
+      assert Runtime.flex_get([1, 2, 3], 2) == 3
+    end
+
+    test "out of bounds returns nil" do
+      assert Runtime.flex_get([1, 2, 3], 10) == nil
+    end
+
+    test "negative index returns nil" do
+      assert Runtime.flex_get([1, 2, 3], -1) == nil
+    end
+
+    test "non-integer key returns nil" do
+      assert Runtime.flex_get([1, 2, 3], "0") == nil
+      assert Runtime.flex_get([1, 2, 3], :key) == nil
+    end
+  end
+
+  describe "flex_fetch - list index support" do
+    test "fetch element by index" do
+      assert Runtime.flex_fetch([1, 2, 3], 0) == {:ok, 1}
+      assert Runtime.flex_fetch([1, 2, 3], 2) == {:ok, 3}
+    end
+
+    test "out of bounds returns error" do
+      assert Runtime.flex_fetch([1, 2, 3], 10) == :error
+    end
+
+    test "nil value preserved" do
+      assert Runtime.flex_fetch([nil, 2], 0) == {:ok, nil}
+    end
+
+    test "negative index returns error" do
+      assert Runtime.flex_fetch([1, 2, 3], -1) == :error
+    end
+  end
+
+  describe "flex_fetch_in - list index support" do
+    test "fetch nested via list index" do
+      data = %{items: [%{name: "A"}]}
+      assert FlexAccess.flex_fetch_in(data, [:items, 0, :name]) == {:ok, "A"}
+    end
+
+    test "out of bounds returns error" do
+      assert FlexAccess.flex_fetch_in([1, 2, 3], [10]) == :error
+    end
+
+    test "nil value at index preserved" do
+      assert FlexAccess.flex_fetch_in([nil, 2], [0]) == {:ok, nil}
+    end
+  end
+
+  describe "flex_put_in - list index support" do
+    test "put value at list index" do
+      assert Runtime.flex_put_in([1, 2, 3], [1], 99) == [1, 99, 3]
+    end
+
+    test "put nested value through list" do
+      data = %{items: [%{name: "A"}]}
+      assert Runtime.flex_put_in(data, [:items, 0, :name], "B") == %{items: [%{name: "B"}]}
+    end
+
+    test "put deep nested value through multiple lists" do
+      data = [[1, 2], [3, 4]]
+      assert Runtime.flex_put_in(data, [1, 0], 99) == [[1, 2], [99, 4]]
+    end
+
+    test "out of bounds raises ArgumentError" do
+      assert_raise ArgumentError, ~r/out of bounds/, fn ->
+        Runtime.flex_put_in([1, 2], [10], 99)
+      end
+    end
+
+    test "negative index falls through (not matched by guard)" do
+      # Negative indices don't match the guard, so they fall through
+      # and don't raise the explicit out-of-bounds error
+      assert_raise FunctionClauseError, fn ->
+        Runtime.flex_put_in([1, 2], [-1], 99)
+      end
+    end
+  end
+
+  describe "flex_update_in - list index support" do
+    test "update value at list index" do
+      assert Runtime.flex_update_in([1, 2, 3], [1], &(&1 * 10)) == [1, 20, 3]
+    end
+
+    test "update nested value through list" do
+      data = %{items: [%{count: 5}]}
+      result = Runtime.flex_update_in(data, [:items, 0, :count], &(&1 + 1))
+      assert result == %{items: [%{count: 6}]}
+    end
+
+    test "update deep nested value through multiple lists" do
+      data = [[1, 2], [3, 4]]
+      assert Runtime.flex_update_in(data, [1, 0], &(&1 * 10)) == [[1, 2], [30, 4]]
+    end
+
+    test "out of bounds raises ArgumentError (Clojure semantics)" do
+      assert_raise ArgumentError, ~r/out of bounds/, fn ->
+        Runtime.flex_update_in([1, 2], [10], &(&1 * 2))
+      end
     end
   end
 end

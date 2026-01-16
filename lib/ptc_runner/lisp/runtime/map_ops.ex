@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
   def get(m, k) when is_map(m), do: FlexAccess.flex_get(m, k)
+  def get(l, k) when is_list(l), do: FlexAccess.flex_get(l, k)
   def get(nil, _k), do: nil
 
   def get(m, k, default) when is_map(m) do
@@ -33,12 +34,27 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
     end
   end
 
+  # List support - only non-negative integers are valid indices
+  def get(l, k, default) when is_list(l) and is_integer(k) and k >= 0 do
+    Enum.at(l, k, default)
+  end
+
+  def get(l, _k, default) when is_list(l), do: default
+
   def get(nil, _k, default), do: default
 
   def get_in(m, path) when is_map(m), do: FlexAccess.flex_get_in(m, path)
+  def get_in(l, path) when is_list(l), do: FlexAccess.flex_get_in(l, path)
 
   def get_in(m, path, default) when is_map(m) do
     case FlexAccess.flex_get_in(m, path) do
+      nil -> default
+      val -> val
+    end
+  end
+
+  def get_in(l, path, default) when is_list(l) do
+    case FlexAccess.flex_get_in(l, path) do
       nil -> default
       val -> val
     end
@@ -59,18 +75,46 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.assoc_variadic([%{}, :a, 1, :b, 2, :c, 3])
       %{a: 1, b: 2, c: 3}
   """
-  def assoc_variadic([m | pairs]) when rem(length(pairs), 2) == 0 do
+  def assoc_variadic([m | pairs]) when is_map(m) and rem(length(pairs), 2) == 0 do
     pairs
     |> Enum.chunk_every(2)
     |> Enum.reduce(m, fn [k, v], acc -> Map.put(acc, k, v) end)
   end
 
+  # List support for assoc - Clojure's assoc works on vectors (index == length appends)
+  def assoc_variadic([l | pairs]) when is_list(l) and rem(length(pairs), 2) == 0 do
+    pairs
+    |> Enum.chunk_every(2)
+    |> Enum.reduce(l, fn [k, v], acc ->
+      len = length(acc)
+
+      cond do
+        is_integer(k) and k >= 0 and k < len -> List.replace_at(acc, k, v)
+        is_integer(k) and k == len -> acc ++ [v]
+        true -> raise ArgumentError, "index #{inspect(k)} out of bounds for list of length #{len}"
+      end
+    end)
+  end
+
   def assoc_variadic(args) do
-    raise ArgumentError, "assoc requires a map and key-value pairs, got #{length(args)} args"
+    raise ArgumentError,
+          "assoc requires a map or list and key-value pairs, got #{length(args)} args"
   end
 
   # Keep the 3-arg version for direct calls
-  def assoc(m, k, v), do: Map.put(m, k, v)
+  def assoc(m, k, v) when is_map(m), do: Map.put(m, k, v)
+
+  # List support - Clojure allows index == length for appending
+  def assoc(l, k, v) when is_list(l) and is_integer(k) and k >= 0 do
+    len = length(l)
+
+    cond do
+      k < len -> List.replace_at(l, k, v)
+      k == len -> l ++ [v]
+      true -> raise ArgumentError, "index #{k} out of bounds for list of length #{len}"
+    end
+  end
+
   def assoc_in(m, path, v), do: FlexAccess.flex_put_in(m, path, v)
 
   @doc """
@@ -89,23 +133,50 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.update_variadic([%{n: nil}, :n, &PtcRunner.Lisp.Runtime.Predicates.fnil(&Kernel.+/2, 0), 5])
       %{n: 5}
   """
-  def update_variadic([m, k, f]) do
+  def update_variadic([m, k, f]) when is_map(m) do
     old_val = Map.get(m, k)
     new_val = apply_with_arity_check(f, [old_val], "update")
     Map.put(m, k, new_val)
   end
 
-  def update_variadic([m, k, f | extra_args]) do
+  def update_variadic([m, k, f | extra_args]) when is_map(m) do
     old_val = Map.get(m, k)
     new_val = apply_with_arity_check(f, [old_val | extra_args], "update")
     Map.put(m, k, new_val)
   end
 
+  # List support for update
+  def update_variadic([l, k, f]) when is_list(l) and is_integer(k) and k >= 0 do
+    if k < length(l) do
+      List.update_at(l, k, fn old_val -> apply_with_arity_check(f, [old_val], "update") end)
+    else
+      raise ArgumentError, "index #{k} out of bounds for list of length #{length(l)}"
+    end
+  end
+
+  def update_variadic([l, k, f | extra_args]) when is_list(l) and is_integer(k) and k >= 0 do
+    if k < length(l) do
+      List.update_at(l, k, fn old_val ->
+        apply_with_arity_check(f, [old_val | extra_args], "update")
+      end)
+    else
+      raise ArgumentError, "index #{k} out of bounds for list of length #{length(l)}"
+    end
+  end
+
   # Keep 3-arg version for direct calls
-  def update(m, k, f) do
+  def update(m, k, f) when is_map(m) do
     old_val = Map.get(m, k)
     new_val = apply_with_arity_check(f, [old_val], "update")
     Map.put(m, k, new_val)
+  end
+
+  def update(l, k, f) when is_list(l) and is_integer(k) and k >= 0 do
+    if k < length(l) do
+      List.update_at(l, k, fn old_val -> apply_with_arity_check(f, [old_val], "update") end)
+    else
+      raise ArgumentError, "index #{k} out of bounds for list of length #{length(l)}"
+    end
   end
 
   @doc """
