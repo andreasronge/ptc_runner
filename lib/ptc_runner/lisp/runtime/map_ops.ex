@@ -6,6 +6,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   """
 
   alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
   def get(m, k) when is_map(m), do: FlexAccess.flex_get(m, k)
@@ -191,15 +192,16 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.update_vals(%{}, &length/1)
       %{}
   """
-  def update_vals(m, f) when is_map(m) and is_function(f, 1) do
-    Map.new(m, fn {k, v} -> {k, f.(v)} end)
+  def update_vals(m, f) when is_map(m) do
+    Map.new(m, fn {k, v} -> {k, Callable.call(f, [v])} end)
   end
 
   def update_vals(nil, _f), do: nil
 
   # Helper to apply a function with proper arity error handling
+  # Uses Callable.call/2 to handle both plain functions and builtin tuples
   defp apply_with_arity_check(f, args, context) do
-    apply(f, args)
+    Callable.call(f, args)
   rescue
     e in BadArityError ->
       # Extract arity info from the error

@@ -54,6 +54,23 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
         "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
   end
 
+  # Also match builtin tuples (now passed through from closure_to_fun)
+  defp specific_type_error(:update_vals, [{tag, _} = _f, m] = args)
+       when tag in [:normal, :collect] and is_map(m) do
+    {:ok,
+     {:type_error,
+      "update-vals expects (map, function) but got (function, map). " <>
+        "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
+  end
+
+  defp specific_type_error(:update_vals, [{tag, _, _} = _f, m] = args)
+       when tag in [:variadic, :variadic_nonempty, :multi_arity] and is_map(m) do
+    {:ok,
+     {:type_error,
+      "update-vals expects (map, function) but got (function, map). " <>
+        "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
+  end
+
   defp specific_type_error(name, [key, %{} = _map] = args)
        when name in [:map, :mapv] and is_atom(key) and not is_boolean(key) do
     {:ok,

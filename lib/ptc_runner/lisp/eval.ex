@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Runtime.Callable
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -403,9 +404,9 @@ defmodule PtcRunner.Lisp.Eval do
          {:type_error, "pmap: keyword accessor requires a list of maps, got a single map",
           [fn_val, coll_val]}}
       else
-        # Convert the function value to an Erlang function
+        # Convert the function value to a callable (may be a tuple for builtins)
         # The closure captures a read-only snapshot of the environment at creation time
-        erlang_fn = value_to_erlang_fn(fn_val, eval_ctx2)
+        callable_fn = value_to_erlang_fn(fn_val, eval_ctx2)
 
         # Execute in parallel using Task.async_stream
         # Limit concurrency to available schedulers to prevent resource exhaustion
@@ -415,7 +416,7 @@ defmodule PtcRunner.Lisp.Eval do
           |> Task.async_stream(
             fn elem ->
               try do
-                {:ok, erlang_fn.(elem)}
+                {:ok, Callable.call(callable_fn, [elem])}
               rescue
                 e ->
                   {:error, {:pmap_error, Exception.message(e)}}
@@ -697,7 +698,11 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   # Build juxt function that applies all functions and returns vector of results
-  defp build_juxt_fn(fns), do: fn arg -> Enum.map(fns, & &1.(arg)) end
+  # Uses Callable.call/2 to properly dispatch to builtin tuples
+  defp build_juxt_fn(fns) do
+    alias PtcRunner.Lisp.Runtime.Callable
+    fn arg -> Enum.map(fns, &Callable.call(&1, [arg])) end
+  end
 
   # ============================================================
   # Pmap helpers
