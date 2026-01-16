@@ -134,6 +134,56 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert String.ends_with?(second, "...")
   end
 
+  test "println respects configurable max_print_length option" do
+    long_string = String.duplicate("y", 200)
+
+    source = """
+    (println "#{long_string}")
+    """
+
+    # Custom limit of 100 characters
+    {:ok, step} = Lisp.run(source, max_print_length: 100)
+    [output] = step.prints
+    assert String.length(output) == 103
+    assert String.ends_with?(output, "...")
+    assert String.starts_with?(output, "yyy")
+  end
+
+  test "max_print_length propagates into defn calls" do
+    long_string = String.duplicate("z", 200)
+
+    source = """
+    (defn log-msg [s] (println s))
+    (log-msg "#{long_string}")
+    """
+
+    # Custom limit of 100 characters should be respected inside defn
+    {:ok, step} = Lisp.run(source, max_print_length: 100)
+    [output] = step.prints
+
+    assert String.length(output) == 103,
+           "expected 103 (100 + '...'), got #{String.length(output)}"
+
+    assert String.ends_with?(output, "...")
+  end
+
+  test "max_print_length propagates into closure calls" do
+    long_string = String.duplicate("w", 200)
+
+    source = """
+    (let [log (fn [s] (println s))]
+      (log "#{long_string}"))
+    """
+
+    {:ok, step} = Lisp.run(source, max_print_length: 100)
+    [output] = step.prints
+
+    assert String.length(output) == 103,
+           "expected 103 (100 + '...'), got #{String.length(output)}"
+
+    assert String.ends_with?(output, "...")
+  end
+
   describe "char list detection (take on string)" do
     test "println joins char list from (take n string)" do
       source = ~S|(println (take 10 "hello world"))|

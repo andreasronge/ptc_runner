@@ -51,19 +51,19 @@ defmodule PtcRunner.Lisp.Eval do
           | {:destructure_error, String.t()}
           | {:cannot_shadow_builtin, atom()}
 
-  @spec eval(CoreAST.t(), map(), map(), env(), tool_executor(), list()) ::
+  @spec eval(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
           {:ok, value(), map()} | {:error, runtime_error()}
-  def eval(ast, ctx, memory, env, tool_executor, turn_history \\ []) do
-    case eval_with_context(ast, ctx, memory, env, tool_executor, turn_history) do
+  def eval(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
+    case eval_with_context(ast, ctx, memory, env, tool_executor, turn_history, opts) do
       {:ok, result, %EvalContext{user_ns: user_ns}} -> {:ok, result, user_ns}
       {:error, _} = err -> err
     end
   end
 
-  @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list()) ::
+  @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
           {:ok, value(), EvalContext.t()} | {:error, runtime_error()}
-  def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ []) do
-    eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history)
+  def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
+    eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history, opts)
 
     try do
       do_eval(ast, eval_ctx)
@@ -737,7 +737,12 @@ defmodule PtcRunner.Lisp.Eval do
           turn_history
         )
 
-      ctx = %{ctx | loop_limit: eval_ctx.loop_limit, prints: eval_ctx.prints}
+      ctx = %{
+        ctx
+        | loop_limit: eval_ctx.loop_limit,
+          prints: eval_ctx.prints,
+          max_print_length: eval_ctx.max_print_length
+      }
 
       case do_eval(body, ctx) do
         {:ok, result, _ctx2} -> result
