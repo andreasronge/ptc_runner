@@ -108,8 +108,8 @@ defmodule PtcRunner.SubAgent.Debug do
 
     case view do
       :turns ->
-        show_raw = Keyword.get(opts, :raw, false)
-        show_all_messages = Keyword.get(opts, :messages, false)
+        show_raw = opts[:raw] == true
+        show_all_messages = opts[:messages] == true
         raw_mode = show_raw and not show_all_messages
         Enum.each(turns, &print_turn(&1, show_raw, show_all_messages, raw_mode))
 
