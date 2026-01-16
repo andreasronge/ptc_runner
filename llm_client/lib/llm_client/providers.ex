@@ -35,6 +35,16 @@ defmodule LLMClient.Providers do
           }
         }
 
+  @type object_response :: %{
+          object: map(),
+          tokens: %{
+            input: non_neg_integer(),
+            output: non_neg_integer(),
+            cache_creation: non_neg_integer(),
+            cache_read: non_neg_integer()
+          }
+        }
+
   @doc """
   Generate text from an LLM.
 
@@ -85,6 +95,53 @@ defmodule LLMClient.Providers do
     case generate_text(model, messages, opts) do
       {:ok, response} -> response
       {:error, reason} -> raise "LLM error: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+  Generate a structured JSON object from an LLM.
+
+  Only supported for ReqLLM providers (cloud models). Local providers (Ollama, OpenAI-compat)
+  will return an error as they don't reliably support structured output.
+
+  ## Arguments
+    - model: Provider-prefixed model string (must be a ReqLLM provider)
+    - messages: List of message maps with :role and :content
+    - schema: JSON Schema map defining the expected output structure
+    - opts: Options passed to the provider
+
+  ## Options
+    - `:receive_timeout` - Request timeout in ms (default: 120_000)
+    - `:cache` - Enable prompt caching for supported providers (default: false)
+
+  ## Returns
+    - `{:ok, %{object: map(), tokens: %{...}}}`
+    - `{:error, :structured_output_not_supported}` for local providers
+    - `{:error, reason}` for other failures
+  """
+  @spec generate_object(String.t(), [message()], map(), keyword()) ::
+          {:ok, object_response()} | {:error, term()}
+  def generate_object(model, messages, schema, opts \\ []) do
+    case parse_provider(model) do
+      {:ollama, _model_name} ->
+        {:error, :structured_output_not_supported}
+
+      {:openai_compat, _base_url, _model_name} ->
+        {:error, :structured_output_not_supported}
+
+      {:req_llm, model_id} ->
+        call_req_llm_object(model_id, messages, schema, opts)
+    end
+  end
+
+  @doc """
+  Generate a structured JSON object, raising on error.
+  """
+  @spec generate_object!(String.t(), [message()], map(), keyword()) :: object_response()
+  def generate_object!(model, messages, schema, opts \\ []) do
+    case generate_object(model, messages, schema, opts) do
+      {:ok, response} -> response
+      {:error, reason} -> raise "LLM structured output error: #{inspect(reason)}"
     end
   end
 
@@ -221,6 +278,38 @@ defmodule LLMClient.Providers do
         }
 
         {:ok, %{content: text, tokens: tokens}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp call_req_llm_object(model, messages, schema, opts) do
+    timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+    http_opts = Keyword.get(opts, :req_http_options, [])
+    cache_enabled = Keyword.get(opts, :cache, false)
+
+    # Apply caching (reuse existing apply_caching/3)
+    {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
+
+    req_opts =
+      [receive_timeout: timeout, req_http_options: http_opts]
+      |> Keyword.merge(extra_opts)
+
+    case ReqLLM.generate_object(model, messages, schema, req_opts) do
+      {:ok, response} ->
+        usage = ReqLLM.Response.usage(response) || %{}
+        cached_tokens = usage[:cached_tokens] || usage["cached_tokens"] || 0
+        cache_write = extract_cache_write_tokens(response.provider_meta)
+
+        tokens = %{
+          input: usage[:input_tokens] || usage["input_tokens"] || 0,
+          output: usage[:output_tokens] || usage["output_tokens"] || 0,
+          cache_creation: cache_write,
+          cache_read: cached_tokens
+        }
+
+        {:ok, %{object: response.object, tokens: tokens}}
 
       {:error, reason} ->
         {:error, reason}

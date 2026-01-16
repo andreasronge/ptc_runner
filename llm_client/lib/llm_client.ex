@@ -35,6 +35,8 @@ defmodule LLMClient do
   # Provider functions
   defdelegate generate_text(model, messages, opts \\ []), to: LLMClient.Providers
   defdelegate generate_text!(model, messages, opts \\ []), to: LLMClient.Providers
+  defdelegate generate_object(model, messages, schema, opts \\ []), to: LLMClient.Providers
+  defdelegate generate_object!(model, messages, schema, opts \\ []), to: LLMClient.Providers
   defdelegate available?(model), to: LLMClient.Providers
   defdelegate requires_api_key?(model), to: LLMClient.Providers
 
