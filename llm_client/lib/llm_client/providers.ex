@@ -321,20 +321,7 @@ defmodule LLMClient.Providers do
       {:ok, response} ->
         text = ReqLLM.Response.text(response) || ""
         usage = ReqLLM.Response.usage(response) || %{}
-
-        # Extract cache tokens from usage and provider_meta
-        # ReqLLM normalizes cache_read to :cached_tokens
-        # cache_write_tokens may be in provider_meta (raw OpenRouter response)
-        cached_tokens = usage[:cached_tokens] || usage["cached_tokens"] || 0
-
-        cache_write = extract_cache_write_tokens(response.provider_meta)
-
-        tokens = %{
-          input: usage[:input_tokens] || usage["input_tokens"] || 0,
-          output: usage[:output_tokens] || usage["output_tokens"] || 0,
-          cache_creation: cache_write,
-          cache_read: cached_tokens
-        }
+        tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
 
         {:ok, %{content: text, tokens: tokens}}
 
@@ -358,15 +345,7 @@ defmodule LLMClient.Providers do
     case ReqLLM.generate_object(model, messages, schema, req_opts) do
       {:ok, response} ->
         usage = ReqLLM.Response.usage(response) || %{}
-        cached_tokens = usage[:cached_tokens] || usage["cached_tokens"] || 0
-        cache_write = extract_cache_write_tokens(response.provider_meta)
-
-        tokens = %{
-          input: usage[:input_tokens] || usage["input_tokens"] || 0,
-          output: usage[:output_tokens] || usage["output_tokens"] || 0,
-          cache_creation: cache_write,
-          cache_read: cached_tokens
-        }
+        tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
 
         {:ok, %{object: response.object, tokens: tokens}}
 
@@ -476,6 +455,19 @@ defmodule LLMClient.Providers do
 
   defp add_cache_fields(tokens) do
     Map.merge(tokens, %{cache_creation: 0, cache_read: 0})
+  end
+
+  # Build normalized token map from ReqLLM response
+  defp build_tokens_from_req_llm_response(usage, provider_meta) do
+    cached_tokens = usage[:cached_tokens] || usage["cached_tokens"] || 0
+    cache_write = extract_cache_write_tokens(provider_meta)
+
+    %{
+      input: usage[:input_tokens] || usage["input_tokens"] || 0,
+      output: usage[:output_tokens] || usage["output_tokens"] || 0,
+      cache_creation: cache_write,
+      cache_read: cached_tokens
+    }
   end
 
   # Extract cache_write_tokens from provider_meta (raw OpenRouter/Anthropic response)
