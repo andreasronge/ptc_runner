@@ -27,8 +27,6 @@ defmodule PtcRunner.SubAgent.Compression do
       # Custom strategy or options
       normalize(MyStrategy)               # => {MyStrategy, [println_limit: 15, ...]}
       normalize({MyStrategy, opts})       # => {MyStrategy, merged_opts}
-
-  See [Message History Optimization](docs/specs/message-history-optimization-architecture.md) for context.
   """
 
   alias PtcRunner.Turn
