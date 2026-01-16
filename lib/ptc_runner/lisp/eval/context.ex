@@ -8,7 +8,17 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `env`: Lexical environment (variable bindings)
   - `tool_exec`: Tool executor function
   - `turn_history`: Previous turn results for multi-turn loops
+
+  ## Limits
+
+  | Field | Default | Hard Cap | Purpose |
+  |-------|---------|----------|---------|
+  | `loop_limit` | 1,000 | 10,000 | Max loop/recursion iterations |
+  | `max_print_length` | 2,000 | — | Max chars per `println` call |
   """
+
+  @default_print_length 2000
+  @max_loop_limit 10_000
 
   defstruct [
     :ctx,
@@ -18,12 +28,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :turn_history,
     iteration_count: 0,
     loop_limit: 1000,
+    max_print_length: @default_print_length,
     prints: [],
     tool_calls: []
   ]
-
-  @max_loop_limit 10_000
-  @max_print_length 2000
 
   @typedoc """
   Tool call record for tracing.
@@ -53,6 +61,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           turn_history: list(),
           iteration_count: integer(),
           loop_limit: integer(),
+          max_print_length: pos_integer(),
           prints: [String.t()],
           tool_calls: [tool_call()]
         }
@@ -60,21 +69,30 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @doc """
   Creates a new evaluation context.
 
+  ## Options
+
+  - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
+
   ## Examples
 
       iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])
       iex> ctx.user_ns
       %{}
 
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [], max_print_length: 500)
+      iex> ctx.max_print_length
+      500
+
   """
-  @spec new(map(), map(), map(), (String.t(), map() -> term()), list()) :: t()
-  def new(ctx, user_ns, env, tool_exec, turn_history) do
+  @spec new(map(), map(), map(), (String.t(), map() -> term()), list(), keyword()) :: t()
+  def new(ctx, user_ns, env, tool_exec, turn_history, opts \\ []) do
     %__MODULE__{
       ctx: ctx,
       user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
       turn_history: turn_history,
+      max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
       prints: [],
       tool_calls: []
     }
@@ -83,13 +101,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @doc """
   Appends a print message to the context.
 
-  Long messages are truncated to #{@max_print_length} characters (TRN-011).
+  Long messages are truncated to `max_print_length` characters (default: #{@default_print_length}).
   """
   @spec append_print(t(), String.t()) :: t()
-  def append_print(%__MODULE__{prints: prints} = context, message) do
+  def append_print(%__MODULE__{prints: prints, max_print_length: max_len} = context, message) do
     truncated =
-      if String.length(message) > @max_print_length do
-        String.slice(message, 0, @max_print_length) <> "..."
+      if String.length(message) > max_len do
+        String.slice(message, 0, max_len) <> "..."
       else
         message
       end

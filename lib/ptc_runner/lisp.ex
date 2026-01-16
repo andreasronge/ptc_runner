@@ -50,6 +50,7 @@ defmodule PtcRunner.Lisp do
     - `:timeout` - Timeout in milliseconds (default: 1000)
     - `:max_heap` - Max heap size in words (default: 1_250_000)
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
+    - `:max_print_length` - Max characters per `println` call (default: 2000)
 
   ## Return Value
 
@@ -113,6 +114,7 @@ defmodule PtcRunner.Lisp do
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
     max_symbols = Keyword.get(opts, :max_symbols, 10_000)
     turn_history = Keyword.get(opts, :turn_history, [])
+    max_print_length = Keyword.get(opts, :max_print_length)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -151,7 +153,8 @@ defmodule PtcRunner.Lisp do
         timeout: timeout,
         max_heap: max_heap,
         max_symbols: max_symbols,
-        turn_history: turn_history
+        turn_history: turn_history,
+        max_print_length: max_print_length
       }
 
       execute_program(source, opts)
@@ -176,7 +179,8 @@ defmodule PtcRunner.Lisp do
       timeout: timeout,
       max_heap: max_heap,
       max_symbols: max_symbols,
-      turn_history: turn_history
+      turn_history: turn_history,
+      max_print_length: max_print_length
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
@@ -184,6 +188,9 @@ defmodule PtcRunner.Lisp do
          {:ok, core_ast} <- Analyze.analyze(raw_ast) do
       # Build Context for sandbox (turn_history passed for completeness, used via eval_fn)
       context = PtcRunner.Context.new(ctx, memory, normalized_tools, turn_history)
+
+      # Build eval options (only include max_print_length if set)
+      eval_opts = if max_print_length, do: [max_print_length: max_print_length], else: []
 
       # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
       eval_fn = fn _ast, sandbox_context ->
@@ -194,7 +201,8 @@ defmodule PtcRunner.Lisp do
             sandbox_context.memory,
             Env.initial(),
             tool_executor,
-            sandbox_context.turn_history
+            sandbox_context.turn_history,
+            eval_opts
           )
         rescue
           e in ExecutionError ->
