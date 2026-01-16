@@ -147,13 +147,15 @@ defmodule PtcRunner.SubAgent do
   - `history_max_bytes` - Truncation limit for `*1/*2/*3` history (default: 512)
   - `result_limit` - Inspect `:limit` for final result (default: 50)
   - `result_max_chars` - Final string truncation (default: 500)
+  - `max_print_length` - Max chars per `println` call (default: 2000)
   """
   @type format_options :: [
           feedback_limit: pos_integer(),
           feedback_max_chars: pos_integer(),
           history_max_bytes: pos_integer(),
           result_limit: pos_integer(),
-          result_max_chars: pos_integer()
+          result_max_chars: pos_integer(),
+          max_print_length: pos_integer()
         ]
 
   @type t :: %__MODULE__{
@@ -185,7 +187,8 @@ defmodule PtcRunner.SubAgent do
     feedback_max_chars: 512,
     history_max_bytes: 512,
     result_limit: 50,
-    result_max_chars: 500
+    result_max_chars: 500,
+    max_print_length: 2000
   ]
 
   defstruct [

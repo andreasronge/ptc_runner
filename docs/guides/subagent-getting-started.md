@@ -353,7 +353,8 @@ PtcRunner.SubAgent.new(
     feedback_max_chars: 512,   # max chars in turn feedback
     history_max_bytes: 512,    # truncation limit for *1/*2/*3 history
     result_limit: 50,          # inspect :limit for final result
-    result_max_chars: 500      # final string truncation
+    result_max_chars: 500,     # final string truncation
+    max_print_length: 2000     # max chars per println call
   ],
 
   # Float precision for output formatting (default: 2)

@@ -125,6 +125,7 @@ Large results are automatically truncated at different stages to manage context 
 | `history_max_bytes` | 512 | Truncation limit for `*1/*2/*3` history access |
 | `result_limit` | 50 | Inspect `:limit` for final result formatting |
 | `result_max_chars` | 500 | Max chars in final result string |
+| `max_print_length` | 2000 | Max chars per `println` call |
 
 Configure via `format_options`:
 
