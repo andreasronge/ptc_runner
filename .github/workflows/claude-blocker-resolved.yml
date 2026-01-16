@@ -94,4 +94,86 @@ jobs:
             fi
           done
 
+          # Second pass: find any orphaned unblocked epic issues
+          # This catches issues with no blockers that weren't triggered by epic-start
+          echo "Checking for orphaned unblocked epic issues..."
+
+          ORPHAN_TRIGGERED=""
+
+          # Get all open issues with epic:* labels, sorted by number
+          EPIC_ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --label "epic:" \
+            --json number,body,labels \
+            --limit 100 \
+            | jq -c 'sort_by(.number) | .[]' 2>/dev/null || echo "")
+
+          # If no epic issues found with label filter, try searching all issues
+          if [ -z "$EPIC_ISSUES" ]; then
+            EPIC_ISSUES=$(echo "$POTENTIAL_DEPENDENTS" | jq -c '.[]')
+          fi
+
+          for issue in $EPIC_ISSUES; do
+            [ -n "$ORPHAN_TRIGGERED" ] && break  # Only trigger one
+
+            ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
+            ISSUE_BODY=$(echo "$issue" | jq -r '.body')
+
+            # Must have epic:* label
+            HAS_EPIC=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json labels --jq '[.labels[].name | select(startswith("epic:"))] | length' 2>/dev/null || echo "0")
+            [ "$HAS_EPIC" -eq 0 ] && continue
+
+            # Skip if already has workflow labels
+            LABELS=$(gh issue view "$ISSUE_NUMBER" --repo "${{ github.repository }}" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+            if echo "$LABELS" | grep -qE "needs-review|ready-for-implementation"; then
+              continue
+            fi
+
+            # Skip if has blocking labels
+            if echo "$LABELS" | grep -qE "needs-clarification|needs-breakdown|quick-fix"; then
+              continue
+            fi
+
+            # Check if ALL blockers are closed (or no blockers)
+            ALL_RESOLVED=true
+            if echo "$ISSUE_BODY" | grep -qi "blocked by:"; then
+              BLOCKED_SECTION=$(echo "$ISSUE_BODY" | sed -n '/[Bb]locked [Bb]y:/,/\*\*[Bb]locks\|^##\|^$/p' | head -10 || true)
+              BLOCKERS=$(echo "$BLOCKED_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+              for b in $BLOCKERS; do
+                [ -z "$b" ] && continue
+                # Skip self-references
+                [ "$b" = "$ISSUE_NUMBER" ] && continue
+                STATE=$(gh issue view "$b" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || echo "OPEN")
+                if [ "$STATE" != "CLOSED" ]; then
+                  ALL_RESOLVED=false
+                  break
+                fi
+              done
+            fi
+
+            if [ "$ALL_RESOLVED" = "true" ]; then
+              echo "Found orphaned unblocked epic issue: #$ISSUE_NUMBER"
+              gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" --add-label "needs-review"
+
+              gh issue comment "$ISSUE_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+          ## Unblocked Issue Found
+
+          Issue #$CLOSED_ISSUE closed. This issue has no open blockers and is ready for review.
+
+          Adding \`needs-review\` label to trigger review before implementation.
+          EOF
+          )"
+              echo "  Added needs-review to orphaned issue #$ISSUE_NUMBER"
+              ORPHAN_TRIGGERED="$ISSUE_NUMBER"
+              break  # Only one at a time
+            fi
+          done
+
+          if [ -n "$ORPHAN_TRIGGERED" ]; then
+            echo "Triggered orphaned issue #$ORPHAN_TRIGGERED"
+          else
+            echo "No orphaned unblocked issues found"
+          fi
+
           echo "Blocker resolution check complete"
