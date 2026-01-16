@@ -45,6 +45,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_field_descriptions!(opts)
     validate_context_descriptions!(opts)
     validate_format_options!(opts)
+    validate_output!(opts)
   end
 
   defp validate_prompt!(opts) do
@@ -201,4 +202,110 @@ defmodule PtcRunner.SubAgent.Validator do
       :error -> :ok
     end
   end
+
+  defp validate_output!(opts) do
+    case Keyword.fetch(opts, :output) do
+      {:ok, :ptc_lisp} ->
+        :ok
+
+      {:ok, :json} ->
+        validate_json_mode_constraints!(opts)
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "output must be :ptc_lisp or :json, got #{inspect(other)}"
+
+      :error ->
+        # Default is :ptc_lisp, no validation needed
+        :ok
+    end
+  end
+
+  defp validate_json_mode_constraints!(opts) do
+    # JSON mode requires: no tools, no compression, has signature, no firewall fields
+    validate_json_no_tools!(opts)
+    validate_json_no_compression!(opts)
+    validate_json_has_signature!(opts)
+    validate_json_no_firewall_fields!(opts)
+  end
+
+  defp validate_json_no_tools!(opts) do
+    case Keyword.fetch(opts, :tools) do
+      {:ok, tools} when map_size(tools) > 0 ->
+        raise ArgumentError, "output: :json cannot be used with tools"
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp validate_json_no_compression!(opts) do
+    case Keyword.fetch(opts, :compression) do
+      {:ok, compression} when compression not in [nil, false] ->
+        raise ArgumentError, "output: :json cannot be used with compression"
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp validate_json_has_signature!(opts) do
+    case Keyword.fetch(opts, :signature) do
+      {:ok, sig} when is_binary(sig) ->
+        :ok
+
+      _ ->
+        raise ArgumentError, "output: :json requires a signature"
+    end
+  end
+
+  defp validate_json_no_firewall_fields!(opts) do
+    alias PtcRunner.SubAgent.Signature
+
+    case Keyword.fetch(opts, :signature) do
+      {:ok, sig} when is_binary(sig) ->
+        case Signature.parse(sig) do
+          {:ok, {:signature, _params, output_type}} ->
+            case find_firewall_field(output_type) do
+              nil ->
+                :ok
+
+              field_name ->
+                raise ArgumentError,
+                      "output: :json signature cannot have firewall fields (#{field_name})"
+            end
+
+          # Signature parsing error already handled by validate_signature!
+          {:error, _} ->
+            :ok
+        end
+
+      _ ->
+        # No signature case already handled by validate_json_has_signature!
+        :ok
+    end
+  end
+
+  # Recursively check a type for firewall fields (fields starting with "_")
+  # Returns the first firewall field name found, or nil if none
+  defp find_firewall_field({:map, fields}) do
+    Enum.find_value(fields, fn {field_name, field_type} ->
+      if String.starts_with?(field_name, "_") do
+        field_name
+      else
+        find_firewall_field(field_type)
+      end
+    end)
+  end
+
+  defp find_firewall_field({:list, element_type}) do
+    find_firewall_field(element_type)
+  end
+
+  defp find_firewall_field({:optional, inner_type}) do
+    find_firewall_field(inner_type)
+  end
+
+  # Primitives and other types don't contain fields
+  defp find_firewall_field(_), do: nil
 end
