@@ -608,11 +608,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         new_env = Map.merge(closure_env, bindings)
         closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
 
-        # Use iteration limit and prints from caller context
+        # Use iteration limit, prints, and max_print_length from caller context
         closure_ctx = %{
           closure_ctx
           | loop_limit: caller_ctx.loop_limit,
-            prints: caller_ctx.prints
+            prints: caller_ctx.prints,
+            max_print_length: caller_ctx.max_print_length
         }
 
         case do_eval_fn.(body, closure_ctx) do
