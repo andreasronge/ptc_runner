@@ -133,4 +133,68 @@ defmodule PtcRunner.SubAgent.Signature do
   def render(signature) do
     Renderer.render(signature)
   end
+
+  @doc """
+  Convert a signature to JSON Schema format.
+
+  Extracts the return type and converts it to a JSON Schema
+  that can be passed to LLM providers for structured output.
+
+  ## Examples
+
+      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> {sentiment :string, score :float}")
+      iex> PtcRunner.SubAgent.Signature.to_json_schema(sig)
+      %{
+        "type" => "object",
+        "properties" => %{
+          "sentiment" => %{"type" => "string"},
+          "score" => %{"type" => "number"}
+        },
+        "required" => ["sentiment", "score"],
+        "additionalProperties" => false
+      }
+
+  """
+  @spec to_json_schema(signature()) :: map()
+  def to_json_schema({:signature, _params, return_type}) do
+    type_to_json_schema(return_type)
+  end
+
+  defp type_to_json_schema(:string), do: %{"type" => "string"}
+  defp type_to_json_schema(:int), do: %{"type" => "integer"}
+  defp type_to_json_schema(:float), do: %{"type" => "number"}
+  defp type_to_json_schema(:bool), do: %{"type" => "boolean"}
+  defp type_to_json_schema(:keyword), do: %{"type" => "string"}
+  defp type_to_json_schema(:any), do: %{}
+  defp type_to_json_schema(:map), do: %{"type" => "object"}
+
+  defp type_to_json_schema({:list, inner_type}) do
+    %{"type" => "array", "items" => type_to_json_schema(inner_type)}
+  end
+
+  defp type_to_json_schema({:optional, inner_type}) do
+    # Optional just affects the required list, not the type schema
+    type_to_json_schema(inner_type)
+  end
+
+  defp type_to_json_schema({:map, fields}) do
+    {properties, required} =
+      Enum.reduce(fields, {%{}, []}, fn {name, type}, {props, req} ->
+        {inner_type, is_optional} = unwrap_optional(type)
+        schema = type_to_json_schema(inner_type)
+        props = Map.put(props, name, schema)
+        req = if is_optional, do: req, else: [name | req]
+        {props, req}
+      end)
+
+    %{
+      "type" => "object",
+      "properties" => properties,
+      "required" => Enum.reverse(required),
+      "additionalProperties" => false
+    }
+  end
+
+  defp unwrap_optional({:optional, inner}), do: {inner, true}
+  defp unwrap_optional(type), do: {type, false}
 end

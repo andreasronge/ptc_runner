@@ -203,4 +203,94 @@ defmodule PtcRunner.SubAgent.SignatureTest do
              end)
     end
   end
+
+  describe "to_json_schema/1" do
+    test "converts simple primitive return type" do
+      {:ok, sig} = Signature.parse("() -> :string")
+      assert %{"type" => "string"} = Signature.to_json_schema(sig)
+    end
+
+    test "converts object with required fields" do
+      {:ok, sig} = Signature.parse("() -> {sentiment :string, score :float}")
+      schema = Signature.to_json_schema(sig)
+
+      assert schema["type"] == "object"
+      assert schema["properties"]["sentiment"] == %{"type" => "string"}
+      assert schema["properties"]["score"] == %{"type" => "number"}
+      assert schema["required"] == ["sentiment", "score"]
+      assert schema["additionalProperties"] == false
+    end
+
+    test "handles optional fields" do
+      {:ok, sig} = Signature.parse("() -> {name :string, nickname :string?}")
+      schema = Signature.to_json_schema(sig)
+
+      assert schema["required"] == ["name"]
+      assert schema["properties"]["nickname"] == %{"type" => "string"}
+    end
+
+    test "handles nested maps" do
+      {:ok, sig} = Signature.parse("() -> {analysis {sentiment :string, score :float}}")
+      schema = Signature.to_json_schema(sig)
+
+      analysis = schema["properties"]["analysis"]
+      assert analysis["type"] == "object"
+      assert analysis["properties"]["sentiment"] == %{"type" => "string"}
+      assert analysis["properties"]["score"] == %{"type" => "number"}
+    end
+
+    test "handles arrays" do
+      {:ok, sig} = Signature.parse("() -> [:string]")
+      schema = Signature.to_json_schema(sig)
+
+      assert schema["type"] == "array"
+      assert schema["items"] == %{"type" => "string"}
+    end
+
+    test "handles arrays of objects" do
+      {:ok, sig} = Signature.parse("() -> [{id :int, name :string}]")
+      schema = Signature.to_json_schema(sig)
+
+      assert schema["type"] == "array"
+      assert schema["items"]["type"] == "object"
+      assert schema["items"]["properties"]["id"] == %{"type" => "integer"}
+    end
+
+    test "converts all primitive types correctly" do
+      type_mappings = [
+        {":string", %{"type" => "string"}},
+        {":int", %{"type" => "integer"}},
+        {":float", %{"type" => "number"}},
+        {":bool", %{"type" => "boolean"}},
+        {":any", %{}},
+        {":map", %{"type" => "object"}},
+        {":keyword", %{"type" => "string"}}
+      ]
+
+      for {sig_type, expected} <- type_mappings do
+        {:ok, sig} = Signature.parse("() -> #{sig_type}")
+        assert Signature.to_json_schema(sig) == expected, "Failed for #{sig_type}"
+      end
+    end
+
+    test "ignores input parameters (only converts output)" do
+      {:ok, sig} = Signature.parse("(text :string, count :int) -> {result :bool}")
+      schema = Signature.to_json_schema(sig)
+
+      # Should only have the output schema, not input params
+      assert schema["properties"] == %{"result" => %{"type" => "boolean"}}
+    end
+
+    test "handles empty map" do
+      {:ok, sig} = Signature.parse("() -> {}")
+      schema = Signature.to_json_schema(sig)
+
+      assert schema == %{
+               "type" => "object",
+               "properties" => %{},
+               "required" => [],
+               "additionalProperties" => false
+             }
+    end
+  end
 end
