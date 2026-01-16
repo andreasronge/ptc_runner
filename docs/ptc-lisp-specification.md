@@ -1621,6 +1621,25 @@ The `seq` function converts a collection to a sequence:
     (update-vals count))           ; => ...
 ```
 
+**List Index Support:**
+
+`get-in`, `assoc`, `assoc-in`, and `update-in` support numeric indices for list/vector access:
+
+```clojure
+(get-in {:results [{:title "A"}]} [:results 0 :title])  ; => "A"
+(get-in [1 2 3] [0])                                     ; => 1
+(get-in [[1 2] [3 4]] [1 0])                             ; => 3
+(get-in [1 2 3] [10])                                    ; => nil (out of bounds)
+(get-in [1 2 3] [-1])                                    ; => nil (negative not supported)
+
+(assoc [1 2 3] 1 5)                                      ; => [1 5 3]
+(assoc-in [1 2 3] [1] 99)                                ; => [1 99 3]
+(assoc-in [[1 2] [3 4]] [0 1] 99)                        ; => [[1 99] [3 4]]
+(update-in [1 2 3] [1] inc)                              ; => [1 3 3]
+```
+
+**Note:** `assoc`, `assoc-in`, and `update-in` raise `ArgumentError` for out-of-bounds indices.
+
 ### 8.3 String Functions
 
 | Function | Signature | Description |

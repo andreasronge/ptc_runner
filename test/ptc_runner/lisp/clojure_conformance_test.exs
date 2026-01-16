@@ -381,4 +381,53 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(-> {:a {:b 1}} (get :a) (get :b))")
     end
   end
+
+  describe "Clojure conformance - get-in with vectors" do
+    @describetag :clojure
+
+    test "get-in accesses vector elements" do
+      assert_clojure_equivalent("(get-in {:users [{:name \"A\"}]} [:users 0 :name])")
+      assert_clojure_equivalent("(get-in [1 2 3] [0])")
+      assert_clojure_equivalent("(get-in [1 2 3] [2])")
+      assert_clojure_equivalent("(get-in [[1 2] [3 4]] [1 0])")
+    end
+
+    test "get-in returns nil for out of bounds" do
+      assert_clojure_equivalent("(get-in [1 2 3] [10])")
+      assert_clojure_equivalent("(get-in [[1 2]] [0 5])")
+    end
+
+    test "get-in returns nil for negative indices" do
+      assert_clojure_equivalent("(get-in [1 2 3] [-1])")
+    end
+
+    test "get-in with default for vectors" do
+      assert_clojure_equivalent("(get-in [1 2 3] [10] :default)")
+      assert_clojure_equivalent("(get-in [1 2 3] [0] :default)")
+    end
+
+    test "assoc-in works on vectors" do
+      assert_clojure_equivalent("(assoc-in [1 2 3] [1] 99)")
+      assert_clojure_equivalent("(assoc-in [[1 2] [3 4]] [0 1] 99)")
+    end
+
+    test "assoc works on vectors" do
+      assert_clojure_equivalent("(assoc [1 2 3] 1 5)")
+      assert_clojure_equivalent("(assoc [1 2 3] 0 99)")
+      assert_clojure_equivalent("(assoc [1 2 3] 2 99)")
+      # Appending when index == length
+      assert_clojure_equivalent("(assoc [1 2] 2 3)")
+      assert_clojure_equivalent("(assoc [] 0 1)")
+    end
+
+    test "update works on vectors" do
+      assert_clojure_equivalent("(update [1 2 3] 1 inc)")
+      assert_clojure_equivalent("(update [10 20 30] 0 #(* % 2))")
+    end
+
+    test "update-in works on vectors" do
+      assert_clojure_equivalent("(update-in [1 2 3] [1] inc)")
+      assert_clojure_equivalent("(update-in [[1 2] [3 4]] [1 0] inc)")
+    end
+  end
 end

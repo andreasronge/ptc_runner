@@ -38,6 +38,13 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   def flex_get(nil, path) when is_list(path), do: nil
   def flex_get(map, path) when is_map(map) and is_list(path), do: flex_get_in(map, path)
   def flex_get(map, key) when is_map(map), do: Map.get(map, key)
+
+  # List index support - only non-negative integers
+  def flex_get(list, key) when is_list(list) and is_integer(key) and key >= 0,
+    do: Enum.at(list, key)
+
+  def flex_get(list, _key) when is_list(list), do: nil
+
   def flex_get(nil, _key), do: nil
 
   @doc """
@@ -71,6 +78,17 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   def flex_fetch(nil, path) when is_list(path), do: :error
   def flex_fetch(map, path) when is_map(map) and is_list(path), do: flex_fetch_in(map, path)
   def flex_fetch(map, key) when is_map(map), do: Map.fetch(map, key)
+
+  # List index support - single traversal using sentinel
+  def flex_fetch(list, key) when is_list(list) and is_integer(key) and key >= 0 do
+    case Enum.at(list, key, :__flex_not_found__) do
+      :__flex_not_found__ -> :error
+      value -> {:ok, value}
+    end
+  end
+
+  def flex_fetch(list, _key) when is_list(list), do: :error
+
   def flex_fetch(nil, _key), do: :error
 
   @doc """
@@ -86,6 +104,11 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     end
   end
 
+  # List index support - simplified since flex_get_in(nil, rest) returns nil
+  def flex_get_in(data, [key | rest]) when is_list(data) and is_integer(key) and key >= 0 do
+    flex_get_in(Enum.at(data, key), rest)
+  end
+
   def flex_get_in(_data, _path), do: nil
 
   @doc """
@@ -99,6 +122,14 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     case flex_fetch(data, key) do
       {:ok, value} -> flex_fetch_in(value, rest)
       :error -> :error
+    end
+  end
+
+  # List index support - single traversal using sentinel
+  def flex_fetch_in(data, [key | rest]) when is_list(data) and is_integer(key) and key >= 0 do
+    case Enum.at(data, key, :__flex_not_found__) do
+      :__flex_not_found__ -> :error
+      value -> flex_fetch_in(value, rest)
     end
   end
 
@@ -125,8 +156,13 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
             nested_result = flex_put_in(nested, rest, v)
             Map.put(data, key, nested_result)
 
+          {:ok, nested} when is_list(nested) ->
+            # Key exists with a list value: recurse into list
+            nested_result = flex_put_in(nested, rest, v)
+            Map.put(data, key, nested_result)
+
           {:ok, _} ->
-            # Key exists with a non-map value: can't traverse further
+            # Key exists with a non-map/non-list value: can't traverse further
             raise ArgumentError,
                   "could not put/update key #{inspect(key)} on a non-map value"
 
@@ -135,6 +171,28 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
             nested_result = flex_put_in(%{}, rest, v)
             Map.put(data, key, nested_result)
         end
+    end
+  end
+
+  # List index support - Clojure's assoc-in works on vectors (index == length appends)
+  def flex_put_in(data, [key | rest], v) when is_list(data) and is_integer(key) and key >= 0 do
+    len = length(data)
+
+    cond do
+      key < len ->
+        case rest do
+          [] -> List.replace_at(data, key, v)
+          _ -> List.update_at(data, key, &flex_put_in(&1, rest, v))
+        end
+
+      key == len ->
+        case rest do
+          [] -> data ++ [v]
+          _ -> data ++ [flex_put_in(%{}, rest, v)]
+        end
+
+      true ->
+        raise ArgumentError, "index #{key} out of bounds for list of length #{len}"
     end
   end
 
@@ -161,8 +219,13 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
             nested_result = flex_update_in(nested, rest, f)
             Map.put(data, key, nested_result)
 
+          {:ok, nested} when is_list(nested) ->
+            # Key exists with a list value: recurse into list
+            nested_result = flex_update_in(nested, rest, f)
+            Map.put(data, key, nested_result)
+
           {:ok, _} ->
-            # Key exists with a non-map value: can't traverse further
+            # Key exists with a non-map/non-list value: can't traverse further
             raise ArgumentError,
                   "could not put/update key #{inspect(key)} on a non-map value"
 
@@ -171,6 +234,18 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
             nested_result = flex_update_in(%{}, rest, f)
             Map.put(data, key, nested_result)
         end
+    end
+  end
+
+  # List index support - throws on out-of-bounds (Clojure semantics)
+  def flex_update_in(data, [key | rest], f) when is_list(data) and is_integer(key) and key >= 0 do
+    if key < length(data) do
+      case rest do
+        [] -> List.update_at(data, key, f)
+        _ -> List.update_at(data, key, &flex_update_in(&1, rest, f))
+      end
+    else
+      raise ArgumentError, "index #{key} out of bounds for list of length #{length(data)}"
     end
   end
 end
