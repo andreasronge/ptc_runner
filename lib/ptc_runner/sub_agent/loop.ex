@@ -65,6 +65,7 @@ defmodule PtcRunner.SubAgent.Loop do
   alias PtcRunner.SubAgent
 
   alias PtcRunner.SubAgent.Loop.{
+    JsonMode,
     LLMRetry,
     Metrics,
     ResponseHandler,
@@ -244,7 +245,11 @@ defmodule PtcRunner.SubAgent.Loop do
       normalized_tools: normalized_tools
     }
 
-    loop(agent, run_opts.llm, initial_state)
+    # Route to appropriate execution mode based on agent.output
+    case agent.output do
+      :json -> JsonMode.run(agent, run_opts.llm, initial_state)
+      :ptc_lisp -> loop(agent, run_opts.llm, initial_state)
+    end
   end
 
   # Loop when max_turns exceeded
