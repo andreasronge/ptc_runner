@@ -30,8 +30,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.{JsonParser, Signature, Telemetry}
   alias PtcRunner.SubAgent.Loop.{LLMRetry, Metrics}
-  alias PtcRunner.SubAgent.{Signature, Telemetry}
 
   # Load JSON prompt templates at compile time
   @prompts_dir Path.join(__DIR__, "../../../../priv/prompts")
@@ -312,40 +312,25 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   # Handle JSON response - parse and validate
   defp handle_json_response(response, agent, llm, state) do
     # Parse JSON from response
-    case parse_json(response) do
-      {:ok, parsed} ->
+    case JsonParser.parse(response) do
+      {:ok, parsed} when is_map(parsed) ->
         validate_and_complete(parsed, response, agent, llm, state)
 
-      {:error, parse_error} ->
-        handle_parse_error(parse_error, response, agent, llm, state)
-    end
-  end
-
-  # Parse JSON from response - try to extract JSON from various formats
-  defp parse_json(response) do
-    trimmed = String.trim(response)
-
-    # Try direct JSON parse first
-    case Jason.decode(trimmed) do
-      {:ok, result} when is_map(result) ->
-        {:ok, result}
-
       {:ok, _non_map} ->
-        {:error, "Response must be a JSON object, not an array or primitive"}
+        # JsonParser allows arrays, but we only accept objects
+        handle_parse_error(
+          "Response must be a JSON object, not an array or primitive",
+          response,
+          agent,
+          llm,
+          state
+        )
 
-      {:error, _} ->
-        # Try extracting from markdown code block
-        case Regex.run(~r/```(?:json)?\s*([\s\S]+?)\s*```/, trimmed) do
-          [_, json_content] ->
-            case Jason.decode(String.trim(json_content)) do
-              {:ok, result} when is_map(result) -> {:ok, result}
-              {:ok, _} -> {:error, "Response must be a JSON object"}
-              {:error, reason} -> {:error, "JSON parse error: #{inspect(reason)}"}
-            end
+      {:error, :no_json_found} ->
+        handle_parse_error("No valid JSON found in response", response, agent, llm, state)
 
-          nil ->
-            {:error, "No valid JSON found in response"}
-        end
+      {:error, :invalid_json} ->
+        handle_parse_error("JSON parse error", response, agent, llm, state)
     end
   end
 
