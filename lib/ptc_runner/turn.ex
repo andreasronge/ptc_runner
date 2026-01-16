@@ -21,8 +21,6 @@ defmodule PtcRunner.Turn do
 
   Use `success/7` or `failure/7` to create turns - don't construct the struct directly.
   The constructors ensure `success?` is set correctly.
-
-  See [Message History Optimization](docs/specs/message-history-optimization-requirements.md) for context.
   """
 
   defstruct [

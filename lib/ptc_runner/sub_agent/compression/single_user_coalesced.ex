@@ -24,8 +24,6 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
   Uses conditional collapsing based on recovery status:
   - If last turn failed: shows most recent error only
   - If last turn succeeded: collapses all errors (no error section)
-
-  See [Message History Optimization](docs/specs/message-history-optimization-architecture.md).
   """
   @behaviour PtcRunner.SubAgent.Compression
 
