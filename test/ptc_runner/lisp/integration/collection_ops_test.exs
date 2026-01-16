@@ -717,4 +717,60 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert length(result) == 2
     end
   end
+
+  # ==========================================================================
+  # Variadic Builtins in HOFs (GH-668)
+  # ==========================================================================
+
+  describe "variadic builtins in HOFs (GH-668)" do
+    test "map with variadic + across multiple collections" do
+      {:ok, %Step{return: result}} = Lisp.run("(map + [1 2] [10 20] [100 200])")
+      assert result == [111, 222]
+    end
+
+    test "map with unary minus (negation)" do
+      {:ok, %Step{return: result}} = Lisp.run("(map - [1 2 3])")
+      assert result == [-1, -2, -3]
+    end
+
+    test "map with multi-arity range" do
+      {:ok, %Step{return: result}} = Lisp.run("(map range [1 2 3])")
+      assert result == [[0], [0, 1], [0, 1, 2]]
+    end
+
+    test "filter with variadic +" do
+      {:ok, %Step{return: result}} = Lisp.run("(filter + [0 1 2 nil])")
+      assert result == [0, 1, 2]
+    end
+
+    test "reduce with variadic + and initial value" do
+      {:ok, %Step{return: result}} = Lisp.run("(reduce + 0 [1 2 3 4])")
+      assert result == 10
+    end
+
+    test "reduce with variadic + without initial value" do
+      {:ok, %Step{return: result}} = Lisp.run("(reduce + [1 2 3 4])")
+      assert result == 10
+    end
+
+    test "map with variadic * across two collections" do
+      {:ok, %Step{return: result}} = Lisp.run("(map * [1 2 3] [10 20 30])")
+      assert result == [10, 40, 90]
+    end
+
+    test "some with variadic builtin" do
+      {:ok, %Step{return: result}} = Lisp.run("(some + [nil nil 1 nil])")
+      assert result == 1
+    end
+
+    test "every? with variadic builtin" do
+      {:ok, %Step{return: result}} = Lisp.run("(every? + [1 2 3])")
+      assert result == true
+    end
+
+    test "map-indexed with variadic +" do
+      {:ok, %Step{return: result}} = Lisp.run("(map-indexed + [10 20 30])")
+      assert result == [10, 21, 32]
+    end
+  end
 end
