@@ -753,6 +753,34 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
     end
   end
 
+  describe "key - map entry extraction" do
+    test "extracts key from 2-element vector" do
+      assert Runtime.key([:a, 1]) == :a
+    end
+
+    test "works with string keys" do
+      assert Runtime.key(["name", "Alice"]) == "name"
+    end
+
+    test "works with integer keys" do
+      assert Runtime.key([0, "first"]) == 0
+    end
+  end
+
+  describe "val - map entry extraction" do
+    test "extracts value from 2-element vector" do
+      assert Runtime.val([:a, 1]) == 1
+    end
+
+    test "works with complex values" do
+      assert Runtime.val([:data, %{nested: true}]) == %{nested: true}
+    end
+
+    test "works with nil values" do
+      assert Runtime.val([:missing, nil]) == nil
+    end
+  end
+
   describe "reduce - comprehensive support" do
     test "reduce on lists (existing support)" do
       assert Runtime.reduce(fn acc, x -> acc + x end, 0, [1, 2, 3]) == 6

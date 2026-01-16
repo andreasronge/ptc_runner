@@ -120,6 +120,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate select_keys(m, ks), to: MapOps
   defdelegate keys(m), to: MapOps
   defdelegate vals(m), to: MapOps
+  defdelegate key(entry), to: MapOps
+  defdelegate val(entry), to: MapOps
   defdelegate entries(m), to: MapOps
   defdelegate update_vals(m, f), to: MapOps
 
