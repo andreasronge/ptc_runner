@@ -1491,7 +1491,7 @@ SubAgent.run(agent, llm: :haiku)
 **Livebook example:**
 
 ```elixir
-Mix.install([{:ptc_runner, "~> 0.1"}, {:req, "~> 0.5"}])
+Mix.install([{:ptc_runner, "~> 0.5"}, {:req, "~> 0.5"}])
 
 defmodule MyLLM do
   def call(model, input) do
