@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-16
+
+### Breaking Changes
+
+- Replace `ctx/` namespace with `data/` and `tool/` namespaces for clearer separation
+- Remove `tool_catalog` field from SubAgent (use `tools` directly)
+
+### Added
+
+**Observability & Message History (v0.5 theme)**
+
+- Add `Turn` struct for immutable per-turn execution history with tool calls, prints, and memory snapshots
+- Add `SingleUserCoalesced` compression strategy for token-efficient multi-turn conversations
+- Add `compression: true` option to enable message compression in SubAgent
+- Add `collect_messages: true` option to capture full conversation history
+- Enhance `print_trace/2` with new options: `view: :compressed`, `messages: true`, `raw: true`, `usage: true`
+- Add compression statistics to debug output
+- Add prompt caching support by splitting static/dynamic sections
+
+**New Functions**
+
+- Add `distinct-by` for unique items by key function
+- Add `re-split` for regex-based string splitting
+- Add `rem` function and fix `mod` to match Clojure semantics
+- Add multi-arity `map` and `partition` functions
+- Add list index support to `get-in`, `assoc`, `update`, and related functions
+- Add context filtering via static analysis to reduce memory pressure
+
+**Other**
+
+- Add configurable println truncation limit (`max_print_length` option)
+- Add hidden fields filtering from LLM-visible output (fields starting with `_`)
+- Add configurable sample limits and smart println for char lists
+- Improve float support in PTC-Lisp
+
+### Fixed
+
+- Multi-arity map with variadic builtins
+- Propagate `max_print_length` into closures and pcalls
+- Show map field names in tool signatures for LLM
+- Handle nil values in `Debug.print_trace` options
+- Support builtin tuples in `fnil` for Clojure compatibility
+- Show explicit "No tools available" message in prompt
+
 ## [0.4.1] - 2026-01-09
 
 ### Added
@@ -281,6 +325,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.5.0]: https://github.com/andreasronge/ptc_runner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/andreasronge/ptc_runner/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/andreasronge/ptc_runner/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/andreasronge/ptc_runner/compare/v0.3.3...v0.3.4

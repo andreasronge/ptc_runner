@@ -93,7 +93,7 @@ compiled.execute.(%{text: "new input"})  #=> %Step{return: %{category: "support"
 
 ```elixir
 def deps do
-  [{:ptc_runner, "~> 0.4.1"}]
+  [{:ptc_runner, "~> 0.5.0"}]
 end
 ```
 
