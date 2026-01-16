@@ -180,6 +180,65 @@ defmodule LLMClient.Providers do
     end
   end
 
+  @doc """
+  Create a SubAgent-compatible callback for a model.
+
+  The callback handles both :json and :ptc_lisp modes automatically.
+
+  ## Example
+
+      llm = LLMClient.callback("sonnet")
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{...})
+  """
+  @spec callback(String.t()) :: (map() -> {:ok, map()} | {:error, term()})
+  def callback(model_or_alias) do
+    model = LLMClient.Registry.resolve!(model_or_alias)
+    &call(model, &1)
+  end
+
+  @doc """
+  Handle a SubAgent request directly.
+
+  Routes to `generate_object/4` for :json mode, `generate_text/3` for :ptc_lisp.
+
+  ## Request Map
+
+  For JSON mode:
+  - `:system` - System prompt string
+  - `:messages` - List of `%{role: atom, content: String.t()}`
+  - `:output` - `:json`
+  - `:schema` - JSON Schema map
+  - `:cache` - Boolean (optional)
+
+  For PTC-Lisp mode:
+  - `:system` - System prompt string
+  - `:messages` - List of `%{role: atom, content: String.t()}`
+  - `:cache` - Boolean (optional)
+
+  ## Returns
+
+  - `{:ok, %{content: String.t(), tokens: map()}}` on success
+  - `{:error, term()}` on failure
+  """
+  @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def call(model, %{output: :json, schema: schema} = req) do
+    messages = [%{role: :system, content: req.system} | req.messages]
+
+    case generate_object(model, messages, schema, cache: req[:cache] || false) do
+      {:ok, %{object: object, tokens: tokens}} ->
+        {:ok, %{content: Jason.encode!(object), tokens: tokens}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def call(model, req) do
+    messages = [%{role: :system, content: req.system} | req.messages]
+    generate_text(model, messages, cache: req[:cache] || false)
+  end
+
   # --- Provider Implementations ---
 
   defp call_ollama(model, messages, opts) do
