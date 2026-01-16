@@ -60,6 +60,27 @@ step.return.sentiment  #=> "positive"
 step.return.score      #=> 0.95
 ```
 
+### JSON Mode (Simpler Alternative)
+
+For classification, extraction, and reasoning tasks that don't need tools, use `output: :json`:
+
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "Extract the person's name and age",
+  context: %{text: "John is 25 years old"},
+  output: :json,
+  signature: "(text :string) -> {name :string, age :int}",
+  llm: my_llm
+)
+
+step.return.name  #=> "John"
+step.return.age   #=> 25
+```
+
+JSON mode skips PTC-Lisp entirely - the LLM returns structured JSON directly, validated against your signature. Use it when you need structured output but not computation or tool calls.
+
+**Constraints:** JSON mode requires a signature, cannot use tools, and doesn't support compression or firewall fields. See [Structured Output Callbacks](structured-output-callbacks.md) for implementation details.
+
 ## Adding Tools
 
 Tools let the agent call functions to gather information:

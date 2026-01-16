@@ -14,6 +14,8 @@ When you call `SubAgent.run/2`, the library:
 
 You don't write PTC-Lisp - the LLM does. You configure the agent with Elixir.
 
+**Alternative: JSON Mode.** For simple classification and extraction tasks, use `output: :json` to skip PTC-Lisp entirely. The LLM returns structured JSON directly. See [Getting Started](subagent-getting-started.md#json-mode-simpler-alternative).
+
 ## The Context Firewall
 
 SubAgents solve a fundamental problem: LLMs need information to make decisions, but context windows are expensive and limited. The **Context Firewall** lets agents work with large datasets while keeping the parent context lean.

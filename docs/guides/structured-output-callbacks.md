@@ -2,8 +2,6 @@
 
 This guide explains how to implement LLM callbacks for SubAgents, including support for `output: :json` mode.
 
-**Notice:** This guide is not implemented in PtcRunner yet.
-
 ## Overview
 
 ```elixir
