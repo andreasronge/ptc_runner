@@ -2,9 +2,9 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 6 -->
-<!-- date: 2026-01-08 -->
-<!-- changes: Added explicit guidance to not return early -->
+<!-- version: 7 -->
+<!-- date: 2026-01-16 -->
+<!-- changes: Added guidance to use doseq instead of map/pmap for side effects -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -57,6 +57,8 @@ Reason: I have 5 item IDs. The user asked for active items, and I've verified th
 ```
 
 **Keep output concise** — truncated at ~512 chars. Avoid decorative formatting.
+
+**Side effects in map/pmap are lost.** Use `doseq` to print items: `(doseq [x items] (println x))`.
 
 ### Completion
 
