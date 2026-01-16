@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   Provides filtering, mapping, sorting, and other collection manipulation functions.
   """
 
+  alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
   # Convert string to list of graphemes for sequence operations
@@ -21,6 +22,15 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   defp wrap_comparator(comp) when is_function(comp, 2) do
     fn a, b ->
       case comp.(a, b) do
+        n when is_integer(n) -> n <= 0
+        bool -> bool
+      end
+    end
+  end
+
+  defp wrap_comparator(comp) when is_tuple(comp) do
+    fn a, b ->
+      case Callable.call(comp, [a, b]) do
         n when is_integer(n) -> n <= 0
         bool -> bool
       end
@@ -44,7 +54,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise "type_error: #{msg}"
   end
 
-  def filter(pred, %MapSet{} = set), do: Enum.filter(set, pred)
+  def filter(pred, %MapSet{} = set), do: Enum.filter(set, &Callable.call(pred, [&1]))
 
   def filter(key, coll) when is_list(coll) and is_atom(key) do
     Enum.filter(coll, truthy_key_pred(key))
@@ -60,18 +70,20 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.filter(graphemes(coll), set_pred(set))
   end
 
-  def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, pred)
-  def filter(pred, coll) when is_binary(coll), do: Enum.filter(graphemes(coll), pred)
+  def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, &Callable.call(pred, [&1]))
+
+  def filter(pred, coll) when is_binary(coll),
+    do: Enum.filter(graphemes(coll), &Callable.call(pred, [&1]))
 
   def filter(pred, coll) when is_map(coll) do
     # When filtering a map, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
     coll
-    |> Enum.filter(fn {k, v} -> pred.([k, v]) end)
+    |> Enum.filter(fn {k, v} -> Callable.call(pred, [[k, v]]) end)
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
-  def remove(pred, %MapSet{} = set), do: Enum.reject(set, pred)
+  def remove(pred, %MapSet{} = set), do: Enum.reject(set, &Callable.call(pred, [&1]))
 
   def remove(key, coll) when is_list(coll) and is_atom(key) do
     Enum.reject(coll, truthy_key_pred(key))
@@ -87,14 +99,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.reject(graphemes(coll), set_pred(set))
   end
 
-  def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, pred)
-  def remove(pred, coll) when is_binary(coll), do: Enum.reject(graphemes(coll), pred)
+  def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, &Callable.call(pred, [&1]))
+
+  def remove(pred, coll) when is_binary(coll),
+    do: Enum.reject(graphemes(coll), &Callable.call(pred, [&1]))
 
   def remove(pred, coll) when is_map(coll) do
     # When removing from a map, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
     coll
-    |> Enum.reject(fn {k, v} -> pred.([k, v]) end)
+    |> Enum.reject(fn {k, v} -> Callable.call(pred, [[k, v]]) end)
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
@@ -108,8 +122,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find(coll, fn item -> MapSet.member?(set, item) end)
   end
 
-  def find(pred, coll) when is_list(coll), do: Enum.find(coll, pred)
-  def find(pred, coll) when is_binary(coll), do: Enum.find(graphemes(coll), pred)
+  def find(pred, coll) when is_list(coll), do: Enum.find(coll, &Callable.call(pred, [&1]))
+
+  def find(pred, coll) when is_binary(coll),
+    do: Enum.find(graphemes(coll), &Callable.call(pred, [&1]))
 
   def map(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
@@ -121,14 +137,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def map(%MapSet{} = set, coll) when is_binary(coll),
     do: Enum.map(graphemes(coll), set_pred(set))
 
-  def map(f, coll) when is_list(coll), do: Enum.map(coll, f)
-  def map(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), f)
+  def map(f, coll) when is_list(coll), do: Enum.map(coll, &Callable.call(f, [&1]))
+  def map(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), &Callable.call(f, [&1]))
 
-  def map(f, %MapSet{} = set), do: Enum.map(set, f)
+  def map(f, %MapSet{} = set), do: Enum.map(set, &Callable.call(f, [&1]))
 
-  def map(f, coll) when is_function(f, 1) and is_map(coll) do
+  def map(f, coll) when is_map(coll) do
     # When mapping over a map, each entry is passed as [key, value] pair
-    Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+    Enum.map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
   end
 
   def mapv(key, coll) when is_list(coll) and is_atom(key),
@@ -141,13 +157,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def mapv(%MapSet{} = set, coll) when is_binary(coll),
     do: Enum.map(graphemes(coll), set_pred(set))
 
-  def mapv(f, coll) when is_list(coll), do: Enum.map(coll, f)
-  def mapv(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), f)
+  def mapv(f, coll) when is_list(coll), do: Enum.map(coll, &Callable.call(f, [&1]))
+  def mapv(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), &Callable.call(f, [&1]))
 
-  def mapv(f, %MapSet{} = set), do: Enum.map(set, f)
+  def mapv(f, %MapSet{} = set), do: Enum.map(set, &Callable.call(f, [&1]))
 
-  def mapv(f, coll) when is_function(f, 1) and is_map(coll) do
-    Enum.map(coll, fn {k, v} -> f.([k, v]) end)
+  def mapv(f, coll) when is_map(coll) do
+    Enum.map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
   end
 
   # ============================================================
@@ -158,12 +174,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def map(_f, nil, _coll2), do: []
   def map(_f, _coll1, nil), do: []
 
-  def map(f, coll1, coll2) when is_function(f) and is_list(coll1) and is_list(coll2) do
-    Enum.zip_with(coll1, coll2, f)
+  def map(f, coll1, coll2) when is_list(coll1) and is_list(coll2) do
+    Enum.zip_with(coll1, coll2, fn a, b -> Callable.call(f, [a, b]) end)
   end
 
-  def map(f, coll1, coll2) when is_function(f) and is_binary(coll1) and is_binary(coll2) do
-    Enum.zip_with(graphemes(coll1), graphemes(coll2), f)
+  def map(f, coll1, coll2) when is_binary(coll1) and is_binary(coll2) do
+    Enum.zip_with(graphemes(coll1), graphemes(coll2), fn a, b -> Callable.call(f, [a, b]) end)
   end
 
   def map(_f, nil, _c2, _c3), do: []
@@ -171,8 +187,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def map(_f, _c1, _c2, nil), do: []
 
   def map(f, coll1, coll2, coll3)
-      when is_function(f) and is_list(coll1) and is_list(coll2) and is_list(coll3) do
-    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> f.(a, b, c) end)
+      when is_list(coll1) and is_list(coll2) and is_list(coll3) do
+    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
   end
 
   # Multi-arity mapv (identical to map since PTC-Lisp has no lazy sequences)
@@ -180,12 +196,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def mapv(_f, nil, _coll2), do: []
   def mapv(_f, _coll1, nil), do: []
 
-  def mapv(f, coll1, coll2) when is_function(f) and is_list(coll1) and is_list(coll2) do
-    Enum.zip_with(coll1, coll2, f)
+  def mapv(f, coll1, coll2) when is_list(coll1) and is_list(coll2) do
+    Enum.zip_with(coll1, coll2, fn a, b -> Callable.call(f, [a, b]) end)
   end
 
-  def mapv(f, coll1, coll2) when is_function(f) and is_binary(coll1) and is_binary(coll2) do
-    Enum.zip_with(graphemes(coll1), graphemes(coll2), f)
+  def mapv(f, coll1, coll2) when is_binary(coll1) and is_binary(coll2) do
+    Enum.zip_with(graphemes(coll1), graphemes(coll2), fn a, b -> Callable.call(f, [a, b]) end)
   end
 
   def mapv(_f, nil, _c2, _c3), do: []
@@ -193,8 +209,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def mapv(_f, _c1, _c2, nil), do: []
 
   def mapv(f, coll1, coll2, coll3)
-      when is_function(f) and is_list(coll1) and is_list(coll2) and is_list(coll3) do
-    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> f.(a, b, c) end)
+      when is_list(coll1) and is_list(coll2) and is_list(coll3) do
+    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
   end
 
   def map_indexed(f, coll) when is_list(coll) do
@@ -212,11 +228,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def map_indexed(f, coll) when is_map(coll) do
     coll
     |> Enum.with_index()
-    |> Enum.map(fn {{k, v}, idx} -> f.(idx, [k, v]) end)
+    |> Enum.map(fn {{k, v}, idx} -> Callable.call(f, [idx, [k, v]]) end)
   end
 
   defp with_index_map(enumerable, f) do
-    enumerable |> Enum.with_index() |> Enum.map(fn {item, idx} -> f.(idx, item) end)
+    enumerable
+    |> Enum.with_index()
+    |> Enum.map(fn {item, idx} -> Callable.call(f, [idx, item]) end)
   end
 
   def pluck(_key, nil), do: []
@@ -236,44 +254,42 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def sort_by(_keyfn, nil), do: []
 
   # sort_by with 2 args: (keyfn/key, coll)
-  def sort_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    Enum.sort_by(coll, keyfn)
-  end
-
-  def sort_by(keyfn, coll) when is_binary(coll) and is_function(keyfn, 1) do
-    Enum.sort_by(graphemes(coll), keyfn)
-  end
-
   def sort_by(key, coll)
       when is_list(coll) and (is_atom(key) or is_binary(key) or is_list(key)) do
     Enum.sort_by(coll, &FlexAccess.flex_get(&1, key))
   end
 
-  def sort_by(keyfn, coll) when is_map(coll) and is_function(keyfn, 1) do
+  def sort_by(keyfn, coll) when is_list(coll) do
+    Enum.sort_by(coll, &Callable.call(keyfn, [&1]))
+  end
+
+  def sort_by(keyfn, coll) when is_binary(coll) do
+    Enum.sort_by(graphemes(coll), &Callable.call(keyfn, [&1]))
+  end
+
+  def sort_by(keyfn, coll) when is_map(coll) do
     # When sorting a map, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
-    |> Enum.sort_by(fn {k, v} -> keyfn.([k, v]) end)
+    |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end)
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
   # sort_by with 3 args: (keyfn/key, comparator, coll)
-  def sort_by(keyfn, comp, coll)
-      when is_list(coll) and is_function(keyfn, 1) do
-    Enum.sort_by(coll, keyfn, wrap_comparator(comp))
-  end
-
   def sort_by(key, comp, coll)
       when is_list(coll) and (is_atom(key) or is_binary(key) or is_list(key)) do
     Enum.sort_by(coll, &FlexAccess.flex_get(&1, key), wrap_comparator(comp))
   end
 
-  def sort_by(keyfn, comp, coll)
-      when is_map(coll) and is_function(keyfn, 1) do
+  def sort_by(keyfn, comp, coll) when is_list(coll) do
+    Enum.sort_by(coll, &Callable.call(keyfn, [&1]), wrap_comparator(comp))
+  end
+
+  def sort_by(keyfn, comp, coll) when is_map(coll) do
     # When sorting a map with custom comparator, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
-    |> Enum.sort_by(fn {k, v} -> keyfn.([k, v]) end, wrap_comparator(comp))
+    |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end, wrap_comparator(comp))
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
@@ -338,10 +354,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.take_while(graphemes(coll), truthy_key_pred(key))
   end
 
-  def take_while(pred, coll) when is_list(coll), do: Enum.take_while(coll, pred)
+  def take_while(pred, coll) when is_list(coll),
+    do: Enum.take_while(coll, &Callable.call(pred, [&1]))
 
   def take_while(pred, coll) when is_binary(coll),
-    do: Enum.take_while(graphemes(coll), pred)
+    do: Enum.take_while(graphemes(coll), &Callable.call(pred, [&1]))
 
   def drop_while(key, coll) when is_list(coll) and is_atom(key) do
     Enum.drop_while(coll, truthy_key_pred(key))
@@ -349,10 +366,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def drop_while(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
 
-  def drop_while(pred, coll) when is_list(coll), do: Enum.drop_while(coll, pred)
+  def drop_while(pred, coll) when is_list(coll),
+    do: Enum.drop_while(coll, &Callable.call(pred, [&1]))
 
   def drop_while(pred, coll) when is_binary(coll),
-    do: Enum.drop_while(graphemes(coll), pred)
+    do: Enum.drop_while(graphemes(coll), &Callable.call(pred, [&1]))
 
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
   def distinct(coll) when is_binary(coll), do: Enum.uniq(graphemes(coll))
@@ -502,67 +520,81 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def reduce(f, coll) when is_list(coll) do
     case coll do
       [] -> nil
-      [h | t] -> Enum.reduce(t, h, fn elem, acc -> f.(acc, elem) end)
+      [h | t] -> Enum.reduce(t, h, fn elem, acc -> Callable.call(f, [acc, elem]) end)
     end
   end
 
   def reduce(f, %MapSet{} = set) do
     case MapSet.to_list(set) do
       [] -> nil
-      [h | t] -> Enum.reduce(t, h, fn elem, acc -> f.(acc, elem) end)
+      [h | t] -> Enum.reduce(t, h, fn elem, acc -> Callable.call(f, [acc, elem]) end)
     end
   end
 
   def reduce(f, coll) when is_map(coll) do
     case Map.to_list(coll) do
-      [] -> nil
-      [{k, v} | t] -> Enum.reduce(t, [k, v], fn {nk, nv}, acc -> f.(acc, [nk, nv]) end)
+      [] ->
+        nil
+
+      [{k, v} | t] ->
+        Enum.reduce(t, [k, v], fn {nk, nv}, acc -> Callable.call(f, [acc, [nk, nv]]) end)
     end
   end
 
   def reduce(f, coll) when is_binary(coll) do
     case graphemes(coll) do
       [] -> nil
-      [h | t] -> Enum.reduce(t, h, fn elem, acc -> f.(acc, elem) end)
+      [h | t] -> Enum.reduce(t, h, fn elem, acc -> Callable.call(f, [acc, elem]) end)
     end
   end
 
   # reduce with 3 args: (reduce f init coll)
   # Clojure: (f acc elem), Elixir: fn elem, acc -> ... end
   def reduce(f, init, coll) when is_list(coll) do
-    Enum.reduce(coll, init, fn elem, acc -> f.(acc, elem) end)
+    Enum.reduce(coll, init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
 
   def reduce(f, init, %MapSet{} = set) do
-    Enum.reduce(set, init, fn elem, acc -> f.(acc, elem) end)
+    Enum.reduce(set, init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
 
   def reduce(f, init, coll) when is_map(coll) do
-    Enum.reduce(coll, init, fn {k, v}, acc -> f.(acc, [k, v]) end)
+    Enum.reduce(coll, init, fn {k, v}, acc -> Callable.call(f, [acc, [k, v]]) end)
   end
 
   def reduce(f, init, coll) when is_binary(coll) do
-    Enum.reduce(graphemes(coll), init, fn elem, acc -> f.(acc, elem) end)
+    Enum.reduce(graphemes(coll), init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
 
-  def sum_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    coll
-    |> Enum.map(keyfn)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.sum()
-  end
-
-  def sum_by(key, coll) when is_list(coll) do
+  # sum_by: atom or string keys
+  def sum_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     coll
     |> Enum.map(&FlexAccess.flex_get(&1, key))
     |> Enum.reject(&is_nil/1)
     |> Enum.sum()
   end
 
+  # sum_by: vector path keys like [:nested :key]
+  def sum_by(path, coll) when is_list(path) and is_list(coll) do
+    coll
+    |> Enum.map(&FlexAccess.flex_get_in(&1, path))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sum()
+  end
+
+  # sum_by: function/builtin
+  def sum_by(keyfn, coll) when is_list(coll) do
+    coll
+    |> Enum.map(&Callable.call(keyfn, [&1]))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sum()
+  end
+
   def sum_by(_key, nil), do: 0
 
-  def avg_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    values = coll |> Enum.map(keyfn) |> Enum.reject(&is_nil/1)
+  # avg_by: atom or string keys
+  def avg_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
+    values = coll |> Enum.map(&FlexAccess.flex_get(&1, key)) |> Enum.reject(&is_nil/1)
 
     case values do
       [] -> nil
@@ -570,8 +602,19 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
-  def avg_by(key, coll) when is_list(coll) do
-    values = coll |> Enum.map(&FlexAccess.flex_get(&1, key)) |> Enum.reject(&is_nil/1)
+  # avg_by: vector path keys
+  def avg_by(path, coll) when is_list(path) and is_list(coll) do
+    values = coll |> Enum.map(&FlexAccess.flex_get_in(&1, path)) |> Enum.reject(&is_nil/1)
+
+    case values do
+      [] -> nil
+      vs -> Enum.sum(vs) / length(vs)
+    end
+  end
+
+  # avg_by: function/builtin
+  def avg_by(keyfn, coll) when is_list(coll) do
+    values = coll |> Enum.map(&Callable.call(keyfn, [&1])) |> Enum.reject(&is_nil/1)
 
     case values do
       [] -> nil
@@ -581,44 +624,71 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def avg_by(_key, nil), do: nil
 
-  def min_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    case Enum.reject(coll, &is_nil(keyfn.(&1))) do
-      [] -> nil
-      filtered -> Enum.min_by(filtered, keyfn)
-    end
-  end
-
-  def min_by(key, coll) when is_list(coll) do
+  # min_by: atom or string keys
+  def min_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     case Enum.reject(coll, &is_nil(FlexAccess.flex_get(&1, key))) do
       [] -> nil
       filtered -> Enum.min_by(filtered, &FlexAccess.flex_get(&1, key))
     end
   end
 
-  def min_by(_key, nil), do: nil
-
-  def max_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    case Enum.reject(coll, &is_nil(keyfn.(&1))) do
+  # min_by: vector path keys
+  def min_by(path, coll) when is_list(path) and is_list(coll) do
+    case Enum.reject(coll, &is_nil(FlexAccess.flex_get_in(&1, path))) do
       [] -> nil
-      filtered -> Enum.max_by(filtered, keyfn)
+      filtered -> Enum.min_by(filtered, &FlexAccess.flex_get_in(&1, path))
     end
   end
 
-  def max_by(key, coll) when is_list(coll) do
+  # min_by: function/builtin
+  def min_by(keyfn, coll) when is_list(coll) do
+    case Enum.reject(coll, &is_nil(Callable.call(keyfn, [&1]))) do
+      [] -> nil
+      filtered -> Enum.min_by(filtered, &Callable.call(keyfn, [&1]))
+    end
+  end
+
+  def min_by(_key, nil), do: nil
+
+  # max_by: atom or string keys
+  def max_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     case Enum.reject(coll, &is_nil(FlexAccess.flex_get(&1, key))) do
       [] -> nil
       filtered -> Enum.max_by(filtered, &FlexAccess.flex_get(&1, key))
     end
   end
 
-  def max_by(_key, nil), do: nil
-
-  def distinct_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    Enum.uniq_by(coll, keyfn)
+  # max_by: vector path keys
+  def max_by(path, coll) when is_list(path) and is_list(coll) do
+    case Enum.reject(coll, &is_nil(FlexAccess.flex_get_in(&1, path))) do
+      [] -> nil
+      filtered -> Enum.max_by(filtered, &FlexAccess.flex_get_in(&1, path))
+    end
   end
 
-  def distinct_by(key, coll) when is_list(coll) do
+  # max_by: function/builtin
+  def max_by(keyfn, coll) when is_list(coll) do
+    case Enum.reject(coll, &is_nil(Callable.call(keyfn, [&1]))) do
+      [] -> nil
+      filtered -> Enum.max_by(filtered, &Callable.call(keyfn, [&1]))
+    end
+  end
+
+  def max_by(_key, nil), do: nil
+
+  # distinct_by: atom or string keys
+  def distinct_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     Enum.uniq_by(coll, &FlexAccess.flex_get(&1, key))
+  end
+
+  # distinct_by: vector path keys
+  def distinct_by(path, coll) when is_list(path) and is_list(coll) do
+    Enum.uniq_by(coll, &FlexAccess.flex_get_in(&1, path))
+  end
+
+  # distinct_by: function/builtin
+  def distinct_by(keyfn, coll) when is_list(coll) do
+    Enum.uniq_by(coll, &Callable.call(keyfn, [&1]))
   end
 
   def distinct_by(_key, nil), do: []
@@ -631,16 +701,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       iex> PtcRunner.Lisp.Runtime.Collection.max_key_variadic([&String.length/1, "a", "abc", "ab"])
       "abc"
   """
-  def max_key_variadic([f | args]) when is_function(f, 1) and args != [] do
-    Enum.max_by(args, f)
-  end
-
   def max_key_variadic([_f]) do
     raise ArgumentError, "max-key requires at least 2 arguments (function and one value)"
   end
 
-  def max_key_variadic([f | _args]) do
-    raise ArgumentError, "max-key: first argument must be a function, got: #{inspect(f)}"
+  def max_key_variadic([f | args]) when args != [] do
+    Enum.max_by(args, &Callable.call(f, [&1]))
   end
 
   @doc """
@@ -651,24 +717,26 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       iex> PtcRunner.Lisp.Runtime.Collection.min_key_variadic([&String.length/1, "a", "abc", "ab"])
       "a"
   """
-  def min_key_variadic([f | args]) when is_function(f, 1) and args != [] do
-    Enum.min_by(args, f)
-  end
-
   def min_key_variadic([_f]) do
     raise ArgumentError, "min-key requires at least 2 arguments (function and one value)"
   end
 
-  def min_key_variadic([f | _args]) do
-    raise ArgumentError, "min-key: first argument must be a function, got: #{inspect(f)}"
+  def min_key_variadic([f | args]) when args != [] do
+    Enum.min_by(args, &Callable.call(f, [&1]))
   end
 
-  def group_by(keyfn, coll) when is_list(coll) and is_function(keyfn, 1) do
-    Enum.group_by(coll, keyfn)
-  end
-
-  def group_by(key, coll) when is_list(coll),
+  # group_by: atom or string keys
+  def group_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)),
     do: Enum.group_by(coll, &FlexAccess.flex_get(&1, key))
+
+  # group_by: vector path keys
+  def group_by(path, coll) when is_list(path) and is_list(coll),
+    do: Enum.group_by(coll, &FlexAccess.flex_get_in(&1, path))
+
+  # group_by: function/builtin
+  def group_by(keyfn, coll) when is_list(coll) do
+    Enum.group_by(coll, &Callable.call(keyfn, [&1]))
+  end
 
   def group_by(_key, nil), do: %{}
 
@@ -685,8 +753,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find_value(coll, set_pred(set))
   end
 
-  def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, pred)
-  def some(pred, coll) when is_binary(coll), do: Enum.find_value(graphemes(coll), pred)
+  def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, &Callable.call(pred, [&1]))
+
+  def some(pred, coll) when is_binary(coll),
+    do: Enum.find_value(graphemes(coll), &Callable.call(pred, [&1]))
 
   def every?(key, coll) when is_list(coll) and is_atom(key) do
     Enum.all?(coll, truthy_key_pred(key))
@@ -698,8 +768,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.all?(coll, set_pred(set))
   end
 
-  def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, pred)
-  def every?(pred, coll) when is_binary(coll), do: Enum.all?(graphemes(coll), pred)
+  def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, &Callable.call(pred, [&1]))
+
+  def every?(pred, coll) when is_binary(coll),
+    do: Enum.all?(graphemes(coll), &Callable.call(pred, [&1]))
 
   def not_any?(key, coll) when is_list(coll) and is_atom(key) do
     not Enum.any?(coll, truthy_key_pred(key))
@@ -711,8 +783,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     not Enum.any?(coll, set_pred(set))
   end
 
-  def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, pred)
-  def not_any?(pred, coll) when is_binary(coll), do: not Enum.any?(graphemes(coll), pred)
+  def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, &Callable.call(pred, [&1]))
+
+  def not_any?(pred, coll) when is_binary(coll),
+    do: not Enum.any?(graphemes(coll), &Callable.call(pred, [&1]))
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 

@@ -464,26 +464,16 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  # Unwrap builtin function tuples so they can be passed to higher-order functions
-  def closure_to_fun({:normal, fun}, %EvalContext{}, _do_eval_fn)
-      when is_function(fun) do
-    fun
-  end
+  # Pass through builtin function tuples so Callable.call/2 can dispatch correctly
+  # This preserves variadic/identity information for proper multi-arity handling
+  def closure_to_fun({:normal, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
+  def closure_to_fun({:variadic, _, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
 
-  def closure_to_fun({:variadic, fun, _identity}, %EvalContext{}, _do_eval_fn)
-      when is_function(fun) do
-    fun
-  end
+  def closure_to_fun({:variadic_nonempty, _, _} = builtin, %EvalContext{}, _do_eval_fn),
+    do: builtin
 
-  def closure_to_fun({:variadic_nonempty, _name, fun}, %EvalContext{}, _do_eval_fn)
-      when is_function(fun) do
-    fun
-  end
-
-  def closure_to_fun({:collect, fun}, %EvalContext{}, _do_eval_fn)
-      when is_function(fun) do
-    fun
-  end
+  def closure_to_fun({:multi_arity, _, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
+  def closure_to_fun({:collect, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
 
   # Special forms like println - convert to a function
   # Note: println side effects are lost when used in HOFs like map (same as pmap)
