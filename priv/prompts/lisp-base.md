@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 20 -->
+<!-- version: 21 -->
 <!-- date: 2026-01-16 -->
-<!-- changes: Add CRITICAL one code block instruction to Role section -->
+<!-- changes: Add key/val and max-key mistakes to Common Mistakes table -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -81,5 +81,7 @@ data/products                      ; read-only input data
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
 | `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |
+| `(key entry)` / `(val entry)` | `(fn [[k v]] ...)` — `key`/`val` not available |
+| `(max-key :price items)` | `(max-by :price items)` — no `max-key` |
 
 <!-- PTC_PROMPT_END -->
