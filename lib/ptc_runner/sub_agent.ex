@@ -139,6 +139,14 @@ defmodule PtcRunner.SubAgent do
   @type compression_opts :: nil | false | true | module() | {module(), keyword()}
 
   @typedoc """
+  Output mode for SubAgent execution.
+
+  - `:ptc_lisp` - Default. LLM generates PTC-Lisp code that is executed.
+  - `:json` - LLM generates JSON directly matching the signature's return type.
+  """
+  @type output_mode :: :ptc_lisp | :json
+
+  @typedoc """
   Output format options for truncation and display.
 
   Fields:
@@ -177,7 +185,8 @@ defmodule PtcRunner.SubAgent do
           context_descriptions: map() | nil,
           format_options: format_options(),
           float_precision: non_neg_integer(),
-          compression: compression_opts()
+          compression: compression_opts(),
+          output: output_mode()
         }
 
   alias PtcRunner.SubAgent.LLMResolver
@@ -210,7 +219,8 @@ defmodule PtcRunner.SubAgent do
     max_depth: 3,
     turn_budget: 20,
     format_options: @default_format_options,
-    float_precision: 2
+    float_precision: 2,
+    output: :ptc_lisp
   ]
 
   @doc "Returns the default format options."
@@ -399,7 +409,8 @@ defmodule PtcRunner.SubAgent do
         :field_descriptions,
         :context_descriptions,
         :format_options,
-        :float_precision
+        :float_precision,
+        :output
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -424,7 +435,8 @@ defmodule PtcRunner.SubAgent do
         :field_descriptions,
         :context_descriptions,
         :format_options,
-        :float_precision
+        :float_precision,
+        :output
       ])
 
     run(agent, runtime_opts)
