@@ -29,8 +29,8 @@ step.return.total  #=> 2450.00
 The SubAgent doesn't answer directly - it writes a program that computes the answer:
 
 ```clojure
-(->> (ctx/get_orders)
-     (filter (where :amount > 100))
+(->> (tool/get_orders)
+     (filter #(> (:amount %) 100))
      (sum-by :amount))
 ```
 
@@ -65,9 +65,9 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 
 ```clojure
 ;; LLM generates this - executes in parallel automatically
-(let [[user orders stats] (pcalls #(ctx/get_user {:id ctx/user_id})
-                                   #(ctx/get_orders {:id ctx/user_id})
-                                   #(ctx/get_stats {:id ctx/user_id}))]
+(let [[user orders stats] (pcalls #(tool/get_user {:id data/user_id})
+                                   #(tool/get_orders {:id data/user_id})
+                                   #(tool/get_stats {:id data/user_id}))]
   {:user user :order_count (count orders) :stats stats})
 ```
 
@@ -126,7 +126,7 @@ For direct program execution without the agentic loop:
 
 ```elixir
 {:ok, step} = PtcRunner.Lisp.run(
-  "(->> ctx/items (filter (where :active)) (count))",
+  "(->> data/items (filter :active) (count))",
   context: %{items: items}
 )
 step.return  #=> 3
