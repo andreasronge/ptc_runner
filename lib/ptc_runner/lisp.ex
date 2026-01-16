@@ -28,7 +28,7 @@ defmodule PtcRunner.Lisp do
   - Should not raise (return `{:error, reason}` for errors)
   """
 
-  alias PtcRunner.Lisp.{Analyze, Env, Eval, ExecutionError, Parser, SymbolCounter}
+  alias PtcRunner.Lisp.{Analyze, DataKeys, Env, Eval, ExecutionError, Parser, SymbolCounter}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Step
@@ -51,6 +51,7 @@ defmodule PtcRunner.Lisp do
     - `:max_heap` - Max heap size in words (default: 1_250_000)
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
+    - `:filter_context` - Filter context to only include accessed data keys (default: true)
 
   ## Return Value
 
@@ -101,6 +102,25 @@ defmodule PtcRunner.Lisp do
   Exceeding limits returns an error:
   - `{:error, {:timeout, ms}}` - execution exceeded timeout
   - `{:error, {:memory_exceeded, bytes}}` - heap limit exceeded
+
+  ## Context Filtering
+
+  By default, PTC-Lisp performs static analysis to identify which `data/xxx` keys are accessed
+  by a program, then filters the context to only include those datasets. This significantly
+  reduces memory pressure when the context contains large datasets that aren't used.
+
+      # Only products is loaded into the sandbox, orders/employees are filtered out
+      ctx = %{"products" => large_list, "orders" => large_list, "employees" => large_list}
+      PtcRunner.Lisp.run("(count data/products)", context: ctx)
+
+  Scalar context values (strings, numbers, nil) are always preserved as they typically
+  represent metadata like prompts or configuration.
+
+  Disable filtering if you need all context available (e.g., for dynamic data access):
+
+      PtcRunner.Lisp.run(source, context: ctx, filter_context: false)
+
+  See `PtcRunner.Lisp.DataKeys` for the static analysis implementation.
   """
   @spec run(String.t(), keyword()) ::
           {:ok, Step.t()} | {:error, Step.t()}
@@ -115,6 +135,7 @@ defmodule PtcRunner.Lisp do
     max_symbols = Keyword.get(opts, :max_symbols, 10_000)
     turn_history = Keyword.get(opts, :turn_history, [])
     max_print_length = Keyword.get(opts, :max_print_length)
+    filter_context = Keyword.get(opts, :filter_context, true)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -154,7 +175,8 @@ defmodule PtcRunner.Lisp do
         max_heap: max_heap,
         max_symbols: max_symbols,
         turn_history: turn_history,
-        max_print_length: max_print_length
+        max_print_length: max_print_length,
+        filter_context: filter_context
       }
 
       execute_program(source, opts)
@@ -180,14 +202,19 @@ defmodule PtcRunner.Lisp do
       max_heap: max_heap,
       max_symbols: max_symbols,
       turn_history: turn_history,
-      max_print_length: max_print_length
+      max_print_length: max_print_length,
+      filter_context: filter_context
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
          :ok <- check_symbol_limit(raw_ast, max_symbols, memory),
          {:ok, core_ast} <- Analyze.analyze(raw_ast) do
+      # Filter context to only include data keys accessed by the program
+      # This reduces memory pressure by not loading unused datasets
+      filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
+
       # Build Context for sandbox (turn_history passed for completeness, used via eval_fn)
-      context = PtcRunner.Context.new(ctx, memory, normalized_tools, turn_history)
+      context = PtcRunner.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
 
       # Build eval options (only include max_print_length if set)
       eval_opts = if max_print_length, do: [max_print_length: max_print_length], else: []
