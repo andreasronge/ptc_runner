@@ -478,8 +478,10 @@ defmodule PtcRunner.SubAgent do
 
         {context, received_field_descriptions} ->
           # Determine execution mode
-          if agent.max_turns == 1 and map_size(agent.tools) == 0 do
-            # Single-shot mode
+          # JSON mode always uses the loop (even for single-shot) since it has its own simpler flow
+          # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
+          if agent.output == :ptc_lisp and agent.max_turns == 1 and map_size(agent.tools) == 0 do
+            # PTC-Lisp single-shot mode
             run_single_shot(
               agent,
               llm,
@@ -490,7 +492,7 @@ defmodule PtcRunner.SubAgent do
               opts
             )
           else
-            # Loop mode - delegate to Loop.run/2
+            # Loop mode (including JSON mode) - delegate to Loop.run/2
             # Update opts with prepared context and received field descriptions
             updated_opts =
               opts
