@@ -1972,14 +1972,15 @@ Regex functions provide validation and extraction capabilities. To ensure system
 | `re-pattern` | `(re-pattern s)` | Compile string `s` into an opaque regex object |
 | `re-find` | `(re-find re s)` | Returns the first match of `re` in `s` |
 | `re-matches` | `(re-matches re s)` | Returns match if `re` matches the **entire** string `s` |
+| `re-seq` | `(re-seq re s)` | Returns all matches of `re` in `s` as a list |
 | `re-split` | `(re-split re s)` | Split string `s` by regex pattern `re` |
 | `regex?` | `(regex? x)` | Returns true if `x` is a regex object |
 
 **Opaque Regex Type:** Regexes do not have a literal syntax. They must be created using `re-pattern`. Internally, they are opaque objects that can be passed to functions but not inspected directly.
 
 **Return Value Semantics:**
-- If no match is found, returns `nil`.
-- If the regex has no capture groups, returns the matching string.
+- If no match is found, `re-find` and `re-matches` return `nil`; `re-seq` returns an empty list.
+- If the regex has no capture groups, returns the matching string (or list of strings for `re-seq`).
 - If the regex contains capture groups, returns a **vector** where the first element is the full match and subsequent elements are the groups.
 
 ```clojure
@@ -1987,6 +1988,8 @@ Regex functions provide validation and extraction capabilities. To ensure system
 (re-matches (re-pattern "\\d+") "123")          ; => "123"
 (re-matches (re-pattern "\\d+") "123abc")       ; => nil (not entire string)
 (re-find (re-pattern "(\\d+)-(\\d+)") "10-20")  ; => ["10-20" "10" "20"]
+(re-seq (re-pattern "\\d+") "a1b22c333")        ; => ["1" "22" "333"]
+(re-seq (re-pattern "(\\d)(\\w)") "1a2b")       ; => [["1a" "1" "a"] ["2b" "2" "b"]]
 (re-split (re-pattern "\\s+") "a  b   c")       ; => ["a" "b" "c"]
 (re-split (re-pattern ",") "a,b,c")             ; => ["a" "b" "c"]
 ```
@@ -2813,7 +2816,6 @@ The `#()` syntax desugars to the equivalent `fn`:
 
 ### 13.3 Functions Excluded from Core
 
-- Regex: `re-find`, `re-matches`, `re-seq`
 - `iterate`, `repeat`, `cycle` (infinite sequences)
 - Infinite `(range)` (standard finite `range` is supported: see §8.1)
 - `partial`, `comp` (function composition)

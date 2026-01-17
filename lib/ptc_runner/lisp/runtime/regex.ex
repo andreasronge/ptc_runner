@@ -113,4 +113,41 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
     # Unlike :re.run/3, :re.split/3 doesn't return error tuples - it always returns a list
     :re.split(input, mp, opts)
   end
+
+  @doc """
+  Find all matches of regex in string.
+  Returns list of matches (empty list if no matches).
+
+  ## Examples
+      (re-seq (re-pattern "\\d+") "a1b2c3") => ["1" "2" "3"]
+      (re-seq (re-pattern "(\\d)(\\w)") "1a2b") => [["1a" "1" "a"] ["2b" "2" "b"]]
+  """
+  def re_seq({:re_mp, mp, _, _}, s) when is_binary(s) do
+    input = truncate_input(s)
+
+    opts = [
+      :global,
+      :report_errors,
+      {:match_limit, @match_limit},
+      {:match_limit_recursion, @recursion_limit},
+      {:capture, :all, :binary}
+    ]
+
+    case :re.run(input, mp, opts) do
+      {:match, matches} ->
+        Enum.map(matches, &unwrap/1)
+
+      :nomatch ->
+        []
+
+      {:error, :match_limit} ->
+        raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)"
+
+      {:error, :match_limit_recursion} ->
+        raise RuntimeError, "Regex recursion limit exceeded"
+
+      {:error, reason} ->
+        raise RuntimeError, "Regex execution error: #{inspect(reason)}"
+    end
+  end
 end
