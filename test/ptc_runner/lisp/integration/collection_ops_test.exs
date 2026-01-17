@@ -676,6 +676,18 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} = Lisp.run(source)
       assert result == "a-b-c"
     end
+
+    test "handles nil separator by inserting nil between elements" do
+      source = "(interpose nil [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, nil, 2, nil, 3]
+    end
+
+    test "handles nil collection by returning empty list" do
+      source = "(interpose :x nil)"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
   end
 
   # ==========================================================================

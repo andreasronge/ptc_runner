@@ -3,6 +3,36 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
 
   alias PtcRunner.SubAgent
 
+  describe "timeout validation" do
+    test "accepts positive integer timeout" do
+      agent = SubAgent.new(prompt: "Test", timeout: 5000)
+      assert agent.timeout == 5000
+    end
+
+    test "rejects timeout: 0" do
+      assert_raise ArgumentError, ~r/timeout must be a positive integer/, fn ->
+        SubAgent.new(prompt: "Test", timeout: 0)
+      end
+    end
+
+    test "rejects negative timeout" do
+      assert_raise ArgumentError, ~r/timeout must be a positive integer/, fn ->
+        SubAgent.new(prompt: "Test", timeout: -1)
+      end
+    end
+
+    test "rejects timeout: nil" do
+      assert_raise ArgumentError, ~r/timeout cannot be nil/, fn ->
+        SubAgent.new(prompt: "Test", timeout: nil)
+      end
+    end
+
+    test "uses default timeout when not specified" do
+      agent = SubAgent.new(prompt: "Test")
+      assert agent.timeout == 1000
+    end
+  end
+
   describe "output validation" do
     test "accepts :ptc_lisp output mode" do
       agent = SubAgent.new(prompt: "Test", output: :ptc_lisp)

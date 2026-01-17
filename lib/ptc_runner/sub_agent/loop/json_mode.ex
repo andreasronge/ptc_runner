@@ -91,18 +91,10 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     state = %{context: context, expanded_prompt: expanded_prompt}
     user_message = build_user_message(agent, state)
 
-    # Build JSON schema from signature
-    schema =
-      if agent.parsed_signature do
-        Signature.to_json_schema(agent.parsed_signature)
-      else
-        nil
-      end
-
     %{
       system: @json_system_prompt,
       user: user_message,
-      schema: schema
+      schema: build_schema(agent)
     }
   end
 
@@ -122,22 +114,20 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   """
   @spec run(SubAgent.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(%SubAgent{} = agent, llm, state) do
-    # Build JSON schema from signature
-    schema =
-      if agent.parsed_signature do
-        Signature.to_json_schema(agent.parsed_signature)
-      else
-        nil
-      end
-
     # Initial JSON mode state
     json_state =
       state
-      |> Map.put(:schema, schema)
+      |> Map.put(:schema, build_schema(agent))
       |> Map.put(:json_mode, true)
 
     json_loop(agent, llm, json_state)
   end
+
+  # Build JSON schema from agent's parsed signature (or nil if no signature)
+  defp build_schema(%{parsed_signature: sig}) when not is_nil(sig),
+    do: Signature.to_json_schema(sig)
+
+  defp build_schema(_), do: nil
 
   # Loop when max_turns exceeded
   defp json_loop(agent, _llm, state) when state.turn > agent.max_turns do
@@ -453,11 +443,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   end
 
   # Atomize list elements based on signature
-  defp atomize_list(list, {:signature, _params, {:list, inner_type}}) do
+  # Note: Callers already guarantee list input via guards (lines 378, 394)
+  defp atomize_list(list, {:signature, _params, {:list, inner_type}}) when is_list(list) do
     Enum.map(list, &atomize_value(&1, inner_type))
   end
 
-  defp atomize_list(list, _), do: list
+  defp atomize_list(list, _) when is_list(list), do: list
 
   # Validate parsed JSON and complete or retry
   defp validate_and_complete(parsed, response, agent, llm, state) do

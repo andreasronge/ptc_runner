@@ -455,7 +455,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
       iex> PtcRunner.Lisp.Runtime.Collection.interpose(:x, [])
       []
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interpose(:x, nil)
+      []
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interpose(nil, [1, 2, 3])
+      [1, nil, 2, nil, 3]
   """
+  def interpose(_sep, nil), do: []
   def interpose(sep, coll) when is_list(coll), do: Enum.intersperse(coll, sep)
 
   # ============================================================

@@ -1441,6 +1441,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `into` | `(into to from)` | Pour from into to |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
 | `interleave` | `(interleave c1 c2)` | Interleave collections |
+| `interpose` | `(interpose sep coll)` | Insert separator between elements |
 | `zip` | `(zip c1 c2)` | Combine into pairs |
 
 ```clojure
@@ -1455,6 +1456,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (into #{} {:a 1})          ; => #{[:a 1]}
 (into {} #{[:a 1]})        ; => {:a 1}
 (flatten [[1 2] [3 [4]]])  ; => [1 2 3 4]
+(interpose ", " ["a" "b" "c"]) ; => ["a" ", " "b" ", " "c"]
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
 ```
 

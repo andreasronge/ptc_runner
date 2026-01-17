@@ -391,40 +391,38 @@ defmodule PtcRunner.SubAgent.Debug do
 
   # Format result for display
   defp format_result(result) when is_binary(result) do
-    if String.length(result) > 200 do
-      [String.slice(result, 0, 197) <> "..."]
-    else
-      String.split(result, "\n")
-    end
+    maybe_truncate_and_split(result)
   end
 
   defp format_result(result) when is_map(result) do
     if map_size(result) == 0 do
       ["{}"]
     else
-      formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
-
-      if String.length(formatted) > 200 do
-        [String.slice(formatted, 0, 197) <> "..."]
-      else
-        String.split(formatted, "\n")
-      end
+      result
+      |> Format.to_string(pretty: true, limit: 5, width: 80)
+      |> maybe_truncate_and_split()
     end
   end
 
   defp format_result(result) when is_list(result) do
-    formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
-
-    if String.length(formatted) > 200 do
-      [String.slice(formatted, 0, 197) <> "..."]
-    else
-      String.split(formatted, "\n")
-    end
+    result
+    |> Format.to_string(pretty: true, limit: 5, width: 80)
+    |> maybe_truncate_and_split()
   end
 
   defp format_result(result) do
-    formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
-    String.split(formatted, "\n")
+    result
+    |> Format.to_string(pretty: true, limit: 5, width: 80)
+    |> String.split("\n")
+  end
+
+  # Truncate text if over limit, then split into lines
+  defp maybe_truncate_and_split(text, limit \\ 200) do
+    if String.length(text) > limit do
+      [String.slice(text, 0, limit - 3) <> "..."]
+    else
+      String.split(text, "\n")
+    end
   end
 
   # Format data compactly for inline display
@@ -656,11 +654,15 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   # ANSI color helpers
-  defp ansi(:reset), do: IO.ANSI.reset()
-  defp ansi(:cyan), do: IO.ANSI.cyan()
-  defp ansi(:green), do: IO.ANSI.green()
-  defp ansi(:red), do: IO.ANSI.red()
-  defp ansi(:yellow), do: IO.ANSI.yellow()
-  defp ansi(:bold), do: IO.ANSI.bright()
-  defp ansi(:dim), do: IO.ANSI.faint()
+  @ansi_codes %{
+    reset: IO.ANSI.reset(),
+    cyan: IO.ANSI.cyan(),
+    green: IO.ANSI.green(),
+    red: IO.ANSI.red(),
+    yellow: IO.ANSI.yellow(),
+    bold: IO.ANSI.bright(),
+    dim: IO.ANSI.faint()
+  }
+
+  defp ansi(code), do: Map.get(@ansi_codes, code, "")
 end

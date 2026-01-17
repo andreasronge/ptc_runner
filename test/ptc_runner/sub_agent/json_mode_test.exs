@@ -790,6 +790,42 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert step.return == %{value: 1}
     end
 
+    test "validates empty list against [:int] signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "() -> [:int]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == []
+    end
+
+    test "validates empty list against list of objects signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Return items",
+          output: :json,
+          signature: "() -> [{id :int, name :string}]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == []
+    end
+
     test "handles :any return type in signature" do
       agent =
         SubAgent.new(
