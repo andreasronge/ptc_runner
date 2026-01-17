@@ -73,9 +73,14 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   @doc """
   Generate a preview of the JSON mode prompts.
 
-  Returns the system and user messages that would be sent to the LLM.
+  Returns the system and user messages that would be sent to the LLM,
+  plus the JSON schema used for validation.
   """
-  @spec preview_prompt(SubAgent.t(), map()) :: %{system: String.t(), user: String.t()}
+  @spec preview_prompt(SubAgent.t(), map()) :: %{
+          system: String.t(),
+          user: String.t(),
+          schema: map() | nil
+        }
   def preview_prompt(%SubAgent{} = agent, context) do
     alias PtcRunner.SubAgent.PromptExpander
 
@@ -86,9 +91,18 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     state = %{context: context, expanded_prompt: expanded_prompt}
     user_message = build_user_message(agent, state)
 
+    # Build JSON schema from signature
+    schema =
+      if agent.parsed_signature do
+        Signature.to_json_schema(agent.parsed_signature)
+      else
+        nil
+      end
+
     %{
       system: @json_system_prompt,
-      user: user_message
+      user: user_message,
+      schema: schema
     }
   end
 
@@ -193,9 +207,15 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
           duration_ms = System.monotonic_time(:millisecond) - state.start_time
           step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", %{})
 
+          # Build usage with schema metrics
+          usage =
+            state
+            |> Metrics.build_final_usage(duration_ms, 0)
+            |> add_schema_metrics(state.schema)
+
           step_with_metrics = %{
             step
-            | usage: Metrics.build_final_usage(state, duration_ms, 0),
+            | usage: usage,
               turns:
                 Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
               messages: build_collected_messages(state, messages),
@@ -221,6 +241,9 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     # Build data section from context
     data_section = format_data_section(state.context)
 
+    # Build output instruction based on return type
+    output_instruction = format_output_instruction(agent)
+
     # Build field descriptions from signature
     field_descriptions = format_field_descriptions(agent)
 
@@ -231,6 +254,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     @json_user_template
     |> String.replace("{{data_section}}", data_section)
     |> String.replace("{{task}}", state.expanded_prompt)
+    |> String.replace("{{output_instruction}}", output_instruction)
     |> String.replace("{{field_descriptions}}", field_descriptions)
     |> String.replace("{{example_output}}", example_output)
   end
@@ -253,6 +277,19 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   rescue
     # Fallback to inspect if JSON encoding fails (e.g., for atoms as keys)
     _ -> inspect(value, limit: :infinity)
+  end
+
+  # Format output instruction based on return type
+  defp format_output_instruction(%{parsed_signature: nil}) do
+    "Return a JSON object with these fields:"
+  end
+
+  defp format_output_instruction(%{parsed_signature: {:signature, _params, {:list, _}}}) do
+    "Return a JSON array:"
+  end
+
+  defp format_output_instruction(%{parsed_signature: {:signature, _params, _return_type}}) do
+    "Return a JSON object with these fields:"
   end
 
   # Format field descriptions from signature
@@ -345,10 +382,27 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     # Parse JSON from response
     case JsonParser.parse(response) do
       {:ok, parsed} when is_map(parsed) ->
-        validate_and_complete(parsed, response, agent, llm, state)
+        # Check if this is a wrapped array response (schema wraps arrays in {"items": [...]})
+        if signature_expects_list?(agent.parsed_signature) do
+          case Map.get(parsed, "items") || Map.get(parsed, :items) do
+            items when is_list(items) ->
+              validate_and_complete_list(items, response, agent, llm, state)
+
+            _ ->
+              handle_parse_error(
+                "Expected {\"items\": [...]} wrapper for array response",
+                response,
+                agent,
+                llm,
+                state
+              )
+          end
+        else
+          validate_and_complete(parsed, response, agent, llm, state)
+        end
 
       {:ok, parsed} when is_list(parsed) ->
-        # Allow arrays when signature expects a list
+        # Direct array response (some LLMs may return this)
         if signature_expects_list?(agent.parsed_signature) do
           validate_and_complete_list(parsed, response, agent, llm, state)
         else
@@ -584,11 +638,17 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     # Include the final assistant response in messages
     final_messages = state.messages ++ [%{role: :assistant, content: response}]
 
+    # Build usage with schema metrics
+    usage =
+      state
+      |> Metrics.build_final_usage(duration_ms, 0)
+      |> add_schema_metrics(state.schema)
+
     final_step = %Step{
       return: return_value,
       fail: nil,
       memory: %{},
-      usage: Metrics.build_final_usage(state, duration_ms, 0),
+      usage: usage,
       turns:
         Metrics.apply_trace_filter(
           Enum.reverse([turn | state.turns]),
@@ -623,9 +683,15 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     # Include the final assistant response in messages
     final_messages = state.messages ++ [%{role: :assistant, content: response}]
 
+    # Build usage with schema metrics
+    usage =
+      state
+      |> Metrics.build_final_usage(duration_ms, 0)
+      |> add_schema_metrics(state.schema)
+
     final_step = %{
       error_step
-      | usage: Metrics.build_final_usage(state, duration_ms, 0),
+      | usage: usage,
         turns:
           Metrics.apply_trace_filter(
             Enum.reverse([turn | state.turns]),
@@ -644,9 +710,15 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
     step = Step.error(reason, message, %{})
 
+    # Build usage with schema metrics
+    usage =
+      state
+      |> Metrics.build_final_usage(duration_ms, 0, -1)
+      |> add_schema_metrics(state.schema)
+
     step_with_metrics = %{
       step
-      | usage: Metrics.build_final_usage(state, duration_ms, 0, -1),
+      | usage: usage,
         turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
         messages: build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt
@@ -666,5 +738,18 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp build_collected_messages(%{collect_messages: true} = state, messages) do
     system_prompt = Map.get(state, :current_system_prompt, @json_system_prompt)
     [%{role: :system, content: system_prompt} | messages]
+  end
+
+  # Add schema metrics to usage map
+  defp add_schema_metrics(usage, schema) when is_map(schema) do
+    schema_json = Jason.encode!(schema)
+
+    usage
+    |> Map.put(:schema_used, true)
+    |> Map.put(:schema_bytes, byte_size(schema_json))
+  end
+
+  defp add_schema_metrics(usage, nil) do
+    Map.put(usage, :schema_used, false)
   end
 end

@@ -333,6 +333,34 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert step.usage.turns == 1
     end
 
+    test "includes schema_used and schema_bytes in usage when schema is provided" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :json,
+          signature: "() -> {value :int}",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|{"value": 1}|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.usage.schema_used == true
+      assert step.usage.schema_bytes > 0
+      # Verify schema_bytes matches actual schema size
+      expected_schema = %{
+        "type" => "object",
+        "properties" => %{"value" => %{"type" => "integer"}},
+        "required" => ["value"],
+        "additionalProperties" => false
+      }
+
+      assert step.usage.schema_bytes == byte_size(Jason.encode!(expected_schema))
+    end
+
     test "includes trace when enabled" do
       agent =
         SubAgent.new(
@@ -664,6 +692,82 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       # Preview should match actual input
       assert preview.system == input.system
       assert preview.user == hd(input.messages).content
+    end
+
+    test "preview_prompt includes JSON schema for object return type" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze text",
+          output: :json,
+          signature: "(text :string) -> {score :int, label :string}",
+          max_turns: 1
+        )
+
+      preview = SubAgent.preview_prompt(agent, context: %{text: "test"})
+
+      assert preview.schema == %{
+               "type" => "object",
+               "properties" => %{
+                 "score" => %{"type" => "integer"},
+                 "label" => %{"type" => "string"}
+               },
+               "required" => ["score", "label"],
+               "additionalProperties" => false
+             }
+    end
+
+    test "preview_prompt includes JSON schema for array return type (wrapped in object)" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "(items [{id :int}]) -> [:int]",
+          max_turns: 1
+        )
+
+      preview = SubAgent.preview_prompt(agent, context: %{items: []})
+
+      # Array schemas are wrapped in object because most LLM providers require object at root
+      assert preview.schema == %{
+               "type" => "object",
+               "properties" => %{
+                 "items" => %{"type" => "array", "items" => %{"type" => "integer"}}
+               },
+               "required" => ["items"],
+               "additionalProperties" => false
+             }
+    end
+
+    test "preview_prompt returns nil schema for PTC-Lisp mode" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze text",
+          signature: "(text :string) -> {score :int}",
+          max_turns: 1
+        )
+
+      # Default is PTC-Lisp mode
+      assert agent.output == :ptc_lisp
+
+      preview = SubAgent.preview_prompt(agent, context: %{text: "test"})
+
+      assert preview.schema == nil
+    end
+
+    test "preview_prompt returns nil schema for PTC-Lisp without signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Do something",
+          max_turns: 1
+        )
+
+      # PTC-Lisp mode doesn't require signature
+      assert agent.output == :ptc_lisp
+      assert agent.parsed_signature == nil
+
+      preview = SubAgent.preview_prompt(agent, context: %{})
+
+      assert preview.schema == nil
     end
   end
 
