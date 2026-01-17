@@ -306,6 +306,24 @@ Key-value associations:
 {[:a :b] "nested"}        ; VALIDATION ERROR - vector key
 ```
 
+**Maps as functions:** Maps can be invoked as functions to look up values by key:
+
+| Expression | Result | Description |
+|------------|--------|-------------|
+| `({:a 1 :b 2} :a)` | `1` | Keyword key lookup |
+| `({:a 1} :missing)` | `nil` | Missing key returns nil |
+| `({:a 1} :missing "default")` | `"default"` | Missing key with default |
+| `({"name" "Alice"} "name")` | `"Alice"` | String key lookup |
+
+**Note:** Maps cannot be passed directly to higher-order functions like `mapv` or `filter`. Use a wrapper closure instead:
+
+```clojure
+;; Won't work: (mapv my-map keys)
+;; Use instead:
+(let [lookup {:a 1 :b 2}]
+  (mapv #(lookup %) [:a :b]))  ; => [1 2]
+```
+
 ### 3.9 Sets
 
 Unordered collections of unique values:
