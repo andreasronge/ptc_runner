@@ -71,6 +71,28 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
                        |> @extract_prompt_content.()
 
   @doc """
+  Generate a preview of the JSON mode prompts.
+
+  Returns the system and user messages that would be sent to the LLM.
+  """
+  @spec preview_prompt(SubAgent.t(), map()) :: %{system: String.t(), user: String.t()}
+  def preview_prompt(%SubAgent{} = agent, context) do
+    alias PtcRunner.SubAgent.PromptExpander
+
+    # Expand the mission template
+    {:ok, expanded_prompt} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
+
+    # Build user message using the same logic as the execution loop
+    state = %{context: context, expanded_prompt: expanded_prompt}
+    user_message = build_user_message(agent, state)
+
+    %{
+      system: @json_system_prompt,
+      user: user_message
+    }
+  end
+
+  @doc """
   Execute a SubAgent in JSON mode.
 
   ## Parameters
@@ -213,15 +235,24 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     |> String.replace("{{example_output}}", example_output)
   end
 
-  # Format context as data section
+  # Format context as data section (as JSON for JSON mode)
   defp format_data_section(context) when map_size(context) == 0 do
     "(no input data)"
   end
 
   defp format_data_section(context) do
     Enum.map_join(context, "\n", fn {key, value} ->
-      "- `#{key}`: #{inspect(value, limit: 50)}"
+      json_value = format_as_json(value)
+      "- `#{key}`: #{json_value}"
     end)
+  end
+
+  # Format value as JSON
+  defp format_as_json(value) do
+    Jason.encode!(value)
+  rescue
+    # Fallback to inspect if JSON encoding fails (e.g., for atoms as keys)
+    _ -> inspect(value, limit: :infinity)
   end
 
   # Format field descriptions from signature
@@ -316,8 +347,21 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
       {:ok, parsed} when is_map(parsed) ->
         validate_and_complete(parsed, response, agent, llm, state)
 
-      {:ok, _non_map} ->
-        # JsonParser allows arrays, but we only accept objects
+      {:ok, parsed} when is_list(parsed) ->
+        # Allow arrays when signature expects a list
+        if signature_expects_list?(agent.parsed_signature) do
+          validate_and_complete_list(parsed, response, agent, llm, state)
+        else
+          handle_parse_error(
+            "Response must be a JSON object, not an array or primitive",
+            response,
+            agent,
+            llm,
+            state
+          )
+        end
+
+      {:ok, _primitive} ->
         handle_parse_error(
           "Response must be a JSON object, not an array or primitive",
           response,
@@ -333,6 +377,33 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
         handle_parse_error("JSON parse error", response, agent, llm, state)
     end
   end
+
+  # Check if the signature expects a list as return type
+  defp signature_expects_list?(nil), do: false
+  defp signature_expects_list?({:signature, _params, {:list, _}}), do: true
+  defp signature_expects_list?(_), do: false
+
+  # Validate parsed list and complete or retry
+  defp validate_and_complete_list(parsed_list, response, agent, llm, state) do
+    # Atomize elements based on signature's inner type
+    atomized = atomize_list(parsed_list, agent.parsed_signature)
+
+    # Validate against signature
+    case validate_return(agent, atomized) do
+      :ok ->
+        build_success_step(atomized, response, state, agent)
+
+      {:error, validation_errors} ->
+        handle_validation_error(validation_errors, response, atomized, agent, llm, state)
+    end
+  end
+
+  # Atomize list elements based on signature
+  defp atomize_list(list, {:signature, _params, {:list, inner_type}}) do
+    Enum.map(list, &atomize_value(&1, inner_type))
+  end
+
+  defp atomize_list(list, _), do: list
 
   # Validate parsed JSON and complete or retry
   defp validate_and_complete(parsed, response, agent, llm, state) do

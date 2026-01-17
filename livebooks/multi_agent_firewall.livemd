@@ -10,10 +10,14 @@ deps =
     [{:ptc_runner, "~> 0.5.0"}]
   end
 
-Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+Mix.install(deps ++ [{:kino, "~> 0.14"}], consolidate_protocols: false)
 ```
 
 ## Setup
+
+```elixir
+IEx.Helpers.recompile()
+```
 
 Add your API key in the Secrets panel (`ss`).
 
@@ -25,17 +29,10 @@ if(api_key, do: "API key configured", else: "No API key - add OPENROUTER_API_KEY
 
 ```elixir
 model_options =
-  if Code.ensure_loaded?(LLMClient) do
-    LLMClient.list_models()
-    |> Enum.filter(& &1.available)
-    |> Enum.map(&{&1.model_id, "#{&1.alias} - #{&1.description}"})
-    |> Enum.sort_by(&elem(&1, 1))
-  else
-    [
-      {"openrouter:anthropic/claude-haiku-4.5", "haiku - Claude Haiku 4.5"},
-      {"openrouter:google/gemini-2.5-flash", "gemini - Gemini 2.5 Flash"}
-    ]
-  end
+  LLMClient.list_models()
+  |> Enum.filter(& &1.available)
+  |> Enum.map(&{&1.model_id, "#{&1.alias} - #{&1.description}"})
+  |> Enum.sort_by(&elem(&1, 1))
 
 model_input = Kino.Input.select("Model", model_options)
 ```
@@ -43,22 +40,8 @@ model_input = Kino.Input.select("Model", model_options)
 ```elixir
 model = Kino.Input.read(model_input)
 
-my_llm =
-  if Code.ensure_loaded?(LLMClient) do
-    fn %{system: system, messages: messages} ->
-      case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 60_000) do
-        {:ok, r} -> {:ok, r}
-        error -> error
-      end
-    end
-  else
-    fn %{system: system, messages: messages} ->
-      case ReqLLM.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 30_000) do
-        {:ok, r} -> {:ok, %{content: ReqLLM.Response.text(r), tokens: ReqLLM.Response.usage(r)}}
-        error -> error
-      end
-    end
-  end
+# LLMClient.callback/1 handles both JSON and PTC-Lisp modes automatically
+my_llm = LLMClient.callback(model)
 
 "Ready: #{model}"
 ```
@@ -71,23 +54,31 @@ Fields prefixed with `_` stay in BEAM memory but are hidden from LLM prompts. Th
 alias PtcRunner.SubAgent
 alias PtcRunner.SubAgent.Debug
 
-# Data with firewalled field
-article = %{
-  title: "Quantum Computing Basics",
-  keywords: ["quantum", "qubits"],
-  _body: "Quantum computers leverage quantum mechanical phenomena like superposition and entanglement. Unlike classical bits that are either 0 or 1, qubits can exist in multiple states simultaneously, enabling parallel computation."
+context = %{
+    topic: "quantum computing",
+    articles: [
+      %{id: 1, keywords: ["quantum", "coffee roasters"]},
+      %{id: 2, keywords: ["quantum", "qubits", "decoherence"]},
+      %{id: 3, keywords: ["quantum", "physics", "skepticism"]}
+    ]
 }
 
 # Preview what LLM sees - note _body is hidden
 agent = SubAgent.new(
-  prompt: "Summarize the article '{{title}}'",
-  signature: "(title :string, keywords [:string], _body :string) -> {summary :string}"
+  prompt: "Return IDs of articles whose keywords are relevant to {{topic}}. Exclude unrelated articles (e.g., coffee, sports).",
+  signature: "(topic :string, articles [{id :int, keywords [:string]}]) -> [:int]",
+  output: :json 
 )
 
-preview = SubAgent.preview_prompt(agent, context: article)
+preview = SubAgent.preview_prompt(agent, context: context)
 IO.puts("=== LLM sees this user message ===")
 IO.puts(preview.user)
-IO.puts("\n=== _body is NOT shown above ===")
+
+{_, step } = SubAgent.run(agent, llm: my_llm, context: context)
+Debug.print_trace(step, raw: true)
+
+IO.puts("=== step returns")
+step.return
 ```
 
 ## Multi-Agent Pipeline
@@ -129,7 +120,7 @@ Finds relevant article. The `_body` flows through the return value without the L
   context: %{topic: "quantum computing", articles: articles},
   llm: my_llm,
   debug: true,
-  compression: true,
+  output: :json,
   max_turns: 5
 )
 
@@ -230,3 +221,5 @@ end
 * [SubAgent Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) - Context firewall details
 * [SubAgent Patterns](https://hexdocs.pm/ptc_runner/subagent-patterns.html) - Composition patterns
 * [LLM Agent Livebook](ptc_runner_llm_agent.livemd) - Basic SubAgent usage
+
+<!-- livebook:{"offset":8227,"stamp":{"token":"XCP.RpWA-eoyGTvjyRZdDt0f3_XvZVac13jYPRvIf1W300DzS1zbmPaVOKKxTuMravHH9phWn0bT_NUy7AHgmHQmVT__E3BmPl6CYlv6XyrMKbC4gHFPAL8Et_zyvUsp","version":2}} -->

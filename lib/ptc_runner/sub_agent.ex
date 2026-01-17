@@ -1103,8 +1103,21 @@ defmodule PtcRunner.SubAgent do
         }
 
   def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
+    alias PtcRunner.SubAgent.Loop.JsonMode
+
     context = Keyword.get(opts, :context, %{})
 
+    # Use JSON mode preview for JSON output agents
+    if agent.output == :json do
+      preview = JsonMode.preview_prompt(agent, context)
+      Map.put(preview, :tool_schemas, [])
+    else
+      preview_prompt_ptc_lisp(agent, context)
+    end
+  end
+
+  # PTC-Lisp mode preview (original implementation)
+  defp preview_prompt_ptc_lisp(agent, context) do
     alias PtcRunner.SubAgent.{PromptExpander, SystemPrompt}
 
     # Generate system prompt - static sections only (matches what Loop sends)

@@ -527,6 +527,146 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
     end
   end
 
+  describe "JSON mode array return type" do
+    test "accepts array when signature expects list" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "() -> [:int]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[1, 2, 3]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == [1, 2, 3]
+    end
+
+    test "accepts array of objects when signature expects list of maps" do
+      agent =
+        SubAgent.new(
+          prompt: "Return items",
+          output: :json,
+          signature: "() -> [{id :int, name :string}]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == [%{id: 1, name: "a"}, %{id: 2, name: "b"}]
+    end
+
+    test "validates array elements against signature type" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "() -> [:int]",
+          max_turns: 2
+        )
+
+      call_count = :counters.new(1, [:atomics])
+
+      llm = fn _input ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        case count do
+          0 -> {:ok, ~s|["not", "ints"]|}
+          _ -> {:ok, ~s|[1, 2, 3]|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == [1, 2, 3]
+      assert length(step.turns) == 2
+    end
+
+    test "rejects array when signature expects object" do
+      agent =
+        SubAgent.new(
+          prompt: "Return object",
+          output: :json,
+          signature: "() -> {value :int}",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[1, 2, 3]|}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm)
+
+      assert step.fail.message =~ "must be a JSON object"
+    end
+  end
+
+  describe "JSON mode preview_prompt" do
+    test "preview_prompt returns JSON mode format" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs for {{topic}}",
+          output: :json,
+          signature: "(topic :string, items [{id :int}]) -> [:int]",
+          max_turns: 1
+        )
+
+      context = %{topic: "test", items: [%{id: 1}, %{id: 2}]}
+      preview = SubAgent.preview_prompt(agent, context: context)
+
+      # System prompt should be JSON mode prompt
+      assert preview.system =~ "structured JSON"
+      refute preview.system =~ "PTC-Lisp"
+
+      # User message should have JSON formatted data (not Elixir format)
+      assert preview.user =~ ~s|`topic`: "test"|
+      assert preview.user =~ ~s|[{"id":1},{"id":2}]|
+      refute preview.user =~ "%{id:"
+
+      # Should include task and expected output
+      assert preview.user =~ "Return IDs for test"
+      assert preview.user =~ "Expected Output"
+    end
+
+    test "preview_prompt matches actual LLM input" do
+      agent =
+        SubAgent.new(
+          prompt: "Classify {{text}}",
+          output: :json,
+          signature: "(text :string) -> {label :string}",
+          max_turns: 1
+        )
+
+      context = %{text: "hello world"}
+      preview = SubAgent.preview_prompt(agent, context: context)
+
+      # Capture actual LLM input
+      test_pid = self()
+
+      llm = fn input ->
+        send(test_pid, {:llm_input, input})
+        {:ok, ~s|{"label": "greeting"}|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, context: context)
+
+      assert_receive {:llm_input, input}
+
+      # Preview should match actual input
+      assert preview.system == input.system
+      assert preview.user == hd(input.messages).content
+    end
+  end
+
   describe "JSON mode edge cases" do
     test "handles empty context" do
       agent =

@@ -222,41 +222,11 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
     end
 
-    # Print program
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
-
-    if turn.program do
-      turn.program
-      |> String.split("\n")
-      |> fit_lines(raw_mode, @line_width)
-      |> Enum.each(fn line ->
-        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
-      end)
-    else
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(parsing failed)#{ansi(:reset)}")
-    end
+    # Print program or JSON mode indicator
+    print_program_section(turn, raw_mode)
 
     # Print tool calls if any
-    unless Enum.empty?(turn.tool_calls) do
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Tools:#{ansi(:reset)}")
-
-      Enum.each(turn.tool_calls, fn call ->
-        tool_name = Map.get(call, :name, "unknown")
-        tool_args = Map.get(call, :args, %{})
-        tool_result = Map.get(call, :result, nil)
-
-        args_str = format_compact(tool_args)
-        result_str = format_compact(tool_result)
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}->#{ansi(:reset)} #{tool_name}(#{args_str})"
-        )
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:green)}<-#{ansi(:reset)} #{result_str}"
-        )
-      end)
-    end
+    print_tool_calls(turn.tool_calls)
 
     # Print println output if any
     unless Enum.empty?(turn.prints) do
@@ -280,6 +250,52 @@ defmodule PtcRunner.SubAgent.Debug do
     end)
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+  end
+
+  # Print program section (or JSON mode indicator)
+  defp print_program_section(turn, raw_mode) do
+    cond do
+      turn.program ->
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
+
+        turn.program
+        |> String.split("\n")
+        |> fit_lines(raw_mode, @line_width)
+        |> Enum.each(fn line ->
+          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
+        end)
+
+      turn.success? ->
+        # JSON mode - no program, show response format
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Response:#{ansi(:reset)}")
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(JSON mode)#{ansi(:reset)}")
+
+      true ->
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(parsing failed)#{ansi(:reset)}")
+    end
+  end
+
+  # Print tool calls section
+  defp print_tool_calls([]), do: :ok
+
+  defp print_tool_calls(tool_calls) do
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Tools:#{ansi(:reset)}")
+
+    Enum.each(tool_calls, fn call ->
+      tool_name = Map.get(call, :name, "unknown")
+      tool_args = Map.get(call, :args, %{})
+      tool_result = Map.get(call, :result, nil)
+
+      args_str = format_compact(tool_args)
+      result_str = format_compact(tool_result)
+
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}->#{ansi(:reset)} #{tool_name}(#{args_str})"
+      )
+
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:green)}<-#{ansi(:reset)} #{result_str}")
+    end)
   end
 
   # Print compressed view using SingleUserCoalesced compression
