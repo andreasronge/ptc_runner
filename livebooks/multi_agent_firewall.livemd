@@ -16,7 +16,8 @@ Mix.install(deps ++ [{:kino, "~> 0.14"}], consolidate_protocols: false)
 ## Setup
 
 ```elixir
-IEx.Helpers.recompile()
+# For testing and loading local ptc_runner library
+# IEx.Helpers.recompile()
 ```
 
 Add your API key in the Secrets panel (`ss`).
@@ -85,7 +86,7 @@ Two specialized agents that will be used as tools:
 ```elixir
 # Agent 1: Filter articles by relevance
 filter_agent = SubAgent.new(
-  prompt: "Return IDs of articles whose keywords are relevant to {{topic}}. Exclude unrelated articles (e.g., coffee, sports, brands).",
+  prompt: "Return IDs of articles whose keywords are relevant to {{topic}}. Exclude unrelated articles.",
   signature: "(topic :string, articles [{id :int, keywords [:string]}]) -> [:int]",
   description: "Filter articles by topic relevance, returns list of relevant article IDs",
   output: :json,
@@ -240,6 +241,13 @@ Key Points:
 - Each tool call is a separate LLM request
 - JSON schema ensures structured responses
 """)
+```
+
+### Compiling Agents, TODO - not working yet
+
+```elixir
+{_, compiled_agent } = SubAgent.compile(orchestrator, llm: my_llm)
+compiled_agent
 ```
 
 ## Interactive Query

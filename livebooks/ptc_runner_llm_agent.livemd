@@ -1,4 +1,4 @@
-# PTC-Lisp SubAgent
+# SubAgent Examples
 
 ```elixir
 repo_root = Path.expand("..", __DIR__)
@@ -18,7 +18,8 @@ Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_prot
 Add your API key in the Secrets panel (`ss`) for cloud models. Ollama works without a key.
 
 ```elixir
-IEx.Helpers.recompile()
+# For testing locally and reloading the library
+# IEx.Helpers.recompile()
 ```
 
 ```elixir
@@ -52,7 +53,7 @@ my_llm =
   if Code.ensure_loaded?(LLMClient) do
     fn %{system: system, messages: messages} ->
       case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 60_000) do
-        {:ok, r} -> {:ok, r}  # Return full response with tokens
+        {:ok, r} -> {:ok, r}
         error -> error
       end
     end
@@ -68,85 +69,117 @@ my_llm =
 "Ready: #{model}"
 ```
 
-## Basic Example
+## Output Modes
+
+SubAgents support two output modes:
+
+| Mode                  | Use When                                              | Output                  |
+| --------------------- | ----------------------------------------------------- | ----------------------- |
+| `:json`               | Classification, extraction, summarization             | Structured JSON         |
+| `:ptc_lisp` (default) | Computation, tool orchestration, multi-step reasoning | PTC-Lisp program result |
+
+### JSON Mode - Direct LLM Tasks
+
+Use `output: :json` when the LLM can answer directly without computation:
 
 ```elixir
+alias PtcRunner.SubAgent
 alias PtcRunner.SubAgent.Debug
 
-{:ok, step} = PtcRunner.SubAgent.run(
-  "What is the sum of the first 5 prime numbers?",
-  llm: my_llm,
-  debug: true
+review = "Great product, fast shipping! Would buy again."
+
+{:ok, step} = SubAgent.run(
+  "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
+  output: :json,
+  signature: "(review :string) -> {sentiment :string, confidence :float}",
+  context: %{review: review},
+  llm: my_llm
 )
 
-Debug.print_trace(step)
+Debug.print_trace(step, raw: true)
 step.return
 ```
 
-```elixir
-Debug.print_trace(step, view: :compressed)
-```
+### PTC-Lisp Mode - Computational Tasks
 
-See [print_trace/2](https://hexdocs.pm/ptc_runner/PtcRunner.SubAgent.Debug.html#print_trace/2) for trace options (`messages`, `system`, `usage`).
-
-To preview the system prompt before running, use [preview_prompt/2](https://hexdocs.pm/ptc_runner/PtcRunner.SubAgent.html#preview_prompt/2):
+The default mode. The LLM writes a program to solve tasks that need accurate computation:
 
 ```elixir
-agent = PtcRunner.SubAgent.new(prompt: "What is 2 + 2?")
-PtcRunner.SubAgent.preview_prompt(agent).system |> IO.puts()
-```
-
-## The Raspberry Problem
-
-LLMs often fail at simple counting tasks. Using PTC-Lisp, the agent can solve this accurately:
-
-```elixir
-{:ok, step} = PtcRunner.SubAgent.run(
+{:ok, step} = SubAgent.run(
   "How many r's are in raspberry?",
   llm: my_llm,
-  debug: true
+  max_turns: 1
 )
 
-Debug.print_trace(step)
-step.return
-```
-
-## With Signatures
-
-Use `context` to pass data. Signatures validate the output structure:
-
-```elixir
-review = "Great product, fast shipping! Would buy again."
-agent = PtcRunner.SubAgent.new(
-  prompt: "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
-  signature: "(review :string) -> {sentiment :string, confidence :float}"
-)
-"done"
-
-```
-
-```elixir
-PtcRunner.SubAgent.preview_prompt(agent, context: %{user: "alice"})
-```
-
-```elixir
-
-{_, step} = PtcRunner.SubAgent.run(agent,
-  llm: my_llm,
-  context: %{ review: review },
-  debug: true,
-  compression: true,
-  turns: 1
-)
-
-step.return
-```
-
-```elixir
 Debug.print_trace(step, raw: true)
+step.return
 ```
 
-## With Tools
+### Execution Modes
+
+| `max_turns`         | Mode        | Behavior                              |
+| ------------------- | ----------- | ------------------------------------- |
+| `1`                 | Single-shot | One LLM call, answer immediately      |
+| `> 1` (default: 10) | Multi-turn  | Can iterate, fix errors, explore data |
+
+**Single-shot** is faster and cheaper - use when the task is straightforward.
+
+**Multi-turn** allows the LLM to inspect results with `println`, retry on errors, and call `return` when confident.
+
+## Signatures
+
+Signatures define input/output types. They work with both output modes.
+
+**Format:** `(input1 :type, input2 :type) -> output_type`
+
+| Type                                 | Examples                 |
+| ------------------------------------ | ------------------------ |
+| `:string`, `:int`, `:float`, `:bool` | Primitives               |
+| `{field :type, ...}`                 | Object with named fields |
+| `[element_type]`                     | List of elements         |
+| `{:optional, :type}`                 | Optional field           |
+
+```elixir
+# Input: two strings, Output: object with score and explanation
+sig1 = "(text1 :string, text2 :string) -> {similarity :float, explanation :string}"
+
+# Input: list of items, Output: object with categorized lists
+sig2 = "(items [{name :string, price :float}]) -> {expensive [{name :string}], cheap [{name :string}]}"
+
+# Output only (no inputs from context)
+sig3 = "{count :int, items [:string]}"
+
+:ok
+```
+
+## Compiled SubAgents
+
+Compile an agent once to derive reusable PTC-Lisp logic. Runs without further LLM calls:
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Count r's in {{word}}",
+  signature: "(word :string) -> :int"
+)
+
+{:ok, compiled} = SubAgent.compile(agent, llm: my_llm)
+
+IO.puts("Compiled source:\n#{compiled.source}")
+```
+
+```elixir
+# Execute on multiple inputs - no LLM calls
+words = ["strawberry", "raspberry", "program", "error"]
+
+for word <- words do
+  step = compiled.execute.(%{"word" => word})
+  "#{word}: #{step.return}"
+end
+```
+
+## Working with Tools
+
+Tools let agents fetch external data or perform actions:
 
 ```elixir
 expenses = [
@@ -168,21 +201,15 @@ Kino.DataTable.new(expenses)
 ```
 
 ```elixir
-{:ok, step} = PtcRunner.SubAgent.run(
+{:ok, step} = SubAgent.run(
   "What is the total travel expense?",
   tools: tools,
   signature: "{total :float}",
-  llm: my_llm,
-  compression: true,
-  debug: true
+  llm: my_llm
 )
 
-Debug.print_trace(step)
-step.return
-```
-
-```elixir
 Debug.print_trace(step, raw: true)
+step.return
 ```
 
 ## Interactive Query
@@ -194,15 +221,33 @@ question_input = Kino.Input.textarea("Question", default: "Show spending by cate
 ```elixir
 question = Kino.Input.read(question_input)
 
-case PtcRunner.SubAgent.run(question, tools: tools, llm: my_llm, debug: true) do
+case SubAgent.run(question, tools: tools, llm: my_llm) do
   {:ok, step} ->
     Debug.print_trace(step)
     step.return
 
   {:error, step} ->
+    Debug.print_trace(step)
     "Failed: #{step.fail.message}"
 end
 ```
+
+## Debug Options
+
+```elixir
+# Preview the prompt before running
+agent = SubAgent.new(prompt: "What is 2 + 2?")
+SubAgent.preview_prompt(agent).system |> IO.puts()
+```
+
+**print_trace options:**
+
+| Option              | Description                               |
+| ------------------- | ----------------------------------------- |
+| `raw: true`         | Show raw LLM input/output                 |
+| `messages: true`    | Show all messages including system prompt |
+| `usage: true`       | Show token usage                          |
+| `view: :compressed` | Show what LLM sees (compressed format)    |
 
 ## Learn More
 
