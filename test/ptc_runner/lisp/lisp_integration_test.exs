@@ -483,6 +483,48 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
   end
 
+  describe "key/val Clojure compatibility" do
+    test "key extracts key from map entry vector" do
+      {:ok, %{return: result}} = Lisp.run("(key [:a 1])")
+      assert result == :a
+    end
+
+    test "val extracts value from map entry vector" do
+      {:ok, %{return: result}} = Lisp.run("(val [:a 1])")
+      assert result == 1
+    end
+
+    test "key/val work with map iteration (seq)" do
+      {:ok, %{return: result}} = Lisp.run("(map key (seq {:a 1 :b 2}))")
+      assert Enum.sort(result) == [:a, :b]
+    end
+
+    test "max-key finds entry with max value" do
+      {:ok, %{return: result}} = Lisp.run(~S|(max-key count "a" "abc" "ab")|)
+      assert result == "abc"
+    end
+
+    test "min-key finds entry with min value" do
+      {:ok, %{return: result}} = Lisp.run(~S|(min-key count "apple" "pear" "banana")|)
+      assert result == "pear"
+    end
+
+    test "apply max-key with val on map (Clojure pattern)" do
+      {:ok, %{return: result}} = Lisp.run("(apply max-key val (seq {:a 10 :b 42 :c 7}))")
+      assert result == [:b, 42]
+    end
+
+    test "key extracts from max-key result" do
+      {:ok, %{return: result}} = Lisp.run("(key (apply max-key val (seq {:a 10 :b 42 :c 7})))")
+      assert result == :b
+    end
+
+    test "val extracts from min-key result" do
+      {:ok, %{return: result}} = Lisp.run("(val (apply min-key val (seq {:a 10 :b 42 :c 7})))")
+      assert result == 7
+    end
+  end
+
   describe "apply function E2E" do
     test "apply with max spreads collection" do
       source = "(apply max [3 1 4 1 5])"

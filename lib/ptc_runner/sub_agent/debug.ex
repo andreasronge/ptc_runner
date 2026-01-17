@@ -222,41 +222,11 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
     end
 
-    # Print program
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
-
-    if turn.program do
-      turn.program
-      |> String.split("\n")
-      |> fit_lines(raw_mode, @line_width)
-      |> Enum.each(fn line ->
-        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
-      end)
-    else
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(parsing failed)#{ansi(:reset)}")
-    end
+    # Print program or JSON mode indicator
+    print_program_section(turn, raw_mode)
 
     # Print tool calls if any
-    unless Enum.empty?(turn.tool_calls) do
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Tools:#{ansi(:reset)}")
-
-      Enum.each(turn.tool_calls, fn call ->
-        tool_name = Map.get(call, :name, "unknown")
-        tool_args = Map.get(call, :args, %{})
-        tool_result = Map.get(call, :result, nil)
-
-        args_str = format_compact(tool_args)
-        result_str = format_compact(tool_result)
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}->#{ansi(:reset)} #{tool_name}(#{args_str})"
-        )
-
-        IO.puts(
-          "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:green)}<-#{ansi(:reset)} #{result_str}"
-        )
-      end)
-    end
+    print_tool_calls(turn.tool_calls)
 
     # Print println output if any
     unless Enum.empty?(turn.prints) do
@@ -280,6 +250,52 @@ defmodule PtcRunner.SubAgent.Debug do
     end)
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+  end
+
+  # Print program section (or JSON mode indicator)
+  defp print_program_section(turn, raw_mode) do
+    cond do
+      turn.program ->
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
+
+        turn.program
+        |> String.split("\n")
+        |> fit_lines(raw_mode, @line_width)
+        |> Enum.each(fn line ->
+          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
+        end)
+
+      turn.success? ->
+        # JSON mode - no program, show response format
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Response:#{ansi(:reset)}")
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(JSON mode)#{ansi(:reset)}")
+
+      true ->
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(parsing failed)#{ansi(:reset)}")
+    end
+  end
+
+  # Print tool calls section
+  defp print_tool_calls([]), do: :ok
+
+  defp print_tool_calls(tool_calls) do
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Tools:#{ansi(:reset)}")
+
+    Enum.each(tool_calls, fn call ->
+      tool_name = Map.get(call, :name, "unknown")
+      tool_args = Map.get(call, :args, %{})
+      tool_result = Map.get(call, :result, nil)
+
+      args_str = format_compact(tool_args)
+      result_str = format_compact(tool_result)
+
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}->#{ansi(:reset)} #{tool_name}(#{args_str})"
+      )
+
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:green)}<-#{ansi(:reset)} #{result_str}")
+    end)
   end
 
   # Print compressed view using SingleUserCoalesced compression
@@ -375,40 +391,38 @@ defmodule PtcRunner.SubAgent.Debug do
 
   # Format result for display
   defp format_result(result) when is_binary(result) do
-    if String.length(result) > 200 do
-      [String.slice(result, 0, 197) <> "..."]
-    else
-      String.split(result, "\n")
-    end
+    maybe_truncate_and_split(result)
   end
 
   defp format_result(result) when is_map(result) do
     if map_size(result) == 0 do
       ["{}"]
     else
-      formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
-
-      if String.length(formatted) > 200 do
-        [String.slice(formatted, 0, 197) <> "..."]
-      else
-        String.split(formatted, "\n")
-      end
+      result
+      |> Format.to_string(pretty: true, limit: 5, width: 80)
+      |> maybe_truncate_and_split()
     end
   end
 
   defp format_result(result) when is_list(result) do
-    formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
-
-    if String.length(formatted) > 200 do
-      [String.slice(formatted, 0, 197) <> "..."]
-    else
-      String.split(formatted, "\n")
-    end
+    result
+    |> Format.to_string(pretty: true, limit: 5, width: 80)
+    |> maybe_truncate_and_split()
   end
 
   defp format_result(result) do
-    formatted = Format.to_string(result, pretty: true, limit: 5, width: 80)
-    String.split(formatted, "\n")
+    result
+    |> Format.to_string(pretty: true, limit: 5, width: 80)
+    |> String.split("\n")
+  end
+
+  # Truncate text if over limit, then split into lines
+  defp maybe_truncate_and_split(text, limit \\ 200) do
+    if String.length(text) > limit do
+      [String.slice(text, 0, limit - 3) <> "..."]
+    else
+      String.split(text, "\n")
+    end
   end
 
   # Format data compactly for inline display
@@ -640,11 +654,15 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   # ANSI color helpers
-  defp ansi(:reset), do: IO.ANSI.reset()
-  defp ansi(:cyan), do: IO.ANSI.cyan()
-  defp ansi(:green), do: IO.ANSI.green()
-  defp ansi(:red), do: IO.ANSI.red()
-  defp ansi(:yellow), do: IO.ANSI.yellow()
-  defp ansi(:bold), do: IO.ANSI.bright()
-  defp ansi(:dim), do: IO.ANSI.faint()
+  @ansi_codes %{
+    reset: IO.ANSI.reset(),
+    cyan: IO.ANSI.cyan(),
+    green: IO.ANSI.green(),
+    red: IO.ANSI.red(),
+    yellow: IO.ANSI.yellow(),
+    bold: IO.ANSI.bright(),
+    dim: IO.ANSI.faint()
+  }
+
+  defp ansi(code), do: Map.get(@ansi_codes, code, "")
 end

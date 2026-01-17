@@ -22,7 +22,7 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       config = %{tools: %{"search" => make_tool("search", "(q :string) -> :string")}}
       result = Namespace.render(config)
 
-      assert result == ";; === tools ===\ntool/search(q) -> string"
+      assert result == ";; === tools ===\ntool/search(q string) -> string"
     end
 
     test "renders data/ section with no tools message" do

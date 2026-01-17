@@ -74,7 +74,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
       assert prompt =~ "PTC-Lisp"
-      assert prompt =~ "PTC Extensions"
+      assert prompt =~ "Common Mistakes"
       # single_shot should not have memory docs
       refute prompt =~ "Memory: Persisting Data Between Turns"
     end

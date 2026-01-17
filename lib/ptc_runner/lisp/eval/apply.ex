@@ -283,13 +283,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     {:ok, apply(fun, args), eval_ctx}
   end
 
-  # Map as function: (map :key) → Map.get(map, :key)
+  # Map as function: (map key) → Map.get(map, key)
+  # Supports any key type (atoms, strings, integers, etc.) like Clojure
   defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_map(m) do
     case args do
-      [k] when is_atom(k) ->
+      [k] ->
         {:ok, flex_get(m, k), eval_ctx}
 
-      [k, default] when is_atom(k) ->
+      [k, default] ->
         case flex_fetch(m, k) do
           {:ok, val} -> {:ok, val, eval_ctx}
           :error -> {:ok, default, eval_ctx}

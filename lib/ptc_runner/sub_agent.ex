@@ -173,6 +173,7 @@ defmodule PtcRunner.SubAgent do
           tools: map(),
           max_turns: pos_integer(),
           prompt_limit: map() | nil,
+          timeout: pos_integer(),
           mission_timeout: pos_integer() | nil,
           llm_retry: map() | nil,
           llm: atom() | (map() -> {:ok, llm_response()} | {:error, term()}) | nil,
@@ -215,6 +216,7 @@ defmodule PtcRunner.SubAgent do
     :compression,
     tools: %{},
     max_turns: 5,
+    timeout: 1000,
     memory_limit: 1_048_576,
     max_depth: 3,
     turn_budget: 20,
@@ -246,6 +248,7 @@ defmodule PtcRunner.SubAgent do
   - `tools` - Map of callable tools (default: %{})
   - `max_turns` - Positive integer for maximum LLM calls (default: 5)
   - `prompt_limit` - Map with truncation config for LLM view
+  - `timeout` - Positive integer for max milliseconds per Lisp execution (default: 1000)
   - `mission_timeout` - Positive integer for max milliseconds for entire execution
   - `llm_retry` - Map with infrastructure retry config
   - `llm` - Atom or function for optional LLM override
@@ -1077,6 +1080,7 @@ defmodule PtcRunner.SubAgent do
   - `:system` - The static system prompt (cacheable - does NOT include mission)
   - `:user` - The full first user message (context sections + mission)
   - `:tool_schemas` - List of tool schema maps with name, signature, and description fields
+  - `:schema` - JSON schema for the return type (JSON mode only, nil for PTC-Lisp)
 
   ## Examples
 
@@ -1099,12 +1103,26 @@ defmodule PtcRunner.SubAgent do
   @spec preview_prompt(t(), keyword()) :: %{
           system: String.t(),
           user: String.t(),
-          tool_schemas: [map()]
+          tool_schemas: [map()],
+          schema: map() | nil
         }
 
   def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
+    alias PtcRunner.SubAgent.Loop.JsonMode
+
     context = Keyword.get(opts, :context, %{})
 
+    # Use JSON mode preview for JSON output agents
+    if agent.output == :json do
+      preview = JsonMode.preview_prompt(agent, context)
+      Map.put(preview, :tool_schemas, [])
+    else
+      preview_prompt_ptc_lisp(agent, context)
+    end
+  end
+
+  # PTC-Lisp mode preview (original implementation)
+  defp preview_prompt_ptc_lisp(agent, context) do
     alias PtcRunner.SubAgent.{PromptExpander, SystemPrompt}
 
     # Generate system prompt - static sections only (matches what Loop sends)
@@ -1150,7 +1168,8 @@ defmodule PtcRunner.SubAgent do
     %{
       system: system_prompt,
       user: user_message,
-      tool_schemas: tool_schemas
+      tool_schemas: tool_schemas,
+      schema: nil
     }
   end
 end

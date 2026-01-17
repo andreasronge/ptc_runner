@@ -333,6 +333,34 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert step.usage.turns == 1
     end
 
+    test "includes schema_used and schema_bytes in usage when schema is provided" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :json,
+          signature: "() -> {value :int}",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|{"value": 1}|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.usage.schema_used == true
+      assert step.usage.schema_bytes > 0
+      # Verify schema_bytes matches actual schema size
+      expected_schema = %{
+        "type" => "object",
+        "properties" => %{"value" => %{"type" => "integer"}},
+        "required" => ["value"],
+        "additionalProperties" => false
+      }
+
+      assert step.usage.schema_bytes == byte_size(Jason.encode!(expected_schema))
+    end
+
     test "includes trace when enabled" do
       agent =
         SubAgent.new(
@@ -527,6 +555,222 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
     end
   end
 
+  describe "JSON mode array return type" do
+    test "accepts array when signature expects list" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "() -> [:int]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[1, 2, 3]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == [1, 2, 3]
+    end
+
+    test "accepts array of objects when signature expects list of maps" do
+      agent =
+        SubAgent.new(
+          prompt: "Return items",
+          output: :json,
+          signature: "() -> [{id :int, name :string}]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == [%{id: 1, name: "a"}, %{id: 2, name: "b"}]
+    end
+
+    test "validates array elements against signature type" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "() -> [:int]",
+          max_turns: 2
+        )
+
+      call_count = :counters.new(1, [:atomics])
+
+      llm = fn _input ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        case count do
+          0 -> {:ok, ~s|["not", "ints"]|}
+          _ -> {:ok, ~s|[1, 2, 3]|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == [1, 2, 3]
+      assert length(step.turns) == 2
+    end
+
+    test "rejects array when signature expects object" do
+      agent =
+        SubAgent.new(
+          prompt: "Return object",
+          output: :json,
+          signature: "() -> {value :int}",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[1, 2, 3]|}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm)
+
+      assert step.fail.message =~ "must be a JSON object"
+    end
+  end
+
+  describe "JSON mode preview_prompt" do
+    test "preview_prompt returns JSON mode format" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs for {{topic}}",
+          output: :json,
+          signature: "(topic :string, items [{id :int}]) -> [:int]",
+          max_turns: 1
+        )
+
+      context = %{topic: "test", items: [%{id: 1}, %{id: 2}]}
+      preview = SubAgent.preview_prompt(agent, context: context)
+
+      # System prompt should be JSON mode prompt
+      assert preview.system =~ "structured JSON"
+      refute preview.system =~ "PTC-Lisp"
+
+      # User message should have JSON formatted data (not Elixir format)
+      assert preview.user =~ ~s|`topic`: "test"|
+      assert preview.user =~ ~s|[{"id":1},{"id":2}]|
+      refute preview.user =~ "%{id:"
+
+      # Should include task and expected output
+      assert preview.user =~ "Return IDs for test"
+      assert preview.user =~ "Expected Output"
+    end
+
+    test "preview_prompt matches actual LLM input" do
+      agent =
+        SubAgent.new(
+          prompt: "Classify {{text}}",
+          output: :json,
+          signature: "(text :string) -> {label :string}",
+          max_turns: 1
+        )
+
+      context = %{text: "hello world"}
+      preview = SubAgent.preview_prompt(agent, context: context)
+
+      # Capture actual LLM input
+      test_pid = self()
+
+      llm = fn input ->
+        send(test_pid, {:llm_input, input})
+        {:ok, ~s|{"label": "greeting"}|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, context: context)
+
+      assert_receive {:llm_input, input}
+
+      # Preview should match actual input
+      assert preview.system == input.system
+      assert preview.user == hd(input.messages).content
+    end
+
+    test "preview_prompt includes JSON schema for object return type" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze text",
+          output: :json,
+          signature: "(text :string) -> {score :int, label :string}",
+          max_turns: 1
+        )
+
+      preview = SubAgent.preview_prompt(agent, context: %{text: "test"})
+
+      assert preview.schema == %{
+               "type" => "object",
+               "properties" => %{
+                 "score" => %{"type" => "integer"},
+                 "label" => %{"type" => "string"}
+               },
+               "required" => ["score", "label"],
+               "additionalProperties" => false
+             }
+    end
+
+    test "preview_prompt includes JSON schema for array return type (wrapped in object)" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "(items [{id :int}]) -> [:int]",
+          max_turns: 1
+        )
+
+      preview = SubAgent.preview_prompt(agent, context: %{items: []})
+
+      # Array schemas are wrapped in object because most LLM providers require object at root
+      assert preview.schema == %{
+               "type" => "object",
+               "properties" => %{
+                 "items" => %{"type" => "array", "items" => %{"type" => "integer"}}
+               },
+               "required" => ["items"],
+               "additionalProperties" => false
+             }
+    end
+
+    test "preview_prompt returns nil schema for PTC-Lisp mode" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze text",
+          signature: "(text :string) -> {score :int}",
+          max_turns: 1
+        )
+
+      # Default is PTC-Lisp mode
+      assert agent.output == :ptc_lisp
+
+      preview = SubAgent.preview_prompt(agent, context: %{text: "test"})
+
+      assert preview.schema == nil
+    end
+
+    test "preview_prompt returns nil schema for PTC-Lisp without signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Do something",
+          max_turns: 1
+        )
+
+      # PTC-Lisp mode doesn't require signature
+      assert agent.output == :ptc_lisp
+      assert agent.parsed_signature == nil
+
+      preview = SubAgent.preview_prompt(agent, context: %{})
+
+      assert preview.schema == nil
+    end
+  end
+
   describe "JSON mode edge cases" do
     test "handles empty context" do
       agent =
@@ -544,6 +788,42 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
       assert step.return == %{value: 1}
+    end
+
+    test "validates empty list against [:int] signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Return IDs",
+          output: :json,
+          signature: "() -> [:int]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == []
+    end
+
+    test "validates empty list against list of objects signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Return items",
+          output: :json,
+          signature: "() -> [{id :int, name :string}]",
+          max_turns: 1
+        )
+
+      llm = fn _input ->
+        {:ok, ~s|[]|}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert step.return == []
     end
 
     test "handles :any return type in signature" do

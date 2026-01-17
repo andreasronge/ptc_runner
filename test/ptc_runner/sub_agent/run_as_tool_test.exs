@@ -305,5 +305,58 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
         {:error, _step} -> assert true
       end
     end
+
+    test "SubAgentTool shows up in preview_prompt" do
+      child_agent =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          description: "Doubles a number"
+        )
+
+      child_tool = SubAgent.as_tool(child_agent)
+
+      parent =
+        SubAgent.new(
+          prompt: "Use double tool on {{value}}",
+          tools: %{"double" => child_tool}
+        )
+
+      preview = SubAgent.preview_prompt(parent, context: %{value: 21})
+
+      # Verify the tool appears in the user message (tools are rendered there)
+      assert preview.user =~ "tool/double"
+      assert preview.user =~ "Doubles a number"
+
+      # Verify tool_schemas contains the tool info
+      assert [tool_schema] = preview.tool_schemas
+      assert tool_schema.name == "double"
+      assert tool_schema.signature == "(n :int) -> {result :int}"
+      assert tool_schema.description == "Doubles a number"
+    end
+
+    test "SubAgentTool shows parameter types in preview_prompt" do
+      child_agent =
+        SubAgent.new(
+          prompt: "Filter articles about {{topic}}",
+          signature: "(topic :string, articles [{id :int, title :string}]) -> [:int]",
+          description: "Filter articles by topic"
+        )
+
+      child_tool = SubAgent.as_tool(child_agent)
+
+      parent =
+        SubAgent.new(
+          prompt: "Research {{subject}}",
+          tools: %{"filter" => child_tool}
+        )
+
+      preview = SubAgent.preview_prompt(parent, context: %{subject: "quantum"})
+
+      # Verify parameter types are shown in the tool signature
+      assert preview.user =~ "topic string"
+      assert preview.user =~ "articles [{id int, title string}]"
+      assert preview.user =~ "-> [int]"
+    end
   end
 end

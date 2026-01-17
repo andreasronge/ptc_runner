@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
 
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string, limit :int) -> [:string]"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"search" => tool})
-      ";; === tools ===\\ntool/search(query, limit) -> [string]"
+      ";; === tools ===\\ntool/search(query string, limit int) -> [string]"
 
       iex> tool = %PtcRunner.Tool{name: "analyze", signature: "-> :map", description: "Analyze data"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"analyze" => tool})
@@ -74,15 +74,12 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
     end
   end
 
-  # Format a parameter for display
-  # For structured maps like {path :string}, show the field names
-  # so the LLM knows what keys to use
-  defp format_param({_param_name, {:map, fields}}) when is_list(fields) and fields != [] do
-    field_strs = Enum.map_join(fields, " ", fn {field_name, _type} -> field_name end)
-    "{#{field_strs}}"
+  # Format a parameter for display with type
+  # Shows "name type" format, e.g., "topic string", "articles [{id int}]"
+  defp format_param({param_name, type}) do
+    type_str = format_return_type(type)
+    "#{param_name} #{type_str}"
   end
-
-  defp format_param({param_name, _type}), do: param_name
 
   defp parse_signature(nil), do: {[], :any}
 
