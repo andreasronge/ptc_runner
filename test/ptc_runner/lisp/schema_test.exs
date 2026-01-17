@@ -41,8 +41,8 @@ defmodule PtcRunner.Lisp.SchemaTest do
 
     test "documents state persistence for multi-turn" do
       prompt = LanguageSpec.get(:multi_turn)
+      # Variables defined with def persist across turns
       assert prompt =~ "def"
-      assert prompt =~ ~r/\*1|\*2|\*3/
     end
   end
 

@@ -62,7 +62,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.usage.turns == 2
     end
 
-    test "expands template placeholders in prompt" do
+    test "expands template placeholders with data references in prompt" do
       agent =
         SubAgent.new(
           prompt: "Process {{name}} with {{value}}",
@@ -73,7 +73,11 @@ defmodule PtcRunner.SubAgent.LoopTest do
       llm = fn %{messages: messages} ->
         first_message = hd(messages)
         assert first_message.role == :user
-        assert first_message.content =~ "Process alice with 42"
+        # Template placeholders become ~{data/...} references
+        assert first_message.content =~ "Process ~{data/name} with ~{data/value}"
+        # Actual values are in the data inventory, not duplicated in mission
+        assert first_message.content =~ "data/name"
+        assert first_message.content =~ "data/value"
         {:ok, ~S|```clojure
 (return {:value 100})
 ```|}
