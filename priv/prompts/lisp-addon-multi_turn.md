@@ -78,12 +78,6 @@ results                                     ; access in later turns
 
 ### Accessing Previous Results
 
-| Symbol | Meaning |
-|--------|---------|
-| `*1` | Previous turn's result |
-| `*2` | Two turns ago |
-| `*3` | Three turns ago |
-
 Use `def` to store values you need to reference later.
 
 **Avoid Clojure features not in PTC-Lisp.** Syntax errors waste a turn. Simpler, shorter programs are safer. You can always build on them in future turns.
