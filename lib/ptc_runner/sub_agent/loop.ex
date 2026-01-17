@@ -241,6 +241,8 @@ defmodule PtcRunner.SubAgent.Loop do
       collected_system_prompt: nil,
       # Expanded prompt for Step.prompt (used by Debug.print_trace)
       expanded_prompt: expanded_prompt,
+      # Original prompt template for Step.original_prompt (used by Debug for annotated display)
+      original_prompt: agent.prompt,
       # Normalized tools for Step.tools (used by Debug.print_trace compressed view)
       normalized_tools: normalized_tools
     }
@@ -339,6 +341,7 @@ defmodule PtcRunner.SubAgent.Loop do
                 Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
               messages: build_collected_messages(state, state.messages),
               prompt: state.expanded_prompt,
+              original_prompt: state.original_prompt,
               tools: state.normalized_tools
           }
 
@@ -562,6 +565,7 @@ defmodule PtcRunner.SubAgent.Loop do
               ),
             messages: build_collected_messages(state, final_messages),
             prompt: state.expanded_prompt,
+            original_prompt: state.original_prompt,
             tools: state.normalized_tools
         }
 
@@ -639,6 +643,7 @@ defmodule PtcRunner.SubAgent.Loop do
                   ),
                 messages: build_collected_messages(state, final_messages),
                 prompt: state.expanded_prompt,
+                original_prompt: state.original_prompt,
                 tools: state.normalized_tools
             }
 
@@ -778,6 +783,7 @@ defmodule PtcRunner.SubAgent.Loop do
         turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
         messages: build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt,
         tools: state.normalized_tools
     }
 
@@ -818,6 +824,7 @@ defmodule PtcRunner.SubAgent.Loop do
         field_descriptions: agent.field_descriptions,
         messages: build_collected_messages(state, final_messages),
         prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt,
         tools: state.normalized_tools
     }
 

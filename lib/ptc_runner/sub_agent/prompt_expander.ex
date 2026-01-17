@@ -125,6 +125,49 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   end
 
   @doc """
+  Expand a template with annotations showing where substitutions occurred.
+
+  Returns an annotated string where substituted values are wrapped with `~{data/...}`
+  syntax to make it clear which parts came from template variables. This is useful
+  for debugging to distinguish dynamic values from hardcoded text.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.PromptExpander.expand_annotated("Hello {{name}}", %{name: "Alice"})
+      {:ok, "Hello ~{data/name}"}
+
+      iex> PtcRunner.SubAgent.PromptExpander.expand_annotated("Count: {{count}}", %{count: 42})
+      {:ok, "Count: ~{data/count}"}
+
+      iex> PtcRunner.SubAgent.PromptExpander.expand_annotated("{{a.b}}", %{a: %{b: "deep"}})
+      {:ok, "~{data/a.b}"}
+
+      iex> PtcRunner.SubAgent.PromptExpander.expand_annotated("Hello", %{})
+      {:ok, "Hello"}
+
+      iex> PtcRunner.SubAgent.PromptExpander.expand_annotated("{{missing}}", %{})
+      {:error, {:missing_keys, ["missing"]}}
+
+  """
+  @spec expand_annotated(String.t(), map()) ::
+          {:ok, String.t()} | {:error, {:missing_keys, [String.t()]}}
+  def expand_annotated(template, context) when is_binary(template) and is_map(context) do
+    placeholders = extract_placeholders(template)
+    missing = find_missing_keys(placeholders, context)
+
+    if missing != [] do
+      {:error, {:missing_keys, missing}}
+    else
+      result =
+        Regex.replace(@placeholder_regex, template, fn _full_match, path_str ->
+          "~{data/#{path_str}}"
+        end)
+
+      {:ok, result}
+    end
+  end
+
+  @doc """
   Expand a template by replacing placeholders with values from the context.
 
   Returns `{:ok, expanded_string}` on success, or `{:error, {:missing_keys, keys}}`

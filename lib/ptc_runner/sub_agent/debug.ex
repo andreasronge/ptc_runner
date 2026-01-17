@@ -105,13 +105,14 @@ defmodule PtcRunner.SubAgent.Debug do
   def print_trace(%Step{turns: turns, usage: usage} = step, opts) when is_list(turns) do
     view = Keyword.get(opts, :view, :turns)
     show_usage = Keyword.get(opts, :usage, false)
+    original_prompt = step.original_prompt
 
     case view do
       :turns ->
         show_raw = opts[:raw] == true
         show_all_messages = opts[:messages] == true
         raw_mode = show_raw and not show_all_messages
-        Enum.each(turns, &print_turn(&1, show_raw, show_all_messages, raw_mode))
+        Enum.each(turns, &print_turn(&1, show_raw, show_all_messages, raw_mode, original_prompt))
 
       :compressed ->
         print_compressed_view(step)
@@ -171,7 +172,7 @@ defmodule PtcRunner.SubAgent.Debug do
   # Private Helpers - Turn-based (new format)
   # ============================================================
 
-  defp print_turn(%Turn{} = turn, show_raw, show_all_messages, raw_mode) do
+  defp print_turn(%Turn{} = turn, show_raw, show_all_messages, raw_mode, original_prompt) do
     # Build header with message count indicator
     msg_indicator =
       case turn.messages do
@@ -184,6 +185,14 @@ defmodule PtcRunner.SubAgent.Debug do
     IO.puts(
       "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
     )
+
+    # Show original mission template on first turn (when raw mode is on)
+    # This helps distinguish template variables from hardcoded values
+    if turn.number == 1 and show_raw and original_prompt do
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Mission:#{ansi(:reset)}")
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{original_prompt}")
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
+    end
 
     # Print messages sent to LLM
     # - show_all_messages: show all messages including system prompt
