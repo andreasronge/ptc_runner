@@ -209,7 +209,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
               turns:
                 Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
               messages: build_collected_messages(state, messages),
-              prompt: state.expanded_prompt
+              prompt: state.expanded_prompt,
+              original_prompt: state.original_prompt
           }
 
           # Emit turn stop on error
@@ -649,6 +650,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
       field_descriptions: agent.field_descriptions,
       messages: build_collected_messages(state, final_messages),
       prompt: state.expanded_prompt,
+      original_prompt: state.original_prompt,
       prints: [],
       tool_calls: []
     }
@@ -690,7 +692,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
             true
           ),
         messages: build_collected_messages(state, final_messages),
-        prompt: state.expanded_prompt
+        prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt
     }
 
     {:error, final_step}
@@ -712,7 +715,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
       | usage: usage,
         turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
         messages: build_collected_messages(state, state.messages),
-        prompt: state.expanded_prompt
+        prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt
     }
 
     {:error, step_with_metrics}

@@ -72,8 +72,9 @@ defmodule PtcRunner.SubAgent.Compiler do
     # Validate that all tools are compilable (no LLM-dependent tools)
     validate_compilable_tools!(agent.tools)
 
-    # Get sample data for compilation
-    sample = Keyword.get(opts, :sample, %{})
+    # Get sample data for compilation - auto-generate from signature if not provided
+    user_sample = Keyword.get(opts, :sample, %{})
+    sample = build_sample_data(agent, user_sample)
 
     # Run the agent once to derive the PTC-Lisp program
     case SubAgent.run(agent, Keyword.put(opts, :context, sample)) do
@@ -166,4 +167,41 @@ defmodule PtcRunner.SubAgent.Compiler do
   # Extracts LLM model name from options
   defp extract_llm_model(llm) when is_atom(llm), do: to_string(llm)
   defp extract_llm_model(_), do: nil
+
+  # Builds sample data for compilation by merging user-provided sample with
+  # auto-generated defaults from the signature. User values take precedence.
+  defp build_sample_data(%SubAgent{parsed_signature: nil}, user_sample), do: user_sample
+
+  defp build_sample_data(%SubAgent{parsed_signature: {:signature, params, _}}, user_sample) do
+    # Generate default sample values for each input parameter
+    generated =
+      params
+      |> Enum.map(fn {name, type} -> {name, default_sample_for_type(type)} end)
+      |> Map.new()
+
+    # User-provided values take precedence
+    Map.merge(generated, stringify_keys(user_sample))
+  end
+
+  defp build_sample_data(_agent, user_sample), do: user_sample
+
+  # Ensure keys are strings for consistency
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  # Generate a sensible default sample value for each type
+  defp default_sample_for_type(:string), do: "example"
+  defp default_sample_for_type(:int), do: 42
+  defp default_sample_for_type(:float), do: 3.14
+  defp default_sample_for_type(:bool), do: true
+  defp default_sample_for_type(:any), do: "value"
+  defp default_sample_for_type({:list, inner}), do: [default_sample_for_type(inner)]
+  defp default_sample_for_type({:optional, inner}), do: default_sample_for_type(inner)
+
+  defp default_sample_for_type({:map, fields}) when is_list(fields) do
+    Map.new(fields, fn {name, type} -> {name, default_sample_for_type(type)} end)
+  end
+
+  defp default_sample_for_type(_), do: "value"
 end

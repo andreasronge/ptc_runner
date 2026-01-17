@@ -183,6 +183,7 @@ defmodule PtcRunner.Step do
     :tool_calls,
     :messages,
     :prompt,
+    :original_prompt,
     :tools
   ]
 

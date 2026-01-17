@@ -75,6 +75,32 @@ defmodule PtcRunner.SubAgent.E2ETest do
     end
   end
 
+  describe "compile" do
+    test "count r's in word - compiled agent works on multiple inputs" do
+      agent =
+        SubAgent.new(
+          prompt: "How many r's are in {{word}}?",
+          signature: "(word :string) -> :int"
+        )
+
+      # Compile the agent - LLM derives the logic once
+      assert {:ok, compiled} = SubAgent.compile(agent, llm: llm_callback())
+
+      # Compiled source should reference data/word, not hardcode a value
+      assert compiled.source =~ "data/word"
+
+      # Execute on multiple inputs without further LLM calls
+      step1 = compiled.execute.(%{"word" => "strawberry"})
+      assert step1.return == 3
+
+      step2 = compiled.execute.(%{"word" => "program"})
+      assert step2.return == 2
+
+      step3 = compiled.execute.(%{"word" => "hello"})
+      assert step3.return == 0
+    end
+  end
+
   defp model, do: LispLLMClient.model()
 
   defp llm_callback do
