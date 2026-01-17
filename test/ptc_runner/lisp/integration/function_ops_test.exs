@@ -450,4 +450,126 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(source)
     end
   end
+
+  # ==========================================================================
+  # Maps as Functions (Clojure-style)
+  # ==========================================================================
+
+  describe "maps as functions" do
+    test "map with keyword key" do
+      source = ~S"""
+      (let [m {:name "Alice" :age 30}]
+        (m :name))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "Alice"
+    end
+
+    test "map with keyword key returns nil for missing key" do
+      source = ~S"""
+      (let [m {:name "Alice"}]
+        (m :missing))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == nil
+    end
+
+    test "map with keyword key and default value" do
+      source = ~S"""
+      (let [m {:name "Alice"}]
+        (m :missing "default"))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "default"
+    end
+
+    test "map with string key" do
+      source = ~S"""
+      (let [m {"name" "Bob" "city" "NYC"}]
+        (m "city"))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "NYC"
+    end
+
+    test "map with string key and default" do
+      source = ~S"""
+      (let [m {"a" 1}]
+        (m "missing" "fallback"))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "fallback"
+    end
+
+    test "map with integer key" do
+      source = ~S"""
+      (let [m {0 "zero" 1 "one" 2 "two"}]
+        (m 1))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "one"
+    end
+
+    test "map with integer key and default" do
+      source = ~S"""
+      (let [m {0 "zero"}]
+        (m 99 "not found"))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "not found"
+    end
+
+    test "map as function in higher-order context with mapv" do
+      # Note: Maps can't be passed directly to HOFs like mapv because Elixir's
+      # Enum.map can't call them. Use keyword accessor syntax instead.
+      source = ~S"""
+      (let [lookup {:a 1 :b 2 :c 3}]
+        (mapv #(lookup %) [:a :b :c]))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 2, 3]
+    end
+
+    test "map as function with filter" do
+      source = ~S"""
+      (let [valid-ids #{1 2 3}
+            lookup {1 "one" 2 "two" 4 "four"}]
+        (mapv #(lookup %) (filter valid-ids [1 2 3 4])))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == ["one", "two", nil]
+    end
+
+    test "nested map access using map-as-function" do
+      source = ~S"""
+      (let [users {:alice {:name "Alice" :age 30}
+                   :bob {:name "Bob" :age 25}}
+            alice (users :alice)]
+        (alice :age))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == 30
+    end
+
+    test "map from context used as function" do
+      source = ~S"""
+      (let [config data/config]
+        (config :database))
+      """
+
+      ctx = %{config: %{database: "postgres", port: 5432}}
+      {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
+      assert result == "postgres"
+    end
+  end
 end

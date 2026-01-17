@@ -30,7 +30,7 @@ defmodule PtcRunner.SubAgent.Namespace do
 
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string) -> :string"}
       iex> PtcRunner.SubAgent.Namespace.render(%{tools: %{"search" => tool}})
-      ";; === tools ===\\ntool/search(query) -> string"
+      ";; === tools ===\\ntool/search(query string) -> string"
 
       iex> PtcRunner.SubAgent.Namespace.render(%{data: %{count: 42}})
       ";; No tools available\\n\\n;; === data/ ===\\ndata/count                    ; integer, sample: 42"

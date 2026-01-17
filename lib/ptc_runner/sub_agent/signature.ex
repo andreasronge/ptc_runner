@@ -140,6 +140,10 @@ defmodule PtcRunner.SubAgent.Signature do
   Extracts the return type and converts it to a JSON Schema
   that can be passed to LLM providers for structured output.
 
+  Note: Array return types are wrapped in an object with an "items" property
+  because most LLM providers require an object at the root level. Use
+  `returns_list?/1` to check if unwrapping is needed.
+
   ## Examples
 
       iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> {sentiment :string, score :float}")
@@ -154,11 +158,43 @@ defmodule PtcRunner.SubAgent.Signature do
         "additionalProperties" => false
       }
 
+      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> [:int]")
+      iex> PtcRunner.SubAgent.Signature.to_json_schema(sig)
+      %{
+        "type" => "object",
+        "properties" => %{
+          "items" => %{"type" => "array", "items" => %{"type" => "integer"}}
+        },
+        "required" => ["items"],
+        "additionalProperties" => false
+      }
+
   """
   @spec to_json_schema(signature()) :: map()
+  def to_json_schema({:signature, _params, {:list, _} = list_type}) do
+    # Wrap arrays in object because most LLM providers require object at root
+    %{
+      "type" => "object",
+      "properties" => %{
+        "items" => type_to_json_schema(list_type)
+      },
+      "required" => ["items"],
+      "additionalProperties" => false
+    }
+  end
+
   def to_json_schema({:signature, _params, return_type}) do
     type_to_json_schema(return_type)
   end
+
+  @doc """
+  Check if signature returns a list type.
+
+  Used to determine if JSON mode response needs unwrapping.
+  """
+  @spec returns_list?(signature()) :: boolean()
+  def returns_list?({:signature, _params, {:list, _}}), do: true
+  def returns_list?(_), do: false
 
   defp type_to_json_schema(:string), do: %{"type" => "string"}
   defp type_to_json_schema(:int), do: %{"type" => "integer"}

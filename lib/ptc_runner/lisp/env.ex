@@ -241,6 +241,7 @@ defmodule PtcRunner.Lisp.Env do
       {:flatten, {:normal, &Runtime.flatten/1}},
       {:zip, {:normal, &Runtime.zip/2}},
       {:interleave, {:normal, &Runtime.interleave/2}},
+      {:interpose, {:normal, &Runtime.interpose/2}},
       {:partition, {:multi_arity, :partition, {&Runtime.partition/2, &Runtime.partition/3}}},
       {:count, {:normal, &Runtime.count/1}},
       {:empty?, {:normal, &Runtime.empty?/1}},
@@ -276,6 +277,8 @@ defmodule PtcRunner.Lisp.Env do
       {:"select-keys", {:normal, &Runtime.select_keys/2}},
       {:keys, {:normal, &Runtime.keys/1}},
       {:vals, {:normal, &Runtime.vals/1}},
+      {:key, {:normal, &Runtime.key/1}},
+      {:val, {:normal, &Runtime.val/1}},
       {:entries, {:normal, &Runtime.entries/1}},
       {:"update-vals", {:normal, &Runtime.update_vals/2}},
 

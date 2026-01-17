@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 21 -->
+<!-- version: 22 -->
 <!-- date: 2026-01-16 -->
-<!-- changes: Add key/val and max-key mistakes to Common Mistakes table -->
+<!-- changes: Remove PTC Extensions (all-of/any-of/none-of) and Aggregation helpers (sum-by/avg-by/min-by/max-by) -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -29,22 +29,7 @@ data/products                      ; read-only input data
 
 **Tip:** `(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
 
-### PTC Extensions
-
-```clojure
-(all-of pred1 pred2)              ; combine predicates (NOT and/or)
-(any-of pred1 pred2)
-(none-of pred)
-```
-
-**Aggregation** (all take a list of maps):
-```clojure
-(sum-by :amount orders)           ; sum of field values
-(avg-by :price products)          ; average
-(min-by :price products)          ; item with min (not value!)
-(max-by :salary employees)        ; item with max
-(contains? coll elem)             ; membership check (works on lists, sets, maps)
-```
+**Membership check:** `(contains? coll elem)` works on lists, sets, and maps.
 
 ### Restrictions
 
@@ -74,14 +59,11 @@ data/products                      ; read-only input data
 | `(includes s "x")` | `(includes? s "x")` |
 | `(includes? list elem)` | `(contains? list elem)` — includes? is for strings only |
 | `(-> coll (filter f))` | `(->> coll (filter f))` |
-| `(apply max-by :field coll)` | `(max-by :field coll)` — max-by takes a collection directly |
 | `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
 | `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
 | `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |
-| `(key entry)` / `(val entry)` | `(fn [[k v]] ...)` — `key`/`val` not available |
-| `(max-key :price items)` | `(max-by :price items)` — no `max-key` |
 
 <!-- PTC_PROMPT_END -->

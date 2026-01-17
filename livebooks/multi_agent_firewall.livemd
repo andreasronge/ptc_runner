@@ -10,10 +10,14 @@ deps =
     [{:ptc_runner, "~> 0.5.0"}]
   end
 
-Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+Mix.install(deps ++ [{:kino, "~> 0.14"}], consolidate_protocols: false)
 ```
 
 ## Setup
+
+```elixir
+IEx.Helpers.recompile()
+```
 
 Add your API key in the Secrets panel (`ss`).
 
@@ -25,17 +29,10 @@ if(api_key, do: "API key configured", else: "No API key - add OPENROUTER_API_KEY
 
 ```elixir
 model_options =
-  if Code.ensure_loaded?(LLMClient) do
-    LLMClient.list_models()
-    |> Enum.filter(& &1.available)
-    |> Enum.map(&{&1.model_id, "#{&1.alias} - #{&1.description}"})
-    |> Enum.sort_by(&elem(&1, 1))
-  else
-    [
-      {"openrouter:anthropic/claude-haiku-4.5", "haiku - Claude Haiku 4.5"},
-      {"openrouter:google/gemini-2.5-flash", "gemini - Gemini 2.5 Flash"}
-    ]
-  end
+  LLMClient.list_models()
+  |> Enum.filter(& &1.available)
+  |> Enum.map(&{&1.model_id, "#{&1.alias} - #{&1.description}"})
+  |> Enum.sort_by(&elem(&1, 1))
 
 model_input = Kino.Input.select("Model", model_options)
 ```
@@ -43,185 +40,230 @@ model_input = Kino.Input.select("Model", model_options)
 ```elixir
 model = Kino.Input.read(model_input)
 
-my_llm =
-  if Code.ensure_loaded?(LLMClient) do
-    fn %{system: system, messages: messages} ->
-      case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 60_000) do
-        {:ok, r} -> {:ok, r}
-        error -> error
-      end
-    end
-  else
-    fn %{system: system, messages: messages} ->
-      case ReqLLM.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 30_000) do
-        {:ok, r} -> {:ok, %{content: ReqLLM.Response.text(r), tokens: ReqLLM.Response.usage(r)}}
-        error -> error
-      end
-    end
-  end
+# LLMClient.callback/1 handles both JSON and PTC-Lisp modes automatically
+my_llm = LLMClient.callback(model)
 
 "Ready: #{model}"
 ```
 
-## Context Firewall
+## Sample Data
 
-Fields prefixed with `_` stay in BEAM memory but are hidden from LLM prompts. This keeps sensitive or large data out of the context window while remaining accessible to tools.
+Articles with hidden `_body` field - the body stays in BEAM memory but is hidden from LLM prompts.
 
 ```elixir
 alias PtcRunner.SubAgent
 alias PtcRunner.SubAgent.Debug
 
-# Data with firewalled field
-article = %{
-  title: "Quantum Computing Basics",
-  keywords: ["quantum", "qubits"],
-  _body: "Quantum computers leverage quantum mechanical phenomena like superposition and entanglement. Unlike classical bits that are either 0 or 1, qubits can exist in multiple states simultaneously, enabling parallel computation."
-}
-
-# Preview what LLM sees - note _body is hidden
-agent = SubAgent.new(
-  prompt: "Summarize the article '{{title}}'",
-  signature: "(title :string, keywords [:string], _body :string) -> {summary :string}"
-)
-
-preview = SubAgent.preview_prompt(agent, context: article)
-IO.puts("=== LLM sees this user message ===")
-IO.puts(preview.user)
-IO.puts("\n=== _body is NOT shown above ===")
-```
-
-## Multi-Agent Pipeline
-
-Two agents working together:
-
-1. **Research Agent** - searches and selects relevant articles (returns `_body` without seeing it)
-2. **Summarize Agent** - receives article, uses tool to read the firewalled body
-
-```elixir
-# Mocked search results
 articles = [
-  %{id: 1, title: "Quantum Coffee Roasters", keywords: ["quantum", "coffee roasters"], _body: ~s(The Quantum Coffee Roasters launched a new dark blend emphasizing speed, energy, and bold flavor, targeting early-morning commuters and fitness enthusiasts.
-)},
-  %{id: 2, title: "Qubits Beyond Decoherence", keywords: ["quantum", "qubits"],
-    _body: ~s(Researchers at the newly founded Helios Quantum Lab announced an unexpected breakthrough suggesting that qubits can temporarily retain partial information even after decoherence occurs.
-The team claims this effect, called “echo-state persistence,” allows a quantum system to reconstruct fragments of its previous computational state without external error correction.
-Surprisingly, the phenomenon was observed using room-temperature hardware built from layered carbon lattices rather than superconducting materials.
-According to the researchers, this challenges the long-held assumption that decoherence represents a strict, irreversible boundary in quantum computation.
-Early simulations indicate the effect could reduce basic error rates by up to 30% in small quantum circuits.
-While the findings remain unverified, the announcement has already sparked debate about whether quantum memory is more resilient than previously believed.
-)},
-  %{id: 3, title: "Questioning Quantum Persistence", keywords: ["quantum", "qubits"],
-    _body: ~s(Several quantum physicists have expressed strong skepticism regarding the recent claims made by Helios Quantum Lab, arguing that the reported “echo-state persistence” effect conflicts with well-established models of decoherence. Critics point out that the experiments rely heavily on indirect simulations rather than reproducible physical measurements. Some researchers note that the use of room-temperature carbon lattice hardware introduces uncontrolled noise sources that could easily be misinterpreted as retained quantum information. Others warn that the reported error-rate reductions lack statistical significance and may result from classical post-processing artifacts. According to independent analysts, no known quantum memory model allows partial state reconstruction once decoherence has fully occurred. Until the results are independently replicated, many in the field consider the claims speculative at best.
-)}
+  %{
+    id: 1,
+    title: "Quantum Coffee Roasters",
+    keywords: ["quantum", "coffee roasters"],
+    _body: "The Quantum Coffee Roasters launched a new dark blend emphasizing speed, energy, and bold flavor, targeting early-morning commuters and fitness enthusiasts."
+  },
+  %{
+    id: 2,
+    title: "Qubits Beyond Decoherence",
+    keywords: ["quantum", "qubits", "decoherence"],
+    _body: "Researchers at Helios Quantum Lab announced a breakthrough suggesting qubits can retain partial information after decoherence. The team claims 'echo-state persistence' allows quantum systems to reconstruct fragments of previous states without external error correction. The phenomenon was observed using room-temperature carbon lattice hardware. Early simulations indicate up to 30% error rate reduction in small quantum circuits."
+  },
+  %{
+    id: 3,
+    title: "Questioning Quantum Persistence",
+    keywords: ["quantum", "physics", "skepticism"],
+    _body: "Several physicists expressed skepticism about Helios Quantum Lab's claims, arguing 'echo-state persistence' conflicts with established decoherence models. Critics note the experiments rely on indirect simulations rather than reproducible measurements. The carbon lattice hardware may introduce noise misinterpreted as retained quantum information. Until independently replicated, many consider the claims speculative."
+  }
 ]
 
 Kino.DataTable.new(Enum.map(articles, &Map.drop(&1, [:_body])), name: "Articles (without _body)")
 ```
 
-### Step 1: Research Agent
+## JSON Mode Agents
 
-Finds relevant article. The `_body` flows through the return value without the LLM ever seeing it.
+Two specialized agents that will be used as tools:
 
 ```elixir
-{_, step1} = SubAgent.run(
-  "Remove articles that have keywords that are not related to {{topic}}, such as quatum sport cars",
-  signature: "(topic :string, articles [{id :int, title :string, keywords [:string], _body :string}]) -> [{id :int, title :string, keywords [:string], _body :string}]",
-  context: %{topic: "quantum computing", articles: articles},
-  llm: my_llm,
-  debug: true,
-  compression: true,
-  max_turns: 5
+# Agent 1: Filter articles by relevance
+filter_agent = SubAgent.new(
+  prompt: "Return IDs of articles whose keywords are relevant to {{topic}}. Exclude unrelated articles (e.g., coffee, sports, brands).",
+  signature: "(topic :string, articles [{id :int, keywords [:string]}]) -> [:int]",
+  description: "Filter articles by topic relevance, returns list of relevant article IDs",
+  output: :json,
+  timeout: 13_000,
+  max_turns: 1
 )
 
-IO.puts("=== Research Result ===")
-IO.inspect(step1.return, label: "Returned article (includes _body)")
+# Agent 2: Summarize text
+summary_agent = SubAgent.new(
+  prompt: "Summarize this text in 1-2 sentences: {{text}}",
+  signature: "(text :string) -> {summary :string}",
+  description: "Summarize text into a short summary",
+  output: :json,
+  timeout: 11_000,
+  max_turns: 1
+)
+
+"Agents created"
 ```
 
+### Test Filter Agent
+
 ```elixir
-# Inspect what the LLM actually saw
-Debug.print_trace(step1, raw: true)
+filter_context = %{
+  topic: "quantum computing",
+  articles: Enum.map(articles, &Map.take(&1, [:id, :keywords]))
+}
+
+{:ok, filter_step} = SubAgent.run(filter_agent, llm: my_llm, context: filter_context)
+
+IO.puts("=== Filter Agent Result ===")
+IO.puts("Relevant IDs: #{inspect(filter_step.return)}")
+
+schema_tokens = div(filter_step.usage.schema_bytes, 4)
+IO.puts("Schema: ~#{schema_tokens} tokens (#{round(schema_tokens / filter_step.usage.input_tokens * 100)}% of input)")
 ```
 
-### Step 2: Summarize Agent
-
-Receives the article as context. The `_body` is hidden from the LLM, but accessible via tool.
+### Test Summary Agent
 
 ```elixir
-# Pass step1's return as context - _body travels along but stays hidden
-{_, step2} = SubAgent.run(
-  "Summarize the text '{{body}}' in one sentence",
-  context: %{ body: step1.return._body},
-  signature: "(body :string) -> {summary :string}",
-  llm: my_llm,
+article = Enum.at(articles, 1)
+{:ok, summary_step} = SubAgent.run(summary_agent, llm: my_llm, context: %{text: article._body})
+
+IO.puts("=== Summary Agent Result ===")
+IO.puts("Summary: #{summary_step.return.summary}")
+```
+
+## Orchestrator Agent (PTC-Lisp)
+
+A Lisp agent that orchestrates the workflow using the two JSON agents as tools.
+
+```elixir
+# Convert agents to tools
+filter_tool = SubAgent.as_tool(filter_agent, llm: my_llm)
+summary_tool = SubAgent.as_tool(summary_agent, llm: my_llm)
+
+# Orchestrator uses Lisp to coordinate the tools
+orchestrator = SubAgent.new(
+  prompt: """
+  Research {{topic}} using the provided articles.
+
+  1. Use filter_articles to find relevant article IDs
+  2. For each relevant article, use summarize to create a summary of its body
+  3. Combine all summaries and use summarize again to create a final summary
+
+  Return the final summary.
+  """,
+  signature: "(topic :string, articles [{id :int, keywords [:string], _body :string}]) -> :string",
+  tools: %{
+    "filter_articles" => filter_tool,
+    "summarize" => summary_tool
+  },
+  max_turns: 1,
+ timeout: 10_000,
   debug: true
 )
 
-IO.puts("=== Summary ===")
-IO.puts(step2.return.summary)
+# "Orchestrator created with tools: filter_articles, summarize"
+preview = SubAgent.preview_prompt(orchestrator,
+   context: %{
+    topic: "quantum computing breakthroughs",
+    articles: articles
+  }
+)
+
+# IO.inspect(preview.system, label: "system: ")  # Full system prompt
+#IO.inspect(preview.user, label: "user")    # Expanded user prompt
+# preview.user
+IO.puts(preview.user)
+
+
 ```
+
+### Run the Orchestrator
 
 ```elixir
-# Verify _body was hidden from LLM prompt
-Debug.print_trace(step2, raw: false)
+{result, step} = SubAgent.run(
+  orchestrator,
+  llm: my_llm,
+  timeout: 12_000,
+  context: %{
+    topic: "quantum computing breakthroughs",
+    articles: articles
+  }
+)
+
+IO.puts("=== Orchestrator Result ===")
+case result do
+  :ok -> IO.puts("Final Summary:\n#{step.return}")
+  :error -> IO.puts("Error: #{step.fail.message}")
+end
 ```
 
-## Data Flow Visualization
+### Inspect the Execution
+
+```elixir
+Debug.print_trace(step, raw: true, usage: true)
+```
+
+## How It Works
 
 ```elixir
 IO.puts("""
-Pipeline Flow:
-==============
+Multi-Agent Orchestration Flow:
+===============================
 
-[Research Agent]
+[Orchestrator Agent - PTC-Lisp]
     |
-    | context: %{topic: "quantum computing"}
-    | tools: search() -> articles with _body
-    | LLM sees: titles, keywords (picks best match)
-    | returns: %{title, keywords, _body}
-    |          (_body travels through, never seen by LLM)
-    v
-[Summarize Agent]
+    | Receives: topic, articles (with hidden _body)
+    | Writes Lisp program to coordinate tools
     |
-    | context: step1.return (includes _body, but hidden)
-    | tools: read_content() -> _body via closure
-    | LLM sees: title, keywords (NOT _body)
-    | LLM calls: read_content() to get text
-    | returns: %{summary: "..."}
-    v
-[Result]
+    +---> [filter_articles tool]
+    |         |
+    |         | JSON mode SubAgent
+    |         | Input: topic, [{id, keywords}]
+    |         | Output: [relevant_ids]
+    |         |
+    +---> [summarize tool] (called per article)
+    |         |
+    |         | JSON mode SubAgent
+    |         | Input: article._body (via Lisp get)
+    |         | Output: {summary: "..."}
+    |         |
+    +---> [summarize tool] (final)
+              |
+              | Combines all summaries
+              | Output: final summary
 
-Key: _body stayed in BEAM memory, never in any LLM prompt
+Key Points:
+- _body stays hidden from orchestrator's prompt
+- Lisp code accesses _body via (get article :_body)
+- Each tool call is a separate LLM request
+- JSON schema ensures structured responses
 """)
 ```
 
 ## Interactive Query
 
 ```elixir
-topic_input = Kino.Input.text("Topic", default: "quantum physics")
+topic_input = Kino.Input.text("Topic", default: "quantum physics research")
 ```
 
 ```elixir
 topic = Kino.Input.read(topic_input)
 
-# Run full pipeline
-with {:ok, research} <- SubAgent.run(
-       "Find the most relevant article about {{topic}}",
-       tools: %{"search" => fn _ -> articles end},
-       signature: "(topic :string) -> {id :int, title :string, keywords [:string], _body :string}",
-       context: %{topic: topic},
-       llm: my_llm
-     ),
-     {:ok, summary} <- SubAgent.run(
-       "Summarize '{{title}}'",
-       tools: %{"read_content" => fn _ -> research.return._body end},
-       context: research.return,
-       signature: "(title :string) -> {summary :string}",
-       llm: my_llm
-     ) do
-  IO.puts("Article: #{research.return.title}")
-  IO.puts("Summary: #{summary.return.summary}")
-else
-  {:error, step} -> IO.puts("Failed: #{step.fail.message}")
+{result, step} = SubAgent.run(
+  orchestrator,
+  llm: my_llm,
+  context: %{topic: topic, articles: articles}
+)
+
+case result do
+  :ok ->
+    IO.puts("Topic: #{topic}")
+    IO.puts("Summary: #{step.return}")
+  :error ->
+    IO.puts("Failed: #{step.fail.message}")
+    Debug.print_trace(step, raw: true)
 end
 ```
 

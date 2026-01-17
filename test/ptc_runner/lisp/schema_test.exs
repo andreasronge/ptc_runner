@@ -10,14 +10,13 @@ defmodule PtcRunner.Lisp.SchemaTest do
       assert String.length(prompt) > 500
     end
 
-    test "documents PTC extensions" do
+    test "documents data access and tools" do
       prompt = LanguageSpec.get(:multi_turn)
-      # Predicate builders
-      assert prompt =~ "all-of"
-      assert prompt =~ "any-of"
-      # Aggregation
-      assert prompt =~ "sum-by"
-      assert prompt =~ "min-by"
+      # Data and tool access patterns
+      assert prompt =~ "data/"
+      assert prompt =~ "tool/"
+      # Membership check
+      assert prompt =~ "contains?"
     end
 
     test "documents context access" do

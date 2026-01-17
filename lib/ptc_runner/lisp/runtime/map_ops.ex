@@ -245,6 +245,26 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   def vals(m), do: m |> Enum.sort_by(fn {k, _v} -> k end) |> Enum.map(fn {_k, v} -> v end)
 
   @doc """
+  Returns the key from a map entry (2-element vector).
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.key([:a, 1])
+      :a
+  """
+  def key([k, _v]), do: k
+
+  @doc """
+  Returns the value from a map entry (2-element vector).
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.val([:a, 1])
+      1
+  """
+  def val([_k, v]), do: v
+
+  @doc """
   Convert map to a list of [key, value] pairs, sorted by key.
   """
   def entries(m) when is_map(m) do

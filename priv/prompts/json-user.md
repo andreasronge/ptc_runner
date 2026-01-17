@@ -18,7 +18,7 @@ User message template for JSON output mode.
 
 # Expected Output
 
-Return a JSON object with these fields:
+{{output_instruction}}
 {{field_descriptions}}
 
 Example format:

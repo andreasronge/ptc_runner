@@ -239,21 +239,25 @@ defmodule PtcRunner.SubAgent.SignatureTest do
       assert analysis["properties"]["score"] == %{"type" => "number"}
     end
 
-    test "handles arrays" do
+    test "handles arrays (wrapped in object for LLM compatibility)" do
       {:ok, sig} = Signature.parse("() -> [:string]")
       schema = Signature.to_json_schema(sig)
 
-      assert schema["type"] == "array"
-      assert schema["items"] == %{"type" => "string"}
+      # Array schemas are wrapped in object because most LLM providers require object at root
+      assert schema["type"] == "object"
+      assert schema["properties"]["items"]["type"] == "array"
+      assert schema["properties"]["items"]["items"] == %{"type" => "string"}
     end
 
-    test "handles arrays of objects" do
+    test "handles arrays of objects (wrapped in object for LLM compatibility)" do
       {:ok, sig} = Signature.parse("() -> [{id :int, name :string}]")
       schema = Signature.to_json_schema(sig)
 
-      assert schema["type"] == "array"
-      assert schema["items"]["type"] == "object"
-      assert schema["items"]["properties"]["id"] == %{"type" => "integer"}
+      # Array schemas are wrapped in object because most LLM providers require object at root
+      assert schema["type"] == "object"
+      assert schema["properties"]["items"]["type"] == "array"
+      assert schema["properties"]["items"]["items"]["type"] == "object"
+      assert schema["properties"]["items"]["items"]["properties"]["id"] == %{"type" => "integer"}
     end
 
     test "converts all primitive types correctly" do

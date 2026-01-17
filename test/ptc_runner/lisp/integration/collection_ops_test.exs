@@ -631,6 +631,66 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # interpose - Insert separator between elements
+  # ==========================================================================
+
+  describe "interpose" do
+    test "inserts separator between elements" do
+      source = ~S|(interpose ", " ["a" "b" "c"])|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == ["a", ", ", "b", ", ", "c"]
+    end
+
+    test "works with numeric separator" do
+      source = "(interpose 0 [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 0, 2, 0, 3]
+    end
+
+    test "returns single element unchanged" do
+      source = "(interpose :x [1])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1]
+    end
+
+    test "returns empty list for empty input" do
+      source = "(interpose :x [])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "works with keyword separator" do
+      source = "(interpose :sep [:a :b :c])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [:a, :sep, :b, :sep, :c]
+    end
+
+    test "commonly used with join for string building" do
+      source = ~S|(join (interpose ", " ["a" "b" "c"]))|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "a, b, c"
+    end
+
+    test "works in threading macro" do
+      source = ~S|(->> ["a" "b" "c"] (interpose "-") (join))|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == "a-b-c"
+    end
+
+    test "handles nil separator by inserting nil between elements" do
+      source = "(interpose nil [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, nil, 2, nil, 3]
+    end
+
+    test "handles nil collection by returning empty list" do
+      source = "(interpose :x nil)"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+  end
+
+  # ==========================================================================
   # distinct-by - Get unique items by key
   # ==========================================================================
 

@@ -213,6 +213,8 @@ defmodule PtcRunner.Step do
   - `output_tokens`: Total output tokens (SubAgent only, optional)
   - `total_tokens`: Input + output tokens (SubAgent only, optional)
   - `llm_requests`: Number of LLM API calls (SubAgent only, optional)
+  - `schema_used`: Whether JSON schema was sent to LLM (JSON mode only, optional)
+  - `schema_bytes`: Size of JSON schema in bytes (JSON mode only, optional)
   """
   @type usage :: %{
           required(:duration_ms) => non_neg_integer(),
@@ -221,7 +223,9 @@ defmodule PtcRunner.Step do
           optional(:input_tokens) => non_neg_integer(),
           optional(:output_tokens) => non_neg_integer(),
           optional(:total_tokens) => non_neg_integer(),
-          optional(:llm_requests) => non_neg_integer()
+          optional(:llm_requests) => non_neg_integer(),
+          optional(:schema_used) => boolean(),
+          optional(:schema_bytes) => non_neg_integer()
         }
 
   @typedoc """

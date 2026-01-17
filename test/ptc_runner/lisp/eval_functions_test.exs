@@ -103,11 +103,37 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
         )
     end
 
-    test "map access error with non-keyword arg" do
-      map = %{name: "Alice"}
+    test "map access with string key" do
+      map = %{"name" => "Alice"}
 
-      {:error, {:invalid_map_call, _, _}} =
-        Eval.eval({:call, {:var, :m}, [{:string, "name"}]}, %{}, %{}, %{m: map}, &dummy_tool/2)
+      assert {:ok, "Alice", %{}} =
+               Eval.eval(
+                 {:call, {:var, :m}, [{:string, "name"}]},
+                 %{},
+                 %{},
+                 %{m: map},
+                 &dummy_tool/2
+               )
+    end
+
+    test "map access with integer key" do
+      map = %{0 => "zero", 1 => "one"}
+
+      assert {:ok, "zero", %{}} =
+               Eval.eval({:call, {:var, :m}, [0]}, %{}, %{}, %{m: map}, &dummy_tool/2)
+    end
+
+    test "map access with string key and default" do
+      map = %{"a" => 1}
+
+      assert {:ok, "default", %{}} =
+               Eval.eval(
+                 {:call, {:var, :m}, [{:string, "missing"}, {:string, "default"}]},
+                 %{},
+                 %{},
+                 %{m: map},
+                 &dummy_tool/2
+               )
     end
   end
 

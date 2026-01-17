@@ -306,6 +306,24 @@ Key-value associations:
 {[:a :b] "nested"}        ; VALIDATION ERROR - vector key
 ```
 
+**Maps as functions:** Maps can be invoked as functions to look up values by key:
+
+| Expression | Result | Description |
+|------------|--------|-------------|
+| `({:a 1 :b 2} :a)` | `1` | Keyword key lookup |
+| `({:a 1} :missing)` | `nil` | Missing key returns nil |
+| `({:a 1} :missing "default")` | `"default"` | Missing key with default |
+| `({"name" "Alice"} "name")` | `"Alice"` | String key lookup |
+
+**Note:** Maps cannot be passed directly to higher-order functions like `mapv` or `filter`. Use a wrapper closure instead:
+
+```clojure
+;; Won't work: (mapv my-map keys)
+;; Use instead:
+(let [lookup {:a 1 :b 2}]
+  (mapv #(lookup %) [:a :b]))  ; => [1 2]
+```
+
 ### 3.9 Sets
 
 Unordered collections of unique values:
@@ -1423,6 +1441,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `into` | `(into to from)` | Pour from into to |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
 | `interleave` | `(interleave c1 c2)` | Interleave collections |
+| `interpose` | `(interpose sep coll)` | Insert separator between elements |
 | `zip` | `(zip c1 c2)` | Combine into pairs |
 
 ```clojure
@@ -1437,6 +1456,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (into #{} {:a 1})          ; => #{[:a 1]}
 (into {} #{[:a 1]})        ; => {:a 1}
 (flatten [[1 2] [3 [4]]])  ; => [1 2 3 4]
+(interpose ", " ["a" "b" "c"]) ; => ["a" ", " "b" ", " "c"]
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
 ```
 

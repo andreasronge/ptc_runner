@@ -13,14 +13,14 @@ defmodule PtcRunner.SubAgent.Namespace.ToolTest do
       assert Tool.render(%{}) == ";; No tools available"
     end
 
-    test "renders single tool with signature" do
+    test "renders single tool with signature including param types" do
       tools = %{"search" => make_tool("search", "(query :string) -> :string")}
       result = Tool.render(tools)
 
-      assert result == ";; === tools ===\ntool/search(query) -> string"
+      assert result == ";; === tools ===\ntool/search(query string) -> string"
     end
 
-    test "renders multiple tools sorted alphabetically" do
+    test "renders multiple tools sorted alphabetically with param types" do
       tools = %{
         "zebra-tool" => make_tool("zebra-tool", "-> :map"),
         "apple-tool" => make_tool("apple-tool", "(id :int) -> :string"),
@@ -31,8 +31,8 @@ defmodule PtcRunner.SubAgent.Namespace.ToolTest do
       lines = String.split(result, "\n")
 
       assert Enum.at(lines, 0) == ";; === tools ==="
-      assert Enum.at(lines, 1) == "tool/apple-tool(id) -> string"
-      assert Enum.at(lines, 2) == "tool/mango-tool(a, b) -> bool"
+      assert Enum.at(lines, 1) == "tool/apple-tool(id int) -> string"
+      assert Enum.at(lines, 2) == "tool/mango-tool(a string, b int) -> bool"
       assert Enum.at(lines, 3) == "tool/zebra-tool() -> map"
     end
 
@@ -50,7 +50,7 @@ defmodule PtcRunner.SubAgent.Namespace.ToolTest do
       assert result == ";; === tools ===\ntool/get-time() -> map"
     end
 
-    test "complex signature with multiple params" do
+    test "complex signature with multiple params shows all types" do
       tools = %{
         "analyze" =>
           make_tool("analyze", "(data :map, threshold :float, enabled :bool) -> {score :float}")
@@ -58,21 +58,22 @@ defmodule PtcRunner.SubAgent.Namespace.ToolTest do
 
       result = Tool.render(tools)
 
-      assert result == ";; === tools ===\ntool/analyze(data, threshold, enabled) -> {score float}"
+      assert result ==
+               ";; === tools ===\ntool/analyze(data map, threshold float, enabled bool) -> {score float}"
     end
 
-    test "renders list return types correctly" do
+    test "renders list return types correctly with param types" do
       tools = %{"list-items" => make_tool("list-items", "(filter :string) -> [:string]")}
       result = Tool.render(tools)
 
-      assert result == ";; === tools ===\ntool/list-items(filter) -> [string]"
+      assert result == ";; === tools ===\ntool/list-items(filter string) -> [string]"
     end
 
-    test "renders optional return types correctly" do
+    test "renders optional return types correctly with param types" do
       tools = %{"find-user" => make_tool("find-user", "(id :int) -> :string?")}
       result = Tool.render(tools)
 
-      assert result == ";; === tools ===\ntool/find-user(id) -> string?"
+      assert result == ";; === tools ===\ntool/find-user(id int) -> string?"
     end
   end
 end
