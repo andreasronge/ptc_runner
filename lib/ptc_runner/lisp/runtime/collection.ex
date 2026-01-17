@@ -442,6 +442,22 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
   end
 
+  @doc """
+  Returns a list with sep inserted between each element.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interpose(", ", ["a", "b", "c"])
+      ["a", ", ", "b", ", ", "c"]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interpose(:x, [1])
+      [1]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interpose(:x, [])
+      []
+  """
+  def interpose(sep, coll) when is_list(coll), do: Enum.intersperse(coll, sep)
+
   # ============================================================
   # partition: chunk collection into groups
   # ============================================================

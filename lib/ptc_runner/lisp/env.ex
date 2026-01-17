@@ -241,6 +241,7 @@ defmodule PtcRunner.Lisp.Env do
       {:flatten, {:normal, &Runtime.flatten/1}},
       {:zip, {:normal, &Runtime.zip/2}},
       {:interleave, {:normal, &Runtime.interleave/2}},
+      {:interpose, {:normal, &Runtime.interpose/2}},
       {:partition, {:multi_arity, :partition, {&Runtime.partition/2, &Runtime.partition/3}}},
       {:count, {:normal, &Runtime.count/1}},
       {:empty?, {:normal, &Runtime.empty?/1}},

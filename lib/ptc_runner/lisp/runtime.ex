@@ -74,6 +74,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate flatten(coll), to: Collection
   defdelegate zip(c1, c2), to: Collection
   defdelegate interleave(c1, c2), to: Collection
+  defdelegate interpose(sep, coll), to: Collection
   defdelegate partition(n, coll), to: Collection
   defdelegate partition(n, step, coll), to: Collection
   defdelegate count(coll), to: Collection
