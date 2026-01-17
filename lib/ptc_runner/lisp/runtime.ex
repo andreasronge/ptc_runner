@@ -203,6 +203,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate re_find(re, s), to: Regex
   defdelegate re_matches(re, s), to: Regex
   defdelegate re_split(re, s), to: Regex
+  defdelegate re_seq(re, s), to: Regex
 
   # ============================================================
   # Type Predicates

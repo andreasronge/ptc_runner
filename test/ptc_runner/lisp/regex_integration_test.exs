@@ -29,6 +29,32 @@ defmodule PtcRunner.Lisp.RegexIntegrationTest do
     end
   end
 
+  describe "re-seq via interpreter" do
+    test "finds all matches" do
+      source = ~S|(re-seq (re-pattern "\\d+") "a1b22c333")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == ["1", "22", "333"]
+    end
+
+    test "returns empty list when no matches" do
+      source = ~S|(re-seq (re-pattern "\\d+") "abc")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "returns groups when pattern has capture groups" do
+      source = ~S|(re-seq (re-pattern "(\\d)(\\w)") "1a2b3c")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == [["1a", "1", "a"], ["2b", "2", "b"], ["3c", "3", "c"]]
+    end
+
+    test "works in pipeline" do
+      source = ~S|(->> "foo1bar2baz3" (re-seq (re-pattern "\\d+")) count)|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == 3
+    end
+  end
+
   describe "regex literal error message" do
     test "provides helpful error for #\"...\" syntax" do
       source = ~S|(clojure.string/split "a b c" #"\s+")|
