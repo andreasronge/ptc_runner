@@ -84,8 +84,17 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   def preview_prompt(%SubAgent{} = agent, context) do
     alias PtcRunner.SubAgent.PromptExpander
 
-    # Expand the mission template
-    {:ok, expanded_prompt} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
+    # Expand the mission template with annotations (e.g., ~{data/review})
+    # This matches the actual execution behavior in Loop.expand_template/2
+    expanded_prompt =
+      case PromptExpander.expand_annotated(agent.prompt, context) do
+        {:ok, result} ->
+          result
+
+        {:error, _} ->
+          {:ok, result} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
+          result
+      end
 
     # Build user message using the same logic as the execution loop
     state = %{context: context, expanded_prompt: expanded_prompt}

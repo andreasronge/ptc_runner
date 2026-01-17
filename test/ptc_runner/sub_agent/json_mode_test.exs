@@ -177,8 +177,10 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       assert_receive {:llm_input, input}
       [user_msg] = input.messages
+      # Actual value is in data inventory
       assert user_msg.content =~ "hello world"
-      assert user_msg.content =~ "Analyze hello world"
+      # Mission uses annotated reference instead of duplicating value
+      assert user_msg.content =~ "Analyze ~{data/text}"
     end
   end
 
@@ -660,8 +662,8 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert preview.user =~ ~s|[{"id":1},{"id":2}]|
       refute preview.user =~ "%{id:"
 
-      # Should include task and expected output
-      assert preview.user =~ "Return IDs for test"
+      # Should include task (with annotated reference) and expected output
+      assert preview.user =~ "Return IDs for ~{data/topic}"
       assert preview.user =~ "Expected Output"
     end
 

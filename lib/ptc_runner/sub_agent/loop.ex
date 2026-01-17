@@ -652,11 +652,22 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Expand template placeholders with context values
+  # Expand template placeholders with annotated references (e.g., ~{data/review})
+  # This tells the LLM that values come from context, not hardcoded strings
   defp expand_template(prompt, context) when is_map(context) do
     alias PtcRunner.SubAgent.PromptExpander
-    {:ok, result} = PromptExpander.expand(prompt, context, on_missing: :keep)
-    result
+    # Use expand_annotated to show ~{data/var} references instead of actual values
+    # This reduces duplication (values already in data inventory) and teaches
+    # the LLM to use data/ references in its code
+    case PromptExpander.expand_annotated(prompt, context) do
+      {:ok, result} ->
+        result
+
+      # Fall back to keeping placeholders if context is missing keys
+      {:error, _} ->
+        {:ok, result} = PromptExpander.expand(prompt, context, on_missing: :keep)
+        result
+    end
   end
 
   # System prompt generation - static sections only (cacheable)
