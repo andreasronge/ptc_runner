@@ -3,27 +3,18 @@
 ## Prerequisites
 
 - `HEX_API_KEY` secret configured in GitHub repo settings
-- Claude CLI installed (for changelog generation)
 
 ## Quick Release (Recommended)
 
 ```bash
-# Step 1: Generate changelog with Claude
-./scripts/update-changelog.sh 0.3.3
+# Step 1: Update CHANGELOG.md manually with changes since last tag
+# Use: git log v0.5.0..HEAD --oneline | grep -E "^[a-f0-9]+ (feat|fix):"
 
-# Step 2: Review CHANGELOG.md, edit if needed
-
-# Step 3: Run release script (validates, bumps version, commits, tags, pushes)
-./scripts/release.sh 0.3.3
+# Step 2: Run release script (validates, bumps version, commits, tags, pushes)
+./scripts/release.sh 0.5.1
 ```
 
-## What the Scripts Do
-
-### `update-changelog.sh`
-- Extracts only `feat:` and `fix:` commits since last tag
-- Uses Claude (Haiku) to write user-facing descriptions
-- Filters out internal/CI/demo changes
-- Groups related small fixes
+## What the Script Does
 
 ### `release.sh`
 Runs these checks before releasing:
