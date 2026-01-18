@@ -79,7 +79,7 @@ step.return.age   #=> 25
 
 JSON mode skips PTC-Lisp entirely - the LLM returns structured JSON directly, validated against your signature. Use it when you need structured output but not computation or tool calls.
 
-**Constraints:** JSON mode requires a signature, cannot use tools, and doesn't support compression or firewall fields. See [Structured Output Callbacks](structured-output-callbacks.md) for implementation details.
+**Constraints:** JSON mode requires a signature, cannot use tools, and doesn't support compression or firewall fields.
 
 ## Adding Tools
 
