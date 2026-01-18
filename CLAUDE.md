@@ -87,6 +87,7 @@ See [Testing Guidelines](docs/guidelines/testing-guidelines.md) for full details
 - Remove low-value tests that duplicate implementation
 - Rule: if test is as simple as implementation, skip it
 - No `Process.sleep` - use monitors or async helpers
+- Writing basic failing integration tests before fixing bugs
 
 ## Documentation Rules
 
