@@ -541,10 +541,35 @@ defmodule PtcRunner.Lisp.Eval do
   # Build args map from a list of evaluated arguments for tool calls.
   # - Single map argument: pass through as-is
   # - No arguments: return empty map
+  # - Keyword-style list [:key1, val1, :key2, val2]: convert to map
   # - Other cases: wrap in a list under :args key
   defp build_args_map([]), do: %{}
   defp build_args_map([arg]) when is_map(arg), do: arg
-  defp build_args_map(args), do: %{args: args}
+
+  defp build_args_map(args) do
+    if keyword_style_args?(args) do
+      args_to_map(args)
+    else
+      %{args: args}
+    end
+  end
+
+  # Check if args list is keyword-style: [:key1, val1, :key2, val2, ...]
+  # Must have even length and odd positions (0, 2, 4...) must be atoms
+  defp keyword_style_args?(args) when rem(length(args), 2) == 0 do
+    args
+    |> Enum.chunk_every(2)
+    |> Enum.all?(fn [k, _v] -> is_atom(k) end)
+  end
+
+  defp keyword_style_args?(_), do: false
+
+  # Convert keyword-style args to map: [:key1, val1, :key2, val2] -> %{key1: val1, key2: val2}
+  defp args_to_map(args) do
+    args
+    |> Enum.chunk_every(2)
+    |> Map.new(fn [k, v] -> {k, v} end)
+  end
 
   # Record a tool call with timing, execution, error capture, and evaluation context update.
   # Captures the error field if the tool raises an exception, records it, and throws a special

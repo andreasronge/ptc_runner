@@ -552,4 +552,50 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert msg =~ "arity_mismatch"
     end
   end
+
+  describe "tool call argument recording" do
+    test "keyword-style args are recorded as map, not wrapped in :args" do
+      # When LLM calls (tool/summarize :text "hello"), the tool_calls should record
+      # args as %{text: "hello"}, not %{args: [:text, "hello"]}
+      tools = %{
+        "summarize" => fn %{text: text} -> %{summary: "Summary of: #{text}"} end
+      }
+
+      source = ~S|(tool/summarize :text "hello world")|
+
+      {:ok, step} = Lisp.run(source, tools: tools)
+
+      assert [tool_call] = step.tool_calls
+      assert tool_call.name == "summarize"
+      # Args should be a proper map with :text key, not wrapped in :args
+      assert tool_call.args == %{text: "hello world"}
+      refute Map.has_key?(tool_call.args, :args)
+    end
+
+    test "multiple keyword args are recorded as map" do
+      tools = %{
+        "search" => fn %{query: q, limit: l} -> [q, l] end
+      }
+
+      source = ~S|(tool/search :query "elixir" :limit 10)|
+
+      {:ok, step} = Lisp.run(source, tools: tools)
+
+      assert [tool_call] = step.tool_calls
+      assert tool_call.args == %{query: "elixir", limit: 10}
+    end
+
+    test "single map arg is passed through as-is" do
+      tools = %{
+        "fetch" => fn %{url: url} -> "content from #{url}" end
+      }
+
+      source = ~S|(tool/fetch {:url "http://example.com"})|
+
+      {:ok, step} = Lisp.run(source, tools: tools)
+
+      assert [tool_call] = step.tool_calls
+      assert tool_call.args == %{url: "http://example.com"}
+    end
+  end
 end
