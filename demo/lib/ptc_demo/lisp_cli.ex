@@ -77,6 +77,7 @@ defmodule PtcDemo.LispCLI do
     if run_tests do
       run_tests_and_exit(
         verbose: verbose,
+        debug: opts[:debug] || false,
         report: report_path,
         runs: runs,
         validate_clojure: validate_clojure,
