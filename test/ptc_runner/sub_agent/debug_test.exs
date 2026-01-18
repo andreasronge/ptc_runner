@@ -727,5 +727,105 @@ defmodule PtcRunner.SubAgent.DebugTest do
         assert output =~ "Memory:"
       end
     end
+
+    test "usage: true shows tool call statistics" do
+      # Create turns with tool calls
+      turns = [
+        Turn.success(
+          1,
+          "```clojure\n(tool/search \"foo\")\n```",
+          "(tool/search \"foo\")",
+          %{},
+          [],
+          [%{name: "search", args: %{query: "foo"}, result: ["result1"]}],
+          %{}
+        ),
+        Turn.success(
+          2,
+          "```clojure\n(tool/search \"bar\")\n```",
+          "(tool/search \"bar\")",
+          %{},
+          [],
+          [
+            %{name: "search", args: %{query: "bar"}, result: ["result2"]},
+            %{name: "fetch", args: %{url: "http://example.com"}, result: "html"}
+          ],
+          %{}
+        )
+      ]
+
+      step = %Step{
+        return: %{done: true},
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 100, memory_bytes: 0, input_tokens: 500, output_tokens: 50}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      # Should show Tool Calls section
+      assert output =~ "Tool Calls"
+      # Should show search was called 2 times
+      assert output =~ "search"
+      assert output =~ "× 2"
+      # Should show fetch was called 1 time
+      assert output =~ "fetch"
+      assert output =~ "× 1"
+      # Should show sample arguments in Clojure format (what LLM sees)
+      assert output =~ ":query"
+    end
+
+    test "usage: true shows tool stats in Clojure format" do
+      # Tool stats uses Clojure format to match what LLM sees
+      turns = [
+        Turn.success(
+          1,
+          "...",
+          "...",
+          %{},
+          [],
+          [%{name: "process", args: %{query: "test", limit: 10}, result: "ok"}],
+          %{}
+        )
+      ]
+
+      step = %Step{
+        return: %{done: true},
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      # Should show Tool Calls section with args in Clojure format
+      assert output =~ "Tool Calls"
+      assert output =~ "process"
+      # Args shown in Clojure format (same as what LLM sees)
+      assert output =~ ":query"
+      assert output =~ ":limit"
+    end
+
+    test "usage: true does not show tool section when no tools called" do
+      turns = [
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 100, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, usage: true) end)
+
+      # Should show Usage section but not Tool Calls section
+      assert output =~ "Usage"
+      refute output =~ "Tool Calls"
+    end
   end
 end
