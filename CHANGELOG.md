@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-01-18
+
+### Added
+
+- **JSON Output Mode** - SubAgents can now return structured JSON instead of PTC-Lisp
+  - Add `output:` field to SubAgent struct for declaring JSON schema
+  - Add `Signature.to_json_schema/1` for JSON schema generation
+  - Add `LLMClient.generate_object/4` for structured output generation
+  - Add `LLMClient.callback/1` for SubAgent integration
+  - Support array types and improved validation UX
+- Add `re-seq` regex function to PTC-Lisp for extracting all matches
+- Add debug mission display and tool call statistics with Clojure format output
+
+### Fixed
+
+- Convert keyword-style tool args to map in Lisp interpreter
+
 ## [0.5.0] - 2026-01-16
 
 ### Breaking Changes
@@ -325,6 +342,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.5.1]: https://github.com/andreasronge/ptc_runner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/andreasronge/ptc_runner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/andreasronge/ptc_runner/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/andreasronge/ptc_runner/compare/v0.3.4...v0.4.0
