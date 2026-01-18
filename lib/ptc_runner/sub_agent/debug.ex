@@ -401,91 +401,16 @@ defmodule PtcRunner.SubAgent.Debug do
     Regex.replace(~r/```(?:lisp|clojure)?\s*[\s\S]+?\s*```/, text, "[program: see below]")
   end
 
-  # Format result for display
-  defp format_result(result) when is_binary(result) do
-    maybe_truncate_and_split(result)
-  end
-
-  defp format_result(result) when is_map(result) do
-    if map_size(result) == 0 do
-      ["{}"]
-    else
-      result
-      |> Format.to_string(pretty: true, limit: 5, width: 80)
-      |> maybe_truncate_and_split()
-    end
-  end
-
-  defp format_result(result) when is_list(result) do
-    result
-    |> Format.to_string(pretty: true, limit: 5, width: 80)
-    |> maybe_truncate_and_split()
-  end
-
+  # Format result for display (multi-line, uses Clojure format to match LLM)
   defp format_result(result) do
-    result
-    |> Format.to_string(pretty: true, limit: 5, width: 80)
-    |> String.split("\n")
+    {str, _truncated} = Format.to_clojure(result, limit: 5, printable_limit: 200)
+    String.split(str, "\n")
   end
 
-  # Truncate text if over limit, then split into lines
-  defp maybe_truncate_and_split(text, limit \\ 200) do
-    if String.length(text) > limit do
-      [String.slice(text, 0, limit - 3) <> "..."]
-    else
-      String.split(text, "\n")
-    end
-  end
-
-  # Format data compactly for inline display
-  defp format_compact(data) when is_map(data) do
-    if map_size(data) == 0 do
-      "{}"
-    else
-      keys =
-        data
-        |> Map.keys()
-        |> Enum.take(3)
-        |> Enum.map_join(", ", &inspect/1)
-
-      if map_size(data) > 3 do
-        "{#{keys}, ... (#{map_size(data)} keys)}"
-      else
-        Format.to_string(data, limit: 3, pretty: false, width: 60)
-      end
-    end
-  end
-
-  defp format_compact(data) when is_list(data) do
-    cond do
-      data == [] ->
-        "[]"
-
-      length(data) <= 3 ->
-        Format.to_string(data, limit: 3, pretty: false, width: 60)
-
-      true ->
-        sample = Enum.take(data, 3) |> Format.to_string(limit: 3, pretty: false)
-        "#{sample}... (#{length(data)} items)"
-    end
-  end
-
-  defp format_compact(data) when is_binary(data) do
-    if String.length(data) > 50 do
-      inspect(String.slice(data, 0, 47) <> "...")
-    else
-      inspect(data)
-    end
-  end
-
+  # Format data compactly for inline display (single line, Clojure format)
   defp format_compact(data) do
-    formatted = Format.to_string(data, limit: 3, pretty: false, width: 60)
-
-    if String.length(formatted) > 50 do
-      String.slice(formatted, 0, 47) <> "..."
-    else
-      formatted
-    end
+    {str, _truncated} = Format.to_clojure(data, limit: 3, printable_limit: 60)
+    str
   end
 
   # Fit lines to max length - raw mode shows full lines, normal mode wraps
