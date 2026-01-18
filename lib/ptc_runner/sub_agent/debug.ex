@@ -63,7 +63,7 @@ defmodule PtcRunner.SubAgent.Debug do
     - `view` - `:turns` (default) or `:compressed` - perspective to render
     - `raw` - Include raw input (messages, excluding system prompt) and raw response (default: `false`)
     - `messages` - Show all messages sent to LLM including system prompt (default: `false`)
-    - `usage` - Show token usage summary after the trace (default: `false`)
+    - `usage` - Show token usage, tool call statistics, and compression summary (default: `false`)
 
   ## Examples
 
@@ -120,6 +120,9 @@ defmodule PtcRunner.SubAgent.Debug do
 
     if show_usage and usage do
       print_usage_summary(usage)
+
+      # Print tool call statistics
+      print_tool_stats(turns)
 
       # Print compression stats if available
       if compression = Map.get(usage, :compression) do
@@ -285,7 +288,7 @@ defmodule PtcRunner.SubAgent.Debug do
     end
   end
 
-  # Print tool calls section
+  # Print tool calls section (uses Clojure format to match what LLM sees)
   defp print_tool_calls([]), do: :ok
 
   defp print_tool_calls(tool_calls) do
@@ -296,8 +299,8 @@ defmodule PtcRunner.SubAgent.Debug do
       tool_args = Map.get(call, :args, %{})
       tool_result = Map.get(call, :result, nil)
 
-      args_str = format_compact(tool_args)
-      result_str = format_compact(tool_result)
+      {args_str, _} = Format.to_clojure(tool_args, limit: 3, printable_limit: 60)
+      {result_str, _} = Format.to_clojure(tool_result, limit: 3, printable_limit: 60)
 
       IO.puts(
         "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}->#{ansi(:reset)} #{tool_name}(#{args_str})"
@@ -609,6 +612,59 @@ defmodule PtcRunner.SubAgent.Debug do
     end
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+  end
+
+  # Print tool call statistics from all turns
+  defp print_tool_stats(turns) do
+    # Collect all tool calls from all turns
+    all_calls =
+      turns
+      |> Enum.flat_map(fn turn -> turn.tool_calls || [] end)
+
+    if Enum.empty?(all_calls) do
+      :ok
+    else
+      # Group by tool name and collect call info
+      stats =
+        all_calls
+        |> Enum.group_by(fn call -> Map.get(call, :name, "unknown") end)
+        |> Enum.map(fn {name, calls} ->
+          {name, length(calls), Enum.map(calls, &Map.get(&1, :args, %{}))}
+        end)
+        |> Enum.sort_by(fn {_name, count, _args} -> -count end)
+
+      header = " Tool Calls "
+
+      IO.puts(
+        "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
+      )
+
+      Enum.each(stats, fn {name, count, args_list} ->
+        IO.puts(
+          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}#{name}#{ansi(:reset)} × #{count}"
+        )
+
+        # Show sample arguments (first 3 calls, using Clojure format to match LLM)
+        args_list
+        |> Enum.take(3)
+        |> Enum.with_index(1)
+        |> Enum.each(fn {args, idx} ->
+          {args_str, _} = Format.to_clojure(args, limit: 3, printable_limit: 50)
+
+          IO.puts(
+            "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}#{idx}. #{args_str}#{ansi(:reset)}"
+          )
+        end)
+
+        if length(args_list) > 3 do
+          IO.puts(
+            "#{ansi(:cyan)}|#{ansi(:reset)}     #{ansi(:dim)}... +#{length(args_list) - 3} more#{ansi(:reset)}"
+          )
+        end
+      end)
+
+      IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+    end
   end
 
   # Calculate system prompt ratio of input tokens
