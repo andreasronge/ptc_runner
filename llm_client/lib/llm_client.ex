@@ -32,13 +32,42 @@ defmodule LLMClient do
   Use `LLMClient.presets/0` to get all aliases.
   """
 
-  # Provider functions
-  defdelegate generate_text(model, messages, opts \\ []), to: LLMClient.Providers
-  defdelegate generate_text!(model, messages, opts \\ []), to: LLMClient.Providers
-  defdelegate generate_object(model, messages, schema, opts \\ []), to: LLMClient.Providers
-  defdelegate generate_object!(model, messages, schema, opts \\ []), to: LLMClient.Providers
-  defdelegate available?(model), to: LLMClient.Providers
-  defdelegate requires_api_key?(model), to: LLMClient.Providers
+  # Provider functions with auto-resolve
+  def generate_text(model, messages, opts \\ []) do
+    with {:ok, resolved} <- LLMClient.Registry.resolve(model) do
+      LLMClient.Providers.generate_text(resolved, messages, opts)
+    end
+  end
+
+  def generate_text!(model, messages, opts \\ []) do
+    resolved = LLMClient.Registry.resolve!(model)
+    LLMClient.Providers.generate_text!(resolved, messages, opts)
+  end
+
+  def generate_object(model, messages, schema, opts \\ []) do
+    with {:ok, resolved} <- LLMClient.Registry.resolve(model) do
+      LLMClient.Providers.generate_object(resolved, messages, schema, opts)
+    end
+  end
+
+  def generate_object!(model, messages, schema, opts \\ []) do
+    resolved = LLMClient.Registry.resolve!(model)
+    LLMClient.Providers.generate_object!(resolved, messages, schema, opts)
+  end
+
+  def available?(model) do
+    case LLMClient.Registry.resolve(model) do
+      {:ok, resolved} -> LLMClient.Providers.available?(resolved)
+      {:error, _} -> false
+    end
+  end
+
+  def requires_api_key?(model) do
+    case LLMClient.Registry.resolve(model) do
+      {:ok, resolved} -> LLMClient.Providers.requires_api_key?(resolved)
+      {:error, _} -> true
+    end
+  end
 
   # SubAgent callback functions
   defdelegate callback(model_or_alias), to: LLMClient.Providers
@@ -55,12 +84,21 @@ defmodule LLMClient do
   @doc """
   Get all model presets as a map of alias to model ID.
 
-  ## Example
+  ## Examples
 
       LLMClient.presets()
       # => %{"haiku" => "openrouter:anthropic/claude-haiku-4.5", ...}
+
+      LLMClient.presets(:bedrock)
+      # => %{"haiku" => "amazon_bedrock:anthropic.claude-3-haiku-20240307-v1:0", ...}
   """
-  defdelegate presets(), to: LLMClient.Registry, as: :preset_models
+  def presets(provider \\ nil) do
+    if provider do
+      LLMClient.Registry.preset_models(provider)
+    else
+      LLMClient.Registry.preset_models()
+    end
+  end
 
   @doc """
   Get list of all model aliases.
@@ -71,6 +109,16 @@ defmodule LLMClient do
       # => ["deepseek", "deepseek-local", "gemini", "gpt", "haiku", ...]
   """
   defdelegate aliases(), to: LLMClient.Registry
+
+  @doc """
+  Extract the provider from a model string.
+
+  ## Example
+
+      LLMClient.provider_from_model("amazon_bedrock:anthropic.claude-3-haiku")
+      # => :amazon_bedrock
+  """
+  defdelegate provider_from_model(model), to: LLMClient.Registry
 
   @doc """
   List all models with availability status.

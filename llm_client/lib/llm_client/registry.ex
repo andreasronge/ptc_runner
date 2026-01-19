@@ -1,114 +1,280 @@
 defmodule LLMClient.Registry do
   @moduledoc """
-  Simple model registry for LLM providers.
+  Provider-aware model registry for LLM providers.
 
-  Supports multiple provider types:
-  - Aliases resolve to OpenRouter models (requires OPENROUTER_API_KEY)
-  - Local Ollama models via `ollama:model-name`
-  - OpenAI-compatible APIs via `openai-compat:base_url|model`
-  - Direct provider access via `anthropic:model`, `openai:model`, etc.
+  Supports multiple providers with unified aliases:
+  - `openrouter:haiku` → OpenRouter's Claude Haiku
+  - `bedrock:haiku` → AWS Bedrock's Claude Haiku
+  - `haiku` → Uses default provider (configurable)
+
+  ## Provider Formats
+
+  - `provider:alias` - Use specific provider with alias (e.g., `bedrock:haiku`)
+  - `alias` - Use default provider with alias (e.g., `haiku`)
+  - `provider:full/model/id` - Direct model ID (e.g., `openrouter:anthropic/claude-haiku-4.5`)
+  - `ollama:model-name` - Local Ollama model
+
+  ## Configuration
+
+      # In config.exs or runtime.exs
+      config :llm_client, :default_provider, :openrouter
+
+  Or via environment variable:
+
+      export LLM_DEFAULT_PROVIDER=bedrock
 
   ## Usage
 
-      # Resolve an alias to OpenRouter model ID
+      # Using default provider
       {:ok, model_id} = LLMClient.Registry.resolve("haiku")
-      # => {:ok, "openrouter:anthropic/claude-haiku-4.5"}
 
-      # Use local Ollama model
-      {:ok, model_id} = LLMClient.Registry.resolve("ollama:deepseek-coder:6.7b")
+      # Using specific provider
+      {:ok, model_id} = LLMClient.Registry.resolve("bedrock:haiku")
 
-      # Use explicit provider (bypasses aliases)
-      {:ok, model_id} = LLMClient.Registry.resolve("anthropic:claude-haiku-4.5")
-
-      # List available models
-      LLMClient.Registry.format_model_list() |> IO.puts()
+      # Direct model ID (passes through)
+      {:ok, model_id} = LLMClient.Registry.resolve("openrouter:anthropic/claude-haiku-4.5")
   """
 
-  # Unified model metadata: alias -> %{id, description, costs}
+  # Model definitions with provider-specific IDs
+  # Each alias maps to available providers and their specific model IDs
   @models %{
-    # Cloud models (via OpenRouter)
     "haiku" => %{
-      id: "openrouter:anthropic/claude-haiku-4.5",
       description: "Claude Haiku 4.5 - Fast, cost-effective",
-      costs: %{input: 0.80, output: 4.00}
+      providers: %{
+        openrouter: "anthropic/claude-haiku-4.5",
+        bedrock: "anthropic.claude-haiku-4-5-20251001-v1:0",
+        anthropic: "claude-haiku-4-5-20251001"
+      },
+      costs: %{
+        openrouter: %{input: 0.80, output: 4.00},
+        bedrock: %{input: 0.80, output: 4.00},
+        anthropic: %{input: 0.80, output: 4.00}
+      }
     },
     "sonnet" => %{
-      id: "openrouter:anthropic/claude-sonnet-4",
       description: "Claude Sonnet 4 - Balanced performance",
-      costs: %{input: 3.00, output: 15.00}
+      providers: %{
+        openrouter: "anthropic/claude-sonnet-4",
+        bedrock: "anthropic.claude-sonnet-4-20250514-v1:0",
+        anthropic: "claude-sonnet-4-20250514"
+      },
+      costs: %{
+        openrouter: %{input: 3.00, output: 15.00},
+        bedrock: %{input: 3.00, output: 15.00},
+        anthropic: %{input: 3.00, output: 15.00}
+      }
     },
-    "devstral" => %{
-      id: "openrouter:mistralai/devstral-2512:free",
-      description: "Devstral 2512 - Mistral AI code model (free)",
-      costs: %{input: 0.0, output: 0.0}
+    "qwen-coder" => %{
+      description: "Qwen3 Coder 30B - Code generation via Bedrock",
+      providers: %{
+        bedrock: "qwen.qwen3-coder-30b-a3b-v1:0"
+      },
+      costs: %{
+        bedrock: %{input: 0.14, output: 0.14}
+      }
     },
     "gemini" => %{
-      id: "openrouter:google/gemini-2.5-flash",
       description: "Gemini 2.5 Flash - Google's fast model",
-      costs: %{input: 0.15, output: 0.60}
+      providers: %{
+        openrouter: "google/gemini-2.5-flash",
+        google: "gemini-2.5-flash"
+        # Not available on Bedrock
+      },
+      costs: %{
+        openrouter: %{input: 0.15, output: 0.60},
+        google: %{input: 0.15, output: 0.60}
+      }
     },
     "deepseek" => %{
-      id: "openrouter:deepseek/deepseek-chat-v3-0324",
       description: "DeepSeek Chat V3 - Cost-effective reasoning",
-      costs: %{input: 0.14, output: 0.28}
+      providers: %{
+        openrouter: "deepseek/deepseek-chat-v3-0324"
+      },
+      costs: %{
+        openrouter: %{input: 0.14, output: 0.28}
+      }
+    },
+    "devstral" => %{
+      description: "Devstral 2512 - Mistral AI code model (free)",
+      providers: %{
+        openrouter: "mistralai/devstral-2512:free"
+      },
+      costs: %{
+        openrouter: %{input: 0.0, output: 0.0}
+      }
     },
     "kimi" => %{
-      id: "openrouter:moonshotai/kimi-k2",
       description: "Kimi K2 - Moonshot AI's model",
-      costs: %{input: 0.60, output: 2.40}
+      providers: %{
+        openrouter: "moonshotai/kimi-k2"
+      },
+      costs: %{
+        openrouter: %{input: 0.60, output: 2.40}
+      }
     },
     "gpt" => %{
-      id: "openrouter:openai/gpt-4.1-mini",
       description: "GPT-4.1 Mini - OpenAI's efficient model",
-      costs: %{input: 0.40, output: 1.60}
+      providers: %{
+        openrouter: "openai/gpt-4.1-mini",
+        openai: "gpt-4.1-mini"
+      },
+      costs: %{
+        openrouter: %{input: 0.40, output: 1.60},
+        openai: %{input: 0.40, output: 1.60}
+      }
     },
-    # Local models (via Ollama) - free
+    # Local models (Ollama only)
     "deepseek-local" => %{
-      id: "ollama:deepseek-coder:6.7b",
       description: "DeepSeek Coder 6.7B - Local via Ollama",
-      costs: %{input: 0.0, output: 0.0}
+      providers: %{
+        ollama: "deepseek-coder:6.7b"
+      },
+      costs: %{ollama: %{input: 0.0, output: 0.0}}
     },
     "qwen-local" => %{
-      id: "ollama:qwen2.5-coder:7b",
       description: "Qwen 2.5 Coder 7B - Local via Ollama",
-      costs: %{input: 0.0, output: 0.0}
+      providers: %{
+        ollama: "qwen2.5-coder:7b"
+      },
+      costs: %{ollama: %{input: 0.0, output: 0.0}}
     },
     "llama-local" => %{
-      id: "ollama:llama3.2:3b",
       description: "Llama 3.2 3B - Local via Ollama (fast)",
-      costs: %{input: 0.0, output: 0.0}
+      providers: %{
+        ollama: "llama3.2:3b"
+      },
+      costs: %{ollama: %{input: 0.0, output: 0.0}}
     }
   }
 
   @default_model "haiku"
+  @default_provider :openrouter
+
+  # Cloud providers that can be used with aliases
+  # Note: :bedrock is user-facing alias, maps to :amazon_bedrock for ReqLLM
+  @cloud_providers [:openrouter, :bedrock, :amazon_bedrock, :anthropic, :openai, :google]
+
+  @doc """
+  Get the default provider.
+
+  Checks in order:
+  1. Application config `:llm_client, :default_provider`
+  2. Environment variable `LLM_DEFAULT_PROVIDER`
+  3. Falls back to `:openrouter`
+  """
+  @spec default_provider() :: atom()
+  def default_provider do
+    Application.get_env(:llm_client, :default_provider) ||
+      parse_env_provider() ||
+      @default_provider
+  end
+
+  defp parse_env_provider do
+    case System.get_env("LLM_DEFAULT_PROVIDER") do
+      nil -> nil
+      provider -> String.to_existing_atom(provider)
+    end
+  rescue
+    ArgumentError -> nil
+  end
 
   @doc """
   Resolve a model name to a full model ID.
 
-  - Aliases (haiku, gemini, etc.) resolve to OpenRouter models
-  - Explicit format (provider:model) passes through after validation
+  ## Formats
+
+  - `"provider:alias"` - Specific provider with alias (e.g., `"bedrock:haiku"`)
+  - `"alias"` - Default provider with alias (e.g., `"haiku"`)
+  - `"provider:full/path"` - Direct model ID (passes through)
+  - `"ollama:model"` - Local Ollama model
 
   ## Examples
 
       iex> LLMClient.Registry.resolve("haiku")
       {:ok, "openrouter:anthropic/claude-haiku-4.5"}
 
-      iex> LLMClient.Registry.resolve("anthropic:claude-haiku-4.5")
-      {:ok, "anthropic:claude-haiku-4.5"}
+      iex> LLMClient.Registry.resolve("bedrock:haiku")
+      {:ok, "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"}
+
+      iex> LLMClient.Registry.resolve("bedrock:gemini")
+      {:error, "Model 'gemini' is not available on bedrock. Available providers: openrouter, google"}
   """
   @spec resolve(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def resolve(name) when is_binary(name) do
-    cond do
-      # Known alias -> OpenRouter model
-      Map.has_key?(@models, name) ->
-        {:ok, @models[name].id}
+    case parse_model_spec(name) do
+      {:alias_only, alias_name} ->
+        resolve_with_provider(alias_name, default_provider())
 
-      # Explicit provider format -> validate and pass through
+      {:provider_alias, provider, alias_name} ->
+        resolve_with_provider(alias_name, provider)
+
+      {:direct, model_id} ->
+        {:ok, model_id}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp parse_model_spec(name) do
+    cond do
+      # Known alias without provider prefix
+      Map.has_key?(@models, name) ->
+        {:alias_only, name}
+
+      # Provider:alias or provider:model format
       String.contains?(name, ":") ->
-        validate_and_return(name)
+        [provider_str | rest] = String.split(name, ":", parts: 2)
+        provider = String.to_existing_atom(provider_str)
+        model_part = Enum.join(rest, ":")
+
+        cond do
+          # provider:alias (e.g., bedrock:haiku)
+          provider in @cloud_providers and Map.has_key?(@models, model_part) ->
+            {:provider_alias, provider, model_part}
+
+          # ollama:model-name
+          provider == :ollama ->
+            {:direct, name}
+
+          # openai-compat:url|model
+          provider_str == "openai-compat" ->
+            {:direct, name}
+
+          # Direct model ID (e.g., openrouter:anthropic/claude-haiku-4.5)
+          provider in @cloud_providers ->
+            {:direct, name}
+
+          true ->
+            {:error, unknown_provider_error(provider_str)}
+        end
 
       true ->
         {:error, unknown_model_error(name)}
+    end
+  rescue
+    ArgumentError ->
+      # String.to_existing_atom failed - unknown provider
+      [provider_str | _] = String.split(name, ":", parts: 2)
+      {:error, unknown_provider_error(provider_str)}
+  end
+
+  defp resolve_with_provider(alias_name, provider) do
+    model = @models[alias_name]
+
+    case Map.get(model.providers, provider) do
+      nil ->
+        available = model.providers |> Map.keys() |> Enum.join(", ")
+
+        {:error,
+         "Model '#{alias_name}' is not available on #{provider}. Available providers: #{available}"}
+
+      model_id ->
+        # Use amazon_bedrock prefix for ReqLLM compatibility
+        req_llm_provider =
+          if provider in [:bedrock, :amazon_bedrock], do: :amazon_bedrock, else: provider
+
+        {:ok, "#{req_llm_provider}:#{model_id}"}
     end
   end
 
@@ -124,11 +290,12 @@ defmodule LLMClient.Registry do
   end
 
   @doc """
-  Get the default model (haiku via OpenRouter).
+  Get the default model using the default provider.
   """
   @spec default_model() :: String.t()
   def default_model do
-    @models[@default_model].id
+    {:ok, model_id} = resolve(@default_model)
+    model_id
   end
 
   @doc """
@@ -136,89 +303,71 @@ defmodule LLMClient.Registry do
   """
   @spec list_models() :: [map()]
   def list_models do
-    providers = available_providers()
+    available_provs = available_providers()
 
     @models
     |> Enum.map(fn {alias_name, meta} ->
-      model_providers = providers_for_model(meta.id)
+      model_providers = Map.keys(meta.providers)
 
       %{
         alias: alias_name,
-        model_id: meta.id,
         description: meta.description,
         providers: model_providers,
-        available: Enum.any?(model_providers, &(&1 in providers))
+        available: Enum.any?(model_providers, &(&1 in available_provs))
       }
     end)
     |> Enum.sort_by(& &1.alias)
   end
 
   @doc """
-  Get all available providers based on environment variables.
+  Get all available providers based on environment variables and services.
   """
   @spec available_providers() :: [atom()]
   def available_providers do
-    [
-      {:anthropic, "ANTHROPIC_API_KEY"},
-      {:openai, "OPENAI_API_KEY"},
-      {:google, "GOOGLE_API_KEY"},
-      {:openrouter, "OPENROUTER_API_KEY"}
-    ]
-    |> Enum.filter(fn {_p, env} -> System.get_env(env) != nil end)
-    |> Enum.map(fn {p, _env} -> p end)
-    |> then(fn cloud ->
-      # Skip Ollama check in CI/test to avoid slow HTTP retries when Ollama isn't running
-      if System.get_env("CI") || Mix.env() == :test do
-        cloud
-      else
-        if LLMClient.Providers.available?("ollama:test"), do: [:ollama | cloud], else: cloud
-      end
-    end)
+    cloud =
+      [
+        {:anthropic, "ANTHROPIC_API_KEY"},
+        {:openai, "OPENAI_API_KEY"},
+        {:google, "GOOGLE_API_KEY"},
+        {:openrouter, "OPENROUTER_API_KEY"},
+        {:bedrock, ["AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN"]}
+      ]
+      |> Enum.filter(fn
+        {_p, env_vars} when is_list(env_vars) ->
+          Enum.any?(env_vars, &(System.get_env(&1) != nil))
+
+        {_p, env} ->
+          System.get_env(env) != nil
+      end)
+      |> Enum.map(fn {p, _env} -> p end)
+
+    # Skip Ollama check in CI/test
+    if System.get_env("CI") || Mix.env() == :test do
+      cloud
+    else
+      if LLMClient.Providers.available?("ollama:test"), do: [:ollama | cloud], else: cloud
+    end
   end
 
   @doc """
-  Get detailed info for a model by alias or model_id.
+  Get detailed info for a model by alias.
   """
   @spec get_model_info(String.t()) :: map() | nil
-  def get_model_info(alias_or_model_id) do
-    # Try alias first
-    case Map.get(@models, alias_or_model_id) do
-      nil ->
-        # Try as model_id
-        alias_name =
-          Enum.find_value(@models, fn {a, meta} ->
-            if meta.id == alias_or_model_id, do: a
-          end)
-
-        if alias_name, do: build_model_info(alias_name), else: nil
-
-      _meta ->
-        build_model_info(alias_or_model_id)
+  def get_model_info(alias_name) do
+    case Map.get(@models, alias_name) do
+      nil -> nil
+      meta -> build_model_info(alias_name, meta)
     end
   end
 
-  defp build_model_info(alias_name) do
-    meta = @models[alias_name]
-
+  defp build_model_info(alias_name, meta) do
     %{
       alias: alias_name,
-      model_id: meta.id,
       description: meta.description,
-      input_cost_per_mtok: meta.costs.input,
-      output_cost_per_mtok: meta.costs.output,
-      providers: providers_for_model(meta.id)
+      providers: Map.keys(meta.providers),
+      provider_models: meta.providers,
+      costs: meta.costs
     }
-  end
-
-  defp providers_for_model(model_id) do
-    cond do
-      String.starts_with?(model_id, "openrouter:") -> [:openrouter]
-      String.starts_with?(model_id, "ollama:") -> [:ollama]
-      String.starts_with?(model_id, "anthropic:") -> [:anthropic]
-      String.starts_with?(model_id, "openai:") -> [:openai]
-      String.starts_with?(model_id, "google:") -> [:google]
-      true -> []
-    end
   end
 
   @doc """
@@ -226,17 +375,18 @@ defmodule LLMClient.Registry do
   """
   @spec format_model_list() :: String.t()
   def format_model_list do
-    available = available_providers()
+    default_prov = default_provider()
 
     {cloud_models, local_models} =
       list_models()
       |> Enum.split_with(fn m ->
-        Enum.any?([:openrouter, :anthropic, :openai, :google], &(&1 in m.providers))
+        Enum.any?([:openrouter, :anthropic, :openai, :google, :bedrock], &(&1 in m.providers))
       end)
 
     header = """
     Available Models
     ================
+    Default provider: #{default_prov}
 
     Cloud Models:
     """
@@ -266,31 +416,17 @@ defmodule LLMClient.Registry do
       end)
       |> Enum.join("\n")
 
-    api_keys =
-      [
-        {"ANTHROPIC_API_KEY", :anthropic},
-        {"OPENROUTER_API_KEY", :openrouter},
-        {"OPENAI_API_KEY", :openai},
-        {"GOOGLE_API_KEY", :google}
-      ]
-      |> Enum.filter(fn {_env, p} -> p in available end)
-      |> Enum.map(fn {env, _p} -> env end)
-      |> Enum.join(", ")
-
-    api_keys_str = if api_keys == "", do: "none", else: api_keys
-
     footer = """
 
 
-    Status:
-      Current API keys: #{api_keys_str}
-      Ollama: #{if :ollama in available, do: "running", else: "not running"}
-
     Usage:
-      mix lisp --model=haiku                                 # Cloud alias
-      mix lisp --model=deepseek-local                        # Local alias
-      mix lisp --model=ollama:codellama:7b                   # Direct Ollama
-      mix lisp --model=openrouter:anthropic/claude-sonnet-4  # Direct OpenRouter
+      mix lisp --model=haiku                    # Uses default provider (#{default_prov})
+      mix lisp --model=bedrock:haiku            # Explicit provider
+      mix lisp --model=openrouter:haiku         # Explicit provider
+      mix lisp --model=deepseek-local           # Local Ollama
+
+    Environment:
+      LLM_DEFAULT_PROVIDER=bedrock              # Change default provider
     """
 
     header <> cloud_section <> local_header <> local_section <> footer
@@ -298,53 +434,40 @@ defmodule LLMClient.Registry do
 
   @doc """
   Validate a model string format.
-
-  Valid formats:
-  - "alias" - Known alias (haiku, gemini, deepseek-local, etc.)
-  - "provider:model" - Direct provider (anthropic:claude-haiku-4.5)
-  - "openrouter:provider/model" - OpenRouter format
-  - "ollama:model-name" - Local Ollama model
-  - "openai-compat:base_url|model" - OpenAI-compatible API
   """
   @spec validate(String.t()) :: :ok | {:error, String.t()}
   def validate(model_string) do
-    cond do
-      Map.has_key?(@models, model_string) ->
-        :ok
-
-      # Ollama models
-      Regex.match?(~r/^ollama:[\w.-]+(:[\w.-]+)?$/, model_string) ->
-        :ok
-
-      # OpenAI-compatible APIs
-      String.starts_with?(model_string, "openai-compat:") ->
-        :ok
-
-      # Direct providers (anthropic, openai, google)
-      Regex.match?(~r/^(anthropic|openai|google):[\w.-]+$/, model_string) ->
-        :ok
-
-      # OpenRouter format
-      Regex.match?(~r/^openrouter:[\w-]+\/[\w.-]+(:\w+)?$/, model_string) ->
-        :ok
-
-      Regex.match?(~r/^openrouter:\w+:\w+/, model_string) and
-          not Regex.match?(~r/^openrouter:[\w-]+\//, model_string) ->
-        {:error,
-         "Invalid OpenRouter format: '#{model_string}'. Use 'openrouter:provider/model' (slash, not colon)"}
-
-      true ->
-        {:error,
-         "Unknown model format: '#{model_string}'. Use 'provider:model', 'ollama:model', or 'openrouter:provider/model'"}
+    case resolve(model_string) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
   Get all aliases as a map (for CLI /model command).
+  Returns alias -> provider:model_id for the given provider.
+
+  ## Examples
+
+      iex> LLMClient.Registry.preset_models(:openrouter) |> Map.get("haiku")
+      "openrouter:anthropic/claude-haiku-4.5"
+
+      iex> LLMClient.Registry.preset_models(:bedrock) |> Map.get("haiku")
+      "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
   """
-  @spec preset_models() :: %{String.t() => String.t()}
-  def preset_models do
-    Map.new(@models, fn {alias_name, meta} -> {alias_name, meta.id} end)
+  @spec preset_models(atom()) :: %{String.t() => String.t()}
+  def preset_models(provider \\ default_provider()) do
+    # Normalize bedrock variants
+    lookup_provider = if provider in [:amazon_bedrock, :bedrock], do: :bedrock, else: provider
+
+    output_provider =
+      if provider in [:amazon_bedrock, :bedrock], do: :amazon_bedrock, else: provider
+
+    @models
+    |> Enum.filter(fn {_alias, meta} -> Map.has_key?(meta.providers, lookup_provider) end)
+    |> Map.new(fn {alias_name, meta} ->
+      {alias_name, "#{output_provider}:#{meta.providers[lookup_provider]}"}
+    end)
   end
 
   @doc """
@@ -354,33 +477,36 @@ defmodule LLMClient.Registry do
   def aliases, do: Map.keys(@models) |> Enum.sort()
 
   @doc """
-  Calculate cost from token counts.
-
-  Uses the model's cost rates if available (looks up by alias or model_id).
-  Returns the cost in dollars or 0.0 if rates not available.
-
-  ## Arguments
-
-    - `alias_or_model_id` - Model alias or full model ID
-    - `tokens` - Token counts map with keys: `:input`, `:output`, `:cache_creation`, `:cache_read`
-
-  ## Cost Calculation
-
-  For Anthropic models with prompt caching:
-    - Cache creation: 1.25x input rate (25% premium to write cache)
-    - Cache read: 0.1x input rate (90% discount on cache hits)
-    - Regular input: 1.0x input rate
+  Extract the provider atom from a model string.
 
   ## Examples
 
-      LLMClient.Registry.calculate_cost("haiku", %{input: 1000, output: 500, cache_creation: 0, cache_read: 0})
-      # => 0.0028 (standard pricing)
+      iex> LLMClient.Registry.provider_from_model("openrouter:anthropic/claude-haiku-4.5")
+      :openrouter
 
-      LLMClient.Registry.calculate_cost("haiku", %{input: 100, output: 500, cache_creation: 1000, cache_read: 0})
-      # => 0.003 (cache write premium)
+      iex> LLMClient.Registry.provider_from_model("amazon_bedrock:anthropic.claude-3-haiku")
+      :amazon_bedrock
 
-      LLMClient.Registry.calculate_cost("haiku", %{input: 100, output: 500, cache_creation: 0, cache_read: 1000})
-      # => 0.00208 (cache read discount)
+      iex> LLMClient.Registry.provider_from_model("haiku")
+      nil
+  """
+  @spec provider_from_model(String.t()) :: atom() | nil
+  def provider_from_model(model) when is_binary(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider_str, _rest] ->
+        try do
+          String.to_existing_atom(provider_str)
+        rescue
+          ArgumentError -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
+  Calculate cost from token counts.
   """
   @spec calculate_cost(String.t(), map()) :: float()
   def calculate_cost(alias_or_model_id, tokens) when is_map(tokens) do
@@ -391,14 +517,11 @@ defmodule LLMClient.Registry do
         0.0
 
       %{input: input_rate, output: output_rate} ->
-        # Support both key formats: :input/:output and :input_tokens/:output_tokens
         total_input = get_token_count(tokens, [:input, :input_tokens])
         output_tokens = get_token_count(tokens, [:output, :output_tokens])
         cache_creation = get_token_count(tokens, [:cache_creation, :cache_creation_tokens])
         cache_read = get_token_count(tokens, [:cache_read, :cache_read_tokens])
 
-        # input_tokens INCLUDES cached tokens, so subtract to get uncached portion
-        # Cache write tokens are ADDITIONAL (not included in input_tokens)
         uncached_input = max(total_input - cache_read, 0)
 
         uncached_input_cost = input_rate * uncached_input / 1_000_000
@@ -414,28 +537,34 @@ defmodule LLMClient.Registry do
     Enum.find_value(keys, 0, fn key -> Map.get(tokens, key) end)
   end
 
-  # Private functions
-
   defp find_costs(alias_or_model_id) do
-    # Try direct alias lookup first
-    case Map.get(@models, alias_or_model_id) do
-      %{costs: costs} ->
-        costs
+    cond do
+      # Direct alias lookup
+      Map.has_key?(@models, alias_or_model_id) ->
+        # Use default provider costs
+        provider = default_provider()
+        get_in(@models, [alias_or_model_id, :costs, provider])
 
-      nil ->
-        # Try as model_id
-        case Enum.find(@models, fn {_alias, meta} -> meta.id == alias_or_model_id end) do
-          {_alias, meta} -> meta.costs
-          nil -> nil
+      # Provider:alias format (e.g., "bedrock:haiku" or "amazon_bedrock:...")
+      String.contains?(alias_or_model_id, ":") ->
+        case String.split(alias_or_model_id, ":", parts: 2) do
+          [provider_str, alias_name] when is_map_key(@models, alias_name) ->
+            provider = String.to_existing_atom(provider_str)
+            # Normalize amazon_bedrock -> bedrock for cost lookup
+            lookup_provider =
+              if provider in [:amazon_bedrock, :bedrock], do: :bedrock, else: provider
+
+            get_in(@models, [alias_name, :costs, lookup_provider])
+
+          _ ->
+            nil
         end
-    end
-  end
 
-  defp validate_and_return(model_string) do
-    case validate(model_string) do
-      :ok -> {:ok, model_string}
-      error -> error
+      true ->
+        nil
     end
+  rescue
+    ArgumentError -> nil
   end
 
   defp unknown_model_error(name) do
@@ -446,11 +575,19 @@ defmodule LLMClient.Registry do
 
     Available aliases: #{aliases_str}
 
-    Or use explicit provider format:
-      - OpenRouter: openrouter:anthropic/claude-haiku-4.5
-      - Direct: anthropic:claude-haiku-4.5
+    Or use provider:alias format:
+      - bedrock:haiku
+      - openrouter:sonnet
 
     Run with --list-models to see all options.
+    """
+  end
+
+  defp unknown_provider_error(provider) do
+    """
+    Unknown provider: '#{provider}'
+
+    Available providers: openrouter, bedrock, anthropic, openai, google, ollama
     """
   end
 end

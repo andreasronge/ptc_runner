@@ -13,23 +13,23 @@ Add as a path dependency:
 ## Usage
 
 ```elixir
-# Generate text with a cloud model
 messages = [%{role: :user, content: "Hello!"}]
-{:ok, response} = LLMClient.generate_text("openrouter:anthropic/claude-haiku-4.5", messages)
-response.content  # => "Hi there!"
-response.tokens   # => %{input: 10, output: 5}
 
-# Use model aliases
-{:ok, model_id} = LLMClient.resolve("haiku")
-{:ok, response} = LLMClient.generate_text(model_id, messages)
+# Using model aliases (uses default provider)
+{:ok, response} = LLMClient.generate_text("haiku", messages)
+
+# Explicit provider with alias
+{:ok, response} = LLMClient.generate_text("bedrock:haiku", messages)
+{:ok, response} = LLMClient.generate_text("openrouter:haiku", messages)
+
+# Direct model ID
+{:ok, response} = LLMClient.generate_text("openrouter:anthropic/claude-haiku-4.5", messages)
 
 # Local Ollama model
 {:ok, response} = LLMClient.generate_text("ollama:deepseek-coder:6.7b", messages)
 
 # Check availability
-LLMClient.available?("ollama:deepseek-coder:6.7b")  # => true if Ollama running
-LLMClient.requires_api_key?("ollama:model")          # => false
-LLMClient.requires_api_key?("openrouter:model")      # => true
+LLMClient.available?("bedrock:haiku")  # => true if AWS credentials set
 ```
 
 ## Providers
@@ -39,34 +39,67 @@ LLMClient.requires_api_key?("openrouter:model")      # => true
 | `ollama:` | Local Ollama | `ollama:deepseek-coder:6.7b` |
 | `openai-compat:` | OpenAI-compatible API | `openai-compat:http://localhost:1234/v1\|model` |
 | `openrouter:` | OpenRouter | `openrouter:anthropic/claude-haiku-4.5` |
-| `anthropic:` | Anthropic direct | `anthropic:claude-haiku-4.5` |
+| `bedrock:` | AWS Bedrock | `bedrock:haiku` |
+| `anthropic:` | Anthropic direct | `anthropic:claude-3-haiku-20240307` |
 | `openai:` | OpenAI direct | `openai:gpt-4.1-mini` |
 | `google:` | Google direct | `google:gemini-2.5-flash` |
 
 ## Model Aliases
 
-Built-in aliases for common models:
+Aliases map to provider-specific model IDs. Use `provider:alias` syntax:
 
-| Alias | Model ID |
-|-------|----------|
-| `haiku` | `openrouter:anthropic/claude-haiku-4.5` |
-| `sonnet` | `openrouter:anthropic/claude-sonnet-4` |
-| `gemini` | `openrouter:google/gemini-2.5-flash` |
-| `deepseek` | `openrouter:deepseek/deepseek-chat-v3-0324` |
-| `deepseek-local` | `ollama:deepseek-coder:6.7b` |
-| `qwen-local` | `ollama:qwen2.5-coder:7b` |
-| `llama-local` | `ollama:llama3.2:3b` |
+| Alias | OpenRouter | Bedrock |
+|-------|------------|---------|
+| `haiku` | `anthropic/claude-haiku-4.5` | `anthropic.claude-haiku-4-5-20251001-v1:0` |
+| `sonnet` | `anthropic/claude-sonnet-4` | `anthropic.claude-sonnet-4-20250514-v1:0` |
+| `qwen-coder` | ❌ Not available | `qwen.qwen3-coder-30b-a3b-v1:0` |
+| `gemini` | `google/gemini-2.5-flash` | ❌ Not available |
+| `deepseek` | `deepseek/deepseek-chat-v3-0324` | ❌ Not available |
+| `gpt` | `openai/gpt-4.1-mini` | ❌ Not available |
 
-Use `LLMClient.presets/0` to get all aliases.
+Local aliases (Ollama only): `deepseek-local`, `qwen-local`, `llama-local`
 
-## Environment Variables
+Use `LLMClient.presets/1` to get aliases for a specific provider.
 
-For cloud providers, set the appropriate API key:
+## Configuration
 
-- `OPENROUTER_API_KEY` - OpenRouter (recommended, supports many models)
-- `ANTHROPIC_API_KEY` - Anthropic direct
-- `OPENAI_API_KEY` - OpenAI direct
-- `GOOGLE_API_KEY` - Google direct
+### Default Provider
+
+Set the default provider used when no prefix is specified:
+
+```bash
+export LLM_DEFAULT_PROVIDER=bedrock  # or openrouter (default)
+```
+
+Or in Elixir config:
+
+```elixir
+config :llm_client, :default_provider, :bedrock
+```
+
+### Environment Variables
+
+| Provider | Environment Variables |
+|----------|----------------------|
+| OpenRouter | `OPENROUTER_API_KEY` |
+| Bedrock | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Google | `GOOGLE_API_KEY` |
+
+### AWS Bedrock with SSO
+
+For local development with AWS SSO:
+
+```bash
+aws sso login --profile sandbox
+eval $(aws configure export-credentials --profile sandbox --format env)
+iex -S mix
+```
+
+## GitHub Actions
+
+See `infrastructure/` for CloudFormation template to set up OIDC authentication for GitHub Actions with Bedrock.
 
 ## License
 

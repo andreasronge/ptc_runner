@@ -510,6 +510,11 @@ defmodule LLMClient.Providers do
       String.starts_with?(model, "google:") ->
         System.get_env("GOOGLE_API_KEY") != nil
 
+      String.starts_with?(model, "bedrock:") or String.starts_with?(model, "amazon_bedrock:") ->
+        # Bedrock can use either IAM credentials or session tokens
+        System.get_env("AWS_ACCESS_KEY_ID") != nil or
+          System.get_env("AWS_SESSION_TOKEN") != nil
+
       true ->
         # Unknown provider, assume available
         true
