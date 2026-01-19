@@ -18,32 +18,27 @@ Mix.install(deps ++ [{:kino, "~> 0.14"}], consolidate_protocols: false)
 ```elixir
 # For testing and loading local ptc_runner library
 # IEx.Helpers.recompile()
+Code.require_file("llm_setup.exs", __DIR__)
 ```
 
-Add your API key in the Secrets panel (`ss`).
+Choose your provider:
 
 ```elixir
-api_key = System.get_env("LB_OPENROUTER_API_KEY") || System.get_env("OPENROUTER_API_KEY")
-if api_key, do: System.put_env("OPENROUTER_API_KEY", api_key)
-if(api_key, do: "API key configured", else: "No API key - add OPENROUTER_API_KEY to secrets")
+provider_input = LLMSetup.provider_input()
 ```
 
 ```elixir
-model_options =
-  LLMClient.list_models()
-  |> Enum.filter(& &1.available)
-  |> Enum.map(&{&1.model_id, "#{&1.alias} - #{&1.description}"})
-  |> Enum.sort_by(&elem(&1, 1))
+provider = Kino.Input.read(provider_input)
+LLMSetup.configure_provider(provider)
+```
 
-model_input = Kino.Input.select("Model", model_options)
+```elixir
+model_input = LLMSetup.model_input(provider)
 ```
 
 ```elixir
 model = Kino.Input.read(model_input)
-
-# LLMClient.callback/1 handles both JSON and PTC-Lisp modes automatically
-my_llm = LLMClient.callback(model)
-
+my_llm = LLMSetup.create_llm(model)
 "Ready: #{model}"
 ```
 
