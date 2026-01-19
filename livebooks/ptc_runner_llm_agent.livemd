@@ -15,57 +15,31 @@ Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_prot
 
 ## Setup
 
-Add your API key in the Secrets panel (`ss`) for cloud models. Ollama works without a key.
-
 ```elixir
 # For testing locally and reloading the library
 # IEx.Helpers.recompile()
+Code.require_file("llm_setup.exs", __DIR__)
+"Setup LLM"
+```
+
+Choose your provider:
+
+```elixir
+provider_input = LLMSetup.provider_input()
 ```
 
 ```elixir
-api_key = System.get_env("LB_OPENROUTER_API_KEY") || System.get_env("OPENROUTER_API_KEY")
-if api_key, do: System.put_env("OPENROUTER_API_KEY", api_key)
-if(api_key, do: "API key configured", else: "No API key - Ollama only")
+provider = Kino.Input.read(provider_input)
+LLMSetup.configure_provider(provider)
 ```
 
 ```elixir
-model_options =
-  if Code.ensure_loaded?(LLMClient) do
-    LLMClient.list_models()
-    |> Enum.filter(& &1.available)
-    |> Enum.map(&{&1.model_id, "#{&1.alias} - #{&1.description}"})
-    |> Enum.sort_by(&elem(&1, 1))
-  else
-    [
-      {"openrouter:anthropic/claude-haiku-4.5", "haiku - Claude Haiku 4.5"},
-      {"openrouter:google/gemini-2.5-flash", "gemini - Gemini 2.5 Flash"},
-      {"openrouter:deepseek/deepseek-chat-v3-0324", "deepseek - DeepSeek V3"}
-    ]
-  end
-
-model_input = Kino.Input.select("Model", model_options)
+model_input = LLMSetup.model_input(provider)
 ```
 
 ```elixir
 model = Kino.Input.read(model_input)
-
-my_llm =
-  if Code.ensure_loaded?(LLMClient) do
-    fn %{system: system, messages: messages} ->
-      case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 60_000) do
-        {:ok, r} -> {:ok, r}
-        error -> error
-      end
-    end
-  else
-    fn %{system: system, messages: messages} ->
-      case ReqLLM.generate_text(model, [%{role: :system, content: system} | messages], receive_timeout: 30_000) do
-        {:ok, r} -> {:ok, %{content: ReqLLM.Response.text(r), tokens: ReqLLM.Response.usage(r)}}
-        error -> error
-      end
-    end
-  end
-
+my_llm = LLMSetup.create_llm(model)
 "Ready: #{model}"
 ```
 
