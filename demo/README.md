@@ -64,8 +64,11 @@ PtcRunner.Lisp executes in sandbox → Only "42500" back to LLM
 ```bash
 cd demo
 
-# Set your OpenRouter API key (one key works with all model aliases)
+# Option 1: OpenRouter (one key works with all model aliases)
 export OPENROUTER_API_KEY=sk-or-v1-...
+
+# Option 2: AWS Bedrock (after `aws sso login --profile sandbox`)
+eval $(aws configure export-credentials --profile sandbox --format env)
 
 # Install dependencies
 mix deps.get
@@ -79,27 +82,37 @@ mix json
 
 ## Model Selection
 
-All model aliases use OpenRouter. Set `OPENROUTER_API_KEY` once and switch freely:
+Use model aliases with explicit provider prefix:
 
 ```bash
-# Via CLI flag
-mix lisp --model=gemini        # Gemini 2.5 Flash
-mix lisp --model=deepseek      # DeepSeek Chat V3
-mix lisp --model=devstral      # Devstral (free)
-mix lisp --model=haiku         # Claude Haiku 4.5 (default)
+# OpenRouter (default) - requires OPENROUTER_API_KEY
+mix lisp --model=haiku              # Uses default provider (openrouter)
+mix lisp --model=openrouter:haiku   # Explicit OpenRouter
+mix lisp --model=openrouter:gemini  # Gemini via OpenRouter
+mix lisp --model=openrouter:deepseek
+
+# AWS Bedrock - requires AWS credentials (see Quick Start)
+mix lisp --model=bedrock:haiku      # Claude 3 Haiku on Bedrock
+mix lisp --model=bedrock:sonnet     # Claude 3.5 Sonnet on Bedrock
 
 # Via environment variable
-export PTC_DEMO_MODEL=gemini
+export PTC_DEMO_MODEL=bedrock:haiku
 mix lisp
 
-# See all available aliases
+# See all available aliases and providers
 mix lisp --list-models
 ```
 
-**Direct provider access** (advanced - requires that provider's API key):
+**Note:** Both providers now use the same model generations:
+| Alias | Model |
+|-------|-------|
+| `haiku` | Claude Haiku 4.5 |
+| `sonnet` | Claude Sonnet 4 |
+
+**Direct model IDs** (advanced):
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-mix lisp --model=anthropic:claude-haiku-4.5
+mix lisp --model=openrouter:anthropic/claude-haiku-4.5
+mix lisp --model=bedrock:anthropic.claude-3-haiku-20240307-v1:0
 ```
 
 ## Generation Modes
@@ -218,7 +231,7 @@ mix json [options]
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 
-Model aliases (via OpenRouter): `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt`
+Model aliases: `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt` (use `provider:alias` syntax)
 
 Examples:
 ```bash
@@ -255,7 +268,7 @@ mix lisp --help        # Show all available options
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--validate-clojure` | Validate generated programs against Babashka |
 
-Model aliases (via OpenRouter): `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt`
+Model aliases: `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt` (use `provider:alias` syntax)
 
 Examples:
 ```bash

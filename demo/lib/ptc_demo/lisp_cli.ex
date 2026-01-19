@@ -210,24 +210,37 @@ defmodule PtcDemo.LispCLI do
 
   defp handle_input("/model", opts) do
     model = PtcDemo.LispAgent.model()
-    presets = PtcDemo.LispAgent.preset_models()
+    provider = LLMClient.provider_from_model(model)
+    presets = LLMClient.presets(provider)
 
     IO.puts("\nCurrent model: #{model}")
-    IO.puts("\nAvailable presets:")
+    IO.puts("\nAvailable presets for #{provider || "default provider"}:")
 
     for {name, full_model} <- Enum.sort(presets) do
       marker = if full_model == model, do: " *", else: ""
       IO.puts("  /model #{name}#{marker} - #{full_model}")
     end
 
-    IO.puts("\nOr use any model: /model openrouter:provider/model-name\n")
+    IO.puts("\nOr use any model: /model provider:alias (e.g., bedrock:haiku)\n")
     loop(opts)
   end
 
   defp handle_input("/model " <> name, opts) do
     name = String.trim(name)
 
-    case LLMClient.resolve(name) do
+    # If no provider prefix, use the current model's provider
+    model_spec =
+      if String.contains?(name, ":") do
+        name
+      else
+        current_model = PtcDemo.LispAgent.model()
+        provider = LLMClient.provider_from_model(current_model)
+        # Normalize amazon_bedrock -> bedrock for resolution
+        provider = if provider == :amazon_bedrock, do: :bedrock, else: provider
+        if provider, do: "#{provider}:#{name}", else: name
+      end
+
+    case LLMClient.resolve(model_spec) do
       {:ok, model} ->
         PtcDemo.LispAgent.set_model(model)
         IO.puts("   [Switched to model: #{model}]\n")
@@ -260,6 +273,25 @@ defmodule PtcDemo.LispCLI do
 
   defp handle_input("/compression " <> _invalid, opts) do
     IO.puts("   [Unknown option. Use: /compression, /compression on, or /compression off]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/turns", opts) do
+    turns = PtcDemo.LispAgent.max_turns()
+    IO.puts("   [Max turns: #{turns}]\n")
+    loop(opts)
+  end
+
+  defp handle_input("/turns " <> value, opts) do
+    case Integer.parse(String.trim(value)) do
+      {n, ""} when n > 0 ->
+        PtcDemo.LispAgent.set_max_turns(n)
+        IO.puts("   [Max turns set to #{n}]\n")
+
+      _ ->
+        IO.puts("   [Invalid value. Use: /turns <number> (e.g., /turns 10)]\n")
+    end
+
     loop(opts)
   end
 
@@ -449,6 +481,8 @@ defmodule PtcDemo.LispCLI do
       /compression     - Show current compression setting
       /compression on  - Enable message history compression
       /compression off - Disable message history compression
+      /turns           - Show current max turns setting
+      /turns <n>       - Set max turns (e.g., /turns 10)
       /debug           - Show current debug mode setting
       /debug on        - Enable debug mode (show raw LLM responses)
       /debug off       - Disable debug mode

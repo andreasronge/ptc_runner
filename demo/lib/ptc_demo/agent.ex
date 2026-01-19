@@ -34,6 +34,7 @@ defmodule PtcDemo.Agent do
     :data_mode,
     :prompt_profile,
     :compression,
+    :max_turns,
     :datasets,
     :last_program,
     :last_result,
@@ -154,6 +155,20 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
+  Get the current max_turns setting.
+  """
+  def max_turns do
+    GenServer.call(__MODULE__, :max_turns)
+  end
+
+  @doc """
+  Set the maximum number of turns for multi-turn conversations.
+  """
+  def set_max_turns(turns) when is_integer(turns) and turns > 0 do
+    GenServer.call(__MODULE__, {:set_max_turns, turns})
+  end
+
+  @doc """
   Available preset models for easy switching.
   """
   def preset_models do
@@ -188,6 +203,7 @@ defmodule PtcDemo.Agent do
     data_mode = Keyword.get(opts, :data_mode, :schema)
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
     compression = Keyword.get(opts, :compression, false)
+    max_turns = Keyword.get(opts, :max_turns, @max_turns)
 
     # Note: documents not included in ctx - use search tool instead
     datasets = %{
@@ -203,6 +219,7 @@ defmodule PtcDemo.Agent do
        data_mode: data_mode,
        prompt_profile: prompt_profile,
        compression: compression,
+       max_turns: max_turns,
        datasets: datasets,
        last_program: nil,
        last_result: nil,
@@ -214,7 +231,7 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call({:ask, question, opts}, _from, state) do
-    max_turns = Keyword.get(opts, :max_turns, @max_turns)
+    max_turns = Keyword.get(opts, :max_turns, state.max_turns)
     debug = Keyword.get(opts, :debug, false)
     verbose = Keyword.get(opts, :verbose, false)
     # Signature for return type validation (explicit or inferred from expect)
@@ -355,6 +372,16 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call({:set_compression, compression}, _from, state) do
     {:reply, :ok, %{state | compression: compression}}
+  end
+
+  @impl true
+  def handle_call(:max_turns, _from, state) do
+    {:reply, state.max_turns, state}
+  end
+
+  @impl true
+  def handle_call({:set_max_turns, turns}, _from, state) do
+    {:reply, :ok, %{state | max_turns: turns}}
   end
 
   @impl true
