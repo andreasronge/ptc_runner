@@ -136,24 +136,37 @@ defmodule PtcDemo.JsonCLI do
 
   defp handle_input("/model", opts) do
     model = PtcDemo.Agent.model()
-    presets = PtcDemo.Agent.preset_models()
+    provider = LLMClient.provider_from_model(model)
+    presets = LLMClient.presets(provider)
 
     IO.puts("\nCurrent model: #{model}")
-    IO.puts("\nAvailable presets:")
+    IO.puts("\nAvailable presets for #{provider || "default provider"}:")
 
     for {name, full_model} <- Enum.sort(presets) do
       marker = if full_model == model, do: " *", else: ""
       IO.puts("  /model #{name}#{marker} - #{full_model}")
     end
 
-    IO.puts("\nOr use any model: /model openrouter:provider/model-name\n")
+    IO.puts("\nOr use any model: /model provider:alias (e.g., bedrock:haiku)\n")
     loop(opts)
   end
 
   defp handle_input("/model " <> name, opts) do
     name = String.trim(name)
 
-    case LLMClient.resolve(name) do
+    # If no provider prefix, use the current model's provider
+    model_spec =
+      if String.contains?(name, ":") do
+        name
+      else
+        current_model = PtcDemo.Agent.model()
+        provider = LLMClient.provider_from_model(current_model)
+        # Normalize amazon_bedrock -> bedrock for resolution
+        provider = if provider == :amazon_bedrock, do: :bedrock, else: provider
+        if provider, do: "#{provider}:#{name}", else: name
+      end
+
+    case LLMClient.resolve(model_spec) do
       {:ok, model} ->
         PtcDemo.Agent.set_model(model)
         IO.puts("   [Switched to model: #{model}]\n")

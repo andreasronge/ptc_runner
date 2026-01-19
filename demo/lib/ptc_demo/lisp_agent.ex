@@ -26,4 +26,6 @@ defmodule PtcDemo.LispAgent do
   defdelegate detect_model(), to: PtcDemo.Agent
   defdelegate compression(), to: PtcDemo.Agent
   defdelegate set_compression(compression), to: PtcDemo.Agent
+  defdelegate max_turns(), to: PtcDemo.Agent
+  defdelegate set_max_turns(turns), to: PtcDemo.Agent
 end
