@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GitHub Actions OIDC setup for Bedrock access
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: andreasronge
+    Description: GitHub organization or username
+  GitHubRepo:
+    Type: String
+    Default: ptc_runner
+    Description: GitHub repository name
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCIdentityProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # GitHub's OIDC thumbprint (AWS validates this automatically now)
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubActionsBedrockRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: GitHubActionsBedrockRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubOIDCProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      Policies:
+        - PolicyName: BedrockInvokeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  # Claude models
+                  - arn:aws:bedrock:*::foundation-model/anthropic.claude-*
+                  # Llama models
+                  - arn:aws:bedrock:*::foundation-model/meta.llama*
+                  # Mistral models
+                  - arn:aws:bedrock:*::foundation-model/mistral.*
+              - Effect: Allow
+                Action:
+                  - bedrock:ListFoundationModels
+                  - bedrock:GetFoundationModel
+                Resource: '*'
+
+Outputs:
+  RoleArn:
+    Description: ARN of the GitHub Actions role (use this in your workflow)
+    Value: !GetAtt GitHubActionsBedrockRole.Arn
+    Export:
+      Name: GitHubActionsBedrockRoleArn
