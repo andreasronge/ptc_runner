@@ -3,6 +3,14 @@ name: Benchmark Tests
 on:
   workflow_dispatch:
     inputs:
+      provider:
+        description: 'LLM Provider'
+        required: false
+        type: choice
+        options:
+          - openrouter
+          - bedrock
+        default: 'openrouter'
       dsl:
         description: 'Which DSL to test'
         required: false
@@ -28,22 +36,40 @@ on:
         type: boolean
         default: false
 
+# Required for OIDC authentication with AWS
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    name: Benchmark ${{ matrix.model }}
+    name: Benchmark ${{ matrix.model }} (${{ inputs.provider }})
     strategy:
       fail-fast: true
       matrix:
         model: [deepseek, gemini, haiku]
+        exclude:
+          # Exclude models not available on bedrock
+          - model: ${{ inputs.provider == 'bedrock' && 'deepseek' || 'never-exclude' }}
+          - model: ${{ inputs.provider == 'bedrock' && 'gemini' || 'never-exclude' }}
     env:
       MIX_ENV: dev
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_API_KEY: ${{ inputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || '' }}
       PTC_DEBUG_PARSER: ${{ inputs.debug_parser && '1' || '' }}
+      LLM_DEFAULT_PROVIDER: ${{ inputs.provider }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Configure AWS credentials for Bedrock (OIDC - no secrets needed)
+      - name: Configure AWS credentials
+        if: inputs.provider == 'bedrock'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::987540640537:role/GitHubActionsBedrockRole
+          aws-region: us-east-1
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -61,7 +87,7 @@ jobs:
         working-directory: demo
         run: |
           mix lisp --test \
-            --model=${{ matrix.model }} \
+            --model=${{ inputs.provider }}:${{ matrix.model }} \
             --runs=${{ inputs.runs }} \
             --validate-clojure \
             ${{ inputs.verbose && '--verbose' || '' }} \
@@ -73,7 +99,7 @@ jobs:
         working-directory: demo
         run: |
           mix json --test \
-            --model=${{ matrix.model }} \
+            --model=${{ inputs.provider }}:${{ matrix.model }} \
             --runs=${{ inputs.runs }} \
             ${{ inputs.verbose && '--verbose' || '' }} \
             --report
@@ -83,7 +109,7 @@ jobs:
         if: always()
         working-directory: demo
         run: |
-          echo "## Benchmark Results: ${{ matrix.model }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Benchmark Results: ${{ matrix.model }} (${{ inputs.provider }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           for report in reports/*.md; do
@@ -100,7 +126,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-reports-${{ matrix.model }}
+          name: benchmark-reports-${{ matrix.model }}-${{ inputs.provider }}
           path: demo/reports/
           if-no-files-found: warn
           retention-days: 30
