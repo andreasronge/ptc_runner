@@ -62,24 +62,20 @@ defmodule LLMClient.RegistryTest do
   end
 
   describe "resolve/1 - invalid formats" do
-    test "rejects malformed OpenRouter format with colon instead of slash" do
-      {:error, reason} = Registry.resolve("openrouter:anthropic:claude-haiku-4.5")
-      assert String.contains?(reason, "OpenRouter format")
-      assert String.contains?(reason, "slash")
+    test "rejects unknown provider" do
+      {:error, reason} = Registry.resolve("invalid_provider:some-model")
+      assert String.contains?(reason, "Unknown provider")
     end
 
-    test "rejects completely invalid format" do
-      {:error, reason} = Registry.resolve("invalid:format:model")
-
-      assert String.contains?(reason, "Unknown model format") or
-               String.contains?(reason, "OpenRouter format")
+    test "accepts cloud provider with arbitrary model path (passthrough)" do
+      # Cloud providers pass through arbitrary paths
+      {:ok, model_id} = Registry.resolve("openrouter:anthropic:claude-haiku-4.5")
+      assert model_id == "openrouter:anthropic:claude-haiku-4.5"
     end
 
     test "rejects empty string" do
       {:error, reason} = Registry.resolve("")
-
-      assert String.contains?(reason, "Unknown model") or
-               String.contains?(reason, "Unknown model format")
+      assert String.contains?(reason, "Unknown model")
     end
   end
 
@@ -118,24 +114,19 @@ defmodule LLMClient.RegistryTest do
   end
 
   describe "validate/1 - invalid formats" do
-    test "rejects OpenRouter format with colon instead of slash" do
-      {:error, reason} = Registry.validate("openrouter:anthropic:claude-haiku-4.5")
-      assert String.contains?(reason, "OpenRouter format")
-      assert String.contains?(reason, "slash, not colon")
+    test "accepts OpenRouter with arbitrary path (passthrough)" do
+      # Cloud providers with arbitrary paths pass through
+      assert Registry.validate("openrouter:anthropic:claude-haiku-4.5") == :ok
     end
 
-    test "rejects unknown model format" do
-      {:error, reason} = Registry.validate("unknown:format:model")
-
-      assert String.contains?(reason, "Unknown model format") or
-               String.contains?(reason, "OpenRouter format")
+    test "rejects unknown provider" do
+      {:error, reason} = Registry.validate("unknown_provider:format:model")
+      assert String.contains?(reason, "Unknown provider")
     end
 
     test "rejects format with no provider prefix" do
       {:error, reason} = Registry.validate("some-model-name")
-
-      assert String.contains?(reason, "Unknown model format") or
-               String.contains?(reason, "Unknown model")
+      assert String.contains?(reason, "Unknown model")
     end
 
     test "rejects empty string" do
@@ -402,9 +393,10 @@ defmodule LLMClient.RegistryTest do
       assert String.contains?(output, "--model")
     end
 
-    test "shows current API keys or 'none'" do
+    test "shows environment section" do
       output = Registry.format_model_list()
-      assert String.contains?(output, "Current API keys:")
+      assert String.contains?(output, "Environment:")
+      assert String.contains?(output, "LLM_DEFAULT_PROVIDER")
     end
 
     test "handles empty available_providers" do
@@ -424,8 +416,8 @@ defmodule LLMClient.RegistryTest do
 
         output = Registry.format_model_list()
         assert is_binary(output)
-        # Should show "none" for current API keys
-        assert String.contains?(output, "none") or String.contains?(output, "Current API keys:")
+        # Should show "[needs API key]" for unavailable models
+        assert String.contains?(output, "[needs API key]")
       after
         {anthropic, openrouter, openai, google} = original_keys
         if anthropic, do: System.put_env("ANTHROPIC_API_KEY", anthropic)
@@ -441,25 +433,29 @@ defmodule LLMClient.RegistryTest do
       info = Registry.get_model_info("haiku")
       assert is_map(info)
       assert Map.has_key?(info, :description)
-      assert Map.has_key?(info, :input_cost_per_mtok)
-      assert Map.has_key?(info, :output_cost_per_mtok)
+      assert Map.has_key?(info, :costs)
       assert Map.has_key?(info, :providers)
+      assert Map.has_key?(info, :provider_models)
     end
 
-    test "returns model info for model ID" do
+    test "only works with aliases, not full model IDs" do
+      # get_model_info only accepts alias names, not full provider:model IDs
       info = Registry.get_model_info("openrouter:anthropic/claude-haiku-4.5")
-      assert is_map(info)
-    end
-
-    test "returns nil for unknown model" do
-      info = Registry.get_model_info("unknown:model")
       assert info == nil
     end
 
-    test "returns correct cost rates for haiku" do
+    test "returns nil for unknown model" do
+      info = Registry.get_model_info("unknown_alias")
+      assert info == nil
+    end
+
+    test "returns correct cost rates for haiku by provider" do
       info = Registry.get_model_info("haiku")
-      assert info.input_cost_per_mtok == 0.80
-      assert info.output_cost_per_mtok == 4.00
+      # Costs are now nested by provider
+      assert info.costs.openrouter.input == 0.80
+      assert info.costs.openrouter.output == 4.00
+      assert info.costs.bedrock.input == 0.80
+      assert info.costs.anthropic.input == 0.80
     end
   end
 

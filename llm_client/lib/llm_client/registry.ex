@@ -225,28 +225,31 @@ defmodule LLMClient.Registry do
       # Provider:alias or provider:model format
       String.contains?(name, ":") ->
         [provider_str | rest] = String.split(name, ":", parts: 2)
-        provider = String.to_existing_atom(provider_str)
         model_part = Enum.join(rest, ":")
 
-        cond do
-          # provider:alias (e.g., bedrock:haiku)
-          provider in @cloud_providers and Map.has_key?(@models, model_part) ->
-            {:provider_alias, provider, model_part}
+        # Handle openai-compat specially before atom conversion
+        # (the atom may not exist yet)
+        if provider_str == "openai-compat" do
+          {:direct, name}
+        else
+          provider = String.to_existing_atom(provider_str)
 
-          # ollama:model-name
-          provider == :ollama ->
-            {:direct, name}
+          cond do
+            # provider:alias (e.g., bedrock:haiku)
+            provider in @cloud_providers and Map.has_key?(@models, model_part) ->
+              {:provider_alias, provider, model_part}
 
-          # openai-compat:url|model
-          provider_str == "openai-compat" ->
-            {:direct, name}
+            # ollama:model-name
+            provider == :ollama ->
+              {:direct, name}
 
-          # Direct model ID (e.g., openrouter:anthropic/claude-haiku-4.5)
-          provider in @cloud_providers ->
-            {:direct, name}
+            # Direct model ID (e.g., openrouter:anthropic/claude-haiku-4.5)
+            provider in @cloud_providers ->
+              {:direct, name}
 
-          true ->
-            {:error, unknown_provider_error(provider_str)}
+            true ->
+              {:error, unknown_provider_error(provider_str)}
+          end
         end
 
       true ->
