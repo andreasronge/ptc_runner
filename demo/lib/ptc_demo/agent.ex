@@ -38,6 +38,7 @@ defmodule PtcDemo.Agent do
     :datasets,
     :last_program,
     :last_result,
+    :last_trace,
     :memory,
     :usage,
     :programs_history
@@ -71,6 +72,14 @@ defmodule PtcDemo.Agent do
   """
   def programs do
     GenServer.call(__MODULE__, :programs)
+  end
+
+  @doc """
+  Get the trace from the last failed execution.
+  Returns a list of turn data for debugging, or nil if last execution succeeded.
+  """
+  def last_trace do
+    GenServer.call(__MODULE__, :last_trace)
   end
 
   def list_datasets do
@@ -223,6 +232,7 @@ defmodule PtcDemo.Agent do
        datasets: datasets,
        last_program: nil,
        last_result: nil,
+       last_trace: nil,
        memory: %{},
        usage: empty_usage(),
        programs_history: []
@@ -274,11 +284,15 @@ defmodule PtcDemo.Agent do
           do:
             IO.puts("   [Result] #{ResponseHandler.format_result(result, result_max_chars: 80)}")
 
+        # Store trace even on success (needed for debugging validation failures)
+        trace = serialize_turns_for_json(step.turns)
+
         {:reply, {:ok, answer},
          %{
            state
            | last_program: program,
              last_result: result,
+             last_trace: trace,
              memory: new_memory,
              usage: new_usage,
              programs_history: new_programs
@@ -298,12 +312,16 @@ defmodule PtcDemo.Agent do
         program = extract_program_from_turns(step.turns)
         new_programs = state.programs_history ++ all_programs
 
+        # Store trace for debugging failed executions
+        trace = serialize_turns_for_json(step.turns)
+
         {:reply, {:error, error_msg},
          %{
            state
            | usage: new_usage,
              programs_history: new_programs,
-             last_program: program
+             last_program: program,
+             last_trace: trace
          }}
     end
   end
@@ -316,6 +334,7 @@ defmodule PtcDemo.Agent do
        | data_mode: :schema,
          last_program: nil,
          last_result: nil,
+         last_trace: nil,
          memory: %{},
          usage: empty_usage(),
          programs_history: []
@@ -335,6 +354,11 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call(:programs, _from, state) do
     {:reply, state.programs_history, state}
+  end
+
+  @impl true
+  def handle_call(:last_trace, _from, state) do
+    {:reply, state.last_trace, state}
   end
 
   @impl true
@@ -566,5 +590,40 @@ defmodule PtcDemo.Agent do
       total_cost: acc.total_cost,
       requests: acc.requests + Map.get(usage, :llm_requests, 1)
     }
+  end
+
+  # --- Trace Serialization ---
+
+  defp serialize_turns_for_json(nil), do: nil
+  defp serialize_turns_for_json([]), do: nil
+
+  defp serialize_turns_for_json(turns) when is_list(turns) do
+    Enum.map(turns, fn turn ->
+      %{
+        number: turn.number,
+        program: turn.program,
+        result: safe_inspect(turn.result),
+        success: turn.success?,
+        tool_calls: serialize_tool_calls(turn.tool_calls),
+        prints: turn.prints || [],
+        memory_keys: if(turn.memory, do: Map.keys(turn.memory), else: [])
+      }
+    end)
+  end
+
+  defp serialize_tool_calls(nil), do: []
+
+  defp serialize_tool_calls(tool_calls) do
+    Enum.map(tool_calls, fn tc ->
+      %{
+        name: tc.name,
+        args: tc.args,
+        result: safe_inspect(tc.result)
+      }
+    end)
+  end
+
+  defp safe_inspect(value) do
+    inspect(value, limit: 50, printable_limit: 500)
   end
 end

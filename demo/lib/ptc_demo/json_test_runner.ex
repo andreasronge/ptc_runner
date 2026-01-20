@@ -314,28 +314,33 @@ defmodule PtcDemo.JsonTestRunner do
                 passed: false,
                 error: "No result returned",
                 attempts: attempts,
-                all_programs: all_programs
+                all_programs: all_programs,
+                trace: agent_mod.last_trace()
               }
 
             value ->
               validation = Base.validate_result(value, test_case)
 
+              # Include trace for failed validations (wrong result)
               validation
               |> Map.put(:program, agent_mod.last_program())
               |> Map.put(:attempts, attempts)
               |> Map.put(:all_programs, all_programs)
               |> Map.put(:final_result, value)
+              |> maybe_add_trace(validation.passed, agent_mod)
           end
 
         {:error, reason} ->
           all_programs = agent_mod.programs()
+          trace = agent_mod.last_trace()
 
           %{
             passed: false,
             error: "Query failed: #{inspect(reason)}",
             program: agent_mod.last_program(),
             attempts: length(all_programs),
-            all_programs: all_programs
+            all_programs: all_programs,
+            trace: trace
           }
       end
 
@@ -374,6 +379,13 @@ defmodule PtcDemo.JsonTestRunner do
     result
   end
 
+  # Only add trace for failed tests (to keep report size reasonable)
+  defp maybe_add_trace(result, true = _passed, _agent_mod), do: result
+
+  defp maybe_add_trace(result, false = _passed, agent_mod) do
+    Map.put(result, :trace, agent_mod.last_trace())
+  end
+
   defp run_multi_turn_test(test_case, queries, index, total, verbose, agent_mod) do
     query_display = Enum.join(queries, " → ")
 
@@ -397,6 +409,7 @@ defmodule PtcDemo.JsonTestRunner do
 
           {:error, reason} ->
             new_programs = agent_mod.programs()
+            trace = agent_mod.last_trace()
 
             {:halt,
              {%{
@@ -404,7 +417,8 @@ defmodule PtcDemo.JsonTestRunner do
                 error: "Query failed: #{inspect(reason)}",
                 program: agent_mod.last_program(),
                 attempts: length(all_programs_acc) + length(new_programs),
-                all_programs: all_programs_acc ++ new_programs
+                all_programs: all_programs_acc ++ new_programs,
+                trace: trace
               }, []}}
         end
       end)
@@ -422,17 +436,20 @@ defmodule PtcDemo.JsonTestRunner do
                 passed: false,
                 error: "No result returned after multi-turn",
                 attempts: attempts,
-                all_programs: all_programs
+                all_programs: all_programs,
+                trace: agent_mod.last_trace()
               }
 
             value ->
               validation = Base.validate_result(value, test_case)
 
+              # Include trace for failed validations (wrong result)
               validation
               |> Map.put(:program, agent_mod.last_program())
               |> Map.put(:attempts, attempts)
               |> Map.put(:all_programs, all_programs)
               |> Map.put(:final_result, value)
+              |> maybe_add_trace(validation.passed, agent_mod)
           end
 
         %{passed: false} = error_result ->

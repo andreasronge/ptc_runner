@@ -17,11 +17,11 @@ defmodule Mix.Tasks.Aggregate do
       # Specify output file
       mix aggregate --output summary.md
 
-  The task reads all markdown reports (*.md) from the specified directory,
-  parses their summary tables, and generates a combined report with:
+  The task reads all JSON reports (*.json) from the specified directory
+  and generates a combined markdown report with:
   - Comparison table across all models
   - Combined statistics
-  - All failures from all models
+  - All failures from all models (with traces if available)
   """
 
   use Mix.Task
@@ -56,123 +56,56 @@ defmodule Mix.Tasks.Aggregate do
   end
 
   @doc """
-  Aggregates all markdown reports in the given directory.
+  Aggregates all JSON reports in the given directory.
   Returns {:ok, report_content} or {:error, reason}.
+
+  Returns an error if there are fewer than 2 valid reports, since a summary
+  of a single report isn't useful.
   """
   def aggregate_reports(reports_dir) do
-    pattern = Path.join(reports_dir, "*.md")
+    pattern = Path.join(reports_dir, "*.json")
 
     case Path.wildcard(pattern) do
       [] ->
-        {:error, "No markdown reports found in #{reports_dir}"}
+        {:error, "No JSON reports found in #{reports_dir}"}
 
       files ->
-        # Filter out SUMMARY.md if it exists
-        files = Enum.reject(files, &String.ends_with?(&1, "SUMMARY.md"))
+        reports =
+          files
+          |> Enum.map(&parse_json_report/1)
+          |> Enum.reject(&is_nil/1)
 
-        if Enum.empty?(files) do
-          {:error, "No benchmark reports found (only SUMMARY.md exists)"}
-        else
-          reports = Enum.map(files, &parse_report/1)
-          {:ok, generate_aggregate_report(reports)}
+        cond do
+          Enum.empty?(reports) ->
+            {:error, "No valid JSON reports found"}
+
+          length(reports) < 2 ->
+            {:error, "Need at least 2 reports to aggregate"}
+
+          true ->
+            {:ok, generate_aggregate_report(reports)}
         end
     end
   end
 
-  # Parse a single markdown report file
-  defp parse_report(file_path) do
-    content = File.read!(file_path)
+  # Parse a single JSON report file
+  defp parse_json_report(file_path) do
     filename = Path.basename(file_path)
 
-    %{
-      filename: filename,
-      model: extract_field(content, "Model"),
-      generated: extract_field(content, "Generated"),
-      version: extract_field(content, "PtcRunner Version"),
-      commit: extract_field(content, "Git Commit"),
-      summary: parse_summary_table(content),
-      failures: parse_failures(content)
-    }
-  end
+    case File.read(file_path) do
+      {:ok, content} ->
+        case Jason.decode(content, keys: :atoms) do
+          {:ok, data} ->
+            Map.put(data, :filename, filename)
 
-  # Extract a field value from **Field:** value format
-  defp extract_field(content, field) do
-    case Regex.run(~r/\*\*#{Regex.escape(field)}:\*\*\s*(.+)/, content) do
-      [_, value] -> String.trim(value)
-      _ -> "unknown"
-    end
-  end
+          {:error, _} ->
+            Mix.shell().info("Warning: Could not parse JSON file: #{filename}")
+            nil
+        end
 
-  # Parse the summary table into a map
-  defp parse_summary_table(content) do
-    # Match the summary table section
-    table_pattern = ~r/## Summary\s+\|[^\n]+\|\s+\|[-|]+\|\s+((?:\|[^\n]+\|\s*)+)/
-
-    case Regex.run(table_pattern, content) do
-      [_, table_rows] ->
-        table_rows
-        |> String.split("\n", trim: true)
-        |> Enum.reduce(%{}, fn row, acc ->
-          case Regex.run(~r/\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/, row) do
-            [_, key, value] ->
-              Map.put(acc, normalize_key(key), String.trim(value))
-
-            _ ->
-              acc
-          end
-        end)
-
-      _ ->
-        %{}
-    end
-  end
-
-  # Normalize table keys to atoms
-  defp normalize_key(key) do
-    key
-    |> String.trim()
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9]+/, "_")
-    |> String.trim("_")
-    |> String.to_atom()
-  end
-
-  # Parse the failed tests section
-  defp parse_failures(content) do
-    # Match ## Failed Tests followed by content until next ## heading
-    case Regex.run(~r/## Failed Tests\n\n([\s\S]*?)(?=\n## [A-Z])/, content) do
-      [_, failures_section] ->
-        # Parse individual failures (split by --- separator)
-        failures_section
-        |> String.split(~r/\n---\n/, trim: true)
-        |> Enum.flat_map(&parse_single_failure/1)
-
-      _ ->
-        []
-    end
-  end
-
-  # Parse a single failure entry
-  defp parse_single_failure(text) do
-    # Match ### followed by index number and query text (may have "(Run N)" suffix)
-    case Regex.run(~r/###\s*(\d+)\.\s*(.+?)(?:\s*\(Run \d+\))?\s*\n/s, text) do
-      [_, index, query] ->
-        error =
-          case Regex.run(~r/\*\*Error:\*\*\s*(.+)/, text) do
-            [_, e] -> String.trim(e)
-            _ -> "unknown"
-          end
-
-        [
-          %{
-            index: String.to_integer(index),
-            query: String.trim(query),
-            error: error
-          }
-        ]
-
-      _ ->
-        []
+      {:error, _} ->
+        Mix.shell().info("Warning: Could not read file: #{filename}")
+        nil
     end
   end
 
@@ -187,8 +120,8 @@ defmodule Mix.Tasks.Aggregate do
     # Benchmark Aggregate Report
 
     **Generated:** #{timestamp}
-    **PtcRunner Version:** #{first.version}
-    **Git Commit:** #{first.commit}
+    **PtcRunner Version:** #{first[:version] || "unknown"}
+    **Git Commit:** #{first[:commit] || "unknown"}
     **Reports Aggregated:** #{length(reports)}
 
     ## Model Comparison
@@ -213,10 +146,20 @@ defmodule Mix.Tasks.Aggregate do
     rows =
       reports
       |> Enum.map(fn r ->
-        s = r.summary
-        model_name = extract_model_name(r.model)
+        metrics = r[:metrics] || %{}
+        stats = r[:stats] || %{}
+        model_name = extract_model_name(r[:model] || "unknown")
 
-        "| #{model_name} | #{s[:pass_rate] || "?"} | #{s[:passed] || "?"} | #{s[:failed] || "?"} | #{s[:total_attempts] || "?"} | #{s[:avg_attempts_test] || "?"} | #{s[:duration] || "?"} | #{s[:cost] || "?"} |"
+        passed = metrics[:passed] || 0
+        failed = metrics[:failed] || 0
+        total = metrics[:total] || 0
+        pass_rate = "#{metrics[:pass_rate] || 0.0}%"
+        attempts = metrics[:total_attempts] || 0
+        avg_attempts = metrics[:avg_attempts_per_test] || 0.0
+        duration_ms = metrics[:duration_ms] || 0
+        cost = format_cost(stats[:total_cost])
+
+        "| #{model_name} | #{pass_rate} | #{passed}/#{total} | #{failed} | #{attempts} | #{avg_attempts} | #{format_duration(duration_ms)} | #{cost} |"
       end)
       |> Enum.join("\n")
 
@@ -239,22 +182,32 @@ defmodule Mix.Tasks.Aggregate do
   # Generate summary statistics
   defp generate_summary_stats(reports) do
     total_tests =
-      Enum.sum(
-        Enum.map(reports, fn r ->
-          parse_int(r.summary[:passed]) + parse_int(r.summary[:failed])
-        end)
-      )
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:metrics, :total]) || 0 end))
 
-    total_passed = Enum.sum(Enum.map(reports, fn r -> parse_int(r.summary[:passed]) end))
-    total_failed = Enum.sum(Enum.map(reports, fn r -> parse_int(r.summary[:failed]) end))
-    total_cost = Enum.sum(Enum.map(reports, fn r -> parse_cost(r.summary[:cost]) end))
+    total_passed =
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:metrics, :passed]) || 0 end))
+
+    total_failed =
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:metrics, :failed]) || 0 end))
+
+    total_cost =
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:stats, :total_cost]) || 0.0 end))
 
     # Token aggregation
-    total_input = Enum.sum(Enum.map(reports, fn r -> parse_int(r.summary[:input_tokens]) end))
-    total_output = Enum.sum(Enum.map(reports, fn r -> parse_int(r.summary[:output_tokens]) end))
-    total_tokens = Enum.sum(Enum.map(reports, fn r -> parse_int(r.summary[:total_tokens]) end))
+    total_input =
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:stats, :input_tokens]) || 0 end))
 
-    perfect_runs = Enum.count(reports, fn r -> parse_int(r.summary[:failed]) == 0 end)
+    total_output =
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:stats, :output_tokens]) || 0 end))
+
+    total_tokens =
+      Enum.sum(Enum.map(reports, fn r -> get_in(r, [:stats, :total_tokens]) || 0 end))
+
+    perfect_runs =
+      Enum.count(reports, fn r -> (get_in(r, [:metrics, :failed]) || 0) == 0 end)
+
+    overall_pass_rate =
+      if total_tests > 0, do: Float.round(total_passed / total_tests * 100, 1), else: 0
 
     """
     | Metric | Value |
@@ -262,7 +215,7 @@ defmodule Mix.Tasks.Aggregate do
     | Total Tests Across All Models | #{total_tests} |
     | Total Passed | #{total_passed} |
     | Total Failed | #{total_failed} |
-    | Overall Pass Rate | #{if total_tests > 0, do: Float.round(total_passed / total_tests * 100, 1), else: 0}% |
+    | Overall Pass Rate | #{overall_pass_rate}% |
     | Models with 100% Pass Rate | #{perfect_runs}/#{length(reports)} |
     | Input Tokens | #{format_number(total_input)} |
     | Output Tokens | #{format_number(total_output)} |
@@ -280,17 +233,30 @@ defmodule Mix.Tasks.Aggregate do
     |> String.reverse()
   end
 
+  defp format_number(n) when is_float(n), do: format_number(round(n))
   defp format_number(n), do: to_string(n)
+
+  # Format cost
+  defp format_cost(nil), do: "$0.00"
+  defp format_cost(cost) when is_float(cost) and cost > 0, do: "$#{Float.round(cost, 4)}"
+  defp format_cost(_), do: "$0.00"
+
+  # Format duration
+  defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
+  defp format_duration(ms) when ms < 60_000, do: "#{Float.round(ms / 1000, 1)}s"
+  defp format_duration(ms), do: "#{Float.round(ms / 60_000, 1)}m"
 
   # Generate the failures section
   defp generate_failures_section(reports) do
     all_failures =
       reports
       |> Enum.flat_map(fn r ->
-        Enum.map(r.failures, fn f ->
+        failures = r[:failures] || []
+
+        Enum.map(failures, fn f ->
           f
-          |> Map.put(:model, extract_model_name(r.model))
-          |> Map.put(:filename, r.filename)
+          |> Map.put(:model, extract_model_name(r[:model] || "unknown"))
+          |> Map.put(:report_filename, r[:filename])
         end)
       end)
 
@@ -304,22 +270,25 @@ defmodule Mix.Tasks.Aggregate do
       # Group by query to deduplicate
       failures_by_query =
         all_failures
-        |> Enum.group_by(& &1.query)
+        |> Enum.group_by(& &1[:query])
 
       entries =
         failures_by_query
-        |> Enum.sort_by(fn {_, failures} -> List.first(failures).index end)
+        |> Enum.sort_by(fn {_, failures} -> List.first(failures)[:index] || 0 end)
         |> Enum.map(fn {query, failures} ->
-          models = failures |> Enum.map(& &1.model) |> Enum.uniq() |> Enum.join(", ")
+          models = failures |> Enum.map(& &1[:model]) |> Enum.uniq() |> Enum.join(", ")
           first = List.first(failures)
           count = length(failures)
           run_info = if count > 1, do: " (#{count} occurrences)", else: ""
 
+          trace_info = format_trace_info(first[:trace])
+
           """
-          ### #{first.index}. #{query}
+          ### #{first[:index] || "?"}. #{query}
 
           **Models affected:** #{models}#{run_info}
-          **Error:** #{first.error}
+          **Error:** #{first[:error] || "Unknown error"}
+          #{trace_info}
           """
         end)
         |> Enum.join("\n---\n\n")
@@ -332,23 +301,42 @@ defmodule Mix.Tasks.Aggregate do
     end
   end
 
-  # Helper to parse integer from string like "31/34" -> 31
-  defp parse_int(nil), do: 0
+  # Format trace information if available
+  defp format_trace_info(nil), do: ""
+  defp format_trace_info([]), do: ""
 
-  defp parse_int(str) do
-    case Regex.run(~r/^(\d+)/, str) do
-      [_, num] -> String.to_integer(num)
-      _ -> 0
+  defp format_trace_info(trace) when is_list(trace) do
+    turns =
+      trace
+      |> Enum.map(fn turn ->
+        status = if turn[:success], do: "✓", else: "✗"
+        program = turn[:program] || "(no program)"
+        result = turn[:result] || ""
+
+        """
+        - Turn #{turn[:number] || "?"} #{status}: `#{truncate(program, 60)}`
+          Result: #{truncate(result, 80)}
+        """
+      end)
+      |> Enum.join("")
+
+    """
+
+    <details>
+    <summary>Execution trace (#{length(trace)} turns)</summary>
+
+    #{turns}
+    </details>
+    """
+  end
+
+  defp truncate(str, max_len) when is_binary(str) do
+    if String.length(str) > max_len do
+      String.slice(str, 0, max_len) <> "..."
+    else
+      str
     end
   end
 
-  # Helper to parse cost from string like "$0.0344"
-  defp parse_cost(nil), do: 0.0
-
-  defp parse_cost(str) do
-    case Regex.run(~r/\$?([\d.]+)/, str) do
-      [_, num] -> String.to_float(num)
-      _ -> 0.0
-    end
-  end
+  defp truncate(other, _), do: inspect(other)
 end

@@ -570,28 +570,33 @@ defmodule PtcDemo.LispTestRunner do
                 passed: false,
                 error: "No result returned",
                 attempts: attempts,
-                all_programs: all_programs
+                all_programs: all_programs,
+                trace: agent_mod.last_trace()
               }
 
             value ->
               validation = Base.validate_result(value, test_case)
 
+              # Include trace for failed validations (wrong result)
               validation
               |> Map.put(:program, agent_mod.last_program())
               |> Map.put(:attempts, attempts)
               |> Map.put(:all_programs, all_programs)
               |> Map.put(:final_result, value)
+              |> maybe_add_trace(validation.passed, agent_mod)
           end
 
         {:error, reason} ->
           all_programs = agent_mod.programs()
+          trace = agent_mod.last_trace()
 
           %{
             passed: false,
             error: "Query failed: #{inspect(reason)}",
             program: agent_mod.last_program(),
             attempts: length(all_programs),
-            all_programs: all_programs
+            all_programs: all_programs,
+            trace: trace
           }
       end
 
@@ -647,6 +652,13 @@ defmodule PtcDemo.LispTestRunner do
     end
 
     result
+  end
+
+  # Only add trace for failed tests (to keep report size reasonable)
+  defp maybe_add_trace(result, true = _passed, _agent_mod), do: result
+
+  defp maybe_add_trace(result, false = _passed, agent_mod) do
+    Map.put(result, :trace, agent_mod.last_trace())
   end
 
   # Execute program in Clojure and compare results

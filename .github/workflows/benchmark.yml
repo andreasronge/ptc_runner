@@ -48,11 +48,13 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        model: [deepseek, gemini, haiku]
+        model: [deepseek, gemini, haiku, qwen-coder]
         exclude:
           # Exclude models not available on bedrock
           - model: ${{ inputs.provider == 'bedrock' && 'deepseek' || 'never-exclude' }}
           - model: ${{ inputs.provider == 'bedrock' && 'gemini' || 'never-exclude' }}
+          # Exclude bedrock-only models when using openrouter
+          - model: ${{ inputs.provider == 'openrouter' && 'qwen-coder' || 'never-exclude' }}
     env:
       MIX_ENV: dev
       OPENROUTER_API_KEY: ${{ inputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || '' }}

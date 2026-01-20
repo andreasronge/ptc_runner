@@ -174,8 +174,111 @@ defmodule PtcDemo.TestRunner.ReportTest do
     end
   end
 
+  describe "generate_json/2" do
+    test "returns map with correct structure" do
+      summary =
+        build_test_summary(
+          passed: 18,
+          failed: 2,
+          total: 20,
+          total_attempts: 25,
+          duration_ms: 45000,
+          stats: %{
+            input_tokens: 50000,
+            output_tokens: 5000,
+            total_tokens: 55000,
+            system_prompt_tokens: 2000,
+            total_runs: 1,
+            total_cost: 0.0275,
+            requests: 20
+          }
+        )
+
+      json = Report.generate_json(summary, "Lisp")
+
+      assert json.dsl == "Lisp"
+      assert json.model == "test-model"
+      assert json.data_mode == "schema"
+      assert json.metrics.passed == 18
+      assert json.metrics.failed == 2
+      assert json.metrics.total == 20
+      assert json.metrics.pass_rate == 90.0
+      assert json.metrics.total_attempts == 25
+      assert json.metrics.avg_attempts_per_test == 1.25
+      assert json.metrics.duration_ms == 45000
+      assert json.stats.input_tokens == 50000
+      assert json.stats.total_cost == 0.0275
+    end
+
+    test "includes trace data for failures" do
+      trace = [
+        %{
+          number: 1,
+          program: "(count users)",
+          result: "{:ok, 250}",
+          success: true,
+          tool_calls: [],
+          prints: [],
+          memory_keys: []
+        },
+        %{
+          number: 2,
+          program: "(filter users)",
+          result: "{:error, \"timeout\"}",
+          success: false,
+          tool_calls: [],
+          prints: [],
+          memory_keys: ["result"]
+        }
+      ]
+
+      result = %{
+        index: 5,
+        query: "How many remote employees?",
+        passed: false,
+        error: "Expected 1-199, got 250",
+        description: "Test",
+        constraint: {:between, 1, 199},
+        trace: trace
+      }
+
+      summary = build_test_summary(failed: 1, results: [result])
+
+      json = Report.generate_json(summary, "Lisp")
+
+      assert length(json.failures) == 1
+      failure = hd(json.failures)
+      assert failure.index == 5
+      assert failure.query == "How many remote employees?"
+      assert failure.error == "Expected 1-199, got 250"
+      assert failure.trace == trace
+    end
+
+    test "handles empty results" do
+      summary = build_test_summary()
+
+      json = Report.generate_json(summary, "JSON")
+
+      assert json.metrics.passed == 0
+      assert json.metrics.failed == 0
+      assert json.failures == []
+    end
+
+    test "calculates pass rate correctly for edge cases" do
+      # Zero total tests
+      summary = build_test_summary(total: 0, passed: 0)
+      json = Report.generate_json(summary, "Test")
+      assert json.metrics.pass_rate == 0.0
+
+      # All passed
+      summary = build_test_summary(total: 10, passed: 10, failed: 0)
+      json = Report.generate_json(summary, "Test")
+      assert json.metrics.pass_rate == 100.0
+    end
+  end
+
   describe "write/3" do
-    test "writes report to file" do
+    test "writes both markdown and json files" do
       summary =
         build_test_summary(
           passed: 1,
@@ -190,19 +293,28 @@ defmodule PtcDemo.TestRunner.ReportTest do
           ]
         )
 
-      temp_file = Path.join(System.tmp_dir!(), "test_report_#{:erlang.phash2(self())}.md")
+      temp_md = Path.join(System.tmp_dir!(), "test_report_#{:erlang.phash2(self())}.md")
+      temp_json = String.replace_suffix(temp_md, ".md", ".json")
 
       try do
-        result = Report.write(temp_file, summary, "Test")
-        assert result == temp_file
+        result = Report.write(temp_md, summary, "Test")
+        assert result == temp_md
 
-        assert File.exists?(temp_file)
+        # Verify markdown file
+        assert File.exists?(temp_md)
+        md_content = File.read!(temp_md)
+        assert String.contains?(md_content, "# PTC-Test Test Report")
+        assert String.contains?(md_content, "test-model")
 
-        content = File.read!(temp_file)
-        assert String.contains?(content, "# PTC-Test Test Report")
-        assert String.contains?(content, "test-model")
+        # Verify JSON file
+        assert File.exists?(temp_json)
+        json_content = File.read!(temp_json)
+        {:ok, json} = Jason.decode(json_content)
+        assert json["dsl"] == "Test"
+        assert json["model"] == "test-model"
       after
-        File.rm(temp_file)
+        File.rm(temp_md)
+        File.rm(temp_json)
       end
     end
 
@@ -231,6 +343,8 @@ defmodule PtcDemo.TestRunner.ReportTest do
         assert !String.contains?(content, "old content")
       after
         File.rm(temp_file)
+        json_file = String.replace_suffix(temp_file, ".md", ".json")
+        File.rm(json_file)
       end
     end
   end

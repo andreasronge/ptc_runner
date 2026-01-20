@@ -210,9 +210,15 @@ defmodule PtcDemo.CLIBase do
           filter_str = String.replace_prefix(arg, "--filter=", "")
 
           case filter_str do
-            "multi_turn" -> Map.put(acc, :filter, :multi_turn)
-            "single_turn" -> Map.put(acc, :filter, :single_turn)
-            "all" -> Map.put(acc, :filter, :all)
+            "multi_turn" ->
+              Map.put(acc, :filter, :multi_turn)
+
+            "single_turn" ->
+              Map.put(acc, :filter, :single_turn)
+
+            "all" ->
+              Map.put(acc, :filter, :all)
+
             _ ->
               IO.puts("Error: --filter must be one of: multi_turn, single_turn, all")
               System.halt(1)
