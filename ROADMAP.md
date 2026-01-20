@@ -20,74 +20,71 @@ _No critical gaps at this time. See v0.6+ for planned features._
 
 ## Tier 1: Foundational Features
 
-### 1. Async/Long-Running Tool Support
+### 1. Unified Task System (replaces Async/Long-Running Tool Support)
 
-**Problem**: Many real-world tools take minutes (phone calls, human approval, slow APIs). Current model is fully synchronous.
+> See GitHub Issue #703 for full design and implementation plan.
 
-**Use Cases**:
-- Voice calls that take 1-5 minutes
-- Human-in-the-loop approval workflows
-- Webhook-based external APIs
-- Background job integration (Oban)
+**Problem**: Multiple related concerns need a unified solution:
+- Idempotency/deduplication of side-effect tool calls (#700)
+- Long-running async tools (phone calls, human approval, slow APIs)
+- Workflow orchestration with parallel execution
 
-**Proposed API**:
+**Solution**: A unified `(task)` form that handles all three transparently.
 
-```elixir
-# Option A: Explicit async wrapper
-"make_phone_call" => PtcRunner.Tool.async(fn args ->
-  call_id = initiate_call(args)
-  {:pending, call_id, %{status: "dialing", call_id: call_id}}
-end)
+**Core Primitives**:
 
-# Option B: Declarative metadata
-tools: %{
-  "make_phone_call" => {&initiate_call/1, async: true}
-}
+| Form | Purpose |
+|------|---------|
+| `(task id expr)` | Idempotent execution - runs once, caches result, handles sync/async transparently |
+| `(parallel & tasks)` | Concurrent execution - starts all tasks, suspends until all complete |
+| `(checkpoint id msg)` | Human-in-the-loop - suspends for approval |
 
-# SubAgent returns pending state
-{:pending, %PtcRunner.PendingStep{
-  pending_ops: %{"call_123" => %{tool: "make_phone_call", args: %{...}}},
-  state: serializable_state,
-  immediate_response: "I'm calling Alice now..."
-}}
-
-# Resume when async op completes
-{:ok, step} = PtcRunner.SubAgent.resume(pending_step, "call_123", %{
-  status: "completed",
-  transcript: "..."
-})
-```
-
-**Design Considerations**:
-- Multiple async ops can be pending simultaneously
-- Resume feeds results back into LLM context
-
-**Decision: Lisp-level `(await)` is required**
-
-The question "should async be at Lisp level or SubAgent level only?" is answered by real use cases:
+**Key Insight**: The LLM doesn't need to know if a tool is sync or async. Same syntax works for both:
 
 ```lisp
-;; Use case: "Call Alice and Bob in parallel, then summarize both"
-;; This REQUIRES Lisp-level await:
-(let [transcript-a (await call-alice)
-      transcript-b (await call-bob)]
-  (summarize (concat transcript-a transcript-b)))
+;; Sync tool - executes immediately, caches result
+(task "fetch_data" (http-get "https://api.example.com"))
 
-;; Without Lisp-level await, this requires:
-;; 1. First SubAgent run -> starts calls -> suspends
-;; 2. Resume with Alice result -> suspends again (can't reference Bob yet)
-;; 3. Resume with Bob result -> another LLM turn to combine
-;; That's 3 LLM round-trips instead of 1
+;; Async tool - same syntax! System handles suspension/resume
+(task "call_bob" (phone-call "bob"))
+;; Tool returns {:pending, "call_123", %{status: "dialing"}}
+;; Task marked pending, execution suspends
+;; ... SubAgent.resume(step, "call_123", result) ...
+;; Task completed, execution continues
+
+;; Parallel async - both calls initiated, suspend until both complete
+(let [[alice bob]
+      (parallel
+        (task "call_alice" (phone-call "alice"))
+        (task "call_bob" (phone-call "bob")))]
+  (summarize alice bob))
+
+;; Human approval checkpoint
+(checkpoint "confirm_meeting" "Schedule for Tuesday 2pm?")
 ```
 
-Lisp-level await enables the LLM to express "wait for multiple async results, then combine" in a single program. SubAgent-level-only would force multiple round-trips for common patterns.
+**Removed Concepts** (simplification from original async design):
+- ~~`(await id)`~~ - Task handles suspension implicitly
+- ~~`async: true` tool metadata~~ - Tool just returns `{:pending, ...}` or normal result
+- ~~Separate async vs sync mental model~~ - Unified under task
 
-**Lisp suspension serialization**: When `(await)` suspends mid-execution, we need to serialize the continuation. Since PTC-Lisp is interpreted, serialize AST + environment (variable bindings), not closures. Resume by continuing interpretation from suspension point.
+**Task State** (tracked in Context, serialized with Step):
 
-**BEAM-Native Approach**:
-- Could model as GenServer that receives messages
-- Or continuation-based: save/restore execution state
-- Or event-sourcing: record decisions, replay with new info
+```elixir
+ctx.tasks = %{
+  "call_bob" => %{
+    status: :completed,  # :pending | :running | :completed | :failed
+    output: %{transcript: "..."},
+    started_at: ~U[...],
+    completed_at: ~U[...]
+  }
+}
+```
+
+**Future Extensions** (documented but not initial scope):
+- Hierarchical tasks / subagents (`Context.child/1`)
+- Replanning with task invalidation
+- Task dependencies and conditional execution
 
 ### 2. State Serialization
 
@@ -156,8 +153,8 @@ tools: %{
 
 MFA tuples are simpler - no registry, no global state, naturally serializable. Less ergonomic than anonymous functions, but the trade-off is worth it for crash recovery and distributed resume.
 
-**Relationship to Async**:
-- Required for async to work (pending state must be persistable)
+**Relationship to Task System**:
+- Required for tasks to work (pending task state must be persistable)
 - But also useful standalone for crash recovery
 
 ---
@@ -166,7 +163,7 @@ MFA tuples are simpler - no registry, no global state, naturally serializable. L
 
 **Current**: Pure library. `SubAgent.run/2` is synchronous, sandboxes are ephemeral.
 
-**Trigger**: Async tools + state persistence (v0.6-v0.7) require shared state → processes.
+**Trigger**: Task system + state persistence (v0.7-v0.8) require shared state → processes.
 
 ### Pattern: child_spec Without Auto-Start
 
@@ -407,14 +404,17 @@ v0.7: State Management
   - Optional: AgentRegistry with child_spec/1 (user-supervised)
   Architecture: First child_spec components (opt-in)
 
-v0.8: Async Tools & Suspension
-  - {:async, id, immediate_result} pattern
-  - {:suspend, question} pattern for human-in-the-loop (ask_user)
-  - PendingStep struct
-  - SubAgent.resume/3
-  - PTC-Lisp (await id) form (required for multi-async patterns)
-  - PendingOps registry for tracking async operations
-  - PtcRunner.Supervisor convenience module
+v0.8: Unified Task System (see #703)
+  - (task id expr) - idempotent execution, handles sync/async transparently
+  - (parallel ...) - concurrent task execution
+  - (checkpoint id msg) - human-in-the-loop suspension
+  - Task state tracking in Context
+  - PendingStep struct for suspended execution
+  - SubAgent.resume/3 for continuing after async/checkpoint
+  - Task status in prompt template (show completed/pending tasks)
+  REMOVED (simplification):
+  - (await id) - not needed, task handles suspension implicitly
+  - async: true tool metadata - tool just returns {:pending, ...} or not
   Architecture: Full child_spec suite (still opt-in)
 
 v0.9: Streaming & Sessions
@@ -440,15 +440,19 @@ v1.0: Production Ready
 
 These questions have been resolved based on real-world feedback:
 
-1. **Async tool design**: ✅ **Lisp-level `(await)`** - Required for "call multiple async tools, combine results" patterns without multiple LLM round-trips.
+1. **Async/idempotency design**: ✅ **Unified `(task)` form** - A single `(task id expr)` handles idempotency, sync tools, and async tools transparently. The LLM doesn't need to know if a tool is sync or async. Replaces separate `(await)` concept. See #703.
 
-2. **Serialization format**: ✅ **JSON as default** - Debuggability (`jq`) matters more than efficiency for async state that may sit in storage for minutes/hours. Binary available as opt-in for high-throughput.
+2. **Parallel execution**: ✅ **`(parallel ...)` form** - Enables concurrent task execution. Combined with task idempotency, handles "call multiple async tools, combine results" patterns.
 
-3. **Tool serialization**: ✅ **MFA tuples** - No registry needed, naturally serializable, simpler than global tool registry.
+3. **Human-in-the-loop**: ✅ **`(checkpoint id msg)` form** - Compiles to suspension, integrates with task system.
 
-4. **Multi-instance naming**: ✅ **Default + explicit override** - Simple cases need no config; multi-instance passes `instance: :name` only when multiple supervisors exist.
+4. **Serialization format**: ✅ **JSON as default** - Debuggability (`jq`) matters more than efficiency for async state that may sit in storage for minutes/hours. Binary available as opt-in for high-throughput.
 
-5. **Session lifecycle**: ✅ **Idle timeout + pending-aware + explicit** - Terminate after configurable idle timeout, but not if async ops pending, and allow explicit termination.
+5. **Tool serialization**: ✅ **MFA tuples** - No registry needed, naturally serializable, simpler than global tool registry.
+
+6. **Multi-instance naming**: ✅ **Default + explicit override** - Simple cases need no config; multi-instance passes `instance: :name` only when multiple supervisors exist.
+
+7. **Session lifecycle**: ✅ **Idle timeout + pending-aware + explicit** - Terminate after configurable idle timeout, but not if async ops pending, and allow explicit termination.
 
 ---
 
@@ -478,23 +482,29 @@ Even then, your app may still own the outer session lifecycle.
 
 ## Open Questions
 
-### Async & State
+### Task System
 
-1. **Message history**: Always collect, opt-in, or opt-out?
+1. **Task serialization scope**: Should task results be included in full serialization, or summarized?
 
-2. **Backpressure**: How to handle LLM rate limits in streaming mode?
+2. **Parallel error handling**: When one task in `(parallel ...)` fails, cancel others or wait for all?
 
-3. **Await semantics**: Does `(await id)` block the Lisp program until result arrives, or return a placeholder that suspends the whole SubAgent?
+3. **Hierarchical tasks**: How should parent/child task IDs be scoped? Auto-prefix with agent path?
+
+### Streaming & Sessions
+
+4. **Backpressure**: How to handle LLM rate limits in streaming mode?
+
+5. **Message history**: Always collect, opt-in, or opt-out?
 
 ### OTP Architecture
 
-4. **GenServer mode**: Should SubAgent optionally run as a process that receives messages? If yes, what's the API?
+6. **GenServer mode**: Should SubAgent optionally run as a process that receives messages? If yes, what's the API?
 
-5. **Auto-start vs opt-in**: Should v1.0 auto-start an Application, or always require explicit `child_spec` in host app?
+7. **Auto-start vs opt-in**: Should v1.0 auto-start an Application, or always require explicit `child_spec` in host app?
 
-6. **Pool implementation**: Use existing library (Poolboy, NimblePool) or custom pool for sandbox workers?
+8. **Pool implementation**: Use existing library (Poolboy, NimblePool) or custom pool for sandbox workers?
 
-7. **State persistence hooks**: Is persistence a GenServer responsibility, or a callback module the user provides?
+9. **State persistence hooks**: Is persistence a GenServer responsibility, or a callback module the user provides?
 
 ---
 
@@ -503,3 +513,5 @@ Even then, your app may still own the outer session lifecycle.
 - Current architecture: `lib/ptc_runner/sub_agent/` (Loop, Telemetry, ToolNormalizer)
 - Step struct: `lib/ptc_runner/step.ex`
 - Sandbox execution: `lib/ptc_runner/sandbox.ex`
+- Issue #700: Idempotency and deduplication (motivation for task system)
+- Issue #703: Unified Task System epic (full design and implementation plan)

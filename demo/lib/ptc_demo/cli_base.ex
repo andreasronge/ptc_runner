@@ -497,13 +497,10 @@ defmodule PtcDemo.CLIBase do
 
   Format: `{dsl}_{model_short}_{YYYYMMDD-HHMM}.md`
 
-  ## Examples
-
-      iex> generate_report_filename("lisp", "openrouter:anthropic/claude-3-5-haiku-latest")
-      "lisp_claude-3-5-haiku-latest_20251212-1430.md"
-
-      iex> generate_report_filename("json", "deepseek")
-      "json_deepseek_20251212-1430.md"
+  Handles various model string formats:
+  - OpenRouter: `openrouter:anthropic/claude-3-5-haiku-latest`
+  - Bedrock: `anthropic.claude-haiku-4-5-20251001-v1:0`
+  - Preset: `bedrock:haiku`
   """
   def generate_report_filename(dsl, model) do
     model_short = extract_model_short_name(model)
@@ -512,12 +509,24 @@ defmodule PtcDemo.CLIBase do
   end
 
   defp extract_model_short_name(model) do
+    # Extract a readable short name from model strings like:
+    # - "openrouter:anthropic/claude-3-5-haiku-latest" -> "claude-3-5-haiku-latest"
+    # - "bedrock:haiku" -> "haiku"
+    # - "anthropic.claude-haiku-4-5-20251001-v1:0" -> "claude-haiku-4-5"
+    # - "qwen.qwen3-coder-30b-a3b-v1:0" -> "qwen3-coder-30b"
     model
     |> String.split("/")
     |> List.last()
+    |> String.replace(~r/:\d+$/, "")
+    |> String.replace(~r/-v\d+$/, "")
+    |> String.replace(~r/-?\d{8,}/, "")
     |> String.split(":")
     |> List.last()
+    |> String.split(".")
+    |> List.last()
     |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+    |> String.replace(~r/[-_]+/, "-")
+    |> String.replace(~r/^[-_]|[-_]$/, "")
   end
 
   defp format_timestamp_for_filename do
