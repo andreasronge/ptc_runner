@@ -46,6 +46,11 @@ defmodule PtcDemo.MockAgent do
     GenServer.call(__MODULE__, :programs)
   end
 
+  def last_trace do
+    # Mock agents don't track traces
+    nil
+  end
+
   def list_datasets do
     SampleData.available_datasets()
   end

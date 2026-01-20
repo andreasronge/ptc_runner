@@ -91,10 +91,91 @@ defmodule PtcDemo.TestRunner.Report do
   end
 
   @doc """
+  Generate a JSON report from a test summary.
+
+  Creates a machine-readable JSON structure with metrics, stats, and detailed
+  failure information including execution traces.
+
+  ## Parameters
+
+    - `summary` - Test summary map built by Base.build_summary
+    - `dsl_name` - DSL name string (e.g., "JSON", "Lisp")
+
+  ## Returns
+
+  A map suitable for JSON encoding containing:
+    - `:dsl` - DSL name
+    - `:generated` - Timestamp string
+    - `:model` - Model name
+    - `:data_mode` - Data mode string
+    - `:version` - PtcRunner version
+    - `:commit` - Git commit hash
+    - `:metrics` - Pass/fail counts, rates, duration
+    - `:stats` - Token usage and cost
+    - `:failures` - List of failed tests with traces
+  """
+  @spec generate_json(map(), String.t()) :: map()
+  def generate_json(summary, dsl_name) do
+    %{
+      dsl: dsl_name,
+      generated: format_timestamp(summary.timestamp),
+      model: summary.model,
+      data_mode: to_string(summary.data_mode),
+      version: summary[:version] || "unknown",
+      commit: summary[:commit] || "unknown",
+      metrics: %{
+        passed: summary.passed,
+        failed: summary.failed,
+        total: summary.total,
+        pass_rate: calculate_pass_rate(summary),
+        total_attempts: summary.total_attempts,
+        avg_attempts_per_test: calculate_avg_attempts(summary),
+        duration_ms: summary.duration_ms
+      },
+      stats:
+        Map.take(summary.stats, [
+          :input_tokens,
+          :output_tokens,
+          :total_tokens,
+          :system_prompt_tokens,
+          :total_runs,
+          :total_cost,
+          :requests
+        ]),
+      failures: extract_failures_with_traces(summary.results)
+    }
+  end
+
+  defp calculate_pass_rate(%{total: 0}), do: 0.0
+
+  defp calculate_pass_rate(%{passed: passed, total: total}),
+    do: Float.round(passed / total * 100, 1)
+
+  defp calculate_avg_attempts(%{total: 0}), do: 0.0
+
+  defp calculate_avg_attempts(%{total_attempts: attempts, total: total}),
+    do: Float.round(attempts / total, 2)
+
+  defp extract_failures_with_traces(results) do
+    results
+    |> Enum.reject(& &1.passed)
+    |> Enum.map(fn r ->
+      %{
+        index: r.index,
+        query: r.query,
+        error: r[:error] || "Unknown error",
+        run: r[:failed_in_run],
+        trace: r[:trace]
+      }
+    end)
+  end
+
+  @doc """
   Write a test report to a file.
 
-  Generates a markdown report from the summary and writes it to the specified path.
-  Creates the file if it doesn't exist, overwrites if it does.
+  Generates both a markdown report (for humans) and a JSON report (for machines)
+  from the summary and writes them to the specified path.
+  Creates the files if they don't exist, overwrites if they do.
 
   Relative paths are automatically placed in the `reports/` directory and the
   directory is created if it doesn't exist. Absolute paths are used as-is.
@@ -107,25 +188,33 @@ defmodule PtcDemo.TestRunner.Report do
 
   ## Returns
 
-  The resolved file path where the report was written.
+  The resolved markdown file path where the report was written.
+  A corresponding JSON file is also written with the same base name.
 
   ## Example
 
-      # Writes to reports/test_report.md
+      # Writes to reports/test_report.md and reports/test_report.json
       PtcDemo.TestRunner.Report.write("test_report.md", summary, "Lisp")
 
-      # Writes to /tmp/report.md
+      # Writes to /tmp/report.md and /tmp/report.json
       PtcDemo.TestRunner.Report.write("/tmp/report.md", summary, "JSON")
   """
   @default_reports_dir "reports"
 
   @spec write(String.t(), map(), String.t()) :: String.t()
   def write(path, summary, dsl_name) do
-    full_path = resolve_report_path(path)
-    ensure_report_dir!(full_path)
-    content = generate(summary, dsl_name)
-    File.write!(full_path, content)
-    full_path
+    md_path = resolve_report_path(path)
+    ensure_report_dir!(md_path)
+
+    # Write markdown report
+    File.write!(md_path, generate(summary, dsl_name))
+
+    # Write JSON report alongside markdown
+    json_path = String.replace_suffix(md_path, ".md", ".json")
+    json_content = summary |> generate_json(dsl_name) |> Jason.encode!(pretty: true)
+    File.write!(json_path, json_content)
+
+    md_path
   end
 
   # Resolves a report path - relative paths are placed in the reports/ directory
