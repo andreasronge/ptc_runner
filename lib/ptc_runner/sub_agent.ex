@@ -591,7 +591,11 @@ defmodule PtcRunner.SubAgent do
       20
 
   """
-  @spec then!(PtcRunner.Step.t(), t() | String.t(), keyword()) :: PtcRunner.Step.t()
+  @spec then!(
+          PtcRunner.Step.t(),
+          t() | PtcRunner.SubAgent.CompiledAgent.t() | String.t(),
+          keyword()
+        ) :: PtcRunner.Step.t()
   def then!(step, agent, opts \\ []) do
     validate_chain_keys!(step, agent)
     run!(agent, Keyword.put(opts, :context, step))
