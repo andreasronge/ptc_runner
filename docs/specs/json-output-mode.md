@@ -554,7 +554,7 @@ test "JSON mode returns parsed data" do
   llm = fn _ -> {:ok, ~s|{"message": "hello"}|} end
   {:ok, step} = SubAgent.run(agent, llm: llm)
 
-  assert step.return == %{message: "hello"}
+  assert step.return == %{"message" => "hello"}
 end
 
 test "JSON mode retries on validation error" do
@@ -572,7 +572,7 @@ test "JSON mode retries on validation error" do
   ])
 
   {:ok, step} = SubAgent.run(agent, llm: llm)
-  assert step.return == %{message: "hello"}
+  assert step.return == %{"message" => "hello"}
   assert length(step.turns) == 2
 end
 
@@ -595,8 +595,8 @@ test "JSON mode pipes to PTC-Lisp mode with type alignment" do
   {:ok, step1} = SubAgent.run(json_agent, llm: llm_json, context: %{text: "Great!"})
   {:ok, step2} = SubAgent.run(lisp_agent, llm: llm_lisp, context: step1)
 
-  assert step1.return == %{sentiment: "positive", score: 0.9}
-  assert step2.return == %{action: "alerted"}
+  assert step1.return == %{"sentiment" => "positive", "score" => 0.9}
+  assert step2.return == %{"action" => "alerted"}
 end
 
 test "PTC-Lisp mode pipes to JSON mode" do
@@ -618,7 +618,7 @@ test "PTC-Lisp mode pipes to JSON mode" do
   {:ok, step1} = SubAgent.run(lisp_agent, llm: llm_lisp, context: %{query: "test"})
   {:ok, step2} = SubAgent.run(json_agent, llm: llm_json, context: step1)
 
-  assert step2.return == %{summary: "Found one result"}
+  assert step2.return == %{"summary" => "Found one result"}
 end
 
 test "JSON → JSON pipeline works" do
@@ -640,7 +640,7 @@ test "JSON → JSON pipeline works" do
   {:ok, step1} = SubAgent.run(agent1, llm: llm1, context: %{text: "..."})
   {:ok, step2} = SubAgent.run(agent2, llm: llm2, context: step1)
 
-  assert step2.return == %{category: "fruits"}
+  assert step2.return == %{"category" => "fruits"}
 end
 ```
 
@@ -660,8 +660,8 @@ test "sentiment classification with real LLM" do
     context: %{text: "I love this product!"}
   )
 
-  assert step.return.sentiment in ["positive", "negative", "neutral"]
-  assert is_float(step.return.confidence)
+  assert step.return["sentiment"] in ["positive", "negative", "neutral"]
+  assert is_float(step.return["confidence"])
 end
 ```
 

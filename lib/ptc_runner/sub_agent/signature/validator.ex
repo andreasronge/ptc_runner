@@ -5,6 +5,8 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   Provides strict validation with path-based error reporting.
   """
 
+  alias PtcRunner.SubAgent.KeyNormalizer
+
   @type validation_error :: %{
           path: [String.t() | non_neg_integer()],
           message: String.t()
@@ -133,15 +135,18 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     end)
   end
 
-  # Try both atom and string keys
+  # Try both atom and string keys, normalizing hyphens to underscores for lookup
   defp get_field(data, field_name) when is_map(data) do
-    case try_existing_atom_key(data, field_name) do
+    # Normalize field name (hyphen -> underscore) to match normalized return value keys
+    normalized_name = KeyNormalizer.normalize_key(field_name)
+
+    case try_existing_atom_key(data, normalized_name) do
       {:ok, _} = result ->
         result
 
       :missing ->
-        if Map.has_key?(data, field_name) do
-          {:ok, Map.get(data, field_name)}
+        if Map.has_key?(data, normalized_name) do
+          {:ok, Map.get(data, normalized_name)}
         else
           :missing
         end

@@ -89,7 +89,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         SubAgent.run!(doubler, llm: mock_llm, context: %{n: 5})
         |> SubAgent.then!(adder, llm: mock_llm)
 
-      assert result.return.final == 20
+      assert result.return["final"] == 20
     end
 
     test "passes previous step return as context" do
@@ -121,7 +121,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         SubAgent.run!(first, llm: mock_llm)
         |> SubAgent.then!(second, llm: mock_llm)
 
-      assert result.return.result == 198
+      assert result.return["result"] == 198
     end
 
     test "short-circuits on chained failure" do
@@ -218,7 +218,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         |> SubAgent.then!(step2, llm: mock_llm)
         |> SubAgent.then!(step3, llm: mock_llm)
 
-      assert result.return.final == 25
+      assert result.return["final"] == 25
     end
 
     test "step.field_descriptions is populated from agent" do
@@ -234,7 +234,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
 
       step = SubAgent.run!(agent, llm: llm)
 
-      assert step.return == %{answer: 42}
+      assert step.return == %{"answer" => 42}
       assert step.field_descriptions == %{answer: "The answer to everything"}
     end
 
@@ -274,7 +274,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
       assert step_a.field_descriptions == %{result: "The doubled value"}
 
       step_b = SubAgent.then!(step_a, agent_b, llm: mock_llm)
-      assert step_b.return.final == 20
+      assert step_b.return["final"] == 20
       assert step_b.field_descriptions == %{final: "The final computed value"}
     end
 
@@ -333,7 +333,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
         |> SubAgent.then!(agent_b, llm: mock_llm)
         |> SubAgent.then!(agent_c, llm: mock_llm)
 
-      assert result.return.z == 60
+      assert result.return["z"] == 60
       assert result.field_descriptions == %{z: "Description from C"}
       assert :ets.lookup(descriptions_seen, :b_saw_a) == [{:b_saw_a, true}]
       assert :ets.lookup(descriptions_seen, :c_saw_b) == [{:c_saw_b, true}]
@@ -372,7 +372,7 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
       assert step_a.field_descriptions == nil
 
       step_b = SubAgent.then!(step_a, agent_b, llm: mock_llm)
-      assert step_b.return.y == 10
+      assert step_b.return["y"] == 10
       assert step_b.field_descriptions == %{y: "Double of x"}
     end
   end

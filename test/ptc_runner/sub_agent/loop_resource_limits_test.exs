@@ -12,7 +12,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 0)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "accepts execution just under max_depth" do
@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{}, _nesting_depth: 2)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "rejects execution at max_depth" do
@@ -70,7 +70,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{}, _remaining_turns: 20)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
       assert step.usage.turns == 2
     end
 
@@ -125,7 +125,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "accepts execution when mission deadline is in future" do
@@ -134,7 +134,7 @@ defmodule PtcRunner.SubAgent.LoopResourceLimitsTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "rejects when mission deadline exceeded" do

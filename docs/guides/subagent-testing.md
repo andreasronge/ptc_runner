@@ -55,7 +55,7 @@ test "finds maximum value" do
     llm: mock
   )
 
-  assert step.return.max == 42
+  assert step.return["max"] == 42
 end
 
 test "multi-turn agent" do
@@ -71,7 +71,7 @@ test "multi-turn agent" do
     llm: mock
   )
 
-  assert step.return.count == 2
+  assert step.return["count"] == 2
 end
 ```
 
@@ -141,7 +141,7 @@ defmodule MyApp.SubAgentIntegrationTest do
       llm: llm
     )
 
-    assert is_binary(step.return.subject)
+    assert is_binary(step.return["subject"])
   end
 end
 ```

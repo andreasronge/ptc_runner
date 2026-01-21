@@ -56,8 +56,8 @@ Add a signature to validate the output structure:
   llm: my_llm
 )
 
-step.return.sentiment  #=> "positive"
-step.return.score      #=> 0.95
+step.return["sentiment"]  #=> "positive"
+step.return["score"]      #=> 0.95
 ```
 
 ### JSON Mode (Simpler Alternative)
@@ -73,8 +73,8 @@ For classification, extraction, and reasoning tasks that don't need tools, use `
   llm: my_llm
 )
 
-step.return.name  #=> "John"
-step.return.age   #=> 25
+step.return["name"]  #=> "John"
+step.return["age"]   #=> 25
 ```
 
 JSON mode skips PTC-Lisp entirely - the LLM returns structured JSON directly, validated against your signature. Use it when you need structured output but not computation or tool calls.
@@ -93,8 +93,8 @@ Tools let the agent call functions to gather information:
   llm: my_llm
 )
 
-step.return.name   #=> "Widget Pro"
-step.return.price  #=> 299.99
+step.return["name"]   #=> "Widget Pro"
+step.return["price"]  #=> 299.99
 ```
 
 With tools, the SubAgent enters an **agentic loop** - it calls tools and reasons until it has enough information to return.

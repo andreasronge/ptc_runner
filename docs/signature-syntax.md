@@ -106,7 +106,7 @@ signature: "{summary :string, count :int, _email_ids [:int]}"
 
 Firewalled fields:
 - **Available** in Lisp context (`data/_email_ids`)
-- **Available** to Elixir code (`step.return._email_ids`)
+- **Available** to Elixir code (`step.return["_email_ids"]`)
 - **Hidden** from LLM prompt text (shown as `<Firewalled>`)
 - **Hidden** from parent LLM when agent is used as tool
 

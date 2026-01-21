@@ -50,10 +50,10 @@ defmodule PtcRunner.SubAgent.ContextFirewallTest do
 
       # Verify the return value DOES include _body fields
       assert length(step.return) == 2
-      assert Enum.all?(step.return, fn article -> Map.has_key?(article, :_body) end)
+      assert Enum.all?(step.return, fn article -> Map.has_key?(article, "_body") end)
 
       # Verify the actual _body values are preserved
-      bodies = Enum.map(step.return, & &1._body)
+      bodies = Enum.map(step.return, & &1["_body"])
       assert "Secret body 1" in bodies
       assert "Secret body 3" in bodies
     end
@@ -99,7 +99,7 @@ defmodule PtcRunner.SubAgent.ContextFirewallTest do
       {:ok, step} = SubAgent.run(agent, llm: llm, context: article)
 
       # Verify the summary was created using content from tool
-      assert step.return.summary =~ "Summary: This is the secret"
+      assert step.return["summary"] =~ "Summary: This is the secret"
     end
 
     test "nested maps in lists have _prefixed values filtered silently" do
