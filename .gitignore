@@ -38,3 +38,6 @@ ptc_runner-*.tar
 
 # Dialyzer PLT files (machine-specific, large).
 /priv/plts/
+
+# Private docs (drafts, personal setup notes).
+/private/
