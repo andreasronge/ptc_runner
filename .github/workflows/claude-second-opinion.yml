@@ -178,17 +178,11 @@ jobs:
 
             ## Step 1: Understand the Original Intent
 
-            Read the linked issue (if any):
-            ```
-            $(cat /tmp/issue.txt)
-            ```
+            Read the linked issue: `cat /tmp/issue.txt`
 
             ## Step 2: Review Previous Attempts
 
-            These comments show what was tried before:
-            ```
-            $(head -100 /tmp/pr_comments.txt)
-            ```
+            Read what was tried before: `cat /tmp/pr_comments.txt`
 
             ## Step 3: Analyze the Current State
 
