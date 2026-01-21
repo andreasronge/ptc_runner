@@ -117,6 +117,38 @@ Multiple parameters are comma-separated. The names `user` and `limit`:
 
 ---
 
+## Naming Convention: Underscores in Signatures
+
+**Signatures use underscores** (Elixir/JSON convention):
+
+```elixir
+signature: "(user_id :int) -> {order_count :int, is_active :bool}"
+```
+
+**PTC-Lisp code uses hyphens** (Clojure convention):
+
+```clojure
+(return {:order-count 5 :is-active true})
+```
+
+At the tool boundary, `KeyNormalizer` automatically converts hyphens to underscores:
+
+| PTC-Lisp (LLM writes) | Elixir receives | Signature field |
+|-----------------------|-----------------|-----------------|
+| `:order-count` | `"order_count"` | `order_count` |
+| `:is-active` | `"is_active"` | `is_active` |
+| `:user-id` | `"user_id"` | `user_id` |
+
+This allows LLMs to write idiomatic Clojure-style code while Elixir tools receive idiomatic underscore-style keys.
+
+**Why this matters:**
+- LLMs trained on Clojure naturally produce hyphenated keywords
+- Elixir/JSON conventions use underscores
+- Signatures define the Elixir-side contract, so they use underscores
+- The conversion is automatic and transparent
+
+---
+
 ## Firewalled Fields
 
 Prefix with `_` to hide from LLM prompts:
