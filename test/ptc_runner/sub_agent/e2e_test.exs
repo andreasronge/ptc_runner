@@ -80,7 +80,8 @@ defmodule PtcRunner.SubAgent.E2ETest do
       agent =
         SubAgent.new(
           prompt: "How many r's are in {{word}}?",
-          signature: "(word :string) -> :int"
+          signature: "(word :string) -> :int",
+          max_turns: 1
         )
 
       # Compile the agent - LLM derives the logic once
