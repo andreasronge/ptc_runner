@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Ptc.ValidateSpec do
 
   alias PtcRunner.Lisp.{ClojureValidator, SpecValidator}
 
-  @checksums_path "test/spec_cases/checksums.exs"
+  @checksums_path "priv/spec/checksums.ex"
 
   @impl Mix.Task
   def run(args) do
