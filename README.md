@@ -79,15 +79,19 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 signature: "{summary :string, _email_ids [:int]}"
 ```
 
-**Compile SubAgents** - LLM called once, execute many times:
+**Compile SubAgents** - LLM writes the orchestration logic once, execute deterministically:
 
 ```elixir
-# LLM derives the program once during compilation
-{:ok, compiled} = SubAgent.compile(classifier_agent, llm: my_llm, sample: %{text: "example"})
+# Orchestrator with SubAgentTools + pure Elixir functions
+{:ok, compiled} = SubAgent.compile(orchestrator, llm: my_llm)
 
-# Execute without LLM calls - deterministic and fast
-compiled.execute.(%{text: "new input"})  #=> %Step{return: %{category: "support"}}
+# LLM generated: (loop [joke initial, i 1] (if (tool/check ...) (return ...) (recur ...)))
+
+# Execute with zero orchestration cost - only child SubAgents call the LLM
+compiled.execute.(%{topic: "cats"}, llm: my_llm)
 ```
+
+See the [Joke Workflow Livebook](livebooks/joke_workflow.livemd) for a complete example.
 
 ## Installation
 

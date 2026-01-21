@@ -102,7 +102,8 @@ defmodule PtcRunner.MixProject do
         "docs/reference/ptc-json-specification.md",
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
-        "livebooks/ptc_runner_llm_agent.livemd"
+        "livebooks/ptc_runner_llm_agent.livemd",
+        "livebooks/joke_workflow.livemd"
       ],
       groups_for_extras: [
         "SubAgent Guides": ~r/docs\/guides\/subagent-.+\.md/,
