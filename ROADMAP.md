@@ -11,10 +11,11 @@ ptc_runner already has:
 - Comprehensive telemetry events (`[:ptc_runner, :sub_agent, :turn|:tool|:llm, :start|:stop]`)
 - SubAgent composition via `as_tool/2`
 - **v0.5 Observability**: Turn struct with tool_calls/prints, Debug API, message compression
+- **v0.5.1 JSON Mode**: Direct JSON structured output, extended LLM callback interface
 
 ## Known Gaps
 
-_No critical gaps at this time. See v0.6+ for planned features._
+_No critical gaps at this time. See release plan for planned features._
 
 ---
 
@@ -382,29 +383,13 @@ v0.5: Observability & Debugging ✅ COMPLETE
   - Debug API (print_trace with view: :compressed, messages: true, etc.) ✅
   Architecture: Pure library (no processes)
 
-v0.6: Output Modes
-  - Add output: parameter (:ptc_lisp, :ptc_json, :json, :text)
-  - :json mode for direct structured data (classification, extraction)
-  - :text mode for free-form responses
-  - Extended callback interface: schema, tools, tool_choice
-  - Tool calling as portable structured output mechanism
-  - Signature to JSON Schema conversion
-  - JSON response parser (code blocks, raw JSON)
-  - Mode-specific prompt templates
-  - Validation rules per mode
-  See: docs/plans/question-mode-plan.md
+v0.5.1: JSON Output Mode ✅ COMPLETE
+  - output: :json mode for direct structured data (classification, extraction) ✅
+  - Extended LLM callback interface: schema, tools, tool_choice ✅
+  - Signature to JSON Schema conversion ✅
   Architecture: Pure library (no processes)
 
-v0.7: State Management
-  - JSON serialization as default (Step <-> JSON)
-  - Binary serialization as opt-in for high-throughput
-  - Resume from serialized state
-  - MFA tuple tool format for serializability
-  - Version format for migrations
-  - Optional: AgentRegistry with child_spec/1 (user-supervised)
-  Architecture: First child_spec components (opt-in)
-
-v0.8: Unified Task System (see #703)
+v0.6: Unified Task System (see #703)
   - (task id expr) - idempotent execution, handles sync/async transparently
   - (parallel ...) - concurrent task execution
   - (checkpoint id msg) - human-in-the-loop suspension
@@ -412,12 +397,21 @@ v0.8: Unified Task System (see #703)
   - PendingStep struct for suspended execution
   - SubAgent.resume/3 for continuing after async/checkpoint
   - Task status in prompt template (show completed/pending tasks)
-  REMOVED (simplification):
-  - (await id) - not needed, task handles suspension implicitly
-  - async: true tool metadata - tool just returns {:pending, ...} or not
-  Architecture: Full child_spec suite (still opt-in)
+  SIMPLIFICATION (vs original async design):
+  - No (await id) - task handles suspension implicitly
+  - No async: true metadata - tool just returns {:pending, ...} or not
+  Architecture: Pure library (no processes initially)
 
-v0.9: Streaming & Sessions
+v0.7: State Management
+  - JSON serialization as default (Step <-> JSON)
+  - Binary serialization as opt-in for high-throughput
+  - Resume from serialized state
+  - MFA tuple tool format for serializability
+  - Version format for migrations
+  - Task state included in serialization
+  Architecture: First child_spec components (opt-in)
+
+v0.8: Streaming & Sessions
   - on_token callback
   - on_tool_start/end callbacks
   - LiveView helper module
@@ -430,8 +424,13 @@ v1.0: Production Ready
   - Phoenix/Oban integration guides
   - Performance benchmarks
   - Decide: auto-start Application or stay opt-in
-  - Consider: :chat mode for traditional tool-calling agents
   Architecture: Evaluate user feedback on OTP adoption
+
+UNDER CONSIDERATION (not scheduled):
+  - :ptc_json mode for JSON DSL programs with operations
+  - :text mode for free-form responses
+  - :chat mode for traditional tool-calling agents
+  See: docs/plans/question-mode-plan.md
 ```
 
 ---
