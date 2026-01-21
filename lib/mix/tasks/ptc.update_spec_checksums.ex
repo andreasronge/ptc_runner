@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Ptc.UpdateSpecChecksums do
   Regenerates the spec checksums file for drift detection.
 
   Reads the current PTC-Lisp specification and generates hashes for each section,
-  storing them in `test/spec_cases/checksums.exs`.
+  storing them in `priv/spec/checksums.ex`.
 
   ## Usage
 
@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Ptc.UpdateSpecChecksums do
 
   ## Output
 
-  Updates `test/spec_cases/checksums.exs` with current section hashes.
+  Updates `priv/spec/checksums.ex` with current section hashes.
   """
 
   use Mix.Task
@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Ptc.UpdateSpecChecksums do
 
   alias PtcRunner.Lisp.SpecValidator
 
-  @checksums_path "test/spec_cases/checksums.exs"
+  @checksums_path "priv/spec/checksums.ex"
 
   @impl Mix.Task
   def run(_args) do

@@ -228,7 +228,7 @@ Section checksums detect unintended spec changes. After intentionally modifying 
 
 ```bash
 mix ptc.update_spec_checksums
-git add test/spec_cases/checksums.exs
+git add priv/spec/checksums.ex
 ```
 
 ## Property-Based Testing
