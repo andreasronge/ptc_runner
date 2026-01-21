@@ -28,7 +28,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert %CompiledAgent{} = compiled
       assert is_binary(compiled.source)
       assert compiled.signature == "(n :int) -> {result :int}"
-      assert is_function(compiled.execute, 1)
+      assert is_function(compiled.execute, 2)
+      assert compiled.has_sub_agent_tools == false
       assert %{compiled_at: _, tokens_used: _, turns: _, llm_model: _} = compiled.metadata
     end
 
@@ -57,7 +58,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         SubAgent.new(
           prompt: "Process {{item}}",
           signature: "(item :string) -> {category :string}",
-          tools: tools
+          tools: tools,
+          max_turns: 1
         )
 
       assert_raise ArgumentError, ~r/LLM-dependent tool: classify/, fn ->
@@ -65,8 +67,14 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       end
     end
 
-    test "raises ArgumentError if agent has SubAgentTool" do
-      child = SubAgent.new(prompt: "Child agent", description: "A child agent")
+    test "raises ArgumentError if agent has SubAgentTool with mission_timeout" do
+      child =
+        SubAgent.new(
+          prompt: "Child agent",
+          description: "A child agent",
+          mission_timeout: 5000
+        )
+
       sub_agent_tool = SubAgent.as_tool(child)
       tools = %{"child" => sub_agent_tool}
 
@@ -74,10 +82,75 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         SubAgent.new(
           prompt: "Parent agent",
           signature: "() -> :string",
-          tools: tools
+          tools: tools,
+          max_turns: 1
         )
 
-      assert_raise ArgumentError, ~r/LLM-dependent tool: child/, fn ->
+      assert_raise ArgumentError, ~r/mission_timeout: child/, fn ->
+        SubAgent.compile(agent, llm: fn _ -> {:ok, ""} end)
+      end
+    end
+
+    test "allows SubAgentTool without mission_timeout" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1
+        )
+
+      sub_agent_tool = SubAgent.as_tool(child)
+      tools = %{"echo" => sub_agent_tool}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo tool for {{input}}",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM - returns different responses for parent vs child
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          # This is the parent orchestrator
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          # This is the child echo agent
+          {:ok, ~S|(return {:echo "mocked echo"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
+      assert compiled.has_sub_agent_tools == true
+    end
+
+    test "raises ArgumentError if max_turns > 1" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          signature: "() -> :string",
+          max_turns: 3
+        )
+
+      assert_raise ArgumentError, ~r/only single-shot agents/, fn ->
+        SubAgent.compile(agent, llm: fn _ -> {:ok, ""} end)
+      end
+    end
+
+    test "raises ArgumentError if output: :json" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          signature: "() -> :string",
+          output: :json,
+          max_turns: 1
+        )
+
+      assert_raise ArgumentError, ~r/only PTC-Lisp agents/, fn ->
         SubAgent.compile(agent, llm: fn _ -> {:ok, ""} end)
       end
     end
@@ -99,7 +172,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
 
-      result = compiled.execute.(%{n: 10})
+      result = compiled.execute.(%{n: 10}, [])
       assert result.return.result == 20
     end
 
@@ -127,7 +200,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
 
-      compiled.execute.(%{n: 42})
+      compiled.execute.(%{n: 42}, [])
 
       assert [{:called, 42}] = :ets.lookup(call_log, :called)
       :ets.delete(call_log)
@@ -228,6 +301,46 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       result = tool.execute.(%{n: 5})
       assert result.return.result == 10
     end
+
+    test "as_tool raises error for compiled agents with SubAgentTools" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "mock"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
+      assert compiled.has_sub_agent_tools == true
+
+      tool = CompiledAgent.as_tool(compiled)
+
+      assert_raise ArgumentError, ~r/cannot be used as a tool in dynamic agents/, fn ->
+        tool.execute.(%{input: "test"})
+      end
+    end
   end
 
   describe "field_descriptions propagation" do
@@ -281,11 +394,11 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         SubAgent.compile(agent, llm: mock_llm, sample: %{value: 100.0, threshold: 50.0})
 
       # Execute multiple times without LLM
-      result1 = compiled.execute.(%{value: 80.0, threshold: 50.0})
+      result1 = compiled.execute.(%{value: 80.0, threshold: 50.0}, [])
       assert result1.return.score == 0.9
       assert result1.return.anomalous == true
 
-      result2 = compiled.execute.(%{value: 30.0, threshold: 50.0})
+      result2 = compiled.execute.(%{value: 30.0, threshold: 50.0}, [])
       assert result2.return.score == 0.1
       assert result2.return.anomalous == false
     end
@@ -312,13 +425,301 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{a: 10, b: 2})
 
       # Valid execution
-      result1 = compiled.execute.(%{a: 10, b: 2})
+      result1 = compiled.execute.(%{a: 10, b: 2}, [])
       assert result1.return.result == 5
 
       # Runtime error - tool exceptions return :tool_error
-      result2 = compiled.execute.(%{a: 10, b: 0})
+      result2 = compiled.execute.(%{a: 10, b: 0}, [])
       assert result2.fail != nil
       assert result2.fail.reason == :tool_error
+    end
+  end
+
+  describe "compile with SubAgentTools (orchestrator pattern)" do
+    test "compiles orchestrator with SubAgentTools, executing them at runtime" do
+      # Child agent that generates a joke (requires LLM at runtime)
+      joke_agent =
+        SubAgent.new(
+          prompt: "Generate a short joke about {{topic}}. Just the joke.",
+          signature: "(topic :string) -> {joke :string}",
+          description: "Generate a joke about the given topic",
+          max_turns: 1
+        )
+
+      generate_joke_tool = SubAgent.as_tool(joke_agent)
+
+      # Pure Elixir tool (no LLM needed)
+      check_punchline_tool =
+        {fn %{"joke" => joke} ->
+           String.contains?(joke, "?") or String.contains?(joke, "!")
+         end, signature: "(joke :string) -> :bool", description: "Check if joke has punchline"}
+
+      tools = %{
+        "generate_joke" => generate_joke_tool,
+        "check_punchline" => check_punchline_tool
+      }
+
+      # Orchestrator that uses these tools
+      orchestrator =
+        SubAgent.new(
+          prompt: """
+          Create a joke about {{topic}}.
+          1. Generate a joke
+          2. Check if it has a good punchline
+          3. Return the joke and whether it passed the check
+          """,
+          signature: "(topic :string) -> {joke :string, has_punchline :bool}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      # Returns different responses for orchestrator vs child agents
+      compile_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/generate_joke") do
+          # This is the orchestrator - return the orchestration logic
+          {:ok,
+           """
+           (let [joke-result (tool/generate_joke {:topic data/topic})
+                 joke (get joke-result :joke)
+                 has-punchline (tool/check_punchline {:joke joke})]
+             (return {:joke joke :has_punchline has-punchline}))
+           """}
+        else
+          # This is the joke_agent - return a mock joke
+          {:ok, ~S|(return {:joke "Why did the mock cross the road? To test the other side!"})|}
+        end
+      end
+
+      # Compile the orchestrator - should NOT reject SubAgentTools
+      {:ok, compiled} = SubAgent.compile(orchestrator, llm: compile_llm)
+
+      assert compiled.has_sub_agent_tools == true
+
+      # Mock LLM for execution - used by the SubAgentTool at runtime
+      # Child agent uses PTC-Lisp output mode, so return valid PTC-Lisp
+      runtime_llm = fn _ ->
+        {:ok,
+         ~S|(return {:joke "Why do programmers prefer dark mode? Because light attracts bugs!"})|}
+      end
+
+      # Execute with runtime LLM for SubAgentTools
+      result = compiled.execute.(%{topic: "programmers"}, llm: runtime_llm)
+
+      assert result.return.joke =~ "programmer"
+      assert result.return.has_punchline == true
+    end
+
+    test "compiled orchestrator can be executed multiple times with different LLMs" do
+      # Simple child agent
+      echo_agent =
+        SubAgent.new(
+          prompt: "Echo back: {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echoes the message",
+          max_turns: 1
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(echo_agent)}
+
+      orchestrator =
+        SubAgent.new(
+          prompt: "Echo {{message}} using the echo tool",
+          signature: "(message :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      compile_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          # This is the orchestrator
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/message}) :echo)})|}
+        else
+          # This is the echo agent
+          {:ok, ~S|(return {:echo "mock echo"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(orchestrator, llm: compile_llm)
+
+      # Execute with different LLMs - child agents use PTC-Lisp mode
+      llm1 = fn _ -> {:ok, ~S|(return {:echo "Hello from LLM1"})|} end
+      llm2 = fn _ -> {:ok, ~S|(return {:echo "Hello from LLM2"})|} end
+
+      result1 = compiled.execute.(%{message: "test"}, llm: llm1)
+      result2 = compiled.execute.(%{message: "test"}, llm: llm2)
+
+      assert result1.return.result == "Hello from LLM1"
+      assert result2.return.result == "Hello from LLM2"
+    end
+
+    test "raises error if llm not provided at execute time with SubAgentTools" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "mock"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
+
+      assert_raise ArgumentError, ~r/llm required for compiled agents/, fn ->
+        compiled.execute.(%{input: "test"}, [])
+      end
+    end
+
+    test "raises error if runtime LLM is atom not in registry" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "mock"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
+
+      # Pass atom LLM without registry
+      assert_raise ArgumentError, ~r/Runtime LLM :my_atom is not in llm_registry/, fn ->
+        compiled.execute.(%{input: "test"}, llm: :my_atom)
+      end
+    end
+
+    test "raises error if child agent's atom LLM not in registry" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1,
+          llm: :child_llm
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "mock"})|}
+        end
+      end
+
+      {:ok, compiled} =
+        SubAgent.compile(agent, llm: mock_llm, llm_registry: %{child_llm: mock_llm})
+
+      # Provide runtime LLM but not the registry
+      runtime_llm = fn _ -> {:ok, ~S|(return {:echo "test"})|} end
+
+      assert_raise ArgumentError, ~r/requires LLM :child_llm which is not in llm_registry/, fn ->
+        compiled.execute.(%{input: "test"}, llm: runtime_llm)
+      end
+    end
+
+    test "atom LLM works when provided in registry" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1,
+          llm: :child_llm
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Context-aware mock LLM for compilation
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "mock"})|}
+        end
+      end
+
+      {:ok, compiled} =
+        SubAgent.compile(agent, llm: mock_llm, llm_registry: %{child_llm: mock_llm})
+
+      # Provide LLM in registry
+      runtime_llm = fn _ -> {:ok, ~S|(return {:echo "test"})|} end
+      child_llm = fn _ -> {:ok, ~S|(return {:echo "from child_llm"})|} end
+
+      result =
+        compiled.execute.(%{input: "test"},
+          llm: runtime_llm,
+          llm_registry: %{child_llm: child_llm}
+        )
+
+      assert result.return.result == "from child_llm"
     end
   end
 end
