@@ -6,11 +6,24 @@ defmodule PtcRunner.SubAgent.Compiler do
   a `CompiledAgent` by running it once with an LLM to derive the PTC-Lisp program.
   The resulting CompiledAgent can then be executed many times without further LLM calls.
 
+  ## SubAgentTools Support
+
+  Compiled agents can include SubAgentTools. The orchestrator's PTC-Lisp code is
+  deterministic (sequencing tool calls), while SubAgentTools execute their child
+  agents with an LLM at runtime.
+
+  When executing a compiled agent with SubAgentTools, pass the LLM at runtime:
+
+      {:ok, compiled} = SubAgent.compile(orchestrator, llm: compile_llm)
+      compiled.execute.(%{topic: "cats"}, llm: runtime_llm)
+
   See `PtcRunner.SubAgent.compile/2` for the public API.
   """
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.CompiledAgent
+  alias PtcRunner.SubAgent.Loop.ToolNormalizer
+  alias PtcRunner.SubAgent.{SubAgentTool, Telemetry}
 
   @doc """
   Compiles a SubAgent into a reusable PTC-Lisp function.
@@ -19,12 +32,19 @@ defmodule PtcRunner.SubAgent.Compiler do
   `CompiledAgent` can then be executed many times without further LLM calls,
   making it efficient for processing many items with deterministic logic.
 
-  ## Restrictions
+  ## Requirements
 
-  Only agents with pure tools can be compiled. Agents with LLM-dependent tools
-  will raise `ArgumentError`:
-  - `LLMTool` - requires LLM at execution time
-  - `SubAgentTool` - requires LLM at execution time
+  - `max_turns: 1` - Only single-shot agents can be compiled
+  - `output: :ptc_lisp` - Only PTC-Lisp output mode (not `:json`)
+
+  ## Tool Support
+
+  - Pure Elixir tools - Supported, executed directly
+  - `LLMTool` - NOT supported (raises ArgumentError)
+  - `SubAgentTool` - Supported if child agent has no `mission_timeout`
+
+  When SubAgentTools are present, the compiled agent requires an `llm` option
+  at execute time for the child agents.
 
   ## Options
 
@@ -52,9 +72,9 @@ defmodule PtcRunner.SubAgent.Compiler do
       "(n :int) -> {result :int}"
       iex> is_binary(compiled.source)
       true
-      iex> is_function(compiled.execute, 1)
+      iex> is_function(compiled.execute, 2)
       true
-      iex> result = compiled.execute.(%{n: 10})
+      iex> result = compiled.execute.(%{n: 10}, [])
       iex> result.return.result
       20
 
@@ -62,12 +82,20 @@ defmodule PtcRunner.SubAgent.Compiler do
 
       iex> alias PtcRunner.SubAgent.LLMTool
       iex> tools = %{"classify" => LLMTool.new(prompt: "Classify {{x}}", signature: "(x :string) -> :string")}
-      iex> agent = PtcRunner.SubAgent.new(prompt: "Process {{item}}", signature: "(item :string) -> {category :string}", tools: tools)
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Process {{item}}", signature: "(item :string) -> {category :string}", tools: tools, max_turns: 1)
       iex> PtcRunner.SubAgent.Compiler.compile(agent, llm: fn _ -> {:ok, ""} end)
       ** (ArgumentError) cannot compile agent with LLM-dependent tool: classify
   """
   @spec compile(SubAgent.t(), keyword()) ::
           {:ok, CompiledAgent.t()} | {:error, PtcRunner.Step.t()}
+  def compile(%SubAgent{max_turns: max_turns}, _opts) when max_turns != 1 do
+    raise ArgumentError, "only single-shot agents (max_turns: 1) can be compiled"
+  end
+
+  def compile(%SubAgent{output: :json}, _opts) do
+    raise ArgumentError, "only PTC-Lisp agents (output: :ptc_lisp) can be compiled"
+  end
+
   def compile(%SubAgent{} = agent, opts) do
     # Validate that all tools are compilable (no LLM-dependent tools)
     validate_compilable_tools!(agent.tools)
@@ -82,6 +110,14 @@ defmodule PtcRunner.SubAgent.Compiler do
         # Extract the final program from the turns
         source = extract_final_program(step.turns)
 
+        # Separate pure tools from SubAgentTools using single pass
+        {sub_agent_list, pure_list} =
+          Enum.split_with(agent.tools, fn {_, t} -> match?(%SubAgentTool{}, t) end)
+
+        pure_tools = Map.new(pure_list)
+        sub_agent_tools = Map.new(sub_agent_list)
+        has_sub_agents = map_size(sub_agent_tools) > 0
+
         # Build executor function that runs the compiled program
         # Include system tools (return/fail) as they're needed at runtime
         # Both return sentinel tuples for consistency with loop detection
@@ -90,15 +126,52 @@ defmodule PtcRunner.SubAgent.Compiler do
           "fail" => fn args -> {:__ptc_fail__, args} end
         }
 
-        all_tools = Map.merge(agent.tools, system_tools)
-
         # Capture field_descriptions for populating in the returned step
         field_descs = agent.field_descriptions
 
-        execute = fn args ->
-          args
-          |> run_and_unwrap(source, all_tools)
-          |> add_field_descriptions(field_descs)
+        execute = fn args, opts_runtime ->
+          # Runtime validation for SubAgentTools
+          llm = Keyword.get(opts_runtime, :llm)
+          llm_registry = Keyword.get(opts_runtime, :llm_registry, %{})
+
+          if has_sub_agents do
+            validate_runtime_llm!(llm, llm_registry)
+            validate_llm_registry_for_sub_agents!(sub_agent_tools, llm, llm_registry)
+          end
+
+          # Inherit context from caller (when CompiledAgent used inside another agent)
+          nesting_depth = Keyword.get(opts_runtime, :_nesting_depth, 0)
+          remaining_turns = Keyword.get(opts_runtime, :_remaining_turns)
+          mission_deadline = Keyword.get(opts_runtime, :_mission_deadline)
+
+          # Build runtime tools
+          runtime_tools =
+            if has_sub_agents do
+              # Build state for ToolNormalizer (same structure as Loop state)
+              state = %{
+                llm: llm,
+                llm_registry: llm_registry,
+                nesting_depth: nesting_depth,
+                remaining_turns: remaining_turns,
+                mission_deadline: mission_deadline
+              }
+
+              # Reuse ToolNormalizer to wrap SubAgentTools (includes telemetry)
+              wrapped_sub_agents = ToolNormalizer.normalize(sub_agent_tools, state, agent)
+              pure_tools |> Map.merge(wrapped_sub_agents) |> Map.merge(system_tools)
+            else
+              pure_tools |> Map.merge(system_tools)
+            end
+
+          # Wrap entire execution in telemetry span
+          Telemetry.span([:compiled, :execute], %{agent: agent}, fn ->
+            result =
+              args
+              |> run_and_unwrap(source, runtime_tools)
+              |> add_field_descriptions(field_descs)
+
+            {result, %{agent: agent, status: step_status(result)}}
+          end)
         end
 
         # Build metadata from the compilation step
@@ -110,7 +183,8 @@ defmodule PtcRunner.SubAgent.Compiler do
            signature: agent.signature,
            execute: execute,
            metadata: metadata,
-           field_descriptions: agent.field_descriptions
+           field_descriptions: agent.field_descriptions,
+           has_sub_agent_tools: has_sub_agents
          }}
 
       {:error, step} ->
@@ -118,17 +192,54 @@ defmodule PtcRunner.SubAgent.Compiler do
     end
   end
 
-  # Validates that all tools are compilable (no LLM-dependent tools)
+  # Validates that all tools are compilable
+  # - Rejects LLMTool (always requires LLM)
+  # - Allows SubAgentTool but rejects if mission_timeout is set
   defp validate_compilable_tools!(tools) do
     Enum.each(tools, fn
       {name, %PtcRunner.SubAgent.LLMTool{}} ->
         raise ArgumentError, "cannot compile agent with LLM-dependent tool: #{name}"
 
-      {name, %PtcRunner.SubAgent.SubAgentTool{}} ->
-        raise ArgumentError, "cannot compile agent with LLM-dependent tool: #{name}"
+      {name, %SubAgentTool{agent: agent}} ->
+        if agent.mission_timeout do
+          raise ArgumentError,
+                "cannot compile agent with SubAgentTool that has mission_timeout: #{name}"
+        end
 
       {_name, _other} ->
         :ok
+    end)
+  end
+
+  # Validate runtime LLM is provided and in registry if it's an atom
+  defp validate_runtime_llm!(nil, _llm_registry) do
+    raise ArgumentError, "llm required for compiled agents with SubAgentTools"
+  end
+
+  defp validate_runtime_llm!(llm, llm_registry) when is_atom(llm) do
+    unless Map.has_key?(llm_registry, llm) do
+      raise ArgumentError,
+            "Runtime LLM :#{llm} is not in llm_registry. " <>
+              "Pass llm_registry: %{#{llm}: &callback/1}"
+    end
+  end
+
+  defp validate_runtime_llm!(_llm, _llm_registry), do: :ok
+
+  # Validate that atom LLMs used by SubAgentTools are in the registry
+  defp validate_llm_registry_for_sub_agents!(sub_agent_tools, _llm, llm_registry) do
+    Enum.each(sub_agent_tools, fn {name, %SubAgentTool{agent: agent, bound_llm: bound_llm}} ->
+      # Check agent.llm (highest priority)
+      if is_atom(agent.llm) and agent.llm != nil and not Map.has_key?(llm_registry, agent.llm) do
+        raise ArgumentError,
+              "SubAgentTool #{name} requires LLM :#{agent.llm} which is not in llm_registry"
+      end
+
+      # Check bound_llm (second priority)
+      if is_atom(bound_llm) and bound_llm != nil and not Map.has_key?(llm_registry, bound_llm) do
+        raise ArgumentError,
+              "SubAgentTool #{name} requires LLM :#{bound_llm} which is not in llm_registry"
+      end
     end)
   end
 
@@ -146,6 +257,10 @@ defmodule PtcRunner.SubAgent.Compiler do
 
   defp add_field_descriptions({:error, step}, field_descs),
     do: %{step | field_descriptions: field_descs}
+
+  # Determine status for telemetry from step result
+  defp step_status(%{fail: nil}), do: :ok
+  defp step_status(_), do: :error
 
   # Extracts the final PTC-Lisp program from the turns
   defp extract_final_program(turns) when is_list(turns) do

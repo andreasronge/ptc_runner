@@ -10,14 +10,28 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   ## Use Cases
 
   - Processing batch data with consistent logic (e.g., scoring reports)
-  - Agents with pure tools that don't require LLM decisions at runtime
+  - Orchestrating SubAgentTools with deterministic control flow
   - Workflows where the logic is derived once and reused many times
 
-  ## Limitations
+  ## Tool Support
 
-  CompiledAgents can only use pure Elixir tools. They cannot include:
-  - `LLMTool` - requires LLM at execution time
-  - `SubAgentTool` - requires LLM at execution time
+  - Pure Elixir tools - Supported, executed directly
+  - `LLMTool` - NOT supported (raises ArgumentError at compile time)
+  - `SubAgentTool` - Supported, requires `llm` option at execute time
+
+  When executing a compiled agent with SubAgentTools, pass the LLM at runtime:
+
+      compiled.execute.(%{topic: "cats"}, llm: runtime_llm)
+
+  ## Runtime Options
+
+  The `execute` function accepts optional keyword arguments:
+
+  - `llm` - Required if agent has SubAgentTools. LLM for child agents.
+  - `llm_registry` - Map of atom to LLM functions (if SubAgentTools use atom LLMs)
+  - `_nesting_depth` - Inherited context depth (used when nested in another agent)
+  - `_remaining_turns` - Inherited turn budget
+  - `_mission_deadline` - Inherited mission deadline
 
   See `SubAgent.compile/2` for compilation details.
 
@@ -25,9 +39,10 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
 
   - `source` - Inspectable PTC-Lisp source code (String)
   - `signature` - Functional contract copied from agent (String)
-  - `execute` - Pre-bound executor function `(map() -> result)`
+  - `execute` - Pre-bound executor function `(map(), keyword() -> result)`
   - `metadata` - Compilation metadata (see `t:metadata/0`)
   - `field_descriptions` - Descriptions for signature fields (Map, optional)
+  - `has_sub_agent_tools` - Whether the agent contains SubAgentTools
 
   ## Examples
 
@@ -46,7 +61,9 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       "(n :int) -> {result :int}"
       iex> compiled.source
       ~S|(return {:result (tool/double {:n data/n})})|
-      iex> result = compiled.execute.(%{n: 10})
+      iex> compiled.has_sub_agent_tools
+      false
+      iex> result = compiled.execute.(%{n: 10}, [])
       iex> result.return.result
       20
   """
@@ -73,25 +90,39 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   Fields:
   - `source` - PTC-Lisp program source code
   - `signature` - Type signature for inputs/outputs
-  - `execute` - Function that executes the program `(map() -> Step.t())`
+  - `execute` - Function that executes the program `(map(), keyword() -> Step.t())`
   - `metadata` - Compilation metadata
   - `field_descriptions` - Descriptions for signature fields
+  - `has_sub_agent_tools` - Whether the agent contains SubAgentTools
   """
   @type t :: %__MODULE__{
           source: String.t(),
           signature: String.t() | nil,
-          execute: (map() -> PtcRunner.Step.t()),
+          execute: (map(), keyword() -> PtcRunner.Step.t()),
           metadata: metadata(),
-          field_descriptions: map() | nil
+          field_descriptions: map() | nil,
+          has_sub_agent_tools: boolean()
         }
 
-  defstruct [:source, :signature, :execute, :metadata, :field_descriptions]
+  defstruct [
+    :source,
+    :signature,
+    :execute,
+    :metadata,
+    :field_descriptions,
+    has_sub_agent_tools: false
+  ]
 
   @doc """
   Wraps a compiled agent as a callable tool.
 
   The resulting tool can be used in parent agents. When called, it executes
   the compiled PTC-Lisp program without making any LLM calls.
+
+  Note: The returned tool has a 1-arity execute function for compatibility with
+  dynamic agents. Compiled agents with SubAgentTools should not be used as tools
+  in dynamic agents (they require runtime LLM options that can't be passed through
+  the 1-arity interface).
 
   ## Examples
 
@@ -116,10 +147,23 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
           execute: (map() -> PtcRunner.Step.t()),
           signature: String.t() | nil
         }
-  def as_tool(%__MODULE__{execute: execute, signature: signature}) do
+  def as_tool(%__MODULE__{execute: execute, signature: signature, has_sub_agent_tools: has_subs}) do
+    # Wrap 2-arity execute in 1-arity for compatibility with dynamic agents
+    # Note: Compiled agents with SubAgentTools will fail if used this way
+    # because they require llm option that can't be passed through 1-arity
+    wrapped_execute = fn args ->
+      if has_subs do
+        raise ArgumentError,
+              "CompiledAgent with SubAgentTools cannot be used as a tool in dynamic agents. " <>
+                "Use compiled.execute.(args, llm: llm) directly or compile the parent agent too."
+      end
+
+      execute.(args, [])
+    end
+
     %{
       type: :compiled,
-      execute: execute,
+      execute: wrapped_execute,
       signature: signature
     }
   end
