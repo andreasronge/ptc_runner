@@ -554,11 +554,11 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   end
 
   describe "tool call argument recording" do
-    test "keyword-style args are recorded as map, not wrapped in :args" do
-      # When LLM calls (tool/summarize :text "hello"), the tool_calls should record
-      # args as %{text: "hello"}, not %{args: [:text, "hello"]}
+    test "keyword-style args are recorded as string-keyed map" do
+      # When LLM calls (tool/summarize :text "hello"), the tool receives string keys
+      # This prevents atom memory leaks and matches JSON conventions
       tools = %{
-        "summarize" => fn %{text: text} -> %{summary: "Summary of: #{text}"} end
+        "summarize" => fn %{"text" => text} -> %{summary: "Summary of: #{text}"} end
       }
 
       source = ~S|(tool/summarize :text "hello world")|
@@ -567,14 +567,14 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       assert [tool_call] = step.tool_calls
       assert tool_call.name == "summarize"
-      # Args should be a proper map with :text key, not wrapped in :args
-      assert tool_call.args == %{text: "hello world"}
-      refute Map.has_key?(tool_call.args, :args)
+      # Args should be a string-keyed map
+      assert tool_call.args == %{"text" => "hello world"}
+      refute Map.has_key?(tool_call.args, "args")
     end
 
-    test "multiple keyword args are recorded as map" do
+    test "multiple keyword args are recorded as string-keyed map" do
       tools = %{
-        "search" => fn %{query: q, limit: l} -> [q, l] end
+        "search" => fn %{"query" => q, "limit" => l} -> [q, l] end
       }
 
       source = ~S|(tool/search :query "elixir" :limit 10)|
@@ -582,12 +582,12 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, step} = Lisp.run(source, tools: tools)
 
       assert [tool_call] = step.tool_calls
-      assert tool_call.args == %{query: "elixir", limit: 10}
+      assert tool_call.args == %{"query" => "elixir", "limit" => 10}
     end
 
-    test "single map arg is passed through as-is" do
+    test "single map arg is converted to string keys" do
       tools = %{
-        "fetch" => fn %{url: url} -> "content from #{url}" end
+        "fetch" => fn %{"url" => url} -> "content from #{url}" end
       }
 
       source = ~S|(tool/fetch {:url "http://example.com"})|
@@ -595,7 +595,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, step} = Lisp.run(source, tools: tools)
 
       assert [tool_call] = step.tool_calls
-      assert tool_call.args == %{url: "http://example.com"}
+      assert tool_call.args == %{"url" => "http://example.com"}
     end
   end
 end

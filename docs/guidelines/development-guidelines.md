@@ -115,6 +115,37 @@ Since this library may run LLM-generated code:
 - Consider memory limits for sandbox processes
 - Log all tool calls for debugging and auditing
 
+### Tool Boundary Conventions
+
+Tools are called from PTC-Lisp with **named arguments only** (maps). Positional arguments are rejected with a clear error.
+
+**Key type at boundary:** String keys (like JSON payloads)
+- PTC-Lisp keywords (`:foo`) become string keys (`"foo"`) when passed to Elixir tools
+- Prevents atom memory leaks from arbitrary LLM-generated keywords
+- Matches how external data is typically handled in Elixir (Phoenix params, JSON APIs)
+
+**Tool implementation pattern:**
+```elixir
+# Tools receive string-keyed maps
+def run(%{"query" => query, "limit" => limit}, _ctx) do
+  # ...
+end
+
+# Or destructure in function body
+def run(args, _ctx) do
+  query = args["query"]
+  limit = args["limit"] || 10
+  # ...
+end
+```
+
+**Calling convention from PTC-Lisp:**
+```clojure
+(tool/search {:query "test" :limit 10})  ; map syntax
+(tool/search :query "test" :limit 10)    ; keyword-style (also valid)
+(tool/search "test" 10)                  ; ERROR: positional args not allowed
+```
+
 ### Testing
 
 - Test the public API surface thoroughly

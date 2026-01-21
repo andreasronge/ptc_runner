@@ -279,11 +279,8 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
     test "context and tools still work with sandbox" do
       tools = %{
-        "double" => fn args ->
-          # Tools receive map from Lisp which might have atom or string keys
-          x = args[:x] || args["x"]
-          x * 2
-        end
+        # Tools receive string keys at the boundary
+        "double" => fn %{"x" => x} -> x * 2 end
       }
 
       ctx = %{value: 5}

@@ -134,7 +134,8 @@ defmodule PtcRunner.Lisp.PmapTest do
       env = Env.initial()
       call_count = :counters.new(1, [:atomics])
 
-      tool_exec = fn "process", %{value: v} ->
+      # Tools receive string keys at the boundary
+      tool_exec = fn "process", %{"value" => v} ->
         :counters.add(call_count, 1, 1)
         # Simulate some work
         v * 2

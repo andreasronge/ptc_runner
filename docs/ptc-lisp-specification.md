@@ -2310,15 +2310,15 @@ Invoke registered tools using the `tool/` namespace:
 
 ```clojure
 (tool/tool-name)                   ; no arguments
-(tool/tool-name args-map)          ; with arguments
+(tool/tool-name args-map)          ; with arguments (named parameters)
 ```
 
 **Syntax:**
 - Tool names become atoms in `tool/` namespace: `tool/tool-name`
-- Arguments follow these rules:
-  - No arguments: `(tool/get-users)`
-  - Single map argument is passed through: `(tool/fetch {:id 123})`
-  - Multiple arguments are wrapped: `(tool/transform arg1 arg2)` → `{:args [arg1 arg2]}`
+- **Tools require named arguments** (maps):
+  - No arguments: `(tool/get-users)` → tool receives `%{}`
+  - Map argument: `(tool/fetch {:id 123})` → tool receives `%{"id" => 123}`
+  - Keyword-style: `(tool/search :query "x" :limit 10)` → tool receives `%{"query" => "x", "limit" => 10}`
 
 **Examples:**
 ```clojure
@@ -2333,6 +2333,12 @@ Invoke registered tools using the `tool/` namespace:
        (filter (where :active))
        (count)))
 ```
+
+**Tool boundary contract:**
+- PTC-Lisp keywords (`:foo`) become **string keys** at the Elixir boundary
+- Tools always receive string-keyed maps: `%{"key" => value}`
+- This matches JSON conventions and prevents atom memory leaks
+- Tool authors pattern match on string keys: `def run(%{"query" => q}, _ctx)`
 
 **Tool behavior:**
 - Tools are Elixir functions registered by the host

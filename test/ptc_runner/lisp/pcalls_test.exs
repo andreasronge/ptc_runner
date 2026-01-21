@@ -153,12 +153,13 @@ defmodule PtcRunner.Lisp.PcallsTest do
       env = Env.initial()
       call_count = :counters.new(1, [:atomics])
 
+      # Tools receive string keys at the boundary
       tool_exec = fn
-        "get-user", %{id: id} ->
+        "get-user", %{"id" => id} ->
           :counters.add(call_count, 1, 1)
           %{name: "User#{id}"}
 
-        "get-stats", %{id: id} ->
+        "get-stats", %{"id" => id} ->
           :counters.add(call_count, 1, 1)
           %{count: id * 10}
 
