@@ -144,6 +144,12 @@ defmodule PtcRunner.SubAgent.Compiler do
           remaining_turns = Keyword.get(opts_runtime, :_remaining_turns)
           mission_deadline = Keyword.get(opts_runtime, :_mission_deadline)
 
+          # Extract Lisp.run options (timeout, max_heap, float_precision, max_print_length)
+          lisp_opts =
+            opts_runtime
+            |> Keyword.take([:timeout, :max_heap, :float_precision, :max_print_length])
+            |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
           # Build runtime tools
           runtime_tools =
             if llm_required do
@@ -167,7 +173,7 @@ defmodule PtcRunner.SubAgent.Compiler do
           Telemetry.span([:compiled, :execute], %{agent: agent}, fn ->
             result =
               args
-              |> run_and_unwrap(source, runtime_tools)
+              |> run_and_unwrap(source, runtime_tools, lisp_opts)
               |> add_field_descriptions(field_descs)
 
             {result, %{agent: agent, status: step_status(result)}}
@@ -244,8 +250,10 @@ defmodule PtcRunner.SubAgent.Compiler do
   end
 
   # Runs the compiled program and unwraps any return/fail sentinels
-  defp run_and_unwrap(args, source, tools) do
-    case PtcRunner.Lisp.run(source, context: args, tools: tools) do
+  defp run_and_unwrap(args, source, tools, lisp_opts) do
+    opts = Keyword.merge([context: args, tools: tools], lisp_opts)
+
+    case PtcRunner.Lisp.run(source, opts) do
       {:ok, step} -> SubAgent.unwrap_sentinels(step)
       {:error, step} -> {:error, step}
     end
