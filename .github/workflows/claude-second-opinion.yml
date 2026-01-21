@@ -31,9 +31,10 @@ jobs:
         id: terminal-check
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+          PR_BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body')
 
           # Check if second opinion already attempted
           if echo "$PR_BODY" | grep -q "<!-- second-opinion-attempted -->"; then
@@ -41,10 +42,10 @@ jobs:
             echo "::warning::Second opinion already attempted - escalating to human review"
 
             # Add terminal state label
-            gh pr edit "$PR_NUMBER" --add-label "needs-human-review"
-            gh pr edit "$PR_NUMBER" --remove-label "needs-second-opinion" || true
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "needs-human-review"
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "needs-second-opinion" || true
 
-            gh pr comment "$PR_NUMBER" --body "$(cat <<'EOF'
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(cat <<'EOF'
           ## Automation Exhausted
 
           Both regular fix attempts and second opinion review have been unable to resolve this PR.
@@ -68,9 +69,10 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName,title,body)
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName,baseRefName,title,body)
 
           echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "head_ref=$(echo "$PR_DATA" | jq -r '.headRefName')" >> $GITHUB_OUTPUT
@@ -85,9 +87,10 @@ jobs:
         if: steps.terminal-check.outputs.is_terminal != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+          PR_BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body')
 
           # Add marker to PR body
           NEW_BODY="$PR_BODY
@@ -95,7 +98,7 @@ jobs:
           <!-- second-opinion-attempted -->"
 
           echo "$NEW_BODY" > /tmp/pr-body.md
-          gh pr edit "$PR_NUMBER" --body-file /tmp/pr-body.md
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --body-file /tmp/pr-body.md
 
       - name: Checkout PR branch
         if: steps.terminal-check.outputs.is_terminal != 'true'
@@ -232,8 +235,9 @@ jobs:
         if: always() && steps.terminal-check.outputs.is_terminal != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          gh pr edit ${{ steps.pr.outputs.number }} --remove-label "needs-second-opinion" || true
+          gh pr edit ${{ steps.pr.outputs.number }} --repo "$REPO" --remove-label "needs-second-opinion" || true
 
       # Safety net: push any unpushed commits
       - name: Push unpushed commits
@@ -241,6 +245,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
+          # Skip if not in a git repo (checkout failed)
+          if [ ! -d .git ]; then
+            echo "Not in a git repository, skipping push"
+            exit 0
+          fi
+
           HEAD_REF="${{ steps.pr.outputs.head_ref }}"
 
           # Re-configure git auth
