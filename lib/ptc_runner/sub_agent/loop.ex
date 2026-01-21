@@ -74,7 +74,7 @@ defmodule PtcRunner.SubAgent.Loop do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{Compression, SystemPrompt, Telemetry}
+  alias PtcRunner.SubAgent.{Compression, KeyNormalizer, SystemPrompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -512,7 +512,7 @@ defmodule PtcRunner.SubAgent.Loop do
       match?({:__ptc_return__, _}, lisp_step.return) ->
         {:__ptc_return__, return_value} = lisp_step.return
         # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
-        normalized_value = normalize_return_keys(return_value)
+        normalized_value = KeyNormalizer.normalize_keys(return_value)
         # Update lisp_step with normalized value for downstream use
         unwrapped_step = %{lisp_step | return: normalized_value}
 
@@ -535,7 +535,7 @@ defmodule PtcRunner.SubAgent.Loop do
       # Single-shot mode - skip validation (no retry possible anyway)
       agent.max_turns == 1 ->
         # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
-        normalized_step = %{lisp_step | return: normalize_return_keys(lisp_step.return)}
+        normalized_step = %{lisp_step | return: KeyNormalizer.normalize_keys(lisp_step.return)}
         build_success_step(code, response, normalized_step, state, agent)
 
       match?({:__ptc_fail__, _}, lisp_step.return) ->
@@ -914,24 +914,4 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
     |> Map.new()
   end
-
-  # ============================================================
-  # Key Normalization for Return Values
-  # ============================================================
-
-  # Recursively normalize map keys from hyphens to underscores at the tool boundary.
-  # Converts Clojure-style :was-improved to Elixir-style "was_improved".
-  defp normalize_return_keys(value) when is_map(value) do
-    Map.new(value, fn {k, v} -> {normalize_key(k), normalize_return_keys(v)} end)
-  end
-
-  defp normalize_return_keys(value) when is_list(value) do
-    Enum.map(value, &normalize_return_keys/1)
-  end
-
-  defp normalize_return_keys(value), do: value
-
-  defp normalize_key(k) when is_atom(k), do: k |> Atom.to_string() |> String.replace("-", "_")
-  defp normalize_key(k) when is_binary(k), do: String.replace(k, "-", "_")
-  defp normalize_key(k), do: k
 end

@@ -190,6 +190,7 @@ defmodule PtcRunner.SubAgent do
           output: output_mode()
         }
 
+  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.LLMResolver
 
   @default_format_options [
@@ -783,7 +784,7 @@ defmodule PtcRunner.SubAgent do
                   )
 
                 # Normalize return value keys (hyphen -> underscore at boundary)
-                normalized_step = %{step | return: normalize_return_keys(step.return)}
+                normalized_step = %{step | return: KeyNormalizer.normalize_keys(step.return)}
 
                 updated_step =
                   normalized_step
@@ -1176,24 +1177,4 @@ defmodule PtcRunner.SubAgent do
       schema: nil
     }
   end
-
-  # ============================================================
-  # Key Normalization for Return Values
-  # ============================================================
-
-  # Recursively normalize map keys from hyphens to underscores at the tool boundary.
-  # Converts Clojure-style :was-improved to Elixir-style "was_improved".
-  defp normalize_return_keys(value) when is_map(value) do
-    Map.new(value, fn {k, v} -> {normalize_key(k), normalize_return_keys(v)} end)
-  end
-
-  defp normalize_return_keys(value) when is_list(value) do
-    Enum.map(value, &normalize_return_keys/1)
-  end
-
-  defp normalize_return_keys(value), do: value
-
-  defp normalize_key(k) when is_atom(k), do: k |> Atom.to_string() |> String.replace("-", "_")
-  defp normalize_key(k) when is_binary(k), do: String.replace(k, "-", "_")
-  defp normalize_key(k), do: k
 end
