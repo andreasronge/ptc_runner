@@ -40,7 +40,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
           context: %{text: "I love this product!"}
         )
 
-      assert step.return.sentiment in ["positive", "Positive", "POSITIVE"]
+      assert step.return["sentiment"] in ["positive", "Positive", "POSITIVE"]
     end
 
     test "extract structured data" do
@@ -58,8 +58,8 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
           context: %{text: "John is 25 years old"}
         )
 
-      assert step.return.name == "John"
-      assert step.return.age == 25
+      assert step.return["name"] == "John"
+      assert step.return["age"] == 25
     end
 
     test "simple arithmetic reasoning" do
@@ -77,7 +77,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
           context: %{a: 17, b: 25}
         )
 
-      assert step.return.result == 42
+      assert step.return["result"] == 42
     end
 
     test "list extraction" do
@@ -95,7 +95,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
           context: %{text: "I bought apples, bananas, and oranges at the store"}
         )
 
-      fruits = step.return.fruits |> Enum.map(&String.downcase/1) |> Enum.sort()
+      fruits = step.return["fruits"] |> Enum.map(&String.downcase/1) |> Enum.sort()
       assert fruits == ["apples", "bananas", "oranges"]
     end
   end
@@ -120,8 +120,8 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
           context: %{review: "This is absolutely amazing!"}
         )
 
-      assert step.return.sentiment in ["positive", "Positive"]
-      assert step.return.confidence >= 0.0 and step.return.confidence <= 1.0
+      assert step.return["sentiment"] in ["positive", "Positive"]
+      assert step.return["confidence"] >= 0.0 and step.return["confidence"] <= 1.0
     end
   end
 
