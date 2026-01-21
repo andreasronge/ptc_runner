@@ -625,9 +625,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
   # Build success step
   defp build_success_step(return_value, response, state, agent) do
+    # Normalize return value keys (hyphen -> underscore at boundary)
+    normalized_return = normalize_return_keys(return_value)
+
     # Build Turn struct
     turn =
-      Metrics.build_turn(state, response, nil, return_value,
+      Metrics.build_turn(state, response, nil, normalized_return,
         success?: true,
         prints: [],
         tool_calls: [],
@@ -646,7 +649,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
       |> add_schema_metrics(state.schema)
 
     final_step = %Step{
-      return: return_value,
+      return: normalized_return,
       fail: nil,
       memory: %{},
       usage: usage,
@@ -756,4 +759,24 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp add_schema_metrics(usage, nil) do
     Map.put(usage, :schema_used, false)
   end
+
+  # ============================================================
+  # Key Normalization for Return Values
+  # ============================================================
+
+  # Recursively normalize map keys from hyphens to underscores at the tool boundary.
+  # Converts Clojure-style :was-improved to Elixir-style "was_improved".
+  defp normalize_return_keys(value) when is_map(value) do
+    Map.new(value, fn {k, v} -> {normalize_key(k), normalize_return_keys(v)} end)
+  end
+
+  defp normalize_return_keys(value) when is_list(value) do
+    Enum.map(value, &normalize_return_keys/1)
+  end
+
+  defp normalize_return_keys(value), do: value
+
+  defp normalize_key(k) when is_atom(k), do: k |> Atom.to_string() |> String.replace("-", "_")
+  defp normalize_key(k) when is_binary(k), do: String.replace(k, "-", "_")
+  defp normalize_key(k), do: k
 end

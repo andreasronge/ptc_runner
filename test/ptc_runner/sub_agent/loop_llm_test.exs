@@ -18,7 +18,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       {:ok, step} = Loop.run(agent, llm: :test_llm, llm_registry: registry, context: %{})
 
-      assert step.return == %{result: "from_registry"}
+      assert step.return == %{"result" => "from_registry"}
     end
 
     test "function LLM works without registry" do
@@ -32,7 +32,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: "direct"}
+      assert step.return == %{"result" => "direct"}
     end
 
     test "atom LLM not in registry returns error" do
@@ -99,7 +99,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
         SubAgent.run(parent, llm: llm, llm_registry: registry, context: %{})
 
       # Child should execute successfully using registry
-      assert step.return == %{from: "child"}
+      assert step.return == %{"from" => "child"}
     end
 
     @tag :skip
@@ -131,7 +131,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       {:ok, step} =
         SubAgent.run(parent, llm: :sonnet, llm_registry: registry, context: %{})
 
-      assert step.return == %{model: "haiku"}
+      assert step.return == %{"model" => "haiku"}
     end
   end
 
@@ -227,7 +227,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{recovered: true}
+      assert step.return == %{"recovered" => true}
       assert :counters.get(turn_counter, 1) == 2
     end
 
@@ -266,7 +266,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{handled: true}
+      assert step.return == %{"handled" => true}
       assert :counters.get(turn_counter, 1) == 2
     end
   end
@@ -330,7 +330,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
       assert Enum.any?(call_log, &match?({:haiku, _}, &1))
 
       # The return should come from the grandchild via parent's execution
-      assert step.return == %{from: "haiku"}
+      assert step.return == %{"from" => "haiku"}
     end
   end
 
@@ -372,7 +372,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           llm_retry: %{max_attempts: 5, backoff: :constant, base_delay: 1}
         )
 
-      assert step.return.done == true
+      assert step.return["done"] == true
       assert :counters.get(attempt_counter, 1) == 3
     end
 
@@ -400,7 +400,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           llm_retry: %{max_attempts: 3, backoff: :constant, base_delay: 1}
         )
 
-      assert step.return.success == true
+      assert step.return["success"] == true
       assert :counters.get(attempt_counter, 1) == 2
     end
 
@@ -428,7 +428,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           llm_retry: %{max_attempts: 3, backoff: :constant, base_delay: 1}
         )
 
-      assert step.return.ok == true
+      assert step.return["ok"] == true
       assert :counters.get(attempt_counter, 1) == 2
     end
 
@@ -692,7 +692,7 @@ defmodule PtcRunner.SubAgent.LoopLlmTest do
           llm_retry: %{max_attempts: 5, backoff: :constant, base_delay: 1}
         )
 
-      assert step.return.result == 2
+      assert step.return["result"] == 2
       # Turn budget should only count actual turns, not retries
       assert step.usage.turns == 2
       # But LLM was called 4 times total (2 retries on turn 1, then turn 1, then turn 2)

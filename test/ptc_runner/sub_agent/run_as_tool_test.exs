@@ -112,7 +112,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       {:ok, step} = SubAgent.run(parent, llm: tracking_llm, context: %{value: 21})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
       # Verify both agents used the same LLM
       assert Agent.get(call_log, &length/1) >= 2
     end
@@ -138,7 +138,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
 
       # Child should have received x=99 and returned it
-      assert step.return == %{value: 99}
+      assert step.return == %{"value" => 99}
     end
 
     test "tool execution - child uses its own LLM over bound LLM" do
@@ -164,7 +164,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
 
       # Child should use its own LLM, returning 100 not 200
-      assert step.return == %{value: 100}
+      assert step.return == %{"value" => 100}
     end
 
     test "child inherits parent LLM successfully" do
@@ -185,7 +185,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       # This should work because parent has LLM which child inherits
       {:ok, step} = SubAgent.run(parent, llm: parent_llm, context: %{})
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "child agent error is caught and parent can recover" do
@@ -209,7 +209,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       # Parent should succeed even though child failed
       assert {:ok, step} = result
-      assert step.return == %{error: "child_failed"}
+      assert step.return == %{"error" => "child_failed"}
     end
 
     test "nested agents respect nesting depth limit" do
@@ -254,7 +254,7 @@ defmodule PtcRunner.SubAgent.RunAsToolTest do
 
       # This should succeed as we have max_depth=3 (0 -> 1 -> 2)
       {:ok, step} = SubAgent.run(parent, llm: llm, context: %{})
-      assert step.return == %{value: 1}
+      assert step.return == %{"value" => 1}
     end
 
     test "nested agents exceed depth limit" do

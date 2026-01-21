@@ -110,7 +110,7 @@ defmodule PtcRunner.SubAgent.Loop do
       iex> llm = fn %{messages: _} -> {:ok, "```clojure\\n(return {:result (+ data/x data/y)})\\n```"} end
       iex> {:ok, step} = PtcRunner.SubAgent.Loop.run(agent, llm: llm, context: %{x: 5, y: 3})
       iex> step.return
-      %{result: 8}
+      %{"result" => 8}
   """
   @spec run(SubAgent.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(%SubAgent{} = agent, opts) do
@@ -511,10 +511,12 @@ defmodule PtcRunner.SubAgent.Loop do
       # Explicit return was actually executed - validate against signature before accepting
       match?({:__ptc_return__, _}, lisp_step.return) ->
         {:__ptc_return__, return_value} = lisp_step.return
-        # Update lisp_step with unwrapped value for downstream use
-        unwrapped_step = %{lisp_step | return: return_value}
+        # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
+        normalized_value = normalize_return_keys(return_value)
+        # Update lisp_step with normalized value for downstream use
+        unwrapped_step = %{lisp_step | return: normalized_value}
 
-        case ReturnValidation.validate(agent, return_value) do
+        case ReturnValidation.validate(agent, normalized_value) do
           :ok ->
             build_success_step(code, response, unwrapped_step, state, agent)
 
@@ -532,7 +534,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
       # Single-shot mode - skip validation (no retry possible anyway)
       agent.max_turns == 1 ->
-        build_success_step(code, response, lisp_step, state, agent)
+        # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
+        normalized_step = %{lisp_step | return: normalize_return_keys(lisp_step.return)}
+        build_success_step(code, response, normalized_step, state, agent)
 
       match?({:__ptc_fail__, _}, lisp_step.return) ->
         # Explicit fail was actually executed - complete with error, no feedback
@@ -910,4 +914,24 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
     |> Map.new()
   end
+
+  # ============================================================
+  # Key Normalization for Return Values
+  # ============================================================
+
+  # Recursively normalize map keys from hyphens to underscores at the tool boundary.
+  # Converts Clojure-style :was-improved to Elixir-style "was_improved".
+  defp normalize_return_keys(value) when is_map(value) do
+    Map.new(value, fn {k, v} -> {normalize_key(k), normalize_return_keys(v)} end)
+  end
+
+  defp normalize_return_keys(value) when is_list(value) do
+    Enum.map(value, &normalize_return_keys/1)
+  end
+
+  defp normalize_return_keys(value), do: value
+
+  defp normalize_key(k) when is_atom(k), do: k |> Atom.to_string() |> String.replace("-", "_")
+  defp normalize_key(k) when is_binary(k), do: String.replace(k, "-", "_")
+  defp normalize_key(k), do: k
 end

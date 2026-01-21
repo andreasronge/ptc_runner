@@ -75,7 +75,7 @@ defmodule PtcRunner.SubAgent.LoopReturnValidationTest do
       llm = mock_llm(["(return {:complex \"data\"})"])
 
       {:ok, step} = SubAgent.run(agent, llm: llm, context: %{})
-      assert step.return == %{complex: "data"}
+      assert step.return == %{"complex" => "data"}
     end
 
     test "single-shot mode skips validation" do

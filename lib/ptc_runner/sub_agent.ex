@@ -569,7 +569,7 @@ defmodule PtcRunner.SubAgent do
       ...> end
       iex> result = PtcRunner.SubAgent.run!(doubler, llm: mock_llm, context: %{n: 5})
       ...> |> PtcRunner.SubAgent.then!(adder, llm: mock_llm)
-      iex> result.return.final
+      iex> result.return["final"]
       20
 
   """
@@ -782,8 +782,11 @@ defmodule PtcRunner.SubAgent do
                     content
                   )
 
+                # Normalize return value keys (hyphen -> underscore at boundary)
+                normalized_step = %{step | return: normalize_return_keys(step.return)}
+
                 updated_step =
-                  step
+                  normalized_step
                   |> update_step_usage(duration_ms, tokens)
                   |> Map.put(:field_descriptions, agent.field_descriptions)
                   |> Map.put(:turns, trace)
@@ -1173,4 +1176,24 @@ defmodule PtcRunner.SubAgent do
       schema: nil
     }
   end
+
+  # ============================================================
+  # Key Normalization for Return Values
+  # ============================================================
+
+  # Recursively normalize map keys from hyphens to underscores at the tool boundary.
+  # Converts Clojure-style :was-improved to Elixir-style "was_improved".
+  defp normalize_return_keys(value) when is_map(value) do
+    Map.new(value, fn {k, v} -> {normalize_key(k), normalize_return_keys(v)} end)
+  end
+
+  defp normalize_return_keys(value) when is_list(value) do
+    Enum.map(value, &normalize_return_keys/1)
+  end
+
+  defp normalize_return_keys(value), do: value
+
+  defp normalize_key(k) when is_atom(k), do: k |> Atom.to_string() |> String.replace("-", "_")
+  defp normalize_key(k) when is_binary(k), do: String.replace(k, "-", "_")
+  defp normalize_key(k), do: k
 end
