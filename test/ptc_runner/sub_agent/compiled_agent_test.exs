@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert is_binary(compiled.source)
       assert compiled.signature == "(n :int) -> {result :int}"
       assert is_function(compiled.execute, 2)
-      assert compiled.has_sub_agent_tools == false
+      assert compiled.llm_required? == false
       assert %{compiled_at: _, tokens_used: _, turns: _, llm_model: _} = compiled.metadata
     end
 
@@ -125,7 +125,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
-      assert compiled.has_sub_agent_tools == true
+      assert compiled.llm_required? == true
     end
 
     test "raises ArgumentError if max_turns > 1" do
@@ -333,13 +333,224 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       end
 
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
-      assert compiled.has_sub_agent_tools == true
+      assert compiled.llm_required? == true
 
       tool = CompiledAgent.as_tool(compiled)
 
       assert_raise ArgumentError, ~r/cannot be used as a tool in dynamic agents/, fn ->
         tool.execute.(%{input: "test"})
       end
+    end
+  end
+
+  describe "SubAgent.run/2 with CompiledAgent" do
+    test "runs CompiledAgent without SubAgentTools (no LLM required)" do
+      tools = %{"double" => fn %{"n" => n} -> n * 2 end}
+
+      agent =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(return {:result (tool/double {:n data/n})})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
+
+      # Run via unified API - no LLM needed since no SubAgentTools
+      {:ok, step} = SubAgent.run(compiled, context: %{n: 5})
+      assert step.return.result == 10
+    end
+
+    test "run/2 with CompiledAgent returns error when llm required but not provided" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "mock"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
+
+      # Should return error, not raise
+      {:error, step} = SubAgent.run(compiled, context: %{input: "test"})
+      assert step.fail.reason == :llm_required
+    end
+
+    test "run/2 with CompiledAgent works when LLM provided" do
+      child =
+        SubAgent.new(
+          prompt: "Echo {{msg}}",
+          signature: "(msg :string) -> {echo :string}",
+          description: "Echo agent",
+          max_turns: 1
+        )
+
+      tools = %{"echo" => SubAgent.as_tool(child)}
+
+      agent =
+        SubAgent.new(
+          prompt: "Use echo",
+          signature: "(input :string) -> {result :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "tool/echo") do
+          {:ok, ~S|(return {:result (get (tool/echo {:msg data/input}) :echo)})|}
+        else
+          {:ok, ~S|(return {:echo "echoed"})|}
+        end
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm)
+
+      runtime_llm = fn _ -> {:ok, ~S|(return {:echo "runtime echo"})|} end
+      {:ok, step} = SubAgent.run(compiled, context: %{input: "test"}, llm: runtime_llm)
+      assert step.return.result == "runtime echo"
+    end
+  end
+
+  describe "SubAgent.then/3 (non-bang)" do
+    test "chains SubAgent results through CompiledAgent" do
+      # First agent - dynamic
+      doubler =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          max_turns: 1
+        )
+
+      # Second agent - compiled (pure, no LLM needed at runtime)
+      tripler_def =
+        SubAgent.new(
+          prompt: "Triple {{result}}",
+          signature: "(result :int) -> {final :int}",
+          tools: %{"triple" => fn %{"n" => n} -> n * 3 end},
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(return {:final (tool/triple {:n data/result})})|}
+      end
+
+      {:ok, tripler} = SubAgent.compile(tripler_def, llm: mock_llm, sample: %{result: 10})
+
+      # Chain
+      result =
+        SubAgent.run(doubler,
+          llm: fn _ -> {:ok, ~S|(return {:result (* 2 data/n)})|} end,
+          context: %{n: 5}
+        )
+        |> SubAgent.then(tripler)
+
+      assert {:ok, step} = result
+      # CompiledAgent returns atom keys
+      assert step.return.final == 30
+    end
+
+    test "then/3 short-circuits on error" do
+      compiled_tools = %{"double" => fn %{"n" => n} -> n * 2 end}
+
+      compiled_agent =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {result :int}",
+          tools: compiled_tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(return {:result (tool/double {:n data/n})})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(compiled_agent, llm: mock_llm, sample: %{n: 1})
+
+      # Start with an error
+      error_step = PtcRunner.Step.error(:test_error, "test failure", %{})
+
+      result = SubAgent.then({:error, error_step}, compiled)
+
+      assert {:error, step} = result
+      assert step.fail.reason == :test_error
+    end
+
+    test "then/3 returns chain_error on missing keys" do
+      agent =
+        SubAgent.new(
+          prompt: "Process {{missing_key}}",
+          signature: "(missing_key :string) -> {result :string}",
+          max_turns: 1
+        )
+
+      # Previous step has wrong keys
+      prev_step = %PtcRunner.Step{return: %{wrong_key: "value"}, fail: nil}
+
+      result = SubAgent.then({:ok, prev_step}, agent)
+
+      assert {:error, step} = result
+      assert step.fail.reason == :chain_error
+      assert step.fail.message =~ "missing_key"
+    end
+
+    test "then/3 works with CompiledAgent chaining" do
+      # Two compiled agents chained
+      first_def =
+        SubAgent.new(
+          prompt: "Double {{n}}",
+          signature: "(n :int) -> {doubled :int}",
+          tools: %{"double" => fn %{"n" => n} -> n * 2 end},
+          max_turns: 1
+        )
+
+      second_def =
+        SubAgent.new(
+          prompt: "Add 10 to {{doubled}}",
+          signature: "(doubled :int) -> {final :int}",
+          tools: %{"add10" => fn %{"n" => n} -> n + 10 end},
+          max_turns: 1
+        )
+
+      mock_llm1 = fn _ -> {:ok, ~S|(return {:doubled (tool/double {:n data/n})})|} end
+      mock_llm2 = fn _ -> {:ok, ~S|(return {:final (tool/add10 {:n data/doubled})})|} end
+
+      {:ok, first} = SubAgent.compile(first_def, llm: mock_llm1, sample: %{n: 5})
+      {:ok, second} = SubAgent.compile(second_def, llm: mock_llm2, sample: %{doubled: 10})
+
+      result =
+        SubAgent.run(first, context: %{n: 5})
+        |> SubAgent.then(second)
+
+      assert {:ok, step} = result
+      assert step.return.final == 20
     end
   end
 
@@ -496,7 +707,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       # Compile the orchestrator - should NOT reject SubAgentTools
       {:ok, compiled} = SubAgent.compile(orchestrator, llm: compile_llm)
 
-      assert compiled.has_sub_agent_tools == true
+      assert compiled.llm_required? == true
 
       # Mock LLM for execution - used by the SubAgentTool at runtime
       # Child agent uses PTC-Lisp output mode, so return valid PTC-Lisp

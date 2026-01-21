@@ -116,7 +116,7 @@ defmodule PtcRunner.SubAgent.Compiler do
 
         pure_tools = Map.new(pure_list)
         sub_agent_tools = Map.new(sub_agent_list)
-        has_sub_agents = map_size(sub_agent_tools) > 0
+        llm_required = map_size(sub_agent_tools) > 0
 
         # Build executor function that runs the compiled program
         # Include system tools (return/fail) as they're needed at runtime
@@ -134,7 +134,7 @@ defmodule PtcRunner.SubAgent.Compiler do
           llm = Keyword.get(opts_runtime, :llm)
           llm_registry = Keyword.get(opts_runtime, :llm_registry, %{})
 
-          if has_sub_agents do
+          if llm_required do
             validate_runtime_llm!(llm, llm_registry)
             validate_llm_registry_for_sub_agents!(sub_agent_tools, llm, llm_registry)
           end
@@ -146,7 +146,7 @@ defmodule PtcRunner.SubAgent.Compiler do
 
           # Build runtime tools
           runtime_tools =
-            if has_sub_agents do
+            if llm_required do
               # Build state for ToolNormalizer (same structure as Loop state)
               state = %{
                 llm: llm,
@@ -184,7 +184,7 @@ defmodule PtcRunner.SubAgent.Compiler do
            execute: execute,
            metadata: metadata,
            field_descriptions: agent.field_descriptions,
-           has_sub_agent_tools: has_sub_agents
+           llm_required?: llm_required
          }}
 
       {:error, step} ->
