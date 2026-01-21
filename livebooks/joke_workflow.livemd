@@ -1,0 +1,333 @@
+# Joke Workflow: LangGraph vs PTC-Lisp
+
+## Section
+
+Demonstrates how the classic LangGraph "prompt chaining" example translates to PTC-Lisp, showing the difference between predefined graphs and code-as-graph.
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+  else
+    [{:ptc_runner, "~> 0.5.1"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+## Setup
+
+```elixir
+Code.require_file("llm_setup.exs", __DIR__)
+"Setup LLM"
+```
+
+```elixir
+provider_input = LLMSetup.provider_input()
+```
+
+```elixir
+provider = Kino.Input.read(provider_input)
+LLMSetup.configure_provider(provider)
+```
+
+```elixir
+model_input = LLMSetup.model_input(provider)
+```
+
+```elixir
+model = Kino.Input.read(model_input)
+my_llm = LLMSetup.create_llm(model)
+"Ready: #{model}"
+```
+
+## The LangGraph Approach
+
+In LangGraph, you define a graph with nodes and edges (Python):
+
+<!-- livebook:{"break_markdown":true} -->
+
+```
+# Predefined graph structure
+#graph.add_node("generate", generate_joke)      # LLM call
+#graph.add_node("check", check_punchline)       # Python function
+#graph.add_node("improve", improve_joke)        # LLM call
+
+#graph.add_edge(START, "generate")
+#graph.add_conditional_edges("generate", check_punchline,
+#    {True: END, False: "improve"})
+#graph.add_edge("improve", END)
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+The graph is **predefined** - you specify all possible paths upfront.
+
+## PTC-Lisp Approach: Tools + Orchestration
+
+In PTC-Lisp, we create the same components but let the LLM write the workflow:
+
+```elixir
+alias PtcRunner.SubAgent
+alias PtcRunner.SubAgent.Debug
+
+
+# 1. SubAgent tool: generate_joke (actual LLM call)
+joke_agent = SubAgent.new(
+  prompt: "Generate a short, punchy joke about {{topic}}. Just the joke, nothing else.",
+  signature: "(topic :string) -> {joke :string}",
+  output: :json,
+  description: "Generate a joke about the given topic",
+  max_turns: 1
+)
+
+{:ok, step } = SubAgent.run(joke_agent, llm: my_llm, context: %{topic: "programmers"})
+Debug.print_trace(step)
+
+```
+
+```elixir
+
+generate_joke_tool = SubAgent.as_tool(joke_agent)
+
+# 2. Elixir function: check_punchline (no LLM needed - just code)
+check_punchline_tool = {
+  fn %{"joke" => joke} ->
+    String.contains?(joke, "?") or String.contains?(joke, "!")
+  end,
+  signature: "(joke :string) -> :bool",
+  description: "Check if joke has good punchline"
+}
+
+# 3. SubAgent tool: improve_joke (actual LLM call)
+improve_joke_agent = SubAgent.new(
+  prompt: """
+  Improve this joke by adding wordplay or a surprising twist: {{joke}}
+
+  Return only the improved joke, nothing else.
+  """,
+  signature: "(joke :string) -> {improved_joke :string}",
+  description: "Improve a joke with wordplay or twist",
+  output: :json,
+  timeout: 5000,
+  max_turns: 1
+)
+
+improve_joke_tool = SubAgent.as_tool(improve_joke_agent)
+
+:tools_defined
+```
+
+Now we have:
+
+* `generate_joke` - SubAgent (LLM call)
+* `check_punchline` - Pure Elixir (no LLM)
+* `improve_joke` - SubAgent (LLM call)
+
+## The Orchestrator
+
+The orchestrator SubAgent writes the workflow that wires these tools together:
+
+```elixir
+topic_input = Kino.Input.text("Topic", default: "programmers")
+```
+
+```elixir
+topic = Kino.Input.read(topic_input)
+
+tools = %{
+  "generate_joke" => generate_joke_tool,
+  "check_punchline" => check_punchline_tool,
+  "improve_joke" => improve_joke_tool
+}
+
+{_, step} = SubAgent.run(
+  """
+  Create a joke about {{topic}} using the available tools.
+
+  1. Generate a joke
+  2. Check if it has a good punchline
+  3. If not, improve it (max 3 times)
+  4. Return the final joke
+  """,
+  context: %{topic: topic},
+  tools: tools,
+  signature: "(topic :string) -> {joke :string, iterations :int, was_improved :bool}",
+  llm: my_llm,
+  max_turns: 1,
+  timeout: 5000
+)
+
+Debug.print_trace(step, raw: true)
+step.return
+```
+
+## The Compiled Orchestrator
+
+The compile pattern separates **derivation** (LLM writes logic once) from **execution** (runs deterministically). Let's compile the orchestrator so we can reuse it without re-deriving the logic each time.
+
+```elixir
+# First, create a fresh orchestrator agent (must use PTC-Lisp output, which is the default)
+orchestrator_agent = SubAgent.new(
+  prompt: """
+  Create a joke about {{topic}} using the available tools.
+
+  1. Generate a joke
+  2. Check if it has a good punchline
+  3. If not, improve it (max 3 times)
+  4. Return the final joke
+  """,
+  signature: "(topic :string) -> {joke :string, iterations :int, was_improved :bool}",
+  tools: tools,
+  max_turns: 1  # Required for compilation
+)
+
+# Compile the orchestrator - the LLM writes the workflow logic once
+{:ok, compiled} = SubAgent.compile(orchestrator_agent,
+  llm: my_llm,
+  sample: %{topic: "cats"}  # Sample helps the LLM understand the task
+)
+
+# Show the compiled source code
+IO.puts("=== Compiled PTC-Lisp Source ===")
+IO.puts(compiled.source)
+IO.puts("\n=== Metadata ===")
+IO.inspect(compiled.metadata, pretty: true)
+
+compiled
+```
+
+Example output:
+
+```
+=== Compiled PTC-Lisp Source ===
+(defn improvement-loop [joke iteration-count]
+  (if (tool/check_punchline {:joke joke})
+    {:final-joke joke :iterations iteration-count :was-improved (> iteration-count 1)}
+    (if (>= iteration-count 3)
+      {:final-joke joke :iterations iteration-count :was-improved (> iteration-count 1)}
+      (let [improved (:improved_joke (tool/improve_joke {:joke joke}))]
+        (improvement-loop improved (inc iteration-count))))))
+
+(let [topic data/topic
+      initial-joke (:joke (tool/generate_joke {:topic topic}))
+      result (improvement-loop initial-joke 1)]
+  (return {:joke (:final-joke result)
+           :iterations (:iterations result)
+           :was-improved (:was-improved result)}))
+
+=== Metadata ===
+%{
+  compiled_at: ~U[2026-01-21 10:41:00.806305Z],
+  tokens_used: 1638,
+  turns: 1,
+  llm_model: nil
+}
+```
+
+The LLM generated a recursive `improvement-loop` function using `defn` that implements the "improve up to 3 times" logic. Note: recursive functions must use `defn` (not `let` bindings). This code is now **frozen** - every execution uses this exact logic.
+
+Now we can execute the compiled workflow with different topics. Since the orchestrator has SubAgentTools (generate_joke and improve_joke), we need to provide an LLM at runtime for those child agents:
+
+```elixir
+# Execute with topic: "cats"
+# Note: timeout is needed because SubAgentTools make LLM calls which take time
+result_cats = compiled.execute.(%{topic: "cats"}, llm: my_llm, timeout: 30_000)
+
+IO.puts("=== Cats Joke ===")
+IO.inspect(result_cats.return, pretty: true)
+```
+
+```elixir
+# Execute with topic: "coffee"
+result_coffee = compiled.execute.(%{topic: "coffee"}, llm: my_llm, timeout: 30_000)
+
+IO.puts("=== Coffee Joke ===")
+IO.inspect(result_coffee.return, pretty: true)
+```
+
+```elixir
+# Execute with topic: "Elixir programming"
+result_elixir = compiled.execute.(%{topic: "Elixir programming"}, llm: my_llm, timeout: 30_000)
+
+IO.puts("=== Elixir Joke ===")
+IO.inspect(result_elixir.return, pretty: true)
+```
+
+### Comparing Approaches
+
+| Approach         | LLM Calls per Run            | Deterministic Logic?      |
+| ---------------- | ---------------------------- | ------------------------- |
+| Dynamic SubAgent | 1 (orchestrator) + N (tools) | No - re-derives each time |
+| Compiled         | 0 (orchestrator) + N (tools) | Yes - fixed logic         |
+
+The compiled orchestrator has **zero orchestration cost** per execution - only the SubAgentTools (generate_joke, improve_joke) call the LLM. The orchestration logic itself is fixed PTC-Lisp code.
+
+## Discussion
+
+### Single-Shot vs Multi-Turn
+
+| `max_turns: 1`                  | Multi-turn                            |
+| ------------------------------- | ------------------------------------- |
+| Predictable cost, lower latency | Variable cost, can observe & react    |
+| Must handle all cases upfront   | Simpler code per turn (ReAct pattern) |
+
+With multi-turn, the LLM "chooses" its strategy at runtime - it might use `loop/recur`, unrolled nested `if`, or spread logic across turns. Single-shot forces complete logic upfront but guarantees predictable execution.
+
+### The Compile Pattern
+
+We demonstrated `SubAgent.compile` above. The key insight: **the orchestration logic is derived once and frozen**. Each execution uses the same PTC-Lisp code, with only the SubAgentTools making LLM calls.
+
+This is ideal for production workflows where you want:
+
+* Predictable behavior (same logic every time)
+* Lower latency (no orchestration derivation)
+* Cost control (orchestration is free after compilation)
+
+### Future: Graph DSL → Code Compilation
+
+A natural extension: a LangGraph-style declarative API that **compiles to code**:
+
+```elixir
+# Hypothetical API
+workflow = Workflow.new()
+|> Workflow.node(:generate, generate_joke_tool)
+|> Workflow.node(:check, check_punchline_tool)
+|> Workflow.node(:improve, improve_joke_tool)
+|> Workflow.edge(:start, :generate)
+|> Workflow.conditional(:generate, :check, true: :end, false: :improve)
+|> Workflow.edge(:improve, :check, max: 3)
+
+compiled = Workflow.compile(workflow)
+```
+
+The underlying code language (PTC-Lisp) becomes an **implementation detail** - like LLVM IR or JVM bytecode. Users work with the Graph DSL and never need to see the generated code unless debugging.
+
+### Why Code > Graphs
+
+| Graphs                       | Code                                  |
+| ---------------------------- | ------------------------------------- |
+| Limited to graph primitives  | Full language (loops, recursion, let) |
+| Add new edge types to extend | Write any logic                       |
+| Opaque runtime state         | Readable, versionable source          |
+
+**Key insight**: Any graph can be expressed as code, but not vice versa. The graph DSL provides ergonomics; the code backend provides power.
+
+### The Spectrum
+
+```
+More LLM autonomy                    More developer control
+      │                                        │
+      ▼                                        ▼
+  Dynamic     Compile      Graph DSL      Hand-written
+  SubAgent    Pattern      → Code         Code
+```
+
+Each point offers different trade-offs between flexibility and predictability.
+
+## Learn More
+
+* [When to Use Agents](../docs/guides/when-to-use-agents.md) - Decision framework
+* [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
