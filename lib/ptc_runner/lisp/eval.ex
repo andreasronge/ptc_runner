@@ -23,6 +23,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.SubAgent.KeyNormalizer
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -594,8 +595,8 @@ defmodule PtcRunner.Lisp.Eval do
   defp stringify_value(list) when is_list(list), do: Enum.map(list, &stringify_value/1)
   defp stringify_value(other), do: other
 
-  defp stringify_key(k) when is_atom(k), do: Atom.to_string(k)
-  defp stringify_key(k) when is_binary(k), do: k
+  defp stringify_key(k) when is_atom(k), do: KeyNormalizer.normalize_key(k)
+  defp stringify_key(k) when is_binary(k), do: KeyNormalizer.normalize_key(k)
   defp stringify_key(k), do: inspect(k)
 
   # Record a tool call with timing, execution, error capture, and evaluation context update.

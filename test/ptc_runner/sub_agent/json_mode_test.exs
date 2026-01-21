@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{message: "hello"}
+      assert step.return == %{"message" => "hello"}
       assert step.memory == %{}
     end
 
@@ -42,7 +42,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{message: "hello"}
+      assert step.return == %{"message" => "hello"}
     end
   end
 
@@ -62,7 +62,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{sentiment: "positive", score: 0.95}
+      assert step.return == %{"sentiment" => "positive", "score" => 0.95}
       assert step.memory == %{}
       assert step.fail == nil
     end
@@ -88,10 +88,10 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{count: 42}
+      assert step.return == %{"count" => 42}
     end
 
-    test "converts string keys to atoms" do
+    test "returns string keys (not atoms)" do
       agent =
         SubAgent.new(
           prompt: "Return data",
@@ -106,8 +106,8 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{name: "Alice", age: 30}
-      assert is_atom(hd(Map.keys(step.return)))
+      assert step.return == %{"name" => "Alice", "age" => 30}
+      assert is_binary(hd(Map.keys(step.return)))
     end
 
     test "handles nested structures" do
@@ -125,7 +125,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{user: %{name: "Bob", emails: ["a@b.com", "c@d.com"]}}
+      assert step.return == %{"user" => %{"name" => "Bob", "emails" => ["a@b.com", "c@d.com"]}}
     end
 
     test "passes output: :json and schema to LLM callback" do
@@ -208,7 +208,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
       assert length(step.turns) == 2
     end
 
@@ -235,7 +235,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
       assert length(step.turns) == 2
     end
 
@@ -442,7 +442,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.return == %{message: "hello"}
+      assert step.return == %{"message" => "hello"}
     end
 
     test "string convenience form works with output: :json" do
@@ -459,7 +459,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
           max_turns: 1
         )
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
     end
   end
 
@@ -491,10 +491,10 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       end
 
       {:ok, step1} = SubAgent.run(json_agent, llm: json_llm)
-      assert step1.return == %{value: 21}
+      assert step1.return == %{"value" => 21}
 
       {:ok, step2} = SubAgent.run(ptc_agent, llm: ptc_llm, context: step1)
-      assert step2.return == %{result: 42}
+      assert step2.return == %{"result" => 42}
     end
 
     test "PTC-Lisp -> JSON piping works" do
@@ -524,10 +524,10 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       end
 
       {:ok, step1} = SubAgent.run(ptc_agent, llm: ptc_llm)
-      assert step1.return == %{value: 21}
+      assert step1.return == %{"value" => 21}
 
       {:ok, step2} = SubAgent.run(json_agent, llm: json_llm, context: step1)
-      assert step2.return == %{result: 42}
+      assert step2.return == %{"result" => 42}
     end
 
     test "JSON -> JSON piping works" do
@@ -553,7 +553,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       {:ok, step1} = SubAgent.run(agent1, llm: llm1)
       {:ok, step2} = SubAgent.run(agent2, llm: llm2, context: step1)
 
-      assert step2.return == %{doubled: 20}
+      assert step2.return == %{"doubled" => 20}
     end
   end
 
@@ -591,7 +591,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == [%{id: 1, name: "a"}, %{id: 2, name: "b"}]
+      assert step.return == [%{"id" => 1, "name" => "a"}, %{"id" => 2, "name" => "b"}]
     end
 
     test "validates array elements against signature type" do
@@ -789,7 +789,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 1}
+      assert step.return == %{"value" => 1}
     end
 
     test "validates empty list against [:int] signature" do
@@ -843,7 +843,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       {:ok, step} = Loop.run(agent, llm: llm)
 
-      assert step.return == %{anything: "works"}
+      assert step.return == %{"anything" => "works"}
     end
 
     test "handles LLM error" do

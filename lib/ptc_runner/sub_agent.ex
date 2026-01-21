@@ -190,6 +190,7 @@ defmodule PtcRunner.SubAgent do
           output: output_mode()
         }
 
+  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.LLMResolver
 
   @default_format_options [
@@ -569,7 +570,7 @@ defmodule PtcRunner.SubAgent do
       ...> end
       iex> result = PtcRunner.SubAgent.run!(doubler, llm: mock_llm, context: %{n: 5})
       ...> |> PtcRunner.SubAgent.then!(adder, llm: mock_llm)
-      iex> result.return.final
+      iex> result.return["final"]
       20
 
   """
@@ -782,8 +783,11 @@ defmodule PtcRunner.SubAgent do
                     content
                   )
 
+                # Normalize return value keys (hyphen -> underscore at boundary)
+                normalized_step = %{step | return: KeyNormalizer.normalize_keys(step.return)}
+
                 updated_step =
-                  step
+                  normalized_step
                   |> update_step_usage(duration_ms, tokens)
                   |> Map.put(:field_descriptions, agent.field_descriptions)
                   |> Map.put(:turns, trace)

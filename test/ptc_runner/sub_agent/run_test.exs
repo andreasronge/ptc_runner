@@ -51,7 +51,7 @@ defmodule PtcRunner.SubAgent.RunTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
       assert step.fail == nil
       assert step.usage.turns == 1
     end
@@ -64,7 +64,7 @@ defmodule PtcRunner.SubAgent.RunTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
       assert step.fail == nil
     end
   end
@@ -84,7 +84,7 @@ defmodule PtcRunner.SubAgent.RunTest do
       {:ok, step} =
         SubAgent.run("Count items", signature: "() -> {count :int}", max_turns: 1, llm: llm)
 
-      assert step.return == %{count: 5}
+      assert step.return == %{"count" => 5}
     end
 
     test "accepts tools in opts for string form (triggers loop mode)" do
@@ -96,7 +96,7 @@ defmodule PtcRunner.SubAgent.RunTest do
       # This triggers loop mode
       {:ok, step} = SubAgent.run("Test", tools: tools, llm: llm)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "accepts max_turns in opts for string form" do
@@ -107,7 +107,7 @@ defmodule PtcRunner.SubAgent.RunTest do
       # max_turns: 2 triggers loop mode
       {:ok, step} = SubAgent.run("Test", max_turns: 2, llm: llm)
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
     end
 
     test "string form with context" do
@@ -210,7 +210,7 @@ defmodule PtcRunner.SubAgent.RunTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
 
-      assert step.return == %{value: 3.33, pi: 3.14}
+      assert step.return == %{"value" => 3.33, "pi" => 3.14}
     end
 
     test "rounds floats to 2 decimals in loop mode" do

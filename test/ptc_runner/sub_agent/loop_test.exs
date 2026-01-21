@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{x: 5, y: 3})
 
-      assert step.return == %{result: 8}
+      assert step.return == %{"result" => 8}
       assert step.fail == nil
       assert length(step.turns) == 1
       assert step.usage.turns == 1
@@ -57,7 +57,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
       assert length(step.turns) == 2
       assert step.usage.turns == 2
     end
@@ -85,7 +85,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{name: "alice", value: 42})
 
-      assert step.return == %{value: 100}
+      assert step.return == %{"value" => 100}
     end
   end
 
@@ -193,7 +193,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 42}
+      assert step.return == %{"value" => 42}
       assert :counters.get(turn_counter, 1) == 2
     end
 
@@ -228,7 +228,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 100}
+      assert step.return == %{"value" => 100}
       assert :counters.get(turn_counter, 1) == 2
     end
   end
@@ -264,7 +264,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: %{value: 42}}
+      assert step.return == %{"result" => %{"value" => 42}}
       assert :counters.get(turn_counter, 1) == 2
     end
   end
@@ -286,7 +286,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{data: %{"key" => "value"}})
 
-      assert step.return == %{value: "value"}
+      assert step.return == %{"value" => "value"}
     end
 
     test "makes previous turn error available as data/fail" do
@@ -318,9 +318,9 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       # The second turn should successfully access data/fail
       assert is_map(step.return)
-      assert Map.has_key?(step.return, :fail)
-      assert is_map(step.return.fail)
-      assert Map.has_key?(step.return.fail, :reason)
+      assert Map.has_key?(step.return, "fail")
+      assert is_map(step.return["fail"])
+      assert Map.has_key?(step.return["fail"], "reason")
       assert :counters.get(turn_counter, 1) == 2
     end
   end
@@ -455,7 +455,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
       assert step.fail == nil
     end
 
@@ -470,7 +470,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{x: 10, y: 5})
 
-      assert step.return == %{sum: 15}
+      assert step.return == %{"sum" => 15}
     end
 
     test "return in let binding" do
@@ -485,7 +485,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 3}
+      assert step.return == %{"value" => 3}
     end
 
     test "return in conditional" do
@@ -501,7 +501,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{n: 5})
 
-      assert step.return == %{sign: :positive}
+      assert step.return == %{"sign" => :positive}
     end
   end
 
@@ -935,7 +935,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
 
       # Check that turn 2 has accumulated messages (uncompressed)
       log = Agent.get(messages_log, & &1)
@@ -967,7 +967,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
 
       log = Agent.get(messages_log, & &1)
 
@@ -1001,7 +1001,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
     end
 
     test "compression: false disables compression" do
@@ -1027,7 +1027,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
 
       log = Agent.get(messages_log, & &1)
 
@@ -1056,7 +1056,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
 
       # Single turn - only 1 user message
       log = Agent.get(messages_log, & &1)
@@ -1122,7 +1122,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
 
       log = Agent.get(messages_log, & &1)
       {2, turn2_messages} = Enum.find(log, fn {turn, _} -> turn == 2 end)
@@ -1158,7 +1158,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
           llm: llm
         )
 
-      assert step.return == %{result: 42}
+      assert step.return == %{"result" => 42}
 
       # Verify compression was actually applied - turn 2 should have 1 message
       log = Agent.get(messages_log, & &1)
@@ -1205,7 +1205,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
-      assert step.return == %{value: 1.0}
+      assert step.return == %{"value" => 1.0}
       assert length(step.turns) == 2
 
       # Verify turn 1 was marked as failure with proper error info

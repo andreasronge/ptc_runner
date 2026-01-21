@@ -86,7 +86,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert stop_measurements.duration > 0
       assert stop_meta.agent == agent
       assert stop_meta.status == :ok
-      assert stop_meta.step.return == %{value: 42}
+      assert stop_meta.step.return == %{"value" => 42}
     end
 
     test "emits :run :stop with error status on failure", %{table: table} do
