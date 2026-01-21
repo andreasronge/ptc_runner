@@ -42,7 +42,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   - `execute` - Pre-bound executor function `(map(), keyword() -> result)`
   - `metadata` - Compilation metadata (see `t:metadata/0`)
   - `field_descriptions` - Descriptions for signature fields (Map, optional)
-  - `has_sub_agent_tools` - Whether the agent contains SubAgentTools
+  - `llm_required?` - Whether the agent requires an LLM at runtime
 
   ## Examples
 
@@ -61,7 +61,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       "(n :int) -> {result :int}"
       iex> compiled.source
       ~S|(return {:result (tool/double {:n data/n})})|
-      iex> compiled.has_sub_agent_tools
+      iex> compiled.llm_required?
       false
       iex> result = compiled.execute.(%{n: 10}, [])
       iex> result.return.result
@@ -93,7 +93,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
   - `execute` - Function that executes the program `(map(), keyword() -> Step.t())`
   - `metadata` - Compilation metadata
   - `field_descriptions` - Descriptions for signature fields
-  - `has_sub_agent_tools` - Whether the agent contains SubAgentTools
+  - `llm_required?` - Whether the agent requires an LLM at runtime
   """
   @type t :: %__MODULE__{
           source: String.t(),
@@ -101,7 +101,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
           execute: (map(), keyword() -> PtcRunner.Step.t()),
           metadata: metadata(),
           field_descriptions: map() | nil,
-          has_sub_agent_tools: boolean()
+          llm_required?: boolean()
         }
 
   defstruct [
@@ -110,7 +110,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
     :execute,
     :metadata,
     :field_descriptions,
-    has_sub_agent_tools: false
+    llm_required?: false
   ]
 
   @doc """
@@ -147,12 +147,12 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
           execute: (map() -> PtcRunner.Step.t()),
           signature: String.t() | nil
         }
-  def as_tool(%__MODULE__{execute: execute, signature: signature, has_sub_agent_tools: has_subs}) do
+  def as_tool(%__MODULE__{execute: execute, signature: signature, llm_required?: llm_required}) do
     # Wrap 2-arity execute in 1-arity for compatibility with dynamic agents
     # Note: Compiled agents with SubAgentTools will fail if used this way
     # because they require llm option that can't be passed through 1-arity
     wrapped_execute = fn args ->
-      if has_subs do
+      if llm_required do
         raise ArgumentError,
               "CompiledAgent with SubAgentTools cannot be used as a tool in dynamic agents. " <>
                 "Use compiled.execute.(args, llm: llm) directly or compile the parent agent too."

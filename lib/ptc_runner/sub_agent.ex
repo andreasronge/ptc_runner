@@ -513,6 +513,23 @@ defmodule PtcRunner.SubAgent do
     end
   end
 
+  # CompiledAgent execution - unified API
+  def run(%PtcRunner.SubAgent.CompiledAgent{} = compiled, opts) when is_list(opts) do
+    context = prepare_compiled_context(opts)
+
+    if compiled.llm_required? and not Keyword.has_key?(opts, :llm) do
+      {:error,
+       PtcRunner.Step.error(
+         :llm_required,
+         "llm required for CompiledAgent with SubAgentTools",
+         %{}
+       )}
+    else
+      step = compiled.execute.(context, opts)
+      if step.fail, do: {:error, step}, else: {:ok, step}
+    end
+  end
+
   @doc """
   Bang variant of `run/2` that raises on failure.
 
@@ -574,10 +591,44 @@ defmodule PtcRunner.SubAgent do
       20
 
   """
-  @spec then!(PtcRunner.Step.t(), t() | String.t(), keyword()) :: PtcRunner.Step.t()
+  @spec then!(
+          PtcRunner.Step.t(),
+          t() | PtcRunner.SubAgent.CompiledAgent.t() | String.t(),
+          keyword()
+        ) :: PtcRunner.Step.t()
   def then!(step, agent, opts \\ []) do
     validate_chain_keys!(step, agent)
     run!(agent, Keyword.put(opts, :context, step))
+  end
+
+  @doc """
+  Chains SubAgent/CompiledAgent executions with error propagation.
+
+  Unlike `then!/3`, this returns `{:ok, Step}` or `{:error, Step}`
+  instead of raising on chain validation failures.
+
+  ## Examples
+
+      SubAgent.run(agent1, llm: llm, context: %{x: 1})
+      |> SubAgent.then(agent2, llm: llm)
+      |> SubAgent.then(compiled)  # No LLM needed if pure
+
+  """
+  @spec then(
+          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()},
+          t() | PtcRunner.SubAgent.CompiledAgent.t() | String.t(),
+          keyword()
+        ) ::
+          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+  def then(result, agent, opts \\ [])
+
+  def then({:error, step}, _agent, _opts), do: {:error, step}
+
+  def then({:ok, step}, agent, opts) do
+    validate_chain_keys!(step, agent)
+    run(agent, Keyword.put(opts, :context, step))
+  rescue
+    e in ArgumentError -> {:error, PtcRunner.Step.error(:chain_error, Exception.message(e), %{})}
   end
 
   # Validates that step output keys satisfy the next agent's signature requirements.
@@ -590,6 +641,38 @@ defmodule PtcRunner.SubAgent do
     required_keys = PromptExpander.extract_signature_params(sig)
 
     # Handle non-map return values (no keys available)
+    provided_keys =
+      case return do
+        map when is_map(map) -> map |> Map.keys() |> Enum.map(&to_string/1)
+        _ -> []
+      end
+
+    missing = required_keys -- provided_keys
+
+    if missing != [] do
+      raise ArgumentError,
+            "Chain mismatch: agent requires #{inspect(Enum.sort(missing))} but previous step doesn't output them"
+    end
+
+    :ok
+  end
+
+  # CompiledAgent validation
+  defp validate_chain_keys!(%PtcRunner.Step{}, %PtcRunner.SubAgent.CompiledAgent{signature: nil}),
+    do: :ok
+
+  defp validate_chain_keys!(%PtcRunner.Step{fail: fail}, %PtcRunner.SubAgent.CompiledAgent{})
+       when fail != nil,
+       do: :ok
+
+  defp validate_chain_keys!(
+         %PtcRunner.Step{return: return},
+         %PtcRunner.SubAgent.CompiledAgent{signature: sig}
+       ) do
+    alias PtcRunner.SubAgent.PromptExpander
+
+    required_keys = PromptExpander.extract_signature_params(sig)
+
     provided_keys =
       case return do
         map when is_map(map) -> map |> Map.keys() |> Enum.map(&to_string/1)
@@ -697,6 +780,17 @@ defmodule PtcRunner.SubAgent do
 
   defp prepare_context(context) when is_map(context), do: {context, nil}
   defp prepare_context(nil), do: {%{}, nil}
+
+  # Prepare context from opts for CompiledAgent execution
+  defp prepare_compiled_context(opts) do
+    case Keyword.get(opts, :context, %{}) do
+      %PtcRunner.Step{fail: nil, return: return} when is_map(return) -> return
+      %PtcRunner.Step{fail: nil, return: _} -> %{}
+      %PtcRunner.Step{fail: _} -> %{}
+      map when is_map(map) -> map
+      _ -> %{}
+    end
+  end
 
   # Single-shot execution: one LLM call, no tools, expression result returned
   defp run_single_shot(
