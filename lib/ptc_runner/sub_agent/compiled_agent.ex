@@ -33,7 +33,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
 
   Compile and execute:
 
-      iex> tools = %{"double" => fn %{n: n} -> n * 2 end}
+      iex> tools = %{"double" => fn %{"n" => n} -> n * 2 end}
       iex> agent = PtcRunner.SubAgent.new(
       ...>   prompt: "Double the input number {{n}}",
       ...>   signature: "(n :int) -> {result :int}",
@@ -95,7 +95,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
 
   ## Examples
 
-      iex> tools = %{"double" => fn %{n: n} -> n * 2 end}
+      iex> tools = %{"double" => fn %{"n" => n} -> n * 2 end}
       iex> agent = PtcRunner.SubAgent.new(
       ...>   prompt: "Double {{n}}",
       ...>   signature: "(n :int) -> {result :int}",

@@ -266,10 +266,11 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
       closure = {:fn, [{:var, :args}], tool_call}
       ast = {:call, {:var, :apply}, [closure, {:vector, [{:map, [{{:keyword, :x}, 1}]}]}]}
 
-      # Mock tool: returns the arguments map
+      # Mock tool: returns the arguments map (now receives string keys)
       mock_tool = fn "test_tool", args -> args end
 
-      assert {:ok, %{x: 1}, _} = Eval.eval(ast, %{}, %{}, env, mock_tool)
+      # Tool receives string keys at the boundary
+      assert {:ok, %{"x" => 1}, _} = Eval.eval(ast, %{}, %{}, env, mock_tool)
     end
   end
 end

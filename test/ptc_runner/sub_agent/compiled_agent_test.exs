@@ -9,7 +9,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
   describe "SubAgent.compile/2" do
     test "returns {:ok, CompiledAgent} on successful compilation" do
-      tools = %{"double" => fn %{n: n} -> n * 2 end}
+      tools = %{"double" => fn %{"n" => n} -> n * 2 end}
 
       agent =
         SubAgent.new(
@@ -83,7 +83,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
     end
 
     test "compiled.execute runs the stored program" do
-      tools = %{"add_ten" => fn %{n: n} -> n + 10 end}
+      tools = %{"add_ten" => fn %{"n" => n} -> n + 10 end}
 
       agent =
         SubAgent.new(
@@ -107,7 +107,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       call_log = :ets.new(:calls, [:set, :public])
 
       tools = %{
-        "log_and_double" => fn %{n: n} ->
+        "log_and_double" => fn %{"n" => n} ->
           :ets.insert(call_log, {:called, n})
           n * 2
         end
@@ -180,7 +180,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
     end
 
     test "uses sample data during compilation" do
-      tools = %{"process" => fn %{data: data} -> String.upcase(data) end}
+      tools = %{"process" => fn %{"data" => data} -> String.upcase(data) end}
 
       agent =
         SubAgent.new(
@@ -204,7 +204,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
   describe "CompiledAgent.as_tool/1" do
     test "returns a function that executes the compiled agent" do
-      tools = %{"double" => fn %{n: n} -> n * 2 end}
+      tools = %{"double" => fn %{"n" => n} -> n * 2 end}
 
       agent =
         SubAgent.new(
@@ -233,7 +233,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
   describe "field_descriptions propagation" do
     test "compiled agent inherits field_descriptions from source agent" do
       fd = %{result: "The doubled value"}
-      tools = %{"double" => fn %{n: n} -> n * 2 end}
+      tools = %{"double" => fn %{"n" => n} -> n * 2 end}
 
       agent =
         SubAgent.new(
@@ -258,7 +258,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
   describe "end-to-end workflow" do
     test "compile and execute many times without LLM" do
       tools = %{
-        "calculate_score" => fn %{value: value, threshold: threshold} ->
+        "calculate_score" => fn %{"value" => value, "threshold" => threshold} ->
           if value > threshold, do: 0.9, else: 0.1
         end
       }
@@ -292,7 +292,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
     test "compiled agent handles runtime tool errors gracefully" do
       tools = %{
-        "divide" => fn %{a: a, b: b} ->
+        "divide" => fn %{"a" => a, "b" => b} ->
           if b == 0, do: raise(ArithmeticError, "division by zero"), else: div(a, b)
         end
       }

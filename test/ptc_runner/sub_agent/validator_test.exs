@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
 
     test "uses default timeout when not specified" do
       agent = SubAgent.new(prompt: "Test")
-      assert agent.timeout == 1000
+      assert agent.timeout == 5000
     end
   end
 

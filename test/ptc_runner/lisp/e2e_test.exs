@@ -191,7 +191,8 @@ defmodule PtcRunner.Lisp.E2ETest do
       # Parallel: ~50ms minimum (all run concurrently)
       # We check that parallel is significantly faster
 
-      slow_tool = fn %{value: v} ->
+      # Tools receive string keys at the boundary
+      slow_tool = fn %{"value" => v} ->
         Process.sleep(50)
         v * 2
       end
@@ -258,12 +259,13 @@ defmodule PtcRunner.Lisp.E2ETest do
       # Sequential: 3 * 50ms = 150ms minimum
       # Parallel: ~50ms minimum (all run concurrently)
 
-      slow_user = fn %{id: id} ->
+      # Tools receive string keys at the boundary
+      slow_user = fn %{"id" => id} ->
         Process.sleep(50)
         %{name: "User#{id}"}
       end
 
-      slow_stats = fn %{id: id} ->
+      slow_stats = fn %{"id" => id} ->
         Process.sleep(50)
         %{count: id * 10}
       end

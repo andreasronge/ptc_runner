@@ -514,10 +514,15 @@ defmodule PtcRunner.Lisp.Eval do
     case eval_all(arg_asts, eval_ctx) do
       {:ok, arg_vals, eval_ctx2} ->
         # Convert args list to map for tool executor
-        args_map = build_args_map(arg_vals)
-        # Convert atom to string for backward compatibility with tool_exec
-        tool_name_str = Atom.to_string(tool_name)
-        record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2)
+        case build_args_map(arg_vals) do
+          {:ok, args_map} ->
+            # Convert atom to string for backward compatibility with tool_exec
+            tool_name_str = Atom.to_string(tool_name)
+            record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2)
+
+          {:error, _} = err ->
+            err
+        end
 
       {:error, _} = err ->
         err
@@ -539,18 +544,24 @@ defmodule PtcRunner.Lisp.Eval do
   defp merge_docstring_into_closure(value, _opts), do: value
 
   # Build args map from a list of evaluated arguments for tool calls.
-  # - Single map argument: pass through as-is
+  # Tools require named arguments (maps). Returns {:ok, map} or {:error, reason}.
   # - No arguments: return empty map
-  # - Keyword-style list [:key1, val1, :key2, val2]: convert to map
-  # - Other cases: wrap in a list under :args key
-  defp build_args_map([]), do: %{}
-  defp build_args_map([arg]) when is_map(arg), do: arg
+  # - Single map argument: pass through as-is (keys converted to strings)
+  # - Keyword-style list [:key1, val1, :key2, val2]: convert to map with string keys
+  # - Other cases: error (positional arguments not allowed)
+  #
+  # All maps are converted to string keys at the tool boundary to:
+  # - Prevent atom memory leaks from LLM-generated keywords
+  # - Match JSON conventions (like Phoenix params)
+  defp build_args_map([]), do: {:ok, %{}}
+  defp build_args_map([arg]) when is_map(arg), do: {:ok, stringify_keys(arg)}
 
   defp build_args_map(args) do
     if keyword_style_args?(args) do
-      args_to_map(args)
+      {:ok, args_to_string_map(args)}
     else
-      %{args: args}
+      {:error,
+       "Tool calls require named arguments. Use (tool/name {:key value}) or (tool/name :key value), not positional args."}
     end
   end
 
@@ -564,12 +575,28 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp keyword_style_args?(_), do: false
 
-  # Convert keyword-style args to map: [:key1, val1, :key2, val2] -> %{key1: val1, key2: val2}
-  defp args_to_map(args) do
+  # Convert keyword-style args to string-keyed map: [:key1, val1, :key2, val2] -> %{"key1" => val1}
+  # Values are recursively stringified to handle nested maps/lists.
+  defp args_to_string_map(args) do
     args
     |> Enum.chunk_every(2)
-    |> Map.new(fn [k, v] -> {k, v} end)
+    |> Map.new(fn [k, v] -> {stringify_key(k), stringify_value(v)} end)
   end
+
+  # Recursively convert map keys to strings (for tool boundary).
+  # Handles nested maps and lists to ensure full protection against atom leaks.
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {stringify_key(k), stringify_value(v)} end)
+  end
+
+  # Recursively stringify values (for nested maps/lists in tool args)
+  defp stringify_value(map) when is_map(map), do: stringify_keys(map)
+  defp stringify_value(list) when is_list(list), do: Enum.map(list, &stringify_value/1)
+  defp stringify_value(other), do: other
+
+  defp stringify_key(k) when is_atom(k), do: Atom.to_string(k)
+  defp stringify_key(k) when is_binary(k), do: k
+  defp stringify_key(k), do: inspect(k)
 
   # Record a tool call with timing, execution, error capture, and evaluation context update.
   # Captures the error field if the tool raises an exception, records it, and throws a special

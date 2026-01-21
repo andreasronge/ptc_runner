@@ -305,7 +305,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
   describe "tool events" do
     test "emits :tool :start and :stop events for tool calls", %{table: table} do
-      helper_fn = fn args -> args.x * 2 end
+      # Tools receive string keys at the boundary
+      helper_fn = fn args -> args["x"] * 2 end
 
       agent = SubAgent.new(prompt: "Test", tools: %{"helper" => helper_fn}, max_turns: 2)
 
@@ -331,7 +332,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert is_integer(start_measurements.system_time)
       assert start_meta.agent == agent
       assert start_meta.tool_name == "helper"
-      assert start_meta.args == %{x: 5}
+      # Args have string keys at the boundary
+      assert start_meta.args == %{"x" => 5}
 
       # Stop event
       assert is_integer(stop_measurements.duration)
@@ -400,10 +402,11 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       [{_, _, start_meta, _}] = tool_starts
 
       assert start_meta.tool_name == "helper"
-      assert start_meta.args.small == 42
-      assert start_meta.args.list == "List(1000)"
-      assert start_meta.args.string == "String(500 bytes)"
-      assert start_meta.args.map == "Map(20)"
+      # Args have string keys at the boundary
+      assert start_meta.args["small"] == 42
+      assert start_meta.args["list"] == "List(1000)"
+      assert start_meta.args["string"] == "String(500 bytes)"
+      assert start_meta.args["map"] == "Map(20)"
     end
 
     test "summarizes arbitrary results using fallback inspect settings", %{table: table} do
@@ -429,7 +432,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
   describe "end-to-end execution" do
     test "full agent execution emits all expected events", %{table: table} do
-      counter_fn = fn args -> args.n + 1 end
+      # Tools receive string keys at the boundary
+      counter_fn = fn args -> args["n"] + 1 end
 
       agent =
         SubAgent.new(

@@ -268,7 +268,8 @@ defmodule PtcRunner.Lisp.DefnTest do
 
     test "defn can call tool/ tools" do
       source = "(do (defn search-for [q] (tool/search {:query q})) (search-for \"test\"))"
-      tools = %{"search" => fn %{query: q} -> [%{query: q}] end}
+      # Tools receive string keys at the boundary
+      tools = %{"search" => fn %{"query" => q} -> [%{query: q}] end}
       {:ok, %{return: result}} = Lisp.run(source, tools: tools)
 
       assert result == [%{query: "test"}]
