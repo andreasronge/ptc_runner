@@ -187,11 +187,11 @@ jobs:
 
             ## Issues to Fix
 
-            $(cat /tmp/issue-summary.txt)
+            Read issue summary: `cat /tmp/issue-summary.txt`
 
             ## Detailed Issue Information
 
-            $(cat /tmp/quick-fix-issues.json)
+            Read detailed info: `cat /tmp/quick-fix-issues.json`
 
             ## Instructions
 
