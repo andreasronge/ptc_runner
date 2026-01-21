@@ -644,9 +644,190 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert result2.fail != nil
       assert result2.fail.reason == :tool_error
     end
+
+    test "compiled.execute respects timeout option" do
+      tools = %{
+        "slow_op" => fn %{"n" => n} ->
+          Process.sleep(100)
+          n * 2
+        end
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Double {{n}} slowly",
+          signature: "(n :int) -> {result :int}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(return {:result (tool/slow_op {:n data/n})})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 1})
+
+      # With short timeout, should fail
+      result_timeout = compiled.execute.(%{n: 5}, timeout: 10)
+      assert result_timeout.fail != nil
+      assert result_timeout.fail.reason == :timeout
+
+      # With longer timeout, should succeed
+      result_ok = compiled.execute.(%{n: 5}, timeout: 500)
+      assert result_ok.return.result == 10
+    end
+
+    test "compiled.execute respects max_heap option" do
+      tools = %{
+        "make_list" => fn %{"size" => size} ->
+          Enum.to_list(1..size)
+        end
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Make a list of size {{size}}",
+          signature: "(size :int) -> {count :int}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(return {:count (count (tool/make_list {:size data/size}))})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{size: 10})
+
+      # With tiny heap, large list should fail
+      result_fail = compiled.execute.(%{size: 100_000}, max_heap: 1000)
+      assert result_fail.fail != nil
+      assert result_fail.fail.reason == :memory_exceeded
+
+      # With default heap, should succeed
+      result_ok = compiled.execute.(%{size: 100}, [])
+      assert result_ok.return.count == 100
+    end
   end
 
   describe "compile with SubAgentTools (orchestrator pattern)" do
+    test "compiled orchestrator with recursive loop and multiple SubAgentTools" do
+      # This test mimics the joke_workflow.livemd scenario exactly
+      #
+      # Child agent: generate_joke (SubAgentTool - requires LLM)
+      joke_agent =
+        SubAgent.new(
+          prompt: "Generate a short joke about {{topic}}. Just the joke.",
+          signature: "(topic :string) -> {joke :string}",
+          description: "Generate a joke about the given topic",
+          max_turns: 1
+        )
+
+      generate_joke_tool = SubAgent.as_tool(joke_agent)
+
+      # Pure Elixir tool: check_punchline (no LLM)
+      check_punchline_tool =
+        {fn %{"joke" => joke} ->
+           String.contains?(joke, "?") or String.contains?(joke, "!")
+         end, signature: "(joke :string) -> :bool", description: "Check if joke has punchline"}
+
+      # Child agent: improve_joke (SubAgentTool - requires LLM)
+      improve_joke_agent =
+        SubAgent.new(
+          prompt: "Improve this joke: {{joke}}. Return only the improved joke.",
+          signature: "(joke :string) -> {improved_joke :string}",
+          description: "Improve a joke with wordplay or twist",
+          max_turns: 1
+        )
+
+      improve_joke_tool = SubAgent.as_tool(improve_joke_agent)
+
+      tools = %{
+        "generate_joke" => generate_joke_tool,
+        "check_punchline" => check_punchline_tool,
+        "improve_joke" => improve_joke_tool
+      }
+
+      # Orchestrator with the same signature as the livebook
+      orchestrator =
+        SubAgent.new(
+          prompt: """
+          Create a joke about {{topic}} using the available tools.
+          1. Generate a joke
+          2. Check if it has a good punchline
+          3. If not, improve it (max 3 times)
+          4. Return the final joke
+          """,
+          signature: "(topic :string) -> {joke :string, iterations :int, was_improved :bool}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Mock LLM that returns the exact PTC-Lisp from the livebook example
+      compile_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        cond do
+          String.contains?(user_msg.content, "tool/generate_joke") and
+              String.contains?(user_msg.content, "tool/improve_joke") ->
+            # This is the orchestrator - use defn for recursive function (defn supports recursion, let does not)
+            {:ok,
+             """
+             (defn improvement-loop [joke iteration-count]
+               (if (tool/check_punchline {:joke joke})
+                 {:final-joke joke :iterations iteration-count :was-improved (> iteration-count 1)}
+                 (if (>= iteration-count 3)
+                   {:final-joke joke :iterations iteration-count :was-improved (> iteration-count 1)}
+                   (let [improved (:improved_joke (tool/improve_joke {:joke joke}))]
+                     (improvement-loop improved (inc iteration-count))))))
+
+             (let [topic data/topic
+                   initial-joke (:joke (tool/generate_joke {:topic topic}))
+                   result (improvement-loop initial-joke 1)]
+               (return {:joke (:final-joke result)
+                        :iterations (:iterations result)
+                        :was_improved (:was-improved result)}))
+             """}
+
+          String.contains?(user_msg.content, "Improve this joke") ->
+            # This is the improve_joke agent
+            {:ok,
+             ~S|(return {:improved_joke "Why do programmers love dark mode? Because bugs hate the light!"})|}
+
+          true ->
+            # This is the generate_joke agent
+            {:ok, ~S|(return {:joke "Why do programmers wear glasses"})|}
+        end
+      end
+
+      # Compile the orchestrator
+      {:ok, compiled} = SubAgent.compile(orchestrator, llm: compile_llm)
+
+      assert compiled.has_sub_agent_tools == true
+
+      # Runtime LLM for the SubAgentTools
+      runtime_llm = fn %{messages: messages} ->
+        user_msg = Enum.find(messages, fn m -> m.role == :user end)
+
+        if String.contains?(user_msg.content, "Improve this joke") do
+          {:ok,
+           ~S|(return {:improved_joke "Why do programmers love dark mode? Because bugs hate the light!"})|}
+        else
+          {:ok, ~S|(return {:joke "Why do programmers wear glasses"})|}
+        end
+      end
+
+      # Execute and verify
+      result = compiled.execute.(%{topic: "programmers"}, llm: runtime_llm, timeout: 10_000)
+
+      # This is the key assertion - return should NOT be nil
+      assert result.return != nil,
+             "Expected return value but got nil. Fail: #{inspect(result.fail)}"
+
+      assert result.return.joke != nil
+      assert is_integer(result.return.iterations)
+      assert is_boolean(result.return.was_improved)
+    end
+
     test "compiles orchestrator with SubAgentTools, executing them at runtime" do
       # Child agent that generates a joke (requires LLM at runtime)
       joke_agent =
