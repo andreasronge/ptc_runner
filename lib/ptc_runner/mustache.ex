@@ -588,12 +588,26 @@ defmodule PtcRunner.Mustache do
   end
 
   defp expand_node({:variable, path, loc}, context_stack, _max_depth, _depth) do
+    path_str = Enum.join(path, ".")
+
     case resolve_path(path, context_stack) do
-      {:ok, value} ->
+      {:ok, value} when is_binary(value) or is_number(value) or is_atom(value) ->
         {:ok, to_string(value)}
 
+      {:ok, value} when is_map(value) ->
+        {:error,
+         {:non_scalar_variable, loc,
+          "{{#{path_str}}} resolved to map on line #{loc.line}, col #{loc.col}. " <>
+            "Use a section {{##{path_str}}} or access a specific field."}}
+
+      {:ok, value} when is_list(value) ->
+        {:error,
+         {:non_scalar_variable, loc,
+          "{{#{path_str}}} resolved to list on line #{loc.line}, col #{loc.col}. " <>
+            "Use a section {{##{path_str}}} to iterate."}}
+
       :not_found ->
-        {:error, {:missing_key, Enum.join(path, "."), loc}}
+        {:error, {:missing_key, path_str, loc}}
     end
   end
 
