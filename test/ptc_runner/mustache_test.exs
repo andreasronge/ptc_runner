@@ -1,6 +1,8 @@
 defmodule PtcRunner.MustacheTest do
   use ExUnit.Case, async: true
 
+  doctest PtcRunner.Mustache
+
   alias PtcRunner.Mustache
 
   describe "parse/1 - simple variables" do
