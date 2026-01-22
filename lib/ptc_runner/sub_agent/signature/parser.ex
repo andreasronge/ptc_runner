@@ -179,6 +179,8 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
     parsec(:signature) |> eos()
   )
 
+  @valid_types ~w(string int float bool keyword map any)
+
   @doc """
   Parse a signature string into AST.
 
@@ -197,11 +199,35 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
          "unexpected input at line #{line}, column #{column}: #{String.slice(rest, 0, 20)}..."}
 
       {:error, reason, _rest, _context, {line, _line_offset}, offset} ->
-        {:error, "parse error at line #{line}, column #{offset}: #{inspect(reason)}"}
+        {:error, format_error(input, reason, line, offset)}
     end
   end
 
   def parse(input) do
     {:error, "signature must be a string, got #{inspect(input)}"}
+  end
+
+  defp format_error(input, reason, line, offset) do
+    base_error = "parse error at line #{line}, column #{offset}: #{inspect(reason)}"
+
+    # Detect generic "expected ASCII character" errors and add type hint
+    if generic_type_error?(reason) and likely_invalid_type?(input) do
+      base_error <>
+        "\n\nHint: Valid types are :#{Enum.join(@valid_types, ", :")}. " <>
+        "For lists use [:type], for maps use {field :type}."
+    else
+      base_error
+    end
+  end
+
+  defp generic_type_error?(reason) do
+    String.contains?(reason, "expected ASCII character")
+  end
+
+  defp likely_invalid_type?(input) do
+    # Check if input contains a colon followed by a word that isn't a valid type
+    Regex.match?(~r/:([a-z]+)/, input) and
+      Regex.scan(~r/:([a-z]+)/, input)
+      |> Enum.any?(fn [_, type] -> type not in @valid_types end)
   end
 end

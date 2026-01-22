@@ -46,6 +46,27 @@ signature: "{name :string, price :float}"
 | `:keyword` | Keyword/atom | `:pending`, `:active` |
 | `:any` | Any value | Matches everything |
 
+### Invalid Type Names (Common Mistakes)
+
+These guessed type names **do not exist**:
+
+| Guessed | What to Use Instead |
+|---------|---------------------|
+| `:list` | `[:type]` - e.g., `[:int]`, `[:string]`, `[:any]` |
+| `:array` | `[:type]` - same as above |
+| `:tuple` | `{field :type}` - maps with typed fields |
+| `:object` | `{field :type}` or `:map` |
+
+Example fix:
+```elixir
+# WRONG - :list is not a valid type
+signature: "(items :list) -> :bool"
+
+# CORRECT - use [:type] syntax
+signature: "(items [:any]) -> :bool"
+signature: "(items [:string]) -> :bool"
+```
+
 ---
 
 ## Collection Types
@@ -238,6 +259,61 @@ Tool validation warnings:
 ```
 
 Errors are fed back to the LLM for self-correction.
+
+---
+
+## String Keys at Tool Boundary
+
+**Important:** When tools receive arguments from LLM-generated code, all map keys are **strings**, not atoms. This matches JSON conventions and prevents atom memory leaks.
+
+```elixir
+# WRONG - pattern matching on atom keys will NOT work
+def search(%{query: query, limit: limit}) do
+  # ...
+end
+
+# CORRECT - use string keys
+def search(%{"query" => query, "limit" => limit}) do
+  # ...
+end
+```
+
+### Why String Keys?
+
+1. **JSON compatibility** - JSON only has string keys; atom keys don't survive serialization
+2. **Memory safety** - LLM-generated atoms could exhaust the atom table
+3. **Consistency** - Same convention as Phoenix params from HTTP requests
+
+### Nested Maps
+
+String keys apply **recursively** to all nested maps:
+
+```elixir
+# Given signature: (user {profile {name :string}}) -> :bool
+
+# Tool receives this structure:
+%{
+  "user" => %{
+    "profile" => %{
+      "name" => "Alice"
+    }
+  }
+}
+
+# NOT this:
+%{user: %{profile: %{name: "Alice"}}}  # WRONG - atoms
+```
+
+### Key Normalization
+
+Hyphens in keys are automatically converted to underscores at the boundary:
+
+```elixir
+# LLM sends: {:user-name "Alice" :created-at "2024-01-01"}
+# Tool receives: %{"user_name" => "Alice", "created_at" => "2024-01-01"}
+```
+
+This allows idiomatic Lisp (kebab-case) while providing idiomatic Elixir (snake_case).
 
 ---
 
