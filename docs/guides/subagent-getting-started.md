@@ -66,7 +66,7 @@ For classification, extraction, and reasoning tasks that don't need tools, use `
 
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
-  "Extract the person's name and age",
+  "Extract the person's name and age from: {{text}}",
   context: %{text: "John is 25 years old"},
   output: :json,
   signature: "(text :string) -> {name :string, age :int}",
@@ -79,7 +79,20 @@ step.return["age"]   #=> 25
 
 JSON mode skips PTC-Lisp entirely - the LLM returns structured JSON directly, validated against your signature. Use it when you need structured output but not computation or tool calls.
 
-**Constraints:** JSON mode requires a signature, cannot use tools, and doesn't support compression or firewall fields.
+JSON mode supports full Mustache templating including sections for lists:
+
+```elixir
+# Iterate over list data with {{#section}}...{{/section}}
+SubAgent.new(
+  prompt: "Summarize these items: {{#items}}{{name}}, {{/items}}",
+  output: :json,
+  signature: "(items [{name :string}]) -> {summary :string}"
+)
+```
+
+**Constraints:** JSON mode requires a signature with all parameters used in the prompt, cannot use tools, and doesn't support compression or firewall fields.
+
+See [JSON Mode Guide](subagent-json-mode.md) for Mustache syntax, validation rules, and examples.
 
 ## Adding Tools
 
@@ -415,6 +428,7 @@ State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-
 
 ## See Also
 
+- [JSON Mode Guide](subagent-json-mode.md) - Mustache templates, validation, and structured output
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
