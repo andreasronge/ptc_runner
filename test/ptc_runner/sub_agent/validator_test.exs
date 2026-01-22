@@ -203,6 +203,124 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     end
   end
 
+  describe "json mode all-params-used validation" do
+    test "rejects json mode with unused signature params" do
+      assert_raise ArgumentError,
+                   ~r/JSON mode requires all signature params in prompt. Unused: \["name"\]/,
+                   fn ->
+                     SubAgent.new(
+                       prompt: "Analyze {{text}}",
+                       output: :json,
+                       signature: "(text :string, name :string) -> {result :string}"
+                     )
+                   end
+    end
+
+    test "accepts json mode when all params used as variables" do
+      agent =
+        SubAgent.new(
+          prompt: "Analyze {{text}} for {{name}}",
+          output: :json,
+          signature: "(text :string, name :string) -> {result :string}"
+        )
+
+      assert agent.output == :json
+    end
+
+    test "accepts json mode when param used in section" do
+      agent =
+        SubAgent.new(
+          prompt: "Process {{#items}}{{name}}{{/items}}",
+          output: :json,
+          signature: "(items [{name :string}]) -> {count :int}"
+        )
+
+      assert agent.output == :json
+    end
+
+    test "accepts json mode when param used in inverted section" do
+      agent =
+        SubAgent.new(
+          prompt: "{{^debug}}Production mode{{/debug}}",
+          output: :json,
+          signature: "(debug :bool) -> {status :string}"
+        )
+
+      assert agent.output == :json
+    end
+
+    test "accepts zero-param json mode signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Return a greeting",
+          output: :json,
+          signature: "() -> {greeting :string}"
+        )
+
+      assert agent.output == :json
+    end
+  end
+
+  describe "json mode section field validation" do
+    test "accepts valid section fields matching signature" do
+      agent =
+        SubAgent.new(
+          prompt: "{{#items}}{{name}}: {{price}}{{/items}}",
+          output: :json,
+          signature: "(items [{name :string, price :float}]) -> {total :float}"
+        )
+
+      assert agent.output == :json
+    end
+
+    test "rejects section field not in element type" do
+      assert_raise ArgumentError,
+                   ~r/\{\{unknown\}\} inside \{\{#items\}\} not found in element type/,
+                   fn ->
+                     SubAgent.new(
+                       prompt: "{{#items}}{{unknown}}{{/items}}",
+                       output: :json,
+                       signature: "(items [{name :string}]) -> {count :int}"
+                     )
+                   end
+    end
+
+    test "accepts dot placeholder for scalar list" do
+      agent =
+        SubAgent.new(
+          prompt: "Tags: {{#tags}}{{.}}, {{/tags}}",
+          output: :json,
+          signature: "(tags [:string]) -> {count :int}"
+        )
+
+      assert agent.output == :json
+    end
+
+    test "rejects dot placeholder for list of maps" do
+      assert_raise ArgumentError,
+                   ~r/\{\{.\}\}.*inside \{\{#items\}\}.*use \{\{field\}\} instead/,
+                   fn ->
+                     SubAgent.new(
+                       prompt: "{{#items}}{{.}}{{/items}}",
+                       output: :json,
+                       signature: "(items [{name :string}]) -> {count :int}"
+                     )
+                   end
+    end
+
+    test "rejects field access on scalar list element" do
+      assert_raise ArgumentError,
+                   ~r/\{\{name\}\} inside \{\{#tags\}\}.*cannot access field on string/,
+                   fn ->
+                     SubAgent.new(
+                       prompt: "{{#tags}}{{name}}{{/tags}}",
+                       output: :json,
+                       signature: "(tags [:string]) -> {count :int}"
+                     )
+                   end
+    end
+  end
+
   describe "ptc_lisp mode allows all features" do
     test "ptc_lisp mode allows tools" do
       agent =

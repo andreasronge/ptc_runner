@@ -196,7 +196,9 @@ defmodule PtcRunner.SubAgent.Loop do
       run_opts.mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
     # Expand template in mission
-    expanded_prompt = expand_template(agent.prompt, run_opts.context)
+    # JSON mode: embed actual values (no Data section)
+    # PTC-Lisp mode: use annotations (data is in Data Inventory section)
+    expanded_prompt = expand_template(agent.prompt, run_opts.context, agent.output)
 
     # Normalize tools for Step.tools (used by Debug.print_trace compressed view)
     normalized_tools = normalize_tools_for_step(agent.tools)
@@ -656,21 +658,29 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Expand template placeholders with annotated references (e.g., ~{data/review})
-  # This tells the LLM that values come from context, not hardcoded strings
-  defp expand_template(prompt, context) when is_map(context) do
+  # Expand template placeholders
+  # - JSON mode: embed actual values (no Data section, values are in the task)
+  # - PTC-Lisp mode: use annotated references (data is in Data Inventory section)
+  defp expand_template(prompt, context, output_mode \\ :ptc_lisp) when is_map(context) do
     alias PtcRunner.SubAgent.PromptExpander
-    # Use expand_annotated to show ~{data/var} references instead of actual values
-    # This reduces duplication (values already in data inventory) and teaches
-    # the LLM to use data/ references in its code
-    case PromptExpander.expand_annotated(prompt, context) do
-      {:ok, result} ->
-        result
 
-      # Fall back to keeping placeholders if context is missing keys
-      {:error, _} ->
+    case output_mode do
+      :json ->
+        # JSON mode: embed actual data values in the task
         {:ok, result} = PromptExpander.expand(prompt, context, on_missing: :keep)
         result
+
+      :ptc_lisp ->
+        # PTC-Lisp mode: use ~{data/var} references (values in Data Inventory)
+        case PromptExpander.expand_annotated(prompt, context) do
+          {:ok, result} ->
+            result
+
+          # Fall back to keeping placeholders if context is missing keys
+          {:error, _} ->
+            {:ok, result} = PromptExpander.expand(prompt, context, on_missing: :keep)
+            result
+        end
     end
   end
 

@@ -177,10 +177,84 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       assert_receive {:llm_input, input}
       [user_msg] = input.messages
-      # Actual value is in data inventory
-      assert user_msg.content =~ "hello world"
-      # Mission uses annotated reference instead of duplicating value
-      assert user_msg.content =~ "Analyze ~{data/text}"
+      # JSON mode embeds actual values directly in task (no separate Data section)
+      assert user_msg.content =~ "Analyze hello world"
+    end
+
+    test "expands Mustache sections with list data" do
+      agent =
+        SubAgent.new(
+          prompt: "Items:{{#items}} {{name}}{{/items}}",
+          output: :json,
+          signature: "(items [{name :string}]) -> {count :int}",
+          max_turns: 1
+        )
+
+      test_pid = self()
+
+      llm = fn input ->
+        send(test_pid, {:llm_input, input})
+        {:ok, ~s|{"count": 3}|}
+      end
+
+      context = %{items: [%{name: "apple"}, %{name: "banana"}, %{name: "cherry"}]}
+      {:ok, _step} = Loop.run(agent, llm: llm, context: context)
+
+      assert_receive {:llm_input, input}
+      [user_msg] = input.messages
+      # Mustache section should expand to list the items
+      assert user_msg.content =~ "Items: apple banana cherry"
+    end
+
+    test "expands Mustache sections with scalar list using dot notation" do
+      agent =
+        SubAgent.new(
+          prompt: "Tags:{{#tags}} {{.}}{{/tags}}",
+          output: :json,
+          signature: "(tags [:string]) -> {count :int}",
+          max_turns: 1
+        )
+
+      test_pid = self()
+
+      llm = fn input ->
+        send(test_pid, {:llm_input, input})
+        {:ok, ~s|{"count": 2}|}
+      end
+
+      context = %{tags: ["important", "urgent"]}
+      {:ok, _step} = Loop.run(agent, llm: llm, context: context)
+
+      assert_receive {:llm_input, input}
+      [user_msg] = input.messages
+      # Mustache section with {{.}} should expand scalar list
+      assert user_msg.content =~ "Tags: important urgent"
+    end
+
+    test "handles inverted sections for empty lists" do
+      agent =
+        SubAgent.new(
+          prompt: "{{#items}}Has items{{/items}}{{^items}}No items{{/items}}",
+          output: :json,
+          signature: "(items [:string]) -> {status :string}",
+          max_turns: 1
+        )
+
+      test_pid = self()
+
+      llm = fn input ->
+        send(test_pid, {:llm_input, input})
+        {:ok, ~s|{"status": "empty"}|}
+      end
+
+      # Empty list should trigger inverted section
+      context = %{items: []}
+      {:ok, _step} = Loop.run(agent, llm: llm, context: context)
+
+      assert_receive {:llm_input, input}
+      [user_msg] = input.messages
+      assert user_msg.content =~ "No items"
+      refute user_msg.content =~ "Has items"
     end
   end
 
@@ -644,7 +718,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
     test "preview_prompt returns JSON mode format" do
       agent =
         SubAgent.new(
-          prompt: "Return IDs for {{topic}}",
+          prompt: "Return IDs for {{topic}} from {{items}}",
           output: :json,
           signature: "(topic :string, items [{id :int}]) -> [:int]",
           max_turns: 1
@@ -657,13 +731,11 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert preview.system =~ "structured JSON"
       refute preview.system =~ "PTC-Lisp"
 
-      # User message should have JSON formatted data (not Elixir format)
-      assert preview.user =~ ~s|`topic`: "test"|
-      assert preview.user =~ ~s|[{"id":1},{"id":2}]|
-      refute preview.user =~ "%{id:"
+      # JSON mode embeds actual values directly in task (no separate Data section)
+      assert preview.user =~ "Return IDs for test"
+      refute preview.user =~ "# Data"
 
-      # Should include task (with annotated reference) and expected output
-      assert preview.user =~ "Return IDs for ~{data/topic}"
+      # Should include expected output
       assert preview.user =~ "Expected Output"
     end
 
@@ -699,7 +771,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
     test "preview_prompt includes JSON schema for object return type" do
       agent =
         SubAgent.new(
-          prompt: "Analyze text",
+          prompt: "Analyze {{text}}",
           output: :json,
           signature: "(text :string) -> {score :int, label :string}",
           max_turns: 1
@@ -721,7 +793,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
     test "preview_prompt includes JSON schema for array return type (wrapped in object)" do
       agent =
         SubAgent.new(
-          prompt: "Return IDs",
+          prompt: "Return IDs from {{items}}",
           output: :json,
           signature: "(items [{id :int}]) -> [:int]",
           max_turns: 1
