@@ -40,6 +40,38 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 
 **LLMs as programmers, not computers.** Most agent frameworks treat LLMs as the runtime. PtcRunner inverts this: LLMs generate programs that execute deterministically in a sandbox.
 
+### Design Philosophy
+
+PtcRunner is designed for **data-heavy agent tasks** where traditional approaches bloat context with tool results.
+
+**The key insight:** Tool results and input data are stored in memory but never shown to the LLM. The agent explores data programmatically through PTC-Lisp, exposing only relevant findings via `println`.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Traditional Agent (full context)                       │
+│                                                         │
+│  Tool call → 500 emails in context → LLM reads all      │
+│            → Token explosion                            │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  PtcRunner (code-first exploration)                     │
+│                                                         │
+│  Tool call → 500 emails in memory → LLM writes code     │
+│            → Filter/aggregate     → println findings    │
+│            → Only relevant data in context              │
+└─────────────────────────────────────────────────────────┘
+```
+
+This approach provides:
+
+- **Scale**: Process thousands of items without context limits
+- **Precision**: Exact filtering, regex, math - no hallucinated counts
+- **Determinism**: Code executes the same way every time
+- **Token efficiency**: Pay for computation, not context
+
+**Best suited for:** Email processing, log analysis, data aggregation, multi-source joins, any task where raw data volume would overwhelm an LLM's context window.
+
 ### BEAM-Native Advantages
 
 - **Parallel tool calling**: `pmap`/`pcalls` execute I/O concurrently using lightweight BEAM processes
