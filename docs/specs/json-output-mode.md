@@ -99,8 +99,8 @@ JSON mode returns the same `Step` struct as other modes:
 
 ```elixir
 %Step{
-  return: %{sentiment: "positive"},  # Parsed JSON (atoms for keys)
-  memory: %{},                       # Always empty for JSON mode
+  return: %{"sentiment" => "positive"},  # Parsed JSON (string keys)
+  memory: %{},                           # Always empty for JSON mode
   usage: %{...},
   turns: [...],                      # Includes retry turns if any
   fail: nil
@@ -181,13 +181,9 @@ Return ONLY valid JSON matching the expected format. No explanation, no markdown
 
 ### User Message
 
+Data is embedded directly in the task via Mustache templates (no separate Data section):
+
 ```markdown
-# Data
-
-```json
-{"text": "I love this product!"}
-```
-
 # Task
 
 Classify: I love this product!
@@ -201,6 +197,13 @@ Example format:
 ```json
 {"sentiment": "..."}
 ```
+```
+
+For list data, use Mustache sections in the prompt:
+
+```elixir
+prompt: "Categorize: {{#items}}{{name}}, {{/items}}"
+# Expands to: "Categorize: Widget, Gadget, "
 ```
 
 ### Error Feedback (Retry)
@@ -344,7 +347,7 @@ JSON keys are strings; convert to atoms for consistency with PTC-Lisp return val
 
 ```elixir
 # LLM returns: {"sentiment": "positive", "score": 0.95}
-# Step.return: %{sentiment: "positive", score: 0.95}
+# Step.return: %{"sentiment" => "positive", "score" => 0.95}
 ```
 
 Use safe atom conversion (existing atoms only) to prevent atom table exhaustion.
@@ -375,11 +378,11 @@ agent2 = SubAgent.new(
 
 # Execute pipeline
 {:ok, step1} = SubAgent.run(agent1, context: %{text: "I love this product!"}, llm: llm)
-# step1.return = %{sentiment: "positive", score: 0.95}
+# step1.return = %{"sentiment" => "positive", "score" => 0.95}
 
 {:ok, step2} = SubAgent.run(agent2, context: step1, llm: llm)
-# step2 receives %{sentiment: "positive", score: 0.95} as context
-# step2.return = %{action: "log_feedback", reason: "High positive sentiment"}
+# step2 receives %{"sentiment" => "positive", "score" => 0.95} as context
+# step2.return = %{"action" => "log_feedback", "reason" => "High positive sentiment"}
 ```
 
 ### Pipeline Patterns

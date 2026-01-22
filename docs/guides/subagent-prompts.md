@@ -223,8 +223,15 @@ IO.puts(preview.system)  # Full system prompt
 IO.puts(preview.user)    # Expanded user prompt
 ```
 
+## JSON Mode Templating
+
+JSON mode uses full Mustache templating with sections for iterating lists. This differs from PTC-Lisp mode where data appears in the Data Inventory section.
+
+See [JSON Mode Guide](subagent-json-mode.md) for Mustache syntax including `{{#section}}`, `{{^inverted}}`, and `{{.}}` notation.
+
 ## See Also
 
+- [JSON Mode Guide](subagent-json-mode.md) - Mustache templates and structured output
 - [Core Concepts](subagent-concepts.md) - Context, memory, and firewalls
 - [Advanced Topics](subagent-advanced.md) - System prompt structure details
 - `PtcRunner.SubAgent.SystemPrompt` - API reference for prompt generation

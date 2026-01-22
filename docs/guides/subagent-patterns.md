@@ -439,6 +439,7 @@ PlanExecutor.run(plan, tool_registry, llm)
 
 ## See Also
 
+- [JSON Mode Guide](subagent-json-mode.md) - Structured output without PTC-Lisp
 - [Advanced Topics](subagent-advanced.md) - Multi-turn ReAct and compile pattern
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
