@@ -2,15 +2,11 @@
 
 User message template for JSON output mode.
 
-<!-- version: 1 -->
-<!-- date: 2026-01-16 -->
-<!-- changes: Initial version -->
+<!-- version: 2 -->
+<!-- date: 2026-01-22 -->
+<!-- changes: Removed Data section - data is embedded via mustache in task -->
 
 <!-- PTC_PROMPT_START -->
-
-# Data
-
-{{data_section}}
 
 # Task
 

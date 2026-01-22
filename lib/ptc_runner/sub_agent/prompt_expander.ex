@@ -13,6 +13,18 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   - Simple: `{{name}}`
   - Nested: `{{user.name}}` or `{{items.count}}`
 
+  ## Mustache Sections (JSON Mode Only)
+
+  The `expand/3` function supports Mustache sections for iterating over lists:
+
+  - List iteration: `{{#items}}{{name}} {{/items}}`
+  - Scalar lists with dot: `{{#tags}}{{.}} {{/tags}}`
+  - Inverted sections: `{{^items}}No items{{/items}}`
+
+  **Note:** Sections are intended for JSON mode agents where data is embedded directly
+  in the prompt. For PTC-Lisp mode, use `expand_annotated/2` which returns annotations
+  like `~{data/var}` and does not support sections (the Data Inventory is flat).
+
   ## Examples
 
       iex> PtcRunner.SubAgent.PromptExpander.expand("Hello {{name}}", %{name: "Alice"})
@@ -29,14 +41,14 @@ defmodule PtcRunner.SubAgent.PromptExpander do
 
   """
 
-  @placeholder_regex ~r/\{\{([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}\}/
+  alias PtcRunner.Mustache
 
   @doc """
   Extract placeholders from a template string.
 
   Returns a list of unique placeholder structs, each containing:
   - `path`: List of strings representing the nested path (e.g., ["user", "name"])
-  - `type`: Always `:simple` (iteration type is out of scope)
+  - `type`: Always `:simple` (for backward compatibility, section names are flattened)
 
   ## Examples
 
@@ -55,12 +67,59 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   """
   @spec extract_placeholders(String.t()) :: [%{path: [String.t()], type: :simple}]
   def extract_placeholders(template) when is_binary(template) do
-    Regex.scan(@placeholder_regex, template)
-    |> Enum.map(fn [_full, path_str] ->
-      path = String.split(path_str, ".")
-      %{path: path, type: :simple}
+    case Mustache.parse(template) do
+      {:ok, ast} ->
+        ast
+        |> Mustache.extract_variables()
+        |> flatten_to_simple_variables()
+        |> Enum.uniq_by(& &1.path)
+
+      {:error, _} ->
+        # On parse error, return empty list (matches old regex behavior for invalid syntax)
+        []
+    end
+  end
+
+  # Flatten sections to their name only, return all as :simple type for backward compatibility
+  defp flatten_to_simple_variables(vars) do
+    Enum.flat_map(vars, fn
+      %{type: :simple, path: path} ->
+        # Skip the special "." placeholder (current element in sections)
+        if path == ["."], do: [], else: [%{path: path, type: :simple}]
+
+      %{type: type, path: path} when type in [:section, :inverted_section] ->
+        # Include section name as simple variable for backward compatibility
+        [%{path: path, type: :simple}]
     end)
-    |> Enum.uniq()
+  end
+
+  @doc """
+  Extract all placeholders with full section information.
+
+  Unlike `extract_placeholders/1`, this returns the complete variable structure
+  including section types and nested fields. Used for signature validation in Phase 3.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.PromptExpander.extract_placeholders_with_sections("{{name}}")
+      [%{type: :simple, path: ["name"], fields: nil, loc: %{line: 1, col: 1}}]
+
+      iex> {:ok, [section]} = {:ok, PtcRunner.SubAgent.PromptExpander.extract_placeholders_with_sections("{{#items}}{{name}}{{/items}}")}
+      iex> section.type
+      :section
+      iex> section.path
+      ["items"]
+      iex> [field] = section.fields
+      iex> field.path
+      ["name"]
+
+  """
+  @spec extract_placeholders_with_sections(String.t()) :: [Mustache.variable_info()]
+  def extract_placeholders_with_sections(template) when is_binary(template) do
+    case Mustache.parse(template) do
+      {:ok, ast} -> Mustache.extract_variables(ast)
+      {:error, _} -> []
+    end
   end
 
   @doc """
@@ -152,18 +211,28 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   @spec expand_annotated(String.t(), map()) ::
           {:ok, String.t()} | {:error, {:missing_keys, [String.t()]}}
   def expand_annotated(template, context) when is_binary(template) and is_map(context) do
-    placeholders = extract_placeholders(template)
-    missing = find_missing_keys(placeholders, context)
+    case Mustache.parse(template) do
+      {:ok, ast} ->
+        # Check for sections - annotated mode only supports simple variables
+        # (Sections are for JSON mode only where data is embedded directly)
+        if has_sections?(ast) do
+          {:error, {:sections_not_supported, "expand_annotated does not support sections"}}
+        else
+          # Validate all keys present
+          missing = find_missing_simple_keys(ast, context)
 
-    if missing != [] do
-      {:error, {:missing_keys, missing}}
-    else
-      result =
-        Regex.replace(@placeholder_regex, template, fn _full_match, path_str ->
-          "~{data/#{path_str}}"
-        end)
+          if missing != [] do
+            {:error, {:missing_keys, missing}}
+          else
+            # Replace variables with annotations
+            result = annotate_ast(ast)
+            {:ok, result}
+          end
+        end
 
-      {:ok, result}
+      {:error, _} ->
+        # On parse error, fall back to returning template unchanged
+        {:ok, template}
     end
   end
 
@@ -217,37 +286,150 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   def expand(template, context, opts \\ [])
       when is_binary(template) and is_map(context) and is_list(opts) do
     on_missing = Keyword.get(opts, :on_missing, :error)
-    placeholders = extract_placeholders(template)
 
-    # Check all keys exist first
-    missing = find_missing_keys(placeholders, context)
+    case Mustache.parse(template) do
+      {:ok, ast} ->
+        # Check if template uses sections - affects context preprocessing
+        uses_sections = has_sections?(ast)
+        expand_with_mustache(ast, context, on_missing, template, uses_sections)
+
+      {:error, _} ->
+        # On parse error, return template unchanged
+        {:ok, template}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Private helpers
+  # ---------------------------------------------------------------------------
+
+  # Check if AST contains any sections
+  defp has_sections?(ast) do
+    Enum.any?(ast, fn
+      {:section, _, _, _} -> true
+      {:inverted_section, _, _, _} -> true
+      _ -> false
+    end)
+  end
+
+  # Find missing simple variable keys (not section names)
+  # Section names that are missing will just not render, which is standard Mustache behavior
+  defp find_missing_simple_keys(ast, context) do
+    ast
+    |> Enum.flat_map(fn
+      {:variable, path, _loc} ->
+        if has_nested_value?(context, path), do: [], else: [Enum.join(path, ".")]
+
+      {:section, _name, inner, _loc} ->
+        # Recursively check inner content for missing simple variables
+        find_missing_simple_keys(inner, context)
+
+      {:inverted_section, _name, inner, _loc} ->
+        # Recursively check inner content for missing simple variables
+        find_missing_simple_keys(inner, context)
+
+      _ ->
+        []
+    end)
+    |> Enum.uniq()
+  end
+
+  # Expand using Mustache, handling on_missing: :keep
+  # When uses_sections is true, keep lists/maps as-is for Mustache iteration
+  # When uses_sections is false, stringify lists for backward compatibility
+  defp expand_with_mustache(ast, context, on_missing, original_template, uses_sections) do
+    # Find missing simple variable keys (not section names)
+    missing = find_missing_simple_keys(ast, context)
 
     if missing != [] and on_missing == :error do
       {:error, {:missing_keys, missing}}
     else
-      result =
-        Regex.replace(@placeholder_regex, template, fn full_match, path_str ->
-          path = String.split(path_str, ".")
+      # Prepare context based on whether sections are used
+      prepared_context =
+        if uses_sections do
+          # Keep lists as-is for Mustache section iteration
+          stringify_keys(context)
+        else
+          # Backward compat: stringify lists for simple variable expansion
+          stringify_values_for_expansion(context)
+        end
 
-          if has_nested_value?(context, path) do
-            get_nested_value(context, path) |> to_string()
-          else
-            # When on_missing: :keep, return the original placeholder
-            full_match
-          end
-        end)
+      if missing != [] and on_missing == :keep do
+        # Build fallback context with missing keys mapped to their original placeholder strings
+        # Only for simple variables, not section names (missing sections just don't render)
+        fallback_context =
+          Enum.reduce(missing, %{}, fn key, acc ->
+            Map.put(acc, key, "{{#{key}}}")
+          end)
 
-      {:ok, result}
+        # Merge fallback with prepared context (actual values take precedence)
+        merged_context = Map.merge(fallback_context, prepared_context)
+
+        case Mustache.expand(ast, merged_context) do
+          {:ok, result} -> {:ok, result}
+          {:error, _} -> {:ok, original_template}
+        end
+      else
+        case Mustache.expand(ast, prepared_context) do
+          {:ok, result} -> {:ok, result}
+          {:error, _} -> {:ok, original_template}
+        end
+      end
     end
   end
 
-  # Find all missing keys in the context
-  defp find_missing_keys(placeholders, context) do
-    placeholders
-    |> Enum.filter(fn %{path: path} ->
-      not has_nested_value?(context, path)
+  # Convert nested map keys to strings for Mustache compatibility
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_map(v) -> {to_string(k), stringify_keys(v)}
+      {k, v} when is_list(v) -> {to_string(k), Enum.map(v, &maybe_stringify_keys/1)}
+      {k, v} -> {to_string(k), v}
     end)
-    |> Enum.map(fn %{path: path} -> Enum.join(path, ".") end)
+  end
+
+  defp maybe_stringify_keys(v) when is_map(v), do: stringify_keys(v)
+  defp maybe_stringify_keys(v), do: v
+
+  # Convert non-scalar values to strings for simple variable expansion
+  # This matches old regex-based behavior which called to_string/1 on any value
+  defp stringify_values_for_expansion(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_map(v) ->
+        # Nested maps: recurse to handle nested access like {{user.name}}
+        {to_string(k), stringify_values_for_expansion(v)}
+
+      {k, v} when is_list(v) ->
+        # Lists at top level: convert to string representation
+        {to_string(k), to_string(inspect(v))}
+
+      {k, v} ->
+        # Scalars: keep as-is (Mustache will convert via to_string)
+        {to_string(k), v}
+    end)
+  end
+
+  # Replace variables with annotations by walking AST
+  defp annotate_ast(ast) do
+    ast
+    |> Enum.map(fn
+      {:text, text} ->
+        text
+
+      {:variable, path, _loc} ->
+        path_str = Enum.join(path, ".")
+        "~{data/#{path_str}}"
+
+      {:comment, _, _} ->
+        ""
+
+      {:current, _loc} ->
+        "~{data/.}"
+
+      other ->
+        # Shouldn't happen if has_sections? returned false
+        inspect(other)
+    end)
+    |> IO.iodata_to_binary()
   end
 
   # Check if a nested value exists in the context
@@ -267,20 +449,6 @@ defmodule PtcRunner.SubAgent.PromptExpander do
     end
   rescue
     ArgumentError -> false
-  end
-
-  # Get a nested value from the context
-  defp get_nested_value(context, [key]) do
-    get_from_map_with_key(context, key, :get)
-  rescue
-    ArgumentError -> Map.get(context, key)
-  end
-
-  defp get_nested_value(context, [key | rest]) do
-    nested = get_from_map_with_key(context, key, :get)
-    get_nested_value(nested, rest)
-  rescue
-    ArgumentError -> Map.get(context, key)
   end
 
   # Helper to get value from map, trying atom key first then string key

@@ -237,6 +237,8 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_json_no_compression!(opts)
     validate_json_has_signature!(opts)
     validate_json_no_firewall_fields!(opts)
+    validate_json_all_params_used!(opts)
+    validate_section_fields!(opts)
   end
 
   defp validate_json_no_tools!(opts) do
@@ -318,4 +320,263 @@ defmodule PtcRunner.SubAgent.Validator do
 
   # Primitives and other types don't contain fields
   defp find_firewall_field(_), do: nil
+
+  # JSON mode: validate all signature params are used in prompt (via variables or sections)
+  defp validate_json_all_params_used!(opts) do
+    alias PtcRunner.SubAgent.{PromptExpander, Signature}
+
+    prompt = Keyword.get(opts, :prompt)
+    signature = Keyword.get(opts, :signature)
+
+    with true <- is_binary(prompt),
+         true <- is_binary(signature),
+         {:ok, {:signature, params, _}} <- Signature.parse(signature) do
+      # Get all params used in prompt (including section names and inverted sections)
+      used_params = extract_all_used_params(prompt)
+
+      # Get signature param names
+      signature_params = Enum.map(params, fn {name, _type} -> name end) |> MapSet.new()
+
+      # Find unused params
+      unused = MapSet.difference(signature_params, used_params)
+
+      if MapSet.size(unused) > 0 do
+        unused_list = unused |> MapSet.to_list() |> Enum.sort()
+
+        raise ArgumentError,
+              "JSON mode requires all signature params in prompt. Unused: #{inspect(unused_list)}"
+      end
+    end
+
+    :ok
+  end
+
+  # Extract all param names used in prompt (from variables, sections, inverted sections)
+  defp extract_all_used_params(prompt) do
+    alias PtcRunner.SubAgent.PromptExpander
+
+    # Get full Mustache variable info including sections
+    variables = PromptExpander.extract_placeholders_with_sections(prompt)
+
+    # Collect all top-level param names (first element of path)
+    variables
+    |> Enum.flat_map(&collect_param_names/1)
+    |> MapSet.new()
+  end
+
+  # Collect param names from variable info (recursively for sections)
+  defp collect_param_names(%{type: type, path: path, fields: fields})
+       when type in [:section, :inverted_section] do
+    # Section name counts as "used"
+    section_name = hd(path)
+
+    # Also collect any nested variable names within the section
+    nested_names =
+      if is_list(fields) do
+        Enum.flat_map(fields, &collect_param_names/1)
+      else
+        []
+      end
+
+    [section_name | nested_names]
+  end
+
+  defp collect_param_names(%{type: :simple, path: path}) do
+    # For simple variables, only the first path element is a param
+    [hd(path)]
+  end
+
+  # Validate section fields against signature types
+  defp validate_section_fields!(opts) do
+    alias PtcRunner.SubAgent.{PromptExpander, Signature}
+    alias PtcRunner.SubAgent.Signature.TypeResolver
+
+    prompt = Keyword.get(opts, :prompt)
+    signature = Keyword.get(opts, :signature)
+
+    with true <- is_binary(prompt),
+         true <- is_binary(signature),
+         {:ok, parsed_sig} <- Signature.parse(signature) do
+      # Get full Mustache variable info including sections
+      variables = PromptExpander.extract_placeholders_with_sections(prompt)
+
+      # Validate each section recursively
+      errors = validate_variables_recursive(variables, parsed_sig, [])
+
+      if errors != [] do
+        error_msg = format_section_errors(errors)
+        raise ArgumentError, error_msg
+      end
+    end
+
+    :ok
+  end
+
+  # Recursively validate variables against signature
+  defp validate_variables_recursive([], _parsed_sig, errors), do: errors
+
+  defp validate_variables_recursive([var | rest], parsed_sig, errors) do
+    new_errors = validate_variable(var, parsed_sig)
+    validate_variables_recursive(rest, parsed_sig, errors ++ new_errors)
+  end
+
+  # Validate a single variable (simple or section)
+  defp validate_variable(%{type: :simple, path: ["."], loc: loc}, _parsed_sig) do
+    # {{.}} is valid only inside sections, and should refer to scalar element type
+    # This is handled at the section level, not here
+    # If we see {{.}} at top level, it's an error
+    [{:dot_outside_section, loc}]
+  end
+
+  defp validate_variable(%{type: :simple, path: path}, parsed_sig) do
+    alias PtcRunner.SubAgent.Signature.TypeResolver
+
+    param_name = hd(path)
+
+    case TypeResolver.resolve_path(parsed_sig, [param_name]) do
+      {:ok, _type} -> []
+      {:error, {:param_not_found, _}} -> [{:param_not_found, param_name}]
+    end
+  end
+
+  defp validate_variable(
+         %{type: type, path: [section_name], fields: fields, loc: loc},
+         parsed_sig
+       )
+       when type in [:section, :inverted_section] do
+    alias PtcRunner.SubAgent.Signature.TypeResolver
+
+    # Check if section name is a valid param
+    case TypeResolver.resolve_path(parsed_sig, [section_name]) do
+      {:ok, param_type} ->
+        # For sections, validate fields based on the param type
+        validate_section_fields_against_type(fields, param_type, section_name, loc)
+
+      {:error, {:param_not_found, _}} ->
+        [{:section_param_not_found, section_name, loc}]
+    end
+  end
+
+  # Validate section fields against the expected type
+  defp validate_section_fields_against_type(nil, _type, _section_name, _loc), do: []
+  defp validate_section_fields_against_type([], _type, _section_name, _loc), do: []
+
+  defp validate_section_fields_against_type(fields, {:list, element_type}, section_name, _loc) do
+    # For list sections, validate fields against element type
+    validate_section_fields_list(fields, element_type, section_name)
+  end
+
+  defp validate_section_fields_against_type(fields, {:map, map_fields}, section_name, _loc) do
+    # For map sections (context push), validate fields against map fields
+    validate_section_fields_map(fields, map_fields, section_name)
+  end
+
+  defp validate_section_fields_against_type(fields, {:optional, inner}, section_name, loc) do
+    validate_section_fields_against_type(fields, inner, section_name, loc)
+  end
+
+  defp validate_section_fields_against_type(_fields, _scalar_type, _section_name, _loc) do
+    # Scalar types (bool, etc.) are valid for truthy checks, no field validation needed
+    []
+  end
+
+  # Validate fields inside a list section
+  defp validate_section_fields_list(fields, {:map, map_fields}, section_name) do
+    # List of maps: validate each field reference
+    Enum.flat_map(fields, fn
+      %{type: :simple, path: ["."], loc: loc} ->
+        # {{.}} inside list of maps is an error
+        [{:dot_on_map_list, section_name, loc}]
+
+      %{type: :simple, path: [field_name]} ->
+        # Check if field exists in map type
+        if Enum.any?(map_fields, fn {name, _} -> name == field_name end) do
+          []
+        else
+          [{:field_not_in_signature, field_name, section_name}]
+        end
+
+      %{type: :simple, path: _nested_path} ->
+        # Nested access like {{user.name}} - would need deeper validation
+        []
+
+      %{type: type, path: [nested_section], fields: nested_fields, loc: loc}
+      when type in [:section, :inverted_section] ->
+        # Nested section - validate recursively
+        nested_type =
+          Enum.find_value(map_fields, nil, fn
+            {name, field_type} when name == nested_section -> field_type
+            _ -> nil
+          end)
+
+        if nested_type do
+          validate_section_fields_against_type(nested_fields, nested_type, nested_section, loc)
+        else
+          [{:field_not_in_signature, nested_section, section_name}]
+        end
+    end)
+  end
+
+  defp validate_section_fields_list(fields, scalar_type, section_name) do
+    # List of scalars: only {{.}} is valid
+    alias PtcRunner.SubAgent.Signature.TypeResolver
+
+    Enum.flat_map(fields, fn
+      %{type: :simple, path: ["."]} ->
+        # {{.}} is valid for scalar lists
+        []
+
+      %{type: :simple, path: [field_name], loc: loc} ->
+        if TypeResolver.scalar_type?(scalar_type) do
+          # Trying to access field on scalar element
+          [{:field_on_scalar, field_name, section_name, scalar_type, loc}]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  # Validate fields inside a map section (context push)
+  defp validate_section_fields_map(fields, map_fields, section_name) do
+    Enum.flat_map(fields, fn
+      %{type: :simple, path: [field_name]} ->
+        if Enum.any?(map_fields, fn {name, _} -> name == field_name end) do
+          []
+        else
+          [{:field_not_in_signature, field_name, section_name}]
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  # Format validation errors for display
+  defp format_section_errors(errors) do
+    messages =
+      Enum.map(errors, fn
+        {:dot_outside_section, loc} ->
+          "{{.}} at line #{loc.line} can only be used inside sections"
+
+        {:dot_on_map_list, section_name, loc} ->
+          "{{.}} at line #{loc.line} inside {{##{section_name}}} - use {{field}} instead (list contains maps)"
+
+        {:param_not_found, param_name} ->
+          "{{#{param_name}}} not found in signature parameters"
+
+        {:section_param_not_found, section_name, _loc} ->
+          "{{##{section_name}}} not found in signature parameters"
+
+        {:field_not_in_signature, field_name, section_name} ->
+          "{{#{field_name}}} inside {{##{section_name}}} not found in element type"
+
+        {:field_on_scalar, field_name, section_name, scalar_type, _loc} ->
+          "{{#{field_name}}} inside {{##{section_name}}} - cannot access field on #{scalar_type}. Use {{.}} instead."
+      end)
+
+    Enum.join(messages, "; ")
+  end
 end

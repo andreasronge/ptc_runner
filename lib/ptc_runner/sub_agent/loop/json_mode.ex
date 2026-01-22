@@ -84,17 +84,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   def preview_prompt(%SubAgent{} = agent, context) do
     alias PtcRunner.SubAgent.PromptExpander
 
-    # Expand the mission template with annotations (e.g., ~{data/review})
-    # This matches the actual execution behavior in Loop.expand_template/2
-    expanded_prompt =
-      case PromptExpander.expand_annotated(agent.prompt, context) do
-        {:ok, result} ->
-          result
-
-        {:error, _} ->
-          {:ok, result} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
-          result
-      end
+    # Expand the mission template with actual values (JSON mode has no Data section)
+    {:ok, expanded_prompt} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
 
     # Build user message using the same logic as the execution loop
     state = %{context: context, expanded_prompt: expanded_prompt}
@@ -238,9 +229,6 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
   # Build user message from template
   defp build_user_message(agent, state) do
-    # Build data section from context
-    data_section = format_data_section(state.context)
-
     # Build output instruction based on return type
     output_instruction = format_output_instruction(agent)
 
@@ -251,32 +239,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     example_output = format_example_output(agent)
 
     # Expand the user message template
+    # Note: Data is embedded via mustache in expanded_prompt (no separate data section)
     @json_user_template
-    |> String.replace("{{data_section}}", data_section)
     |> String.replace("{{task}}", state.expanded_prompt)
     |> String.replace("{{output_instruction}}", output_instruction)
     |> String.replace("{{field_descriptions}}", field_descriptions)
     |> String.replace("{{example_output}}", example_output)
-  end
-
-  # Format context as data section (as JSON for JSON mode)
-  defp format_data_section(context) when map_size(context) == 0 do
-    "(no input data)"
-  end
-
-  defp format_data_section(context) do
-    Enum.map_join(context, "\n", fn {key, value} ->
-      json_value = format_as_json(value)
-      "- `#{key}`: #{json_value}"
-    end)
-  end
-
-  # Format value as JSON
-  defp format_as_json(value) do
-    Jason.encode!(value)
-  rescue
-    # Fallback to inspect if JSON encoding fails (e.g., for atoms as keys)
-    _ -> inspect(value, limit: :infinity)
   end
 
   # Format output instruction based on return type
