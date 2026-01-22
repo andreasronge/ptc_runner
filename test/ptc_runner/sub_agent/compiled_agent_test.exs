@@ -802,7 +802,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       # Compile the orchestrator
       {:ok, compiled} = SubAgent.compile(orchestrator, llm: compile_llm)
 
-      assert compiled.has_sub_agent_tools == true
+      assert compiled.llm_required? == true
 
       # Runtime LLM for the SubAgentTools
       runtime_llm = fn %{messages: messages} ->
