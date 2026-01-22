@@ -202,6 +202,21 @@ defmodule PtcRunner.SubAgent.SignatureTest do
                Enum.at(err.path, 0) == "results" and Enum.at(err.path, 1) == 0
              end)
     end
+
+    test "invalid type in signature includes hint about valid types" do
+      {:error, message} = Signature.parse("(pending :list) -> :bool")
+
+      assert message =~ "Hint: Valid types are"
+      assert message =~ ":string"
+      assert message =~ ":int"
+      assert message =~ "[:type]"
+    end
+
+    test "other invalid types also include hint" do
+      {:error, message} = Signature.parse("(items :array) -> :bool")
+
+      assert message =~ "Hint: Valid types are"
+    end
   end
 
   describe "to_json_schema/1" do
