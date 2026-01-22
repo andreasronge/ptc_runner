@@ -252,6 +252,35 @@ defmodule PtcRunner.MustacheTest do
       {:ok, ast} = Mustache.parse("Hello {{name}}")
       assert {:error, {:missing_key, "name", %{line: 1, col: 7}}} = Mustache.expand(ast, %{})
     end
+
+    test "returns error for map variable (use section instead)" do
+      {:ok, ast} = Mustache.parse("Hello {{user}}")
+
+      assert {:error, {:non_scalar_variable, _loc, msg}} =
+               Mustache.expand(ast, %{user: %{name: "Alice"}})
+
+      assert msg =~ "resolved to map"
+      assert msg =~ "Use a section {{#user}}"
+    end
+
+    test "returns error for list variable (use section instead)" do
+      {:ok, ast} = Mustache.parse("Tags: {{tags}}")
+
+      assert {:error, {:non_scalar_variable, _loc, msg}} =
+               Mustache.expand(ast, %{tags: ["a", "b", "c"]})
+
+      assert msg =~ "resolved to list"
+      assert msg =~ "Use a section {{#tags}}"
+    end
+
+    test "returns error for nested map variable" do
+      {:ok, ast} = Mustache.parse("{{user.address}}")
+
+      assert {:error, {:non_scalar_variable, _loc, msg}} =
+               Mustache.expand(ast, %{user: %{address: %{city: "NYC"}}})
+
+      assert msg =~ "{{user.address}} resolved to map"
+    end
   end
 
   describe "expand/3 - dot notation" do
