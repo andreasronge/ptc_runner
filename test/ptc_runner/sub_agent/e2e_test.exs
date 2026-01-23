@@ -91,13 +91,13 @@ defmodule PtcRunner.SubAgent.E2ETest do
       assert compiled.source =~ "data/word"
 
       # Execute on multiple inputs without further LLM calls
-      step1 = compiled.execute.(%{"word" => "strawberry"})
+      step1 = compiled.execute.(%{"word" => "strawberry"}, [])
       assert step1.return == 3
 
-      step2 = compiled.execute.(%{"word" => "program"})
+      step2 = compiled.execute.(%{"word" => "program"}, [])
       assert step2.return == 2
 
-      step3 = compiled.execute.(%{"word" => "hello"})
+      step3 = compiled.execute.(%{"word" => "hello"}, [])
       assert step3.return == 0
     end
   end
