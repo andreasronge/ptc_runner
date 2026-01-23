@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-01-23
+
+### Added
+
+- **Mustache Templates** - Standalone `PtcRunner.Mustache` module for template rendering (#719)
+- **Unified SubAgent API** - CompiledAgent support with `then/3` for chaining (#709)
+- Support `timeout` and `max_heap` options in compiled agent execution
+- Allow SubAgentTools in compiled agents
+- JSON reports with failure traces for demo benchmarks
+- Signature naming convention documentation (underscores vs hyphens)
+- Improved signature documentation and error messages (#715)
+
+### Fixed
+
+- Normalize hyphenated keys to underscores at tool boundary (#706)
+- Enforce named args and string keys at tool boundary
+- Normalize keys in `has_keys` constraint for better prompt clarity
+- Return error for non-scalar Mustache variable expansion
+- Use string keys for JSON mode and add `max_turns` for compile
+- Allow `timeout` option in string convenience form
+- Fix report filename extraction for Bedrock model IDs
+
 ## [0.5.1] - 2026-01-18
 
 ### Added
@@ -342,6 +364,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.5.2]: https://github.com/andreasronge/ptc_runner/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/andreasronge/ptc_runner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/andreasronge/ptc_runner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/andreasronge/ptc_runner/compare/v0.4.0...v0.4.1
