@@ -122,7 +122,10 @@ defmodule PtcDemo.TestRunner.Base do
   end
 
   def check_constraint(value, {:has_keys, keys}) when is_map(value) and is_list(keys) do
-    missing = Enum.filter(keys, fn key -> not Map.has_key?(value, key) end)
+    # Normalize both expected and actual keys to strings for comparison
+    # (PTC-Lisp returns string keys due to KeyNormalizer, but constraints use atoms)
+    actual_keys = value |> Map.keys() |> MapSet.new(&to_string/1)
+    missing = Enum.filter(keys, fn key -> not MapSet.member?(actual_keys, to_string(key)) end)
 
     if missing == [] do
       true
