@@ -18,7 +18,18 @@ Mix.install(deps ++ [{:kino, "~> 0.14"}], consolidate_protocols: false)
 ```elixir
 # For testing and loading local ptc_runner library
 # IEx.Helpers.recompile()
-Code.require_file("llm_setup.exs", __DIR__)
+
+# Load LLM setup: local file if available, otherwise fetch from GitHub
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} = Req.get!("https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs")
+  Code.eval_string(code)
+end
+
+"LLM Setup loaded"
 ```
 
 Choose your provider:
