@@ -329,5 +329,4 @@ Each point offers different trade-offs between flexibility and predictability.
 
 ## Learn More
 
-* [When to Use Agents](../docs/guides/when-to-use-agents.md) - Decision framework
 * [SubAgent Guide](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
