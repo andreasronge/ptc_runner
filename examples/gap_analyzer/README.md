@@ -1,4 +1,4 @@
-# Gap Analyzer Example
+# Gap Analyzer Example, work in progress
 
 A compliance gap analysis tool demonstrating **Elixir-driven investigation** with single-shot SubAgents and workspace-based state management.
 
