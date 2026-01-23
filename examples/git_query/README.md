@@ -1,4 +1,4 @@
-# Git Query
+# Git Query, work in progress
 
 Query git repositories with natural language questions using PtcRunner.
 
