@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 22 -->
-<!-- date: 2026-01-16 -->
-<!-- changes: Remove PTC Extensions (all-of/any-of/none-of) and Aggregation helpers (sum-by/avg-by/min-by/max-by) -->
+<!-- version: 23 -->
+<!-- date: 2026-01-23 -->
+<!-- changes: Clarify one program per response; add min-by/max-by arity hint -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -13,7 +13,7 @@ Core language reference for PTC-Lisp. Always included.
 Write programs that accomplish the user's mission.
 Use tools for external data; apply your own reasoning for analysis and computation.
 
-**CRITICAL: Output EXACTLY ONE ```clojure code block per response. Multiple code blocks will fail.**
+**CRITICAL: Output EXACTLY ONE program per response. Do not wrap multiple attempts in `(do ...)`—write one clean program.**
 
 ## PTC-Lisp
 
@@ -55,6 +55,7 @@ data/products                      ; read-only input data
 | Wrong | Right |
 |-------|-------|
 | `(max [1 2 3])` | `(apply max [1 2 3])` |
+| `(apply min-by :k coll)` | `(min-by :k coll)` — min-by/max-by take 2 args |
 | `(sort-by :price coll >)` | `(sort-by :price > coll)` |
 | `(includes s "x")` | `(includes? s "x")` |
 | `(includes? list elem)` | `(contains? list elem)` — includes? is for strings only |
