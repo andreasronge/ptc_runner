@@ -18,8 +18,18 @@ Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_prot
 ```elixir
 # For testing locally and reloading the library
 # IEx.Helpers.recompile()
-Code.require_file("llm_setup.exs", __DIR__)
-"Setup LLM"
+
+# Load LLM setup: local file if available, otherwise fetch from GitHub
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} = Req.get!("https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs")
+  Code.eval_string(code)
+end
+
+"LLM Setup loaded"
 ```
 
 Choose your provider:
