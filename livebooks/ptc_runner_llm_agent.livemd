@@ -133,7 +133,8 @@ Compile an agent once to derive reusable PTC-Lisp logic. Runs without further LL
 ```elixir
 agent = SubAgent.new(
   prompt: "Count r's in {{word}}",
-  signature: "(word :string) -> :int"
+  signature: "(word :string) -> :int",
+  max_turns: 1
 )
 
 {:ok, compiled} = SubAgent.compile(agent, llm: my_llm)
@@ -146,7 +147,7 @@ IO.puts("Compiled source:\n#{compiled.source}")
 words = ["strawberry", "raspberry", "program", "error"]
 
 for word <- words do
-  step = compiled.execute.(%{"word" => word})
+  step = compiled.execute.(%{"word" => word}, [])
   "#{word}: #{step.return}"
 end
 ```

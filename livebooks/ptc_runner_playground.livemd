@@ -23,7 +23,7 @@ PTC-Lisp is a small, safe subset of Clojure designed for Programmatic Tool Calli
 * `->>` threads data through a pipeline (like Elixir's `|>`)
 * `:keyword` accesses map fields (converted to string keys internally)
 * `where` builds predicates for filtering
-* `ctx/tool-name` calls external tools
+* `tool/tool-name` calls external tools
 
 ## Basic Example
 
@@ -40,7 +40,7 @@ tools = %{
   end
 }
 
-program = ~S|(->> (ctx/get-expenses) (filter (where :category = "travel")) (sum-by :amount))|
+program = ~S|(->> (tool/get-expenses) (filter (where :category = "travel")) (sum-by :amount))|
 
 {:ok, step} = PtcRunner.Lisp.run(program, tools: tools)
 
@@ -49,9 +49,59 @@ IO.puts("Travel expenses: #{step.return}")
 
 ### Step-by-step breakdown
 
-1. `(ctx/get-expenses)` - calls the tool, returns list of expense maps
+1. `(tool/get-expenses)` - calls the tool, returns list of expense maps
 2. `(filter (where :category = "travel"))` - keeps only travel expenses
 3. `(sum-by :amount)` - sums the amount field
+
+## PTC-Lisp Extensions
+
+The example above uses `where` and `sum-by`, which are PTC-Lisp extensions not found in standard Clojure. These make common filtering and aggregation patterns more concise.
+
+In standard Clojure, the same logic would be:
+
+```elixir
+program = ~S|(->> (tool/get-expenses) (filter #(= (:category %) "travel")) (map :amount) (reduce +))|
+
+{:ok, step} = PtcRunner.Lisp.run(program, tools: tools)
+
+IO.puts("Travel expenses (Clojure style): #{step.return}")
+```
+
+**Key PTC-Lisp extensions:**
+
+| Extension                | Clojure Equivalent             | Purpose                        |
+| ------------------------ | ------------------------------ | ------------------------------ |
+| `(where :field = value)` | `#(= (:field %) value)`        | Build predicates for filtering |
+| `(sum-by :field coll)`   | `(reduce + (map :field coll))` | Sum a field across collection  |
+| `(avg-by :field coll)`   | Manual calculation             | Average a field                |
+| `(all-of pred1 pred2)`   | `#(and (pred1 %) (pred2 %))`   | Combine predicates with AND    |
+| `(any-of pred1 pred2)`   | `#(or (pred1 %) (pred2 %))`    | Combine predicates with OR     |
+
+These extensions are designed for LLM code generation - they reduce syntax errors and make intent clearer.
+
+## Key Convention
+
+Tools receive and return **string-keyed maps** (like JSON):
+
+```elixir
+# Tool data uses string keys
+%{"category" => "travel", "amount" => 500}
+```
+
+PTC-Lisp's FlexAccess makes `:keyword` access work transparently with string-keyed data:
+
+```elixir
+# These all work on string-keyed maps:
+(:category item)              # => "travel"
+(where :category = "travel")  # matches %{"category" => "travel"}
+(sum-by :amount expenses)     # sums the "amount" field
+```
+
+**Why string keys?**
+
+* Prevents atom table exhaustion from LLM-generated code
+* Matches JSON conventions (external APIs, Phoenix params)
+* Tools pattern match on string keys: `fn %{"id" => id} -> ... end`
 
 ## Working with Variables
 
@@ -59,7 +109,7 @@ Use `let` to bind intermediate results:
 
 ```elixir
 program = ~S"""
-(let [expenses (ctx/get-expenses)
+(let [expenses (tool/get-expenses)
       travel (filter (where :category = "travel") expenses)]
   {:count (count travel)
    :total (sum-by :amount travel)
@@ -116,8 +166,8 @@ tools = %{
 }
 
 program = ~S"""
-(let [users (ctx/get-users)
-      orders (ctx/get-orders)
+(let [users (tool/get-users)
+      orders (tool/get-orders)
       high-value (filter (where :total > 100) orders)]
   (->> high-value
        (mapv (fn [order]
@@ -148,7 +198,7 @@ expenses_tools = %{
 }
 
 program = ~S"""
-(let [expenses (ctx/get-expenses)
+(let [expenses (tool/get-expenses)
       by-category (group-by :category expenses)]
   (->> (keys by-category)
        (mapv (fn [cat]
