@@ -13,7 +13,8 @@ This document specifies the SubAgent API for the PtcRunner library.
 3. [Core API](#core-api)
    - [SubAgent.new/1](#subagentnew1)
    - [SubAgent.run/2](#subagentrun2)
-   - [SubAgent.run!/2 and then!/2](#subagentrun2-and-then2)
+   - [SubAgent.run!/2 and then!/3](#subagentrun2-and-then3)
+   - [SubAgent.then/3](#subagentthen3)
    - [SubAgent.as_tool/2](#subagentas_tool2)
    - [SubAgent.compile/2](#subagentcompile2)
 4. [Chaining Patterns](#chaining-patterns)
@@ -229,7 +230,7 @@ The LLM might generate:
 
 ---
 
-### SubAgent.run!/2 and then!/2
+### SubAgent.run!/2 and then!/3
 
 Bang variants for pipe-style chaining. Raise `SubAgentError` on failure.
 
@@ -246,7 +247,7 @@ def then!(step, agent, opts \\ [])
 step = SubAgent.run!(agent, llm: llm, context: %{...})
 ```
 
-**`then!/2`** - Chains steps, auto-sets `context`:
+**`then!/3`** - Chains steps, auto-sets `context`:
 ```elixir
 SubAgent.run!(finder_agent, llm: llm)
 |> SubAgent.then!(drafter_agent, llm: llm)
@@ -264,6 +265,36 @@ end
 
 def then!(step, agent, opts \\ []) do
   run!(agent, Keyword.put(opts, :context, step))
+end
+```
+
+---
+
+### SubAgent.then/3
+
+Non-bang variant for chaining with explicit error handling.
+
+```elixir
+@spec then({:ok, Step.t()} | {:error, Step.t()}, SubAgent.t() | String.t(), keyword()) ::
+  {:ok, Step.t()} | {:error, Step.t()}
+def then(result, agent, opts \\ [])
+```
+
+**`then/3`** - Chains steps with error propagation:
+```elixir
+SubAgent.run(agent1, llm: llm, context: %{x: 1})
+|> SubAgent.then(agent2, llm: llm)
+|> SubAgent.then(agent3, llm: llm)
+```
+
+Unlike `then!/3`, this returns `{:ok, Step}` or `{:error, Step}` instead of raising on failures.
+
+Implementation:
+```elixir
+def then({:error, step}, _agent, _opts), do: {:error, step}
+
+def then({:ok, step}, agent, opts) do
+  run(agent, Keyword.put(opts, :context, step))
 end
 ```
 
