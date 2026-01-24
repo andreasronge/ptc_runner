@@ -3,6 +3,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   Turn feedback formatting for SubAgent execution.
 
   Formats execution results and turn state information for LLM feedback.
+  Supports the unified budget model with work turns and retry turns.
   """
 
   alias PtcRunner.SubAgent
@@ -10,10 +11,49 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   @doc """
   Append turn progress info to a feedback message.
 
-  For multi-turn agents, adds remaining turn count and final turn warnings.
+  For multi-turn agents with return_retries, shows unified budget info.
+  For multi-turn agents without return_retries, shows legacy turn count.
   """
   @spec append_turn_info(String.t(), SubAgent.t(), map()) :: String.t()
   def append_turn_info(message, agent, state) do
+    # Use unified budget model if return_retries is configured
+    if agent.return_retries > 0 do
+      append_unified_budget_info(message, state)
+    else
+      append_legacy_turn_info(message, agent, state)
+    end
+  end
+
+  # Unified budget info with work/retry counters
+  defp append_unified_budget_info(message, state) do
+    work_left = state.work_turns_remaining
+    retry_left = state.retry_turns_remaining
+    next_turn = state.turn + 1
+    in_retry_phase = work_left <= 0
+
+    turn_info =
+      cond do
+        # In retry phase
+        in_retry_phase and retry_left == 1 ->
+          "\n\n⚠️ FINAL RETRY - you must call (return result) or (fail response) next."
+
+        in_retry_phase ->
+          "\n\nTurn #{next_turn}: RETRY MODE (#{retry_left} retries remaining)"
+
+        # Last work turn - must return
+        work_left == 1 ->
+          "\n\n⚠️ FINAL WORK TURN - tools stripped, you must call (return result) or (fail response)."
+
+        # Normal work turns
+        true ->
+          "\n\nTurn #{next_turn} (#{work_left} work turns + #{retry_left} retry turns remaining)"
+      end
+
+    message <> turn_info
+  end
+
+  # Legacy turn info (no return_retries)
+  defp append_legacy_turn_info(message, agent, state) do
     if agent.max_turns > 1 do
       next_turn = state.turn + 1
       turns_remaining = agent.max_turns - state.turn
@@ -29,6 +69,21 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     else
       message
     end
+  end
+
+  @doc """
+  Build error feedback with appropriate turn info based on unified budget model.
+
+  This is used by the loop to format error messages with context about
+  work/retry budgets.
+  """
+  @spec build_error_feedback(String.t(), SubAgent.t(), map()) :: String.t()
+  def build_error_feedback(error_message, agent, state) do
+    # Start with the error message
+    base = "Error: #{error_message}"
+
+    # Add turn info based on budget model
+    append_turn_info(base, agent, state)
   end
 
   @doc """

@@ -246,7 +246,12 @@ defmodule PtcRunner.SubAgent.Loop do
       # Original prompt template for Step.original_prompt (used by Debug for annotated display)
       original_prompt: agent.prompt,
       # Normalized tools for Step.tools (used by Debug.print_trace compressed view)
-      normalized_tools: normalized_tools
+      normalized_tools: normalized_tools,
+      # Unified budget model for return_retries
+      work_turns_remaining: agent.max_turns,
+      retry_turns_remaining: agent.return_retries,
+      # Last error message for retry feedback (collapsed context)
+      last_return_error: nil
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -256,16 +261,25 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Loop when max_turns exceeded
-  defp loop(agent, _llm, state) when state.turn > agent.max_turns do
-    build_termination_error(
-      :max_turns_exceeded,
-      "Exceeded max_turns limit of #{agent.max_turns}",
-      state
-    )
+  # Check unified budget (work + retry turns)
+  # Budget exhausted when both work and retry turns are consumed
+  # Use appropriate error reason based on whether retry budget was configured
+  defp loop(agent, _llm, state)
+       when state.work_turns_remaining <= 0 and state.retry_turns_remaining <= 0 do
+    if agent.return_retries == 0 do
+      # Legacy behavior: no retry budget, so this is max_turns_exceeded
+      build_termination_error(
+        :max_turns_exceeded,
+        "Exceeded max_turns limit of #{agent.max_turns}",
+        state
+      )
+    else
+      # Unified budget: both work and retry turns consumed
+      build_termination_error(:budget_exhausted, "Budget exhausted (work and retry turns)", state)
+    end
   end
 
-  # Check turn budget before each turn (guard clause)
+  # Check global turn budget before each turn (guard clause)
   defp loop(_agent, _llm, state) when state.remaining_turns <= 0 do
     build_termination_error(:turn_budget_exhausted, "Turn budget exhausted", state)
   end
@@ -276,8 +290,29 @@ defmodule PtcRunner.SubAgent.Loop do
     if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
       build_termination_error(:mission_timeout, "Mission timeout exceeded", state)
     else
-      # Emit turn start event
-      Telemetry.emit([:turn, :start], %{}, %{agent: agent, turn: state.turn})
+      # Compute turn phase based on unified budget model
+      must_return_mode = state.work_turns_remaining <= 1
+      in_retry_phase = state.work_turns_remaining <= 0
+
+      # Determine turn type for this iteration
+      turn_type =
+        cond do
+          in_retry_phase -> :retry
+          must_return_mode -> :must_return
+          true -> :normal
+        end
+
+      # Store turn type in state for downstream use
+      state = Map.put(state, :current_turn_type, turn_type)
+
+      # Emit turn start event with turn type
+      Telemetry.emit([:turn, :start], %{}, %{
+        agent: agent,
+        turn: state.turn,
+        type: turn_type,
+        tools_count: if(must_return_mode, do: 0, else: map_size(agent.tools))
+      })
+
       turn_start = System.monotonic_time()
 
       # Build LLM input with resolution context for language_spec callbacks
@@ -307,11 +342,14 @@ defmodule PtcRunner.SubAgent.Loop do
           do: Map.put(state, :compression_stats, compression_stats),
           else: state
 
+      # Strip tools in must-return mode (structural enforcement)
+      tool_names = if must_return_mode, do: [], else: Map.keys(agent.tools)
+
       llm_input = %{
         system: system_prompt,
         messages: messages,
         turn: state.turn,
-        tool_names: Map.keys(agent.tools),
+        tool_names: tool_names,
         cache: state.cache
       }
 
@@ -420,25 +458,59 @@ defmodule PtcRunner.SubAgent.Loop do
           IO.puts("---")
         end
 
-        # Feed error back to LLM with turn info
-        error_message =
-          "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('."
-          |> TurnFeedback.append_turn_info(agent, state)
-
-        new_state = %{
-          state
-          | turn: state.turn + 1,
-            messages:
-              state.messages ++
-                [
-                  %{role: :assistant, content: response},
-                  %{role: :user, content: error_message}
-                ],
-            remaining_turns: state.remaining_turns - 1
-        }
-
-        loop(agent, llm, new_state)
+        # Handle error using unified budget model
+        handle_error_with_budget(
+          response,
+          "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('.",
+          nil,
+          state,
+          agent,
+          llm
+        )
     end
+  end
+
+  # Handle error with unified budget model
+  # Decrements work_turns_remaining if not in retry phase, otherwise retry_turns_remaining
+  defp handle_error_with_budget(response, error_message, turn_or_nil, state, agent, llm) do
+    in_retry_phase = state.work_turns_remaining <= 0
+
+    # Build Turn struct if not provided
+    turn =
+      turn_or_nil ||
+        Metrics.build_turn(state, response, nil, %{reason: :parse_error, message: error_message},
+          success?: false,
+          type: state.current_turn_type
+        )
+
+    # Determine which budget counter to decrement
+    {new_work_turns, new_retry_turns} =
+      if in_retry_phase do
+        {state.work_turns_remaining, state.retry_turns_remaining - 1}
+      else
+        {state.work_turns_remaining - 1, state.retry_turns_remaining}
+      end
+
+    # Build feedback with appropriate turn info
+    feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
+
+    new_state = %{
+      state
+      | turn: state.turn + 1,
+        messages:
+          state.messages ++
+            [
+              %{role: :assistant, content: response},
+              %{role: :user, content: feedback}
+            ],
+        turns: [turn | state.turns],
+        remaining_turns: state.remaining_turns - 1,
+        work_turns_remaining: new_work_turns,
+        retry_turns_remaining: new_retry_turns,
+        last_return_error: error_message
+    }
+
+    loop(agent, llm, new_state)
   end
 
   # Execute parsed code
@@ -474,19 +546,31 @@ defmodule PtcRunner.SubAgent.Loop do
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
 
       {:error, lisp_step} ->
-        # Feed error back to LLM for next turn with turn info
-        error_message =
-          ResponseHandler.format_error_for_llm(lisp_step.fail)
-          |> TurnFeedback.append_turn_info(agent, state)
+        # Build error message for LLM
+        error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
 
-        # Build Turn struct (failure turn)
+        # Build Turn struct (failure turn) with turn type
         turn =
           Metrics.build_turn(state, response, code, lisp_step.fail,
             success?: false,
             prints: lisp_step.prints,
             tool_calls: lisp_step.tool_calls,
-            memory: lisp_step.memory
+            memory: lisp_step.memory,
+            type: state.current_turn_type
           )
+
+        # Use unified budget model for error handling
+        in_retry_phase = state.work_turns_remaining <= 0
+
+        {new_work_turns, new_retry_turns} =
+          if in_retry_phase do
+            {state.work_turns_remaining, state.retry_turns_remaining - 1}
+          else
+            {state.work_turns_remaining - 1, state.retry_turns_remaining}
+          end
+
+        # Build feedback with appropriate turn info
+        feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
         new_state = %{
           state
@@ -495,12 +579,15 @@ defmodule PtcRunner.SubAgent.Loop do
               state.messages ++
                 [
                   %{role: :assistant, content: response},
-                  %{role: :user, content: error_message}
+                  %{role: :user, content: feedback}
                 ],
             turns: [turn | state.turns],
             memory: lisp_step.memory,
             last_fail: lisp_step.fail,
-            remaining_turns: state.remaining_turns - 1
+            remaining_turns: state.remaining_turns - 1,
+            work_turns_remaining: new_work_turns,
+            retry_turns_remaining: new_retry_turns,
+            last_return_error: error_message
         }
 
         loop(agent, llm, new_state)
@@ -534,23 +621,25 @@ defmodule PtcRunner.SubAgent.Loop do
             )
         end
 
-      # Single-shot mode - skip validation (no retry possible anyway)
-      agent.max_turns == 1 ->
+      # Single-shot mode without return_retries - skip validation (no retry possible anyway)
+      agent.max_turns == 1 and agent.return_retries == 0 ->
         # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
         normalized_step = %{lisp_step | return: KeyNormalizer.normalize_keys(lisp_step.return)}
         build_success_step(code, response, normalized_step, state, agent)
 
       match?({:__ptc_fail__, _}, lisp_step.return) ->
-        # Explicit fail was actually executed - complete with error, no feedback
+        # Explicit fail was actually executed - complete with error, NO RETRY
+        # This bypasses the retry mechanism entirely (intentional failure)
         {:__ptc_fail__, fail_args} = lisp_step.return
 
-        # Build Turn struct (failure turn)
+        # Build Turn struct (failure turn) with turn type
         turn =
           Metrics.build_turn(state, response, code, fail_args,
             success?: false,
             prints: lisp_step.prints,
             tool_calls: lisp_step.tool_calls,
-            memory: lisp_step.memory
+            memory: lisp_step.memory,
+            type: state.current_turn_type
           )
 
         duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -585,19 +674,21 @@ defmodule PtcRunner.SubAgent.Loop do
             # Calculate feedback
             {execution_result, _feedback_truncated} = TurnFeedback.format(agent, state, lisp_step)
 
-            # Build Turn struct (success turn - loop continues)
+            # Build Turn struct (success turn - loop continues) with turn type
             turn =
               Metrics.build_turn(state, response, code, lisp_step.return,
                 success?: true,
                 prints: lisp_step.prints,
                 tool_calls: lisp_step.tool_calls,
-                memory: lisp_step.memory
+                memory: lisp_step.memory,
+                type: state.current_turn_type
               )
 
             # Update turn history with truncated result (keep last 3)
             truncated_result = ResponseHandler.truncate_for_history(lisp_step.return)
             updated_history = update_turn_history(state.turn_history, truncated_result)
 
+            # Decrement work_turns_remaining (normal execution consumes work turn)
             new_state = %{
               state
               | turn: state.turn + 1,
@@ -612,20 +703,23 @@ defmodule PtcRunner.SubAgent.Loop do
                 # Context stays immutable - memory values become available as symbols
                 last_fail: nil,
                 remaining_turns: state.remaining_turns - 1,
-                turn_history: updated_history
+                work_turns_remaining: state.work_turns_remaining - 1,
+                turn_history: updated_history,
+                last_return_error: nil
             }
 
             loop(agent, llm, new_state)
 
           {:error, :memory_limit_exceeded, actual_size} ->
             # Memory limit exceeded - return error
-            # Build Turn struct (failure turn - memory limit exceeded)
+            # Build Turn struct (failure turn - memory limit exceeded) with turn type
             turn =
               Metrics.build_turn(state, response, code, lisp_step.return,
                 success?: false,
                 prints: lisp_step.prints,
                 tool_calls: lisp_step.tool_calls,
-                memory: lisp_step.memory
+                memory: lisp_step.memory,
+                type: state.current_turn_type
               )
 
             duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -823,13 +917,14 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Build success step for return/single-shot termination
   defp build_success_step(code, response, lisp_step, state, agent) do
-    # Build Turn struct (success turn - final)
+    # Build Turn struct (success turn - final) with turn type
     turn =
       Metrics.build_turn(state, response, code, lisp_step.return,
         success?: true,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
-        memory: lisp_step.memory
+        memory: lisp_step.memory,
+        type: Map.get(state, :current_turn_type, :normal)
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -857,6 +952,7 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Handle return validation error - feed back to LLM for retry
+  # Uses unified budget model: consumes work turn if not in retry phase, else retry turn
   defp handle_return_validation_error(code, response, lisp_step, state, agent, llm, errors) do
     error_message = ReturnValidation.format_error_for_llm(agent, lisp_step.return, errors)
 
@@ -868,15 +964,28 @@ defmodule PtcRunner.SubAgent.Loop do
       errors: errors
     }
 
-    # Build Turn struct (failure turn - validation error)
-    # Store the validation error (not just the return value) so compression shows the actual error
+    # Build Turn struct (failure turn - validation error) with turn type
     turn =
       Metrics.build_turn(state, response, code, validation_error,
         success?: false,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
-        memory: lisp_step.memory
+        memory: lisp_step.memory,
+        type: state.current_turn_type
       )
+
+    # Use unified budget model: consume work turn if not in retry phase, else retry turn
+    in_retry_phase = state.work_turns_remaining <= 0
+
+    {new_work_turns, new_retry_turns} =
+      if in_retry_phase do
+        {state.work_turns_remaining, state.retry_turns_remaining - 1}
+      else
+        {state.work_turns_remaining - 1, state.retry_turns_remaining}
+      end
+
+    # Build feedback with appropriate turn info
+    feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
     new_state = %{
       state
@@ -885,12 +994,15 @@ defmodule PtcRunner.SubAgent.Loop do
           state.messages ++
             [
               %{role: :assistant, content: response},
-              %{role: :user, content: error_message}
+              %{role: :user, content: feedback}
             ],
         turns: [turn | state.turns],
         memory: lisp_step.memory,
         last_fail: nil,
-        remaining_turns: state.remaining_turns - 1
+        remaining_turns: state.remaining_turns - 1,
+        work_turns_remaining: new_work_turns,
+        retry_turns_remaining: new_retry_turns,
+        last_return_error: error_message
     }
 
     loop(agent, llm, new_state)

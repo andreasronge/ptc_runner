@@ -21,6 +21,7 @@ defmodule PtcRunner.SubAgent do
   - `signature` - String.t() | nil, optional, contract for inputs/outputs
   - `tools` - map(), callable tools (default: %{})
   - `max_turns` - pos_integer(), maximum LLM calls (default: 5)
+  - `return_retries` - non_neg_integer(), extra turns in must-return mode (default: 0)
   - `prompt_limit` - map() | nil, truncation config for LLM view
   - `mission_timeout` - pos_integer() | nil, max ms for entire execution
   - `llm_retry` - map() | nil, infrastructure retry config
@@ -172,6 +173,7 @@ defmodule PtcRunner.SubAgent do
           parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
           max_turns: pos_integer(),
+          return_retries: non_neg_integer(),
           prompt_limit: map() | nil,
           timeout: pos_integer(),
           mission_timeout: pos_integer() | nil,
@@ -217,6 +219,7 @@ defmodule PtcRunner.SubAgent do
     :compression,
     tools: %{},
     max_turns: 5,
+    return_retries: 0,
     timeout: 5000,
     memory_limit: 1_048_576,
     max_depth: 3,
@@ -248,6 +251,7 @@ defmodule PtcRunner.SubAgent do
   - `signature` - String contract defining expected inputs and outputs
   - `tools` - Map of callable tools (default: %{})
   - `max_turns` - Positive integer for maximum LLM calls (default: 5)
+  - `return_retries` - Non-negative integer for extra turns in must-return mode (default: 0)
   - `prompt_limit` - Map with truncation config for LLM view
   - `timeout` - Positive integer for max milliseconds per Lisp execution (default: 1000)
   - `mission_timeout` - Positive integer for max milliseconds for entire execution
@@ -400,6 +404,7 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :max_turns,
+        :return_retries,
         :timeout,
         :prompt_limit,
         :mission_timeout,
@@ -427,6 +432,7 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :max_turns,
+        :return_retries,
         :prompt_limit,
         :mission_timeout,
         :llm_retry,

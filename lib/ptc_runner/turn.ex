@@ -16,12 +16,22 @@ defmodule PtcRunner.Turn do
   - `memory` - Accumulated definitions after this turn
   - `success?` - Whether the turn succeeded
   - `messages` - Messages sent to the LLM for this turn (for debugging/verification)
+  - `type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
 
   ## Constructors
 
   Use `success/5` or `failure/5` to create turns - don't construct the struct directly.
   The constructors ensure `success?` is set correctly.
   """
+
+  @typedoc """
+  Turn type indicating the phase of execution.
+
+  - `:normal` - Investigation turn with tools available
+  - `:must_return` - Final work turn, tools stripped
+  - `:retry` - Retry turn after failed return
+  """
+  @type turn_type :: :normal | :must_return | :retry
 
   defstruct [
     :number,
@@ -32,7 +42,8 @@ defmodule PtcRunner.Turn do
     :tool_calls,
     :memory,
     :success?,
-    :messages
+    :messages,
+    type: :normal
   ]
 
   @typedoc """
@@ -74,7 +85,8 @@ defmodule PtcRunner.Turn do
           tool_calls: [tool_call()],
           memory: map(),
           success?: boolean(),
-          messages: [message()] | nil
+          messages: [message()] | nil,
+          type: turn_type()
         }
 
   @doc """
@@ -91,6 +103,7 @@ defmodule PtcRunner.Turn do
     - `:tool_calls` - Tool invocations made during this turn (default: [])
     - `:memory` - Accumulated definitions after this turn (default: %{})
     - `:messages` - Messages sent to the LLM for this turn (default: nil)
+    - `:type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
 
   ## Examples
 
@@ -108,6 +121,10 @@ defmodule PtcRunner.Turn do
       iex> turn.memory
       %{x: 10}
 
+      iex> turn = PtcRunner.Turn.success(3, "raw", "(return 42)", 42, %{type: :must_return})
+      iex> turn.type
+      :must_return
+
   """
   @spec success(pos_integer(), String.t(), String.t() | nil, term(), map()) :: t()
   def success(number, raw_response, program, result, params \\ %{}) do
@@ -120,7 +137,8 @@ defmodule PtcRunner.Turn do
       tool_calls: Map.get(params, :tool_calls, []),
       memory: Map.get(params, :memory, %{}),
       success?: true,
-      messages: Map.get(params, :messages)
+      messages: Map.get(params, :messages),
+      type: Map.get(params, :type, :normal)
     }
   end
 
@@ -140,6 +158,7 @@ defmodule PtcRunner.Turn do
     - `:tool_calls` - Tool invocations made during this turn (default: [])
     - `:memory` - Memory state after this turn (default: %{})
     - `:messages` - Messages sent to the LLM for this turn (default: nil)
+    - `:type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
 
   ## Examples
 
@@ -150,6 +169,10 @@ defmodule PtcRunner.Turn do
       %{reason: :eval_error, message: "division by zero"}
       iex> turn.memory
       %{x: 10}
+
+      iex> turn = PtcRunner.Turn.failure(3, "raw", "(return {:x 1})", %{reason: :validation_error}, %{type: :retry})
+      iex> turn.type
+      :retry
 
   """
   @spec failure(pos_integer(), String.t(), String.t() | nil, term(), map()) :: t()
@@ -163,7 +186,8 @@ defmodule PtcRunner.Turn do
       tool_calls: Map.get(params, :tool_calls, []),
       memory: Map.get(params, :memory, %{}),
       success?: false,
-      messages: Map.get(params, :messages)
+      messages: Map.get(params, :messages),
+      type: Map.get(params, :type, :normal)
     }
   end
 end
