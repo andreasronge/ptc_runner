@@ -229,28 +229,17 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         }
       end)
 
+    params = %{
+      prints: prints,
+      tool_calls: simplified_tool_calls,
+      memory: memory,
+      messages: messages
+    }
+
     if success? do
-      Turn.success(
-        state.turn,
-        raw_response,
-        program,
-        result,
-        prints,
-        simplified_tool_calls,
-        memory,
-        messages
-      )
+      Turn.success(state.turn, raw_response, program, result, params)
     else
-      Turn.failure(
-        state.turn,
-        raw_response,
-        program,
-        result,
-        prints,
-        simplified_tool_calls,
-        memory,
-        messages
-      )
+      Turn.failure(state.turn, raw_response, program, result, params)
     end
   end
 end
