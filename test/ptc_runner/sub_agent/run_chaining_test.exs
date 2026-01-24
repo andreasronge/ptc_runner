@@ -3,6 +3,8 @@ defmodule PtcRunner.SubAgent.RunChainingTest do
 
   alias PtcRunner.SubAgent
 
+  doctest PtcRunner.SubAgent.Chaining
+
   describe "run!/2" do
     test "returns Step directly on success" do
       agent = SubAgent.new(prompt: "Return 42", max_turns: 1)
