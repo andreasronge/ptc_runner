@@ -33,6 +33,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_prompt!(opts)
     validate_tools!(opts)
     validate_max_turns!(opts)
+    validate_return_retries!(opts)
     validate_timeout!(opts)
     validate_mission_timeout!(opts)
     validate_signature!(opts)
@@ -69,6 +70,14 @@ defmodule PtcRunner.SubAgent.Validator do
     case Keyword.fetch(opts, :max_turns) do
       {:ok, max_turns} when is_integer(max_turns) and max_turns > 0 -> :ok
       {:ok, _} -> raise ArgumentError, "max_turns must be a positive integer"
+      :error -> :ok
+    end
+  end
+
+  defp validate_return_retries!(opts) do
+    case Keyword.fetch(opts, :return_retries) do
+      {:ok, retries} when is_integer(retries) and retries >= 0 -> :ok
+      {:ok, _} -> raise ArgumentError, "return_retries must be a non-negative integer"
       :error -> :ok
     end
   end

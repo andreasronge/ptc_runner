@@ -126,6 +126,34 @@ In **single-shot mode**, the LLM's expression is evaluated and returned directly
 > `max_turns: 1` for single-shot execution, or ensure your prompt guides the LLM to
 > use `(return {:value ...})` when done.
 
+## Validation Retries with return_retries
+
+By default, if return value validation fails, the agent stops with an error. To enable automatic recovery, use the `return_retries` option to give agents a limited budget for retrying after validation failures:
+
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "Extract and return user data",
+  signature: "{name :string, age :int}",
+  return_retries: 3,  # Budget for 3 retry attempts if validation fails
+  llm: my_llm
+)
+```
+
+When validation fails and retries are available:
+1. The agent enters **retry mode** with the original error message and guidance
+2. The LLM sees feedback like "Retry 1 of 3" to understand how many attempts remain
+3. The agent must call `(return new_value)` to complete
+4. If validation passes, the loop continues normally
+5. If retries are exhausted, the agent returns an error
+
+The `return_retries` option uses a **unified budget model** alongside `max_turns`:
+- **Work turns** (`max_turns`): Used for normal execution with tools available
+- **Retry turns** (`return_retries`): Used only after validation failures, with no tools
+
+This separation lets agents safely explore solutions during work turns, then recover from validation errors during retry turns without consuming the main work budget.
+
+> **Note:** `return_retries` only applies to multi-turn agents with signatures. Single-shot agents (max_turns: 1) don't benefit from retries since there's no recovery loop. Use signatures to enable validation in your return statement.
+
 ## Debugging Execution
 
 To see what the agent is doing, use `PtcRunner.SubAgent.Debug.print_trace/2`:

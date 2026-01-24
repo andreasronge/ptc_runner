@@ -205,6 +205,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     - `prints` - Captured println output (default: [])
     - `tool_calls` - Tool invocations made during this turn (default: [])
     - `memory` - Memory state after this turn (default: state.memory)
+    - `type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
 
   ## Returns
 
@@ -216,6 +217,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     prints = Keyword.get(opts, :prints, [])
     tool_calls = Keyword.get(opts, :tool_calls, [])
     memory = Keyword.get(opts, :memory, state.memory)
+    turn_type = Keyword.get(opts, :type, :normal)
     # Get messages from state (set by loop before LLM call)
     messages = Map.get(state, :current_messages)
 
@@ -233,7 +235,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       prints: prints,
       tool_calls: simplified_tool_calls,
       memory: memory,
-      messages: messages
+      messages: messages,
+      type: turn_type
     }
 
     if success? do
