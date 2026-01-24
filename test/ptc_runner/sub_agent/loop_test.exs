@@ -1457,5 +1457,38 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       assert step.return == %{"done" => true}
     end
+
+    test "early return failure consumes work turn, not retry turn" do
+      # Per spec (docs/specs/return-retries.md lines 87-99):
+      # If LLM calls (return ...) before the final turn and it fails validation,
+      # consume a work turn, not a retry turn.
+      agent =
+        SubAgent.new(
+          prompt: "Return a valid integer",
+          signature: "{x :int}",
+          max_turns: 5,
+          return_retries: 1
+        )
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          # Turn 1: Early return fails - should consume work turn
+          1 -> {:ok, "```clojure\n(return {:x \"bad\"})\n```"}
+          # Turn 2: Valid return
+          2 -> {:ok, "```clojure\n(return {:x 42})\n```"}
+          _ -> flunk("unexpected turn")
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{"x" => 42}
+      assert length(step.turns) == 2
+
+      # Both should be :normal turns (not :retry) because work budget was used
+      [turn1, turn2] = step.turns
+      assert turn1.type == :normal
+      assert turn2.type == :normal
+    end
   end
 end
