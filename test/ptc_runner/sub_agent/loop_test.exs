@@ -1490,5 +1490,60 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert turn1.type == :normal
       assert turn2.type == :normal
     end
+
+    test "context is collapsed during retry phase (single-shot with return_retries)" do
+      # Per spec (docs/specs/return-retries.md lines 108-128):
+      # Previous failed responses are NOT accumulated in message history.
+      # Only the most recent error is shown.
+      #
+      # This test verifies that compression is enabled for single-shot mode
+      # when return_retries > 0, preventing context window inflation.
+      agent =
+        SubAgent.new(
+          prompt: "Return a float",
+          signature: "{value :float}",
+          max_turns: 1,
+          return_retries: 3,
+          compression: true
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        # Track message count to verify context collapsing
+        send(self(), {:messages, turn, length(messages)})
+
+        case turn do
+          # Turn 1 (must-return): returns integer (fails validation)
+          1 -> {:ok, "```clojure\n(return {:value 0})\n```"}
+          # Turn 2 (retry 1): returns string (fails validation)
+          2 -> {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
+          # Turn 3 (retry 2): returns float (succeeds)
+          3 -> {:ok, "```clojure\n(return {:value 1.0})\n```"}
+          _ -> {:ok, "```clojure\n(return {:value 0.0})\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{"value" => 1.0}
+      assert length(step.turns) == 3
+
+      # Collect message counts
+      assert_receive {:messages, 1, msg_count_1}
+      assert_receive {:messages, 2, msg_count_2}
+      assert_receive {:messages, 3, msg_count_3}
+
+      # Turn 1: single user message
+      assert msg_count_1 == 1
+
+      # Turn 2 & 3: With compression enabled, message count should stay constant
+      # (compressed to single user message), not grow by 2 each turn.
+      # If compression was NOT enabled, we'd see: 1, 3, 5 messages (accumulating)
+      # With compression enabled, we expect: 1, 1, 1 messages (collapsed)
+      assert msg_count_2 == 1,
+             "Expected compressed single message on turn 2, got #{msg_count_2}"
+
+      assert msg_count_3 == 1,
+             "Expected compressed single message on turn 3, got #{msg_count_3}"
+    end
   end
 end
