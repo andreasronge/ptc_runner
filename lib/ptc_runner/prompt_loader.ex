@@ -37,14 +37,8 @@ defmodule PtcRunner.PromptLoader do
   @spec extract_content(String.t()) :: String.t()
   def extract_content(file_content) do
     case String.split(file_content, @start_marker) do
-      [_before, after_start] ->
-        case String.split(after_start, @end_marker) do
-          [prompt_text, _after_end] -> String.trim(prompt_text)
-          _ -> String.trim(after_start)
-        end
-
-      _ ->
-        String.trim(file_content)
+      [_before, after_start] -> extract_between_markers(after_start)
+      _ -> String.trim(file_content)
     end
   end
 
@@ -68,17 +62,16 @@ defmodule PtcRunner.PromptLoader do
   @spec extract_with_header(String.t()) :: {String.t(), String.t()}
   def extract_with_header(file_content) do
     case String.split(file_content, @start_marker) do
-      [before, after_start] ->
-        content =
-          case String.split(after_start, @end_marker) do
-            [prompt_text, _after_end] -> String.trim(prompt_text)
-            _ -> String.trim(after_start)
-          end
+      [before, after_start] -> {before, extract_between_markers(after_start)}
+      _ -> {file_content, String.trim(file_content)}
+    end
+  end
 
-        {before, content}
-
-      _ ->
-        {file_content, String.trim(file_content)}
+  # Extracts content between start marker and end marker (or to EOF if no end marker).
+  defp extract_between_markers(after_start) do
+    case String.split(after_start, @end_marker) do
+      [prompt_text, _after_end] -> String.trim(prompt_text)
+      _ -> String.trim(after_start)
     end
   end
 end
