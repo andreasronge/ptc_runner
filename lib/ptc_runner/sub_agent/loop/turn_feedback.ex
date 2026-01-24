@@ -4,9 +4,47 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   Formats execution results and turn state information for LLM feedback.
   Supports the unified budget model with work turns and retry turns.
+
+  Templates are loaded from `priv/prompts/` at compile time:
+  - `must_return_warning.md` - Warning for final work turn
+  - `retry_feedback.md` - Turn info during retry phase
   """
 
+  alias PtcRunner.Mustache
   alias PtcRunner.SubAgent
+
+  # Load templates at compile time
+  @prompts_dir Path.join(__DIR__, "../../../../priv/prompts")
+
+  @must_return_warning_path Path.join(@prompts_dir, "must_return_warning.md")
+  @retry_feedback_path Path.join(@prompts_dir, "retry_feedback.md")
+
+  @external_resource @must_return_warning_path
+  @external_resource @retry_feedback_path
+
+  # Extract content between PTC_PROMPT_START and PTC_PROMPT_END markers
+  @extract_prompt_content fn file_content ->
+    case String.split(file_content, "<!-- PTC_PROMPT_START -->") do
+      [_before, after_start] ->
+        case String.split(after_start, "<!-- PTC_PROMPT_END -->") do
+          [prompt_text, _after_end] -> String.trim(prompt_text)
+          _ -> String.trim(after_start)
+        end
+
+      _ ->
+        String.trim(file_content)
+    end
+  end
+
+  @must_return_warning_template (fn ->
+                                   content = File.read!(@must_return_warning_path)
+                                   @extract_prompt_content.(content)
+                                 end).()
+
+  @retry_feedback_template (fn ->
+                              content = File.read!(@retry_feedback_path)
+                              @extract_prompt_content.(content)
+                            end).()
 
   @doc """
   Append turn progress info to a feedback message.
@@ -33,22 +71,34 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
     turn_info =
       cond do
-        # In retry phase
-        in_retry_phase and retry_left == 1 ->
-          attempt_num = agent.return_retries - retry_left + 1
-
-          "\n\n⚠️ FINAL RETRY (Retry #{attempt_num} of #{agent.return_retries}) - you must call (return result) or (fail response) next."
-
+        # In retry phase - use retry_feedback template
         in_retry_phase ->
           attempt_num = agent.return_retries - retry_left + 1
+          is_final_retry = retry_left == 1
 
-          "\n\nTurn #{next_turn}: Retry #{attempt_num} of #{agent.return_retries} (#{retry_left} retries remaining)"
+          context = %{
+            is_final_retry: is_final_retry,
+            current_retry: attempt_num,
+            total_retries: agent.return_retries,
+            retries_remaining: retry_left,
+            next_turn: next_turn
+          }
 
-        # Last work turn - must return
+          {:ok, rendered} = Mustache.render(@retry_feedback_template, context)
+          emoji_prefix = if is_final_retry, do: "⚠️ ", else: ""
+          "\n\n" <> emoji_prefix <> rendered
+
+        # Last work turn - use must_return_warning template
         work_left == 1 ->
-          "\n\n⚠️ FINAL WORK TURN - tools stripped, you must call (return result) or (fail response)."
+          context = %{
+            has_retries: retry_left > 0,
+            retry_count: retry_left
+          }
 
-        # Normal work turns
+          {:ok, rendered} = Mustache.render(@must_return_warning_template, context)
+          "\n\n⚠️ " <> rendered
+
+        # Normal work turns - simple string (no template needed)
         true ->
           "\n\nTurn #{next_turn} (#{work_left} work turns + #{retry_left} retry turns remaining)"
       end
