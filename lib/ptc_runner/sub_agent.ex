@@ -642,25 +642,7 @@ defmodule PtcRunner.SubAgent do
   defp validate_chain_keys!(%PtcRunner.Step{fail: fail}, _agent) when fail != nil, do: :ok
 
   defp validate_chain_keys!(%PtcRunner.Step{return: return}, %__MODULE__{signature: sig}) do
-    alias PtcRunner.SubAgent.PromptExpander
-
-    required_keys = PromptExpander.extract_signature_params(sig)
-
-    # Handle non-map return values (no keys available)
-    provided_keys =
-      case return do
-        map when is_map(map) -> map |> Map.keys() |> Enum.map(&to_string/1)
-        _ -> []
-      end
-
-    missing = required_keys -- provided_keys
-
-    if missing != [] do
-      raise ArgumentError,
-            "Chain mismatch: agent requires #{inspect(Enum.sort(missing))} but previous step doesn't output them"
-    end
-
-    :ok
+    do_validate_chain_keys!(return, sig)
   end
 
   # CompiledAgent validation
@@ -675,10 +657,16 @@ defmodule PtcRunner.SubAgent do
          %PtcRunner.Step{return: return},
          %PtcRunner.SubAgent.CompiledAgent{signature: sig}
        ) do
+    do_validate_chain_keys!(return, sig)
+  end
+
+  # Shared validation logic for both SubAgent and CompiledAgent
+  defp do_validate_chain_keys!(return, sig) do
     alias PtcRunner.SubAgent.PromptExpander
 
     required_keys = PromptExpander.extract_signature_params(sig)
 
+    # Handle non-map return values (no keys available)
     provided_keys =
       case return do
         map when is_map(map) -> map |> Map.keys() |> Enum.map(&to_string/1)
