@@ -305,13 +305,29 @@ defmodule PtcRunner.SubAgent.Loop do
       # Store turn type in state for downstream use
       state = Map.put(state, :current_turn_type, turn_type)
 
-      # Emit turn start event with turn type
-      Telemetry.emit([:turn, :start], %{}, %{
+      # Build telemetry metadata
+      telemetry_metadata = %{
         agent: agent,
         turn: state.turn,
         type: turn_type,
         tools_count: if(must_return_mode, do: 0, else: map_size(agent.tools))
-      })
+      }
+
+      # Add retry-specific metadata when in retry phase
+      telemetry_metadata =
+        if in_retry_phase do
+          attempt_num = agent.return_retries - state.retry_turns_remaining + 1
+
+          Map.merge(telemetry_metadata, %{
+            attempt: attempt_num,
+            remaining: state.retry_turns_remaining
+          })
+        else
+          telemetry_metadata
+        end
+
+      # Emit turn start event with turn type
+      Telemetry.emit([:turn, :start], %{}, telemetry_metadata)
 
       turn_start = System.monotonic_time()
 

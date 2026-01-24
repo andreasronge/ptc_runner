@@ -18,14 +18,14 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   def append_turn_info(message, agent, state) do
     # Use unified budget model if return_retries is configured
     if agent.return_retries > 0 do
-      append_unified_budget_info(message, state)
+      append_unified_budget_info(message, state, agent)
     else
       append_legacy_turn_info(message, agent, state)
     end
   end
 
   # Unified budget info with work/retry counters
-  defp append_unified_budget_info(message, state) do
+  defp append_unified_budget_info(message, state, agent) do
     work_left = state.work_turns_remaining
     retry_left = state.retry_turns_remaining
     next_turn = state.turn + 1
@@ -35,10 +35,14 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
       cond do
         # In retry phase
         in_retry_phase and retry_left == 1 ->
-          "\n\n⚠️ FINAL RETRY - you must call (return result) or (fail response) next."
+          attempt_num = agent.return_retries - retry_left + 1
+
+          "\n\n⚠️ FINAL RETRY (Retry #{attempt_num} of #{agent.return_retries}) - you must call (return result) or (fail response) next."
 
         in_retry_phase ->
-          "\n\nTurn #{next_turn}: RETRY MODE (#{retry_left} retries remaining)"
+          attempt_num = agent.return_retries - retry_left + 1
+
+          "\n\nTurn #{next_turn}: Retry #{attempt_num} of #{agent.return_retries} (#{retry_left} retries remaining)"
 
         # Last work turn - must return
         work_left == 1 ->
