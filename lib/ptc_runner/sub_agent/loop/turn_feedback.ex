@@ -74,9 +74,10 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
         # In retry phase - use retry_feedback template
         in_retry_phase ->
           attempt_num = agent.return_retries - retry_left + 1
+          is_final_retry = retry_left == 1
 
           context = %{
-            is_final_retry: retry_left == 1,
+            is_final_retry: is_final_retry,
             current_retry: attempt_num,
             total_retries: agent.return_retries,
             retries_remaining: retry_left,
@@ -84,7 +85,8 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
           }
 
           {:ok, rendered} = Mustache.render(@retry_feedback_template, context)
-          "\n\n⚠️ " <> rendered
+          emoji_prefix = if is_final_retry, do: "⚠️ ", else: ""
+          "\n\n" <> emoji_prefix <> rendered
 
         # Last work turn - use must_return_warning template
         work_left == 1 ->
