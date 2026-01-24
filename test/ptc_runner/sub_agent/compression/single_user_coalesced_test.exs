@@ -68,10 +68,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
           1,
           "raw",
           "(bad-code)",
-          %{message: "error"},
-          [],
-          [],
-          %{}
+          %{message: "error"}
         )
 
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([failed_turn], %{}, base_opts())
@@ -117,9 +114,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
           "raw",
           "(code)",
           :ok,
-          [],
-          [%{name: "search", args: %{q: "a"}, result: 1}],
-          %{}
+          %{tool_calls: [%{name: "search", args: %{q: "a"}, result: 1}]}
         )
 
       turn2 =
@@ -128,9 +123,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
           "raw",
           "(code)",
           :ok,
-          [],
-          [%{name: "fetch", args: %{url: "b"}, result: 2}],
-          %{}
+          %{tool_calls: [%{name: "fetch", args: %{url: "b"}, result: 2}]}
         )
 
       {[_system, user], _stats} =
@@ -152,8 +145,8 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
         base_opts()
         |> Keyword.put(:tools, %{"println" => make_tool("println", "(msg :string) -> :nil")})
 
-      turn1 = Turn.success(1, "raw", "(code)", :ok, ["line1"], [], %{})
-      turn2 = Turn.success(2, "raw", "(code)", :ok, ["line2", "line3"], [], %{})
+      turn1 = Turn.success(1, "raw", "(code)", :ok, %{prints: ["line1"]})
+      turn2 = Turn.success(2, "raw", "(code)", :ok, %{prints: ["line2", "line3"]})
 
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([turn1, turn2], %{}, opts)
 
@@ -164,7 +157,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "skips output section when no println tool" do
-      turn = Turn.success(1, "raw", "(code)", :ok, ["line1"], [], %{})
+      turn = Turn.success(1, "raw", "(code)", :ok, %{prints: ["line1"]})
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([turn], %{}, base_opts())
 
       refute String.contains?(user.content, ";; Output:")
@@ -172,7 +165,9 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
     test "excludes tool_calls from failed turns" do
       success =
-        Turn.success(1, "raw", "(code)", :ok, [], [%{name: "good", args: %{}, result: 1}], %{})
+        Turn.success(1, "raw", "(code)", :ok, %{
+          tool_calls: [%{name: "good", args: %{}, result: 1}]
+        })
 
       failure =
         Turn.failure(
@@ -180,9 +175,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
           "raw",
           "(bad)",
           %{message: "err"},
-          [],
-          [%{name: "bad", args: %{}, result: 2}],
-          %{}
+          %{tool_calls: [%{name: "bad", args: %{}, result: 2}]}
         )
 
       {[_system, user], _stats} =
@@ -195,7 +188,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
   describe "error conditional display (ERR-001 to ERR-005)" do
     test "shows error when last turn failed (ERR-002)" do
-      failed = Turn.failure(1, "raw", "(/ 1 0)", %{message: "division by zero"}, [], [], %{})
+      failed = Turn.failure(1, "raw", "(/ 1 0)", %{message: "division by zero"})
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([failed], %{}, base_opts())
 
       assert String.contains?(user.content, "Your previous attempt:")
@@ -204,8 +197,8 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "collapses errors when recovered (ERR-003)" do
-      failed = Turn.failure(1, "raw", "(bad)", %{message: "error"}, [], [], %{})
-      success = Turn.success(2, "raw", "(good)", :ok, [], [], %{})
+      failed = Turn.failure(1, "raw", "(bad)", %{message: "error"})
+      success = Turn.success(2, "raw", "(good)", :ok)
 
       {[_system, user], _stats} =
         SingleUserCoalesced.to_messages([failed, success], %{}, base_opts())
@@ -215,8 +208,8 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "shows only most recent error when multiple failures" do
-      fail1 = Turn.failure(1, "raw", "(first-bad)", %{message: "first error"}, [], [], %{})
-      fail2 = Turn.failure(2, "raw", "(second-bad)", %{message: "second error"}, [], [], %{})
+      fail1 = Turn.failure(1, "raw", "(first-bad)", %{message: "first error"})
+      fail2 = Turn.failure(2, "raw", "(second-bad)", %{message: "second error"})
 
       {[_system, user], _stats} =
         SingleUserCoalesced.to_messages([fail1, fail2], %{}, base_opts())
@@ -229,9 +222,11 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
     test "preserves successful turn data after failed turns (ERR-005)" do
       success =
-        Turn.success(1, "raw", "(code)", :ok, [], [%{name: "tool1", args: %{}, result: 1}], %{})
+        Turn.success(1, "raw", "(code)", :ok, %{
+          tool_calls: [%{name: "tool1", args: %{}, result: 1}]
+        })
 
-      failed = Turn.failure(2, "raw", "(bad)", %{message: "error"}, [], [], %{})
+      failed = Turn.failure(2, "raw", "(bad)", %{message: "error"})
 
       {[_system, user], _stats} =
         SingleUserCoalesced.to_messages([success, failed], %{}, base_opts())
@@ -243,21 +238,21 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "handles error with only reason" do
-      failed = Turn.failure(1, "raw", "(bad)", %{reason: :timeout}, [], [], %{})
+      failed = Turn.failure(1, "raw", "(bad)", %{reason: :timeout})
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([failed], %{}, base_opts())
 
       assert String.contains?(user.content, "Error: timeout")
     end
 
     test "handles string error" do
-      failed = Turn.failure(1, "raw", "(bad)", "plain string error", [], [], %{})
+      failed = Turn.failure(1, "raw", "(bad)", "plain string error")
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([failed], %{}, base_opts())
 
       assert String.contains?(user.content, "Error: plain string error")
     end
 
     test "handles nil program in error display" do
-      failed = Turn.failure(1, "raw", nil, %{message: "parse error"}, [], [], %{})
+      failed = Turn.failure(1, "raw", nil, %{message: "parse error"})
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([failed], %{}, base_opts())
 
       assert String.contains?(user.content, "(unknown program)")
@@ -294,7 +289,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
   describe "FIFO limits (API-004, API-005)" do
     test "respects tool_call_limit" do
       tool_calls = for i <- 1..25, do: %{name: "tool#{i}", args: %{}, result: i}
-      turn = Turn.success(1, "raw", "(code)", :ok, [], tool_calls, %{})
+      turn = Turn.success(1, "raw", "(code)", :ok, %{tool_calls: tool_calls})
 
       opts = Keyword.put(base_opts(), :tool_call_limit, 5)
       {[_system, user], _stats} = SingleUserCoalesced.to_messages([turn], %{}, opts)
@@ -308,7 +303,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
     test "respects println_limit" do
       prints = for i <- 1..20, do: "line#{i}"
-      turn = Turn.success(1, "raw", "(code)", :ok, prints, [], %{})
+      turn = Turn.success(1, "raw", "(code)", :ok, %{prints: prints})
 
       opts =
         base_opts()
@@ -382,7 +377,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
   describe "compression stats accuracy" do
     test "reports dropped tool calls correctly" do
       tool_calls = for i <- 1..10, do: %{name: "t#{i}", args: %{}, result: "ok"}
-      turn = Turn.success(1, "raw", "(code)", :ok, [], tool_calls, %{})
+      turn = Turn.success(1, "raw", "(code)", :ok, %{tool_calls: tool_calls})
       opts = Keyword.put(base_opts(), :tool_call_limit, 5)
 
       {_messages, stats} = SingleUserCoalesced.to_messages([turn], %{}, opts)
@@ -394,7 +389,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
     test "reports dropped printlns correctly" do
       prints = for i <- 1..20, do: "line#{i}"
-      turn = Turn.success(1, "raw", "(code)", :ok, prints, [], %{})
+      turn = Turn.success(1, "raw", "(code)", :ok, %{prints: prints})
       opts = Keyword.put(base_opts(), :println_limit, 8)
 
       {_messages, stats} = SingleUserCoalesced.to_messages([turn], %{}, opts)
@@ -405,8 +400,8 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "reports collapsed error turns when multiple failures" do
-      fail1 = Turn.failure(1, "raw", "(bad1)", %{message: "err1"}, [], [], %{})
-      fail2 = Turn.failure(2, "raw", "(bad2)", %{message: "err2"}, [], [], %{})
+      fail1 = Turn.failure(1, "raw", "(bad1)", %{message: "err1"})
+      fail2 = Turn.failure(2, "raw", "(bad2)", %{message: "err2"})
 
       {_messages, stats} = SingleUserCoalesced.to_messages([fail1, fail2], %{}, base_opts())
 
@@ -415,9 +410,9 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "reports all errors collapsed when recovered" do
-      fail1 = Turn.failure(1, "raw", "(bad1)", %{message: "err1"}, [], [], %{})
-      fail2 = Turn.failure(2, "raw", "(bad2)", %{message: "err2"}, [], [], %{})
-      success = Turn.success(3, "raw", "(good)", :ok, [], [], %{})
+      fail1 = Turn.failure(1, "raw", "(bad1)", %{message: "err1"})
+      fail2 = Turn.failure(2, "raw", "(bad2)", %{message: "err2"})
+      success = Turn.success(3, "raw", "(good)", :ok)
 
       {_messages, stats} =
         SingleUserCoalesced.to_messages([fail1, fail2, success], %{}, base_opts())
@@ -427,8 +422,8 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     end
 
     test "reports zero collapsed errors when no failures" do
-      turn1 = Turn.success(1, "raw", "(code)", :ok, [], [], %{})
-      turn2 = Turn.success(2, "raw", "(code)", :ok, [], [], %{})
+      turn1 = Turn.success(1, "raw", "(code)", :ok)
+      turn2 = Turn.success(2, "raw", "(code)", :ok)
 
       {_messages, stats} = SingleUserCoalesced.to_messages([turn1, turn2], %{}, base_opts())
 
@@ -438,7 +433,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
     test "reports turns_compressed count" do
       turns =
         for i <- 1..5 do
-          Turn.success(i, "raw", "(code)", :ok, [], [], %{})
+          Turn.success(i, "raw", "(code)", :ok)
         end
 
       {_messages, stats} = SingleUserCoalesced.to_messages(turns, %{}, base_opts())
@@ -453,9 +448,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
           "raw",
           "(code)",
           :ok,
-          ["print1"],
-          [%{name: "t1", args: %{}, result: 1}],
-          %{}
+          %{prints: ["print1"], tool_calls: [%{name: "t1", args: %{}, result: 1}]}
         )
 
       failure =
@@ -464,9 +457,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
           "raw",
           "(bad)",
           %{message: "err"},
-          ["print2"],
-          [%{name: "t2", args: %{}, result: 2}],
-          %{}
+          %{prints: ["print2"], tool_calls: [%{name: "t2", args: %{}, result: 2}]}
         )
 
       {_messages, stats} = SingleUserCoalesced.to_messages([success, failure], %{}, base_opts())

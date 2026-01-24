@@ -5,9 +5,9 @@ defmodule PtcRunner.TurnTest do
 
   doctest PtcRunner.Turn
 
-  describe "Turn.success/7" do
+  describe "Turn.success/5" do
     test "creates turn with success? set to true" do
-      turn = Turn.success(1, "raw", "(+ 1 2)", 3, [], [], %{})
+      turn = Turn.success(1, "raw", "(+ 1 2)", 3)
 
       assert turn.success? == true
     end
@@ -22,9 +22,7 @@ defmodule PtcRunner.TurnTest do
           "```ptc-lisp\n(+ x y)\n```",
           "(+ x y)",
           30,
-          ["hello", "world"],
-          tool_calls,
-          memory
+          %{prints: ["hello", "world"], tool_calls: tool_calls, memory: memory}
         )
 
       assert turn.number == 3
@@ -38,17 +36,26 @@ defmodule PtcRunner.TurnTest do
     end
 
     test "allows nil program for parse failures in success context" do
-      turn = Turn.success(1, "raw", nil, nil, [], [], %{})
+      turn = Turn.success(1, "raw", nil, nil)
 
       assert turn.program == nil
       assert turn.success? == true
     end
+
+    test "uses default values when params not provided" do
+      turn = Turn.success(1, "raw", "(+ 1 2)", 3)
+
+      assert turn.prints == []
+      assert turn.tool_calls == []
+      assert turn.memory == %{}
+      assert turn.messages == nil
+    end
   end
 
-  describe "Turn.failure/7" do
+  describe "Turn.failure/5" do
     test "creates turn with success? set to false" do
       error = %{reason: :timeout, message: "Execution timed out"}
-      turn = Turn.failure(1, "raw", "(infinite-loop)", error, [], [], %{})
+      turn = Turn.failure(1, "raw", "(infinite-loop)", error)
 
       assert turn.success? == false
     end
@@ -64,9 +71,7 @@ defmodule PtcRunner.TurnTest do
           "Let me divide by zero",
           "(/ 100 divisor)",
           error,
-          ["debug: divisor is 0"],
-          tool_calls,
-          memory
+          %{prints: ["debug: divisor is 0"], tool_calls: tool_calls, memory: memory}
         )
 
       assert turn.number == 2
@@ -81,17 +86,27 @@ defmodule PtcRunner.TurnTest do
 
     test "allows nil program for parse failures" do
       error = %{reason: :parse_error, message: "Invalid syntax"}
-      turn = Turn.failure(1, "invalid code", nil, error, [], [], %{})
+      turn = Turn.failure(1, "invalid code", nil, error)
 
       assert turn.program == nil
       assert turn.result == error
       assert turn.success? == false
     end
+
+    test "uses default values when params not provided" do
+      error = %{reason: :timeout, message: "timeout"}
+      turn = Turn.failure(1, "raw", "(bad)", error)
+
+      assert turn.prints == []
+      assert turn.tool_calls == []
+      assert turn.memory == %{}
+      assert turn.messages == nil
+    end
   end
 
   describe "struct immutability" do
     test "all fields are accessible via dot notation" do
-      turn = Turn.success(1, "raw", "program", :result, ["print"], [], %{a: 1})
+      turn = Turn.success(1, "raw", "program", :result, %{prints: ["print"], memory: %{a: 1}})
 
       assert turn.number == 1
       assert turn.raw_response == "raw"
@@ -104,7 +119,7 @@ defmodule PtcRunner.TurnTest do
     end
 
     test "supports pattern matching" do
-      turn = Turn.success(5, "response", "(return 42)", 42, [], [], %{})
+      turn = Turn.success(5, "response", "(return 42)", 42)
 
       assert %Turn{number: n, result: r, success?: s} = turn
       assert n == 5
@@ -113,7 +128,7 @@ defmodule PtcRunner.TurnTest do
     end
 
     test "pattern match on failure" do
-      turn = Turn.failure(1, "resp", nil, :error, [], [], %{})
+      turn = Turn.failure(1, "resp", nil, :error)
 
       assert %Turn{success?: false, result: :error} = turn
     end

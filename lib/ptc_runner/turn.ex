@@ -19,7 +19,7 @@ defmodule PtcRunner.Turn do
 
   ## Constructors
 
-  Use `success/7` or `failure/7` to create turns - don't construct the struct directly.
+  Use `success/5` or `failure/5` to create turns - don't construct the struct directly.
   The constructors ensure `success?` is set correctly.
   """
 
@@ -80,9 +80,21 @@ defmodule PtcRunner.Turn do
   @doc """
   Creates a successful turn.
 
+  ## Parameters
+
+  - `number` - Turn sequence number (1-indexed)
+  - `raw_response` - Full LLM output including reasoning
+  - `program` - Parsed PTC-Lisp program, or nil if parsing failed
+  - `result` - Execution result value
+  - `params` - Optional map with:
+    - `:prints` - Captured println output (default: [])
+    - `:tool_calls` - Tool invocations made during this turn (default: [])
+    - `:memory` - Accumulated definitions after this turn (default: %{})
+    - `:messages` - Messages sent to the LLM for this turn (default: nil)
+
   ## Examples
 
-      iex> turn = PtcRunner.Turn.success(1, "```ptc-lisp\\n(+ 1 2)\\n```", "(+ 1 2)", 3, [], [], %{})
+      iex> turn = PtcRunner.Turn.success(1, "```ptc-lisp\\n(+ 1 2)\\n```", "(+ 1 2)", 3)
       iex> turn.success?
       true
       iex> turn.number
@@ -90,28 +102,25 @@ defmodule PtcRunner.Turn do
       iex> turn.result
       3
 
+      iex> turn = PtcRunner.Turn.success(2, "raw", "(+ x y)", 30, %{prints: ["hello"], memory: %{x: 10}})
+      iex> turn.prints
+      ["hello"]
+      iex> turn.memory
+      %{x: 10}
+
   """
-  @spec success(
-          pos_integer(),
-          String.t(),
-          String.t() | nil,
-          term(),
-          [String.t()],
-          [tool_call()],
-          map(),
-          [message()] | nil
-        ) :: t()
-  def success(number, raw_response, program, result, prints, tool_calls, memory, messages \\ nil) do
+  @spec success(pos_integer(), String.t(), String.t() | nil, term(), map()) :: t()
+  def success(number, raw_response, program, result, params \\ %{}) do
     %__MODULE__{
       number: number,
       raw_response: raw_response,
       program: program,
       result: result,
-      prints: prints,
-      tool_calls: tool_calls,
-      memory: memory,
+      prints: Map.get(params, :prints, []),
+      tool_calls: Map.get(params, :tool_calls, []),
+      memory: Map.get(params, :memory, %{}),
       success?: true,
-      messages: messages
+      messages: Map.get(params, :messages)
     }
   end
 
@@ -120,9 +129,21 @@ defmodule PtcRunner.Turn do
 
   The `error` parameter contains error information (typically a map with `:reason` and `:message`).
 
+  ## Parameters
+
+  - `number` - Turn sequence number (1-indexed)
+  - `raw_response` - Full LLM output including reasoning
+  - `program` - Parsed PTC-Lisp program, or nil if parsing failed
+  - `error` - Error information (typically a map with `:reason` and `:message`)
+  - `params` - Optional map with:
+    - `:prints` - Captured println output (default: [])
+    - `:tool_calls` - Tool invocations made during this turn (default: [])
+    - `:memory` - Memory state after this turn (default: %{})
+    - `:messages` - Messages sent to the LLM for this turn (default: nil)
+
   ## Examples
 
-      iex> turn = PtcRunner.Turn.failure(2, "```ptc-lisp\\n(/ 1 0)\\n```", "(/ 1 0)", %{reason: :eval_error, message: "division by zero"}, [], [], %{x: 10})
+      iex> turn = PtcRunner.Turn.failure(2, "```ptc-lisp\\n(/ 1 0)\\n```", "(/ 1 0)", %{reason: :eval_error, message: "division by zero"}, %{memory: %{x: 10}})
       iex> turn.success?
       false
       iex> turn.result
@@ -131,27 +152,18 @@ defmodule PtcRunner.Turn do
       %{x: 10}
 
   """
-  @spec failure(
-          pos_integer(),
-          String.t(),
-          String.t() | nil,
-          term(),
-          [String.t()],
-          [tool_call()],
-          map(),
-          [message()] | nil
-        ) :: t()
-  def failure(number, raw_response, program, error, prints, tool_calls, memory, messages \\ nil) do
+  @spec failure(pos_integer(), String.t(), String.t() | nil, term(), map()) :: t()
+  def failure(number, raw_response, program, error, params \\ %{}) do
     %__MODULE__{
       number: number,
       raw_response: raw_response,
       program: program,
       result: error,
-      prints: prints,
-      tool_calls: tool_calls,
-      memory: memory,
+      prints: Map.get(params, :prints, []),
+      tool_calls: Map.get(params, :tool_calls, []),
+      memory: Map.get(params, :memory, %{}),
       success?: false,
-      messages: messages
+      messages: Map.get(params, :messages)
     }
   end
 end
