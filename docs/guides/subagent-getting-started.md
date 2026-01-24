@@ -152,7 +152,7 @@ The `return_retries` option uses a **unified budget model** alongside `max_turns
 
 This separation lets agents safely explore solutions during work turns, then recover from validation errors during retry turns without consuming the main work budget.
 
-> **Note:** `return_retries` only applies to multi-turn agents with signatures. Single-shot agents (max_turns: 1) don't benefit from retries since there's no recovery loop. Use signatures to enable validation in your return statement.
+> **Note:** Single-shot agents with `return_retries > 0` use compression to collapse previous failed attempts, preventing context window inflation during retries. For multi-turn agents with signatures, use signatures to enable validation in your return statement.
 
 ## Debugging Execution
 

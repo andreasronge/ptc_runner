@@ -54,8 +54,10 @@ These guessed type names **do not exist**:
 |---------|---------------------|
 | `:list` | `[:type]` - e.g., `[:int]`, `[:string]`, `[:any]` |
 | `:array` | `[:type]` - same as above |
-| `:tuple` | `{field :type}` - maps with typed fields |
+| `:tuple` | No direct equivalent - use `{field :type}` maps with named fields |
 | `:object` | `{field :type}` or `:map` |
+
+> **Note:** PTC-Lisp signatures don't have true tuples (ordered, position-based). Use maps with named fields instead, which provide better self-documentation and validation.
 
 Example fix:
 ```elixir
