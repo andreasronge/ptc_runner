@@ -102,22 +102,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       |> String.to_atom()
 
     file_content = File.read!(path)
-
-    {header, content} =
-      case String.split(file_content, "<!-- PTC_PROMPT_START -->") do
-        [before, after_start] ->
-          trimmed_content =
-            case String.split(after_start, "<!-- PTC_PROMPT_END -->") do
-              [prompt_text, _after_end] -> String.trim(prompt_text)
-              _ -> String.trim(after_start)
-            end
-
-          {before, trimmed_content}
-
-        _ ->
-          {file_content, String.trim(file_content)}
-      end
-
+    {header, content} = PtcRunner.PromptLoader.extract_with_header(file_content)
     metadata = @parse_metadata.(header)
 
     {key, %{content: content, metadata: metadata, archived: archived}}

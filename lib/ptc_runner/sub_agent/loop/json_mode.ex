@@ -44,31 +44,17 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   @external_resource @json_user_file
   @external_resource @json_error_file
 
-  # Extract content between PTC_PROMPT_START and PTC_PROMPT_END markers
-  @extract_prompt_content fn file_content ->
-    case String.split(file_content, "<!-- PTC_PROMPT_START -->") do
-      [_before, after_start] ->
-        case String.split(after_start, "<!-- PTC_PROMPT_END -->") do
-          [prompt_text, _after_end] -> String.trim(prompt_text)
-          _ -> String.trim(after_start)
-        end
-
-      _ ->
-        String.trim(file_content)
-    end
-  end
-
   @json_system_prompt @json_system_file
                       |> File.read!()
-                      |> @extract_prompt_content.()
+                      |> PtcRunner.PromptLoader.extract_content()
 
   @json_user_template @json_user_file
                       |> File.read!()
-                      |> @extract_prompt_content.()
+                      |> PtcRunner.PromptLoader.extract_content()
 
   @json_error_template @json_error_file
                        |> File.read!()
-                       |> @extract_prompt_content.()
+                       |> PtcRunner.PromptLoader.extract_content()
 
   @doc """
   Generate a preview of the JSON mode prompts.

@@ -22,29 +22,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   @external_resource @must_return_warning_path
   @external_resource @retry_feedback_path
 
-  # Extract content between PTC_PROMPT_START and PTC_PROMPT_END markers
-  @extract_prompt_content fn file_content ->
-    case String.split(file_content, "<!-- PTC_PROMPT_START -->") do
-      [_before, after_start] ->
-        case String.split(after_start, "<!-- PTC_PROMPT_END -->") do
-          [prompt_text, _after_end] -> String.trim(prompt_text)
-          _ -> String.trim(after_start)
-        end
+  @must_return_warning_template @must_return_warning_path
+                                |> File.read!()
+                                |> PtcRunner.PromptLoader.extract_content()
 
-      _ ->
-        String.trim(file_content)
-    end
-  end
-
-  @must_return_warning_template (fn ->
-                                   content = File.read!(@must_return_warning_path)
-                                   @extract_prompt_content.(content)
-                                 end).()
-
-  @retry_feedback_template (fn ->
-                              content = File.read!(@retry_feedback_path)
-                              @extract_prompt_content.(content)
-                            end).()
+  @retry_feedback_template @retry_feedback_path
+                           |> File.read!()
+                           |> PtcRunner.PromptLoader.extract_content()
 
   @doc """
   Append turn progress info to a feedback message.
