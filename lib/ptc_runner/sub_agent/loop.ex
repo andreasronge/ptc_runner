@@ -824,8 +824,9 @@ defmodule PtcRunner.SubAgent.Loop do
     # Use compressed messages if:
     # 1. Compression strategy is enabled (not nil)
     # 2. We're past turn 1 (have history to compress)
-    # 3. Not in single-shot mode (SS-001: max_turns == 1 skips compression)
-    if strategy && state.turn > 1 && agent.max_turns > 1 do
+    # 3. Not in single-shot mode without retries (SS-001: max_turns == 1 skips compression)
+    #    BUT: single-shot with return_retries > 0 DOES use compression for context collapsing
+    if strategy && state.turn > 1 && (agent.max_turns > 1 or agent.return_retries > 0) do
       build_compressed_messages(agent, state, system_prompt, strategy, opts)
     else
       # Uncompressed mode - use accumulated messages as-is, no compression stats
@@ -850,7 +851,9 @@ defmodule PtcRunner.SubAgent.Loop do
       |> Map.new()
 
     # Calculate turns left for the indicator
-    turns_left = agent.max_turns - state.turn
+    # In retry phase (work_turns_remaining <= 0), we're always on final turn (turns_left = 0)
+    # This handles single-shot with return_retries where turn > max_turns
+    turns_left = max(0, state.work_turns_remaining - 1)
 
     # Build compression options with context
     compression_opts =
