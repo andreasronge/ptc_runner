@@ -283,7 +283,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
   describe "Debug.print_trace/2 with turns" do
     test "prints trace for successful execution" do
       turns = [
-        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3)
       ]
 
       step = %Step{
@@ -335,10 +335,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
           1,
           "Some reasoning here\n\n```clojure\n(+ 1 2)\n```",
           "(+ 1 2)",
-          3,
-          [],
-          [],
-          %{}
+          3
         )
       ]
 
@@ -369,10 +366,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
           1,
           "Some reasoning here\n\n```clojure\n(+ 1 2)\n```",
           "(+ 1 2)",
-          3,
-          [],
-          [],
-          %{}
+          3
         )
       ]
 
@@ -392,7 +386,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
     test "view: :compressed shows compressed format" do
       turns = [
-        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3)
       ]
 
       step = %Step{
@@ -459,7 +453,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
     test "usage: true shows token stats" do
       turns = [
-        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3)
       ]
 
       step = %Step{
@@ -485,8 +479,8 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
     test "usage: true shows memory and system prompt ratio" do
       turns = [
-        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{}),
-        Turn.success(2, "```clojure\n(+ 3 4)\n```", "(+ 3 4)", 7, [], [], %{})
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3),
+        Turn.success(2, "```clojure\n(+ 3 4)\n```", "(+ 3 4)", 7)
       ]
 
       step = %Step{
@@ -523,7 +517,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
       long_program = String.duplicate("(+ 1 2) ", 50)
 
       turns = [
-        Turn.success(1, "```clojure\n#{long_program}\n```", long_program, 3, [], [], %{})
+        Turn.success(1, "```clojure\n#{long_program}\n```", long_program, 3)
       ]
 
       step = %Step{
@@ -548,7 +542,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 10},
         fail: nil,
         memory: %{},
-        turns: [Turn.success(1, "(+ 5 5)", "(+ 5 5)", 10, [], [], %{})],
+        turns: [Turn.success(1, "(+ 5 5)", "(+ 5 5)", 10)],
         usage: %{duration_ms: 50, memory_bytes: 0}
       }
 
@@ -556,7 +550,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
         return: %{value: 20},
         fail: nil,
         memory: %{},
-        turns: [Turn.success(1, "(* data/value 2)", "(* data/value 2)", 20, [], [], %{})],
+        turns: [Turn.success(1, "(* data/value 2)", "(* data/value 2)", 20)],
         usage: %{duration_ms: 75, memory_bytes: 0}
       }
 
@@ -736,21 +730,19 @@ defmodule PtcRunner.SubAgent.DebugTest do
           "```clojure\n(tool/search \"foo\")\n```",
           "(tool/search \"foo\")",
           %{},
-          [],
-          [%{name: "search", args: %{query: "foo"}, result: ["result1"]}],
-          %{}
+          %{tool_calls: [%{name: "search", args: %{query: "foo"}, result: ["result1"]}]}
         ),
         Turn.success(
           2,
           "```clojure\n(tool/search \"bar\")\n```",
           "(tool/search \"bar\")",
           %{},
-          [],
-          [
-            %{name: "search", args: %{query: "bar"}, result: ["result2"]},
-            %{name: "fetch", args: %{url: "http://example.com"}, result: "html"}
-          ],
-          %{}
+          %{
+            tool_calls: [
+              %{name: "search", args: %{query: "bar"}, result: ["result2"]},
+              %{name: "fetch", args: %{url: "http://example.com"}, result: "html"}
+            ]
+          }
         )
       ]
 
@@ -784,9 +776,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
           "...",
           "...",
           %{},
-          [],
-          [%{name: "process", args: %{query: "test", limit: 10}, result: "ok"}],
-          %{}
+          %{tool_calls: [%{name: "process", args: %{query: "test", limit: 10}, result: "ok"}]}
         )
       ]
 
@@ -810,7 +800,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
     test "usage: true does not show tool section when no tools called" do
       turns = [
-        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3, [], [], %{})
+        Turn.success(1, "```clojure\n(+ 1 2)\n```", "(+ 1 2)", 3)
       ]
 
       step = %Step{
