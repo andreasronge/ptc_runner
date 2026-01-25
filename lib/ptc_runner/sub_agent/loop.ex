@@ -384,7 +384,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
           # Emit turn stop event (only for completed turns, not continuation)
           # Extract program from the last turn in the result
-          program = extract_program_from_result(result)
+          program = Metrics.extract_program_from_result(result)
 
           Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start,
             program: program
@@ -1075,21 +1075,4 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
     |> Map.new()
   end
-
-  # ============================================================
-  # Telemetry Helpers
-  # ============================================================
-
-  # Extract program from the last turn in a result
-  # The result is {:ok, step} or {:error, step} for final results
-  # For continuation results (loop), this returns nil
-  # Note: step.turns is in chronological order (first turn first, last turn last)
-  defp extract_program_from_result({_status, step}) when is_struct(step, Step) do
-    case step.turns do
-      turns when is_list(turns) and turns != [] -> List.last(turns).program
-      _ -> nil
-    end
-  end
-
-  defp extract_program_from_result(_), do: nil
 end

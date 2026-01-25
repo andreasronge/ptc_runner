@@ -180,7 +180,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
           # Emit turn stop event
           # JSON mode doesn't have a program (uses nil), but we get it from the result anyway
-          program = extract_program_from_result(result)
+          program = Metrics.extract_program_from_result(result)
 
           Metrics.emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start,
             program: program
@@ -722,15 +722,4 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp add_schema_metrics(usage, nil) do
     Map.put(usage, :schema_used, false)
   end
-
-  # Extract program from the last turn in a result (always nil for JSON mode)
-  # Note: step.turns is in chronological order (first turn first, last turn last)
-  defp extract_program_from_result({_status, step}) when is_struct(step, Step) do
-    case step.turns do
-      turns when is_list(turns) and turns != [] -> List.last(turns).program
-      _ -> nil
-    end
-  end
-
-  defp extract_program_from_result(_), do: nil
 end

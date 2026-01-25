@@ -10,7 +10,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Trace filtering based on execution result
   """
 
-  alias PtcRunner.SubAgent
+  alias PtcRunner.{Step, SubAgent}
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
   alias PtcRunner.Turn
 
@@ -293,4 +293,34 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       Turn.failure(state.turn, raw_response, program, result, params)
     end
   end
+
+  @doc """
+  Extract program from the last turn in a result.
+
+  The result is `{:ok, step}` or `{:error, step}` for final results.
+  For continuation results (loop), this returns `nil`.
+
+  Note: `step.turns` is in chronological order (first turn first, last turn last).
+
+  ## Examples
+
+      iex> step = %PtcRunner.Step{turns: [%{program: "code"}]}
+      iex> PtcRunner.SubAgent.Loop.Metrics.extract_program_from_result({:ok, step})
+      "code"
+
+      iex> PtcRunner.SubAgent.Loop.Metrics.extract_program_from_result({:ok, %PtcRunner.Step{turns: []}})
+      nil
+
+      iex> PtcRunner.SubAgent.Loop.Metrics.extract_program_from_result({:error, :invalid})
+      nil
+  """
+  @spec extract_program_from_result(tuple()) :: String.t() | nil
+  def extract_program_from_result({_status, step}) when is_struct(step, Step) do
+    case step.turns do
+      turns when is_list(turns) and turns != [] -> List.last(turns).program
+      _ -> nil
+    end
+  end
+
+  def extract_program_from_result(_), do: nil
 end
