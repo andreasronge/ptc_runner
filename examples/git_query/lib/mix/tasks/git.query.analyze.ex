@@ -114,7 +114,7 @@ defmodule Mix.Tasks.Git.Query.Analyze do
     Mix.shell().info("  Status:     #{summary.status || "N/A"}")
 
     if summary.tokens do
-      Mix.shell().info("  Tokens:     #{summary.tokens["input"]} in / #{summary.tokens["output"]} out")
+      Mix.shell().info("  Tokens:     #{summary.tokens.input} in / #{summary.tokens.output} out")
     end
   end
 
