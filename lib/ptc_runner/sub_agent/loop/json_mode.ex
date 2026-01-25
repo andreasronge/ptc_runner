@@ -135,6 +135,9 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
       build_termination_error(:mission_timeout, "Mission timeout exceeded", state)
     else
+      # JSON mode always uses :normal turn type (no must_return/retry phases)
+      state = Map.put(state, :current_turn_type, :normal)
+
       # Emit turn start event
       Telemetry.emit([:turn, :start], %{}, %{agent: agent, turn: state.turn})
       turn_start = System.monotonic_time()
@@ -176,7 +179,13 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
           result = handle_json_response(content, agent, llm, state_with_tokens)
 
           # Emit turn stop event
-          Metrics.emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start)
+          # JSON mode doesn't have a program (uses nil), but we get it from the result anyway
+          program = Metrics.extract_program_from_result(result)
+
+          Metrics.emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start,
+            program: program
+          )
+
           result
 
         {:error, reason} ->
