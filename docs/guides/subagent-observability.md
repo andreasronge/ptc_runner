@@ -96,6 +96,66 @@ Full turn history is always preserved in `step.turns` regardless of compression.
 
 > **Full guide:** See [Message Compression](subagent-compression.md) for details on how compression works and implementing custom strategies.
 
+## TraceLog
+
+For detailed offline analysis, use `TraceLog` to capture execution events to JSONL files:
+
+```elixir
+alias PtcRunner.TraceLog
+
+# Capture a trace (recommended)
+{:ok, step, trace_path} = TraceLog.with_trace(fn ->
+  SubAgent.run(agent, llm: my_llm())
+end)
+
+# With custom path and metadata
+{:ok, step, path} = TraceLog.with_trace(
+  fn -> SubAgent.run(agent, llm: my_llm()) end,
+  path: "traces/debug.jsonl",
+  meta: %{query: "test query", preset: "simple"}
+)
+```
+
+### Analyzing Traces
+
+Use `TraceLog.Analyzer` to inspect captured traces:
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+# Load and summarize
+events = Analyzer.load(trace_path)
+summary = Analyzer.summary(events)
+# => %{duration_ms: 1234, turns: 3, llm_calls: 3, tool_calls: 5, tokens: %{...}}
+
+# Find slowest operations
+Analyzer.slowest(events, 5)
+
+# Filter by event type
+Analyzer.filter(events, type: "llm")
+Analyzer.filter(events, min_duration_ms: 100)
+
+# Print timeline
+Analyzer.print_timeline(events)
+# [0ms] run.start
+# [10ms] turn.start
+# [15ms] llm.start
+# [850ms] llm.stop (835ms)
+# ...
+```
+
+### Use Cases
+
+- **Debugging** - Understand what happened during agent execution
+- **Performance analysis** - Identify slow LLM calls or bottlenecks
+- **Comparison** - Compare traces across different configurations or models
+
+### Known Limitations
+
+Tool telemetry events (`tool.start`, `tool.stop`) are not captured because tool execution runs inside a sandboxed process. The main events (`run`, `turn`, `llm`) are captured correctly.
+
+> **Full API:** See `PtcRunner.TraceLog.with_trace/2` and `PtcRunner.TraceLog.Analyzer.summary/1`.
+
 ## Telemetry Events
 
 SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetry, or custom handlers:
@@ -141,5 +201,7 @@ System.convert_time_unit(duration, :native, :millisecond)
 - [Message Compression](subagent-compression.md) - Reduce token usage in multi-turn agents
 - [Troubleshooting](subagent-troubleshooting.md) - Common issues and debugging
 - [Testing](subagent-testing.md) - Mock LLMs and test strategies
+- `PtcRunner.TraceLog.with_trace/2` - Capture execution traces to JSONL files
+- `PtcRunner.TraceLog.Analyzer.summary/1` - Offline trace analysis
 - `PtcRunner.SubAgent.Telemetry.span/3` - Telemetry module with event reference
 - `PtcRunner.SubAgent.Debug.print_trace/2` - Trace inspection API
