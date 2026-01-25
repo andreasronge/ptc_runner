@@ -381,8 +381,15 @@ defmodule PtcRunner.SubAgent.Loop do
             |> maybe_add_system_prompt_tokens(llm_input.system)
 
           result = handle_llm_response(content, agent, llm, state_with_metadata)
+
           # Emit turn stop event (only for completed turns, not continuation)
-          Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start)
+          # Extract program from the last turn in the result
+          program = extract_program_from_result(result)
+
+          Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start,
+            program: program
+          )
+
           result
 
         {:error, reason} ->
@@ -401,13 +408,16 @@ defmodule PtcRunner.SubAgent.Loop do
               tools: state.normalized_tools
           }
 
-          # Emit turn stop on error
+          # Emit turn stop on error (LLM call failed, so no program or result)
           turn_duration = System.monotonic_time() - turn_start
+          turn_type = Map.get(state, :current_turn_type, :normal)
 
           Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
             agent: agent,
             turn: state.turn,
-            program: nil
+            program: nil,
+            result_preview: nil,
+            type: turn_type
           })
 
           {:error, step_with_metrics}
@@ -1065,4 +1075,21 @@ defmodule PtcRunner.SubAgent.Loop do
     end)
     |> Map.new()
   end
+
+  # ============================================================
+  # Telemetry Helpers
+  # ============================================================
+
+  # Extract program from the last turn in a result
+  # The result is {:ok, step} or {:error, step} for final results
+  # For continuation results (loop), this returns nil
+  # Note: step.turns is in chronological order (first turn first, last turn last)
+  defp extract_program_from_result({_status, step}) when is_struct(step, Step) do
+    case step.turns do
+      turns when is_list(turns) and turns != [] -> List.last(turns).program
+      _ -> nil
+    end
+  end
+
+  defp extract_program_from_result(_), do: nil
 end

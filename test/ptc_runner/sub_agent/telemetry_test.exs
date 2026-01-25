@@ -110,14 +110,10 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
   end
 
   describe "turn events" do
-    test "emits :turn :start and :stop events for each turn", %{table: table} do
-      turn_counter = :counters.new(1, [:atomics])
-
+    test "emits :turn :start for each turn, :stop only for final turn", %{table: table} do
       agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 5)
 
       llm = fn %{turn: turn} ->
-        :counters.put(turn_counter, 1, turn)
-
         case turn do
           1 -> {:ok, "(+ 1 2)"}
           2 -> {:ok, ~S|(return {:value 42})|}
@@ -130,17 +126,25 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       turn_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :start])
       turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
 
+      # Start events for each turn
       assert length(turn_starts) == 2
-      assert length(turn_stops) == 2
+
+      # Stop event only for final turn (turn.stop is only emitted for final results)
+      assert length(turn_stops) == 1
 
       # Check first turn event
-      [{_, start_measurements, start_meta, _} | _] = turn_starts
+      first_start =
+        turn_starts
+        |> Enum.sort_by(fn {_, _, meta, _} -> meta.turn end)
+        |> List.first()
+
+      {_, start_measurements, start_meta, _} = first_start
       assert start_measurements == %{}
       assert start_meta.agent == agent
       assert start_meta.turn == 1
 
       # Check turn stop has duration
-      [{_, stop_measurements, _stop_meta, _} | _] = turn_stops
+      [{_, stop_measurements, _stop_meta, _}] = turn_stops
       assert is_integer(stop_measurements.duration)
       assert stop_measurements.duration > 0
     end
@@ -483,6 +487,191 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
     end
   end
 
+  describe "span correlation" do
+    test "span events include span_id and parent_span_id", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(return {:value 42})|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      # Check run events have span correlation
+      run_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :run, :start])
+      run_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :run, :stop])
+
+      [{_, _, start_meta, _}] = run_starts
+      [{_, _, stop_meta, _}] = run_stops
+
+      # Run is the root span, so parent should be nil
+      assert is_binary(start_meta.span_id)
+      assert String.length(start_meta.span_id) == 8
+      assert start_meta.parent_span_id == nil
+
+      # Start and stop should have the same span_id
+      assert start_meta.span_id == stop_meta.span_id
+      assert stop_meta.parent_span_id == nil
+    end
+
+    test "nested spans have correct parent-child relationship", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(return {:done true})|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      # Get all events
+      run_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :run, :start])
+      llm_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :llm, :start])
+
+      [{_, _, run_meta, _}] = run_starts
+      run_span_id = run_meta.span_id
+
+      # LLM spans should have run as parent
+      Enum.each(llm_starts, fn {_, _, meta, _} ->
+        assert is_binary(meta.span_id)
+        assert meta.parent_span_id == run_span_id
+      end)
+    end
+
+    test "different spans have unique span IDs", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 3)
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, "(+ 1 2)"}
+          2 -> {:ok, "(+ 3 4)"}
+          _ -> {:ok, ~S|(return {:done true})|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      # Collect all start events (each span gets a unique ID)
+      run_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :run, :start])
+      llm_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :llm, :start])
+
+      # Each LLM call should have a unique span ID
+      llm_span_ids = Enum.map(llm_starts, fn {_, _, meta, _} -> meta.span_id end)
+      assert length(Enum.uniq(llm_span_ids)) == length(llm_span_ids)
+
+      # Run span ID should be different from LLM span IDs
+      [{_, _, run_meta, _}] = run_starts
+      refute run_meta.span_id in llm_span_ids
+    end
+
+    test "emit events include span context from current span", %{table: table} do
+      # Turn start/stop events are emitted via Telemetry.emit, not span
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(return {:value 42})|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      turn_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :start])
+      turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+
+      # Turn events should have span context
+      [{_, _, start_meta, _}] = turn_starts
+      [{_, _, stop_meta, _}] = turn_stops
+
+      assert is_binary(start_meta.span_id)
+      assert is_binary(stop_meta.span_id)
+      # Turn events are emitted within the run span, so parent should be the run span
+    end
+  end
+
+  describe "turn.stop enhanced metadata" do
+    test "includes program, result_preview, and type", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(return {:value 42})|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+      assert length(turn_stops) == 1
+
+      [{_, _, stop_meta, _}] = turn_stops
+
+      # Program should contain the PTC-Lisp code
+      assert stop_meta.program == ~S|(return {:value 42})|
+
+      # Result preview should be a string representation
+      assert is_binary(stop_meta.result_preview)
+      assert stop_meta.result_preview =~ "value"
+
+      # Type should be :normal for first turn
+      assert stop_meta.type == :normal
+    end
+
+    test "includes type :must_return on final work turn", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, "(+ 1 2)"}
+          _ -> {:ok, ~S|(return {:done true})|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+      # Final turn emits turn.stop event with :must_return type
+      # Get the last stop event (sorted by timestamp)
+      [{_, _, stop_meta, _}] =
+        turn_stops
+        |> Enum.sort_by(fn {_, _, _, ts} -> ts end, :desc)
+        |> Enum.take(1)
+
+      assert stop_meta.type == :must_return
+    end
+
+    test "result_preview is truncated for large results", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      # Return a large map in PTC-Lisp syntax
+      llm = fn _ ->
+        large_map = Enum.map_join(1..50, " ", fn i -> ":key#{i} #{i}" end)
+        {:ok, "(return {#{large_map}})"}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+      [{_, _, stop_meta, _}] = turn_stops
+
+      # Result preview should be truncated to max 200 chars
+      assert String.length(stop_meta.result_preview) <= 200
+    end
+
+    test "program is nil when parsing fails", %{table: table} do
+      # Use max_turns: 2 to ensure we're in loop mode and emit turn stop
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, "no valid code here"}
+      end
+
+      {:error, _step} = SubAgent.run(agent, llm: llm)
+
+      turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+
+      # All turns should have nil program when parsing fails
+      Enum.each(turn_stops, fn {_, _, stop_meta, _} ->
+        assert stop_meta.program == nil
+      end)
+    end
+  end
+
   describe "Telemetry module" do
     test "prefix/0 returns correct prefix" do
       assert Telemetry.prefix() == [:ptc_runner, :sub_agent]
@@ -512,7 +701,10 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       [{event, measurements, metadata}] = events
       assert event == [:ptc_runner, :sub_agent, :test, :event]
       assert measurements == %{count: 1}
-      assert metadata == %{name: "test"}
+      # emit/3 adds span context (nil when not in a span)
+      assert metadata.name == "test"
+      assert Map.has_key?(metadata, :span_id)
+      assert Map.has_key?(metadata, :parent_span_id)
 
       :telemetry.detach(handler_id)
       :ets.delete(custom_table)

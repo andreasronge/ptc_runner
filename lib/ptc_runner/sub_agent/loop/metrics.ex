@@ -134,24 +134,72 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     end
   end
 
+  @max_result_preview_length 200
+
   @doc """
   Emit turn stop event only for final results (not loop continuations).
 
   Emits `[:sub_agent, :turn, :stop]` telemetry event with duration and optional token counts.
-  """
-  @spec emit_turn_stop_if_final(term(), SubAgent.t(), map(), integer()) :: :ok
-  def emit_turn_stop_if_final({status, _step} = _result, agent, state, turn_start)
-      when status in [:ok, :error] do
-    turn_duration = System.monotonic_time() - turn_start
-    measurements = build_turn_measurements(turn_duration, state.turn_tokens)
 
-    Telemetry.emit([:turn, :stop], measurements, %{
-      agent: agent,
-      turn: state.turn,
-      program: nil
-    })
+  ## Metadata
+
+  - `agent` - The SubAgent struct
+  - `turn` - Turn number
+  - `program` - The PTC-Lisp code that was executed (or nil if parsing failed)
+  - `result_preview` - Truncated result string (max #{@max_result_preview_length} chars)
+  - `type` - Turn type: `:normal`, `:retry`, or `:must_return`
+  """
+  @spec emit_turn_stop_if_final(term(), SubAgent.t(), map(), integer(), keyword()) :: :ok
+  def emit_turn_stop_if_final(result, agent, state, turn_start, opts \\ [])
+
+  def emit_turn_stop_if_final({status, step} = _result, agent, state, turn_start, opts)
+      when status in [:ok, :error] do
+    # Only emit for the turn that actually completed this execution
+    # The recursive loop means intermediate turns will see the final result bubble up,
+    # but we only want to emit once for the actual final turn
+    final_turn_count = step.usage[:turns] || 0
+    current_turn = state.turn
+
+    # Only emit if this is the turn that finished the execution
+    # (current_turn should match the total turn count in the final step)
+    if current_turn == final_turn_count do
+      turn_duration = System.monotonic_time() - turn_start
+      measurements = build_turn_measurements(turn_duration, state.turn_tokens)
+
+      program = Keyword.get(opts, :program)
+      turn_type = Map.get(state, :current_turn_type, :normal)
+
+      # Build result preview from step.return
+      result_preview = build_result_preview(step.return)
+
+      Telemetry.emit([:turn, :stop], measurements, %{
+        agent: agent,
+        turn: state.turn,
+        program: program,
+        result_preview: result_preview,
+        type: turn_type
+      })
+    end
 
     :ok
+  end
+
+  @doc """
+  Build a truncated preview of the result for telemetry metadata.
+
+  Truncates to #{@max_result_preview_length} characters.
+  """
+  @spec build_result_preview(term()) :: String.t()
+  def build_result_preview(nil), do: "nil"
+
+  def build_result_preview(result) do
+    preview = inspect(result, limit: 10, printable_limit: @max_result_preview_length)
+
+    if String.length(preview) > @max_result_preview_length do
+      String.slice(preview, 0, @max_result_preview_length - 3) <> "..."
+    else
+      preview
+    end
   end
 
   @doc """
