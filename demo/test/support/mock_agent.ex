@@ -51,6 +51,11 @@ defmodule PtcDemo.MockAgent do
     nil
   end
 
+  def last_retry_count do
+    # Mock agents don't track retries
+    0
+  end
+
   def list_datasets do
     SampleData.available_datasets()
   end
