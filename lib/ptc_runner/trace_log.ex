@@ -115,12 +115,12 @@ defmodule PtcRunner.TraceLog do
     collectors = Process.get(:ptc_trace_collectors, [])
     handlers = Process.get(:ptc_trace_handler_ids, [])
 
-    {handler_id, _remaining_handlers} =
+    {handler_id, found} =
       case {collectors, handlers} do
         {[^collector | rest_collectors], [h | rest_handlers]} ->
           Process.put(:ptc_trace_collectors, rest_collectors)
           Process.put(:ptc_trace_handler_ids, rest_handlers)
-          {h, rest_handlers}
+          {h, true}
 
         _ ->
           # Collector not at top of stack - find and remove it
@@ -128,12 +128,12 @@ defmodule PtcRunner.TraceLog do
 
           if idx do
             {new_collectors, _} = List.pop_at(collectors, idx)
-            {handler, new_handlers} = List.pop_at(handlers, idx)
+            {handler, _new_handlers} = List.pop_at(handlers, idx)
             Process.put(:ptc_trace_collectors, new_collectors)
-            Process.put(:ptc_trace_handler_ids, new_handlers)
-            {handler, new_handlers}
+            Process.put(:ptc_trace_handler_ids, List.delete_at(handlers, idx))
+            {handler, true}
           else
-            {nil, handlers}
+            {nil, false}
           end
       end
 
@@ -141,7 +141,13 @@ defmodule PtcRunner.TraceLog do
       Handler.detach(handler_id)
     end
 
-    Collector.stop(collector)
+    # Only call Collector.stop if we found the collector (idempotent)
+    if found do
+      Collector.stop(collector)
+    else
+      # Collector already stopped, return a default result
+      {:ok, "unknown", 0}
+    end
   end
 
   @doc """
@@ -177,10 +183,8 @@ defmodule PtcRunner.TraceLog do
       result = fun.()
       {:ok, path, _errors} = stop(collector)
       {:ok, result, path}
-    rescue
-      e ->
-        stop(collector)
-        reraise e, __STACKTRACE__
+    after
+      stop(collector)
     end
   end
 

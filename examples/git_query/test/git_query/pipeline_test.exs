@@ -4,9 +4,10 @@ defmodule GitQuery.PipelineTest do
   alias GitQuery.{Config, Tools}
 
   describe "run/4 with :simple preset" do
+    # Skipped: #754 - requires sophisticated mock LLM setup
     @tag :skip
     test "executes single step without planning" do
-      # This test would require a more sophisticated mock LLM setup
+      # TODO(#754): This test would require a more sophisticated mock LLM setup
       # that can handle the full SubAgent protocol
     end
   end
