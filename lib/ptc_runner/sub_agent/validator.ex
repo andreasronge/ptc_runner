@@ -48,6 +48,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_context_descriptions!(opts)
     validate_format_options!(opts)
     validate_output!(opts)
+    validate_self_tool_requires_signature!(opts)
   end
 
   defp validate_prompt!(opts) do
@@ -587,5 +588,20 @@ defmodule PtcRunner.SubAgent.Validator do
       end)
 
     Enum.join(messages, "; ")
+  end
+
+  # Validate that :self tools require a signature
+  defp validate_self_tool_requires_signature!(opts) do
+    tools = Keyword.get(opts, :tools, %{})
+    signature = Keyword.get(opts, :signature)
+
+    has_self = Enum.any?(tools, fn {_, v} -> v == :self end)
+
+    if has_self and is_nil(signature) do
+      raise ArgumentError,
+            "agents with :self tools must have a signature"
+    end
+
+    :ok
   end
 end
