@@ -52,11 +52,11 @@ defmodule LLMClient.Registry do
       }
     },
     "sonnet" => %{
-      description: "Claude Sonnet 4 - Balanced performance",
+      description: "Claude Sonnet 4.5 - Balanced performance",
       providers: %{
-        openrouter: "anthropic/claude-sonnet-4",
-        bedrock: "anthropic.claude-sonnet-4-20250514-v1:0",
-        anthropic: "claude-sonnet-4-20250514"
+        openrouter: "anthropic/claude-sonnet-4.5",
+        bedrock: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+        anthropic: "claude-sonnet-4-5-20250929"
       },
       costs: %{
         openrouter: %{input: 3.00, output: 15.00},
