@@ -202,6 +202,18 @@ defmodule PtcRunner.Tool do
      }}
   end
 
+  defp normalize_format(name, :self) do
+    # :self is resolved at runtime; for schema generation, return placeholder
+    {:ok,
+     %__MODULE__{
+       name: name,
+       function: nil,
+       signature: nil,
+       description: "Recursive self-invocation (resolved at runtime)",
+       type: :subagent
+     }}
+  end
+
   defp normalize_format(_name, _format) do
     {:error, :invalid_tool_format}
   end

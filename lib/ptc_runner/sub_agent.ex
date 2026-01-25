@@ -47,6 +47,7 @@ defmodule PtcRunner.SubAgent do
   | `{fn, meta}` | Function with metadata (signature, description) |
   | `%SubAgentTool{}` | Wrapped SubAgent (via `as_tool/2`) |
   | `%LLMTool{}` | LLM-powered tool (via `LLMTool.new/1`) |
+  | `:self` | Recursive self-reference (requires signature) |
 
   See `PtcRunner.Tool` for normalization details.
 
@@ -455,6 +456,14 @@ defmodule PtcRunner.SubAgent do
 
   # Main implementation with SubAgent struct
   def run(%__MODULE__{} = agent, opts) do
+    # Resolve :self tools before execution so they have proper signatures in prompts
+    agent =
+      if Enum.any?(agent.tools, fn {_, v} -> v == :self end) do
+        %{agent | tools: resolve_self_tools(agent.tools, agent)}
+      else
+        agent
+      end
+
     start_time = System.monotonic_time(:millisecond)
 
     # Validate required llm option
@@ -1114,15 +1123,19 @@ defmodule PtcRunner.SubAgent do
   defp preview_prompt_ptc_lisp(agent, context) do
     alias PtcRunner.SubAgent.{PromptExpander, SystemPrompt}
 
+    # Resolve :self tools before generating prompts so the context includes proper signatures
+    resolved_tools = resolve_self_tools(agent.tools, agent)
+    agent_with_resolved_tools = %{agent | tools: resolved_tools}
+
     # Generate system prompt - static sections only (matches what Loop sends)
     # This is cacheable because it doesn't include the mission
-    system_prompt = SystemPrompt.generate_system(agent)
+    system_prompt = SystemPrompt.generate_system(agent_with_resolved_tools)
 
     # Expand the mission template
     {:ok, expanded_mission} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
 
     # Generate context sections (data inventory, tools, expected output)
-    context_prompt = SystemPrompt.generate_context(agent, context: context)
+    context_prompt = SystemPrompt.generate_context(agent_with_resolved_tools, context: context)
 
     # Combine context with mission (matches what Loop sends as first user message)
     user_message =
@@ -1130,9 +1143,9 @@ defmodule PtcRunner.SubAgent do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n\n")
 
-    # Tool schemas - extract from agent.tools
+    # Tool schemas - extract from resolved tools
     tool_schemas =
-      agent.tools
+      resolved_tools
       |> Enum.map(fn {name, format} ->
         case PtcRunner.Tool.new(name, format) do
           {:ok, tool} ->
@@ -1160,5 +1173,25 @@ defmodule PtcRunner.SubAgent do
       tool_schemas: tool_schemas,
       schema: nil
     }
+  end
+
+  # Resolve :self sentinels in tools map to SubAgentTool structs
+  defp resolve_self_tools(tools, agent) do
+    alias PtcRunner.SubAgent.SubAgentTool
+
+    Map.new(tools, fn
+      {name, :self} ->
+        {name,
+         %SubAgentTool{
+           agent: agent,
+           bound_llm: nil,
+           signature: agent.signature,
+           description:
+             agent.description || "Recursively invoke this agent on a subset of the input"
+         }}
+
+      other ->
+        other
+    end)
   end
 end
