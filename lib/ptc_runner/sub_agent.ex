@@ -47,6 +47,7 @@ defmodule PtcRunner.SubAgent do
   | `{fn, meta}` | Function with metadata (signature, description) |
   | `%SubAgentTool{}` | Wrapped SubAgent (via `as_tool/2`) |
   | `%LLMTool{}` | LLM-powered tool (via `LLMTool.new/1`) |
+  | `:self` | Recursive self-reference (requires signature) |
 
   See `PtcRunner.Tool` for normalization details.
 
