@@ -111,16 +111,18 @@ defmodule Mix.Tasks.Git.Query do
     if opts[:trace] do
       trace_path = trace_path(opts[:trace])
 
-      # TODO: Replace with TraceLog.with_trace/2 when #745 lands
-      # {:ok, result, path} = PtcRunner.TraceLog.with_trace(
-      #   fn -> GitQuery.query(question, query_opts) end,
-      #   path: trace_path,
-      #   meta: %{query: question, model: query_opts[:model]}
-      # )
-      Mix.shell().info("Trace: enabled (stub - waiting for #745)")
+      # Ensure trace directory exists
+      trace_path |> Path.dirname() |> File.mkdir_p!()
 
-      result = GitQuery.query(question, query_opts)
-      {result, trace_path}
+      {:ok, result, path} =
+        PtcRunner.TraceLog.with_trace(
+          fn -> GitQuery.query(question, query_opts) end,
+          path: trace_path,
+          meta: %{query: question, model: query_opts[:model]}
+        )
+
+      Mix.shell().info("Trace: #{path}")
+      {result, path}
     else
       {GitQuery.query(question, query_opts), nil}
     end
@@ -134,23 +136,32 @@ defmodule Mix.Tasks.Git.Query do
   end
 
   defp maybe_print_trace_summary(trace_path, opts) do
-    if opts[:trace_summary] do
-      # TODO: Replace with Analyzer.summary/1 when #745 lands
-      # events = PtcRunner.TraceLog.Analyzer.load(trace_path)
-      # summary = PtcRunner.TraceLog.Analyzer.summary(events)
-      # print_summary(summary)
-      Mix.shell().info("\n[Trace summary: stub - waiting for #745]")
-      Mix.shell().info("  Path: #{trace_path}")
+    if opts[:trace_summary] and trace_path do
+      events = PtcRunner.TraceLog.Analyzer.load(trace_path)
+      summary = PtcRunner.TraceLog.Analyzer.summary(events)
+      print_summary(summary)
+    end
+  end
+
+  defp print_summary(summary) do
+    Mix.shell().info("\nTrace Summary")
+    Mix.shell().info("─────────────")
+    Mix.shell().info("  Duration:   #{summary.duration_ms || "N/A"}ms")
+    Mix.shell().info("  Turns:      #{summary.turns || "N/A"}")
+    Mix.shell().info("  LLM calls:  #{summary.llm_calls}")
+    Mix.shell().info("  Tool calls: #{summary.tool_calls}")
+
+    if summary.tokens do
+      Mix.shell().info("  Tokens:     #{summary.tokens.input} in / #{summary.tokens.output} out")
     end
   end
 
   defp maybe_print_trace_timeline(trace_path, opts) do
-    if opts[:trace_timeline] do
-      # TODO: Replace with Analyzer.print_timeline/1 when #745 lands
-      # events = PtcRunner.TraceLog.Analyzer.load(trace_path)
-      # PtcRunner.TraceLog.Analyzer.print_timeline(events)
-      Mix.shell().info("\n[Trace timeline: stub - waiting for #745]")
-      Mix.shell().info("  Path: #{trace_path}")
+    if opts[:trace_timeline] and trace_path do
+      events = PtcRunner.TraceLog.Analyzer.load(trace_path)
+      Mix.shell().info("\nTrace Timeline")
+      Mix.shell().info("──────────────")
+      PtcRunner.TraceLog.Analyzer.print_timeline(events)
     end
   end
 end
