@@ -704,7 +704,16 @@ defmodule PtcRunner.SubAgent.Loop do
             truncated_result = ResponseHandler.truncate_for_history(lisp_step.return)
             updated_history = update_turn_history(state.turn_history, truncated_result)
 
-            # Decrement work_turns_remaining (normal execution consumes work turn)
+            # Use unified budget model: consume work turn if not in retry phase, else retry turn
+            in_retry_phase = state.work_turns_remaining <= 0
+
+            {new_work_turns, new_retry_turns} =
+              if in_retry_phase do
+                {state.work_turns_remaining, state.retry_turns_remaining - 1}
+              else
+                {state.work_turns_remaining - 1, state.retry_turns_remaining}
+              end
+
             new_state = %{
               state
               | turn: state.turn + 1,
@@ -719,7 +728,8 @@ defmodule PtcRunner.SubAgent.Loop do
                 # Context stays immutable - memory values become available as symbols
                 last_fail: nil,
                 remaining_turns: state.remaining_turns - 1,
-                work_turns_remaining: state.work_turns_remaining - 1,
+                work_turns_remaining: new_work_turns,
+                retry_turns_remaining: new_retry_turns,
                 turn_history: updated_history,
                 last_return_error: nil
             }
