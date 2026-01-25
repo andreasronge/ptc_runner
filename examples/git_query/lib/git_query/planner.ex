@@ -139,10 +139,12 @@ defmodule GitQuery.Planner do
   end
 
   # Convert needs from [[step_id, key], ...] to [{step_id, key}, ...]
+  # Keys are kept as strings (not atoms) to avoid atom table exhaustion
+  # from LLM-generated content, and to match JSON data keys.
   defp normalize_needs(needs) do
     Enum.map(needs, fn
       [step_id, key] when is_integer(step_id) and is_binary(key) ->
-        {step_id, String.to_atom(key)}
+        {step_id, key}
 
       {step_id, key} ->
         {step_id, key}
