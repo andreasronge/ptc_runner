@@ -72,6 +72,7 @@ defmodule PtcDemo.JsonTestRunner do
     data_mode = Keyword.get(opts, :data_mode, :schema)
     report_path = Keyword.get(opts, :report)
     runs = Keyword.get(opts, :runs, 1)
+    return_retries = Keyword.get(opts, :return_retries, 0)
 
     # Ensure agent is started
     ensure_agent_started(data_mode, agent_mod)
@@ -98,7 +99,15 @@ defmodule PtcDemo.JsonTestRunner do
     # Run tests multiple times if requested
     summaries =
       for run_num <- 1..runs do
-        run_single_batch(run_num, runs, data_mode, verbose, agent_mod, current_model)
+        run_single_batch(
+          run_num,
+          runs,
+          data_mode,
+          verbose,
+          agent_mod,
+          current_model,
+          return_retries
+        )
       end
 
     # Print aggregate summary if multiple runs
@@ -143,7 +152,15 @@ defmodule PtcDemo.JsonTestRunner do
     end
   end
 
-  defp run_single_batch(run_num, total_runs, data_mode, verbose, agent_mod, current_model) do
+  defp run_single_batch(
+         run_num,
+         total_runs,
+         data_mode,
+         verbose,
+         agent_mod,
+         current_model,
+         return_retries
+       ) do
     if total_runs > 1 do
       IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
     end
@@ -161,7 +178,11 @@ defmodule PtcDemo.JsonTestRunner do
       end)
 
     stats = agent_mod.stats()
-    summary = Base.build_summary(results, start_time, current_model, data_mode, stats)
+
+    summary =
+      Base.build_summary(results, start_time, current_model, data_mode, stats,
+        return_retries: return_retries
+      )
 
     if verbose do
       Base.print_summary(summary)

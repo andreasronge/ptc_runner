@@ -353,8 +353,8 @@ defmodule PtcDemo.TestRunner.Base do
       iex> summary.total
       2
   """
-  @spec build_summary(list(), integer(), String.t(), atom(), map()) :: map()
-  def build_summary(results, start_time, model, data_mode, stats) do
+  @spec build_summary(list(), integer(), String.t(), atom(), map(), keyword()) :: map()
+  def build_summary(results, start_time, model, data_mode, stats, opts \\ []) do
     end_time = System.monotonic_time(:millisecond)
     duration_ms = end_time - start_time
 
@@ -362,6 +362,8 @@ defmodule PtcDemo.TestRunner.Base do
     failed = Enum.count(results, &(!&1.passed))
     total = length(results)
     total_attempts = Enum.sum(Enum.map(results, & &1.attempts))
+    total_retries = Enum.sum(Enum.map(results, &Map.get(&1, :retry_count, 0)))
+    tests_with_retries = Enum.count(results, &(Map.get(&1, :retry_count, 0) > 0))
 
     # Apply cost fallback if needed
     stats_with_fallback = apply_cost_fallback(stats, model)
@@ -371,6 +373,8 @@ defmodule PtcDemo.TestRunner.Base do
       failed: failed,
       total: total,
       total_attempts: total_attempts,
+      total_retries: total_retries,
+      tests_with_retries: tests_with_retries,
       duration_ms: duration_ms,
       model: model,
       data_mode: data_mode,
@@ -378,7 +382,9 @@ defmodule PtcDemo.TestRunner.Base do
       stats: stats_with_fallback,
       timestamp: DateTime.utc_now(),
       version: get_ptc_runner_version(),
-      commit: get_git_commit()
+      commit: get_git_commit(),
+      git_dirty: get_git_dirty?(),
+      return_retries: Keyword.get(opts, :return_retries, 0)
     }
   end
 
@@ -408,6 +414,8 @@ defmodule PtcDemo.TestRunner.Base do
     total_failed = Enum.sum(Enum.map(summaries, & &1.failed))
     total_tests = Enum.sum(Enum.map(summaries, & &1.total))
     total_attempts = Enum.sum(Enum.map(summaries, & &1.total_attempts))
+    total_retries = Enum.sum(Enum.map(summaries, &Map.get(&1, :total_retries, 0)))
+    tests_with_retries = Enum.sum(Enum.map(summaries, &Map.get(&1, :tests_with_retries, 0)))
     total_duration = Enum.sum(Enum.map(summaries, & &1.duration_ms))
 
     # Aggregate stats (tokens, cost)
@@ -440,6 +448,8 @@ defmodule PtcDemo.TestRunner.Base do
       failed: total_failed,
       total: total_tests,
       total_attempts: total_attempts,
+      total_retries: total_retries,
+      tests_with_retries: tests_with_retries,
       duration_ms: total_duration,
       model: first.model,
       data_mode: first.data_mode,
@@ -448,6 +458,8 @@ defmodule PtcDemo.TestRunner.Base do
       timestamp: DateTime.utc_now(),
       version: first[:version] || "unknown",
       commit: first[:commit] || "unknown",
+      git_dirty: first[:git_dirty] || false,
+      return_retries: first[:return_retries] || 0,
       num_runs: num_runs
     }
   end
@@ -498,6 +510,14 @@ defmodule PtcDemo.TestRunner.Base do
     IO.puts(
       "Total attempts: #{summary.total_attempts} (#{Float.round(summary.total_attempts / summary.total, 1)} avg per test)"
     )
+
+    # Show retry stats if any retries occurred
+    total_retries = Map.get(summary, :total_retries, 0)
+    tests_with_retries = Map.get(summary, :tests_with_retries, 0)
+
+    if total_retries > 0 do
+      IO.puts("Retries: #{total_retries} (#{tests_with_retries} tests needed retries)")
+    end
 
     IO.puts("Duration: #{format_duration(summary.duration_ms)}")
     IO.puts("Model: #{summary.model}")
@@ -575,6 +595,15 @@ defmodule PtcDemo.TestRunner.Base do
     case System.cmd("git", ["rev-parse", "--short", "HEAD"], stderr_to_stdout: true) do
       {hash, 0} -> String.trim(hash)
       _ -> "unknown"
+    end
+  end
+
+  # Checks if there are uncommitted changes in the working directory
+  defp get_git_dirty? do
+    case System.cmd("git", ["status", "--porcelain"], stderr_to_stdout: true) do
+      {"", 0} -> false
+      {output, 0} when byte_size(output) > 0 -> true
+      _ -> false
     end
   end
 end

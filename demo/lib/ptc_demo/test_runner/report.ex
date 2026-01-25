@@ -58,8 +58,9 @@ defmodule PtcDemo.TestRunner.Report do
     **Generated:** #{format_timestamp(summary.timestamp)}
     **Model:** #{summary.model}
     **Data Mode:** #{summary.data_mode}
+    **Return Retries:** #{summary[:return_retries] || 0}
     **PtcRunner Version:** #{summary[:version] || "unknown"}
-    **Git Commit:** #{summary[:commit] || "unknown"}
+    **Git Commit:** #{summary[:commit] || "unknown"}#{if summary[:git_dirty], do: " (uncommitted changes)", else: ""}
 
     ## Summary
 
@@ -70,6 +71,8 @@ defmodule PtcDemo.TestRunner.Report do
     | Pass Rate | #{if summary.total > 0, do: Float.round(summary.passed / summary.total * 100, 1), else: 0.0}% |
     | Total Attempts | #{summary.total_attempts} |
     | Avg Attempts/Test | #{if summary.total > 0, do: Float.round(summary.total_attempts / summary.total, 2), else: 0.0} |
+    | Total Retries | #{Map.get(summary, :total_retries, 0)} |
+    | Tests with Retries | #{Map.get(summary, :tests_with_retries, 0)} |
     | Duration | #{Base.format_duration(summary.duration_ms)} |
     | Total Runs | #{summary.stats.total_runs} |
     | Input Tokens | #{summary.stats.input_tokens} |
@@ -121,8 +124,10 @@ defmodule PtcDemo.TestRunner.Report do
       generated: format_timestamp(summary.timestamp),
       model: summary.model,
       data_mode: to_string(summary.data_mode),
+      return_retries: summary[:return_retries] || 0,
       version: summary[:version] || "unknown",
       commit: summary[:commit] || "unknown",
+      git_dirty: summary[:git_dirty] || false,
       metrics: %{
         passed: summary.passed,
         failed: summary.failed,
@@ -130,6 +135,8 @@ defmodule PtcDemo.TestRunner.Report do
         pass_rate: calculate_pass_rate(summary),
         total_attempts: summary.total_attempts,
         avg_attempts_per_test: calculate_avg_attempts(summary),
+        total_retries: Map.get(summary, :total_retries, 0),
+        tests_with_retries: Map.get(summary, :tests_with_retries, 0),
         duration_ms: summary.duration_ms
       },
       stats:
