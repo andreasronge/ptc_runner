@@ -107,15 +107,7 @@ defmodule Mix.Tasks.Git.Query.Analyze do
     Mix.shell().info("")
     Mix.shell().info("Summary")
     Mix.shell().info("───────")
-    Mix.shell().info("  Duration:   #{summary.duration_ms || "N/A"}ms")
-    Mix.shell().info("  Turns:      #{summary.turns || "N/A"}")
-    Mix.shell().info("  LLM calls:  #{summary.llm_calls}")
-    Mix.shell().info("  Tool calls: #{summary.tool_calls}")
-    Mix.shell().info("  Status:     #{summary.status || "N/A"}")
-
-    if summary.tokens do
-      Mix.shell().info("  Tokens:     #{summary.tokens["input"]} in / #{summary.tokens["output"]} out")
-    end
+    GitQuery.CLI.Formatter.print_summary(summary, show_status: true)
   end
 
   defp show_timeline(path) do

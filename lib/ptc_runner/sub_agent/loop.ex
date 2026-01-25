@@ -959,6 +959,28 @@ defmodule PtcRunner.SubAgent.Loop do
     {:error, step_with_metrics}
   end
 
+  # Build final Step struct with common fields
+  # Used by build_success_step and build_success_from_fallback
+  defp build_final_step(step, agent, state, opts) do
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+    turns = Keyword.get(opts, :turns, state.turns)
+    extra_usage = Keyword.get(opts, :extra_usage, %{})
+    messages = Keyword.get(opts, :messages, state.messages)
+    memory_bytes = Keyword.get(opts, :memory_bytes, 0)
+
+    %{
+      step
+      | usage:
+          Map.merge(Metrics.build_final_usage(state, duration_ms, memory_bytes), extra_usage),
+        turns: Metrics.apply_trace_filter(Enum.reverse(turns), state.trace_mode, false),
+        field_descriptions: agent.field_descriptions,
+        messages: build_collected_messages(state, messages),
+        prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt,
+        tools: state.normalized_tools
+    }
+  end
+
   # Update turn history, keeping only the last 3 results
   # New results are appended to the end so *1 = last, *2 = second-to-last, *3 = third-to-last
   defp update_turn_history(history, new_result) do
@@ -977,26 +999,15 @@ defmodule PtcRunner.SubAgent.Loop do
         type: Map.get(state, :current_turn_type, :normal)
       )
 
-    duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
     # Include the final assistant response in messages
     final_messages = state.messages ++ [%{role: :assistant, content: response}]
 
-    final_step = %{
-      lisp_step
-      | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
-        turns:
-          Metrics.apply_trace_filter(
-            Enum.reverse([turn | state.turns]),
-            state.trace_mode,
-            false
-          ),
-        field_descriptions: agent.field_descriptions,
-        messages: build_collected_messages(state, final_messages),
-        prompt: state.expanded_prompt,
-        original_prompt: state.original_prompt,
-        tools: state.normalized_tools
-    }
+    final_step =
+      build_final_step(lisp_step, agent, state,
+        turns: [turn | state.turns],
+        messages: final_messages,
+        memory_bytes: lisp_step.usage.memory_bytes
+      )
 
     {:ok, final_step}
   end
@@ -1097,23 +1108,11 @@ defmodule PtcRunner.SubAgent.Loop do
   # Build a success step from a fallback turn.
   # Uses turn.memory (state at that point) rather than state.memory.
   defp build_success_from_fallback(normalized_value, turn, state, agent) do
-    duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
     # Build a success step with the fallback value
     step = Step.ok(normalized_value, turn.memory)
 
-    final_step = %{
-      step
-      | usage:
-          Metrics.build_final_usage(state, duration_ms, 0)
-          |> Map.put(:fallback_used, true),
-        turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, false),
-        field_descriptions: agent.field_descriptions,
-        messages: build_collected_messages(state, state.messages),
-        prompt: state.expanded_prompt,
-        original_prompt: state.original_prompt,
-        tools: state.normalized_tools
-    }
+    final_step =
+      build_final_step(step, agent, state, extra_usage: %{fallback_used: true})
 
     {:ok, final_step}
   end

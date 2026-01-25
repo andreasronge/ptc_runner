@@ -135,7 +135,7 @@ Each line is a self-contained JSON object with these fields:
 | Field | Type | Events | Description |
 |-------|------|--------|-------------|
 | `meta` | object | `run.start` | User-defined metadata (test context, query info, etc.) |
-| `type` | string | `turn.*` | Turn type: `"normal"`, `"retry"`, or `"chained"` |
+| `type` | string | `turn.*` | Turn type: `"normal"`, `"retry"`, or `"must_return"` |
 | `cost` | float | `run.stop` | Calculated LLM cost in USD |
 | `retries` | integer | `run.stop` | Count of retry turns |
 | `parent_trace_id` | string | `run.start` | Parent agent's trace_id (nested agents only) |
@@ -230,7 +230,7 @@ The `retries` field counts turns with `type: "retry"`. The `cost` field is calcu
 }
 ```
 
-The `type` field indicates the turn type: `"normal"`, `"retry"`, or `"chained"`. This enables tracking retry attempts for reliability analysis.
+The `type` field indicates the turn type: `"normal"`, `"retry"`, or `"must_return"`. This enables tracking retry attempts for reliability analysis.
 
 #### `turn.stop`
 ```json
@@ -988,7 +988,7 @@ These enhancements to `[:ptc_runner, :sub_agent, :turn, :stop]` are strongly rec
 
 1. **Add `program`** - Pass actual program code in metadata (avoids brittle LLM response parsing)
 2. **Add `result_preview`** - Include truncated result for per-turn debugging
-3. **Add `type`** - Include turn type (`:normal`, `:retry`, `:chained`) for retry tracking
+3. **Add `type`** - Include turn type (`:normal`, `:retry`, `:must_return`) for retry tracking
 
 Without these, TraceLog must use fragile workarounds that are prone to parsing errors. Implementing these in Telemetry makes TraceLog much simpler and more reliable.
 
