@@ -117,13 +117,11 @@ defmodule PtcRunner.TraceLog.Collector do
 
   @impl true
   def handle_cast({:write, json_line}, state) do
-    case IO.puts(state.file, json_line) do
-      :ok ->
-        {:noreply, state}
-
-      {:error, _reason} ->
-        {:noreply, %{state | write_errors: state.write_errors + 1}}
-    end
+    IO.puts(state.file, json_line)
+    {:noreply, state}
+  rescue
+    _ ->
+      {:noreply, %{state | write_errors: state.write_errors + 1}}
   end
 
   @impl true
