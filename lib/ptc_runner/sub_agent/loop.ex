@@ -264,18 +264,29 @@ defmodule PtcRunner.SubAgent.Loop do
   # Check unified budget (work + retry turns)
   # Budget exhausted when both work and retry turns are consumed
   # Use appropriate error reason based on whether retry budget was configured
+  # First attempts fallback to last successful expression before returning error
   defp loop(agent, _llm, state)
        when state.work_turns_remaining <= 0 and state.retry_turns_remaining <= 0 do
-    if agent.return_retries == 0 do
-      # Legacy behavior: no retry budget, so this is max_turns_exceeded
-      build_termination_error(
-        :max_turns_exceeded,
-        "Exceeded max_turns limit of #{agent.max_turns}",
-        state
-      )
-    else
-      # Unified budget: both work and retry turns consumed
-      build_termination_error(:budget_exhausted, "Budget exhausted (work and retry turns)", state)
+    case try_last_expression_fallback(agent, state) do
+      {:ok, step} ->
+        {:ok, step}
+
+      :no_fallback ->
+        if agent.return_retries == 0 do
+          # Legacy behavior: no retry budget, so this is max_turns_exceeded
+          build_termination_error(
+            :max_turns_exceeded,
+            "Exceeded max_turns limit of #{agent.max_turns}",
+            state
+          )
+        else
+          # Unified budget: both work and retry turns consumed
+          build_termination_error(
+            :budget_exhausted,
+            "Budget exhausted (work and retry turns)",
+            state
+          )
+        end
     end
   end
 
@@ -1045,6 +1056,66 @@ defmodule PtcRunner.SubAgent.Loop do
     }
 
     loop(agent, llm, new_state)
+  end
+
+  # ============================================================
+  # Last Expression Fallback
+  # ============================================================
+
+  # Attempt to recover a valid return from the last successful expression result.
+  # This handles the case where the LLM computed the correct answer but forgot
+  # to wrap it with (return ...).
+  defp try_last_expression_fallback(agent, state) do
+    case find_last_successful_result(state.turns) do
+      {:ok, result, turn} ->
+        # Normalize keys (Clojure-style -> Elixir-style)
+        normalized = KeyNormalizer.normalize_keys(result)
+
+        case ReturnValidation.validate(agent, normalized) do
+          :ok ->
+            build_success_from_fallback(normalized, turn, state, agent)
+
+          {:error, _} ->
+            :no_fallback
+        end
+
+      :none ->
+        :no_fallback
+    end
+  end
+
+  # Find the most recent successful turn with a non-nil result.
+  # state.turns is in reverse chronological order (most recent first),
+  # so Enum.find returns the most recent match.
+  defp find_last_successful_result(turns) do
+    case Enum.find(turns, fn turn -> turn.success? and turn.result != nil end) do
+      nil -> :none
+      turn -> {:ok, turn.result, turn}
+    end
+  end
+
+  # Build a success step from a fallback turn.
+  # Uses turn.memory (state at that point) rather than state.memory.
+  defp build_success_from_fallback(normalized_value, turn, state, agent) do
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+    # Build a success step with the fallback value
+    step = Step.ok(normalized_value, turn.memory)
+
+    final_step = %{
+      step
+      | usage:
+          Metrics.build_final_usage(state, duration_ms, 0)
+          |> Map.put(:fallback_used, true),
+        turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, false),
+        field_descriptions: agent.field_descriptions,
+        messages: build_collected_messages(state, state.messages),
+        prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt,
+        tools: state.normalized_tools
+    }
+
+    {:ok, final_step}
   end
 
   # ============================================================

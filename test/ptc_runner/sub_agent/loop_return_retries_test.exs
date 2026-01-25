@@ -338,11 +338,15 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       # Bug scenario: LLM ignores must-return warning and returns expression
       # instead of calling (return ...). With return_retries > 0, the loop
       # should properly decrement retry_turns_remaining and terminate.
+      #
+      # Uses a signature that the expression result doesn't match, preventing
+      # the fallback recovery from triggering (fallback validates against signature)
       agent =
         SubAgent.new(
           prompt: "Return a value",
           max_turns: 1,
-          return_retries: 2
+          return_retries: 2,
+          signature: "{result :string}"
         )
 
       turn_counter = :counters.new(1, [:atomics])
@@ -352,6 +356,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
         :counters.put(turn_counter, 1, turn)
 
         # Always return expression without (return ...) - ignoring must-return
+        # Returns integer, doesn't match {result :string} signature
         {:ok, "```clojure\n(+ 1 #{turn})\n```"}
       end
 

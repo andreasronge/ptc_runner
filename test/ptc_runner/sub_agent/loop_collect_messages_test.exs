@@ -78,9 +78,12 @@ defmodule PtcRunner.SubAgent.LoopCollectMessagesTest do
     end
 
     test "error path (max_turns exceeded) collects messages" do
-      agent = test_agent(max_turns: 2)
+      # Uses a signature that the expression result doesn't match, preventing
+      # the fallback recovery from triggering (fallback validates against signature)
+      agent = test_agent(max_turns: 2, signature: "{result :string}")
 
       llm = fn _ ->
+        # Returns integer, doesn't match {result :string} signature
         {:ok, "```clojure\n(+ 1 2)\n```"}
       end
 

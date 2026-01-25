@@ -442,4 +442,145 @@ defmodule PtcRunner.SubAgent.LoopTest do
       {:ok, _step} = Loop.run(agent, llm: llm, context: %{})
     end
   end
+
+  describe "last expression fallback on budget exhaustion" do
+    test "accepts valid expression result when budget exhausted" do
+      # LLM computes correct result but doesn't use (return ...)
+      agent = test_agent(max_turns: 2, signature: "{count :int}")
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          # Turn 1: Compute result without return
+          1 -> {:ok, "```clojure\n{:count 42}\n```"}
+          # Turn 2: Still doesn't use return
+          2 -> {:ok, "```clojure\n{:count 42}\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{"count" => 42}
+      assert step.usage.fallback_used == true
+    end
+
+    test "fallback normalizes hyphenated keys to underscored" do
+      # Use max_turns: 2 to actually trigger the fallback path
+      # (max_turns: 1 with no return_retries skips validation and uses normal path)
+      agent = test_agent(max_turns: 2, signature: "{growth_rate :float}")
+
+      llm = fn _ ->
+        # LLM uses Clojure-style hyphenated keys
+        {:ok, "```clojure\n{:growth-rate 3.14}\n```"}
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      # Keys should be normalized to underscored
+      assert step.return == %{"growth_rate" => 3.14}
+      assert step.usage.fallback_used == true
+    end
+
+    test "fallback skips nil results (println returns nil)" do
+      agent = test_agent(max_turns: 2, signature: "{value :int}")
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          # Turn 1: Compute valid result
+          1 -> {:ok, "```clojure\n{:value 100}\n```"}
+          # Turn 2: println returns nil
+          2 -> {:ok, ~S|```clojure
+(println "Done")
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      # Should fall back to turn 1's result (not nil from turn 2)
+      assert step.return == %{"value" => 100}
+      assert step.usage.fallback_used == true
+    end
+
+    test "fallback fails when result doesn't match signature" do
+      # Use max_turns: 2 so we actually exhaust budget and try fallback
+      # (max_turns: 1 with no return_retries skips validation entirely)
+      agent = test_agent(max_turns: 2, signature: "{name :string}")
+
+      llm = fn _ ->
+        # Result doesn't match expected signature
+        {:ok, "```clojure\n{:count 42}\n```"}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.fail.reason == :max_turns_exceeded
+      assert step.usage[:fallback_used] != true
+    end
+
+    test "fallback fails when no successful turns exist" do
+      agent = test_agent(max_turns: 2, signature: "{value :int}")
+
+      llm = fn _ ->
+        # All turns produce errors
+        {:ok, "```clojure\n(/ 1 0)\n```"}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.fail.reason == :max_turns_exceeded
+    end
+
+    test "fallback uses turn.memory from successful turn" do
+      agent = test_agent(max_turns: 2, signature: "{result :int}")
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          # Turn 1: Set memory and compute result
+          1 -> {:ok, "```clojure\n(let [x 42] {:result x})\n```"}
+          # Turn 2: produces an error (so turn 1's memory should be preserved)
+          2 -> {:ok, "```clojure\n(int Double/POSITIVE_INFINITY)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{"result" => 42}
+      assert step.usage.fallback_used == true
+    end
+
+    test "fallback works with return_retries > 0 (budget_exhausted)" do
+      agent = test_agent(max_turns: 1, return_retries: 1, signature: "{value :int}")
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          # Turn 1 (work turn): Compute result
+          1 -> {:ok, "```clojure\n{:value 99}\n```"}
+          # Turn 2 (retry turn): Still no return
+          2 -> {:ok, "```clojure\n{:value 99}\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{"value" => 99}
+      assert step.usage.fallback_used == true
+    end
+
+    test "explicit return still works normally (no fallback)" do
+      agent = test_agent(max_turns: 2, signature: "{value :int}")
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
+          2 -> {:ok, "```clojure\n(return {:value 42})\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+      assert step.return == %{"value" => 42}
+      # fallback_used should not be present when return was explicit
+      assert step.usage[:fallback_used] != true
+    end
+  end
 end
