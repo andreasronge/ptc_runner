@@ -333,5 +333,39 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       assert msg_count_3 == 1,
              "Expected compressed single message on turn 3, got #{msg_count_3}"
     end
+
+    test "budget exhausted when LLM continues without (return ...) in retry phase" do
+      # Bug scenario: LLM ignores must-return warning and returns expression
+      # instead of calling (return ...). With return_retries > 0, the loop
+      # should properly decrement retry_turns_remaining and terminate.
+      agent =
+        SubAgent.new(
+          prompt: "Return a value",
+          max_turns: 1,
+          return_retries: 2
+        )
+
+      turn_counter = :counters.new(1, [:atomics])
+
+      llm = fn _ ->
+        turn = :counters.get(turn_counter, 1) + 1
+        :counters.put(turn_counter, 1, turn)
+
+        # Always return expression without (return ...) - ignoring must-return
+        {:ok, "```clojure\n(+ 1 #{turn})\n```"}
+      end
+
+      {:error, step} = Loop.run(agent, llm: llm, context: %{})
+
+      # Should exhaust budget after 1 work turn + 2 retry turns = 3 turns
+      assert step.fail.reason == :budget_exhausted
+      assert length(step.turns) == 3
+
+      # Verify turn types
+      [turn1, turn2, turn3] = step.turns
+      assert turn1.type == :must_return
+      assert turn2.type == :retry
+      assert turn3.type == :retry
+    end
   end
 end
