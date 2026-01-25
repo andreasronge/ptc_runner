@@ -36,6 +36,7 @@ defmodule PtcDemo.LispCLI do
     validate_clojure = opts[:validate_clojure]
     compression = Map.get(opts, :compression, false)
     filter = Map.get(opts, :filter, :all)
+    return_retries = Map.get(opts, :return_retries, 0)
 
     # Resolve model early so we can check if it's a local provider
     resolved_model = if model, do: CLIBase.resolve_model(model), else: nil
@@ -56,7 +57,8 @@ defmodule PtcDemo.LispCLI do
       PtcDemo.LispAgent.start_link(
         data_mode: data_mode,
         prompt: initial_prompt,
-        compression: compression
+        compression: compression,
+        return_retries: return_retries
       )
 
     # Set model if specified
@@ -84,7 +86,8 @@ defmodule PtcDemo.LispCLI do
         test_index: test_index,
         prompt: prompt_profile,
         compression: compression,
-        filter: filter
+        filter: filter,
+        return_retries: return_retries
       )
     else
       IO.puts(

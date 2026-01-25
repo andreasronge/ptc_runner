@@ -35,10 +35,12 @@ defmodule PtcDemo.Agent do
     :prompt_profile,
     :compression,
     :max_turns,
+    :return_retries,
     :datasets,
     :last_program,
     :last_result,
     :last_trace,
+    :last_retry_count,
     :memory,
     :usage,
     :programs_history
@@ -80,6 +82,14 @@ defmodule PtcDemo.Agent do
   """
   def last_trace do
     GenServer.call(__MODULE__, :last_trace)
+  end
+
+  @doc """
+  Get the number of retry turns used in the last execution.
+  Returns 0 if no retries were needed.
+  """
+  def last_retry_count do
+    GenServer.call(__MODULE__, :last_retry_count)
   end
 
   def list_datasets do
@@ -213,6 +223,7 @@ defmodule PtcDemo.Agent do
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
     compression = Keyword.get(opts, :compression, false)
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
+    return_retries = Keyword.get(opts, :return_retries, 0)
 
     # Note: documents not included in ctx - use search tool instead
     datasets = %{
@@ -229,10 +240,12 @@ defmodule PtcDemo.Agent do
        prompt_profile: prompt_profile,
        compression: compression,
        max_turns: max_turns,
+       return_retries: return_retries,
        datasets: datasets,
        last_program: nil,
        last_result: nil,
        last_trace: nil,
+       last_retry_count: 0,
        memory: %{},
        usage: empty_usage(),
        programs_history: []
@@ -242,14 +255,22 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call({:ask, question, opts}, _from, state) do
     max_turns = Keyword.get(opts, :max_turns, state.max_turns)
+    return_retries = Keyword.get(opts, :return_retries, state.return_retries)
     debug = Keyword.get(opts, :debug, false)
     verbose = Keyword.get(opts, :verbose, false)
     # Signature for return type validation (explicit or inferred from expect)
     signature = Keyword.get(opts, :signature) || infer_signature(Keyword.get(opts, :expect))
 
-    # Build the SubAgent with requested max_turns, signature, and compression
+    # Build the SubAgent with requested max_turns, signature, compression, and return_retries
     agent =
-      build_agent(state.data_mode, state.prompt_profile, state.compression, max_turns, signature)
+      build_agent(
+        state.data_mode,
+        state.prompt_profile,
+        state.compression,
+        max_turns,
+        signature,
+        return_retries
+      )
 
     # Build context with datasets (memory is handled internally by SubAgent)
     context = Map.merge(state.datasets, %{"question" => question})
@@ -277,6 +298,9 @@ defmodule PtcDemo.Agent do
         all_programs = extract_all_programs_from_turns(step.turns)
         new_programs = state.programs_history ++ all_programs
 
+        # Count retry turns
+        retry_count = count_retry_turns(step.turns)
+
         # Format answer - if it's the raw value, format it nicely
         answer = ResponseHandler.format_result(result)
 
@@ -293,6 +317,7 @@ defmodule PtcDemo.Agent do
            | last_program: program,
              last_result: result,
              last_trace: trace,
+             last_retry_count: retry_count,
              memory: new_memory,
              usage: new_usage,
              programs_history: new_programs
@@ -312,6 +337,9 @@ defmodule PtcDemo.Agent do
         program = extract_program_from_turns(step.turns)
         new_programs = state.programs_history ++ all_programs
 
+        # Count retry turns
+        retry_count = count_retry_turns(step.turns)
+
         # Store trace for debugging failed executions
         trace = serialize_turns_for_json(step.turns)
 
@@ -321,7 +349,8 @@ defmodule PtcDemo.Agent do
            | usage: new_usage,
              programs_history: new_programs,
              last_program: program,
-             last_trace: trace
+             last_trace: trace,
+             last_retry_count: retry_count
          }}
     end
   end
@@ -335,6 +364,7 @@ defmodule PtcDemo.Agent do
          last_program: nil,
          last_result: nil,
          last_trace: nil,
+         last_retry_count: 0,
          memory: %{},
          usage: empty_usage(),
          programs_history: []
@@ -359,6 +389,11 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call(:last_trace, _from, state) do
     {:reply, state.last_trace, state}
+  end
+
+  @impl true
+  def handle_call(:last_retry_count, _from, state) do
+    {:reply, state.last_retry_count, state}
   end
 
   @impl true
@@ -434,14 +469,15 @@ defmodule PtcDemo.Agent do
   # --- Private Functions ---
 
   defp build_agent(data_mode, prompt_profile, compression) do
-    build_agent(data_mode, prompt_profile, compression, @max_turns, nil)
+    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0)
   end
 
-  defp build_agent(data_mode, prompt_profile, compression, max_turns, signature) do
+  defp build_agent(data_mode, prompt_profile, compression, max_turns, signature, return_retries) do
     SubAgent.new(
       prompt: "{{question}}",
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
+      return_retries: return_retries,
       tools: build_tools(),
       context_descriptions: context_descriptions_for(data_mode),
       system_prompt: build_system_prompt(prompt_profile, max_turns),
@@ -544,6 +580,14 @@ defmodule PtcDemo.Agent do
       _ -> nil
     end)
     |> Enum.reject(&is_nil/1)
+  end
+
+  # Count turns that were retry attempts (turn.type == :retry)
+  defp count_retry_turns(nil), do: 0
+  defp count_retry_turns([]), do: 0
+
+  defp count_retry_turns(turns) when is_list(turns) do
+    Enum.count(turns, fn turn -> turn.type == :retry end)
   end
 
   defp format_error(%{reason: reason, message: message}) do

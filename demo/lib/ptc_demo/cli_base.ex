@@ -224,6 +224,21 @@ defmodule PtcDemo.CLIBase do
               System.halt(1)
           end
 
+        String.starts_with?(arg, "--return-retries=") ->
+          retries_str = String.replace_prefix(arg, "--return-retries=", "")
+
+          case Integer.parse(retries_str) do
+            {n, ""} when n >= 0 ->
+              Map.put(acc, :return_retries, n)
+
+            _ ->
+              IO.puts(
+                "Error: --return-retries must be a non-negative integer (e.g., --return-retries=2)"
+              )
+
+              System.halt(1)
+          end
+
         String.starts_with?(arg, "--model") ->
           IO.puts("Error: Use --model=<name> format (e.g., --model=haiku)")
           System.halt(1)

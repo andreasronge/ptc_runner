@@ -174,6 +174,7 @@ defmodule PtcDemo.LispTestRunner do
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
     compression = Keyword.get(opts, :compression, false)
     filter = Keyword.get(opts, :filter, :all)
+    return_retries = Keyword.get(opts, :return_retries, 0)
 
     # Check Babashka availability if Clojure validation requested
     clojure_available = check_clojure_validation(validate_clojure)
@@ -241,7 +242,8 @@ defmodule PtcDemo.LispTestRunner do
           verbose,
           agent_mod,
           current_model,
-          clojure_available
+          clojure_available,
+          return_retries
         )
       end
 
@@ -282,7 +284,8 @@ defmodule PtcDemo.LispTestRunner do
          verbose,
          agent_mod,
          current_model,
-         clojure_available
+         clojure_available,
+         return_retries
        ) do
     if total_runs > 1 do
       IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
@@ -315,7 +318,11 @@ defmodule PtcDemo.LispTestRunner do
       end)
 
     stats = agent_mod.stats()
-    summary = Base.build_summary(results, start_time, current_model, data_mode, stats)
+
+    summary =
+      Base.build_summary(results, start_time, current_model, data_mode, stats,
+        return_retries: return_retries
+      )
 
     if verbose do
       Base.print_summary(summary)
@@ -377,6 +384,7 @@ defmodule PtcDemo.LispTestRunner do
       report_path = Keyword.get(opts, :report)
       runs = Keyword.get(opts, :runs, 1)
       compression = Keyword.get(opts, :compression, false)
+      return_retries = Keyword.get(opts, :return_retries, 0)
 
       test_case = Enum.at(cases, index - 1)
 
@@ -429,7 +437,10 @@ defmodule PtcDemo.LispTestRunner do
             )
 
           stats = agent_mod.stats()
-          Base.build_summary([result], start_time, current_model, data_mode, stats)
+
+          Base.build_summary([result], start_time, current_model, data_mode, stats,
+            return_retries: return_retries
+          )
         end
 
       # Use last run's result for pass/fail determination
@@ -562,6 +573,7 @@ defmodule PtcDemo.LispTestRunner do
           # Get all programs attempted during this query
           all_programs = agent_mod.programs()
           attempts = length(all_programs)
+          retry_count = agent_mod.last_retry_count()
 
           # Get the actual result from running the program
           case agent_mod.last_result() do
@@ -570,6 +582,7 @@ defmodule PtcDemo.LispTestRunner do
                 passed: false,
                 error: "No result returned",
                 attempts: attempts,
+                retry_count: retry_count,
                 all_programs: all_programs,
                 trace: agent_mod.last_trace()
               }
@@ -581,6 +594,7 @@ defmodule PtcDemo.LispTestRunner do
               validation
               |> Map.put(:program, agent_mod.last_program())
               |> Map.put(:attempts, attempts)
+              |> Map.put(:retry_count, retry_count)
               |> Map.put(:all_programs, all_programs)
               |> Map.put(:final_result, value)
               |> maybe_add_trace(validation.passed, agent_mod)
@@ -589,12 +603,14 @@ defmodule PtcDemo.LispTestRunner do
         {:error, reason} ->
           all_programs = agent_mod.programs()
           trace = agent_mod.last_trace()
+          retry_count = agent_mod.last_retry_count()
 
           %{
             passed: false,
             error: "Query failed: #{inspect(reason)}",
             program: agent_mod.last_program(),
             attempts: length(all_programs),
+            retry_count: retry_count,
             all_programs: all_programs,
             trace: trace
           }
