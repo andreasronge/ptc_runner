@@ -139,6 +139,7 @@ defmodule PtcRunner.SubAgent.Loop do
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
     remaining_turns = Keyword.get(opts, :_remaining_turns, agent.turn_budget)
     mission_deadline = Keyword.get(opts, :_mission_deadline)
+    trace_context = Keyword.get(opts, :trace_context)
 
     # Check nesting depth limit before starting
     if nesting_depth >= agent.max_depth do
@@ -177,7 +178,8 @@ defmodule PtcRunner.SubAgent.Loop do
           received_field_descriptions: received_field_descriptions,
           token_limit: token_limit,
           on_budget_exceeded: on_budget_exceeded,
-          budget_callback: budget_callback
+          budget_callback: budget_callback,
+          trace_context: trace_context
         }
 
         run_with_telemetry(agent, run_opts)
@@ -268,7 +270,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Budget callback options
       token_limit: run_opts.token_limit,
       on_budget_exceeded: run_opts.on_budget_exceeded,
-      budget_callback: run_opts.budget_callback
+      budget_callback: run_opts.budget_callback,
+      # Trace context for nested agent tracing
+      trace_context: run_opts.trace_context
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -601,14 +605,19 @@ defmodule PtcRunner.SubAgent.Loop do
       max_print_length: Keyword.get(agent.format_options, :max_print_length),
       timeout: agent.timeout,
       pmap_timeout: agent.pmap_timeout,
-      budget: build_budget_introspection_map(agent, state)
+      budget: build_budget_introspection_map(agent, state),
+      trace_context: state.trace_context
     ]
 
     case Lisp.run(code, lisp_opts) do
       {:ok, lisp_step} ->
+        # Emit pmap/pcalls telemetry events if any
+        emit_pmap_telemetry(agent, lisp_step)
         handle_successful_execution(code, response, lisp_step, state, agent, llm)
 
       {:error, lisp_step} ->
+        # Emit pmap/pcalls telemetry events even on error
+        emit_pmap_telemetry(agent, lisp_step)
         # Build error message for LLM
         error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
 
@@ -1254,5 +1263,39 @@ defmodule PtcRunner.SubAgent.Loop do
       end
     end)
     |> Map.new()
+  end
+
+  # ============================================================
+  # Pmap/Pcalls Telemetry
+  # ============================================================
+
+  # Emit telemetry events for pmap/pcalls executions recorded during Lisp evaluation.
+  # Since pmap/pcalls run inside the sandbox (isolated process), telemetry can't be
+  # emitted during execution. Instead, we record execution metadata in EvalContext
+  # and emit events after the sandbox returns.
+  defp emit_pmap_telemetry(_agent, %{pmap_calls: []}), do: :ok
+
+  defp emit_pmap_telemetry(agent, %{pmap_calls: pmap_calls}) do
+    Enum.each(pmap_calls, fn pmap_call ->
+      event_suffix =
+        case pmap_call.type do
+          :pmap -> [:pmap, :stop]
+          :pcalls -> [:pcalls, :stop]
+        end
+
+      measurements = %{
+        duration: System.convert_time_unit(pmap_call.duration_ms, :millisecond, :native)
+      }
+
+      metadata = %{
+        agent: agent,
+        count: pmap_call.count,
+        child_trace_ids: pmap_call.child_trace_ids,
+        success_count: pmap_call.success_count,
+        error_count: pmap_call.error_count
+      }
+
+      Telemetry.emit(event_suffix, measurements, metadata)
+    end)
   end
 end

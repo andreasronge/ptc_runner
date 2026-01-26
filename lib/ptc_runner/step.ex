@@ -181,6 +181,8 @@ defmodule PtcRunner.Step do
     :field_descriptions,
     :prints,
     :tool_calls,
+    :pmap_calls,
+    :child_traces,
     :messages,
     :prompt,
     :original_prompt,
@@ -262,15 +264,27 @@ defmodule PtcRunner.Step do
         }
 
   @typedoc """
-  Step result struct.
+  Parallel map/calls execution record for tracing.
 
-  One of `return` or `fail` will be set, but never both:
-  - Success: `return` is set, `fail` is nil
-  - Failure: `fail` is set, `return` is nil
-
-  The `trace_id` and `parent_trace_id` fields are used for tracing correlation
-  in parallel and nested agent executions. See `PtcRunner.Tracer` for details.
+  Fields:
+  - `type`: `:pmap` or `:pcalls`
+  - `count`: Number of parallel tasks
+  - `child_trace_ids`: List of trace IDs from SubAgentTool executions
+  - `timestamp`: When execution started
+  - `duration_ms`: Total execution time
+  - `success_count`: Number of successful executions
+  - `error_count`: Number of failed executions
   """
+  @type pmap_call :: %{
+          type: :pmap | :pcalls,
+          count: non_neg_integer(),
+          child_trace_ids: [String.t()],
+          timestamp: DateTime.t(),
+          duration_ms: non_neg_integer(),
+          success_count: non_neg_integer(),
+          error_count: non_neg_integer()
+        }
+
   @type t :: %__MODULE__{
           return: term() | nil,
           fail: fail() | nil,
@@ -283,6 +297,8 @@ defmodule PtcRunner.Step do
           field_descriptions: map() | nil,
           prints: [String.t()],
           tool_calls: [tool_call()],
+          pmap_calls: [pmap_call()],
+          child_traces: [String.t()],
           messages: [message()] | nil,
           prompt: String.t() | nil,
           tools: map() | nil
@@ -313,7 +329,9 @@ defmodule PtcRunner.Step do
       parent_trace_id: nil,
       field_descriptions: nil,
       prints: [],
-      tool_calls: []
+      tool_calls: [],
+      pmap_calls: [],
+      child_traces: []
     }
   end
 
@@ -366,7 +384,9 @@ defmodule PtcRunner.Step do
       parent_trace_id: nil,
       field_descriptions: nil,
       prints: [],
-      tool_calls: []
+      tool_calls: [],
+      pmap_calls: [],
+      child_traces: []
     }
   end
 end

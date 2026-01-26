@@ -24,6 +24,10 @@ defmodule PtcRunner.TraceLog.Handler do
     [:ptc_runner, :sub_agent, :tool, :start],
     [:ptc_runner, :sub_agent, :tool, :stop],
     [:ptc_runner, :sub_agent, :tool, :exception],
+    [:ptc_runner, :sub_agent, :pmap, :start],
+    [:ptc_runner, :sub_agent, :pmap, :stop],
+    [:ptc_runner, :sub_agent, :pcalls, :start],
+    [:ptc_runner, :sub_agent, :pcalls, :stop],
     [:ptc_runner, :sub_agent, :compiled, :execute, :start],
     [:ptc_runner, :sub_agent, :compiled, :execute, :stop],
     [:ptc_runner, :sub_agent, :compiled, :execute, :exception]

@@ -414,6 +414,12 @@ defmodule PtcRunner.Lisp.Eval do
          {:type_error, "pmap: keyword accessor requires a list of maps, got a single map",
           [fn_val, coll_val]}}
       else
+        # Record start time for pmap execution
+        start_time = System.monotonic_time(:millisecond)
+        timestamp = DateTime.utc_now()
+        coll_list = Enum.to_list(coll_val)
+        count = length(coll_list)
+
         # Convert the function value to a callable (may be a tuple for builtins)
         # The closure captures a read-only snapshot of the environment at creation time
         callable_fn = value_to_erlang_fn(fn_val, eval_ctx2)
@@ -423,11 +429,19 @@ defmodule PtcRunner.Lisp.Eval do
         # when LLM generates pmap over large collections (e.g., unbounded search results)
         # Timeout is configurable via pmap_timeout for LLM-backed tool calls
         results =
-          coll_val
+          coll_list
           |> Task.async_stream(
             fn elem ->
               try do
-                {:ok, Callable.call(callable_fn, [elem])}
+                result = Callable.call(callable_fn, [elem])
+                # Check if result contains a child_trace_id (from SubAgentTool)
+                case result do
+                  %{__child_trace_id__: trace_id, value: value} ->
+                    {:ok, value, trace_id}
+
+                  _ ->
+                    {:ok, result, nil}
+                end
               rescue
                 e ->
                   {:error, {:pmap_error, Exception.message(e)}}
@@ -445,8 +459,32 @@ defmodule PtcRunner.Lisp.Eval do
           )
           |> Enum.to_list()
 
-        # Collect results, stopping at first error
-        collect_pmap_results(results, [], eval_ctx2)
+        # Collect results and child trace IDs
+        duration_ms = System.monotonic_time(:millisecond) - start_time
+
+        case collect_pmap_results_with_traces(results, [], [], eval_ctx2) do
+          {:ok, values, child_trace_ids, eval_ctx3} ->
+            # Count successes and errors
+            success_count = length(values)
+            error_count = count - success_count
+
+            # Record pmap execution
+            pmap_call = %{
+              type: :pmap,
+              count: count,
+              child_trace_ids: Enum.reject(child_trace_ids, &is_nil/1),
+              timestamp: timestamp,
+              duration_ms: duration_ms,
+              success_count: success_count,
+              error_count: error_count
+            }
+
+            eval_ctx4 = EvalContext.append_pmap_call(eval_ctx3, pmap_call)
+            {:ok, values, eval_ctx4}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
     end
   end
@@ -459,6 +497,11 @@ defmodule PtcRunner.Lisp.Eval do
     # First evaluate all function expressions to get function values
     case eval_all(fn_asts, eval_ctx) do
       {:ok, fn_vals, eval_ctx2} ->
+        # Record start time for pcalls execution
+        start_time = System.monotonic_time(:millisecond)
+        timestamp = DateTime.utc_now()
+        count = length(fn_vals)
+
         # Convert each function value to an Erlang function (zero-arity thunk)
         # Use a try/rescue to catch validation errors (wrong arity, non-callable)
         try do
@@ -477,7 +520,15 @@ defmodule PtcRunner.Lisp.Eval do
             |> Task.async_stream(
               fn {erlang_fn, idx} ->
                 try do
-                  {:ok, erlang_fn.(), idx}
+                  result = erlang_fn.()
+                  # Check if result contains a child_trace_id (from SubAgentTool)
+                  case result do
+                    %{__child_trace_id__: trace_id, value: value} ->
+                      {:ok, value, trace_id, idx}
+
+                    _ ->
+                      {:ok, result, nil, idx}
+                  end
                 rescue
                   e ->
                     {:error, {:pcalls_error, idx, Exception.message(e)}}
@@ -495,8 +546,32 @@ defmodule PtcRunner.Lisp.Eval do
             )
             |> Enum.to_list()
 
-          # Collect results, stopping at first error
-          collect_pcalls_results(results, [], eval_ctx2)
+          # Collect results and child trace IDs
+          duration_ms = System.monotonic_time(:millisecond) - start_time
+
+          case collect_pcalls_results_with_traces(results, [], [], eval_ctx2) do
+            {:ok, values, child_trace_ids, eval_ctx3} ->
+              # Count successes and errors
+              success_count = length(values)
+              error_count = count - success_count
+
+              # Record pcalls execution
+              pmap_call = %{
+                type: :pcalls,
+                count: count,
+                child_trace_ids: Enum.reject(child_trace_ids, &is_nil/1),
+                timestamp: timestamp,
+                duration_ms: duration_ms,
+                success_count: success_count,
+                error_count: error_count
+              }
+
+              eval_ctx4 = EvalContext.append_pmap_call(eval_ctx3, pmap_call)
+              {:ok, values, eval_ctx4}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
         rescue
           e in RuntimeError ->
             {:error, {:pcalls_error, Exception.message(e)}}
@@ -613,11 +688,14 @@ defmodule PtcRunner.Lisp.Eval do
   # Record a tool call with timing, execution, error capture, and evaluation context update.
   # Captures the error field if the tool raises an exception, records it, and throws a special
   # exception that includes the updated eval_ctx so the error can be properly reported.
+  #
+  # Also handles SubAgentTool results that may be wrapped with child_trace_id metadata.
+  # The wrapper is unwrapped here so the Lisp interpreter only sees the actual value.
   defp record_tool_call(tool_name, args_map, tool_exec, eval_ctx) do
     start_time = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
 
-    {result, error} =
+    {raw_result, error} =
       try do
         {tool_exec.(tool_name, args_map), nil}
       rescue
@@ -632,6 +710,10 @@ defmodule PtcRunner.Lisp.Eval do
 
     duration_ms = System.monotonic_time(:millisecond) - start_time
 
+    # Unwrap SubAgentTool results that include child_trace_id metadata
+    # This prevents internal trace metadata from leaking to the Lisp interpreter
+    {result, child_trace_id} = unwrap_tool_result(raw_result)
+
     tool_call = %{
       name: tool_name,
       args: args_map,
@@ -640,6 +722,14 @@ defmodule PtcRunner.Lisp.Eval do
       timestamp: timestamp,
       duration_ms: duration_ms
     }
+
+    # Add child_trace_id if present (from SubAgentTool execution)
+    tool_call =
+      if child_trace_id do
+        Map.put(tool_call, :child_trace_id, child_trace_id)
+      else
+        tool_call
+      end
 
     eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
 
@@ -653,6 +743,14 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, result, eval_ctx2}
     end
   end
+
+  # Unwrap SubAgentTool results that contain child_trace_id metadata.
+  # Returns {actual_result, child_trace_id} or {result, nil} if not wrapped.
+  defp unwrap_tool_result(%{__child_trace_id__: trace_id, value: value}) do
+    {value, trace_id}
+  end
+
+  defp unwrap_tool_result(result), do: {result, nil}
 
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do
@@ -772,18 +870,30 @@ defmodule PtcRunner.Lisp.Eval do
   # Pmap helpers
   # ============================================================
 
-  # Helper to collect pmap results, preserving order and detecting errors
-  defp collect_pmap_results([], acc, eval_ctx), do: {:ok, Enum.reverse(acc), eval_ctx}
-
-  defp collect_pmap_results([{:ok, {:ok, val}} | rest], acc, eval_ctx) do
-    collect_pmap_results(rest, [val | acc], eval_ctx)
+  # Helper to collect pmap results with child trace IDs
+  defp collect_pmap_results_with_traces([], acc, trace_ids, eval_ctx) do
+    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids), eval_ctx}
   end
 
-  defp collect_pmap_results([{:ok, {:error, reason}} | _rest], _acc, _eval_ctx) do
+  defp collect_pmap_results_with_traces(
+         [{:ok, {:ok, val, trace_id}} | rest],
+         acc,
+         trace_ids,
+         eval_ctx
+       ) do
+    collect_pmap_results_with_traces(rest, [val | acc], [trace_id | trace_ids], eval_ctx)
+  end
+
+  defp collect_pmap_results_with_traces(
+         [{:ok, {:error, reason}} | _rest],
+         _acc,
+         _trace_ids,
+         _eval_ctx
+       ) do
     {:error, reason}
   end
 
-  defp collect_pmap_results([{:exit, reason} | _rest], _acc, _eval_ctx) do
+  defp collect_pmap_results_with_traces([{:exit, reason} | _rest], _acc, _trace_ids, _eval_ctx) do
     {:error, {:pmap_error, "parallel task failed: #{inspect(reason)}"}}
   end
 
@@ -842,18 +952,30 @@ defmodule PtcRunner.Lisp.Eval do
     raise "pcalls requires callable thunks, got: #{inspect(value)}"
   end
 
-  # Helper to collect pcalls results, preserving order and detecting errors
-  defp collect_pcalls_results([], acc, eval_ctx), do: {:ok, Enum.reverse(acc), eval_ctx}
-
-  defp collect_pcalls_results([{:ok, {:ok, val, _idx}} | rest], acc, eval_ctx) do
-    collect_pcalls_results(rest, [val | acc], eval_ctx)
+  # Helper to collect pcalls results with child trace IDs
+  defp collect_pcalls_results_with_traces([], acc, trace_ids, eval_ctx) do
+    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids), eval_ctx}
   end
 
-  defp collect_pcalls_results([{:ok, {:error, reason}} | _rest], _acc, _eval_ctx) do
+  defp collect_pcalls_results_with_traces(
+         [{:ok, {:ok, val, trace_id, _idx}} | rest],
+         acc,
+         trace_ids,
+         eval_ctx
+       ) do
+    collect_pcalls_results_with_traces(rest, [val | acc], [trace_id | trace_ids], eval_ctx)
+  end
+
+  defp collect_pcalls_results_with_traces(
+         [{:ok, {:error, reason}} | _rest],
+         _acc,
+         _trace_ids,
+         _eval_ctx
+       ) do
     {:error, reason}
   end
 
-  defp collect_pcalls_results([{:exit, reason} | _rest], _acc, _eval_ctx) do
+  defp collect_pcalls_results_with_traces([{:exit, reason} | _rest], _acc, _trace_ids, _eval_ctx) do
     {:error, {:pcalls_error, "parallel task failed: #{inspect(reason)}"}}
   end
 

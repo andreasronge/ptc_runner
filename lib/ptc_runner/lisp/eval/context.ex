@@ -29,12 +29,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :tool_exec,
     :turn_history,
     :budget,
+    :trace_context,
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
     pmap_timeout: @default_pmap_timeout,
     prints: [],
-    tool_calls: []
+    tool_calls: [],
+    pmap_calls: []
   ]
 
   @typedoc """
@@ -47,14 +49,54 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `error`: Error message if tool failed
   - `timestamp`: When tool was called
   - `duration_ms`: How long tool took
+  - `child_trace_id`: Trace ID of nested SubAgentTool execution (if any)
   """
   @type tool_call :: %{
-          name: String.t(),
-          args: map(),
-          result: term(),
-          error: String.t() | nil,
+          required(:name) => String.t(),
+          required(:args) => map(),
+          required(:result) => term(),
+          required(:error) => String.t() | nil,
+          required(:timestamp) => DateTime.t(),
+          required(:duration_ms) => non_neg_integer(),
+          optional(:child_trace_id) => String.t()
+        }
+
+  @typedoc """
+  Trace context for nested agent execution tracing.
+
+  Fields:
+  - `trace_id`: Unique identifier for this trace session
+  - `parent_span_id`: Span ID of the parent operation (nil for root)
+  - `depth`: Nesting depth for visualization
+  """
+  @type trace_context ::
+          %{
+            trace_id: String.t(),
+            parent_span_id: String.t() | nil,
+            depth: non_neg_integer()
+          }
+          | nil
+
+  @typedoc """
+  Parallel map/calls execution record for tracing.
+
+  Fields:
+  - `type`: `:pmap` or `:pcalls`
+  - `count`: Number of parallel tasks
+  - `child_trace_ids`: List of trace IDs from SubAgentTool executions
+  - `timestamp`: When execution started
+  - `duration_ms`: Total execution time
+  - `success_count`: Number of successful executions
+  - `error_count`: Number of failed executions
+  """
+  @type pmap_call :: %{
+          type: :pmap | :pcalls,
+          count: non_neg_integer(),
+          child_trace_ids: [String.t()],
           timestamp: DateTime.t(),
-          duration_ms: non_neg_integer()
+          duration_ms: non_neg_integer(),
+          success_count: non_neg_integer(),
+          error_count: non_neg_integer()
         }
 
   @type t :: %__MODULE__{
@@ -64,12 +106,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_exec: (String.t(), map() -> term()),
           turn_history: list(),
           budget: map() | nil,
+          trace_context: trace_context(),
           iteration_count: integer(),
           loop_limit: integer(),
           max_print_length: pos_integer(),
           pmap_timeout: pos_integer(),
           prints: [String.t()],
-          tool_calls: [tool_call()]
+          tool_calls: [tool_call()],
+          pmap_calls: [pmap_call()]
         }
 
   @doc """
@@ -80,6 +124,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
   - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
   - `:pmap_timeout` - Timeout in ms for each pmap task (default: 5000). Increase for LLM-backed tools.
+  - `:trace_context` - Trace context for nested agent tracing (default: nil)
 
   ## Examples
 
@@ -111,8 +156,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
       budget: Keyword.get(opts, :budget),
+      trace_context: Keyword.get(opts, :trace_context),
       prints: [],
-      tool_calls: []
+      tool_calls: [],
+      pmap_calls: []
     }
   end
 
@@ -139,6 +186,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec append_tool_call(t(), tool_call()) :: t()
   def append_tool_call(%__MODULE__{tool_calls: tool_calls} = context, tool_call) do
     %{context | tool_calls: [tool_call | tool_calls]}
+  end
+
+  @doc """
+  Appends a pmap/pcalls execution record to the context.
+  """
+  @spec append_pmap_call(t(), pmap_call()) :: t()
+  def append_pmap_call(%__MODULE__{pmap_calls: pmap_calls} = context, pmap_call) do
+    %{context | pmap_calls: [pmap_call | pmap_calls]}
   end
 
   @doc """
@@ -179,7 +234,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Merges two contexts, specifically combining prints and tool calls.
+  Merges two contexts, specifically combining prints, tool calls, and pmap calls.
   Used to merge results from parallel execution branches (pmap, pcalls).
   """
   @spec merge(t(), t()) :: t()
@@ -188,6 +243,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       ctx1
       | prints: ctx2.prints ++ ctx1.prints,
         tool_calls: ctx2.tool_calls ++ ctx1.tool_calls,
+        pmap_calls: ctx2.pmap_calls ++ ctx1.pmap_calls,
         user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
         iteration_count: ctx1.iteration_count + ctx2.iteration_count
     }
