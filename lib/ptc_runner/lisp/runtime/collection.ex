@@ -349,6 +349,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def rest(coll) when is_list(coll), do: Enum.drop(coll, 1)
   def rest(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), 1)
 
+  # butlast - all but last element (empty list for empty/single-element collections)
+  def butlast(nil), do: []
+  def butlast(coll) when is_list(coll), do: Enum.drop(coll, -1)
+  def butlast(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), -1)
+
   # next - returns nil for empty/single-element collections
   def next(nil), do: nil
 
