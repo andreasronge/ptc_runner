@@ -59,6 +59,8 @@ An LLM acts as an **orchestrator** that dispatches work to parallel sub-agents a
 
 ## How to Run
 
+### From parent project (recommended)
+
 ```bash
 # Generate test corpus (10k lines with hidden incidents)
 mix run examples/rlm/gen_data.exs
@@ -79,10 +81,13 @@ mix rlm --export --open
 mix rlm --clean
 ```
 
-Or use the script directly:
+### Standalone (from examples/rlm directory)
+
 ```bash
-mix run examples/rlm/run.exs
-mix run examples/rlm/run.exs --trace
+cd examples/rlm
+mix deps.get
+mix run run.exs
+mix run run.exs --trace
 ```
 
 ## Expected Output
