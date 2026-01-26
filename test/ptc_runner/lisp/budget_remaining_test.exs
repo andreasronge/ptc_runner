@@ -49,6 +49,32 @@ defmodule PtcRunner.Lisp.BudgetRemainingTest do
       assert step.return == 15
     end
 
+    test "hyphenated keys can be accessed with keyword syntax" do
+      budget = %{
+        turns: 15,
+        "work-turns": 10,
+        "retry-turns": 5,
+        tokens: %{
+          "cache-creation": 1000,
+          "cache-read": 2000
+        }
+      }
+
+      # Access hyphenated top-level key
+      {:ok, step} = Lisp.run("(:work-turns (budget/remaining))", budget: budget)
+      assert step.return == 10
+
+      # Access another hyphenated top-level key
+      {:ok, step} = Lisp.run("(:retry-turns (budget/remaining))", budget: budget)
+      assert step.return == 5
+
+      # Access nested hyphenated key
+      {:ok, step} =
+        Lisp.run("(:cache-creation (:tokens (budget/remaining)))", budget: budget)
+
+      assert step.return == 1000
+    end
+
     test "budget map can be used in conditional logic" do
       budget = %{turns: 5}
 
