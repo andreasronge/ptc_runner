@@ -1,27 +1,32 @@
 defmodule PtcRunner do
   @moduledoc """
-  BEAM-native Programmatic Tool Calling (PTC) runner.
+  BEAM-native Programmatic Tool Calling (PTC) library.
 
-  ## Languages
+  PtcRunner enables LLMs to write programs that orchestrate tools and transform
+  data inside a sandboxed environment. The LLM reasons and generates code; the
+  computation runs in an isolated interpreter with deterministic results.
 
-  PtcRunner supports multiple DSL languages:
+  ## Core Components
 
-  - `PtcRunner.Json` - JSON-based DSL (stable)
-  - `PtcRunner.Lisp` - Clojure-like DSL (experimental)
+  | Component | Purpose |
+  |-----------|---------|
+  | `PtcRunner.SubAgent` | Agentic loop: prompt → LLM → program → execute → repeat |
+  | `PtcRunner.Lisp` | PTC-Lisp interpreter |
+  | `PtcRunner.Sandbox` | Isolated execution with timeout/memory limits |
+  | `PtcRunner.Context` | Tools and memory container |
 
-  ## Examples
+  ## Example
 
-  ### JSON DSL
+      {:ok, step} = PtcRunner.SubAgent.run("What's 2 + 2?", llm: my_llm)
+      step.return  #=> 4
 
-      iex> program = ~s({"program": {"op": "literal", "value": 42}})
-      iex> {:ok, result, _metrics} = PtcRunner.Json.run(program)
-      iex> result
-      42
+  The SubAgent asks the LLM to write a program, executes it in the sandbox,
+  and returns the result. See `PtcRunner.SubAgent.run/2` for all options.
 
-  ### PTC-Lisp
+  ## Guides
 
-      iex> {:ok, result, _delta, _memory} = PtcRunner.Lisp.run("(+ 1 2)")
-      iex> result
-      3
+  - [Getting Started](guides/subagent-getting-started.md) - First SubAgent walkthrough
+  - [Core Concepts](guides/subagent-concepts.md) - Context, memory, firewall convention
+  - [Patterns](guides/subagent-patterns.md) - Composition and orchestration
   """
 end
