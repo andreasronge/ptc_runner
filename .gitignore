@@ -8,6 +8,8 @@ _build/
 /deps/
 demo/deps/
 examples/*/deps/
+examples/*/_build/
+examples/*/mix.lock
 
 # Where third-party dependencies like ExDoc output generated docs.
 /doc/
