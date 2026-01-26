@@ -1260,6 +1260,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `map` | `(map f coll)` | Apply f to each item |
 | `map` | `(map f c1 c2)` | Apply f to pairs from c1, c2 |
 | `map` | `(map f c1 c2 c3)` | Apply f to triples |
+| `mapcat` | `(mapcat f coll)` | Apply f to each item, concatenate results |
 | `pmap` | `(pmap f coll)` | Apply f to each item in parallel |
 | `pcalls` | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
 | `mapv` | `(mapv f coll)` | Like map, returns vector |
@@ -1271,6 +1272,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 ```clojure
 (map :name users)                    ; extract :name from each
+(mapcat (fn [x] [x (* x 2)]) [1 2 3])  ; => [1 2 2 4 3 6] (map + flatten)
 (pmap :name users)                   ; same, but parallel execution
 (pcalls #(tool/get-user) #(tool/get-stats))  ; parallel heterogeneous calls
 (mapv :name users)                   ; same, ensures vector
@@ -1285,6 +1287,11 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 ;; 3-collection map requires explicit closure for variadic ops
 (map (fn [a b c] (+ a b c)) [1 2] [10 20] [100 200])  ; => [111 222]
+
+;; mapcat - apply function and concatenate results (flat_map)
+(mapcat (fn [x] (range 0 x)) [2 3 1])   ; => [0 1 0 1 2 0]
+(mapcat identity [[1 2] [3 4] [5]])     ; => [1 2 3 4 5] (flatten one level)
+(mapcat (fn [x] (if (> x 0) [x] [])) [-1 2 -3 4])  ; => [2 4] (filter + flatten)
 ```
 
 **Limitation:** Variadic builtins (`+`, `*`, `str`) don't work directly with 3-collection map—use explicit closures. See [#668](https://github.com/andreasronge/ptc_runner/issues/668).
