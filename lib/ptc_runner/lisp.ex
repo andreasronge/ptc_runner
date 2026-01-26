@@ -47,7 +47,8 @@ defmodule PtcRunner.Lisp do
     - `:tools` - Map of tool names to functions (default: %{})
     - `:signature` - Optional signature string for return value validation
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
-    - `:timeout` - Timeout in milliseconds (default: 1000)
+    - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
+    - `:pmap_timeout` - Timeout in milliseconds per pmap/pcalls task (default: 5000). Increase for LLM-backed tools.
     - `:max_heap` - Max heap size in words (default: 1_250_000)
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
@@ -138,6 +139,7 @@ defmodule PtcRunner.Lisp do
     max_print_length = Keyword.get(opts, :max_print_length)
     filter_context = Keyword.get(opts, :filter_context, true)
     budget = Keyword.get(opts, :budget)
+    pmap_timeout = Keyword.get(opts, :pmap_timeout)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -179,7 +181,8 @@ defmodule PtcRunner.Lisp do
         turn_history: turn_history,
         max_print_length: max_print_length,
         filter_context: filter_context,
-        budget: budget
+        budget: budget,
+        pmap_timeout: pmap_timeout
       }
 
       execute_program(source, opts)
@@ -207,7 +210,8 @@ defmodule PtcRunner.Lisp do
       turn_history: turn_history,
       max_print_length: max_print_length,
       filter_context: filter_context,
-      budget: budget
+      budget: budget,
+      pmap_timeout: pmap_timeout
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
@@ -222,7 +226,7 @@ defmodule PtcRunner.Lisp do
 
       # Build eval options (only include options if set)
       eval_opts =
-        [max_print_length: max_print_length, budget: budget]
+        [max_print_length: max_print_length, budget: budget, pmap_timeout: pmap_timeout]
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
       # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result

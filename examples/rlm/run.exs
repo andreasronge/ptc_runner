@@ -38,10 +38,11 @@ defmodule RLM.Runner do
         prompt: """
         Analyze the log chunk in data/chunk for CRITICAL or ERROR incidents.
         Extract and return a list of incident descriptions found.
+        If no incidents are found, return an empty list.
         """,
         signature: "(chunk :string) -> {incidents [:string]}",
         description: "Analyze a log chunk for CRITICAL/ERROR incidents.",
-        max_turns: 3,
+        max_turns: 5,
         llm: LLMClient.callback("bedrock:haiku")
       )
 
@@ -64,6 +65,12 @@ defmodule RLM.Runner do
       llm: LLMClient.callback("bedrock:sonnet"),
       max_turns: 5,
       max_heap: 20_000_000,
+      # LLM-backed tool calls need longer timeout (each Haiku call ~5-15s)
+      # pmap runs in parallel, so timeout needs to cover the slowest worker
+      timeout: 120_000,
+      # pmap_timeout: per-task timeout for parallel tool calls (default: 5s)
+      # LLM-backed workers need 30-60s each
+      pmap_timeout: 60_000,
       # Operator-level budget control
       token_limit: 200_000,
       on_budget_exceeded: :return_partial
@@ -96,10 +103,8 @@ defmodule RLM.Runner do
     IO.puts("\n=== RLM Audit Complete ===")
     IO.inspect(step.return, pretty: true)
 
-    IO.puts("\nExecution Metrics:")
-    IO.puts("  LLM Requests: #{step.usage.llm_requests}")
-    IO.puts("  Duration: #{step.usage.duration_ms}ms")
-    IO.puts("  Tokens: #{step.usage.total_tokens}")
+    # Show detailed execution trace with usage and tool call stats
+    SubAgent.Debug.print_trace(step, usage: true)
 
     if step.prints != [], do: IO.puts("\nLogs:\n#{Enum.join(step.prints, "")}")
   end
@@ -108,10 +113,8 @@ defmodule RLM.Runner do
     IO.puts("\n=== RLM Audit Failed ===")
     IO.inspect(step.fail)
 
-    if step.turns != [] do
-      IO.puts("\nLast Turn:")
-      IO.inspect(List.last(step.turns).result)
-    end
+    # Show trace even on failure - helps debug what went wrong
+    SubAgent.Debug.print_trace(step, usage: true, raw: true)
   end
 
   defp load_aws_credentials_if_needed do

@@ -421,6 +421,7 @@ defmodule PtcRunner.Lisp.Eval do
         # Execute in parallel using Task.async_stream
         # Limit concurrency to available schedulers to prevent resource exhaustion
         # when LLM generates pmap over large collections (e.g., unbounded search results)
+        # Timeout is configurable via pmap_timeout for LLM-backed tool calls
         results =
           coll_val
           |> Task.async_stream(
@@ -438,7 +439,7 @@ defmodule PtcRunner.Lisp.Eval do
                   {:error, {:pmap_error, "fail called inside pmap"}}
               end
             end,
-            timeout: 5_000,
+            timeout: eval_ctx2.pmap_timeout,
             ordered: true,
             max_concurrency: System.schedulers_online() * 2
           )
@@ -470,6 +471,7 @@ defmodule PtcRunner.Lisp.Eval do
 
           # Execute all thunks in parallel using Task.async_stream
           # Limit concurrency to prevent resource exhaustion
+          # Timeout is configurable via pmap_timeout for LLM-backed tool calls
           results =
             erlang_fns
             |> Task.async_stream(
@@ -487,7 +489,7 @@ defmodule PtcRunner.Lisp.Eval do
                     {:error, {:pcalls_error, idx, "fail called inside pcalls"}}
                 end
               end,
-              timeout: 5_000,
+              timeout: eval_ctx2.pmap_timeout,
               ordered: true,
               max_concurrency: System.schedulers_online() * 2
             )
@@ -808,7 +810,8 @@ defmodule PtcRunner.Lisp.Eval do
         ctx
         | loop_limit: eval_ctx.loop_limit,
           prints: eval_ctx.prints,
-          max_print_length: eval_ctx.max_print_length
+          max_print_length: eval_ctx.max_print_length,
+          pmap_timeout: eval_ctx.pmap_timeout
       }
 
       case do_eval(body, ctx) do

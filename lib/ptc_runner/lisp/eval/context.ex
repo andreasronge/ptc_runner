@@ -20,6 +20,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @default_print_length 2000
   @max_loop_limit 10_000
 
+  @default_pmap_timeout 5_000
+
   defstruct [
     :ctx,
     :user_ns,
@@ -30,6 +32,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
+    pmap_timeout: @default_pmap_timeout,
     prints: [],
     tool_calls: []
   ]
@@ -64,6 +67,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           iteration_count: integer(),
           loop_limit: integer(),
           max_print_length: pos_integer(),
+          pmap_timeout: pos_integer(),
           prints: [String.t()],
           tool_calls: [tool_call()]
         }
@@ -75,6 +79,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
   - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
+  - `:pmap_timeout` - Timeout in ms for each pmap task (default: 5000). Increase for LLM-backed tools.
 
   ## Examples
 
@@ -90,6 +95,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
       iex> ctx.budget
       %{turns: 10}
 
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [], pmap_timeout: 60_000)
+      iex> ctx.pmap_timeout
+      60000
+
   """
   @spec new(map(), map(), map(), (String.t(), map() -> term()), list(), keyword()) :: t()
   def new(ctx, user_ns, env, tool_exec, turn_history, opts \\ []) do
@@ -100,6 +109,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_exec: tool_exec,
       turn_history: turn_history,
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
+      pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
       budget: Keyword.get(opts, :budget),
       prints: [],
       tool_calls: []
