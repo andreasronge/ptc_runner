@@ -104,7 +104,11 @@ defmodule RLM.Runner do
   end
 
   defp execute_with_tracing(prompt, opts, true) do
-    trace_path = "examples/rlm/rlm_trace.jsonl"
+    # Traces go to gitignored folder
+    trace_path = "examples/rlm/traces/rlm_trace.jsonl"
+
+    # Ensure directory exists
+    File.mkdir_p!(Path.dirname(trace_path))
 
     {:ok, result, path} =
       TraceLog.with_trace(

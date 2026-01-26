@@ -131,15 +131,15 @@ Use the `--trace` flag to capture detailed execution traces for the planner and 
 mix run examples/rlm/run.exs --trace
 ```
 
-This creates:
-- `examples/rlm/rlm_trace.jsonl` - Main planner trace
-- One child trace file per worker (linked via `child_trace_id`)
+This creates trace files in the gitignored `traces/` folder:
+- `examples/rlm/traces/rlm_trace.jsonl` - Main planner trace
+- `examples/rlm/traces/trace_<id>.jsonl` - One per worker
 
 The execution tree visualization shows duration and status for each:
 
 ```
 === Trace Summary ===
-Main trace: examples/rlm/rlm_trace.jsonl
+Main trace: examples/rlm/traces/rlm_trace.jsonl
 Child traces: 28
 
 Execution tree:
@@ -165,8 +165,8 @@ Export to Chrome Trace Event format and open in DevTools for flame chart visuali
 alias PtcRunner.TraceLog.Analyzer
 
 # Load the trace tree and export to Chrome format
-{:ok, tree} = Analyzer.load_tree("examples/rlm/rlm_trace.jsonl")
-Analyzer.export_chrome_trace(tree, "examples/rlm/rlm_trace.json")
+{:ok, tree} = Analyzer.load_tree("examples/rlm/traces/rlm_trace.jsonl")
+Analyzer.export_chrome_trace(tree, "examples/rlm/traces/rlm_trace.json")
 ```
 
 Then open in Chrome:
@@ -195,11 +195,11 @@ open examples/rlm/trace_viewer.html
 alias PtcRunner.TraceLog.Analyzer
 
 # Load and visualize the full tree
-{:ok, tree} = Analyzer.load_tree("examples/rlm/rlm_trace.jsonl")
+{:ok, tree} = Analyzer.load_tree("examples/rlm/traces/rlm_trace.jsonl")
 Analyzer.print_tree(tree)
 
 # View timeline for a specific trace
-events = Analyzer.load("examples/rlm/rlm_trace.jsonl")
+events = Analyzer.load("examples/rlm/traces/rlm_trace.jsonl")
 Analyzer.print_timeline(events)
 
 # Get summary statistics
@@ -210,20 +210,20 @@ Analyzer.summary(events)
 
 ```bash
 # Pretty print all events
-cat examples/rlm/rlm_trace.jsonl | jq .
+cat examples/rlm/traces/rlm_trace.jsonl | jq .
 
 # Show just event types and durations
-cat examples/rlm/rlm_trace.jsonl | jq '{event, duration_ms}'
+cat examples/rlm/traces/rlm_trace.jsonl | jq '{event, duration_ms}'
 
 # Find slow workers (>10s)
-cat examples/rlm/trace_*.jsonl | jq 'select(.duration_ms > 10000)'
+cat examples/rlm/traces/trace_*.jsonl | jq 'select(.duration_ms > 10000)'
 ```
 
 **Cleanup**
 
 ```elixir
 # Delete all trace files in the tree
-{:ok, tree} = Analyzer.load_tree("examples/rlm/rlm_trace.jsonl")
+{:ok, tree} = Analyzer.load_tree("examples/rlm/traces/rlm_trace.jsonl")
 {:ok, count} = Analyzer.delete_tree(tree)
 IO.puts("Deleted #{count} trace files")
 ```

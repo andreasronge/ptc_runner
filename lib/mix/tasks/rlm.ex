@@ -39,7 +39,7 @@ defmodule Mix.Tasks.Rlm do
 
   ## Trace Files
 
-  When tracing is enabled, files are created in `examples/rlm/`:
+  When tracing is enabled, files are created in `examples/rlm/traces/` (gitignored):
     * `rlm_trace.jsonl` - Main planner trace
     * `trace_<id>.jsonl` - One per worker (child traces)
     * `rlm_trace.json` - Chrome DevTools format (after --export)
@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Rlm do
 
   use Mix.Task
 
-  @trace_dir "examples/rlm"
+  @trace_dir "examples/rlm/traces"
   @main_trace Path.join(@trace_dir, "rlm_trace.jsonl")
   @chrome_trace Path.join(@trace_dir, "rlm_trace.json")
 
