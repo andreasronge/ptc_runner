@@ -28,13 +28,22 @@ ptc_runner is well-suited for RLM because:
 
 - **Context firewall**: Large data stays in `data/*`, never bloats the prompt
 - **Native parallelism**: `pmap` spawns concurrent BEAM processes
-- **Deterministic chunking**: Lisp functions slice data predictably
+- **Pre-chunking**: `PtcRunner.Chunker` handles chunking in Elixir (recommended)
+- **Budget introspection**: `(budget/remaining)` enables adaptive strategies
 - **Recursive agents**: Agents can call themselves for divide-and-conquer
 
 ## Basic Pattern: Chunk-Map-Aggregate
 
+The simplest RLM pattern pre-chunks data in Elixir using `PtcRunner.Chunker`:
+
 ```elixir
-# 1. Define a worker agent for processing chunks
+alias PtcRunner.{SubAgent, Chunker}
+
+# 1. Pre-chunk in Elixir with overlap (recommended)
+corpus = File.read!("logs/production.log")
+chunks = Chunker.by_tokens(corpus, 4000, overlap: 200)
+
+# 2. Define a simple worker agent
 worker = SubAgent.new(
   prompt: """
   Analyze the log chunk in data/chunk for CRITICAL or ERROR incidents.
@@ -42,43 +51,34 @@ worker = SubAgent.new(
   """,
   signature: "(chunk :string) -> {incidents [:string]}",
   max_turns: 3,
-  llm: :haiku  # Use fast model for parallel workers
+  llm: :haiku
 )
 
-# 2. Define the orchestrator
+# 3. Define the orchestrator (no chunking logic needed)
 orchestrator = SubAgent.new(
   prompt: """
-  Analyze the system logs in data/corpus for incidents.
-
-  Strategy:
-  1. Split the corpus into ~2000-line chunks using partition
-  2. Use pmap with the 'analyze' tool to process all chunks in parallel
-  3. Flatten and deduplicate the results
-  4. Return the total count and first 10 unique incidents
+  Process the pre-chunked logs in data/chunks.
+  Use pmap with 'analyze' tool to process all chunks in parallel.
+  Aggregate and return total count and first 10 unique incidents.
   """,
-  signature: "(corpus :string) -> {total :int, incidents [:string]}",
-  tools: %{
-    "analyze" => SubAgent.as_tool(worker)
-  },
+  signature: "(chunks [:string]) -> {total :int, incidents [:string]}",
+  tools: %{"analyze" => SubAgent.as_tool(worker)},
   max_turns: 5,
-  llm: :sonnet  # Use smart model for orchestration
+  llm: :sonnet
 )
 
-# 3. Run with large corpus
-corpus = File.read!("logs/production.log")  # 100k+ lines
-
+# 4. Run with pre-chunked data and budget control
 {:ok, step} = SubAgent.run(orchestrator,
-  context: %{"corpus" => corpus},
-  llm_registry: registry
+  context: %{"chunks" => chunks},
+  token_limit: 100_000,
+  on_budget_exceeded: :return_partial
 )
 ```
 
-The orchestrator generates PTC-Lisp like:
+The orchestrator generates simple PTC-Lisp (no chunking logic):
 
 ```clojure
-(let [lines (split-lines data/corpus)
-      chunks (partition 2000 lines)
-      results (pmap #(tool/analyze {:chunk (join "\n" %)}) chunks)
+(let [results (pmap #(tool/analyze {:chunk %}) data/chunks)
       all-incidents (flatten (map :incidents results))
       unique (distinct all-incidents)]
   (return {:total (count unique)
@@ -166,32 +166,26 @@ For recursive agents, check depth before subdividing:
 
 ## Chunking Strategies
 
-### By Line Count
+### Pre-Chunking in Elixir (Recommended)
 
-```clojure
-(let [lines (split-lines data/corpus)
-      chunks (partition 2000 lines)]  ; 2000 lines per chunk
-  ...)
-```
-
-### By Delimiter
-
-```clojure
-(let [sections (split data/corpus "---\n")  ; Split on delimiter
-      chunks (partition 5 sections)]         ; Group 5 sections per chunk
-  ...)
-```
-
-### Pre-Chunking in Elixir
-
-For predictable chunk sizes, chunk before passing to the agent:
+Use `PtcRunner.Chunker` to chunk data before passing to the agent. Token-based chunking with overlap is safest for production:
 
 ```elixir
-lines = String.split(corpus, "\n")
-chunks = Enum.chunk_every(lines, 2000) |> Enum.map(&Enum.join(&1, "\n"))
+alias PtcRunner.Chunker
+
+# Token-based with overlap (recommended for production)
+# - Handles variable line lengths (JSON blobs, stack traces)
+# - Overlap ensures boundary incidents aren't split
+chunks = Chunker.by_tokens(corpus, 4000, overlap: 200)
+
+# Line-based (simpler, fine if line lengths are predictable)
+chunks = Chunker.by_lines(corpus, 2000)
+
+# Line-based with overlap
+chunks = Chunker.by_lines(corpus, 2000, overlap: 100)
 
 SubAgent.run(orchestrator,
-  context: %{"chunks" => chunks, "chunk_count" => length(chunks)}
+  context: %{"chunks" => chunks}
 )
 ```
 
@@ -199,6 +193,28 @@ The agent then processes pre-chunked data directly:
 
 ```clojure
 (pmap #(tool/analyze {:chunk %}) data/chunks)
+```
+
+This approach is simpler and more reliable than having the LLM generate chunking code.
+
+### LLM-Generated Chunking (Alternative)
+
+For dynamic chunking where the LLM decides how to split:
+
+#### By Line Count
+
+```clojure
+(let [lines (split-lines data/corpus)
+      chunks (partition 2000 lines)]  ; 2000 lines per chunk
+  ...)
+```
+
+#### By Delimiter
+
+```clojure
+(let [sections (split data/corpus "---\n")  ; Split on delimiter
+      chunks (partition 5 sections)]         ; Group 5 sections per chunk
+  ...)
 ```
 
 ## Model Selection Strategy
@@ -256,15 +272,69 @@ The callback receives `%{total_tokens, input_tokens, output_tokens, llm_requests
 
 ## Best Practices
 
-1. **Size chunks appropriately**: 1000-3000 lines is typical. Too small = overhead, too large = attention issues.
+1. **Pre-chunk in Elixir**: Use `PtcRunner.Chunker` instead of LLM-generated chunking for reliability.
 
-2. **Use fast models for workers**: Haiku processes chunks; Sonnet orchestrates.
+2. **Size chunks appropriately**: 1000-3000 lines is typical. Too small = overhead, too large = attention issues.
 
-3. **Aggregate incrementally**: Don't collect all results then process. Reduce as you go when possible.
+3. **Use fast models for workers**: Haiku processes chunks; Sonnet orchestrates.
 
-4. **Set depth limits**: Recursive agents should have `max_depth: 3` or less to prevent runaway recursion.
+4. **Set budget limits**: Use `token_limit` to control costs in production.
 
-5. **Monitor with telemetry**: Track `llm_requests` and `duration_ms` to tune chunk sizes.
+5. **Set depth limits**: Recursive agents should have `max_depth: 3` or less to prevent runaway recursion.
+
+6. **Monitor with telemetry**: Track `llm_requests` and `duration_ms` to tune chunk sizes.
+
+## Production Considerations
+
+### Boundary Handling with Overlap
+
+Multi-line incidents (stack traces, JSON blobs) can be split across chunk boundaries. Use overlap to ensure nothing is missed:
+
+```elixir
+# 200 tokens of overlap ensures incidents at boundaries are seen by both chunks
+chunks = Chunker.by_tokens(corpus, 4000, overlap: 200)
+```
+
+The worker may report the same incident twice, but the final `distinct` handles deduplication.
+
+### Token-based vs Line-based Chunking
+
+Line-based chunking (`by_lines`) is intuitive but risky - a single JSON log line could be 10KB. Token-based chunking (`by_tokens`) ensures workers never hit context limits:
+
+```elixir
+# Safer for logs with variable line lengths
+chunks = Chunker.by_tokens(corpus, 4000)
+
+# vs. line-based (fine if line lengths are predictable)
+chunks = Chunker.by_lines(corpus, 2000)
+```
+
+### Worker Failure Handling
+
+Currently, if one worker in `pmap` fails, the entire operation fails. For fault-tolerant RLM:
+
+**Option 1: Prompt engineering** - Instruct the planner to handle partial results:
+```
+"If some worker calls fail, proceed with available results and note which chunks failed."
+```
+
+**Option 2: Defensive Lisp** - Wrap worker calls in error handling (future library feature).
+
+For most use cases, fail-fast is acceptable. For mission-critical RLM over unreliable data, consider pre-validating chunks in Elixir.
+
+### Aggregation Patterns
+
+For simple aggregation (flatten, distinct, take), inline Lisp is fine:
+
+```clojure
+(let [all (flatten (map :incidents results))]
+  (return {:total (count (distinct all))
+           :incidents (take 10 (distinct all))}))
+```
+
+For complex aggregation (merging time-series, conflict resolution, weighted scoring), consider:
+- A dedicated Aggregator agent with its own prompt
+- Pre-processing in Elixir before returning to the user
 
 ## Example: Log Analysis
 
