@@ -99,6 +99,15 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp do_analyze({:ns_symbol, :data, key}, _tail?), do: {:ok, {:data, key}}
 
+  # Budget introspection: (budget/remaining) returns budget info map
+  defp do_analyze({:ns_symbol, :budget, :remaining}, _tail?), do: {:ok, {:budget_remaining}}
+
+  # Invalid budget namespace functions
+  defp do_analyze({:ns_symbol, :budget, other}, _tail?) do
+    {:error,
+     {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
+  end
+
   # Clojure-style namespaces: normalize to built-in or provide helpful error
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
     normalize_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
@@ -193,6 +202,18 @@ defmodule PtcRunner.Lisp.Analyze do
   # Tool invocation via tool/ namespace: (tool/name args...)
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
+
+  # Budget introspection via budget/ namespace: (budget/remaining)
+  defp dispatch_list_form({:ns_symbol, :budget, :remaining}, [], _list, _tail?),
+    do: {:ok, {:budget_remaining}}
+
+  defp dispatch_list_form({:ns_symbol, :budget, :remaining}, _args, _list, _tail?),
+    do: {:error, {:invalid_arity, :"budget/remaining", "(budget/remaining) takes no arguments"}}
+
+  defp dispatch_list_form({:ns_symbol, :budget, other}, _rest, _list, _tail?),
+    do:
+      {:error,
+       {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do

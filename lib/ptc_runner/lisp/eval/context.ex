@@ -26,6 +26,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :env,
     :tool_exec,
     :turn_history,
+    :budget,
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
@@ -59,6 +60,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           env: map(),
           tool_exec: (String.t(), map() -> term()),
           turn_history: list(),
+          budget: map() | nil,
           iteration_count: integer(),
           loop_limit: integer(),
           max_print_length: pos_integer(),
@@ -72,6 +74,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   ## Options
 
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
+  - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
 
   ## Examples
 
@@ -83,6 +86,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
       iex> ctx.max_print_length
       500
 
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [], budget: %{turns: 10})
+      iex> ctx.budget
+      %{turns: 10}
+
   """
   @spec new(map(), map(), map(), (String.t(), map() -> term()), list(), keyword()) :: t()
   def new(ctx, user_ns, env, tool_exec, turn_history, opts \\ []) do
@@ -93,6 +100,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_exec: tool_exec,
       turn_history: turn_history,
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
+      budget: Keyword.get(opts, :budget),
       prints: [],
       tool_calls: []
     }

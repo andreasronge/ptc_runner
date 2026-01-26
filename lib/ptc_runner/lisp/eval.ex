@@ -88,6 +88,15 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # ============================================================
+  # Budget introspection: (budget/remaining)
+  # ============================================================
+
+  # Returns the budget info map, or empty map if running standalone (not in SubAgent loop)
+  defp do_eval({:budget_remaining}, %EvalContext{budget: budget} = eval_ctx) do
+    {:ok, budget || %{}, eval_ctx}
+  end
+
+  # ============================================================
   # Literals
   # ============================================================
 
