@@ -61,7 +61,7 @@ defmodule PtcRunner.TraceLog.Handler do
       meta: meta
     }
 
-    :telemetry.attach_many(handler_id, @events, &handle_event/4, config)
+    :telemetry.attach_many(handler_id, @events, &__MODULE__.handle_event/4, config)
   end
 
   @doc """
