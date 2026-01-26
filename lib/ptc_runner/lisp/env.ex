@@ -226,6 +226,7 @@ defmodule PtcRunner.Lisp.Env do
       {:last, {:normal, &Runtime.last/1}},
       {:nth, {:normal, &Runtime.nth/2}},
       {:rest, {:normal, &Runtime.rest/1}},
+      {:butlast, {:normal, &Runtime.butlast/1}},
       {:next, {:normal, &Runtime.next/1}},
       {:ffirst, {:normal, &Runtime.ffirst/1}},
       {:fnext, {:normal, &Runtime.fnext/1}},
