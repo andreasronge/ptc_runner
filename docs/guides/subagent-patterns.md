@@ -442,6 +442,7 @@ PlanExecutor.run(plan, tool_registry, llm)
 - [JSON Mode Guide](subagent-json-mode.md) - Structured output without PTC-Lisp
 - [Advanced Topics](subagent-advanced.md) - Multi-turn ReAct and compile pattern
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
+- [RLM Patterns](subagent-rlm-patterns.md) - Recursive Language Model patterns
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
 - `PtcRunner.SubAgent` - API reference

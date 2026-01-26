@@ -2225,6 +2225,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | Plain symbols | Stored values | Values from map returns (defined via `def` form) |
 | `data/` | Current request context | Current request context (read-only) |
 | `tool/` | Tool invocation | Call registered tools |
+| `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -2304,7 +2305,59 @@ Access results from previous turns using the turn history symbols:
 
 **For reliable multi-turn patterns**, use `(def name value)` to store values in the User Namespace. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
 
-### 9.5 Tool Invocation — `tool/tool-name`
+### 9.5 Budget Introspection — `budget/remaining`
+
+Query the remaining budget using the `budget/` namespace. This enables programs to make intelligent decisions based on available resources.
+
+```clojure
+(budget/remaining)            ; returns budget map
+```
+
+**Return value:**
+
+The `budget/remaining` primitive returns a map with hyphenated keys (Clojure-style):
+
+```clojure
+{:turns 15                    ; total turns remaining
+ :work-turns 10               ; work turns remaining
+ :retry-turns 5               ; retry turns remaining
+ :depth {:current 1 :max 3}   ; nesting depth info
+ :tokens {:input 5000         ; input tokens used
+          :output 2000        ; output tokens used
+          :total 7000         ; total tokens used
+          :cache-creation 1000
+          :cache-read 2000}
+ :llm-requests 3}             ; LLM API calls made
+```
+
+**Accessing hyphenated keys:**
+
+```clojure
+(:work-turns (budget/remaining))              ; => 10
+(:retry-turns (budget/remaining))             ; => 5
+(:cache-read (:tokens (budget/remaining)))    ; => 2000
+```
+
+**Use cases:**
+
+- Adjust processing strategy based on remaining turns
+- Batch operations when budget is low
+- Log resource usage for monitoring
+
+```clojure
+;; Choose strategy based on remaining budget
+(let [b (budget/remaining)
+      items data/items]
+  (if (< (:turns b) (count items))
+    ;; Low budget: batch process
+    (tool/batch-process {:items items})
+    ;; High budget: process individually
+    (mapv (fn [i] (tool/process {:item i})) items)))
+```
+
+**Note:** Returns an empty map `{}` when running outside a SubAgent context (e.g., standalone `Lisp.run/2` without budget option).
+
+### 9.6 Tool Invocation — `tool/tool-name`
 
 Invoke registered tools using the `tool/` namespace:
 
@@ -2346,7 +2399,7 @@ Invoke registered tools using the `tool/` namespace:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
-### 9.6 Clojure Namespace Compatibility
+### 9.7 Clojure Namespace Compatibility
 
 LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normalizes these to built-in functions at analysis time.
 
