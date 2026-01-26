@@ -600,6 +600,7 @@ defmodule PtcRunner.SubAgent.Loop do
       float_precision: agent.float_precision,
       max_print_length: Keyword.get(agent.format_options, :max_print_length),
       timeout: agent.timeout,
+      pmap_timeout: agent.pmap_timeout,
       budget: build_budget_introspection_map(agent, state)
     ]
 
