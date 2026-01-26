@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PTC Trace Viewer</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --fg: #d4d4d4;
+      --accent: #569cd6;
+      --success: #4ec9b0;
+      --error: #f44747;
+      --warning: #dcdcaa;
+      --muted: #808080;
+      --border: #3c3c3c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--fg);
+      margin: 0;
+      padding: 20px;
+      line-height: 1.5;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 500;
+      margin: 0 0 20px 0;
+      color: var(--accent);
+    }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+      margin-bottom: 20px;
+      transition: all 0.2s;
+    }
+
+    .drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(86, 156, 214, 0.1);
+    }
+
+    .drop-zone p {
+      margin: 0 0 10px 0;
+      color: var(--muted);
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+    }
+
+    .summary {
+      background: #252526;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    .summary.visible {
+      display: block;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+    }
+
+    .summary-item {
+      text-align: center;
+    }
+
+    .summary-value {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .summary-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .tree {
+      display: none;
+    }
+
+    .tree.visible {
+      display: block;
+    }
+
+    .event {
+      margin: 2px 0;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .event:hover {
+      background: #2d2d2d;
+    }
+
+    .event-type {
+      font-weight: 600;
+      min-width: 120px;
+    }
+
+    .event-type.turn { color: var(--accent); }
+    .event-type.tool { color: var(--warning); }
+    .event-type.pmap { color: #c586c0; }
+    .event-type.pcalls { color: #c586c0; }
+    .event-type.trace { color: var(--muted); }
+
+    .event-status {
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .event-status.ok {
+      background: rgba(78, 201, 176, 0.2);
+      color: var(--success);
+    }
+
+    .event-status.error {
+      background: rgba(244, 71, 71, 0.2);
+      color: var(--error);
+    }
+
+    .event-duration {
+      color: var(--muted);
+      min-width: 80px;
+      text-align: right;
+    }
+
+    .event-name {
+      color: var(--fg);
+      flex: 1;
+    }
+
+    .event-meta {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .children {
+      margin-left: 20px;
+      border-left: 1px solid var(--border);
+      padding-left: 12px;
+    }
+
+    .child-trace {
+      margin: 8px 0;
+      padding: 8px;
+      background: #252526;
+      border-radius: 4px;
+      border-left: 3px solid var(--accent);
+    }
+
+    .child-trace-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .child-trace-header:hover {
+      color: var(--accent);
+    }
+
+    .toggle {
+      cursor: pointer;
+      user-select: none;
+      width: 16px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .collapsed .children {
+      display: none;
+    }
+
+    .collapsed .toggle::before {
+      content: '+';
+    }
+
+    .expanded .toggle::before {
+      content: '-';
+    }
+
+    .file-list {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .file-list h2 {
+      font-size: 14px;
+      margin: 0 0 10px 0;
+      color: var(--muted);
+    }
+
+    .file-item {
+      padding: 8px;
+      margin: 4px 0;
+      background: #252526;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .file-item:hover {
+      background: #2d2d2d;
+    }
+
+    .file-item.active {
+      border-left: 3px solid var(--accent);
+    }
+
+    .instructions {
+      background: #252526;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 20px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .instructions code {
+      background: #1e1e1e;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: var(--warning);
+    }
+  </style>
+</head>
+<body>
+  <h1>PTC Trace Viewer</h1>
+
+  <div class="drop-zone" id="dropZone">
+    <p>Drop .jsonl trace files here or click to select</p>
+    <p style="font-size: 11px; color: var(--muted);">Select multiple files to view parent + child traces together</p>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">Select Files</button>
+    <input type="file" id="fileInput" accept=".jsonl" multiple>
+  </div>
+
+  <div class="summary" id="summary">
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="summary-value" id="summaryDuration">-</div>
+        <div class="summary-label">Duration</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-value" id="summaryTurns">-</div>
+        <div class="summary-label">Turns</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-value" id="summaryTools">-</div>
+        <div class="summary-label">Tool Calls</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-value" id="summaryChildren">-</div>
+        <div class="summary-label">Child Traces</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="file-list" id="fileList" style="display: none;">
+    <h2>Loaded Files</h2>
+    <div id="fileListItems"></div>
+  </div>
+
+  <div class="tree" id="tree"></div>
+
+  <div class="instructions">
+    <strong>How to use:</strong><br>
+    1. Run your SubAgent with tracing: <code>mix run examples/rlm/run.exs --trace</code><br>
+    2. Open this file in Chrome and drop the generated .jsonl files<br>
+    3. Select multiple files to see parent and child traces together
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const summary = document.getElementById('summary');
+    const tree = document.getElementById('tree');
+    const fileList = document.getElementById('fileList');
+    const fileListItems = document.getElementById('fileListItems');
+
+    let loadedFiles = new Map(); // filename -> {events, traceId}
+    let currentFile = null;
+
+    // Drag and drop handlers
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+    });
+
+    async function handleFiles(files) {
+      for (const file of files) {
+        const text = await file.text();
+        const events = parseJsonl(text);
+        const traceId = extractTraceId(events);
+        loadedFiles.set(file.name, { events, traceId, file: file.name });
+      }
+
+      updateFileList();
+
+      // Auto-select first file or main trace
+      if (!currentFile && loadedFiles.size > 0) {
+        const mainTrace = [...loadedFiles.entries()].find(([name]) =>
+          !name.startsWith('trace_') || name.includes('rlm_trace')
+        );
+        currentFile = mainTrace ? mainTrace[0] : [...loadedFiles.keys()][0];
+      }
+
+      if (currentFile) {
+        displayTrace(currentFile);
+      }
+    }
+
+    function parseJsonl(text) {
+      return text.trim().split('\n')
+        .filter(line => line.trim())
+        .map(line => {
+          try {
+            return JSON.parse(line);
+          } catch (e) {
+            console.error('Failed to parse line:', line);
+            return null;
+          }
+        })
+        .filter(Boolean);
+    }
+
+    function extractTraceId(events) {
+      const metaEvent = events.find(e => e.event === 'trace.start');
+      return metaEvent?.trace_id || 'unknown';
+    }
+
+    function updateFileList() {
+      if (loadedFiles.size === 0) {
+        fileList.style.display = 'none';
+        return;
+      }
+
+      fileList.style.display = 'block';
+      fileListItems.innerHTML = '';
+
+      for (const [name, data] of loadedFiles) {
+        const item = document.createElement('div');
+        item.className = 'file-item' + (name === currentFile ? ' active' : '');
+        item.innerHTML = `
+          <span>${name}</span>
+          <span style="color: var(--muted); font-size: 11px;">${data.traceId.slice(0, 8)}</span>
+        `;
+        item.onclick = () => {
+          currentFile = name;
+          displayTrace(name);
+          updateFileList();
+        };
+        fileListItems.appendChild(item);
+      }
+    }
+
+    function displayTrace(filename) {
+      const data = loadedFiles.get(filename);
+      if (!data) return;
+
+      const events = data.events;
+
+      // Update summary
+      summary.classList.add('visible');
+
+      const turns = events.filter(e => e.event?.includes('turn.'));
+      const tools = events.filter(e => e.event?.includes('tool.'));
+      const childIds = extractChildTraceIds(events);
+      const totalDuration = calculateTotalDuration(events);
+
+      document.getElementById('summaryDuration').textContent = formatDuration(totalDuration);
+      document.getElementById('summaryTurns').textContent = Math.floor(turns.length / 2);
+      document.getElementById('summaryTools').textContent = Math.floor(tools.length / 2);
+      document.getElementById('summaryChildren').textContent = childIds.length;
+
+      // Build tree
+      tree.classList.add('visible');
+      tree.innerHTML = buildEventTree(events);
+
+      // Add toggle handlers
+      tree.querySelectorAll('.toggle').forEach(toggle => {
+        toggle.onclick = (e) => {
+          const parent = e.target.closest('.event-container');
+          parent.classList.toggle('collapsed');
+          parent.classList.toggle('expanded');
+        };
+      });
+    }
+
+    function extractChildTraceIds(events) {
+      const ids = new Set();
+      for (const event of events) {
+        if (event.child_trace_ids) {
+          event.child_trace_ids.forEach(id => ids.add(id));
+        }
+        if (event.child_trace_id) {
+          ids.add(event.child_trace_id);
+        }
+      }
+      return [...ids];
+    }
+
+    function calculateTotalDuration(events) {
+      // Find the trace.stop event or calculate from first/last event
+      const stopEvent = events.find(e => e.event === 'trace.stop');
+      if (stopEvent?.duration_ms) return stopEvent.duration_ms;
+
+      // Sum up top-level durations
+      let total = 0;
+      for (const event of events) {
+        if (event.event?.endsWith('.stop') && event.duration_ms) {
+          total += event.duration_ms;
+        }
+      }
+      return total;
+    }
+
+    function buildEventTree(events) {
+      let html = '';
+
+      for (const event of events) {
+        if (!event.event) continue;
+
+        const [category, action] = event.event.split('.');
+
+        // Skip start events (we'll show info on stop events)
+        if (action === 'start') continue;
+
+        const eventType = category.replace('sub_agent.', '');
+        const status = event.error ? 'error' : 'ok';
+        const duration = event.duration_ms;
+
+        let name = '';
+        let meta = '';
+
+        if (eventType === 'turn') {
+          name = `Turn ${event.turn_number || '?'}`;
+          if (event.tokens) {
+            meta = `${event.tokens.input || 0} in / ${event.tokens.output || 0} out tokens`;
+          }
+        } else if (eventType === 'tool') {
+          name = event.tool_name || 'unknown tool';
+          if (event.child_trace_id) {
+            meta = `child: ${event.child_trace_id.slice(0, 8)}...`;
+          }
+        } else if (eventType === 'pmap' || eventType === 'pcalls') {
+          name = `${eventType} (${event.count || '?'} tasks)`;
+          if (event.child_trace_ids?.length) {
+            meta = `${event.child_trace_ids.length} child traces`;
+          }
+        } else if (eventType === 'trace') {
+          name = event.trace_id ? `Trace ${event.trace_id.slice(0, 8)}...` : 'Trace';
+        } else {
+          name = event.event;
+        }
+
+        html += `
+          <div class="event">
+            <span class="event-type ${eventType}">${eventType}</span>
+            <span class="event-status ${status}">${status}</span>
+            <span class="event-name">${escapeHtml(name)}</span>
+            ${meta ? `<span class="event-meta">${escapeHtml(meta)}</span>` : ''}
+            ${duration ? `<span class="event-duration">${formatDuration(duration)}</span>` : ''}
+          </div>
+        `;
+
+        // Show child trace links
+        if (event.child_trace_ids?.length) {
+          html += '<div class="children">';
+          for (const childId of event.child_trace_ids) {
+            const childFile = findFileByTraceId(childId);
+            html += `
+              <div class="child-trace">
+                <span style="color: var(--muted);">Child:</span>
+                <span style="color: var(--accent);">${childId.slice(0, 8)}...</span>
+                ${childFile ? `<span style="color: var(--success); cursor: pointer;" onclick="displayTrace('${childFile}')">[view]</span>` : '<span style="color: var(--muted);">(not loaded)</span>'}
+              </div>
+            `;
+          }
+          html += '</div>';
+        }
+      }
+
+      return html || '<p style="color: var(--muted);">No events found</p>';
+    }
+
+    function findFileByTraceId(traceId) {
+      for (const [name, data] of loadedFiles) {
+        if (data.traceId === traceId) return name;
+      }
+      return null;
+    }
+
+    function formatDuration(ms) {
+      if (ms == null) return '-';
+      if (ms < 1000) return `${ms}ms`;
+      if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+      return `${(ms / 60000).toFixed(1)}m`;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
