@@ -84,6 +84,46 @@ Use `iex>` prompt for doctests:
 | Conceptual, tutorial-style | API reference |
 | Multiple modules | Single module focus |
 | "How to achieve X" | "What does Y do" |
+| Progressive workflow | Minimal examples showing *flavor* |
+
+**Complement, don't duplicate.** Guides teach workflows progressively; module docs orient users to the API. Link between them:
+
+```markdown
+<!-- In guides: link to module docs for API details -->
+See `PtcRunner.SubAgent.run/2` for all options.
+
+<!-- In module docs: link to guides for tutorials -->
+See the [Getting Started Guide](guides/subagent-getting-started.md) for a walkthrough.
+```
+
+## Entry Point Modules
+
+The main library module (e.g., `PtcRunner`) serves as an **architectural roadmap**, not a tutorial.
+
+**Structure:**
+1. One-line summary
+2. Overview (2-3 sentences)
+3. Component table mapping modules to purpose
+4. One minimal example showing the primary workflow
+5. Links to guides
+
+**Example component table:**
+
+```elixir
+@moduledoc """
+...
+
+## Core Components
+
+| Component | Purpose |
+|-----------|---------|
+| `PtcRunner.SubAgent` | Agentic loop - prompt → LLM → execute |
+| `PtcRunner.Lisp` | PTC-Lisp interpreter |
+| `PtcRunner.Sandbox` | Isolated execution |
+"""
+```
+
+This gives users a mental model before diving into specifics. Keep examples minimal—enough to show flavor, not enough to teach.
 
 ## Brevity
 
