@@ -28,7 +28,7 @@ defmodule RLM.Runner do
 
   def run do
     load_aws_credentials_if_needed()
-    trace? = "--trace" in System.argv()
+    trace? = "--trace" in System.argv() or System.get_env("PTC_RLM_TRACE") == "1"
 
     # 1. Load and pre-chunk the corpus in Elixir
     corpus = load_corpus()
