@@ -65,6 +65,9 @@ mix run examples/rlm/gen_data.exs
 
 # Run the RLM workflow
 mix run examples/rlm/run.exs
+
+# Run with hierarchical tracing (creates trace files for planner + all workers)
+mix run examples/rlm/run.exs --trace
 ```
 
 ## Expected Output
@@ -105,16 +108,39 @@ Corpus: 5001 lines -> 28 chunks of ~4000 tokens (200 overlap)
 
 Sequential processing of 28 Haiku calls at ~10-15s each would take **280-420 seconds**. The observed **~55 seconds** suggests a **5-8x speedup** from parallelism. However, without worker-level tracing, we can't confirm this rigorously.
 
-### Tracing Gap
+### Hierarchical Tracing
 
-The current tracing shows **planner turns** but not **worker internals**:
+Use the `--trace` flag to capture detailed execution traces for the planner and every worker:
 
-- Individual worker durations (which was slowest?)
-- Worker token usage (cost breakdown)
-- Worker success/failure rates
-- Whether parallelism was effective (true overlap vs. bottlenecks)
+```bash
+mix run examples/rlm/run.exs --trace
+```
 
-This is because `pmap` spawns workers in separate BEAM processes, and their traces don't bubble up to the parent Step. See [Observability Guide](../../docs/guides/subagent-observability.md) for available tracing options.
+This creates:
+- `examples/rlm/rlm_trace.jsonl` - Main planner trace
+- One child trace file per worker (linked via `child_trace_id`)
+
+The execution tree visualization shows duration and status for each:
+
+```
+=== Trace Summary ===
+Main trace: examples/rlm/rlm_trace.jsonl
+Child traces: 28
+
+Execution tree:
+└─ [55291ms] [ok] (planner)
+   ├─ [8500ms] [ok] (worker)
+   ├─ [9200ms] [ok] (worker)
+   ├─ [15000ms] [ok] (worker)  ← slowest chunk
+   └─ ...
+```
+
+This reveals:
+- **Individual worker durations** - identify "poison" chunks that are slow
+- **Worker success/failure** - see which chunks failed without digging through logs
+- **Parallelism effectiveness** - compare total wall clock vs. sum of worker times
+
+See `PtcRunner.TraceLog.Analyzer` for programmatic access to trace data.
 
 ### Relation to the RLM Paper
 
@@ -135,9 +161,7 @@ This example demonstrates the **mechanics** of RLM but not the full **adaptive i
 
 3. **Smarter aggregation**: Use Sonnet to synthesize patterns across worker results rather than simple concatenation.
 
-4. **Worker-level tracing**: Collect child Step traces from `pmap` to enable full visibility into the parallel execution tree.
-
-5. **Adaptive chunk sizing**: Let the LLM decide chunk boundaries based on content (e.g., log session boundaries) rather than fixed token counts.
+4. **Adaptive chunk sizing**: Let the LLM decide chunk boundaries based on content (e.g., log session boundaries) rather than fixed token counts.
 
 ## See Also
 
