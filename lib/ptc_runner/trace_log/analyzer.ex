@@ -351,4 +351,271 @@ defmodule PtcRunner.TraceLog.Analyzer do
         ""
     end
   end
+
+  # ============================================================
+  # Tree Functions for Hierarchical Traces
+  # ============================================================
+
+  @typedoc """
+  A trace tree node representing a trace file and its children.
+
+  Fields:
+  - `path`: File path to this trace
+  - `trace_id`: Unique trace identifier
+  - `events`: Loaded events from this trace
+  - `summary`: Summary statistics for this trace
+  - `children`: List of child trace tree nodes
+  """
+  @type trace_tree :: %{
+          path: String.t(),
+          trace_id: String.t() | nil,
+          events: [map()],
+          summary: map(),
+          children: [trace_tree()]
+        }
+
+  @doc """
+  Loads a trace file and recursively loads all child traces.
+
+  Child traces are discovered from:
+  - `pmap.stop` events with `child_trace_ids` metadata
+  - `tool.stop` events with `child_trace_id` metadata
+
+  Returns a tree structure where each node contains:
+  - `path`: File path
+  - `trace_id`: Trace ID
+  - `events`: Loaded events
+  - `summary`: Execution summary
+  - `children`: List of child trace trees
+
+  ## Examples
+
+      {:ok, tree} = Analyzer.load_tree("parent_trace.jsonl")
+      length(tree.children)  #=> 28
+
+  ## Options
+
+  - `:base_dir` - Directory to search for child trace files (defaults to same directory as parent)
+  - `:_seen` - Internal option for cycle detection (do not set manually)
+  """
+  @spec load_tree(String.t(), keyword()) :: {:ok, trace_tree()} | {:error, term()}
+  def load_tree(path, opts \\ []) do
+    base_dir = Keyword.get(opts, :base_dir, Path.dirname(path))
+    seen = Keyword.get(opts, :_seen, MapSet.new())
+
+    try do
+      events = load(path)
+      summary = summary(events)
+      trace_id = extract_trace_id(events)
+
+      # Cycle detection: skip if we've already visited this trace
+      if trace_id && MapSet.member?(seen, trace_id) do
+        {:error, {:cycle_detected, trace_id}}
+      else
+        # Add current trace_id to seen set for children
+        new_seen = if trace_id, do: MapSet.put(seen, trace_id), else: seen
+        child_opts = Keyword.put(opts, :_seen, new_seen) |> Keyword.put(:base_dir, base_dir)
+
+        # Find child trace IDs from pmap.stop and tool.stop events
+        child_trace_ids = extract_child_trace_ids(events)
+
+        # Recursively load child traces (skipping cycles)
+        children =
+          child_trace_ids
+          |> Enum.map(&find_trace_file(&1, base_dir))
+          |> Enum.reject(&is_nil/1)
+          |> Enum.map(fn child_path ->
+            case load_tree(child_path, child_opts) do
+              {:ok, child_tree} -> child_tree
+              {:error, {:cycle_detected, _}} -> nil
+              {:error, _} -> nil
+            end
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        {:ok,
+         %{
+           path: path,
+           trace_id: trace_id,
+           events: events,
+           summary: summary,
+           children: children
+         }}
+      end
+    rescue
+      e -> {:error, Exception.message(e)}
+    end
+  end
+
+  @doc """
+  Returns a flat list of all file paths in the trace tree.
+
+  Useful for cleanup operations.
+
+  ## Examples
+
+      {:ok, tree} = Analyzer.load_tree("parent.jsonl")
+      paths = Analyzer.list_tree(tree)
+      #=> ["parent.jsonl", "child1.jsonl", "child2.jsonl", ...]
+  """
+  @spec list_tree(trace_tree()) :: [String.t()]
+  def list_tree(%{path: path, children: children}) do
+    child_paths = Enum.flat_map(children, &list_tree/1)
+    [path | child_paths]
+  end
+
+  @doc """
+  Deletes all trace files in the tree.
+
+  Returns `{:ok, deleted_count}` on success, `{:error, reason}` on failure.
+
+  ## Examples
+
+      {:ok, tree} = Analyzer.load_tree("parent.jsonl")
+      {:ok, 29} = Analyzer.delete_tree(tree)
+  """
+  @spec delete_tree(trace_tree()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def delete_tree(tree) do
+    paths = list_tree(tree)
+
+    results =
+      Enum.map(paths, fn path ->
+        case File.rm(path) do
+          :ok -> :ok
+          {:error, _} = err -> err
+        end
+      end)
+
+    errors = Enum.filter(results, &match?({:error, _}, &1))
+
+    if errors == [] do
+      {:ok, length(paths)}
+    else
+      {:error, {:delete_failed, errors}}
+    end
+  end
+
+  @doc """
+  Prints an ASCII visualization of the trace tree hierarchy.
+
+  Shows execution times and nested structure for debugging and analysis.
+
+  ## Examples
+
+      {:ok, tree} = Analyzer.load_tree("parent.jsonl")
+      Analyzer.print_tree(tree)
+      # Output:
+      # ├─ [1234ms] parent (trace-abc123)
+      # │  ├─ [100ms] worker-1 (trace-def456)
+      # │  ├─ [120ms] worker-2 (trace-ghi789)
+      # │  └─ [95ms] worker-3 (trace-jkl012)
+  """
+  @spec print_tree(trace_tree()) :: :ok
+  def print_tree(tree) do
+    do_print_tree(tree, "", true)
+    :ok
+  end
+
+  @doc """
+  Returns the trace tree as a formatted string.
+
+  Like `print_tree/1` but returns a string instead of printing.
+  """
+  @spec format_tree(trace_tree()) :: String.t()
+  def format_tree(tree) do
+    do_format_tree(tree, "", true)
+    |> String.trim_trailing("\n")
+  end
+
+  # Private helpers for tree functions
+
+  defp extract_trace_id(events) do
+    case Enum.find(events, &(&1["event"] in ["trace.start", "run.start"])) do
+      nil -> nil
+      event -> event["trace_id"]
+    end
+  end
+
+  defp extract_child_trace_ids(events) do
+    pmap_ids =
+      events
+      |> Enum.filter(&(&1["event"] in ["pmap.stop", "pcalls.stop"]))
+      |> Enum.flat_map(&(get_in(&1, ["metadata", "child_trace_ids"]) || []))
+
+    tool_ids =
+      events
+      |> Enum.filter(&(&1["event"] == "tool.stop"))
+      |> Enum.map(&get_in(&1, ["metadata", "child_trace_id"]))
+      |> Enum.reject(&is_nil/1)
+
+    Enum.uniq(pmap_ids ++ tool_ids)
+  end
+
+  defp find_trace_file(trace_id, base_dir) do
+    # Look for trace file with the given trace_id
+    # Common naming patterns: trace-{id}.jsonl, {id}.jsonl
+    patterns = [
+      Path.join(base_dir, "trace-#{trace_id}.jsonl"),
+      Path.join(base_dir, "#{trace_id}.jsonl"),
+      Path.join(base_dir, "*#{trace_id}*.jsonl")
+    ]
+
+    Enum.find_value(patterns, fn pattern ->
+      case Path.wildcard(pattern) do
+        [path | _] -> path
+        [] -> nil
+      end
+    end)
+  end
+
+  defp do_print_tree(tree, prefix, is_last) do
+    {connector, child_prefix} =
+      if is_last do
+        {"└─ ", "   "}
+      else
+        {"├─ ", "│  "}
+      end
+
+    duration = tree.summary[:duration_ms] || 0
+    trace_id_short = if tree.trace_id, do: " (#{String.slice(tree.trace_id, 0..7)}...)", else: ""
+    status = if tree.summary[:status], do: " [#{tree.summary[:status]}]", else: ""
+
+    IO.puts("#{prefix}#{connector}[#{duration}ms]#{status}#{trace_id_short}")
+
+    children = tree.children
+    last_index = length(children) - 1
+
+    children
+    |> Enum.with_index()
+    |> Enum.each(fn {child, index} ->
+      do_print_tree(child, prefix <> child_prefix, index == last_index)
+    end)
+  end
+
+  defp do_format_tree(tree, prefix, is_last) do
+    {connector, child_prefix} =
+      if is_last do
+        {"└─ ", "   "}
+      else
+        {"├─ ", "│  "}
+      end
+
+    duration = tree.summary[:duration_ms] || 0
+    trace_id_short = if tree.trace_id, do: " (#{String.slice(tree.trace_id, 0..7)}...)", else: ""
+    status = if tree.summary[:status], do: " [#{tree.summary[:status]}]", else: ""
+
+    line = "#{prefix}#{connector}[#{duration}ms]#{status}#{trace_id_short}\n"
+
+    children = tree.children
+    last_index = length(children) - 1
+
+    child_lines =
+      children
+      |> Enum.with_index()
+      |> Enum.map_join("", fn {child, index} ->
+        do_format_tree(child, prefix <> child_prefix, index == last_index)
+      end)
+
+    line <> child_lines
+  end
 end

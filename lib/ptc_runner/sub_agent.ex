@@ -143,6 +143,8 @@ defmodule PtcRunner.SubAgent do
 
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.LLMResolver
+  alias PtcRunner.SubAgent.Telemetry
+  alias PtcRunner.TraceLog.Collector
 
   @default_format_options [
     feedback_limit: 10,
@@ -406,6 +408,9 @@ defmodule PtcRunner.SubAgent do
 
   # Main implementation with SubAgent struct
   def run(%__MODULE__{} = agent, opts) do
+    # Auto-inject trace_context if TraceLog is active but trace_context not provided
+    opts = maybe_inject_trace_context(opts)
+
     # Resolve :self tools before execution so they have proper signatures in prompts
     agent =
       if Enum.any?(agent.tools, fn {_, v} -> v == :self end) do
@@ -1143,5 +1148,34 @@ defmodule PtcRunner.SubAgent do
       other ->
         other
     end)
+  end
+
+  # Auto-inject trace_context if TraceLog is active and trace_context not already provided.
+  # This enables automatic trace propagation to nested agents when running inside
+  # TraceLog.with_trace/2 without requiring explicit trace_context option.
+  defp maybe_inject_trace_context(opts) do
+    if Keyword.has_key?(opts, :trace_context) do
+      # trace_context already provided (e.g., from ToolNormalizer for child agents)
+      opts
+    else
+      # Check if TraceLog is active in this process
+      case PtcRunner.TraceLog.current_collector() do
+        nil ->
+          opts
+
+        collector ->
+          # Get trace_id from the collector and build initial trace_context
+          trace_id = Collector.trace_id(collector)
+          parent_span_id = Telemetry.current_span_id()
+
+          trace_context = %{
+            trace_id: trace_id,
+            parent_span_id: parent_span_id,
+            depth: 0
+          }
+
+          Keyword.put(opts, :trace_context, trace_context)
+      end
+    end
   end
 end
