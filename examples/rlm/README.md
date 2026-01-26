@@ -64,9 +64,24 @@ An LLM acts as an **orchestrator** that dispatches work to parallel sub-agents a
 mix run examples/rlm/gen_data.exs
 
 # Run the RLM workflow
-mix run examples/rlm/run.exs
+mix rlm
 
-# Run with hierarchical tracing (creates trace files for planner + all workers)
+# Run with hierarchical tracing
+mix rlm --trace
+
+# View trace tree in terminal
+mix rlm --tree
+
+# Export to Chrome DevTools format and open
+mix rlm --export --open
+
+# Clean up all trace files
+mix rlm --clean
+```
+
+Or use the script directly:
+```bash
+mix run examples/rlm/run.exs
 mix run examples/rlm/run.exs --trace
 ```
 
