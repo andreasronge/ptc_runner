@@ -1389,6 +1389,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `last` | `(last coll)` | Last item or nil |
 | `nth` | `(nth coll idx)` | Item at index or nil |
 | `rest` | `(rest coll)` | All but first (empty list if none) |
+| `butlast` | `(butlast coll)` | All but last (empty list if none) |
 | `next` | `(next coll)` | All but first (nil if none) |
 | `ffirst` | `(ffirst coll)` | First of first |
 | `fnext` | `(fnext coll)` | First of next |
@@ -1411,6 +1412,9 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (nth [1 2 3] 10)      ; => nil (out of bounds)
 (rest [1 2 3])        ; => [2 3]
 (rest [])             ; => []
+(butlast [1 2 3 4])   ; => [1 2 3]
+(butlast [1])         ; => []
+(butlast [])          ; => []
 (next [1 2 3])        ; => [2 3]
 (next [])             ; => nil
 (next [1])            ; => nil
@@ -1876,6 +1880,7 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `last` | ✗ | ✓ | Maps: use `(last (keys m))`. Strings: returns last character |
 | `nth` | ✗ | ✓ | Maps: not supported. Strings: returns character at index |
 | `rest` | ✗ | ✓ | Strings: returns list of remaining characters |
+| `butlast` | ✗ | ✓ | Strings: returns list of all but last character |
 | `next` | ✗ | ✓ | Strings: returns list of remaining characters or nil |
 | `take` | ✗ | ✓ | Strings: returns list of first n characters |
 | `drop` | ✗ | ✓ | Strings: returns list of characters after dropping n |

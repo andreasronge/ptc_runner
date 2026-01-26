@@ -781,6 +781,40 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
     end
   end
 
+  describe "butlast" do
+    test "returns all but last element of a list" do
+      assert Runtime.butlast([1, 2, 3, 4]) == [1, 2, 3]
+    end
+
+    test "returns empty list for single-element list" do
+      assert Runtime.butlast([1]) == []
+    end
+
+    test "returns empty list for empty list" do
+      assert Runtime.butlast([]) == []
+    end
+
+    test "returns empty list for nil" do
+      assert Runtime.butlast(nil) == []
+    end
+
+    test "returns list of graphemes for string (all but last)" do
+      assert Runtime.butlast("hello") == ["h", "e", "l", "l"]
+    end
+
+    test "returns empty list for single-character string" do
+      assert Runtime.butlast("x") == []
+    end
+
+    test "returns empty list for empty string" do
+      assert Runtime.butlast("") == []
+    end
+
+    test "handles unicode strings correctly" do
+      assert Runtime.butlast("café") == ["c", "a", "f"]
+    end
+  end
+
   describe "reduce - comprehensive support" do
     test "reduce on lists (existing support)" do
       assert Runtime.reduce(fn acc, x -> acc + x end, 0, [1, 2, 3]) == 6
