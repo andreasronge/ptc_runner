@@ -142,21 +142,39 @@ This reveals:
 
 ### Viewing Trace Files
 
-**Option 1: Browser Viewer**
+**Option 1: Chrome DevTools (Flame Chart)**
+
+Export to Chrome Trace Event format and open in DevTools for flame chart visualization:
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+# Load the trace tree and export to Chrome format
+{:ok, tree} = Analyzer.load_tree("examples/rlm/rlm_trace.jsonl")
+Analyzer.export_chrome_trace(tree, "examples/rlm/rlm_trace.json")
+```
+
+Then open in Chrome:
+1. Open Chrome DevTools (F12)
+2. Go to **Performance** tab
+3. Click **Load profile...** (or drag & drop the .json file)
+4. Explore the flame chart - wider bars = longer duration
+
+Or use `chrome://tracing`:
+1. Navigate to `chrome://tracing` in Chrome
+2. Click **Load** and select the .json file
+3. Use WASD keys to navigate, mouse to zoom
+
+**Option 2: Simple Browser Viewer**
 
 Open `trace_viewer.html` in Chrome and drag & drop the `.jsonl` files:
 
 ```bash
-# macOS
 open examples/rlm/trace_viewer.html
-
-# Linux
-xdg-open examples/rlm/trace_viewer.html
-
 # Then drag rlm_trace.jsonl and all trace_*.jsonl files into the browser
 ```
 
-**Option 2: IEx with Analyzer**
+**Option 3: IEx with Analyzer**
 
 ```elixir
 alias PtcRunner.TraceLog.Analyzer

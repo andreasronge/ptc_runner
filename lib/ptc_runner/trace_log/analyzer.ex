@@ -527,6 +527,236 @@ defmodule PtcRunner.TraceLog.Analyzer do
     |> String.trim_trailing("\n")
   end
 
+  @doc """
+  Exports a trace tree to Chrome DevTools Trace Event format.
+
+  The output can be opened in Chrome DevTools (Performance panel → Load profile)
+  or at chrome://tracing for flame chart visualization.
+
+  ## Parameters
+
+  - `tree` - A trace tree from `load_tree/1`
+  - `output_path` - Path to write the JSON file (e.g., "trace.json")
+
+  ## Examples
+
+      {:ok, tree} = Analyzer.load_tree("rlm_trace.jsonl")
+      :ok = Analyzer.export_chrome_trace(tree, "rlm_trace.json")
+
+      # Then open Chrome DevTools → Performance → Load profile → select rlm_trace.json
+      # Or navigate to chrome://tracing and load the file
+
+  ## Visualization
+
+  The flame chart shows:
+  - **Horizontal axis**: Time (wider = longer duration)
+  - **Vertical stacking**: Nested calls (children below parents)
+  - **Colors**: Different categories (turns, tools, pmap)
+
+  Click any span to see details including arguments and results.
+  """
+  @spec export_chrome_trace(trace_tree(), String.t()) :: :ok | {:error, term()}
+  def export_chrome_trace(tree, output_path) do
+    trace_events = build_chrome_trace_events(tree, 0, 0)
+
+    chrome_trace = %{
+      "traceEvents" => trace_events,
+      "metadata" => %{
+        "source" => "PtcRunner.TraceLog",
+        "trace_id" => tree.trace_id
+      }
+    }
+
+    case Jason.encode(chrome_trace, pretty: true) do
+      {:ok, json} ->
+        File.write(output_path, json)
+
+      {:error, reason} ->
+        {:error, {:encode_failed, reason}}
+    end
+  end
+
+  # Build Chrome Trace Event format events from a trace tree
+  # Returns list of trace events with timestamps in microseconds
+  defp build_chrome_trace_events(tree, start_time_us, depth) do
+    events = tree.events
+    trace_id = tree.trace_id || "unknown"
+
+    # Find the trace duration for this level
+    trace_stop = Enum.find(events, &(&1["event"] == "trace.stop"))
+    total_duration_us = (trace_stop["duration_ms"] || 0) * 1000
+
+    # Create the main span for this trace
+    main_span = %{
+      "name" => trace_name(tree),
+      "cat" => "trace",
+      "ph" => "X",
+      "ts" => start_time_us,
+      "dur" => total_duration_us,
+      "pid" => 1,
+      "tid" => depth,
+      "args" => %{
+        "trace_id" => trace_id,
+        "depth" => depth
+      }
+    }
+
+    # Convert internal events to Chrome trace format
+    internal_events = convert_events_to_chrome(events, start_time_us, depth)
+
+    # Recursively process children
+    # Space children out based on their relative start times or distribute evenly
+    child_events =
+      tree.children
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {child, index} ->
+        # Estimate child start time based on index and total duration
+        child_offset = div(total_duration_us * index, max(length(tree.children), 1))
+        build_chrome_trace_events(child, start_time_us + child_offset, depth + 1)
+      end)
+
+    [main_span | internal_events] ++ child_events
+  end
+
+  defp trace_name(tree) do
+    # Try to get a meaningful name from meta or summary
+    cond do
+      tree.summary[:meta][:tool_name] ->
+        "worker: #{tree.summary[:meta][:tool_name]}"
+
+      tree.trace_id ->
+        short_id = String.slice(tree.trace_id, 0, 8)
+        "trace-#{short_id}"
+
+      true ->
+        "trace"
+    end
+  end
+
+  defp convert_events_to_chrome(events, base_time_us, depth) do
+    # Pair start/stop events and convert to Chrome "X" (complete) events
+    events
+    |> pair_start_stop_events()
+    |> Enum.map(fn {start_event, stop_event} ->
+      event_type = event_type_from_name(start_event["event"])
+      duration_us = (stop_event["duration_ms"] || 0) * 1000
+
+      # Calculate relative timestamp from event order
+      start_offset = calculate_event_offset(events, start_event) * 1000
+
+      %{
+        "name" => event_name(event_type, stop_event),
+        "cat" => event_type,
+        "ph" => "X",
+        "ts" => base_time_us + start_offset,
+        "dur" => duration_us,
+        "pid" => 1,
+        "tid" => depth,
+        "args" => event_args(event_type, start_event, stop_event)
+      }
+    end)
+  end
+
+  defp pair_start_stop_events(events) do
+    # Group events by type and pair start/stop
+    events
+    |> Enum.reduce({[], %{}}, &process_event_for_pairing/2)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp process_event_for_pairing(event, {pairs, pending}) do
+    event_name = event["event"]
+
+    cond do
+      is_nil(event_name) ->
+        {pairs, pending}
+
+      String.ends_with?(event_name, ".start") ->
+        key = event_pairing_key(event_name, ".start", event)
+        {pairs, Map.put(pending, key, event)}
+
+      String.ends_with?(event_name, ".stop") ->
+        key = event_pairing_key(event_name, ".stop", event)
+        match_stop_event(pairs, pending, key, event)
+
+      true ->
+        {pairs, pending}
+    end
+  end
+
+  defp event_pairing_key(event_name, suffix, event) do
+    base = String.replace_suffix(event_name, suffix, "")
+    {base, event["metadata"]["turn_number"] || event["metadata"]["tool_name"]}
+  end
+
+  defp match_stop_event(pairs, pending, key, stop_event) do
+    case Map.pop(pending, key) do
+      {nil, pending} -> {pairs, pending}
+      {start_event, pending} -> {[{start_event, stop_event} | pairs], pending}
+    end
+  end
+
+  defp event_type_from_name(event_name) when is_binary(event_name) do
+    event_name
+    |> String.split(".")
+    |> List.first()
+  end
+
+  defp event_type_from_name(_), do: "unknown"
+
+  defp event_name(type, stop_event) do
+    case type do
+      "turn" -> "Turn #{stop_event["metadata"]["turn_number"] || "?"}"
+      "tool" -> stop_event["metadata"]["tool_name"] || "tool"
+      "pmap" -> "pmap (#{stop_event["metadata"]["count"] || "?"} tasks)"
+      "pcalls" -> "pcalls (#{stop_event["metadata"]["count"] || "?"} tasks)"
+      "llm" -> "LLM call"
+      _ -> type
+    end
+  end
+
+  defp event_args(type, start_event, stop_event) do
+    base = %{
+      "duration_ms" => stop_event["duration_ms"]
+    }
+
+    case type do
+      "turn" ->
+        Map.merge(base, %{
+          "turn_number" => stop_event["metadata"]["turn_number"],
+          "tokens" => stop_event["metadata"]["tokens"]
+        })
+
+      "tool" ->
+        Map.merge(base, %{
+          "tool_name" => stop_event["metadata"]["tool_name"],
+          "args" => start_event["metadata"]["args"],
+          "child_trace_id" => stop_event["metadata"]["child_trace_id"]
+        })
+
+      "pmap" ->
+        Map.merge(base, %{
+          "count" => stop_event["metadata"]["count"],
+          "success_count" => stop_event["metadata"]["success_count"],
+          "error_count" => stop_event["metadata"]["error_count"],
+          "child_trace_ids" => stop_event["metadata"]["child_trace_ids"]
+        })
+
+      _ ->
+        base
+    end
+  end
+
+  defp calculate_event_offset(events, target_event) do
+    # Sum durations of all stop events before this one to estimate offset
+    events
+    |> Enum.take_while(&(&1 != target_event))
+    |> Enum.filter(&String.ends_with?(&1["event"] || "", ".stop"))
+    |> Enum.map(&(&1["duration_ms"] || 0))
+    |> Enum.sum()
+  end
+
   # Private helpers for tree functions
 
   defp extract_trace_id(events) do
