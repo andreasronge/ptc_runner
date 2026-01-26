@@ -921,16 +921,16 @@ mix git.query.analyze traces/orchestrator.jsonl --critical-path
 ### Programmatic Usage
 
 ```elixir
-# In git_query pipeline
-defmodule GitQuery.Pipeline do
-  def run(question, opts) do
+# In your application pipeline
+defmodule MyApp.Pipeline do
+  def run(input, opts) do
     if opts[:trace] do
       PtcRunner.TraceLog.with_trace(
-        fn -> do_run(question, opts) end,
+        fn -> do_run(input, opts) end,
         path: opts[:trace_path] || default_trace_path()
       )
     else
-      {:ok, do_run(question, opts), nil}
+      {:ok, do_run(input, opts), nil}
     end
   end
 end
@@ -1287,4 +1287,3 @@ These are explicitly out of scope for initial implementation but the design shou
 
 - [Observability Guide](../guides/subagent-observability.md) - Existing observability features
 - [Telemetry Module](../../lib/ptc_runner/sub_agent/telemetry.ex) - Event definitions
-- [Git Query README](../../examples/git_query/README.md) - Example application
