@@ -1880,6 +1880,7 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `last` | ✗ | ✓ | Maps: use `(last (keys m))`. Strings: returns last character |
 | `nth` | ✗ | ✓ | Maps: not supported. Strings: returns character at index |
 | `rest` | ✗ | ✓ | Strings: returns list of remaining characters |
+| `butlast` | ✗ | ✓ | Strings: returns list of all but last character |
 | `next` | ✗ | ✓ | Strings: returns list of remaining characters or nil |
 | `take` | ✗ | ✓ | Strings: returns list of first n characters |
 | `drop` | ✗ | ✓ | Strings: returns list of characters after dropping n |
