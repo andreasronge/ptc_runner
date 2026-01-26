@@ -7,11 +7,16 @@
   <style>
     :root {
       --bg: #1e1e1e;
+      --bg-light: #252526;
+      --bg-hover: #2d2d2d;
       --fg: #d4d4d4;
       --accent: #569cd6;
       --success: #4ec9b0;
       --error: #f44747;
       --warning: #dcdcaa;
+      --string: #ce9178;
+      --keyword: #c586c0;
+      --comment: #6a9955;
       --muted: #808080;
       --border: #3c3c3c;
     }
@@ -19,7 +24,7 @@
     * { box-sizing: border-box; }
 
     body {
-      font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       background: var(--bg);
       color: var(--fg);
@@ -49,14 +54,8 @@
       background: rgba(86, 156, 214, 0.1);
     }
 
-    .drop-zone p {
-      margin: 0 0 10px 0;
-      color: var(--muted);
-    }
-
-    input[type="file"] {
-      display: none;
-    }
+    .drop-zone p { margin: 0 0 10px 0; color: var(--muted); }
+    input[type="file"] { display: none; }
 
     .btn {
       background: var(--accent);
@@ -68,210 +67,264 @@
       font-family: inherit;
       font-size: 13px;
     }
-
-    .btn:hover {
-      opacity: 0.9;
-    }
+    .btn:hover { opacity: 0.9; }
 
     .summary {
-      background: #252526;
+      background: var(--bg-light);
       border-radius: 8px;
       padding: 16px;
       margin-bottom: 20px;
       display: none;
     }
-
-    .summary.visible {
-      display: block;
-    }
+    .summary.visible { display: block; }
 
     .summary-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 16px;
     }
 
-    .summary-item {
-      text-align: center;
-    }
+    .summary-item { text-align: center; }
+    .summary-value { font-size: 24px; font-weight: 600; color: var(--accent); }
+    .summary-label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
 
-    .summary-value {
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--accent);
-    }
-
-    .summary-label {
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-    }
-
-    .tree {
+    /* Timeline */
+    .timeline {
+      background: var(--bg-light);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
       display: none;
+      overflow-x: auto;
     }
+    .timeline.visible { display: block; }
+    .timeline h3 { margin: 0 0 12px 0; font-size: 14px; color: var(--muted); }
 
-    .tree.visible {
-      display: block;
-    }
-
-    .event {
-      margin: 2px 0;
-      padding: 4px 8px;
+    .timeline-bar {
+      height: 24px;
+      background: var(--bg);
       border-radius: 4px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .event:hover {
-      background: #2d2d2d;
-    }
-
-    .event-type {
-      font-weight: 600;
-      min-width: 120px;
-    }
-
-    .event-type.turn { color: var(--accent); }
-    .event-type.tool { color: var(--warning); }
-    .event-type.pmap { color: #c586c0; }
-    .event-type.pcalls { color: #c586c0; }
-    .event-type.trace { color: var(--muted); }
-
-    .event-status {
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .event-status.ok {
-      background: rgba(78, 201, 176, 0.2);
-      color: var(--success);
-    }
-
-    .event-status.error {
-      background: rgba(244, 71, 71, 0.2);
-      color: var(--error);
-    }
-
-    .event-duration {
-      color: var(--muted);
-      min-width: 80px;
-      text-align: right;
-    }
-
-    .event-name {
-      color: var(--fg);
-      flex: 1;
-    }
-
-    .event-meta {
-      color: var(--muted);
-      font-size: 11px;
-    }
-
-    .children {
-      margin-left: 20px;
-      border-left: 1px solid var(--border);
-      padding-left: 12px;
-    }
-
-    .child-trace {
-      margin: 8px 0;
-      padding: 8px;
-      background: #252526;
-      border-radius: 4px;
-      border-left: 3px solid var(--accent);
-    }
-
-    .child-trace-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      position: relative;
       margin-bottom: 8px;
+      min-width: 600px;
+    }
+
+    .timeline-segment {
+      position: absolute;
+      height: 100%;
+      border-radius: 3px;
       cursor: pointer;
+      transition: opacity 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 4px;
     }
+    .timeline-segment:hover { opacity: 0.8; }
+    .timeline-segment.llm { background: var(--accent); }
+    .timeline-segment.tool { background: var(--warning); }
+    .timeline-segment.pmap { background: var(--keyword); }
 
-    .child-trace-header:hover {
-      color: var(--accent);
+    /* Event cards */
+    .events { display: none; }
+    .events.visible { display: block; }
+
+    .event-card {
+      background: var(--bg-light);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      overflow: hidden;
+      border-left: 3px solid var(--border);
     }
+    .event-card.llm { border-left-color: var(--accent); }
+    .event-card.tool { border-left-color: var(--warning); }
+    .event-card.pmap { border-left-color: var(--keyword); }
+    .event-card.turn { border-left-color: var(--success); }
+    .event-card.error { border-left-color: var(--error); }
 
-    .toggle {
+    .event-header {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
       cursor: pointer;
       user-select: none;
-      width: 16px;
-      text-align: center;
+    }
+    .event-header:hover { background: var(--bg-hover); }
+
+    .event-toggle {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       color: var(--muted);
+      font-size: 16px;
     }
 
-    .collapsed .children {
+    .event-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+    .event-icon.llm { background: rgba(86, 156, 214, 0.2); color: var(--accent); }
+    .event-icon.tool { background: rgba(220, 220, 170, 0.2); color: var(--warning); }
+    .event-icon.pmap { background: rgba(197, 134, 192, 0.2); color: var(--keyword); }
+    .event-icon.turn { background: rgba(78, 201, 176, 0.2); color: var(--success); }
+
+    .event-title { flex: 1; font-weight: 500; }
+    .event-meta { color: var(--muted); font-size: 12px; display: flex; gap: 16px; }
+    .event-meta span { display: flex; align-items: center; gap: 4px; }
+
+    .event-body {
       display: none;
+      border-top: 1px solid var(--border);
+    }
+    .event-card.expanded .event-body { display: block; }
+    .event-card.expanded .event-toggle { transform: rotate(90deg); }
+
+    .event-section {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .event-section:last-child { border-bottom: none; }
+    .event-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-weight: 600;
     }
 
-    .collapsed .toggle::before {
-      content: '+';
+    /* Code blocks */
+    .code-block {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
-    .expanded .toggle::before {
-      content: '-';
+    /* Syntax highlighting for Lisp */
+    .code-block .keyword { color: var(--keyword); }
+    .code-block .builtin { color: var(--accent); }
+    .code-block .string { color: var(--string); }
+    .code-block .comment { color: var(--comment); font-style: italic; }
+    .code-block .number { color: var(--success); }
+    .code-block .symbol { color: var(--warning); }
+
+    /* Thinking block */
+    .thinking-block {
+      background: rgba(106, 153, 85, 0.1);
+      border-left: 3px solid var(--comment);
+      padding: 12px;
+      border-radius: 0 6px 6px 0;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: var(--comment);
+      white-space: pre-wrap;
     }
 
+    /* Child traces */
+    .child-traces {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 8px;
+    }
+
+    .child-trace-item {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 10px 12px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.2s;
+    }
+    .child-trace-item:hover { background: var(--bg-hover); }
+    .child-trace-item .id { font-family: monospace; color: var(--accent); }
+    .child-trace-item .status { font-size: 11px; color: var(--success); }
+
+    /* File list */
     .file-list {
       margin-top: 20px;
       padding-top: 20px;
       border-top: 1px solid var(--border);
+      display: none;
     }
-
-    .file-list h2 {
-      font-size: 14px;
-      margin: 0 0 10px 0;
-      color: var(--muted);
-    }
+    .file-list.visible { display: block; }
+    .file-list h2 { font-size: 14px; margin: 0 0 10px 0; color: var(--muted); }
 
     .file-item {
-      padding: 8px;
+      padding: 8px 12px;
       margin: 4px 0;
-      background: #252526;
+      background: var(--bg-light);
       border-radius: 4px;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-
-    .file-item:hover {
-      background: #2d2d2d;
-    }
-
-    .file-item.active {
-      border-left: 3px solid var(--accent);
-    }
+    .file-item:hover { background: var(--bg-hover); }
+    .file-item.active { border-left: 3px solid var(--accent); background: var(--bg-hover); }
 
     .instructions {
-      background: #252526;
+      background: var(--bg-light);
       border-radius: 8px;
       padding: 16px;
       margin-top: 20px;
       font-size: 12px;
       color: var(--muted);
     }
-
     .instructions code {
-      background: #1e1e1e;
+      background: var(--bg);
       padding: 2px 6px;
       border-radius: 3px;
       color: var(--warning);
+      font-family: monospace;
     }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .tab {
+      padding: 8px 16px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .tab:hover { background: var(--bg-hover); color: var(--fg); }
+    .tab.active { background: var(--accent); color: #fff; }
   </style>
 </head>
 <body>
-  <h1>PTC Trace Viewer</h1>
+  <h1>🔍 PTC Trace Viewer</h1>
 
   <div class="drop-zone" id="dropZone">
     <p>Drop .jsonl trace files here or click to select</p>
-    <p style="font-size: 11px; color: var(--muted);">Select multiple files to view parent + child traces together</p>
+    <p style="font-size: 11px;">Select the main trace + child traces to view the full hierarchy</p>
     <button class="btn" onclick="document.getElementById('fileInput').click()">Select Files</button>
     <input type="file" id="fileInput" accept=".jsonl" multiple>
   </div>
@@ -287,59 +340,75 @@
         <div class="summary-label">Turns</div>
       </div>
       <div class="summary-item">
-        <div class="summary-value" id="summaryTools">-</div>
-        <div class="summary-label">Tool Calls</div>
+        <div class="summary-value" id="summaryLLM">-</div>
+        <div class="summary-label">LLM Calls</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-value" id="summaryTokens">-</div>
+        <div class="summary-label">Tokens</div>
       </div>
       <div class="summary-item">
         <div class="summary-value" id="summaryChildren">-</div>
-        <div class="summary-label">Child Traces</div>
+        <div class="summary-label">Children</div>
       </div>
     </div>
   </div>
 
-  <div class="file-list" id="fileList" style="display: none;">
+  <div class="timeline" id="timeline">
+    <h3>Timeline</h3>
+    <div class="timeline-bar" id="timelineBar"></div>
+  </div>
+
+  <div class="tabs" id="tabs" style="display: none;">
+    <button class="tab active" data-filter="all">All Events</button>
+    <button class="tab" data-filter="llm">LLM Calls</button>
+    <button class="tab" data-filter="tool">Tools</button>
+    <button class="tab" data-filter="pmap">Parallel</button>
+  </div>
+
+  <div class="events" id="events"></div>
+
+  <div class="file-list" id="fileList">
     <h2>Loaded Files</h2>
     <div id="fileListItems"></div>
   </div>
 
-  <div class="tree" id="tree"></div>
-
   <div class="instructions">
-    <strong>How to use:</strong><br>
-    1. Run your SubAgent with tracing: <code>mix run examples/rlm/run.exs --trace</code><br>
-    2. Open this file in Chrome and drop the generated .jsonl files<br>
-    3. Select multiple files to see parent and child traces together
+    <strong>Usage:</strong><br>
+    1. Run with tracing: <code>mix rlm --trace</code><br>
+    2. Drop all .jsonl files from <code>examples/rlm/traces/</code> here<br>
+    3. Click on events to expand details, click child traces to navigate
   </div>
 
   <script>
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const summary = document.getElementById('summary');
-    const tree = document.getElementById('tree');
+    const timeline = document.getElementById('timeline');
+    const timelineBar = document.getElementById('timelineBar');
+    const tabs = document.getElementById('tabs');
+    const eventsContainer = document.getElementById('events');
     const fileList = document.getElementById('fileList');
     const fileListItems = document.getElementById('fileListItems');
 
-    let loadedFiles = new Map(); // filename -> {events, traceId}
+    let loadedFiles = new Map();
     let currentFile = null;
+    let currentFilter = 'all';
 
-    // Drag and drop handlers
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
+    // Drag and drop
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+    fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
 
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('dragover');
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      handleFiles(e.dataTransfer.files);
-    });
-
-    fileInput.addEventListener('change', (e) => {
-      handleFiles(e.target.files);
+    // Tab filtering
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentFilter = tab.dataset.filter;
+        if (currentFile) displayTrace(currentFile);
+      });
     });
 
     async function handleFiles(files) {
@@ -347,64 +416,34 @@
         const text = await file.text();
         const events = parseJsonl(text);
         const traceId = extractTraceId(events);
-        loadedFiles.set(file.name, { events, traceId, file: file.name });
+        loadedFiles.set(file.name, { events, traceId, filename: file.name });
       }
-
       updateFileList();
-
-      // Auto-select first file or main trace
       if (!currentFile && loadedFiles.size > 0) {
-        const mainTrace = [...loadedFiles.entries()].find(([name]) =>
-          !name.startsWith('trace_') || name.includes('rlm_trace')
-        );
+        const mainTrace = [...loadedFiles.entries()].find(([name]) => name.includes('rlm_trace') || !name.startsWith('trace_'));
         currentFile = mainTrace ? mainTrace[0] : [...loadedFiles.keys()][0];
       }
-
-      if (currentFile) {
-        displayTrace(currentFile);
-      }
+      if (currentFile) displayTrace(currentFile);
     }
 
     function parseJsonl(text) {
-      return text.trim().split('\n')
-        .filter(line => line.trim())
-        .map(line => {
-          try {
-            return JSON.parse(line);
-          } catch (e) {
-            console.error('Failed to parse line:', line);
-            return null;
-          }
-        })
-        .filter(Boolean);
+      return text.trim().split('\n').filter(l => l.trim()).map(line => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
     }
 
     function extractTraceId(events) {
-      const metaEvent = events.find(e => e.event === 'trace.start');
-      return metaEvent?.trace_id || 'unknown';
+      return events.find(e => e.event === 'trace.start')?.trace_id || 'unknown';
     }
 
     function updateFileList() {
-      if (loadedFiles.size === 0) {
-        fileList.style.display = 'none';
-        return;
-      }
-
-      fileList.style.display = 'block';
+      fileList.classList.toggle('visible', loadedFiles.size > 0);
       fileListItems.innerHTML = '';
-
       for (const [name, data] of loadedFiles) {
         const item = document.createElement('div');
         item.className = 'file-item' + (name === currentFile ? ' active' : '');
-        item.innerHTML = `
-          <span>${name}</span>
-          <span style="color: var(--muted); font-size: 11px;">${data.traceId.slice(0, 8)}</span>
-        `;
-        item.onclick = () => {
-          currentFile = name;
-          displayTrace(name);
-          updateFileList();
-        };
+        item.innerHTML = `<span>${name}</span><span style="color: var(--muted); font-size: 11px;">${data.traceId.slice(0, 8)}...</span>`;
+        item.onclick = () => { currentFile = name; displayTrace(name); updateFileList(); };
         fileListItems.appendChild(item);
       }
     }
@@ -414,129 +453,237 @@
       if (!data) return;
 
       const events = data.events;
+      const paired = pairEvents(events);
 
-      // Update summary
+      // Summary
       summary.classList.add('visible');
-
-      const turns = events.filter(e => e.event?.includes('turn.'));
-      const tools = events.filter(e => e.event?.includes('tool.'));
+      const llmEvents = paired.filter(e => e.type === 'llm');
+      const totalDuration = events.find(e => e.event === 'trace.stop')?.duration_ms || 0;
+      const totalTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
       const childIds = extractChildTraceIds(events);
-      const totalDuration = calculateTotalDuration(events);
 
       document.getElementById('summaryDuration').textContent = formatDuration(totalDuration);
-      document.getElementById('summaryTurns').textContent = Math.floor(turns.length / 2);
-      document.getElementById('summaryTools').textContent = Math.floor(tools.length / 2);
+      document.getElementById('summaryTurns').textContent = paired.filter(e => e.type === 'turn').length;
+      document.getElementById('summaryLLM').textContent = llmEvents.length;
+      document.getElementById('summaryTokens').textContent = totalTokens.toLocaleString();
       document.getElementById('summaryChildren').textContent = childIds.length;
 
-      // Build tree
-      tree.classList.add('visible');
-      tree.innerHTML = buildEventTree(events);
+      // Timeline
+      timeline.classList.add('visible');
+      renderTimeline(paired, totalDuration);
 
-      // Add toggle handlers
-      tree.querySelectorAll('.toggle').forEach(toggle => {
-        toggle.onclick = (e) => {
-          const parent = e.target.closest('.event-container');
-          parent.classList.toggle('collapsed');
-          parent.classList.toggle('expanded');
-        };
-      });
+      // Events
+      tabs.style.display = 'flex';
+      eventsContainer.classList.add('visible');
+      renderEvents(paired);
+    }
+
+    function pairEvents(events) {
+      const pairs = [];
+      const pending = {};
+
+      for (const event of events) {
+        if (!event.event) continue;
+        const [type, action] = event.event.split('.');
+        if (action === 'start') {
+          const key = `${type}-${event.metadata?.turn || event.metadata?.tool_name || ''}`;
+          pending[key] = event;
+        } else if (action === 'stop') {
+          const key = `${type}-${event.metadata?.turn || event.metadata?.tool_name || ''}`;
+          if (pending[key]) {
+            pairs.push({ type, start: pending[key], stop: event });
+            delete pending[key];
+          }
+        }
+      }
+      return pairs;
     }
 
     function extractChildTraceIds(events) {
       const ids = new Set();
-      for (const event of events) {
-        if (event.child_trace_ids) {
-          event.child_trace_ids.forEach(id => ids.add(id));
-        }
-        if (event.child_trace_id) {
-          ids.add(event.child_trace_id);
-        }
+      for (const e of events) {
+        (e.child_trace_ids || []).forEach(id => ids.add(id));
+        if (e.child_trace_id) ids.add(e.child_trace_id);
+        (e.metadata?.child_trace_ids || []).forEach(id => ids.add(id));
       }
       return [...ids];
     }
 
-    function calculateTotalDuration(events) {
-      // Find the trace.stop event or calculate from first/last event
-      const stopEvent = events.find(e => e.event === 'trace.stop');
-      if (stopEvent?.duration_ms) return stopEvent.duration_ms;
+    function renderTimeline(pairs, totalDuration) {
+      timelineBar.innerHTML = '';
+      if (!totalDuration) return;
 
-      // Sum up top-level durations
-      let total = 0;
-      for (const event of events) {
-        if (event.event?.endsWith('.stop') && event.duration_ms) {
-          total += event.duration_ms;
-        }
+      let offset = 0;
+      for (const pair of pairs) {
+        if (!['llm', 'tool', 'pmap'].includes(pair.type)) continue;
+        const duration = pair.stop?.duration_ms || 0;
+        const width = (duration / totalDuration) * 100;
+        const left = (offset / totalDuration) * 100;
+
+        const segment = document.createElement('div');
+        segment.className = `timeline-segment ${pair.type}`;
+        segment.style.left = `${left}%`;
+        segment.style.width = `${Math.max(width, 0.5)}%`;
+        segment.textContent = pair.type === 'llm' ? `T${pair.stop?.metadata?.turn || '?'}` : pair.type;
+        segment.title = `${pair.type}: ${formatDuration(duration)}`;
+        timelineBar.appendChild(segment);
+
+        offset += duration;
       }
-      return total;
     }
 
-    function buildEventTree(events) {
-      let html = '';
+    function renderEvents(pairs) {
+      const filtered = currentFilter === 'all' ? pairs : pairs.filter(p => p.type === currentFilter);
+      eventsContainer.innerHTML = filtered.map(pair => renderEventCard(pair)).join('');
 
-      for (const event of events) {
-        if (!event.event) continue;
+      // Add click handlers
+      eventsContainer.querySelectorAll('.event-header').forEach(header => {
+        header.onclick = () => header.closest('.event-card').classList.toggle('expanded');
+      });
 
-        const [category, action] = event.event.split('.');
+      // Child trace navigation
+      eventsContainer.querySelectorAll('.child-trace-item').forEach(item => {
+        item.onclick = () => {
+          const traceId = item.dataset.traceid;
+          const file = findFileByTraceId(traceId);
+          if (file) { currentFile = file; displayTrace(file); updateFileList(); }
+        };
+      });
+    }
 
-        // Skip start events (we'll show info on stop events)
-        if (action === 'start') continue;
+    function renderEventCard(pair) {
+      const { type, start, stop } = pair;
+      const duration = stop?.duration_ms || 0;
+      const tokens = stop?.measurements?.tokens || stop?.metadata?.tokens || 0;
+      const turn = stop?.metadata?.turn || start?.metadata?.turn;
+      const hasError = stop?.metadata?.error;
 
-        const eventType = category.replace('sub_agent.', '');
-        const status = event.error ? 'error' : 'ok';
-        const duration = event.duration_ms;
+      let title = type;
+      let icon = '📦';
+      let meta = [];
 
-        let name = '';
-        let meta = '';
+      if (type === 'llm') {
+        title = `LLM Call${turn ? ` (Turn ${turn})` : ''}`;
+        icon = '🤖';
+        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+        if (tokens) meta.push(`<span>📊 ${tokens} tokens</span>`);
+      } else if (type === 'turn') {
+        title = `Turn ${stop?.metadata?.turn_number || '?'}`;
+        icon = '🔄';
+        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+      } else if (type === 'tool') {
+        title = stop?.metadata?.tool_name || 'Tool';
+        icon = '🔧';
+        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+      } else if (type === 'pmap' || type === 'pcalls') {
+        const count = stop?.metadata?.count || '?';
+        title = `${type} (${count} tasks)`;
+        icon = '⚡';
+        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+        meta.push(`<span>✓ ${stop?.metadata?.success_count || 0} / ✗ ${stop?.metadata?.error_count || 0}</span>`);
+      }
 
-        if (eventType === 'turn') {
-          name = `Turn ${event.turn_number || '?'}`;
-          if (event.tokens) {
-            meta = `${event.tokens.input || 0} in / ${event.tokens.output || 0} out tokens`;
-          }
-        } else if (eventType === 'tool') {
-          name = event.tool_name || 'unknown tool';
-          if (event.child_trace_id) {
-            meta = `child: ${event.child_trace_id.slice(0, 8)}...`;
-          }
-        } else if (eventType === 'pmap' || eventType === 'pcalls') {
-          name = `${eventType} (${event.count || '?'} tasks)`;
-          if (event.child_trace_ids?.length) {
-            meta = `${event.child_trace_ids.length} child traces`;
-          }
-        } else if (eventType === 'trace') {
-          name = event.trace_id ? `Trace ${event.trace_id.slice(0, 8)}...` : 'Trace';
-        } else {
-          name = event.event;
+      let bodyContent = '';
+
+      // LLM specific content
+      if (type === 'llm') {
+        const response = stop?.metadata?.response || '';
+        const thinking = extractThinking(response);
+        const program = extractProgram(response);
+        const prompt = getLastUserMessage(start?.metadata?.messages);
+
+        if (thinking) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">💭 Thinking</div>
+              <div class="thinking-block">${escapeHtml(thinking)}</div>
+            </div>`;
         }
 
-        html += `
-          <div class="event">
-            <span class="event-type ${eventType}">${eventType}</span>
-            <span class="event-status ${status}">${status}</span>
-            <span class="event-name">${escapeHtml(name)}</span>
-            ${meta ? `<span class="event-meta">${escapeHtml(meta)}</span>` : ''}
-            ${duration ? `<span class="event-duration">${formatDuration(duration)}</span>` : ''}
-          </div>
-        `;
+        if (program) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">📝 Program</div>
+              <div class="code-block">${highlightLisp(program)}</div>
+            </div>`;
+        }
 
-        // Show child trace links
-        if (event.child_trace_ids?.length) {
-          html += '<div class="children">';
-          for (const childId of event.child_trace_ids) {
-            const childFile = findFileByTraceId(childId);
-            html += `
-              <div class="child-trace">
-                <span style="color: var(--muted);">Child:</span>
-                <span style="color: var(--accent);">${childId.slice(0, 8)}...</span>
-                ${childFile ? `<span style="color: var(--success); cursor: pointer;" onclick="displayTrace('${childFile}')">[view]</span>` : '<span style="color: var(--muted);">(not loaded)</span>'}
-              </div>
-            `;
-          }
-          html += '</div>';
+        if (prompt) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">📨 Prompt (truncated)</div>
+              <div class="code-block" style="max-height: 200px; overflow-y: auto;">${escapeHtml(truncate(prompt, 1000))}</div>
+            </div>`;
         }
       }
 
-      return html || '<p style="color: var(--muted);">No events found</p>';
+      // Child traces
+      const childIds = stop?.metadata?.child_trace_ids || [];
+      if (childIds.length > 0) {
+        bodyContent += `
+          <div class="event-section">
+            <div class="event-section-title">👶 Child Traces (${childIds.length})</div>
+            <div class="child-traces">
+              ${childIds.map(id => {
+                const file = findFileByTraceId(id);
+                return `<div class="child-trace-item" data-traceid="${id}">
+                  <span class="id">${id.slice(0, 12)}...</span>
+                  <span class="status">${file ? '→' : '(not loaded)'}</span>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+      }
+
+      // Tool args
+      if (type === 'tool' && start?.metadata?.args) {
+        bodyContent += `
+          <div class="event-section">
+            <div class="event-section-title">📥 Arguments</div>
+            <div class="code-block">${escapeHtml(JSON.stringify(start.metadata.args, null, 2))}</div>
+          </div>`;
+      }
+
+      return `
+        <div class="event-card ${type}${hasError ? ' error' : ''}">
+          <div class="event-header">
+            <div class="event-toggle">▶</div>
+            <div class="event-icon ${type}">${icon}</div>
+            <div class="event-title">${escapeHtml(title)}</div>
+            <div class="event-meta">${meta.join('')}</div>
+          </div>
+          <div class="event-body">${bodyContent || '<div class="event-section" style="color: var(--muted);">No additional details</div>'}</div>
+        </div>`;
+    }
+
+    function extractThinking(response) {
+      if (!response) return '';
+      const match = response.match(/thinking:\s*([\s\S]*?)(?=```|$)/i);
+      return match ? match[1].trim() : '';
+    }
+
+    function extractProgram(response) {
+      if (!response) return '';
+      const match = response.match(/```clojure\n([\s\S]*?)```/);
+      return match ? match[1].trim() : '';
+    }
+
+    function getLastUserMessage(messages) {
+      if (!messages) return '';
+      const userMsgs = messages.filter(m => m.role === 'user');
+      return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
+    }
+
+    function highlightLisp(code) {
+      return escapeHtml(code)
+        .replace(/;[^\n]*/g, '<span class="comment">$&</span>')
+        .replace(/\b(def|defn|let|if|cond|when|do|fn|loop|recur|return|fail|pmap|pcalls|doseq|for)\b/g, '<span class="keyword">$1</span>')
+        .replace(/\b(map|filter|reduce|first|rest|count|get|assoc|conj|into|take|drop|distinct|concat|str|println|inc|dec)\b/g, '<span class="builtin">$1</span>')
+        .replace(/"([^"\\]|\\.)*"/g, '<span class="string">$&</span>')
+        .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>')
+        .replace(/:([\w-]+)/g, '<span class="symbol">:$1</span>')
+        .replace(/data\/[\w-]+/g, '<span class="symbol">$&</span>')
+        .replace(/tool\/[\w-]+/g, '<span class="builtin">$&</span>');
     }
 
     function findFileByTraceId(traceId) {
@@ -553,7 +700,12 @@
       return `${(ms / 60000).toFixed(1)}m`;
     }
 
+    function truncate(str, len) {
+      return str && str.length > len ? str.slice(0, len) + '...' : str || '';
+    }
+
     function escapeHtml(text) {
+      if (!text) return '';
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
