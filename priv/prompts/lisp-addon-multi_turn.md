@@ -2,9 +2,9 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 7 -->
-<!-- date: 2026-01-16 -->
-<!-- changes: Added guidance to use doseq instead of map/pmap for side effects -->
+<!-- version: 8 -->
+<!-- date: 2026-01-26 -->
+<!-- changes: Added budget/remaining for adaptive strategies -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -79,6 +79,10 @@ results                                     ; access in later turns
 ### Accessing Previous Results
 
 Use `def` to store values you need to reference later.
+
+### Budget Introspection
+
+`(budget/remaining)` returns turns, depth, and token usage for adaptive strategies.
 
 **Avoid Clojure features not in PTC-Lisp.** Syntax errors waste a turn. Simpler, shorter programs are safer. You can always build on them in future turns.
 <!-- PTC_PROMPT_END -->

@@ -87,7 +87,7 @@ The orchestrator generates PTC-Lisp like:
 
 ## Recursive Pattern: Self-Subdividing Agents
 
-For hierarchical decomposition, agents can call themselves:
+For hierarchical decomposition, use the `:self` sentinel in the tools map:
 
 ```elixir
 analyzer = SubAgent.new(
@@ -95,12 +95,12 @@ analyzer = SubAgent.new(
   Analyze the data chunk in data/chunk.
 
   If the chunk is small (< 1000 lines), analyze directly.
-  If large, subdivide into smaller chunks and use the 'self' tool recursively.
+  If large, subdivide into smaller chunks and use the 'worker' tool recursively.
   Aggregate child results before returning.
   """,
   signature: "(chunk :string) -> {findings [:string]}",
-  recursive: true,  # Enables self-recursion via 'self' tool
-  max_depth: 3,     # Limits recursion depth
+  tools: %{"worker" => :self},  # Self-recursion via :self sentinel
+  max_depth: 3,
   max_turns: 5,
   llm: :haiku
 )
@@ -121,24 +121,47 @@ The agent decides dynamically whether to process or subdivide:
     (return {:findings (analyze-for-patterns lines)})
     ;; Recursive case: subdivide
     (let [halves (partition (/ n 2) lines)
-          results (pmap #(tool/self {:chunk (join "\n" %)}) halves)]
+          results (pmap #(tool/worker {:chunk (join "\n" %)}) halves)]
       (return {:findings (flatten (map :findings results))}))))
 ```
 
 ## Budget-Aware Orchestration
 
-Agents can query remaining budget to make smart decisions:
+Agents can query remaining budget via `(budget/remaining)`:
 
 ```clojure
-(let [remaining (budget/remaining)
+(budget/remaining)
+;; => {:turns 15
+;;     "work-turns" 10
+;;     "retry-turns" 5
+;;     :depth {:current 1 :max 3}
+;;     :tokens {:input 5000 :output 2000 :total 7000}
+;;     "llm-requests" 3}
+```
+
+Use this to make smart decisions about parallelization:
+
+```clojure
+(let [b (budget/remaining)
       chunk-count (count chunks)]
-  (if (> chunk-count (:turns remaining))
+  (if (> chunk-count (:turns b))
     ;; Not enough budget for all chunks, batch them
-    (let [batch-size (max 1 (/ chunk-count (:turns remaining)))
+    (let [batch-size (max 1 (/ chunk-count (:turns b)))
           batches (partition batch-size chunks)]
       (pmap #(tool/analyze-batch {:chunks %}) batches))
     ;; Enough budget, process individually
     (pmap #(tool/analyze {:chunk %}) chunks)))
+```
+
+For recursive agents, check depth before subdividing:
+
+```clojure
+(let [b (budget/remaining)
+      at-max-depth? (>= (get-in b [:depth :current])
+                        (dec (get-in b [:depth :max])))]
+  (if at-max-depth?
+    (analyze-directly data/chunk)
+    (subdivide-and-recurse data/chunk)))
 ```
 
 ## Chunking Strategies
@@ -151,19 +174,31 @@ Agents can query remaining budget to make smart decisions:
   ...)
 ```
 
-### By Character Count
-
-```clojure
-(let [chunks (chunk/by-chars data/corpus 50000)]  ; 50k chars per chunk
-  ...)
-```
-
-### By Semantic Boundaries
+### By Delimiter
 
 ```clojure
 (let [sections (split data/corpus "---\n")  ; Split on delimiter
       chunks (partition 5 sections)]         ; Group 5 sections per chunk
   ...)
+```
+
+### Pre-Chunking in Elixir
+
+For predictable chunk sizes, chunk before passing to the agent:
+
+```elixir
+lines = String.split(corpus, "\n")
+chunks = Enum.chunk_every(lines, 2000) |> Enum.map(&Enum.join(&1, "\n"))
+
+SubAgent.run(orchestrator,
+  context: %{"chunks" => chunks, "chunk_count" => length(chunks)}
+)
+```
+
+The agent then processes pre-chunked data directly:
+
+```clojure
+(pmap #(tool/analyze {:chunk %}) data/chunks)
 ```
 
 ## Model Selection Strategy
@@ -181,6 +216,33 @@ worker_tool = SubAgent.as_tool(worker, llm: :haiku)
 # Orchestrator uses sonnet (at runtime)
 SubAgent.run(orchestrator, llm: :sonnet, tools: %{"worker" => worker_tool})
 ```
+
+## Budget Enforcement
+
+For operator-level cost control, use `token_limit` or a custom `budget` callback:
+
+```elixir
+# Simple token limit
+SubAgent.run(orchestrator,
+  llm: llm,
+  token_limit: 100_000,
+  on_budget_exceeded: :return_partial  # or :fail (default)
+)
+
+# Custom callback for fine-grained control
+SubAgent.run(orchestrator,
+  llm: llm,
+  budget: fn usage ->
+    cond do
+      usage.total_tokens > 100_000 -> :stop
+      usage.llm_requests > 50 -> :stop
+      true -> :continue
+    end
+  end
+)
+```
+
+The callback receives `%{total_tokens, input_tokens, output_tokens, llm_requests}`.
 
 ## Comparison with Alternatives
 

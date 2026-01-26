@@ -51,22 +51,26 @@ defmodule RLM.Runner do
     # 2. Define the Recursive Worker Agent
     # This agent analyzes a chunk. It uses Haiku 4.5 for cost-effective parallel processing.
     # The :self sentinel enables clean recursive invocation without Agent registry hacks.
+    # Uses (budget/remaining) for depth-aware decisions instead of manual {{_depth}} tracking.
 
     worker_agent =
       SubAgent.new(
         prompt: """
         TASK: Analyze the log chunk in data/chunk for CRITICAL or ERROR incidents.
-        CURRENT_DEPTH: {{_depth}}
 
         STRATEGY:
-        1. If the chunk is small enough (< 1500 lines), analyze it directly using Cloujure logic.
-        2. If the chunk is massive, use the 'worker' tool to subdivide it into smaller parallel tasks.
-        3. Use 'pmap' for parallel tool calls to maximize efficiency.
-        4. Always return results in the format: {incidents [:string]}
+        1. Check depth with (budget/remaining) - if at max depth, process directly
+        2. If chunk is small (< 1500 lines), analyze directly
+        3. If chunk is large AND have depth budget, subdivide via 'worker' tool with pmap
+        4. Return results as: {incidents [:string]}
+
+        DEPTH CHECK EXAMPLE:
+        (let [b (budget/remaining)
+              at-max? (>= (get-in b [:depth :current]) (get-in b [:depth :max]))]
+          ...)
         """,
-        signature: "(chunk :string, _depth :int) -> {incidents [:string]}",
-        description:
-          "Analyze a log chunk for incidents. Use this tool recursively for large chunks by subdividing them.",
+        signature: "(chunk :string) -> {incidents [:string]}",
+        description: "Analyze a log chunk for incidents. Use recursively for large chunks.",
         tools: %{"worker" => :self},
         max_turns: 5,
         max_depth: 3,
