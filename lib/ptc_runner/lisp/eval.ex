@@ -740,7 +740,13 @@ defmodule PtcRunner.Lisp.Eval do
         eval_ctx: eval_ctx2,
         tool_name: tool_name
     else
-      {:ok, result, eval_ctx2}
+      # Return the original wrapper (if present) so pmap can extract child_trace_ids.
+      # The tool_call record already has the unwrapped result for logging.
+      # Non-pmap callers that go through do_eval will just see the wrapper as a map,
+      # but that's fine since they can access the value via :value key if needed.
+      # Pmap specifically checks for __child_trace_id__ wrapper.
+      return_value = if child_trace_id, do: raw_result, else: result
+      {:ok, return_value, eval_ctx2}
     end
   end
 

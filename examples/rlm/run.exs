@@ -105,7 +105,7 @@ defmodule RLM.Runner do
 
   defp execute_with_tracing(prompt, opts, true) do
     # Traces go to gitignored folder
-    trace_path = "examples/rlm/traces/rlm_trace.jsonl"
+    trace_path = Path.join(base_dir(), "traces/rlm_trace.jsonl")
 
     # Ensure directory exists
     File.mkdir_p!(Path.dirname(trace_path))
@@ -137,15 +137,26 @@ defmodule RLM.Runner do
   end
 
   defp load_corpus do
-    corpus_path = "examples/rlm/test_corpus.log"
+    corpus_path = Path.join(base_dir(), "test_corpus.log")
 
     unless File.exists?(corpus_path) do
       IO.puts("Generating 10,000 line corpus...")
       System.put_env("N_LINES", "10000")
-      Code.require_file("examples/rlm/gen_data.exs")
+      Code.require_file(Path.join(base_dir(), "gen_data.exs"))
     end
 
     File.read!(corpus_path)
+  end
+
+  # Detect whether we're running from project root or examples/rlm/
+  defp base_dir do
+    cwd = File.cwd!()
+
+    if String.ends_with?(cwd, "examples/rlm") do
+      "."
+    else
+      "examples/rlm"
+    end
   end
 
   defp count_lines(text), do: length(String.split(text, "\n"))

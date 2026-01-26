@@ -47,10 +47,6 @@ defmodule Mix.Tasks.Rlm do
 
   use Mix.Task
 
-  @trace_dir "examples/rlm/traces"
-  @main_trace Path.join(@trace_dir, "rlm_trace.jsonl")
-  @chrome_trace Path.join(@trace_dir, "rlm_trace.json")
-
   @impl Mix.Task
   def run(args) do
     {opts, _, _} =
@@ -89,11 +85,11 @@ defmodule Mix.Tasks.Rlm do
     IO.puts("Running RLM example#{if trace?, do: " with tracing", else: ""}...\n")
 
     # Run the example script
-    Code.eval_file("examples/rlm/run.exs")
+    Code.eval_file(example_script())
 
     if trace? do
       IO.puts("\n" <> String.duplicate("─", 60))
-      IO.puts("Trace files created in #{@trace_dir}/")
+      IO.puts("Trace files created in #{trace_dir()}/")
       IO.puts("  • View tree:   mix rlm --tree")
       IO.puts("  • Export:      mix rlm --export")
       IO.puts("  • Clean up:    mix rlm --clean")
@@ -105,25 +101,29 @@ defmodule Mix.Tasks.Rlm do
 
     alias PtcRunner.TraceLog.Analyzer
 
-    unless File.exists?(@main_trace) do
-      Mix.raise("No trace file found at #{@main_trace}. Run `mix rlm --trace` first.")
+    main_trace = main_trace_path()
+
+    unless File.exists?(main_trace) do
+      Mix.raise("No trace file found at #{main_trace}. Run `mix rlm --trace` first.")
     end
 
     IO.puts("Loading trace tree...")
 
-    case Analyzer.load_tree(@main_trace) do
+    chrome_trace = chrome_trace_path()
+
+    case Analyzer.load_tree(main_trace) do
       {:ok, tree} ->
         IO.puts("Exporting to Chrome DevTools format...")
 
-        case Analyzer.export_chrome_trace(tree, @chrome_trace) do
+        case Analyzer.export_chrome_trace(tree, chrome_trace) do
           :ok ->
-            IO.puts("Exported to: #{@chrome_trace}")
+            IO.puts("Exported to: #{chrome_trace}")
             IO.puts("\nTo view in Chrome:")
             IO.puts("  1. Open DevTools (F12) → Performance tab")
-            IO.puts("  2. Click 'Load profile...' and select #{@chrome_trace}")
+            IO.puts("  2. Click 'Load profile...' and select #{chrome_trace}")
             IO.puts("  Or navigate to chrome://tracing and load the file")
 
-            if open?, do: open_chrome_trace()
+            if open?, do: open_chrome_trace(chrome_trace)
 
           {:error, reason} ->
             Mix.raise("Export failed: #{inspect(reason)}")
@@ -139,11 +139,13 @@ defmodule Mix.Tasks.Rlm do
 
     alias PtcRunner.TraceLog.Analyzer
 
-    unless File.exists?(@main_trace) do
-      Mix.raise("No trace file found at #{@main_trace}. Run `mix rlm --trace` first.")
+    main_trace = main_trace_path()
+
+    unless File.exists?(main_trace) do
+      Mix.raise("No trace file found at #{main_trace}. Run `mix rlm --trace` first.")
     end
 
-    case Analyzer.load_tree(@main_trace) do
+    case Analyzer.load_tree(main_trace) do
       {:ok, tree} ->
         IO.puts("Trace tree:\n")
         Analyzer.print_tree(tree)
@@ -158,9 +160,13 @@ defmodule Mix.Tasks.Rlm do
 
     alias PtcRunner.TraceLog.Analyzer
 
+    main_trace = main_trace_path()
+    chrome_trace = chrome_trace_path()
+    trace_dir = trace_dir()
+
     # Delete tree if main trace exists
-    if File.exists?(@main_trace) do
-      case Analyzer.load_tree(@main_trace) do
+    if File.exists?(main_trace) do
+      case Analyzer.load_tree(main_trace) do
         {:ok, tree} ->
           case Analyzer.delete_tree(tree) do
             {:ok, count} ->
@@ -172,19 +178,19 @@ defmodule Mix.Tasks.Rlm do
 
         {:error, _} ->
           # Just delete the main file
-          File.rm(@main_trace)
-          IO.puts("Deleted #{@main_trace}")
+          File.rm(main_trace)
+          IO.puts("Deleted #{main_trace}")
       end
     end
 
     # Also delete Chrome export if it exists
-    if File.exists?(@chrome_trace) do
-      File.rm(@chrome_trace)
-      IO.puts("Deleted #{@chrome_trace}")
+    if File.exists?(chrome_trace) do
+      File.rm(chrome_trace)
+      IO.puts("Deleted #{chrome_trace}")
     end
 
     # Clean up any orphaned trace files
-    Path.wildcard(Path.join(@trace_dir, "trace_*.jsonl"))
+    Path.wildcard(Path.join(trace_dir, "trace_*.jsonl"))
     |> Enum.each(fn path ->
       File.rm(path)
       IO.puts("Deleted #{path}")
@@ -193,16 +199,34 @@ defmodule Mix.Tasks.Rlm do
     IO.puts("Cleanup complete")
   end
 
-  defp open_chrome_trace do
+  defp open_chrome_trace(chrome_trace) do
     case :os.type() do
       {:unix, :darwin} ->
-        System.cmd("open", [@chrome_trace])
+        System.cmd("open", [chrome_trace])
 
       {:unix, _} ->
-        System.cmd("xdg-open", [@chrome_trace])
+        System.cmd("xdg-open", [chrome_trace])
 
       {:win32, _} ->
-        System.cmd("cmd", ["/c", "start", @chrome_trace])
+        System.cmd("cmd", ["/c", "start", chrome_trace])
     end
   end
+
+  # Path helpers that detect whether we're running from project root or examples/rlm/
+  defp base_dir do
+    cwd = File.cwd!()
+
+    if String.ends_with?(cwd, "examples/rlm") do
+      # Running from examples/rlm/ directory
+      ""
+    else
+      # Running from project root
+      "examples/rlm/"
+    end
+  end
+
+  defp trace_dir, do: Path.join(base_dir(), "traces")
+  defp main_trace_path, do: Path.join(trace_dir(), "rlm_trace.jsonl")
+  defp chrome_trace_path, do: Path.join(trace_dir(), "rlm_trace.json")
+  defp example_script, do: Path.join(base_dir(), "run.exs")
 end

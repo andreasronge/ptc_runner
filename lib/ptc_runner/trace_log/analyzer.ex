@@ -752,10 +752,66 @@ defmodule PtcRunner.TraceLog.Analyzer do
           "child_trace_ids" => stop_event["metadata"]["child_trace_ids"]
         })
 
+      "pcalls" ->
+        Map.merge(base, %{
+          "count" => stop_event["metadata"]["count"],
+          "success_count" => stop_event["metadata"]["success_count"],
+          "error_count" => stop_event["metadata"]["error_count"],
+          "child_trace_ids" => stop_event["metadata"]["child_trace_ids"]
+        })
+
+      "llm" ->
+        # Extract program from response (after thinking: block if present)
+        response = stop_event["metadata"]["response"] || ""
+        program = extract_program_from_response(response)
+
+        # Get last user message as prompt context
+        messages = start_event["metadata"]["messages"] || []
+        last_user_msg = messages |> Enum.filter(&(&1["role"] == "user")) |> List.last()
+        prompt_preview = truncate_string(last_user_msg["content"] || "", 500)
+
+        Map.merge(base, %{
+          "turn" => stop_event["metadata"]["turn"],
+          "tokens" => stop_event["measurements"]["tokens"],
+          "program" => program,
+          "response_preview" => truncate_string(response, 1000),
+          "prompt_preview" => prompt_preview
+        })
+
       _ ->
         base
     end
   end
+
+  # Extract program code from LLM response (handles various formats)
+  defp extract_program_from_response(response) when is_binary(response) do
+    cond do
+      # Look for clojure code block
+      match = Regex.run(~r/```clojure\n(.*?)```/s, response) ->
+        match |> Enum.at(1) |> String.trim()
+
+      # Look for code after common markers
+      match = Regex.run(~r/(?:code:|program:)\s*\n?(.*)/si, response) ->
+        match |> Enum.at(1) |> String.trim() |> truncate_string(500)
+
+      # Just return first part of response
+      true ->
+        truncate_string(response, 300)
+    end
+  end
+
+  defp extract_program_from_response(_), do: ""
+
+  defp truncate_string(str, max_len) when is_binary(str) do
+    if String.length(str) > max_len do
+      String.slice(str, 0, max_len) <> "..."
+    else
+      str
+    end
+  end
+
+  defp truncate_string(nil, _), do: ""
+  defp truncate_string(other, _), do: inspect(other)
 
   defp calculate_event_offset(events, target_event) do
     # Sum durations of all stop events before this one to estimate offset
