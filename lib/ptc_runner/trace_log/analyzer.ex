@@ -567,7 +567,8 @@ defmodule PtcRunner.TraceLog.Analyzer do
       }
     }
 
-    case Jason.encode(chrome_trace, pretty: true) do
+    # Compact JSON - pretty: true creates huge files that crash browsers
+    case Jason.encode(chrome_trace) do
       {:ok, json} ->
         File.write(output_path, json)
 
@@ -578,7 +579,15 @@ defmodule PtcRunner.TraceLog.Analyzer do
 
   # Build Chrome Trace Event format events from a trace tree
   # Returns list of trace events with timestamps in microseconds
-  defp build_chrome_trace_events(tree, start_time_us, depth) do
+  #
+  # For parallel children (pmap/pcalls), we use:
+  # - Same start time (they run concurrently)
+  # - Different thread IDs (so they appear on separate rows in flame chart)
+  defp build_chrome_trace_events(tree, start_time_us, tid) do
+    build_chrome_trace_events(tree, start_time_us, tid, 0)
+  end
+
+  defp build_chrome_trace_events(tree, start_time_us, tid, _child_index) do
     events = tree.events
     trace_id = tree.trace_id || "unknown"
 
@@ -594,25 +603,25 @@ defmodule PtcRunner.TraceLog.Analyzer do
       "ts" => start_time_us,
       "dur" => total_duration_us,
       "pid" => 1,
-      "tid" => depth,
+      "tid" => tid,
       "args" => %{
-        "trace_id" => trace_id,
-        "depth" => depth
+        "trace_id" => trace_id
       }
     }
 
     # Convert internal events to Chrome trace format
-    internal_events = convert_events_to_chrome(events, start_time_us, depth)
+    internal_events = convert_events_to_chrome(events, start_time_us, tid)
 
     # Recursively process children
-    # Space children out based on their relative start times or distribute evenly
+    # Parallel children (from pmap) start at the same time but get unique thread IDs
     child_events =
       tree.children
       |> Enum.with_index()
       |> Enum.flat_map(fn {child, index} ->
-        # Estimate child start time based on index and total duration
-        child_offset = div(total_duration_us * index, max(length(tree.children), 1))
-        build_chrome_trace_events(child, start_time_us + child_offset, depth + 1)
+        # Same start time (parallel execution)
+        # Unique thread ID: base tid + 1 + index (avoids collision with parent)
+        child_tid = tid * 100 + index + 1
+        build_chrome_trace_events(child, start_time_us, child_tid, index)
       end)
 
     [main_span | internal_events] ++ child_events
