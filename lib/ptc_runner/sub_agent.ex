@@ -1164,14 +1164,16 @@ defmodule PtcRunner.SubAgent do
           opts
 
         collector ->
-          # Get trace_id from the collector and build initial trace_context
+          # Get trace_id and path from the collector, build initial trace_context
           trace_id = Collector.trace_id(collector)
+          trace_path = Collector.path(collector)
           parent_span_id = Telemetry.current_span_id()
 
           trace_context = %{
             trace_id: trace_id,
             parent_span_id: parent_span_id,
-            depth: 0
+            depth: 0,
+            trace_dir: Path.dirname(trace_path)
           }
 
           Keyword.put(opts, :trace_context, trace_context)

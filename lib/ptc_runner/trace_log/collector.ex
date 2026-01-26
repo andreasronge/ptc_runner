@@ -84,6 +84,14 @@ defmodule PtcRunner.TraceLog.Collector do
     GenServer.call(collector, :trace_id)
   end
 
+  @doc """
+  Returns the file path for this collector's trace output.
+  """
+  @spec path(GenServer.server()) :: String.t()
+  def path(collector) do
+    GenServer.call(collector, :path)
+  end
+
   # GenServer callbacks
 
   @impl true
@@ -133,6 +141,11 @@ defmodule PtcRunner.TraceLog.Collector do
   @impl true
   def handle_call(:trace_id, _from, state) do
     {:reply, state.trace_id, state}
+  end
+
+  @impl true
+  def handle_call(:path, _from, state) do
+    {:reply, state.path, state}
   end
 
   # Private helpers

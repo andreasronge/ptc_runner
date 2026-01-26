@@ -196,23 +196,35 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
     # Generate trace ID and determine trace file path
     child_trace_id = generate_trace_id()
     parent_trace_id = state.trace_context[:trace_id]
+    trace_dir = state.trace_context[:trace_dir]
     depth = (state.trace_context[:depth] || 0) + 1
 
+    # Build child trace path in same directory as parent
+    child_path =
+      if trace_dir do
+        Path.join(trace_dir, "trace_#{child_trace_id}.jsonl")
+      else
+        nil
+      end
+
     # Build trace options - use same directory as parent if possible
-    trace_opts = [
-      trace_id: child_trace_id,
-      meta: %{
-        parent_trace_id: parent_trace_id,
-        depth: depth,
-        tool_name: name
-      }
-    ]
+    trace_opts =
+      [
+        trace_id: child_trace_id,
+        meta: %{
+          parent_trace_id: parent_trace_id,
+          depth: depth,
+          tool_name: name
+        }
+      ]
+      |> then(fn opts -> if child_path, do: Keyword.put(opts, :path, child_path), else: opts end)
 
     # Build child trace_context for the nested agent
     child_trace_context = %{
       trace_id: child_trace_id,
       parent_span_id: Telemetry.current_span_id(),
-      depth: depth
+      depth: depth,
+      trace_dir: trace_dir
     }
 
     run_opts_with_trace = Keyword.put(run_opts, :trace_context, child_trace_context)
