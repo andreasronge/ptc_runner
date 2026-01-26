@@ -140,7 +140,60 @@ This reveals:
 - **Worker success/failure** - see which chunks failed without digging through logs
 - **Parallelism effectiveness** - compare total wall clock vs. sum of worker times
 
-See `PtcRunner.TraceLog.Analyzer` for programmatic access to trace data.
+### Viewing Trace Files
+
+**Option 1: Browser Viewer**
+
+Open `trace_viewer.html` in Chrome and drag & drop the `.jsonl` files:
+
+```bash
+# macOS
+open examples/rlm/trace_viewer.html
+
+# Linux
+xdg-open examples/rlm/trace_viewer.html
+
+# Then drag rlm_trace.jsonl and all trace_*.jsonl files into the browser
+```
+
+**Option 2: IEx with Analyzer**
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+# Load and visualize the full tree
+{:ok, tree} = Analyzer.load_tree("examples/rlm/rlm_trace.jsonl")
+Analyzer.print_tree(tree)
+
+# View timeline for a specific trace
+events = Analyzer.load("examples/rlm/rlm_trace.jsonl")
+Analyzer.print_timeline(events)
+
+# Get summary statistics
+Analyzer.summary(events)
+```
+
+**Option 3: Command line with jq**
+
+```bash
+# Pretty print all events
+cat examples/rlm/rlm_trace.jsonl | jq .
+
+# Show just event types and durations
+cat examples/rlm/rlm_trace.jsonl | jq '{event, duration_ms}'
+
+# Find slow workers (>10s)
+cat examples/rlm/trace_*.jsonl | jq 'select(.duration_ms > 10000)'
+```
+
+**Cleanup**
+
+```elixir
+# Delete all trace files in the tree
+{:ok, tree} = Analyzer.load_tree("examples/rlm/rlm_trace.jsonl")
+{:ok, count} = Analyzer.delete_tree(tree)
+IO.puts("Deleted #{count} trace files")
+```
 
 ### Relation to the RLM Paper
 
