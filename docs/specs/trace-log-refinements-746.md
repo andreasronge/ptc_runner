@@ -186,20 +186,129 @@ The existing `load_tree/1` algorithm works if:
 
 1. **Add trace_context to EvalContext** - Simple addition, no behavior change
 2. **Thread trace_context through SubAgent.run → Loop → Lisp.run** - Plumbing
-3. **ToolNormalizer wraps SubAgentTools with trace propagation** - Core feature
-4. **Automatic trace context injection** - Convenience
-5. **Child trace collection in Step** - Reporting
-6. **Analyzer.load_tree handles multiple children** - Already in spec
+3. **Add pmap.start/pmap.stop telemetry events** - Dedicated events for parallel execution
+4. **pmap collects trace_ids from worker results** - Core tracing feature
+5. **ToolNormalizer wraps SubAgentTools with trace propagation** - Child trace files
+6. **Pre-register child IDs for orphan handling** - Crash recovery
+7. **Automatic trace context injection** - Convenience (with double-wrap prevention)
+8. **Child trace collection in Step** - Reporting
+9. **Analyzer.load_tree handles multiple children** - Already in spec
+10. **Analyzer.list_tree and delete_tree** - Cleanup utilities
 
-## Questions for Review
+## Design Decisions
 
-1. **Should pmap emit its own telemetry event?** Currently tool calls inside sandbox don't emit telemetry. Should we add `pmap.start/stop` events that run outside the sandbox?
+Based on review feedback, the following decisions have been made:
 
-2. **File naming convention for parallel children?** The spec suggests `trace-{trace_id}.jsonl`. For 28 pmap workers, that's 28 files. Should we support a single-file mode for simpler debugging?
+### Decision 1: Dedicated pmap.start/pmap.stop Events
 
-3. **Memory overhead of trace context?** If trace_context is passed through every Lisp evaluation, is there measurable overhead? (Probably negligible, but worth measuring.)
+**Decision:** Add dedicated `pmap.start` and `pmap.stop` telemetry events rather than overloading `tool.stop`.
 
-4. **What if workers call workers?** The spec supports arbitrary depth. With pmap, we could have Planner → Worker → Sub-worker. Does the depth limit (default 10) apply correctly?
+**Rationale:** A timeline showing 28 individual `tool.stop` events is confusing. Dedicated events make the parallel fan-out explicit.
+
+```json
+// pmap.start
+{
+  "ts": "...",
+  "event": "pmap.start",
+  "trace_id": "aaaa",
+  "span_id": "12345678",
+  "tool": "worker",
+  "count": 28
+}
+
+// pmap.stop
+{
+  "ts": "...",
+  "event": "pmap.stop",
+  "trace_id": "aaaa",
+  "span_id": "12345678",
+  "tool": "worker",
+  "child_trace_ids": ["bb01", "bb02", "bb03", ...],
+  "duration_ms": 15000,
+  "success_count": 27,
+  "error_count": 1
+}
+```
+
+Also add `pcalls.start/pcalls.stop` for the same reason.
+
+### Decision 2: pmap Collects trace_ids from Worker Results
+
+**Decision:** The pmap implementation collects trace_ids directly from worker task results, rather than having ToolNormalizer track children via side effects.
+
+**Rationale:** Simpler, more explicit, no hidden state.
+
+```elixir
+# In pmap implementation (eval.ex)
+results = Task.async_stream(coll_val, fn elem ->
+  {result, child_trace_id} = execute_with_trace(callable_fn, elem, trace_context)
+  {result, child_trace_id}
+end, timeout: eval_ctx.pmap_timeout, ...)
+
+{values, child_trace_ids} = Enum.unzip(results)
+emit_pmap_stop(tool_name, child_trace_ids, duration)
+```
+
+### Decision 3: Pre-register Child IDs for Orphan Handling
+
+**Decision:** pmap registers child trace IDs *before* waiting for results, enabling orphan recovery on crash.
+
+**Rationale:** If pmap crashes mid-execution, child_trace_ids would never be recorded. Pre-registration ensures orphan healing can find children via `parent_trace_id` in their files.
+
+```elixir
+# Generate all child IDs upfront
+child_ids = Enum.map(coll_val, fn _ -> generate_trace_id() end)
+
+# Register as pending (survives partial failure)
+emit_pmap_start(tool_name, child_ids)
+
+# Execute workers with pre-assigned IDs
+results = Task.async_stream(Enum.zip(coll_val, child_ids), fn {elem, trace_id} ->
+  execute_with_trace(callable_fn, elem, trace_context, trace_id)
+end, ...)
+
+# On success or partial failure, child files exist with parent_trace_id
+emit_pmap_stop(tool_name, child_ids, results)
+```
+
+### Decision 4: Flat File Structure with Tree Utilities
+
+**Decision:** Keep flat file structure (`traces/trace-{id}.jsonl`), add `Analyzer.list_tree/1` for cleanup.
+
+**Rationale:** Flat is simpler for glob operations. The Analyzer abstracts the complexity.
+
+| Function | Purpose |
+|----------|---------|
+| `Analyzer.load_tree(path)` | Load full tree into memory |
+| `Analyzer.list_tree(path)` | Return list of all file paths in tree (for cleanup) |
+| `Analyzer.delete_tree(path)` | Delete all files in tree |
+
+### Decision 5: Explicit Double-wrap Prevention
+
+**Decision:** Automatic trace context injection explicitly checks for existing context to prevent double-wrapping.
+
+```elixir
+defp maybe_inject_trace_context(opts) do
+  # IMPORTANT: Only inject if not already present (prevents double-wrap)
+  if TraceLog.current_collector() && !Keyword.has_key?(opts, :trace_context) do
+    collector = TraceLog.current_collector()
+    trace_id = Collector.trace_id(collector)
+    Keyword.put(opts, :trace_context, %{trace_id: trace_id, depth: 0})
+  else
+    opts
+  end
+end
+```
+
+### Decision 6: Separate trace_context.depth from budget.depth
+
+**Decision:** Keep `trace_context.depth` (visualization) separate from `budget.depth` (execution control).
+
+**Rationale:** They serve different purposes:
+- `trace_context.depth` - Nesting level for trace hierarchy display
+- `budget.depth` / `(budget/remaining)` - Remaining recursion budget for execution limits
+
+They correlate but should be initialized consistently, not unified.
 
 ## Acceptance Criteria Additions
 
@@ -207,8 +316,13 @@ Add to #746 acceptance criteria:
 
 - [ ] Trace context flows through EvalContext to tool executors
 - [ ] SubAgentTool calls from pmap automatically create child trace files
+- [ ] `pmap.start/pmap.stop` events emitted with child_trace_ids array
+- [ ] `pcalls.start/pcalls.stop` events emitted similarly
+- [ ] Child trace IDs pre-registered before execution (orphan recovery)
 - [ ] Parent Step.child_traces contains all child trace IDs from pmap
 - [ ] Analyzer.load_tree correctly discovers pmap children (multiple per tool)
+- [ ] Analyzer.list_tree returns all file paths for cleanup
+- [ ] Double-wrap prevention works correctly
 - [ ] RLM example produces full trace tree showing all 28 workers
 
 ## Example: RLM Trace Output
