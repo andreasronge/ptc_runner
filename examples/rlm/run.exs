@@ -6,12 +6,18 @@
 # 1. Token-based chunking with overlap - handles variable line lengths and boundary incidents
 # 2. Simple worker agent - just analyzes a chunk, no recursive subdivision
 # 3. Operator-level budget control via token_limit
+# 4. Optional hierarchical tracing with --trace flag
 #
 # The planner (Sonnet) orchestrates, workers (Haiku) process chunks in parallel.
+#
+# Usage:
+#   mix run examples/rlm/run.exs           # Run without tracing
+#   mix run examples/rlm/run.exs --trace   # Run with hierarchical tracing
 
 defmodule RLM.Runner do
   alias PtcRunner.SubAgent
   alias PtcRunner.Chunker
+  alias PtcRunner.TraceLog
 
   # Token-based chunking is safer than line-based for LLM context limits.
   # Log lines vary wildly in length - a JSON blob could be 10KB on one line.
@@ -22,6 +28,7 @@ defmodule RLM.Runner do
 
   def run do
     load_aws_credentials_if_needed()
+    trace? = "--trace" in System.argv()
 
     # 1. Load and pre-chunk the corpus in Elixir
     corpus = load_corpus()
@@ -51,6 +58,8 @@ defmodule RLM.Runner do
     # 3. Run the Planner with pre-chunked data
     IO.puts("\n=== Starting RLM Orchestration (Sonnet -> Haiku) ===\n")
 
+    if trace?, do: IO.puts("Tracing enabled - trace files will be created\n")
+
     planner_prompt = """
     Audit the system logs for incidents.
 
@@ -76,12 +85,50 @@ defmodule RLM.Runner do
       on_budget_exceeded: :return_partial
     ]
 
-    case SubAgent.run(planner_prompt, run_opts) do
+    # Run with or without tracing
+    {result, trace_path} = execute_with_tracing(planner_prompt, run_opts, trace?)
+
+    case result do
       {:ok, step} ->
+        if trace_path, do: print_trace_summary(trace_path, step)
         print_success(step)
 
       {:error, step} ->
+        if trace_path, do: print_trace_summary(trace_path, step)
         print_failure(step)
+    end
+  end
+
+  defp execute_with_tracing(prompt, opts, false) do
+    {SubAgent.run(prompt, opts), nil}
+  end
+
+  defp execute_with_tracing(prompt, opts, true) do
+    trace_path = "examples/rlm/rlm_trace.jsonl"
+
+    {:ok, result, path} =
+      TraceLog.with_trace(
+        fn -> SubAgent.run(prompt, opts) end,
+        path: trace_path
+      )
+
+    {result, path}
+  end
+
+  defp print_trace_summary(trace_path, step) do
+    alias PtcRunner.TraceLog.Analyzer
+
+    IO.puts("\n=== Trace Summary ===")
+    IO.puts("Main trace: #{trace_path}")
+    IO.puts("Child traces: #{length(step.child_traces)}")
+
+    case Analyzer.load_tree(trace_path) do
+      {:ok, tree} ->
+        IO.puts("\nExecution tree:")
+        Analyzer.print_tree(tree)
+
+      {:error, reason} ->
+        IO.puts("Could not load trace tree: #{inspect(reason)}")
     end
   end
 
