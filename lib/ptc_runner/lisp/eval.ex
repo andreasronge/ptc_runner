@@ -462,8 +462,8 @@ defmodule PtcRunner.Lisp.Eval do
         # Collect results and child trace IDs
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
-        case collect_pmap_results_with_traces(results, [], [], eval_ctx2) do
-          {:ok, values, child_trace_ids, eval_ctx3} ->
+        case collect_parallel_results(results, :pmap) do
+          {:ok, values, child_trace_ids} ->
             # Count successes and errors
             success_count = length(values)
             error_count = count - success_count
@@ -479,8 +479,8 @@ defmodule PtcRunner.Lisp.Eval do
               error_count: error_count
             }
 
-            eval_ctx4 = EvalContext.append_pmap_call(eval_ctx3, pmap_call)
-            {:ok, values, eval_ctx4}
+            eval_ctx3 = EvalContext.append_pmap_call(eval_ctx2, pmap_call)
+            {:ok, values, eval_ctx3}
 
           {:error, reason} ->
             {:error, reason}
@@ -549,8 +549,8 @@ defmodule PtcRunner.Lisp.Eval do
           # Collect results and child trace IDs
           duration_ms = System.monotonic_time(:millisecond) - start_time
 
-          case collect_pcalls_results_with_traces(results, [], [], eval_ctx2) do
-            {:ok, values, child_trace_ids, eval_ctx3} ->
+          case collect_parallel_results(results, :pcalls) do
+            {:ok, values, child_trace_ids} ->
               # Count successes and errors
               success_count = length(values)
               error_count = count - success_count
@@ -566,8 +566,8 @@ defmodule PtcRunner.Lisp.Eval do
                 error_count: error_count
               }
 
-              eval_ctx4 = EvalContext.append_pmap_call(eval_ctx3, pmap_call)
-              {:ok, values, eval_ctx4}
+              eval_ctx3 = EvalContext.append_pmap_call(eval_ctx2, pmap_call)
+              {:ok, values, eval_ctx3}
 
             {:error, reason} ->
               {:error, reason}
@@ -867,35 +867,38 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # ============================================================
-  # Pmap helpers
+  # Parallel execution helpers (shared by pmap and pcalls)
   # ============================================================
 
-  # Helper to collect pmap results with child trace IDs
-  defp collect_pmap_results_with_traces([], acc, trace_ids, eval_ctx) do
-    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids), eval_ctx}
+  # Unified helper to collect parallel results with child trace IDs
+  # Works for both pmap ({:ok, val, trace_id}) and pcalls ({:ok, val, trace_id, idx})
+  defp collect_parallel_results(results, type) do
+    collect_parallel_results(results, [], [], type)
   end
 
-  defp collect_pmap_results_with_traces(
-         [{:ok, {:ok, val, trace_id}} | rest],
-         acc,
-         trace_ids,
-         eval_ctx
-       ) do
-    collect_pmap_results_with_traces(rest, [val | acc], [trace_id | trace_ids], eval_ctx)
+  defp collect_parallel_results([], acc, trace_ids, _type) do
+    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids)}
   end
 
-  defp collect_pmap_results_with_traces(
-         [{:ok, {:error, reason}} | _rest],
-         _acc,
-         _trace_ids,
-         _eval_ctx
-       ) do
-    {:error, reason}
+  defp collect_parallel_results([{:ok, result} | rest], acc, trace_ids, type) do
+    case extract_parallel_result(result) do
+      {:ok, val, trace_id} ->
+        collect_parallel_results(rest, [val | acc], [trace_id | trace_ids], type)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
-  defp collect_pmap_results_with_traces([{:exit, reason} | _rest], _acc, _trace_ids, _eval_ctx) do
-    {:error, {:pmap_error, "parallel task failed: #{inspect(reason)}"}}
+  defp collect_parallel_results([{:exit, reason} | _rest], _acc, _trace_ids, type) do
+    error_type = if type == :pmap, do: :pmap_error, else: :pcalls_error
+    {:error, {error_type, "parallel task failed: #{inspect(reason)}"}}
   end
+
+  # Extract value and trace_id from different result formats
+  defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id}
+  defp extract_parallel_result({:ok, val, trace_id, _idx}), do: {:ok, val, trace_id}
+  defp extract_parallel_result({:error, _reason} = error), do: error
 
   # ============================================================
   # Pcalls helpers
@@ -950,33 +953,6 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp pcalls_fn_to_erlang(value, %EvalContext{}) do
     raise "pcalls requires callable thunks, got: #{inspect(value)}"
-  end
-
-  # Helper to collect pcalls results with child trace IDs
-  defp collect_pcalls_results_with_traces([], acc, trace_ids, eval_ctx) do
-    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids), eval_ctx}
-  end
-
-  defp collect_pcalls_results_with_traces(
-         [{:ok, {:ok, val, trace_id, _idx}} | rest],
-         acc,
-         trace_ids,
-         eval_ctx
-       ) do
-    collect_pcalls_results_with_traces(rest, [val | acc], [trace_id | trace_ids], eval_ctx)
-  end
-
-  defp collect_pcalls_results_with_traces(
-         [{:ok, {:error, reason}} | _rest],
-         _acc,
-         _trace_ids,
-         _eval_ctx
-       ) do
-    {:error, reason}
-  end
-
-  defp collect_pcalls_results_with_traces([{:exit, reason} | _rest], _acc, _trace_ids, _eval_ctx) do
-    {:error, {:pcalls_error, "parallel task failed: #{inspect(reason)}"}}
   end
 
   # ============================================================
