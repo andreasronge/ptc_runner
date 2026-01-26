@@ -779,6 +779,121 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # mapcat - Apply function and concatenate results
+  # ==========================================================================
+
+  describe "mapcat" do
+    test "basic mapcat with vector-returning function" do
+      source = "(mapcat (fn [x] [x (* x 2)]) [1 2 3])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 2, 2, 4, 3, 6]
+    end
+
+    test "mapcat with range" do
+      source = "(mapcat (fn [x] (range 0 x)) [2 3 1])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [0, 1, 0, 1, 2, 0]
+    end
+
+    test "mapcat with identity flattens one level" do
+      source = "(mapcat identity [[1 2] [3 4] [5]])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 2, 3, 4, 5]
+    end
+
+    test "mapcat with empty collection returns empty list" do
+      source = "(mapcat (fn [x] [x (* x 2)]) [])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "mapcat with nil collection returns empty list" do
+      source = "(mapcat (fn [x] [x (* x 2)]) nil)"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "mapcat with function returning empty vectors filters out" do
+      source = "(mapcat (fn [x] (if (> x 0) [x] [])) [-1 2 -3 4])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [2, 4]
+    end
+
+    test "mapcat with keyword extracts nested values" do
+      source = "(mapcat :tags data/items)"
+      items = [%{tags: ["a", "b"]}, %{tags: ["c"]}, %{tags: []}]
+      {:ok, %Step{return: result}} = Lisp.run(source, context: %{items: items})
+      assert result == ["a", "b", "c"]
+    end
+
+    test "mapcat with anonymous function creating pairs" do
+      source = "(mapcat (fn [x] [[x :start] [x :end]]) [:a :b])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[:a, :start], [:a, :end], [:b, :start], [:b, :end]]
+    end
+
+    test "mapcat in threading macro" do
+      source = """
+      (->> [[1 2] [3 4 5] [6]]
+           (mapcat identity)
+           (filter (fn [x] (> x 2))))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [3, 4, 5, 6]
+    end
+
+    test "mapcat with closure capturing scope" do
+      source = """
+      (let [factor 10]
+        (mapcat (fn [x] [x (* x factor)]) [1 2]))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 10, 2, 20]
+    end
+
+    test "mapcat on string processes graphemes" do
+      source = "(mapcat (fn [c] [c c]) \"abc\")"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == ["a", "a", "b", "b", "c", "c"]
+    end
+
+    test "mapcat on set" do
+      source = ~S|(mapcat (fn [x] [x (* x 2)]) #{1 2 3})|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      # Sets have undefined order, so just check all elements are present
+      assert length(result) == 6
+      assert Enum.sort(result) == [1, 2, 2, 3, 4, 6]
+    end
+
+    test "mapcat on map with key-value pairs" do
+      source = "(mapcat (fn [[k v]] [k v]) {:a 1 :b 2})"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      # Maps have undefined order, but check contents
+      assert length(result) == 4
+      assert :a in result
+      assert :b in result
+      assert 1 in result
+      assert 2 in result
+    end
+
+    test "mapcat practical example: flatten nested tags" do
+      source = """
+      (let [posts [{:title "Post 1" :tags ["elixir" "beam"]}
+                   {:title "Post 2" :tags ["clojure"]}
+                   {:title "Post 3" :tags []}]]
+        (->> posts
+             (mapcat :tags)
+             (distinct)))
+      """
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == ["elixir", "beam", "clojure"]
+    end
+  end
+
+  # ==========================================================================
   # Variadic Builtins in HOFs (GH-668)
   # ==========================================================================
 

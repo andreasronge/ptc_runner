@@ -213,6 +213,40 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
   end
 
+  # ============================================================
+  # mapcat: map then concatenate results
+  # ============================================================
+
+  # Keyword support - extract field values and flatten
+  def mapcat(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.flat_map(coll, fn item ->
+      case FlexAccess.flex_get(item, key) do
+        nil -> []
+        val when is_list(val) -> val
+        val -> [val]
+      end
+    end)
+  end
+
+  def mapcat(f, coll) when is_list(coll) do
+    Enum.flat_map(coll, &Callable.call(f, [&1]))
+  end
+
+  def mapcat(f, coll) when is_binary(coll) do
+    Enum.flat_map(graphemes(coll), &Callable.call(f, [&1]))
+  end
+
+  def mapcat(f, %MapSet{} = set) do
+    Enum.flat_map(set, &Callable.call(f, [&1]))
+  end
+
+  def mapcat(f, coll) when is_map(coll) do
+    # When mapcatting over a map, each entry is passed as [key, value] pair
+    Enum.flat_map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
+  end
+
+  def mapcat(_f, nil), do: []
+
   def map_indexed(f, coll) when is_list(coll) do
     with_index_map(coll, f)
   end
