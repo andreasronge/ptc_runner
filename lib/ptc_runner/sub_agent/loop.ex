@@ -98,6 +98,12 @@ defmodule PtcRunner.SubAgent.Loop do
       - `backoff` - Backoff strategy: :exponential, :linear, or :constant (default: :exponential)
       - `base_delay` - Base delay in milliseconds (default: 1000)
       - `retryable_errors` - List of error types to retry (default: [:rate_limit, :timeout, :server_error])
+    - `token_limit` - Max total tokens before budget check triggers (default: nil)
+    - `on_budget_exceeded` - Action when token_limit or budget callback returns :stop (default: :fail)
+      - `:fail` - Return error with :budget_callback_exceeded
+      - `:return_partial` - Try to return last successful expression result
+    - `budget` - Custom budget callback function `(usage_map -> :continue | :stop)` (default: nil)
+      Usage map contains: `%{total_tokens: int, input_tokens: int, output_tokens: int, llm_requests: int}`
 
   ## Returns
 
@@ -124,6 +130,10 @@ defmodule PtcRunner.SubAgent.Loop do
     collect_messages = Keyword.get(opts, :collect_messages, false)
     # Field descriptions received from upstream agent in a chain
     received_field_descriptions = Keyword.get(opts, :_received_field_descriptions)
+    # Budget callback options
+    token_limit = Keyword.get(opts, :token_limit)
+    on_budget_exceeded = Keyword.get(opts, :on_budget_exceeded, :fail)
+    budget_callback = Keyword.get(opts, :budget)
 
     # Extract runtime context for nesting depth and turn budget
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
@@ -164,7 +174,10 @@ defmodule PtcRunner.SubAgent.Loop do
           trace_mode: trace_mode,
           llm_retry: llm_retry,
           collect_messages: collect_messages,
-          received_field_descriptions: received_field_descriptions
+          received_field_descriptions: received_field_descriptions,
+          token_limit: token_limit,
+          on_budget_exceeded: on_budget_exceeded,
+          budget_callback: budget_callback
         }
 
         run_with_telemetry(agent, run_opts)
@@ -251,7 +264,11 @@ defmodule PtcRunner.SubAgent.Loop do
       work_turns_remaining: agent.max_turns,
       retry_turns_remaining: agent.return_retries,
       # Last error message for retry feedback (collapsed context)
-      last_return_error: nil
+      last_return_error: nil,
+      # Budget callback options
+      token_limit: run_opts.token_limit,
+      on_budget_exceeded: run_opts.on_budget_exceeded,
+      budget_callback: run_opts.budget_callback
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -391,17 +408,24 @@ defmodule PtcRunner.SubAgent.Loop do
             |> Map.put(:current_messages, messages)
             |> maybe_add_system_prompt_tokens(llm_input.system)
 
-          result = handle_llm_response(content, agent, llm, state_with_metadata)
+          # Check budget callback after token accumulation
+          case check_budget_callback(state_with_metadata) do
+            :continue ->
+              result = handle_llm_response(content, agent, llm, state_with_metadata)
 
-          # Emit turn stop event (only for completed turns, not continuation)
-          # Extract program from the last turn in the result
-          program = Metrics.extract_program_from_result(result)
+              # Emit turn stop event (only for completed turns, not continuation)
+              # Extract program from the last turn in the result
+              program = Metrics.extract_program_from_result(result)
 
-          Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start,
-            program: program
-          )
+              Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start,
+                program: program
+              )
 
-          result
+              result
+
+            :stop ->
+              handle_budget_exceeded(agent, state_with_metadata)
+          end
 
         {:error, reason} ->
           duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -575,7 +599,8 @@ defmodule PtcRunner.SubAgent.Loop do
       turn_history: state.turn_history,
       float_precision: agent.float_precision,
       max_print_length: Keyword.get(agent.format_options, :max_print_length),
-      timeout: agent.timeout
+      timeout: agent.timeout,
+      budget: build_budget_introspection_map(agent, state)
     ]
 
     case Lisp.run(code, lisp_opts) do
@@ -1130,6 +1155,89 @@ defmodule PtcRunner.SubAgent.Loop do
       nil -> messages
       system_prompt -> [%{role: :system, content: system_prompt} | messages]
     end
+  end
+
+  # ============================================================
+  # Budget Callback
+  # ============================================================
+
+  # Check if budget is exceeded via callback or token_limit
+  # Returns :continue or :stop
+  defp check_budget_callback(state) do
+    usage = build_usage_callback_map(state)
+
+    cond do
+      # Custom callback takes precedence
+      is_function(state.budget_callback) ->
+        state.budget_callback.(usage)
+
+      # Simple token limit
+      state.token_limit && usage.total_tokens > state.token_limit ->
+        :stop
+
+      true ->
+        :continue
+    end
+  end
+
+  # Handle budget exceeded - try fallback or return error
+  defp handle_budget_exceeded(agent, state) do
+    case state.on_budget_exceeded do
+      :return_partial ->
+        # Try to return last successful expression result
+        case try_last_expression_fallback(agent, state) do
+          {:ok, step} ->
+            {:ok, step}
+
+          :no_fallback ->
+            build_termination_error(
+              :budget_callback_exceeded,
+              "Budget exceeded (token_limit or callback returned :stop)",
+              state
+            )
+        end
+
+      _fail ->
+        build_termination_error(
+          :budget_callback_exceeded,
+          "Budget exceeded (token_limit or callback returned :stop)",
+          state
+        )
+    end
+  end
+
+  # ============================================================
+  # Budget Map Builders
+  # ============================================================
+
+  # Build budget map for (budget/remaining) Lisp introspection
+  # Uses hyphenated keys (idiomatic PTC-Lisp/Clojure)
+  defp build_budget_introspection_map(agent, state) do
+    %{
+      turns: state.remaining_turns,
+      "work-turns": state.work_turns_remaining,
+      "retry-turns": state.retry_turns_remaining,
+      depth: %{current: state.nesting_depth + 1, max: agent.max_depth},
+      tokens: %{
+        input: state.total_input_tokens,
+        output: state.total_output_tokens,
+        total: state.total_input_tokens + state.total_output_tokens,
+        "cache-creation": state.total_cache_creation_tokens,
+        "cache-read": state.total_cache_read_tokens
+      },
+      "llm-requests": state.llm_requests
+    }
+  end
+
+  # Build usage map for the SubAgent.run budget callback (operator code)
+  # Uses underscored keys (idiomatic Elixir)
+  defp build_usage_callback_map(state) do
+    %{
+      total_tokens: state.total_input_tokens + state.total_output_tokens,
+      input_tokens: state.total_input_tokens,
+      output_tokens: state.total_output_tokens,
+      llm_requests: state.llm_requests
+    }
   end
 
   # ============================================================
