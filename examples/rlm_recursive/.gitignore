@@ -1,0 +1,9 @@
+# Build artifacts
+/_build/
+/deps/
+
+# Generated data
+/data/
+
+# Traces
+/traces/

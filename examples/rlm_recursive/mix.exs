@@ -1,12 +1,12 @@
-defmodule GapAnalyzer.MixProject do
+defmodule RlmRecursive.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :gap_analyzer,
+      app: :rlm_recursive,
       version: "0.1.0",
-      elixir: "~> 1.15",
-      start_permanent: Mix.env() == :prod,
+      elixir: "~> 1.17",
+      start_permanent: false,
       deps: deps()
     ]
   end
@@ -19,7 +19,7 @@ defmodule GapAnalyzer.MixProject do
 
   defp deps do
     [
-      {:ptc_runner, path: "../../"},
+      {:ptc_runner, path: "../.."},
       {:llm_client, path: "../../llm_client"}
     ]
   end
