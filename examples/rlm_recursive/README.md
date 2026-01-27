@@ -67,6 +67,38 @@ This is fundamentally different from stuffing everything into the prompt.
 
 **Note**: This solves in 1 turn without recursion - **this is the expected behavior** per the paper. Recursion would be needed for O(n²) tasks like pairwise comparison.
 
+### OOLONG-Pairs (O(n²) - Recursion Essential!)
+
+**Task**: Find all pairs of people in the same city who share at least one hobby.
+
+**Example**: With 100 profiles across 5 cities, find ~150+ valid pairs.
+
+**Why Recursion is Essential**: This is an O(n²) task - comparing all pairs explodes quickly:
+- 100 profiles = 4,950 comparisons
+- 500 profiles = 124,750 comparisons
+- Direct enumeration exhausts context before completing
+
+**Strategy**: Divide by city (reduces n² to sum of smaller n²), then find pairs within each city group:
+
+```clojure
+;; Group profiles by city
+(def by-city (group-by :city profiles))
+
+;; For each city, find pairs or recurse if group too large
+(defn find-pairs-in-group [group]
+  (if (> (count group) 30)
+    ;; Too large - recurse with just this city's profiles
+    (tool/find_pairs {:corpus (profiles->corpus group)})
+    ;; Small enough - enumerate pairs directly
+    (for [p1 group, p2 group
+          :when (and (< (:id p1) (:id p2)) (shares-hobby? p1 p2))]
+      (pair-id p1 p2))))
+
+(return {:count (count all-pairs) :pairs (take 20 all-pairs)})
+```
+
+**Key Insight**: The paper found OOLONG-Pairs went from **0% to 60% F1** with recursion - this is the benchmark where RLM truly shines.
+
 ## When Would Recursion Be Used?
 
 Recursion becomes essential when:
@@ -101,6 +133,9 @@ mix run run.exs --trace
 # Run counting benchmark with 5000 profiles
 mix run run.exs --benchmark counting --profiles 5000
 
+# Run pairs benchmark (demonstrates essential recursion)
+mix run run.exs --benchmark pairs --profiles 100 --trace
+
 # View help
 mix run run.exs --help
 ```
@@ -109,9 +144,9 @@ mix run run.exs --help
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--benchmark` | `-b` | "sniah" or "counting" | sniah |
+| `--benchmark` | `-b` | "sniah", "counting", or "pairs" | sniah |
 | `--lines` | `-l` | Corpus lines for S-NIAH | 1000 |
-| `--profiles` | `-p` | Profiles for counting | 500 |
+| `--profiles` | `-p` | Profiles for counting/pairs | 500 |
 | `--seed` | `-s` | Random seed | 42 |
 | `--trace` | `-t` | Enable tracing | false |
 | `--min-age` | | Min age for counting | 30 |
@@ -126,7 +161,8 @@ lib/
 ├── scorer.ex             # Ground truth validation
 └── generators/
     ├── sniah.ex          # S-NIAH corpus generator
-    └── counting.ex       # OOLONG-Counting generator
+    ├── counting.ex       # OOLONG-Counting generator
+    └── pairs.ex          # OOLONG-Pairs generator (O(n²))
 ```
 
 ### Key Patterns
@@ -181,9 +217,9 @@ export OPENROUTER_API_KEY=your_key
 
 ## Future Work
 
-To fully demonstrate recursive behavior, add:
-- **OOLONG-Pairs**: O(n²) pairwise comparison benchmark
+To further explore recursive behavior, add:
 - **Multi-hop QA**: Questions requiring synthesis across documents
+- **BrowseComp**: Multi-document reasoning benchmark from the paper
 
 ## References
 

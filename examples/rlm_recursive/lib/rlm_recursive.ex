@@ -35,16 +35,16 @@ defmodule RlmRecursive do
   alias PtcRunner.SubAgent
   alias PtcRunner.TraceLog
   alias RlmRecursive.{Agent, Scorer}
-  alias RlmRecursive.Generators.{SNIAH, Counting}
+  alias RlmRecursive.Generators.{SNIAH, Counting, Pairs}
 
   @doc """
   Run a benchmark with the specified options.
 
   ## Options
 
-    * `:benchmark` - `:sniah` or `:counting` (default: `:sniah`)
+    * `:benchmark` - `:sniah`, `:counting`, or `:pairs` (default: `:sniah`)
     * `:lines` - Corpus size for S-NIAH (default: 1000)
-    * `:profiles` - Number of profiles for counting (default: 500)
+    * `:profiles` - Number of profiles for counting/pairs (default: 500)
     * `:seed` - Random seed for reproducibility (default: 42)
     * `:trace` - Enable tracing (default: false)
     * `:llm` - LLM callback (default: bedrock:sonnet)
@@ -171,6 +171,60 @@ defmodule RlmRecursive do
     score =
       case result do
         {:ok, step} -> Scorer.score(:counting, step.return, data.ground_truth)
+        {:error, _} -> %{correct: false, expected: data.ground_truth.count, actual: nil}
+      end
+
+    if verbose?, do: print_result(result, score, trace_path)
+
+    %{result: result, score: score, trace_path: trace_path, data: data}
+  end
+
+  def run_benchmark(:pairs, opts) do
+    profiles = Keyword.get(opts, :profiles, 100)
+    seed = Keyword.get(opts, :seed, 42)
+    trace? = Keyword.get(opts, :trace, false)
+    verbose? = Keyword.get(opts, :verbose, true)
+
+    llm =
+      Keyword.get_lazy(opts, :llm, fn ->
+        load_aws_credentials_if_needed()
+        LLMClient.callback("bedrock:sonnet")
+      end)
+
+    # Generate corpus with ground truth
+    if verbose?,
+      do: IO.puts("Generating pairs corpus (#{profiles} profiles, seed #{seed})...")
+
+    data = Pairs.generate(profiles: profiles, seed: seed)
+
+    if verbose? do
+      IO.puts("Expected pairs: #{data.ground_truth.count}")
+      IO.puts("Query: #{data.query}")
+      IO.puts("\n=== Starting Pairs Benchmark (O(n²) - recursion essential!) ===\n")
+    end
+
+    # Create recursive agent
+    agent = Agent.new(:pairs, llm: llm)
+
+    # Run with tracing if requested
+    # O(n²) task needs more resources
+    run_opts = [
+      context: %{"corpus" => data.corpus},
+      llm: llm,
+      max_turns: 25,
+      timeout: 300_000,
+      pmap_timeout: 90_000,
+      max_heap: 200_000_000,
+      token_limit: 200_000,
+      on_budget_exceeded: :return_partial
+    ]
+
+    {result, trace_path} = execute_with_tracing(agent, run_opts, trace?)
+
+    # Score the result
+    score =
+      case result do
+        {:ok, step} -> Scorer.score(:pairs, step.return, data.ground_truth)
         {:error, _} -> %{correct: false, expected: data.ground_truth.count, actual: nil}
       end
 
