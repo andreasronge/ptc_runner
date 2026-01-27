@@ -39,27 +39,31 @@ defmodule RlmRecursive.Scorer do
   end
 
   @doc """
-  Score an OOLONG-Counting result against ground truth.
+  Score an OOLONG-Counting or OOLONG-Pairs result against ground truth.
 
-  ## Arguments
+  ## Counting (`:counting`)
 
-    * `result` - The agent's return value (map with "count" key)
-    * `ground_truth` - Map with `:count` key containing the expected count
+  Expects `result` with `"count"` key and `ground_truth` with `:count`.
+  Default tolerance: 0.0 (exact match).
+
+  ## Pairs (`:pairs`)
+
+  Expects `result` with `"count"` and optional `"pairs"` keys.
+  Expects `ground_truth` with `:count` and `:pairs`.
+  Default tolerance: 5.0% (some pairs may be missed at recursion boundaries).
 
   ## Options
 
-    * `:tolerance` - Allowed error margin as percentage (default: 0.0 for exact match)
+    * `:tolerance` - Allowed error margin as percentage
 
   ## Returns
 
-  A map with:
-    * `:correct` - Boolean indicating match within tolerance
-    * `:expected` - The expected count
-    * `:actual` - What the agent returned
-    * `:error` - Absolute error (actual - expected)
-    * `:error_pct` - Error as percentage of expected
+  A map with `:correct`, `:expected`, `:actual`, `:error`, `:error_pct`.
+  Pairs also includes `:sample_match` and `:sample_pairs`.
   """
-  def score(:counting, result, %{count: expected_count} = _ground_truth, opts \\ []) do
+  def score(type, result, ground_truth, opts \\ [])
+
+  def score(:counting, result, %{count: expected_count} = _ground_truth, opts) do
     tolerance = Keyword.get(opts, :tolerance, 0.0)
     actual = extract_count(result)
 
@@ -83,6 +87,49 @@ defmodule RlmRecursive.Scorer do
           actual: count,
           error: error,
           error_pct: Float.round(error_pct, 2)
+        }
+    end
+  end
+
+  def score(
+        :pairs,
+        result,
+        %{count: expected_count, pairs: expected_pairs} = _ground_truth,
+        opts
+      ) do
+    # Allow 5% tolerance for pairs (some may be missed due to recursion boundaries)
+    tolerance = Keyword.get(opts, :tolerance, 5.0)
+    actual_count = extract_count(result)
+    actual_pairs = extract_pairs(result)
+
+    case actual_count do
+      nil ->
+        %{
+          correct: false,
+          expected: expected_count,
+          actual: nil,
+          error: nil,
+          error_pct: nil,
+          sample_match: false
+        }
+
+      count when is_integer(count) ->
+        error = count - expected_count
+        error_pct = if expected_count > 0, do: abs(error) / expected_count * 100, else: 0.0
+
+        # Check if returned pairs are valid (subset of ground truth)
+        expected_set = MapSet.new(Enum.map(expected_pairs, fn {a, b} -> "#{a}-#{b}" end))
+        actual_set = MapSet.new(actual_pairs || [])
+        sample_match = MapSet.subset?(actual_set, expected_set) or MapSet.size(actual_set) == 0
+
+        %{
+          correct: error_pct <= tolerance,
+          expected: expected_count,
+          actual: count,
+          error: error,
+          error_pct: Float.round(error_pct, 2),
+          sample_match: sample_match,
+          sample_pairs: Enum.take(actual_pairs || [], 5)
         }
     end
   end
@@ -152,4 +199,17 @@ defmodule RlmRecursive.Scorer do
   end
 
   defp normalize(other), do: to_string(other) |> normalize()
+
+  # Extract pairs from result
+  defp extract_pairs(nil), do: nil
+
+  defp extract_pairs(result) when is_map(result) do
+    cond do
+      Map.has_key?(result, "pairs") -> result["pairs"]
+      Map.has_key?(result, :pairs) -> result[:pairs]
+      true -> nil
+    end
+  end
+
+  defp extract_pairs(_), do: nil
 end

@@ -73,7 +73,8 @@ defmodule RlmRecursive.Runner do
       case Keyword.get(opts, :benchmark, "sniah") do
         "sniah" -> :sniah
         "counting" -> :counting
-        other -> raise "Unknown benchmark: #{other}. Use 'sniah' or 'counting'."
+        "pairs" -> :pairs
+        other -> raise "Unknown benchmark: #{other}. Use 'sniah', 'counting', or 'pairs'."
       end
 
     run_opts =
@@ -102,6 +103,11 @@ defmodule RlmRecursive.Runner do
       :counting ->
         IO.puts(
           "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]}, Age > #{run_opts[:min_age]}, Hobby: #{run_opts[:hobby]}"
+        )
+
+      :pairs ->
+        IO.puts(
+          "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]} (O(n^2) task - recursion essential!)"
         )
     end
 
@@ -139,13 +145,14 @@ defmodule RlmRecursive.Runner do
       mix run run.exs [OPTIONS]
 
     Benchmarks:
-      sniah     - Single Needle in a Haystack (find hidden fact)
-      counting  - OOLONG-Counting (aggregate matching profiles)
+      sniah     - Single Needle in a Haystack (find hidden fact) - O(1) with grep
+      counting  - OOLONG-Counting (aggregate matching profiles) - O(n), direct filtering
+      pairs     - OOLONG-Pairs (find matching pairs) - O(n^2), recursion essential!
 
     Options:
-      --benchmark, -b TYPE    Benchmark type: sniah or counting (default: sniah)
+      --benchmark, -b TYPE    Benchmark type: sniah, counting, or pairs (default: sniah)
       --lines, -l N           Corpus lines for S-NIAH (default: 1000)
-      --profiles, -p N        Profile count for counting (default: 500)
+      --profiles, -p N        Profile count for counting/pairs (default: 500)
       --seed, -s N            Random seed for reproducibility (default: 42)
       --trace, -t             Enable hierarchical tracing
       --min-age N             Minimum age for counting (default: 30)
@@ -161,6 +168,9 @@ defmodule RlmRecursive.Runner do
 
       # Run counting benchmark with 200 profiles
       mix run run.exs --benchmark counting --profiles 200
+
+      # Run pairs benchmark (demonstrates essential recursion)
+      mix run run.exs --benchmark pairs --profiles 100 --trace
 
       # Run S-NIAH with larger corpus
       mix run run.exs --lines 10000 --seed 123

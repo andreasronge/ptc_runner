@@ -28,7 +28,7 @@ defmodule RlmRecursive.Agent do
 
   ## Arguments
 
-    * `type` - Either `:sniah` or `:counting`
+    * `type` - `:sniah`, `:counting`, or `:pairs`
     * `opts` - Options passed to SubAgent.new/1
 
   ## Options
@@ -66,6 +66,23 @@ defmodule RlmRecursive.Agent do
       signature: "(corpus :string, min_age :int, hobby :string) -> {count :int}",
       description: "Count profiles matching criteria using recursive aggregation",
       tools: %{"count" => :self},
+      max_depth: max_depth,
+      max_turns: max_turns,
+      llm: llm
+    )
+  end
+
+  def new(:pairs, opts) do
+    max_depth = Keyword.get(opts, :max_depth, 5)
+    max_turns = Keyword.get(opts, :max_turns, 15)
+    llm = Keyword.get(opts, :llm)
+
+    SubAgent.new(
+      prompt: pairs_prompt(),
+      signature: "(corpus :string) -> {count :int, pairs [:string]}",
+      description:
+        "Find pairs of profiles in same city with shared hobby - uses recursion for O(n^2) task",
+      tools: %{"find_pairs" => :self},
       max_depth: max_depth,
       max_turns: max_turns,
       llm: llm
@@ -169,6 +186,74 @@ defmodule RlmRecursive.Agent do
           r1 (tool/count {:corpus (join "\\n" (take mid lines)) :min_age data/min_age :hobby data/hobby})
           r2 (tool/count {:corpus (join "\\n" (drop mid lines)) :min_age data/min_age :hobby data/hobby})]
       (return {:count (+ (:count r1) (:count r2))}))
+    ```
+    """
+  end
+
+  # OOLONG-Pairs prompt - O(n^2) task where recursion is ESSENTIAL
+  defp pairs_prompt do
+    """
+    Find all pairs of profiles where both people live in the same city AND share at least one hobby.
+
+    ## WHY RECURSION IS ESSENTIAL
+
+    This is an O(n^2) task - comparing all pairs directly will:
+    - Explode memory for large n
+    - Take too long in a single pass
+
+    **Strategy: Divide by city, then aggregate**
+
+    1. Group profiles by city (reduces n^2 to sum of smaller n^2)
+    2. For each city group, find pairs within that group
+    3. If a city group is still large (> 30 profiles), recurse
+
+    ## Input
+    - data/corpus: Profile lines (format: "PROFILE N: name=..., city=CITY, hobbies=[h1, h2, ...]")
+
+    ## Output
+    Return `{:count N :pairs ["1-2" "3-5" ...]}` where pairs are "id1-id2" strings (id1 < id2).
+
+    ## REQUIRED Recursive Pattern
+
+    ```clojure
+    (def lines (split-lines data/corpus))
+    (def n (count lines))
+    (println "Processing" n "profiles...")
+
+    ;; Parse profiles to extract city
+    (defn parse-profile [line]
+      (let [id-match (re-find (re-pattern "PROFILE (\\\\d+)") line)
+            city-match (re-find (re-pattern "city=([^,]+)") line)
+            hobbies-match (re-find (re-pattern "hobbies=\\\\[([^\\\\]]+)\\\\]") line)]
+        {:id (if id-match (parse-long (get id-match 1)) 0)
+         :city (if city-match (get city-match 1) "")
+         :hobbies (if hobbies-match (split (get hobbies-match 1) ", ") [])
+         :line line}))
+
+    (def profiles (map parse-profile lines))
+
+    ;; Group by city
+    (def by-city (group-by :city profiles))
+    (println "Cities:" (keys by-city))
+
+    ;; Find pairs within each city group
+    (defn shares-hobby [p1 p2]
+      (not (empty? (filter #(includes? (join " " (:hobbies p2)) %) (:hobbies p1)))))
+
+    (defn find-pairs-in-group [group]
+      (if (> (count group) 30)
+        ;; Too large - recurse with just this city's profiles
+        (let [corpus (join "\\n" (map :line group))
+              result (tool/find_pairs {:corpus corpus})]
+          (:pairs result))
+        ;; Small enough - find pairs directly
+        (for [p1 group
+              p2 group
+              :when (and (< (:id p1) (:id p2)) (shares-hobby p1 p2))]
+          (str (:id p1) "-" (:id p2)))))
+
+    (def all-pairs (flatten (map find-pairs-in-group (vals by-city))))
+    (return {:count (count all-pairs) :pairs (take 20 all-pairs)})
     ```
     """
   end
