@@ -89,6 +89,26 @@ defmodule RlmRecursive.Agent do
     )
   end
 
+  def new(:semantic_pairs, opts) do
+    max_depth = Keyword.get(opts, :max_depth, 5)
+    max_turns = Keyword.get(opts, :max_turns, 20)
+    llm = Keyword.get(opts, :llm)
+
+    SubAgent.new(
+      prompt: semantic_pairs_prompt(),
+      signature: "(corpus :string) -> {count :int, pairs [:string]}",
+      description:
+        "Find pairs with semantically compatible interests - REQUIRES LLM judgment per pair",
+      tools: %{"evaluate_pairs" => :self},
+      max_depth: max_depth,
+      max_turns: max_turns,
+      llm: llm,
+      # Long timeouts for recursive LLM calls (each child call needs 60-120s)
+      timeout: 300_000,
+      pmap_timeout: 300_000
+    )
+  end
+
   # S-NIAH prompt with grep-based probing and budget-aware recursion
   defp sniah_prompt do
     """
@@ -255,6 +275,81 @@ defmodule RlmRecursive.Agent do
     (def all-pairs (flatten (map find-pairs-in-group (vals by-city))))
     (return {:count (count all-pairs) :pairs (take 20 all-pairs)})
     ```
+    """
+  end
+
+  # Semantic pairs prompt - REQUIRES LLM judgment per pair (forces recursion)
+  defp semantic_pairs_prompt do
+    """
+    Find all pairs of people in the same city with SEMANTICALLY COMPATIBLE interests.
+
+    ## CRITICAL: This task REQUIRES LLM judgment for EACH pair
+
+    You cannot solve this programmatically with simple set operations!
+    Compatibility is SEMANTIC - you must reason about whether interests are related:
+
+    Compatible examples:
+    - hiking + cycling (both active/outdoor)
+    - painting + photography (both creative/artistic)
+    - gaming + coding (both tech-oriented)
+    - cooking + board_games (both social)
+
+    NOT compatible:
+    - hiking + gaming (unrelated domains)
+    - pottery + robotics (no semantic connection)
+
+    ## MANDATORY: Use recursion for O(n^2) semantic comparisons
+
+    Since EACH pair needs LLM judgment, you MUST use `tool/evaluate_pairs` to
+    recursively process subsets. A single pass cannot evaluate all pairs semantically.
+
+    ## Strategy
+
+    1. Parse profiles and group by city
+    2. For each city group, use `tool/evaluate_pairs` to recursively evaluate pairs
+    3. In each recursive call, evaluate a subset of pairs semantically
+    4. Aggregate results
+
+    ## Input
+    - data/corpus: Profile lines (format: "PROFILE N: name=..., city=CITY, interests=[...]")
+
+    ## Output
+    Return `{:count N :pairs ["1-2" "3-5" ...]}` where pairs have compatible interests.
+
+    ## Example recursive pattern
+
+    ```clojure
+    (def lines (split-lines data/corpus))
+    (def n (count lines))
+    (println "Evaluating" n "profiles for semantic compatibility...")
+
+    ;; If small enough, evaluate pairs directly with semantic judgment
+    (if (<= n 10)
+      (do
+        (println "Direct evaluation of" (* n (dec n) 0.5) "pairs")
+        ;; For each pair, judge semantic compatibility
+        ;; ... semantic evaluation logic ...
+        (return {:count found-count :pairs found-pairs}))
+
+      ;; Too many pairs for direct evaluation - subdivide
+      (let [mid (quot n 2)
+            first-half (take mid lines)
+            second-half (drop mid lines)]
+        (println "Subdividing:" mid "+" (- n mid) "profiles")
+
+        ;; Recursively evaluate each half
+        (def r1 (tool/evaluate_pairs {:corpus (join "\\n" first-half)}))
+        (def r2 (tool/evaluate_pairs {:corpus (join "\\n" second-half)}))
+
+        ;; Also need cross-pairs between halves
+        (def r3 (tool/evaluate_pairs {:corpus (join "\\n" (concat first-half second-half))}))
+
+        ;; Aggregate (careful not to double-count)
+        (return {:count (+ (:count r1) (:count r2))
+                 :pairs (concat (:pairs r1) (:pairs r2))})))
+    ```
+
+    REMEMBER: Each pair comparison needs YOUR semantic judgment. You cannot shortcut this.
     """
   end
 end

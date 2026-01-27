@@ -71,10 +71,20 @@ defmodule RlmRecursive.Runner do
   defp run_benchmark(opts) do
     benchmark =
       case Keyword.get(opts, :benchmark, "sniah") do
-        "sniah" -> :sniah
-        "counting" -> :counting
-        "pairs" -> :pairs
-        other -> raise "Unknown benchmark: #{other}. Use 'sniah', 'counting', or 'pairs'."
+        "sniah" ->
+          :sniah
+
+        "counting" ->
+          :counting
+
+        "pairs" ->
+          :pairs
+
+        "semantic_pairs" ->
+          :semantic_pairs
+
+        other ->
+          raise "Unknown benchmark: #{other}. Use 'sniah', 'counting', 'pairs', or 'semantic_pairs'."
       end
 
     run_opts =
@@ -108,6 +118,11 @@ defmodule RlmRecursive.Runner do
       :pairs ->
         IO.puts(
           "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]} (O(n^2) task - recursion essential!)"
+        )
+
+      :semantic_pairs ->
+        IO.puts(
+          "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]} (SEMANTIC judgment per pair - forces recursion!)"
         )
     end
 
@@ -145,12 +160,13 @@ defmodule RlmRecursive.Runner do
       mix run run.exs [OPTIONS]
 
     Benchmarks:
-      sniah     - Single Needle in a Haystack (find hidden fact) - O(1) with grep
-      counting  - OOLONG-Counting (aggregate matching profiles) - O(n), direct filtering
-      pairs     - OOLONG-Pairs (find matching pairs) - O(n^2), recursion essential!
+      sniah          - Single Needle in a Haystack (find hidden fact) - O(1) with grep
+      counting       - OOLONG-Counting (aggregate matching profiles) - O(n), direct filtering
+      pairs          - OOLONG-Pairs (find matching pairs) - O(n^2), simple matching
+      semantic_pairs - OOLONG-Pairs with SEMANTIC compatibility - FORCES recursion!
 
     Options:
-      --benchmark, -b TYPE    Benchmark type: sniah, counting, or pairs (default: sniah)
+      --benchmark, -b TYPE    Benchmark type: sniah, counting, pairs, or semantic_pairs
       --lines, -l N           Corpus lines for S-NIAH (default: 1000)
       --profiles, -p N        Profile count for counting/pairs (default: 500)
       --seed, -s N            Random seed for reproducibility (default: 42)
@@ -169,8 +185,11 @@ defmodule RlmRecursive.Runner do
       # Run counting benchmark with 200 profiles
       mix run run.exs --benchmark counting --profiles 200
 
-      # Run pairs benchmark (demonstrates essential recursion)
+      # Run pairs benchmark (simple matching)
       mix run run.exs --benchmark pairs --profiles 100 --trace
+
+      # Run semantic pairs (LLM judgment per pair - truly forces recursion)
+      mix run run.exs --benchmark semantic_pairs --profiles 40 --trace
 
       # Run S-NIAH with larger corpus
       mix run run.exs --lines 10000 --seed 123
