@@ -1,26 +1,41 @@
-# RLM Recursive - Advanced Recursive Language Model Benchmarks
+# RLM Recursive - Recursive Language Model Benchmarks
 
-This example demonstrates **true recursive patterns** from the [RLM paper](https://arxiv.org/abs/2512.24601), where the LLM decides how to decompose problems rather than receiving pre-chunked data.
+This example implements benchmarks from the [RLM paper (arXiv:2512.24601)](https://arxiv.org/abs/2512.24601), demonstrating how LLMs can process arbitrarily long inputs by treating them as an external environment and programmatically examining, decomposing, and recursively processing them.
 
-## Key Features
+## Paper Findings: When is Recursion Needed?
 
-| Feature | Description |
-|---------|-------------|
-| **Recursive Self-Calls** | Agent calls itself via `:self` tool for divide-and-conquer |
-| **LLM-Decided Chunking** | Model decides when/how to subdivide (not pre-chunked) |
-| **Budget Awareness** | Uses `(budget/remaining)` to adapt recursion strategy |
-| **Grep Probing** | Uses stdlib `grep`/`grep-n` for efficient corpus search |
-| **Ground Truth Validation** | Automated scoring against known correct answers |
+The RLM paper found that **task complexity determines whether recursion is essential**:
 
-## Comparison with Simple RLM (`examples/rlm/`)
+| Benchmark | Complexity | Recursion Needed? | Paper Finding |
+|-----------|------------|-------------------|---------------|
+| **S-NIAH** | O(1) | No | Direct probing (grep) works |
+| **OOLONG** | O(n) | No | REPL alone sufficient |
+| **OOLONG-Pairs** | O(n²) | **Yes** | Recursion essential (0% → 60% F1) |
+| **BrowseComp** | Multi-hop | **Yes** | Multi-doc reasoning needs recursion |
 
-| Feature | `rlm/` (Simple) | `rlm_recursive/` (Advanced) |
-|---------|-----------------|----------------------------|
-| Chunking | Pre-chunked in Elixir | LLM decides split points |
-| Recursion | Single level (pmap) | True recursion via `:self` |
-| Budget | Just `token_limit` | Agent queries `(budget/remaining)` |
-| Validation | Manual inspection | Automated ground truth scoring |
-| Complexity | O(n) always | Can be O(log n) for search tasks |
+> "The REPL environment alone was enough to handle long inputs, but **recursive self-calls were essential for tasks with high information density**."
+
+Our benchmarks reproduce this behavior:
+- **S-NIAH**: Solves in 1-2 turns via `grep` probing (no recursion needed)
+- **Counting**: Solves in 1 turn via direct filtering (no recursion needed - this is correct!)
+
+This matches the paper's findings for O(1) and O(n) tasks.
+
+## The Core RLM Insight
+
+**Bulk data stays in memory, not LLM context.** The LLM writes processing code; the computer executes it on arbitrarily large datasets:
+
+```clojure
+;; LLM writes this code once, computer filters 50K profiles instantly
+(def matching
+  (filter
+    (fn [line]
+      (and (> (parse-age line) 30) (includes? line "hiking")))
+    (split-lines data/corpus)))
+(return {:count (count matching)})
+```
+
+This is fundamentally different from stuffing everything into the prompt.
 
 ## Benchmarks
 
@@ -28,42 +43,53 @@ This example demonstrates **true recursive patterns** from the [RLM paper](https
 
 **Task**: Find one hidden fact in a large corpus.
 
-**Example**: A corpus of 10,000 log lines contains one line like:
+**Example**: Find "The access code for agent_7291 is XKQMTR" in 10,000 lines.
+
+**Behavior**: Uses `grep-n` to locate the needle instantly - O(1) LLM turns regardless of corpus size.
+
+```clojure
+(def matches (grep-n "agent_7291" data/corpus))
+(return {:answer (extract-code (first matches)) :found true})
 ```
-The access code for agent_7291 is XKQMTR
-```
-
-**Question**: "What is the access code for agent_7291?"
-
-**Expected Strategy**:
-1. Probe with `(grep "agent_7291" data/corpus)` - O(1) if using grep
-2. Extract the code from matching line(s)
-3. If grep returns too many matches, subdivide and recurse
-
-**Complexity**: Near-constant for well-indexed searches (grep is O(n) but fast).
 
 ### OOLONG-Counting
 
-**Task**: Count entities matching criteria across a corpus.
+**Task**: Count entities matching criteria.
 
-**Example**: 500 person profiles with attributes:
+**Example**: "How many people are over 30 AND have hiking as a hobby?" across 5,000 profiles.
+
+**Behavior**: Direct in-memory filtering - the computer processes all profiles in milliseconds.
+
+```clojure
+(def matching (filter #(and (> (age %) 30) (has-hobby? % "hiking")) profiles))
+(return {:count (count matching)})
 ```
-PROFILE 42: name=Alice Smith, age=35, city=Seattle, hobbies=[hiking, photography]
+
+**Note**: This solves in 1 turn without recursion - **this is the expected behavior** per the paper. Recursion would be needed for O(n²) tasks like pairwise comparison.
+
+## When Would Recursion Be Used?
+
+Recursion becomes essential when:
+
+1. **Quadratic complexity** (OOLONG-Pairs): Comparing all pairs of entries
+2. **Multi-hop reasoning**: Synthesizing information across multiple documents
+3. **Context exceeds window**: Input is 2+ orders of magnitude beyond context limit
+4. **LLM judgment per chunk**: Each subdivision requires reasoning, not just filtering
+
+The `:self` tool is available for these cases:
+
+```clojure
+;; Recursive subdivision (when needed)
+(let [mid (quot n 2)
+      r1 (tool/count {:corpus (take mid lines) ...})
+      r2 (tool/count {:corpus (drop mid lines) ...})]
+  (return {:count (+ (:count r1) (:count r2))}))
 ```
-
-**Question**: "How many people are over 30 AND have hiking as a hobby?"
-
-**Expected Strategy**:
-1. Check corpus size
-2. If small: count directly
-3. If large: split, recurse, sum results (map-reduce)
-
-**Complexity**: Linear (must examine all profiles).
 
 ## Usage
 
 ```bash
-# Install dependencies (from examples/rlm_recursive/)
+# Install dependencies
 mix deps.get
 
 # Run S-NIAH benchmark (default)
@@ -72,12 +98,8 @@ mix run run.exs
 # Run with tracing
 mix run run.exs --trace
 
-# Run counting benchmark
-mix run run.exs --benchmark counting
-
-# Customize parameters
-mix run run.exs --lines 5000 --seed 123
-mix run run.exs --benchmark counting --profiles 200
+# Run counting benchmark with 5000 profiles
+mix run run.exs --benchmark counting --profiles 5000
 
 # View help
 mix run run.exs --help
@@ -95,132 +117,76 @@ mix run run.exs --help
 | `--min-age` | | Min age for counting | 30 |
 | `--hobby` | | Hobby for counting | hiking |
 
-## Expected Output
-
-```
-╔══════════════════════════════════════════════════════════════╗
-║           RLM Recursive Benchmark Runner                     ║
-╚══════════════════════════════════════════════════════════════╝
-
-Benchmark: sniah
-Lines: 1000, Seed: 42
-
-Generating S-NIAH corpus (1000 lines, seed 42)...
-Needle hidden at line 472 of 1000
-Query: What is the access code for agent_7291?
-
-=== Starting S-NIAH Benchmark ===
-
-=== Benchmark Complete ===
-[PASS] Expected: "XKQMTR", Actual: "XKQMTR"
-
-Return value:
-%{"answer" => "XKQMTR", "found" => true}
-
-════════════════════════════════════════════════════════════════
-Summary
-════════════════════════════════════════════════════════════════
-Correct: true
-Expected: "XKQMTR"
-Actual: "XKQMTR"
-```
-
 ## Architecture
 
 ```
 lib/
 ├── rlm_recursive.ex      # Main API: run/1, run_benchmark/2
-├── agent.ex              # Recursive agent builder with :self tool
+├── agent.ex              # Agent builder with :self tool
 ├── scorer.ex             # Ground truth validation
 └── generators/
     ├── sniah.ex          # S-NIAH corpus generator
     └── counting.ex       # OOLONG-Counting generator
 ```
 
-### Recursive Agent Pattern
+### Key Patterns
 
-The key pattern is using `:self` in the tools map:
-
-```elixir
-SubAgent.new(
-  prompt: "...",
-  signature: "(corpus :string, query :string) -> {answer :string, found :bool}",
-  tools: %{"search" => :self},  # Self-recursion!
-  max_depth: 4,
-  max_turns: 10
-)
-```
-
-When the agent calls `(tool/search {:corpus sub_corpus :query query})`, it invokes itself with the new context.
-
-### Budget-Aware Logic
-
-Agents can query their remaining budget:
-
+**Grep-based probing** for search tasks:
 ```clojure
-(let [b (budget/remaining)
-      at-limit? (>= (:current (:depth b)) (dec (:max (:depth b))))]
-  (if at-limit?
-    (process-directly data/corpus)
-    (subdivide-and-recurse data/corpus)))
-```
-
-### Grep-Based Probing
-
-Use stdlib grep functions for efficient search:
-
-```clojure
-;; Find lines containing pattern
-(grep "agent_7291" data/corpus)
-;; => ["The access code for agent_7291 is XKQMTR"]
-
-;; Find with line numbers
-(grep-n "agent_7291" data/corpus)
+(grep-n "search_term" data/corpus)
 ;; => [{:line 472 :text "The access code for agent_7291 is XKQMTR"}]
 ```
 
-## Context Rot
+**Budget introspection** for adaptive behavior:
+```clojure
+(def b (budget/remaining))
+;; => {:turns 15, :depth {:current 1, :max 4}, ...}
+```
 
-The RLM paper introduces "context rot" - the phenomenon where single-shot prompts fail on large contexts even when the answer is present. Key insights:
+**Recursive self-calls** (when complexity requires it):
+```clojure
+(tool/count {:corpus subset :min_age data/min_age :hobby data/hobby})
+```
 
-1. **Attention dilutes**: As context grows, attention to any single fact decreases
-2. **Recursion helps**: Breaking into focused sub-contexts maintains attention quality
-3. **Grep bypasses rot**: Direct string search doesn't suffer from attention limits
+## Comparison with `examples/rlm/`
 
-This benchmark demonstrates how recursive decomposition with grep probing can achieve high accuracy on large corpora where single-shot approaches fail.
+| Feature | `rlm/` (Simple) | `rlm_recursive/` (Advanced) |
+|---------|-----------------|----------------------------|
+| Chunking | Pre-chunked in Elixir | LLM decides |
+| Tools | External worker agents | `:self` for recursion |
+| Validation | Manual inspection | Automated scoring |
+| Paper alignment | Orchestration pattern | Full RLM benchmarks |
 
 ## Tracing
 
-Enable tracing to see the recursive execution tree:
+Enable tracing to see execution:
 
 ```bash
 mix run run.exs --trace
 ```
 
-Then open `trace_viewer.html` in your browser and load `traces/recursive_trace.jsonl`.
-
-The trace shows:
-- Parent/child relationships between recursive calls
-- Token usage per call
-- Return values at each level
-- How the LLM decided to decompose the problem
+Open `trace_viewer.html` and load `traces/recursive_trace.jsonl`.
 
 ## Environment
 
-The benchmarks use AWS Bedrock by default. Set credentials:
-
+AWS Bedrock (default):
 ```bash
-export AWS_PROFILE=sandbox  # or set AWS_ACCESS_KEY_ID etc.
+export AWS_PROFILE=sandbox
 ```
 
-Or use OpenRouter:
-
+Or OpenRouter:
 ```bash
 export OPENROUTER_API_KEY=your_key
 ```
 
-## See Also
+## Future Work
 
+To fully demonstrate recursive behavior, add:
+- **OOLONG-Pairs**: O(n²) pairwise comparison benchmark
+- **Multi-hop QA**: Questions requiring synthesis across documents
+
+## References
+
+- [arXiv:2512.24601](https://arxiv.org/abs/2512.24601) - Recursive Language Models (Zhang, Kraska, Khattab)
 - [examples/rlm/](../rlm/) - Simpler RLM with pre-chunking
 - [RLM Patterns Guide](../../docs/guides/subagent-rlm-patterns.md)
-- [arXiv:2512.24601](https://arxiv.org/abs/2512.24601) - Original RLM paper
