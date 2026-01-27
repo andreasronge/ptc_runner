@@ -163,6 +163,8 @@ defmodule PtcRunner.Lisp.Env do
     [
       :"java.util.Date.",
       :".getTime",
+      :".indexOf",
+      :".lastIndexOf",
       :"System/currentTimeMillis",
       :"LocalDate/parse",
       :POSITIVE_INFINITY,
@@ -406,6 +408,9 @@ defmodule PtcRunner.Lisp.Env do
       {:"java.util.Date.",
        {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
       {:".getTime", {:normal, &Runtime.dot_get_time/1}},
+      {:".indexOf",
+       {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},
+      {:".lastIndexOf", {:normal, &Runtime.dot_last_index_of/2}},
       {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
       {:parse, {:normal, &Runtime.local_date_parse/1}},
 
