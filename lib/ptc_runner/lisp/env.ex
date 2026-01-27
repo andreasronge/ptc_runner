@@ -158,7 +158,7 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:math) do
-    [:sqrt, :pow, :abs, :floor, :ceil, :round, :trunc, :double, :float, :int, :max, :min]
+    [:sqrt, :pow, :abs, :floor, :ceil, :round, :trunc, :double, :float, :int, :max, :min, :quot]
   end
 
   def builtins_by_category(:interop) do
@@ -305,6 +305,7 @@ defmodule PtcRunner.Lisp.Env do
       {:/, {:variadic_nonempty, :/, &Runtime.Math.divide/2}},
       {:mod, {:normal, &Runtime.mod/2}},
       {:rem, {:normal, &Runtime.remainder/2}},
+      {:quot, {:normal, &Runtime.Math.quot/2}},
       {:inc, {:normal, &Runtime.inc/1}},
       {:dec, {:normal, &Runtime.dec/1}},
       {:abs, {:normal, &Runtime.abs/1}},

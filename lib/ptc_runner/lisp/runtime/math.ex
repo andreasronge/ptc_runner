@@ -145,6 +145,31 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
+  @doc """
+  Integer division (quotient), truncating toward zero.
+
+  Matches Clojure's `quot` function.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Math.quot(7, 2)
+      3
+
+      iex> PtcRunner.Lisp.Runtime.Math.quot(-7, 2)
+      -3
+
+      iex> PtcRunner.Lisp.Runtime.Math.quot(7.5, 2)
+      3
+  """
+  def quot(x, y) do
+    cond do
+      SpecialValues.special?(x) or SpecialValues.special?(y) -> :nan
+      y == 0 -> raise ArithmeticError, "division by zero"
+      is_integer(x) and is_integer(y) -> Kernel.div(x, y)
+      true -> Kernel.trunc(x / y)
+    end
+  end
+
   defp floored_mod_float(x, y) do
     x - y * :math.floor(x / y)
   end

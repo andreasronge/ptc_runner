@@ -1750,7 +1750,8 @@ The `seq` function converts a collection to a sequence:
 | `+` | `(+ x y ...)` | Addition |
 | `-` | `(- x y ...)` | Subtraction |
 | `*` | `(* x y ...)` | Multiplication |
-| `/` | `(/ x y)` | Division |
+| `/` | `(/ x y)` | Division (always returns float) |
+| `quot` | `(quot x y)` | Integer division (truncated toward zero) |
 | `mod` | `(mod x y)` | Modulo (floored division, result sign matches divisor) |
 | `rem` | `(rem x y)` | Remainder (truncated division, result sign matches dividend) |
 | `inc` | `(inc x)` | Add 1 |
@@ -1778,6 +1779,8 @@ The `seq` function converts a collection to a sequence:
 (* 2 3 4)       ; => 24
 (/ 10 2)        ; => 5.0
 (/ 10 3)        ; => 3.333...
+(quot 10 3)     ; => 3
+(quot -7 2)     ; => -3   (truncates toward zero)
 (mod 10 3)      ; => 1
 (mod -10 3)     ; => 2   (sign matches divisor)
 (rem 10 3)      ; => 1
@@ -1801,7 +1804,7 @@ The `seq` function converts a collection to a sequence:
 (int Double/POSITIVE_INFINITY)      ; => ARITHMETIC ERROR
 ```
 
-**Division behavior:** The `/` operator always returns a float, even for exact divisions. Integer division (`quot`) is not supported. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
+**Division behavior:** The `/` operator always returns a float, even for exact divisions. For integer division, use `quot` which truncates toward zero—useful for index calculations like `(take (quot n 2) coll)`. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
 
 ### 8.5 Comparison
 

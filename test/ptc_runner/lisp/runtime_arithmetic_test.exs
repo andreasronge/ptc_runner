@@ -113,6 +113,43 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "quot - integer division (truncates toward zero)" do
+    test "positive integers" do
+      assert_lisp("(quot 7 2)", 3)
+    end
+
+    test "negative dividend truncates toward zero" do
+      assert_lisp("(quot -7 2)", -3)
+    end
+
+    test "negative divisor truncates toward zero" do
+      assert_lisp("(quot 7 -2)", -3)
+    end
+
+    test "both negative truncates toward zero" do
+      assert_lisp("(quot -7 -2)", 3)
+    end
+
+    test "handles floats" do
+      assert_lisp("(quot 7.5 2)", 3)
+    end
+
+    test "division by zero raises ArithmeticError" do
+      assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(quot 7 0)")
+      assert message =~ "division by zero"
+    end
+
+    test "special values return NaN" do
+      assert_lisp("(quot Double/NaN 2)", :nan)
+      assert_lisp("(quot 7 Double/NaN)", :nan)
+      assert_lisp("(quot Double/POSITIVE_INFINITY 2)", :nan)
+    end
+
+    test "practical use case: splitting collections" do
+      assert_lisp("(take (quot 5 2) [1 2 3 4 5])", [1, 2])
+    end
+  end
+
   defp assert_lisp(source, expected) do
     {:ok, %{return: result}} = PtcRunner.Lisp.run(source)
     assert result == expected
