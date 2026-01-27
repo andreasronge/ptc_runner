@@ -60,6 +60,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate nth(coll, idx), to: Collection
   defdelegate rest(coll), to: Collection
   defdelegate butlast(coll), to: Collection
+  defdelegate take_last(n, coll), to: Collection
+  defdelegate drop_last(coll), to: Collection
+  defdelegate drop_last(n, coll), to: Collection
   defdelegate next(coll), to: Collection
   defdelegate ffirst(coll), to: Collection
   defdelegate fnext(coll), to: Collection
