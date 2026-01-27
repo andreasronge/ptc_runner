@@ -61,7 +61,7 @@ defmodule PtcRunner.SubAgent.Loop do
   This is an internal module called by `SubAgent.run/2`.
   """
 
-  alias PtcRunner.{Lisp, Step}
+  alias PtcRunner.{Lisp, Step, Turn}
   alias PtcRunner.SubAgent
 
   alias PtcRunner.SubAgent.Loop.{
@@ -278,16 +278,38 @@ defmodule PtcRunner.SubAgent.Loop do
     # Route to appropriate execution mode based on agent.output
     case agent.output do
       :json -> JsonMode.run(agent, run_opts.llm, initial_state)
-      :ptc_lisp -> loop(agent, run_opts.llm, initial_state)
+      :ptc_lisp -> driver_loop(agent, run_opts.llm, initial_state)
     end
   end
 
-  # Check unified budget (work + retry turns)
-  # Budget exhausted when both work and retry turns are consumed
-  # Use appropriate error reason based on whether retry budget was configured
-  # First attempts fallback to last successful expression before returning error
-  defp loop(agent, _llm, state)
-       when state.work_turns_remaining <= 0 and state.retry_turns_remaining <= 0 do
+  # ============================================================
+  # Termination Checks
+  # ============================================================
+
+  # Check all termination conditions before executing a turn.
+  # Returns {:stop, result} to terminate or :continue to proceed.
+  @spec check_termination(SubAgent.t(), map()) :: {:stop, {:ok | :error, Step.t()}} | :continue
+  defp check_termination(agent, state) do
+    cond do
+      # Unified budget exhausted (work + retry turns)
+      state.work_turns_remaining <= 0 and state.retry_turns_remaining <= 0 ->
+        {:stop, handle_budget_exhausted_termination(agent, state)}
+
+      # Global turn budget exhausted
+      state.remaining_turns <= 0 ->
+        {:stop, build_termination_error(:turn_budget_exhausted, "Turn budget exhausted", state)}
+
+      # Mission timeout exceeded
+      state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) ->
+        {:stop, build_termination_error(:mission_timeout, "Mission timeout exceeded", state)}
+
+      true ->
+        :continue
+    end
+  end
+
+  # Handle unified budget exhaustion with fallback attempt
+  defp handle_budget_exhausted_termination(agent, state) do
     case try_last_expression_fallback(agent, state) do
       {:ok, step} ->
         {:ok, step}
@@ -311,156 +333,222 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Check global turn budget before each turn (guard clause)
-  defp loop(_agent, _llm, state) when state.remaining_turns <= 0 do
-    build_termination_error(:turn_budget_exhausted, "Turn budget exhausted", state)
+  # ============================================================
+  # State Continuation Builder
+  # ============================================================
+
+  # Build state for the next turn iteration.
+  # Encapsulates the common pattern of updating state after a turn completes.
+  #
+  # ## Parameters
+  #
+  # - `state` - Current state
+  # - `turn` - Turn struct for this iteration
+  # - `response` - LLM response text
+  # - `feedback` - Feedback message for next turn
+  # - `opts` - Keyword options:
+  #   - `memory` - New memory state (default: state.memory)
+  #   - `last_fail` - Last failure info (default: nil)
+  #   - `last_return_error` - Error message for retry context (default: nil)
+  #   - `turn_history` - Updated turn history (default: state.turn_history)
+  @spec build_continuation_state(map(), Turn.t(), String.t(), String.t(), keyword()) :: map()
+  defp build_continuation_state(state, turn, response, feedback, opts) do
+    # Determine budget decrements
+    in_retry_phase = state.work_turns_remaining <= 0
+
+    {new_work_turns, new_retry_turns} =
+      if in_retry_phase do
+        {state.work_turns_remaining, state.retry_turns_remaining - 1}
+      else
+        {state.work_turns_remaining - 1, state.retry_turns_remaining}
+      end
+
+    %{
+      state
+      | turn: state.turn + 1,
+        messages:
+          state.messages ++
+            [
+              %{role: :assistant, content: response},
+              %{role: :user, content: feedback}
+            ],
+        turns: [turn | state.turns],
+        remaining_turns: state.remaining_turns - 1,
+        work_turns_remaining: new_work_turns,
+        retry_turns_remaining: new_retry_turns,
+        memory: Keyword.get(opts, :memory, state.memory),
+        last_fail: Keyword.get(opts, :last_fail),
+        last_return_error: Keyword.get(opts, :last_return_error),
+        turn_history: Keyword.get(opts, :turn_history, state.turn_history),
+        # Preserve turn_tokens from the LLM call (for telemetry)
+        turn_tokens: state.turn_tokens
+    }
   end
 
-  # Main loop iteration
-  defp loop(agent, llm, state) do
-    # Check mission timeout before each turn
-    if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
-      build_termination_error(:mission_timeout, "Mission timeout exceeded", state)
-    else
-      # Compute turn phase based on unified budget model
-      must_return_mode = state.work_turns_remaining <= 1
-      in_retry_phase = state.work_turns_remaining <= 0
+  # ============================================================
+  # Iterative Driver Loop (TCO-friendly)
+  # ============================================================
 
-      # Determine turn type for this iteration
-      turn_type =
-        cond do
-          in_retry_phase -> :retry
-          must_return_mode -> :must_return
-          true -> :normal
+  # Main iterative loop that drives agent execution.
+  # Uses tail-call optimization by returning from each iteration
+  # and emitting telemetry immediately after each turn completes.
+  @spec driver_loop(SubAgent.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
+  defp driver_loop(agent, llm, state) do
+    case check_termination(agent, state) do
+      {:stop, result} ->
+        result
+
+      :continue ->
+        # Compute turn phase and emit turn start
+        {state, telemetry_metadata, turn_start} = setup_turn(agent, state)
+
+        Telemetry.emit([:turn, :start], %{}, telemetry_metadata)
+
+        # Execute single turn - returns signal
+        case execute_turn(agent, llm, state) do
+          {:continue, next_state, turn} ->
+            # Emit turn stop IMMEDIATELY (not batched)
+            # Use turn_tokens from next_state for correct measurements
+            Metrics.emit_turn_stop_immediate(
+              turn,
+              agent,
+              state,
+              turn_start,
+              next_state.turn_tokens
+            )
+
+            # TCO: tail-recursive call
+            driver_loop(agent, llm, next_state)
+
+          {:stop, result, turn, turn_tokens} ->
+            # Emit turn stop for final turn
+            # turn_tokens may be nil for budget exceeded or LLM error cases
+            Metrics.emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens)
+            result
         end
+    end
+  end
 
-      # Store turn type in state for downstream use
-      state = Map.put(state, :current_turn_type, turn_type)
+  # Set up state for a turn - compute turn phase and build telemetry metadata
+  defp setup_turn(agent, state) do
+    must_return_mode = state.work_turns_remaining <= 1
+    in_retry_phase = state.work_turns_remaining <= 0
 
-      # Build telemetry metadata
-      telemetry_metadata = %{
-        agent: agent,
-        turn: state.turn,
-        type: turn_type,
-        tools_count: if(must_return_mode, do: 0, else: map_size(agent.tools))
-      }
-
-      # Add retry-specific metadata when in retry phase
-      telemetry_metadata =
-        if in_retry_phase do
-          attempt_num = agent.return_retries - state.retry_turns_remaining + 1
-
-          Map.merge(telemetry_metadata, %{
-            attempt: attempt_num,
-            remaining: state.retry_turns_remaining
-          })
-        else
-          telemetry_metadata
-        end
-
-      # Emit turn start event with turn type
-      Telemetry.emit([:turn, :start], %{}, telemetry_metadata)
-
-      turn_start = System.monotonic_time()
-
-      # Build LLM input with resolution context for language_spec callbacks
-      resolution_context = %{
-        turn: state.turn,
-        model: state.llm,
-        memory: state.memory,
-        messages: state.messages
-      }
-
-      # Build system prompt
-      system_prompt =
-        build_system_prompt(
-          agent,
-          state.context,
-          resolution_context,
-          state.received_field_descriptions
-        )
-
-      # Build messages - use compression if enabled and turn > 1
-      # Returns {messages, compression_stats | nil}
-      {messages, compression_stats} = build_llm_messages(agent, state, system_prompt)
-
-      # Store compression stats in state (will be used by build_final_usage)
-      state =
-        if compression_stats,
-          do: Map.put(state, :compression_stats, compression_stats),
-          else: state
-
-      # Strip tools in must-return mode (structural enforcement)
-      tool_names = if must_return_mode, do: [], else: Map.keys(agent.tools)
-
-      llm_input = %{
-        system: system_prompt,
-        messages: messages,
-        turn: state.turn,
-        tool_names: tool_names,
-        cache: state.cache
-      }
-
-      # Call LLM with telemetry and retry logic
-      case call_llm_with_telemetry(llm, llm_input, state, agent) do
-        {:ok, %{content: content, tokens: tokens}} ->
-          # Accumulate tokens and store system prompt + messages for debugging
-          state_with_metadata =
-            state
-            |> Metrics.accumulate_tokens(tokens)
-            |> Map.put(:current_system_prompt, llm_input.system)
-            |> Map.put(:current_messages, messages)
-            |> maybe_add_system_prompt_tokens(llm_input.system)
-
-          # Check budget callback after token accumulation
-          case check_budget_callback(state_with_metadata) do
-            :continue ->
-              result = handle_llm_response(content, agent, llm, state_with_metadata)
-
-              # Emit turn stop event (only for completed turns, not continuation)
-              # Extract program from the last turn in the result
-              program = Metrics.extract_program_from_result(result)
-
-              Metrics.emit_turn_stop_if_final(result, agent, state_with_metadata, turn_start,
-                program: program
-              )
-
-              result
-
-            :stop ->
-              handle_budget_exceeded(agent, state_with_metadata)
-          end
-
-        {:error, reason} ->
-          duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
-          step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", state.memory)
-
-          step_with_metrics = %{
-            step
-            | usage: Metrics.build_final_usage(state, duration_ms, 0),
-              turns:
-                Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-              messages: build_collected_messages(state, state.messages),
-              prompt: state.expanded_prompt,
-              original_prompt: state.original_prompt,
-              tools: state.normalized_tools
-          }
-
-          # Emit turn stop on error (LLM call failed, so no program or result)
-          turn_duration = System.monotonic_time() - turn_start
-          turn_type = Map.get(state, :current_turn_type, :normal)
-
-          Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
-            agent: agent,
-            turn: state.turn,
-            program: nil,
-            result_preview: nil,
-            type: turn_type
-          })
-
-          {:error, step_with_metrics}
+    turn_type =
+      cond do
+        in_retry_phase -> :retry
+        must_return_mode -> :must_return
+        true -> :normal
       end
+
+    state = Map.put(state, :current_turn_type, turn_type)
+
+    telemetry_metadata = %{
+      agent: agent,
+      turn: state.turn,
+      type: turn_type,
+      tools_count: if(must_return_mode, do: 0, else: map_size(agent.tools))
+    }
+
+    telemetry_metadata =
+      if in_retry_phase do
+        attempt_num = agent.return_retries - state.retry_turns_remaining + 1
+
+        Map.merge(telemetry_metadata, %{
+          attempt: attempt_num,
+          remaining: state.retry_turns_remaining
+        })
+      else
+        telemetry_metadata
+      end
+
+    turn_start = System.monotonic_time()
+
+    {state, telemetry_metadata, turn_start}
+  end
+
+  # Execute a single turn - builds LLM input, calls LLM, processes response
+  # Returns {:continue, new_state, turn} or {:stop, result, turn, turn_tokens}
+  @spec execute_turn(SubAgent.t(), term(), map()) ::
+          {:continue, map(), Turn.t()}
+          | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
+  defp execute_turn(agent, llm, state) do
+    must_return_mode = state.work_turns_remaining <= 1
+
+    # Build LLM input with resolution context for language_spec callbacks
+    resolution_context = %{
+      turn: state.turn,
+      model: state.llm,
+      memory: state.memory,
+      messages: state.messages
+    }
+
+    # Build system prompt
+    system_prompt =
+      build_system_prompt(
+        agent,
+        state.context,
+        resolution_context,
+        state.received_field_descriptions
+      )
+
+    # Build messages - use compression if enabled and turn > 1
+    {messages, compression_stats} = build_llm_messages(agent, state, system_prompt)
+
+    state =
+      if compression_stats,
+        do: Map.put(state, :compression_stats, compression_stats),
+        else: state
+
+    # Strip tools in must-return mode
+    tool_names = if must_return_mode, do: [], else: Map.keys(agent.tools)
+
+    llm_input = %{
+      system: system_prompt,
+      messages: messages,
+      turn: state.turn,
+      tool_names: tool_names,
+      cache: state.cache
+    }
+
+    # Call LLM with telemetry
+    case call_llm_with_telemetry(llm, llm_input, state, agent) do
+      {:ok, %{content: content, tokens: tokens}} ->
+        state_with_metadata =
+          state
+          |> Metrics.accumulate_tokens(tokens)
+          |> Map.put(:current_system_prompt, llm_input.system)
+          |> Map.put(:current_messages, messages)
+          |> maybe_add_system_prompt_tokens(llm_input.system)
+
+        # Check budget callback
+        case check_budget_callback(state_with_metadata) do
+          :continue ->
+            handle_llm_response(content, agent, state_with_metadata)
+
+          :stop ->
+            # Budget exceeded - return error (no turn to emit)
+            result = handle_budget_exceeded(agent, state_with_metadata)
+            {:stop, result, nil, state_with_metadata.turn_tokens}
+        end
+
+      {:error, reason} ->
+        # LLM error - build error step and return
+        duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+        step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", state.memory)
+
+        step_with_metrics = %{
+          step
+          | usage: Metrics.build_final_usage(state, duration_ms, 0),
+            turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+            messages: build_collected_messages(state, state.messages),
+            prompt: state.expanded_prompt,
+            original_prompt: state.original_prompt,
+            tools: state.normalized_tools
+        }
+
+        {:stop, {:error, step_with_metrics}, nil, nil}
     end
   end
 
@@ -506,10 +594,13 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Handle LLM response - parse and execute code
-  defp handle_llm_response(response, agent, llm, state) do
+  # Returns signal for driver_loop (or legacy loop to process)
+  @spec handle_llm_response(String.t(), SubAgent.t(), map()) ::
+          {:stop, {:ok | :error, Step.t()}, Turn.t()} | {:continue, map(), Turn.t()}
+  defp handle_llm_response(response, agent, state) do
     case ResponseHandler.parse(response) do
       {:ok, code} ->
-        execute_code(code, response, agent, llm, state)
+        execute_code(code, response, agent, state)
 
       {:error, :no_code_in_response} ->
         # Log the response in debug mode so user can see what LLM returned
@@ -523,23 +614,23 @@ defmodule PtcRunner.SubAgent.Loop do
           IO.puts("---")
         end
 
-        # Handle error using unified budget model
+        # Handle error using unified budget model - returns signal
         handle_error_with_budget(
           response,
           "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('.",
           nil,
           state,
-          agent,
-          llm
+          agent
         )
     end
   end
 
-  # Handle error with unified budget model
+  # Handle error with unified budget model - returns signal for driver_loop
   # Decrements work_turns_remaining if not in retry phase, otherwise retry_turns_remaining
-  defp handle_error_with_budget(response, error_message, turn_or_nil, state, agent, llm) do
-    in_retry_phase = state.work_turns_remaining <= 0
-
+  # Returns {:continue, new_state, turn} for the driver_loop to process
+  @spec handle_error_with_budget(String.t(), String.t(), Turn.t() | nil, map(), SubAgent.t()) ::
+          {:continue, map(), Turn.t()}
+  defp handle_error_with_budget(response, error_message, turn_or_nil, state, agent) do
     # Build Turn struct if not provided
     turn =
       turn_or_nil ||
@@ -548,38 +639,17 @@ defmodule PtcRunner.SubAgent.Loop do
           type: state.current_turn_type
         )
 
-    # Determine which budget counter to decrement
-    {new_work_turns, new_retry_turns} =
-      if in_retry_phase do
-        {state.work_turns_remaining, state.retry_turns_remaining - 1}
-      else
-        {state.work_turns_remaining - 1, state.retry_turns_remaining}
-      end
-
     # Build feedback with appropriate turn info
     feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
-    new_state = %{
-      state
-      | turn: state.turn + 1,
-        messages:
-          state.messages ++
-            [
-              %{role: :assistant, content: response},
-              %{role: :user, content: feedback}
-            ],
-        turns: [turn | state.turns],
-        remaining_turns: state.remaining_turns - 1,
-        work_turns_remaining: new_work_turns,
-        retry_turns_remaining: new_retry_turns,
-        last_return_error: error_message
-    }
+    new_state =
+      build_continuation_state(state, turn, response, feedback, last_return_error: error_message)
 
-    loop(agent, llm, new_state)
+    {:continue, new_state, turn}
   end
 
-  # Execute parsed code
-  defp execute_code(code, response, agent, llm, state) do
+  # Execute parsed code - returns signal for driver_loop
+  defp execute_code(code, response, agent, state) do
     # Add last_fail to context if present
     exec_context =
       if state.last_fail do
@@ -591,11 +661,24 @@ defmodule PtcRunner.SubAgent.Loop do
     # Normalize SubAgentTool instances to functions with telemetry
     normalized_tools = ToolNormalizer.normalize(agent.tools, state, agent)
 
-    execute_code_with_tools(code, response, agent, llm, state, exec_context, normalized_tools)
+    execute_code_with_tools(code, response, agent, state, exec_context, normalized_tools)
   end
 
-  # Execute code with normalized tools
-  defp execute_code_with_tools(code, response, agent, llm, state, exec_context, all_tools) do
+  # Execute code with normalized tools - returns signal for driver_loop
+  # Returns:
+  # - {:stop, {:ok, step}, turn, turn_tokens} for successful completion
+  # - {:stop, {:error, step}, turn, turn_tokens} for explicit fail or memory limit
+  # - {:continue, new_state, turn} for continuation (normal execution or error retry)
+  @spec execute_code_with_tools(
+          String.t(),
+          String.t(),
+          SubAgent.t(),
+          map(),
+          map(),
+          map()
+        ) ::
+          {:stop, {:ok | :error, Step.t()}, Turn.t(), map() | nil} | {:continue, map(), Turn.t()}
+  defp execute_code_with_tools(code, response, agent, state, exec_context, all_tools) do
     lisp_opts = [
       context: exec_context,
       memory: state.memory,
@@ -613,7 +696,7 @@ defmodule PtcRunner.SubAgent.Loop do
       {:ok, lisp_step} ->
         # Emit pmap/pcalls telemetry events if any
         emit_pmap_telemetry(agent, lisp_step)
-        handle_successful_execution(code, response, lisp_step, state, agent, llm)
+        handle_successful_execution(code, response, lisp_step, state, agent)
 
       {:error, lisp_step} ->
         # Emit pmap/pcalls telemetry events even on error
@@ -631,43 +714,28 @@ defmodule PtcRunner.SubAgent.Loop do
             type: state.current_turn_type
           )
 
-        # Use unified budget model for error handling
-        in_retry_phase = state.work_turns_remaining <= 0
-
-        {new_work_turns, new_retry_turns} =
-          if in_retry_phase do
-            {state.work_turns_remaining, state.retry_turns_remaining - 1}
-          else
-            {state.work_turns_remaining - 1, state.retry_turns_remaining}
-          end
-
         # Build feedback with appropriate turn info
         feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
-        new_state = %{
-          state
-          | turn: state.turn + 1,
-            messages:
-              state.messages ++
-                [
-                  %{role: :assistant, content: response},
-                  %{role: :user, content: feedback}
-                ],
-            turns: [turn | state.turns],
+        new_state =
+          build_continuation_state(state, turn, response, feedback,
             memory: lisp_step.memory,
             last_fail: lisp_step.fail,
-            remaining_turns: state.remaining_turns - 1,
-            work_turns_remaining: new_work_turns,
-            retry_turns_remaining: new_retry_turns,
             last_return_error: error_message
-        }
+          )
 
-        loop(agent, llm, new_state)
+        {:continue, new_state, turn}
     end
   end
 
-  # Handle successful Lisp execution
-  defp handle_successful_execution(code, response, lisp_step, state, agent, llm) do
+  # Handle successful Lisp execution - returns signal for driver_loop
+  # Returns:
+  # - {:stop, {:ok, step}, turn, turn_tokens} for successful completion
+  # - {:stop, {:error, step}, turn, turn_tokens} for explicit fail or memory limit
+  # - {:continue, new_state, turn} for normal execution continuation
+  @spec handle_successful_execution(String.t(), String.t(), Step.t(), map(), SubAgent.t()) ::
+          {:stop, {:ok | :error, Step.t()}, Turn.t(), map() | nil} | {:continue, map(), Turn.t()}
+  defp handle_successful_execution(code, response, lisp_step, state, agent) do
     cond do
       # Explicit return was actually executed - validate against signature before accepting
       match?({:__ptc_return__, _}, lisp_step.return) ->
@@ -679,7 +747,9 @@ defmodule PtcRunner.SubAgent.Loop do
 
         case ReturnValidation.validate(agent, normalized_value) do
           :ok ->
-            build_success_step(code, response, unwrapped_step, state, agent)
+            turn = build_success_turn(code, response, unwrapped_step, state)
+            {:ok, step} = build_success_step(code, response, unwrapped_step, state, agent)
+            {:stop, {:ok, step}, turn, state.turn_tokens}
 
           {:error, validation_errors} ->
             handle_return_validation_error(
@@ -688,7 +758,6 @@ defmodule PtcRunner.SubAgent.Loop do
               unwrapped_step,
               state,
               agent,
-              llm,
               validation_errors
             )
         end
@@ -697,7 +766,9 @@ defmodule PtcRunner.SubAgent.Loop do
       agent.max_turns == 1 and agent.return_retries == 0 ->
         # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
         normalized_step = %{lisp_step | return: KeyNormalizer.normalize_keys(lisp_step.return)}
-        build_success_step(code, response, normalized_step, state, agent)
+        turn = build_success_turn(code, response, normalized_step, state)
+        {:ok, step} = build_success_step(code, response, normalized_step, state, agent)
+        {:stop, {:ok, step}, turn, state.turn_tokens}
 
       match?({:__ptc_fail__, _}, lisp_step.return) ->
         # Explicit fail was actually executed - complete with error, NO RETRY
@@ -736,7 +807,7 @@ defmodule PtcRunner.SubAgent.Loop do
             tools: state.normalized_tools
         }
 
-        {:error, final_step}
+        {:stop, {:error, final_step}, turn, state.turn_tokens}
 
       true ->
         # Normal execution - continue loop
@@ -760,37 +831,13 @@ defmodule PtcRunner.SubAgent.Loop do
             truncated_result = ResponseHandler.truncate_for_history(lisp_step.return)
             updated_history = update_turn_history(state.turn_history, truncated_result)
 
-            # Use unified budget model: consume work turn if not in retry phase, else retry turn
-            in_retry_phase = state.work_turns_remaining <= 0
-
-            {new_work_turns, new_retry_turns} =
-              if in_retry_phase do
-                {state.work_turns_remaining, state.retry_turns_remaining - 1}
-              else
-                {state.work_turns_remaining - 1, state.retry_turns_remaining}
-              end
-
-            new_state = %{
-              state
-              | turn: state.turn + 1,
-                messages:
-                  state.messages ++
-                    [
-                      %{role: :assistant, content: response},
-                      %{role: :user, content: execution_result}
-                    ],
-                turns: [turn | state.turns],
+            new_state =
+              build_continuation_state(state, turn, response, execution_result,
                 memory: lisp_step.memory,
-                # Context stays immutable - memory values become available as symbols
-                last_fail: nil,
-                remaining_turns: state.remaining_turns - 1,
-                work_turns_remaining: new_work_turns,
-                retry_turns_remaining: new_retry_turns,
-                turn_history: updated_history,
-                last_return_error: nil
-            }
+                turn_history: updated_history
+              )
 
-            loop(agent, llm, new_state)
+            {:continue, new_state, turn}
 
           {:error, :memory_limit_exceeded, actual_size} ->
             # Memory limit exceeded - return error
@@ -829,9 +876,20 @@ defmodule PtcRunner.SubAgent.Loop do
                 tools: state.normalized_tools
             }
 
-            {:error, final_step}
+            {:stop, {:error, final_step}, turn, state.turn_tokens}
         end
     end
+  end
+
+  # Build a success Turn struct (helper for handle_successful_execution)
+  defp build_success_turn(code, response, lisp_step, state) do
+    Metrics.build_turn(state, response, code, lisp_step.return,
+      success?: true,
+      prints: lisp_step.prints,
+      tool_calls: lisp_step.tool_calls,
+      memory: lisp_step.memory,
+      type: Map.get(state, :current_turn_type, :normal)
+    )
   end
 
   # Expand template placeholders
@@ -1038,7 +1096,16 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Handle return validation error - feed back to LLM for retry
   # Uses unified budget model: consumes work turn if not in retry phase, else retry turn
-  defp handle_return_validation_error(code, response, lisp_step, state, agent, llm, errors) do
+  # Returns {:continue, new_state, turn} signal for driver_loop
+  @spec handle_return_validation_error(
+          String.t(),
+          String.t(),
+          Step.t(),
+          map(),
+          SubAgent.t(),
+          list()
+        ) :: {:continue, map(), Turn.t()}
+  defp handle_return_validation_error(code, response, lisp_step, state, agent, errors) do
     error_message = ReturnValidation.format_error_for_llm(agent, lisp_step.return, errors)
 
     # Build validation error info for the turn (so compression can show the actual error)
@@ -1059,38 +1126,16 @@ defmodule PtcRunner.SubAgent.Loop do
         type: state.current_turn_type
       )
 
-    # Use unified budget model: consume work turn if not in retry phase, else retry turn
-    in_retry_phase = state.work_turns_remaining <= 0
-
-    {new_work_turns, new_retry_turns} =
-      if in_retry_phase do
-        {state.work_turns_remaining, state.retry_turns_remaining - 1}
-      else
-        {state.work_turns_remaining - 1, state.retry_turns_remaining}
-      end
-
     # Build feedback with appropriate turn info
     feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
-    new_state = %{
-      state
-      | turn: state.turn + 1,
-        messages:
-          state.messages ++
-            [
-              %{role: :assistant, content: response},
-              %{role: :user, content: feedback}
-            ],
-        turns: [turn | state.turns],
+    new_state =
+      build_continuation_state(state, turn, response, feedback,
         memory: lisp_step.memory,
-        last_fail: nil,
-        remaining_turns: state.remaining_turns - 1,
-        work_turns_remaining: new_work_turns,
-        retry_turns_remaining: new_retry_turns,
         last_return_error: error_message
-    }
+      )
 
-    loop(agent, llm, new_state)
+    {:continue, new_state, turn}
   end
 
   # ============================================================

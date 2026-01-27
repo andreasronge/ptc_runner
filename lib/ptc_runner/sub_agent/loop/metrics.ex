@@ -137,49 +137,43 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   @max_result_preview_length 200
 
   @doc """
-  Emit turn stop event only for final results (not loop continuations).
+  Emit turn stop event immediately after a turn completes.
 
-  Emits `[:sub_agent, :turn, :stop]` telemetry event with duration and optional token counts.
+  This is used by the iterative driver_loop to emit telemetry right after each turn,
+  rather than batching events when the stack unwinds. Handles nil turn defensively
+  for cases where LLM errors occur before a Turn struct is created.
 
-  ## Metadata
+  ## Parameters
 
+  - `turn` - The Turn struct for this turn, or nil if LLM error occurred before turn creation
   - `agent` - The SubAgent struct
-  - `turn` - Turn number
-  - `program` - The PTC-Lisp code that was executed (or nil if parsing failed)
-  - `result_preview` - Truncated result string (max #{@max_result_preview_length} chars)
-  - `type` - Turn type: `:normal`, `:retry`, or `:must_return`
+  - `state` - Current loop state
+  - `turn_start` - Monotonic timestamp when turn started
+  - `turn_tokens` - Optional token counts from LLM call (overrides state.turn_tokens if provided)
   """
-  @spec emit_turn_stop_if_final(term(), SubAgent.t(), map(), integer(), keyword()) :: :ok
-  def emit_turn_stop_if_final(result, agent, state, turn_start, opts \\ [])
+  @spec emit_turn_stop_immediate(Turn.t() | nil, SubAgent.t(), map(), integer(), map() | nil) ::
+          :ok
+  def emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens \\ nil) do
+    turn_duration = System.monotonic_time() - turn_start
+    # Use explicit turn_tokens if provided, otherwise fall back to state.turn_tokens
+    tokens = turn_tokens || state.turn_tokens
+    measurements = build_turn_measurements(turn_duration, tokens)
+    turn_type = Map.get(state, :current_turn_type, :normal)
 
-  def emit_turn_stop_if_final({status, step} = _result, agent, state, turn_start, opts)
-      when status in [:ok, :error] do
-    # Only emit for the turn that actually completed this execution
-    # The recursive loop means intermediate turns will see the final result bubble up,
-    # but we only want to emit once for the actual final turn
-    final_turn_count = step.usage[:turns] || 0
-    current_turn = state.turn
+    # Extract program and result preview from turn (nil-safe)
+    {program, result_preview} =
+      case turn do
+        nil -> {nil, "nil"}
+        %Turn{} -> {turn.program, build_result_preview(turn.result)}
+      end
 
-    # Only emit if this is the turn that finished the execution
-    # (current_turn should match the total turn count in the final step)
-    if current_turn == final_turn_count do
-      turn_duration = System.monotonic_time() - turn_start
-      measurements = build_turn_measurements(turn_duration, state.turn_tokens)
-
-      program = Keyword.get(opts, :program)
-      turn_type = Map.get(state, :current_turn_type, :normal)
-
-      # Build result preview from step.return
-      result_preview = build_result_preview(step.return)
-
-      Telemetry.emit([:turn, :stop], measurements, %{
-        agent: agent,
-        turn: state.turn,
-        program: program,
-        result_preview: result_preview,
-        type: turn_type
-      })
-    end
+    Telemetry.emit([:turn, :stop], measurements, %{
+      agent: agent,
+      turn: state.turn,
+      program: program,
+      result_preview: result_preview,
+      type: turn_type
+    })
 
     :ok
   end

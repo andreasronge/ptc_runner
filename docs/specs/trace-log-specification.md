@@ -960,13 +960,12 @@ The existing telemetry events have some gaps that affect trace completeness:
 
 | Gap | Current State | Impact | Workaround |
 |-----|---------------|--------|------------|
-| **turn.stop missing program** | `program: nil` always | Cannot see which PTC-Lisp code executed per turn | Extract from `llm.stop` response (brittle) |
-| **turn.stop missing result** | Not included | Cannot see turn execution result | Use `run.stop` step.turns |
-| **turn type not included** | Not in telemetry | Cannot track retries | Count from step.turns post-hoc |
 | **Tool args/results summarized** | Truncated if >1KB | Large tool data not captured | Acceptable trade-off for memory |
 | **No span_id in events** | Not included | Cannot correlate start/stop pairs | TraceLog must track via process dict |
 | **No parent_span_id** | Not included | Cannot build hierarchy | TraceLog must track via process dict |
 | **No nested agent context** | Not propagated | Cannot link parent/child traces | Must pass context manually via SubAgent.run opts |
+
+**Note:** `turn.stop` now includes `program`, `result_preview`, and `type` for all turns (including intermediate `:loop` turns), making the executed code and results available as structured data without needing to parse LLM responses.
 
 ### Recommended Telemetry Enhancements
 
@@ -981,16 +980,6 @@ This is the **right architectural fix** that benefits all telemetry consumers:
 - Enables correlation across any handler
 
 Implementation: Update `PtcRunner.SubAgent.Telemetry.span/3` to generate and propagate span IDs in metadata.
-
-#### High Priority Enhancements (turn.stop)
-
-These enhancements to `[:ptc_runner, :sub_agent, :turn, :stop]` are strongly recommended for TraceLog stability:
-
-1. **Add `program`** - Pass actual program code in metadata (avoids brittle LLM response parsing)
-2. **Add `result_preview`** - Include truncated result for per-turn debugging
-3. **Add `type`** - Include turn type (`:normal`, `:retry`, `:chained`) for retry tracking
-
-Without these, TraceLog must use fragile workarounds that are prone to parsing errors. Implementing these in Telemetry makes TraceLog much simpler and more reliable.
 
 #### Nested Agent Context Propagation
 
@@ -1011,13 +1000,10 @@ This allows TraceLog to automatically include `parent_trace_id`, `parent_span_id
 
 ### Workarounds (if telemetry not enhanced)
 
-TraceLog can work around gaps, but with caveats:
+TraceLog can work around remaining gaps:
 
 | Gap | Workaround | Caveat |
 |-----|------------|--------|
-| Missing program | Parse code block from `llm.stop` response | Brittle - LLMs may format differently, multiple code blocks, etc. |
-| Missing result | Get from `run.stop` step.turns | Only available at end, not per-turn |
-| Missing turn type | Count from `run.stop` step.turns | Only available at end; cannot track per-turn |
 | No span_id | Track via process dict stack | Works but adds complexity, potential for bugs |
 
 ### Nested Agent Tracing
