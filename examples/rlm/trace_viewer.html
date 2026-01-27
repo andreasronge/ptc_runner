@@ -352,6 +352,30 @@
         <div class="summary-label">Children</div>
       </div>
     </div>
+    <div id="aggregateStats" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: none;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <span style="color: var(--muted); font-size: 12px; text-transform: uppercase;">Total (including children)</span>
+        <button class="btn" id="loadChildrenBtn" style="font-size: 11px; padding: 4px 10px;">Load All Children</button>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-value" id="totalTurns">-</div>
+          <div class="summary-label">Total Turns</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" id="totalLLM">-</div>
+          <div class="summary-label">Total LLM Calls</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" id="totalTokens">-</div>
+          <div class="summary-label">Total Tokens</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" id="loadedChildren">-</div>
+          <div class="summary-label">Loaded</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="timeline" id="timeline">
@@ -473,6 +497,15 @@
       document.getElementById('summaryTokens').textContent = totalTokens.toLocaleString();
       document.getElementById('summaryChildren').textContent = childIds.length;
 
+      // Show aggregate stats section if there are children
+      const aggregateSection = document.getElementById('aggregateStats');
+      if (childIds.length > 0) {
+        aggregateSection.style.display = 'block';
+        updateAggregateStats();
+      } else {
+        aggregateSection.style.display = 'none';
+      }
+
       // Timeline
       timeline.classList.add('visible');
       renderTimeline(paired, totalDuration);
@@ -565,7 +598,12 @@
     }
 
     function renderEvents(pairs) {
-      const filtered = currentFilter === 'all' ? pairs : pairs.filter(p => p.type === currentFilter);
+      // Filter out low-value structural events (turn, run) - their info is shown elsewhere
+      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls'];
+      let filtered = pairs.filter(p => displayableTypes.includes(p.type));
+      if (currentFilter !== 'all') {
+        filtered = filtered.filter(p => p.type === currentFilter);
+      }
       eventsContainer.innerHTML = filtered.map(pair => renderEventCard(pair)).join('');
 
       // Add click handlers
@@ -744,6 +782,93 @@
       div.textContent = text;
       return div.innerHTML;
     }
+
+    // Aggregate stats across all loaded traces
+    function updateAggregateStats() {
+      let totalTurns = 0;
+      let totalLLM = 0;
+      let totalTokens = 0;
+      let loadedCount = 0;
+
+      // Get child IDs from current trace
+      const mainData = loadedFiles.get(currentFile);
+      const childIds = mainData ? extractChildTraceIds(mainData.events) : [];
+
+      for (const [name, data] of loadedFiles) {
+        const paired = pairEvents(data.events);
+        const llmEvents = paired.filter(e => e.type === 'llm');
+        const maxTurn = llmEvents.reduce((max, e) => Math.max(max, e.stop?.metadata?.turn || 0), 0);
+
+        totalTurns += maxTurn;
+        totalLLM += llmEvents.length;
+        totalTokens += llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
+
+        // Count how many children are loaded
+        if (childIds.includes(data.traceId)) loadedCount++;
+      }
+
+      document.getElementById('totalTurns').textContent = totalTurns;
+      document.getElementById('totalLLM').textContent = totalLLM;
+      document.getElementById('totalTokens').textContent = totalTokens.toLocaleString();
+      document.getElementById('loadedChildren').textContent = loadedCount + ' / ' + childIds.length;
+
+      // Update button state
+      const btn = document.getElementById('loadChildrenBtn');
+      if (loadedCount >= childIds.length) {
+        btn.textContent = 'All Loaded';
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+      } else {
+        btn.textContent = 'Load All Children';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }
+
+    // Load all child traces from the server
+    async function loadAllChildren() {
+      const mainData = loadedFiles.get(currentFile);
+      if (!mainData) return;
+
+      const childIds = extractChildTraceIds(mainData.events);
+      const btn = document.getElementById('loadChildrenBtn');
+      btn.textContent = 'Loading...';
+      btn.disabled = true;
+
+      let loaded = 0;
+      for (const childId of childIds) {
+        // Skip if already loaded
+        if (findFileByTraceId(childId)) continue;
+
+        // Try to fetch the child trace file
+        const filename = 'trace_' + childId + '.jsonl';
+        try {
+          const response = await fetch('traces/' + filename);
+          if (response.ok) {
+            const text = await response.text();
+            const events = parseJsonl(text);
+            const traceId = extractTraceId(events);
+            loadedFiles.set(filename, { events, traceId, filename });
+            loaded++;
+          }
+        } catch (e) {
+          console.log('Could not load ' + filename);
+        }
+      }
+
+      updateFileList();
+      updateAggregateStats();
+
+      if (loaded > 0) {
+        btn.textContent = 'Loaded ' + loaded + ' files';
+      } else {
+        btn.textContent = 'All Loaded';
+      }
+      setTimeout(() => updateAggregateStats(), 100);
+    }
+
+    // Wire up the load children button
+    document.getElementById('loadChildrenBtn').addEventListener('click', loadAllChildren);
   </script>
 </body>
 </html>
