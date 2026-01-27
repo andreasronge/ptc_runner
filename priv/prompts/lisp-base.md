@@ -65,5 +65,18 @@ data/products                      ; read-only input data
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
 | `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |
+| `(grep text pattern)` | `(grep pattern text)` — pattern first, like Unix grep |
+
+### Line Search (grep)
+
+```clojure
+(grep "error" text)              ; => ["error: first" "error: second"]
+(grep-n "agent_42" corpus)       ; => [{:line 4523 :text "agent_42 code: XYZ"}]
+
+; Access line number from result
+(def matches (grep-n "error" log))
+(:line (first matches))          ; => 1
+(:text (first matches))          ; => "error: connection failed"
+```
 
 <!-- PTC_PROMPT_END -->
