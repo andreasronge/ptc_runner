@@ -458,12 +458,17 @@
       // Summary
       summary.classList.add('visible');
       const llmEvents = paired.filter(e => e.type === 'llm');
-      const totalDuration = events.find(e => e.event === 'trace.stop')?.duration_ms || 0;
+      // Duration from run.stop (primary) or trace.stop (fallback)
+      const runStop = events.find(e => e.event === 'run.stop');
+      const traceStop = events.find(e => e.event === 'trace.stop');
+      const totalDuration = runStop?.duration_ms || traceStop?.duration_ms || 0;
       const totalTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
       const childIds = extractChildTraceIds(events);
 
       document.getElementById('summaryDuration').textContent = formatDuration(totalDuration);
-      document.getElementById('summaryTurns').textContent = paired.filter(e => e.type === 'turn').length;
+      // Count turns from LLM events (max turn number)
+      const maxTurn = llmEvents.reduce((max, e) => Math.max(max, e.stop?.metadata?.turn || 0), 0);
+      document.getElementById('summaryTurns').textContent = maxTurn;
       document.getElementById('summaryLLM').textContent = llmEvents.length;
       document.getElementById('summaryTokens').textContent = totalTokens.toLocaleString();
       document.getElementById('summaryChildren').textContent = childIds.length;
@@ -485,14 +490,21 @@
       for (const event of events) {
         if (!event.event) continue;
         const [type, action] = event.event.split('.');
+
+        // Use span_id for pairing (most reliable), fallback to type+turn/tool_name
+        const spanId = event.span_id;
+        const key = spanId ? `${type}-${spanId}` : `${type}-${event.metadata?.turn || event.metadata?.tool_name || ''}`;
+
         if (action === 'start') {
-          const key = `${type}-${event.metadata?.turn || event.metadata?.tool_name || ''}`;
           pending[key] = event;
         } else if (action === 'stop') {
-          const key = `${type}-${event.metadata?.turn || event.metadata?.tool_name || ''}`;
-          if (pending[key]) {
-            pairs.push({ type, start: pending[key], stop: event });
+          const startEvent = pending[key];
+          if (startEvent) {
+            pairs.push({ type, start: startEvent, stop: event });
             delete pending[key];
+          } else {
+            // No matching start - create a stop-only pair for display
+            pairs.push({ type, start: null, stop: event });
           }
         }
       }
@@ -513,23 +525,43 @@
       timelineBar.innerHTML = '';
       if (!totalDuration) return;
 
-      let offset = 0;
+      // Get the start timestamp as reference
+      const startTs = getEarliestTimestamp(pairs);
+
       for (const pair of pairs) {
         if (!['llm', 'tool', 'pmap'].includes(pair.type)) continue;
         const duration = pair.stop?.duration_ms || 0;
+        if (duration === 0) continue;
+
+        // Calculate position based on timestamps if available
+        let left = 0;
+        if (pair.start?.timestamp && startTs) {
+          const eventStart = new Date(pair.start.timestamp).getTime();
+          const offsetMs = eventStart - startTs;
+          left = (offsetMs / totalDuration) * 100;
+        }
+
         const width = (duration / totalDuration) * 100;
-        const left = (offset / totalDuration) * 100;
 
         const segment = document.createElement('div');
         segment.className = `timeline-segment ${pair.type}`;
-        segment.style.left = `${left}%`;
-        segment.style.width = `${Math.max(width, 0.5)}%`;
+        segment.style.left = `${Math.max(0, left)}%`;
+        segment.style.width = `${Math.max(width, 1)}%`;
         segment.textContent = pair.type === 'llm' ? `T${pair.stop?.metadata?.turn || '?'}` : pair.type;
         segment.title = `${pair.type}: ${formatDuration(duration)}`;
         timelineBar.appendChild(segment);
-
-        offset += duration;
       }
+    }
+
+    function getEarliestTimestamp(pairs) {
+      let earliest = null;
+      for (const pair of pairs) {
+        if (pair.start?.timestamp) {
+          const ts = new Date(pair.start.timestamp).getTime();
+          if (!earliest || ts < earliest) earliest = ts;
+        }
+      }
+      return earliest;
     }
 
     function renderEvents(pairs) {
@@ -675,15 +707,17 @@
     }
 
     function highlightLisp(code) {
+      // Important: Use single quotes for HTML attributes to avoid conflict
+      // with the double-quote string pattern in Lisp
       return escapeHtml(code)
-        .replace(/;[^\n]*/g, '<span class="comment">$&</span>')
-        .replace(/\b(def|defn|let|if|cond|when|do|fn|loop|recur|return|fail|pmap|pcalls|doseq|for)\b/g, '<span class="keyword">$1</span>')
-        .replace(/\b(map|filter|reduce|first|rest|count|get|assoc|conj|into|take|drop|distinct|concat|str|println|inc|dec)\b/g, '<span class="builtin">$1</span>')
-        .replace(/"([^"\\]|\\.)*"/g, '<span class="string">$&</span>')
-        .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>')
-        .replace(/:([\w-]+)/g, '<span class="symbol">:$1</span>')
-        .replace(/data\/[\w-]+/g, '<span class="symbol">$&</span>')
-        .replace(/tool\/[\w-]+/g, '<span class="builtin">$&</span>');
+        .replace(/;[^\n]*/g, "<span class='comment'>$&</span>")
+        .replace(/\b(def|defn|let|if|cond|when|do|fn|loop|recur|return|fail|pmap|pcalls|doseq|for)\b/g, "<span class='keyword'>$1</span>")
+        .replace(/\b(map|filter|reduce|first|rest|count|get|assoc|conj|into|take|drop|distinct|concat|str|println|inc|dec)\b/g, "<span class='builtin'>$1</span>")
+        .replace(/"([^"\\]|\\.)*"/g, "<span class='string'>$&</span>")
+        .replace(/\b(\d+\.?\d*)\b/g, "<span class='number'>$1</span>")
+        .replace(/:([\w-]+)/g, "<span class='symbol'>:$1</span>")
+        .replace(/data\/[\w-]+/g, "<span class='symbol'>$&</span>")
+        .replace(/tool\/[\w-]+/g, "<span class='builtin'>$&</span>");
     }
 
     function findFileByTraceId(traceId) {
