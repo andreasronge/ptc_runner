@@ -35,14 +35,14 @@ defmodule RlmRecursive do
   alias PtcRunner.SubAgent
   alias PtcRunner.TraceLog
   alias RlmRecursive.{Agent, Scorer}
-  alias RlmRecursive.Generators.{SNIAH, Counting, Pairs}
+  alias RlmRecursive.Generators.{SNIAH, Counting, Pairs, SemanticPairs}
 
   @doc """
   Run a benchmark with the specified options.
 
   ## Options
 
-    * `:benchmark` - `:sniah`, `:counting`, or `:pairs` (default: `:sniah`)
+    * `:benchmark` - `:sniah`, `:counting`, `:pairs`, or `:semantic_pairs` (default: `:sniah`)
     * `:lines` - Corpus size for S-NIAH (default: 1000)
     * `:profiles` - Number of profiles for counting/pairs (default: 500)
     * `:seed` - Random seed for reproducibility (default: 42)
@@ -222,6 +222,56 @@ defmodule RlmRecursive do
     {result, trace_path} = execute_with_tracing(agent, run_opts, trace?)
 
     # Score the result
+    score =
+      case result do
+        {:ok, step} -> Scorer.score(:pairs, step.return, data.ground_truth)
+        {:error, _} -> %{correct: false, expected: data.ground_truth.count, actual: nil}
+      end
+
+    if verbose?, do: print_result(result, score, trace_path)
+
+    %{result: result, score: score, trace_path: trace_path, data: data}
+  end
+
+  def run_benchmark(:semantic_pairs, opts) do
+    profiles = Keyword.get(opts, :profiles, 40)
+    seed = Keyword.get(opts, :seed, 42)
+    trace? = Keyword.get(opts, :trace, false)
+    verbose? = Keyword.get(opts, :verbose, true)
+
+    llm =
+      Keyword.get_lazy(opts, :llm, fn ->
+        load_aws_credentials_if_needed()
+        LLMClient.callback("bedrock:sonnet")
+      end)
+
+    if verbose?,
+      do: IO.puts("Generating semantic pairs corpus (#{profiles} profiles, seed #{seed})...")
+
+    data = SemanticPairs.generate(profiles: profiles, seed: seed)
+
+    if verbose? do
+      IO.puts("Expected pairs: #{data.ground_truth.count}")
+      IO.puts("Query: #{String.slice(data.query, 0, 100)}...")
+      IO.puts("\n=== Starting Semantic Pairs Benchmark (LLM judgment per pair!) ===\n")
+    end
+
+    agent = Agent.new(:semantic_pairs, llm: llm)
+
+    # Semantic evaluation needs more resources
+    run_opts = [
+      context: %{"corpus" => data.corpus},
+      llm: llm,
+      max_turns: 30,
+      timeout: 600_000,
+      pmap_timeout: 120_000,
+      max_heap: 200_000_000,
+      token_limit: 300_000,
+      on_budget_exceeded: :return_partial
+    ]
+
+    {result, trace_path} = execute_with_tracing(agent, run_opts, trace?)
+
     score =
       case result do
         {:ok, step} -> Scorer.score(:pairs, step.return, data.ground_truth)
