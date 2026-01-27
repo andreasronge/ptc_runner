@@ -64,6 +64,7 @@ data/products                      ; read-only input data
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
+| `(take (/ n 2) coll)` | `(take (quot n 2) coll)` — `/` returns float |
 | `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |
 | `(grep text pattern)` | `(grep pattern text)` — pattern first, like Unix grep |
 
