@@ -32,6 +32,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{JsonParser, KeyNormalizer, Signature, Telemetry}
   alias PtcRunner.SubAgent.Loop.{LLMRetry, Metrics}
+  alias PtcRunner.Turn
 
   # Load JSON prompt templates at compile time
   @prompts_dir Path.join(__DIR__, "../../../../priv/prompts")
@@ -106,7 +107,148 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
       |> Map.put(:schema, build_schema(agent))
       |> Map.put(:json_mode, true)
 
-    json_loop(agent, llm, json_state)
+    json_driver_loop(agent, llm, json_state)
+  end
+
+  # ============================================================
+  # Termination Checks
+  # ============================================================
+
+  # Check all termination conditions before executing a turn.
+  # Returns {:stop, result} to terminate or :continue to proceed.
+  @spec check_json_termination(SubAgent.t(), map()) :: {:stop, {:error, Step.t()}} | :continue
+  defp check_json_termination(agent, state) do
+    cond do
+      # Max turns exceeded
+      state.turn > agent.max_turns ->
+        {:stop,
+         build_termination_error(
+           :max_turns_exceeded,
+           "Exceeded max_turns limit of #{agent.max_turns}",
+           state
+         )}
+
+      # Global turn budget exhausted
+      state.remaining_turns <= 0 ->
+        {:stop, build_termination_error(:turn_budget_exhausted, "Turn budget exhausted", state)}
+
+      # Mission timeout exceeded
+      state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) ->
+        {:stop, build_termination_error(:mission_timeout, "Mission timeout exceeded", state)}
+
+      true ->
+        :continue
+    end
+  end
+
+  # ============================================================
+  # Iterative Driver Loop (TCO-friendly)
+  # ============================================================
+
+  # Main iterative loop that drives JSON mode execution.
+  # Emits telemetry immediately after each turn completes.
+  @spec json_driver_loop(SubAgent.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
+  defp json_driver_loop(agent, llm, state) do
+    case check_json_termination(agent, state) do
+      {:stop, result} ->
+        result
+
+      :continue ->
+        # JSON mode always uses :normal turn type
+        state = Map.put(state, :current_turn_type, :normal)
+
+        # Emit turn start event (consistent metadata with PTC-Lisp mode)
+        Telemetry.emit([:turn, :start], %{}, %{
+          agent: agent,
+          turn: state.turn,
+          type: :normal,
+          tools_count: 0
+        })
+
+        turn_start = System.monotonic_time()
+
+        # Execute single turn - returns signal
+        case execute_json_turn(agent, llm, state) do
+          {:continue, next_state, turn} ->
+            # Emit turn stop IMMEDIATELY (not batched)
+            Metrics.emit_turn_stop_immediate(
+              turn,
+              agent,
+              state,
+              turn_start,
+              next_state.turn_tokens
+            )
+
+            # TCO: tail-recursive call
+            json_driver_loop(agent, llm, next_state)
+
+          {:stop, result, turn, turn_tokens} ->
+            # Emit turn stop for final turn
+            Metrics.emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens)
+            result
+        end
+    end
+  end
+
+  # Execute a single JSON mode turn
+  @spec execute_json_turn(SubAgent.t(), term(), map()) ::
+          {:continue, map(), Turn.t()}
+          | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
+  defp execute_json_turn(agent, llm, state) do
+    # Build prompts
+    system_prompt = @json_system_prompt
+
+    # For first turn, build user message from template
+    # For subsequent turns, use accumulated messages
+    messages =
+      if state.turn == 1 do
+        user_message = build_user_message(agent, state)
+        [%{role: :user, content: user_message}]
+      else
+        state.messages
+      end
+
+    # Build LLM input with JSON mode indicator
+    llm_input = %{
+      system: system_prompt,
+      messages: messages,
+      turn: state.turn,
+      output: :json,
+      schema: state.schema,
+      cache: state.cache
+    }
+
+    # Call LLM with telemetry
+    case call_llm_with_telemetry(llm, llm_input, state, agent) do
+      {:ok, %{content: content, tokens: tokens}} ->
+        state_with_tokens =
+          state
+          |> Metrics.accumulate_tokens(tokens)
+          |> Map.put(:current_messages, messages)
+          |> Map.put(:current_system_prompt, system_prompt)
+
+        handle_json_response(content, agent, state_with_tokens)
+
+      {:error, reason} ->
+        duration_ms = System.monotonic_time(:millisecond) - state.start_time
+        step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", %{})
+
+        usage =
+          state
+          |> Metrics.build_final_usage(duration_ms, 0)
+          |> add_schema_metrics(state.schema)
+
+        step_with_metrics = %{
+          step
+          | usage: usage,
+            turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+            messages: build_collected_messages(state, messages),
+            prompt: state.expanded_prompt,
+            original_prompt: state.original_prompt
+        }
+
+        {:stop, {:error, step_with_metrics}, nil, nil}
+    end
   end
 
   # Build JSON schema from agent's parsed signature (or nil if no signature)
@@ -114,113 +256,6 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     do: Signature.to_json_schema(sig)
 
   defp build_schema(_), do: nil
-
-  # Loop when max_turns exceeded
-  defp json_loop(agent, _llm, state) when state.turn > agent.max_turns do
-    build_termination_error(
-      :max_turns_exceeded,
-      "Exceeded max_turns limit of #{agent.max_turns}",
-      state
-    )
-  end
-
-  # Check turn budget before each turn (guard clause)
-  defp json_loop(_agent, _llm, state) when state.remaining_turns <= 0 do
-    build_termination_error(:turn_budget_exhausted, "Turn budget exhausted", state)
-  end
-
-  # Main loop iteration
-  defp json_loop(agent, llm, state) do
-    # Check mission timeout before each turn
-    if state.mission_deadline && mission_timeout_exceeded?(state.mission_deadline) do
-      build_termination_error(:mission_timeout, "Mission timeout exceeded", state)
-    else
-      # JSON mode always uses :normal turn type (no must_return/retry phases)
-      state = Map.put(state, :current_turn_type, :normal)
-
-      # Emit turn start event
-      Telemetry.emit([:turn, :start], %{}, %{agent: agent, turn: state.turn})
-      turn_start = System.monotonic_time()
-
-      # Build prompts
-      system_prompt = @json_system_prompt
-
-      # For first turn, build user message from template
-      # For subsequent turns, use accumulated messages (which include error feedback)
-      messages =
-        if state.turn == 1 do
-          user_message = build_user_message(agent, state)
-          [%{role: :user, content: user_message}]
-        else
-          # Use accumulated messages from retries
-          state.messages
-        end
-
-      # Build LLM input with JSON mode indicator
-      llm_input = %{
-        system: system_prompt,
-        messages: messages,
-        turn: state.turn,
-        output: :json,
-        schema: state.schema,
-        cache: state.cache
-      }
-
-      # Call LLM with telemetry and retry logic
-      case call_llm_with_telemetry(llm, llm_input, state, agent) do
-        {:ok, %{content: content, tokens: tokens}} ->
-          # Accumulate tokens
-          state_with_tokens =
-            state
-            |> Metrics.accumulate_tokens(tokens)
-            |> Map.put(:current_messages, messages)
-            |> Map.put(:current_system_prompt, system_prompt)
-
-          result = handle_json_response(content, agent, llm, state_with_tokens)
-
-          # Emit turn stop event
-          # JSON mode doesn't have a program (uses nil), but we get it from the result anyway
-          program = Metrics.extract_program_from_result(result)
-
-          Metrics.emit_turn_stop_if_final(result, agent, state_with_tokens, turn_start,
-            program: program
-          )
-
-          result
-
-        {:error, reason} ->
-          duration_ms = System.monotonic_time(:millisecond) - state.start_time
-          step = Step.error(:llm_error, "LLM call failed: #{inspect(reason)}", %{})
-
-          # Build usage with schema metrics
-          usage =
-            state
-            |> Metrics.build_final_usage(duration_ms, 0)
-            |> add_schema_metrics(state.schema)
-
-          step_with_metrics = %{
-            step
-            | usage: usage,
-              turns:
-                Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-              messages: build_collected_messages(state, messages),
-              prompt: state.expanded_prompt,
-              original_prompt: state.original_prompt
-          }
-
-          # Emit turn stop on error
-          turn_duration = System.monotonic_time() - turn_start
-
-          Telemetry.emit([:turn, :stop], %{duration: turn_duration}, %{
-            agent: agent,
-            turn: state.turn,
-            program: nil
-          })
-
-          {:error, step_with_metrics}
-      end
-    end
-  end
 
   # Build user message from template
   defp build_user_message(agent, state) do
@@ -341,7 +376,11 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   end
 
   # Handle JSON response - parse and validate
-  defp handle_json_response(response, agent, llm, state) do
+  # Returns signal: {:continue, state, turn} or {:stop, result, turn, turn_tokens}
+  @spec handle_json_response(String.t(), SubAgent.t(), map()) ::
+          {:continue, map(), Turn.t()}
+          | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
+  defp handle_json_response(response, agent, state) do
     # Parse JSON from response
     case JsonParser.parse(response) do
       {:ok, parsed} when is_map(parsed) ->
@@ -349,31 +388,29 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
         if signature_expects_list?(agent.parsed_signature) do
           case Map.get(parsed, "items") || Map.get(parsed, :items) do
             items when is_list(items) ->
-              validate_and_complete_list(items, response, agent, llm, state)
+              validate_and_complete_list(items, response, agent, state)
 
             _ ->
               handle_parse_error(
                 "Expected {\"items\": [...]} wrapper for array response",
                 response,
                 agent,
-                llm,
                 state
               )
           end
         else
-          validate_and_complete(parsed, response, agent, llm, state)
+          validate_and_complete(parsed, response, agent, state)
         end
 
       {:ok, parsed} when is_list(parsed) ->
         # Direct array response (some LLMs may return this)
         if signature_expects_list?(agent.parsed_signature) do
-          validate_and_complete_list(parsed, response, agent, llm, state)
+          validate_and_complete_list(parsed, response, agent, state)
         else
           handle_parse_error(
             "Response must be a JSON object, not an array or primitive",
             response,
             agent,
-            llm,
             state
           )
         end
@@ -383,15 +420,14 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
           "Response must be a JSON object, not an array or primitive",
           response,
           agent,
-          llm,
           state
         )
 
       {:error, :no_json_found} ->
-        handle_parse_error("No valid JSON found in response", response, agent, llm, state)
+        handle_parse_error("No valid JSON found in response", response, agent, state)
 
       {:error, :invalid_json} ->
-        handle_parse_error("JSON parse error", response, agent, llm, state)
+        handle_parse_error("JSON parse error", response, agent, state)
     end
   end
 
@@ -400,18 +436,19 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp signature_expects_list?({:signature, _params, {:list, _}}), do: true
   defp signature_expects_list?(_), do: false
 
-  # Validate parsed list and complete or retry
-  defp validate_and_complete_list(parsed_list, response, agent, llm, state) do
+  # Validate parsed list and complete or retry - returns signal
+  defp validate_and_complete_list(parsed_list, response, agent, state) do
     # Atomize elements based on signature's inner type
     atomized = atomize_list(parsed_list, agent.parsed_signature)
 
     # Validate against signature
     case validate_return(agent, atomized) do
       :ok ->
-        build_success_step(atomized, response, state, agent)
+        {turn, step} = build_success_step(atomized, response, state, agent)
+        {:stop, {:ok, step}, turn, state.turn_tokens}
 
       {:error, validation_errors} ->
-        handle_validation_error(validation_errors, response, atomized, agent, llm, state)
+        handle_validation_error(validation_errors, response, agent, state)
     end
   end
 
@@ -423,18 +460,19 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
   defp atomize_list(list, _) when is_list(list), do: list
 
-  # Validate parsed JSON and complete or retry
-  defp validate_and_complete(parsed, response, agent, llm, state) do
+  # Validate parsed JSON and complete or retry - returns signal
+  defp validate_and_complete(parsed, response, agent, state) do
     # Convert string keys to atoms (safe - from signature)
     atomized = atomize_keys(parsed, agent.parsed_signature)
 
     # Validate against signature if present
     case validate_return(agent, atomized) do
       :ok ->
-        build_success_step(atomized, response, state, agent)
+        {turn, step} = build_success_step(atomized, response, state, agent)
+        {:stop, {:ok, step}, turn, state.turn_tokens}
 
       {:error, validation_errors} ->
-        handle_validation_error(validation_errors, response, atomized, agent, llm, state)
+        handle_validation_error(validation_errors, response, agent, state)
     end
   end
 
@@ -463,8 +501,6 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp atomize_keys(map, {:signature, _params, return_type}) when is_map(map) do
     atomize_value(map, return_type)
   end
-
-  defp atomize_keys(value, _sig), do: value
 
   # Atomize value based on expected type
   defp atomize_value(map, {:map, fields}) when is_map(map) do
@@ -506,27 +542,29 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     ArgumentError -> string
   end
 
-  # Handle parse error - retry with feedback
-  defp handle_parse_error(error, response, agent, llm, state) do
+  # Handle parse error - retry with feedback or return error signal
+  defp handle_parse_error(error, response, agent, state) do
     if state.turn >= agent.max_turns do
       # No more retries - return error
-      build_error_step(:json_parse_error, error, response, state, agent)
+      {turn, step} = build_error_step(:json_parse_error, error, response, state, agent)
+      {:stop, {:error, step}, turn, state.turn_tokens}
     else
       # Retry with error feedback
-      retry_with_feedback(error, response, nil, agent, llm, state)
+      retry_with_feedback(error, response, agent, state)
     end
   end
 
-  # Handle validation error - retry with feedback
-  defp handle_validation_error(errors, response, _parsed, agent, llm, state) do
+  # Handle validation error - retry with feedback or return error signal
+  defp handle_validation_error(errors, response, agent, state) do
     if state.turn >= agent.max_turns do
       # No more retries - return error
       error_msg = format_validation_errors(errors)
-      build_error_step(:validation_error, error_msg, response, state, agent)
+      {turn, step} = build_error_step(:validation_error, error_msg, response, state, agent)
+      {:stop, {:error, step}, turn, state.turn_tokens}
     else
       # Retry with error feedback
       error_msg = format_validation_errors(errors)
-      retry_with_feedback(error_msg, response, nil, agent, llm, state)
+      retry_with_feedback(error_msg, response, agent, state)
     end
   end
 
@@ -538,8 +576,10 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     end)
   end
 
-  # Retry with error feedback
-  defp retry_with_feedback(error, response, _parsed, agent, llm, state) do
+  # Retry with error feedback - returns {:continue, new_state, turn} signal
+  @spec retry_with_feedback(String.t(), String.t(), SubAgent.t(), map()) ::
+          {:continue, map(), Turn.t()}
+  defp retry_with_feedback(error, response, agent, state) do
     # Build error feedback message
     error_message = build_error_feedback(error, response, agent)
 
@@ -563,10 +603,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
               %{role: :user, content: error_message}
             ],
         turns: [turn | state.turns],
-        remaining_turns: state.remaining_turns - 1
+        remaining_turns: state.remaining_turns - 1,
+        # Preserve turn_tokens for telemetry
+        turn_tokens: state.turn_tokens
     }
 
-    json_loop(agent, llm, new_state)
+    {:continue, new_state, turn}
   end
 
   # Build error feedback message from template
@@ -586,7 +628,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     String.slice(string, 0, max_length) <> "..."
   end
 
-  # Build success step
+  # Build success step - returns {turn, step} tuple for signal construction
   defp build_success_step(return_value, response, state, agent) do
     # Normalize return value keys (hyphen -> underscore at boundary)
     normalized_return = KeyNormalizer.normalize_keys(return_value)
@@ -630,10 +672,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
       tool_calls: []
     }
 
-    {:ok, final_step}
+    {turn, final_step}
   end
 
-  # Build error step
+  # Build error step - returns {turn, step} tuple for signal construction
+  @spec build_error_step(atom(), String.t(), String.t(), map(), SubAgent.t()) ::
+          {Turn.t(), Step.t()}
   defp build_error_step(reason, message, response, state, _agent) do
     # Build Turn struct
     turn =
@@ -671,7 +715,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
         original_prompt: state.original_prompt
     }
 
-    {:error, final_step}
+    {turn, final_step}
   end
 
   # Build termination error (max_turns, turn_budget, mission_timeout)

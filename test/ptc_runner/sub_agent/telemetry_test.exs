@@ -110,7 +110,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
   end
 
   describe "turn events" do
-    test "emits :turn :start for each turn, :stop only for final turn", %{table: table} do
+    test "emits :turn :start and :stop for each turn immediately", %{table: table} do
       agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 5)
 
       llm = fn %{turn: turn} ->
@@ -129,8 +129,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       # Start events for each turn
       assert length(turn_starts) == 2
 
-      # Stop event only for final turn (turn.stop is only emitted for final results)
-      assert length(turn_stops) == 1
+      # Stop event for EVERY turn (emitted immediately after each turn completes)
+      assert length(turn_stops) == 2
 
       # Check first turn event
       first_start =
@@ -143,10 +143,11 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert start_meta.agent == agent
       assert start_meta.turn == 1
 
-      # Check turn stop has duration
-      [{_, stop_measurements, _stop_meta, _}] = turn_stops
-      assert is_integer(stop_measurements.duration)
-      assert stop_measurements.duration > 0
+      # Check turn stop has duration (all stop events should have duration)
+      Enum.each(turn_stops, fn {_, stop_measurements, _stop_meta, _} ->
+        assert is_integer(stop_measurements.duration)
+        assert stop_measurements.duration > 0
+      end)
     end
   end
 
