@@ -2226,6 +2226,30 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 (< (str d1) (str d2))  ; lexicographical comparison works for YYYY-MM-DD
 ```
 
+### 8.14 String Methods (Java Interop)
+
+PTC-Lisp supports Java-style string methods for common operations.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `.indexOf` | `(.indexOf s substr)` | Index of first occurrence, or -1 if not found |
+| `.indexOf` | `(.indexOf s substr from)` | Index of first occurrence starting from position |
+| `.lastIndexOf` | `(.lastIndexOf s substr)` | Index of last occurrence, or -1 if not found |
+
+```clojure
+(.indexOf "hello" "ll")      ; => 2
+(.indexOf "hello" "x")       ; => -1
+(.indexOf "hello" "l" 3)     ; => 3 (finds second 'l')
+(.lastIndexOf "hello" "l")   ; => 3 (last 'l')
+```
+
+**Return Value**: These methods return -1 when the substring is not found (Java semantics), unlike Clojure which returns nil.
+
+**Errors**: Passing a non-string raises a descriptive error:
+```clojure
+(.indexOf 123 "x")  ; => error: .indexOf: expected string, got integer
+```
+
 ---
 
 ---

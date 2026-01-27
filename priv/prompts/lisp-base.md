@@ -62,7 +62,6 @@ data/products                      ; read-only input data
 | `(-> coll (filter f))` | `(->> coll (filter f))` |
 | `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
 | `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
-| `(.indexOf s "x")` | No Java interop — use `(includes? s "x")` to check presence |
 | `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
 | `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
 | `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |

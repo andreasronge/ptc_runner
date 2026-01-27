@@ -90,9 +90,10 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert {:error, step} = Lisp.run("(.toString date)")
       msg = step.fail.message
       assert msg =~ "Unknown method '.toString'"
-
-      assert msg =~
-               "Supported interop methods: java.util.Date., .getTime, System/currentTimeMillis"
+      assert msg =~ "Supported interop methods:"
+      assert msg =~ ".getTime"
+      assert msg =~ ".indexOf"
+      assert msg =~ ".lastIndexOf"
     end
 
     test "Runtime error on nil in .getTime (raised exception)" do
@@ -136,6 +137,113 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     test "LocalDate/parse error on nil" do
       assert {:error, step} = Lisp.run("(LocalDate/parse nil)")
       assert step.fail.message =~ "LocalDate/parse: cannot parse nil"
+    end
+  end
+
+  describe ".indexOf" do
+    test "finds substring" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "ll")|)
+      assert step.return == 2
+    end
+
+    test "returns -1 when not found" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "x")|)
+      assert step.return == -1
+    end
+
+    test "with from-index" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "l" 3)|)
+      assert step.return == 3
+    end
+
+    test "with from-index beyond match" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "l" 4)|)
+      assert step.return == -1
+    end
+
+    test "with negative from-index treated as 0" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "h" -5)|)
+      assert step.return == 0
+    end
+
+    test "error on non-string" do
+      assert {:error, step} = Lisp.run("(.indexOf 123 \"x\")")
+      assert step.fail.message =~ ".indexOf: expected string, got integer"
+    end
+
+    # Grapheme-based indexing tests (critical for multi-byte characters)
+    test "returns grapheme index, not byte offset, for emoji" do
+      # "🍎alt" - emoji is 1 grapheme but 4 bytes
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "🍎alt" "alt")|)
+      assert step.return == 1
+    end
+
+    test "works with subs for multi-byte characters" do
+      # The index returned should work correctly with subs
+      assert {:ok, step} = Lisp.run(~s|(let [s "🍎alt"] (subs s (.indexOf s "alt")))|)
+      assert step.return == "alt"
+    end
+
+    test "handles multiple emoji correctly" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "🍎🍊🍋fruit" "fruit")|)
+      assert step.return == 3
+    end
+
+    # Empty substring tests (Java semantics)
+    test "empty substring returns 0" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "")|)
+      assert step.return == 0
+    end
+
+    test "empty substring with from-index returns min(from, length)" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "abc" "" 3)|)
+      assert step.return == 3
+    end
+
+    test "empty substring with from-index beyond length returns length" do
+      assert {:ok, step} = Lisp.run(~s|(.indexOf "abc" "" 10)|)
+      assert step.return == 3
+    end
+  end
+
+  describe ".lastIndexOf" do
+    test "finds last occurrence" do
+      assert {:ok, step} = Lisp.run(~s|(.lastIndexOf "hello" "l")|)
+      assert step.return == 3
+    end
+
+    test "returns -1 when not found" do
+      assert {:ok, step} = Lisp.run(~s|(.lastIndexOf "hello" "x")|)
+      assert step.return == -1
+    end
+
+    test "error on non-string" do
+      assert {:error, step} = Lisp.run("(.lastIndexOf [] \"x\")")
+      assert step.fail.message =~ ".lastIndexOf: expected string, got list"
+    end
+
+    # Grapheme-based indexing tests
+    test "returns grapheme index for emoji" do
+      # "alt🍎alt" = a(0) l(1) t(2) 🍎(3) a(4) l(5) t(6)
+      # Last "alt" starts at index 4
+      assert {:ok, step} = Lisp.run(~s|(.lastIndexOf "alt🍎alt" "alt")|)
+      assert step.return == 4
+    end
+
+    test "works with subs for multi-byte characters" do
+      assert {:ok, step} = Lisp.run(~s|(let [s "🍎x🍊x"] (subs s (.lastIndexOf s "x")))|)
+      assert step.return == "x"
+    end
+
+    # Empty substring tests (Java semantics)
+    test "empty substring returns string length" do
+      assert {:ok, step} = Lisp.run(~s|(.lastIndexOf "hello" "")|)
+      assert step.return == 5
+    end
+
+    test "empty substring on empty string returns 0" do
+      assert {:ok, step} = Lisp.run(~s|(.lastIndexOf "" "")|)
+      assert step.return == 0
     end
   end
 end
