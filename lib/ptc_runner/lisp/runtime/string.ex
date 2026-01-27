@@ -158,6 +158,29 @@ defmodule PtcRunner.Lisp.Runtime.String do
     String.contains?(s, substring)
   end
 
+  @doc """
+  Return lines containing the pattern (literal substring match).
+  - (grep "error" text) returns lines containing "error"
+  - (grep "" "a\nb") returns ["a", "b"] (empty pattern matches all)
+  """
+  def grep(pattern, text) when is_binary(pattern) and is_binary(text) do
+    text
+    |> split_lines()
+    |> Enum.filter(&String.contains?(&1, pattern))
+  end
+
+  @doc """
+  Return lines containing the pattern with 1-based line numbers.
+  - (grep-n "error" text) returns [{:line 1 :text "error here"} ...]
+  """
+  def grep_n(pattern, text) when is_binary(pattern) and is_binary(text) do
+    text
+    |> split_lines()
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _idx} -> String.contains?(line, pattern) end)
+    |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
+  end
+
   # ============================================================
   # String Parsing
   # ============================================================

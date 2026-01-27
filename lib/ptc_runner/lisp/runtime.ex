@@ -193,6 +193,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate starts_with?(s, prefix), to: RuntimeString
   defdelegate ends_with?(s, suffix), to: RuntimeString
   defdelegate includes?(s, substring), to: RuntimeString
+  defdelegate grep(pattern, text), to: RuntimeString
+  defdelegate grep_n(pattern, text), to: RuntimeString
 
   # ============================================================
   # String Parsing
