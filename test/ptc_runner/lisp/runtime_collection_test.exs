@@ -815,6 +815,90 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
     end
   end
 
+  describe "take_last" do
+    test "returns last n elements of a list" do
+      assert Runtime.take_last(2, [1, 2, 3, 4]) == [3, 4]
+    end
+
+    test "returns all elements when n > length" do
+      assert Runtime.take_last(5, [1, 2]) == [1, 2]
+    end
+
+    test "returns all elements when n = length" do
+      assert Runtime.take_last(3, [1, 2, 3]) == [1, 2, 3]
+    end
+
+    test "returns empty list when n is 0" do
+      assert Runtime.take_last(0, [1, 2, 3]) == []
+    end
+
+    test "returns empty list when n is negative" do
+      assert Runtime.take_last(-1, [1, 2, 3]) == []
+      assert Runtime.take_last(-5, [1, 2, 3]) == []
+    end
+
+    test "returns empty list for empty list" do
+      assert Runtime.take_last(2, []) == []
+    end
+
+    test "returns empty list for nil" do
+      assert Runtime.take_last(2, nil) == []
+    end
+
+    test "returns list of graphemes for string" do
+      assert Runtime.take_last(2, "hello") == ["l", "o"]
+    end
+
+    test "handles unicode strings" do
+      assert Runtime.take_last(2, "café") == ["f", "é"]
+    end
+
+    test "returns empty list for negative n with string" do
+      assert Runtime.take_last(-1, "hello") == []
+    end
+  end
+
+  describe "drop_last" do
+    test "drops last element by default" do
+      assert Runtime.drop_last([1, 2, 3, 4]) == [1, 2, 3]
+    end
+
+    test "drops last n elements" do
+      assert Runtime.drop_last(2, [1, 2, 3, 4]) == [1, 2]
+    end
+
+    test "returns empty list when n = length" do
+      assert Runtime.drop_last(3, [1, 2, 3]) == []
+    end
+
+    test "returns empty list when dropping more than available" do
+      assert Runtime.drop_last(5, [1, 2]) == []
+    end
+
+    test "returns all elements when n is 0" do
+      assert Runtime.drop_last(0, [1, 2, 3]) == [1, 2, 3]
+    end
+
+    test "returns all elements when n is negative" do
+      assert Runtime.drop_last(-1, [1, 2, 3]) == [1, 2, 3]
+      assert Runtime.drop_last(-5, [1, 2, 3]) == [1, 2, 3]
+    end
+
+    test "returns empty list for nil" do
+      assert Runtime.drop_last(nil) == []
+      assert Runtime.drop_last(2, nil) == []
+    end
+
+    test "handles strings" do
+      assert Runtime.drop_last("hello") == ["h", "e", "l", "l"]
+      assert Runtime.drop_last(2, "hello") == ["h", "e", "l"]
+    end
+
+    test "returns full string as graphemes when n is negative" do
+      assert Runtime.drop_last(-1, "hello") == ["h", "e", "l", "l", "o"]
+    end
+  end
+
   describe "reduce - comprehensive support" do
     test "reduce on lists (existing support)" do
       assert Runtime.reduce(fn acc, x -> acc + x end, 0, [1, 2, 3]) == 6

@@ -1397,6 +1397,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `nnext` | `(nnext coll)` | Next of next |
 | `take` | `(take n coll)` | First n items |
 | `drop` | `(drop n coll)` | Skip first n items |
+| `take-last` | `(take-last n coll)` | Last n items |
+| `drop-last` | `(drop-last coll)` `(drop-last n coll)` | All but last n items (default n=1) |
 | `take-while` | `(take-while pred coll)` | Take while pred is true |
 | `drop-while` | `(drop-while pred coll)` | Drop while pred is true |
 | `distinct` | `(distinct coll)` | Remove duplicates |
@@ -1884,6 +1886,8 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `next` | ✗ | ✓ | Strings: returns list of remaining characters or nil |
 | `take` | ✗ | ✓ | Strings: returns list of first n characters |
 | `drop` | ✗ | ✓ | Strings: returns list of characters after dropping n |
+| `take-last` | ✗ | ✓ | Strings: returns list of last n characters |
+| `drop-last` | ✗ | ✓ | Strings: returns list of characters after dropping last n |
 | `take-while` | ✗ | ✓ | Strings: returns list of characters while predicate is true |
 | `drop-while` | ✗ | ✓ | Strings: returns list of characters after predicate becomes false |
 | `map` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |

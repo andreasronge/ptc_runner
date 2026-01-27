@@ -236,6 +236,8 @@ defmodule PtcRunner.Lisp.Env do
       {:drop, {:normal, &Runtime.drop/2}},
       {:"take-while", {:normal, &Runtime.take_while/2}},
       {:"drop-while", {:normal, &Runtime.drop_while/2}},
+      {:"take-last", {:normal, &Runtime.take_last/2}},
+      {:"drop-last", {:multi_arity, :"drop-last", {&Runtime.drop_last/1, &Runtime.drop_last/2}}},
       {:distinct, {:normal, &Runtime.distinct/1}},
       {:concat, {:variadic, &Runtime.concat2/2, []}},
       {:conj, {:variadic_nonempty, :conj, &Runtime.conj/2}},
