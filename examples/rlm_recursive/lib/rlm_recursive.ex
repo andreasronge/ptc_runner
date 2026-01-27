@@ -97,11 +97,13 @@ defmodule RlmRecursive do
     agent = Agent.new(:sniah, llm: llm)
 
     # Run with tracing if requested
+    # pmap_timeout must be long enough for recursive LLM calls (30-60s each)
     run_opts = [
       context: %{"corpus" => data.corpus, "query" => query},
       llm: llm,
       max_turns: 15,
       timeout: 120_000,
+      pmap_timeout: 60_000,
       token_limit: 100_000,
       on_budget_exceeded: :return_partial
     ]
@@ -150,11 +152,15 @@ defmodule RlmRecursive do
     agent = Agent.new(:counting, llm: llm)
 
     # Run with tracing if requested
+    # Large heap: RLM keeps bulk data in memory, not LLM context
+    # The computer can filter 100K+ items easily - that's the point!
     run_opts = [
       context: %{"corpus" => data.corpus, "min_age" => min_age, "hobby" => hobby},
       llm: llm,
       max_turns: 20,
       timeout: 180_000,
+      pmap_timeout: 60_000,
+      max_heap: 200_000_000,
       token_limit: 150_000,
       on_budget_exceeded: :return_partial
     ]

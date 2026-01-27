@@ -123,30 +123,16 @@ defmodule RlmRecursive.Agent do
     """
   end
 
-  # Counting prompt with recursive aggregation pattern
+  # Counting prompt - demonstrates RLM pattern: bulk data in memory, not LLM context
   defp counting_prompt do
     """
     Count profiles in the corpus that match the criteria.
 
-    ## Strategy
+    ## RLM Pattern: Data Lives in Memory
 
-    This is an aggregation task - must examine all profiles:
-    1. Parse each line as a profile
-    2. Check if age > data/min_age AND hobbies contains data/hobby
-    3. Sum the counts
-
-    For large corpora, use recursive map-reduce:
-    1. Check corpus size with `(count (split-lines data/corpus))`
-    2. If small (< 100 lines), count directly
-    3. If large, split into halves and recurse with `tool/count`
-    4. Sum child results
-
-    ## Budget Awareness
-
-    Check `(budget/remaining)` before recursing:
-    - If at depth limit, count all profiles directly
-    - If low on turns, count directly
-    - Otherwise, subdivide and recurse
+    The corpus can be large (10K+ profiles). Process it directly in code -
+    the computer can filter millions of items instantly. This is the RLM insight:
+    bulk data stays in memory, the LLM just writes processing code.
 
     ## Input
     - data/corpus: Profile lines (format: "PROFILE N: name=..., age=N, city=..., hobbies=[...]")
@@ -156,40 +142,33 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:count N}` where N is the count of matching profiles.
 
-    ## Example (direct counting for small corpus)
+    ## Example
 
     ```clojure
     (def lines (split-lines data/corpus))
+    (println "Processing" (count lines) "profiles...")
+
     (def matching
       (filter
         (fn [line]
-          (let [age-match (re-find #"age=(\\d+)" line)
-                age (if age-match (parse-long (get age-match 1)) 0)
-                has-hobby (str/includes? line data/hobby)]
-            (and (> age data/min_age) has-hobby)))
+          (let [age-match (re-find (re-pattern "age=(\\\\d+)") line)
+                age (if age-match (parse-long (get age-match 1)) 0)]
+            (and (> age data/min_age) (includes? line data/hobby))))
         lines))
+
     (return {:count (count matching)})
     ```
 
-    ## Example (recursive for large corpus)
+    ## Optional: Recursion for Very Large Data
+
+    If you need to subdivide (e.g., for parallel processing or if context is limited),
+    use `tool/count` to recurse:
 
     ```clojure
-    (def lines (split-lines data/corpus))
-    (def n (count lines))
-
-    (if (< n 100)
-      ;; Base case: count directly
-      (let [matching (filter #(and (> (extract-age %) data/min_age)
-                                    (has-hobby? % data/hobby)) lines)]
-        (return {:count (count matching)}))
-
-      ;; Recursive case: split and aggregate
-      (let [mid (/ n 2)
-            first-half (join "\\n" (take mid lines))
-            second-half (join "\\n" (drop mid lines))
-            r1 (tool/count {:corpus first-half :min_age data/min_age :hobby data/hobby})
-            r2 (tool/count {:corpus second-half :min_age data/min_age :hobby data/hobby})]
-        (return {:count (+ (:count r1) (:count r2))})))
+    (let [mid (quot n 2)
+          r1 (tool/count {:corpus (join "\\n" (take mid lines)) :min_age data/min_age :hobby data/hobby})
+          r2 (tool/count {:corpus (join "\\n" (drop mid lines)) :min_age data/min_age :hobby data/hobby})]
+      (return {:count (+ (:count r1) (:count r2))}))
     ```
     """
   end
