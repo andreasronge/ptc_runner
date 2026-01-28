@@ -96,14 +96,13 @@ defmodule RlmRecursive do
     # Create recursive agent
     agent = Agent.new(:sniah, llm: llm)
 
-    # Run with tracing if requested
-    # pmap_timeout must be long enough for recursive LLM calls (30-60s each)
+    # RLM benchmark: generous timeouts, let the model work
     run_opts = [
       context: %{"corpus" => data.corpus, "query" => query},
       llm: llm,
       max_turns: 15,
-      timeout: 120_000,
-      pmap_timeout: 60_000,
+      timeout: 300_000,
+      pmap_timeout: 300_000,
       token_limit: 100_000,
       on_budget_exceeded: :return_partial
     ]
@@ -152,14 +151,13 @@ defmodule RlmRecursive do
     agent = Agent.new(:counting, llm: llm)
 
     # Run with tracing if requested
-    # Large heap: RLM keeps bulk data in memory, not LLM context
-    # The computer can filter 100K+ items easily - that's the point!
+    # RLM benchmark: generous timeouts, large heap for bulk data processing
     run_opts = [
       context: %{"corpus" => data.corpus, "min_age" => min_age, "hobby" => hobby},
       llm: llm,
       max_turns: 20,
-      timeout: 180_000,
-      pmap_timeout: 60_000,
+      timeout: 300_000,
+      pmap_timeout: 300_000,
       max_heap: 200_000_000,
       token_limit: 150_000,
       on_budget_exceeded: :return_partial
@@ -206,14 +204,13 @@ defmodule RlmRecursive do
     # Create recursive agent
     agent = Agent.new(:pairs, llm: llm)
 
-    # Run with tracing if requested
-    # O(n²) task needs more resources
+    # RLM benchmark: generous timeouts for O(n²) recursive decomposition
     run_opts = [
       context: %{"corpus" => data.corpus},
       llm: llm,
       max_turns: 25,
       timeout: 300_000,
-      pmap_timeout: 90_000,
+      pmap_timeout: 300_000,
       max_heap: 200_000_000,
       token_limit: 200_000,
       on_budget_exceeded: :return_partial
@@ -238,6 +235,7 @@ defmodule RlmRecursive do
     seed = Keyword.get(opts, :seed, 42)
     trace? = Keyword.get(opts, :trace, false)
     verbose? = Keyword.get(opts, :verbose, true)
+    model = Keyword.get(opts, :model)
 
     llm =
       Keyword.get_lazy(opts, :llm, fn ->
@@ -256,18 +254,16 @@ defmodule RlmRecursive do
       IO.puts("\n=== Starting Semantic Pairs Benchmark (LLM judgment per pair!) ===\n")
     end
 
-    agent = Agent.new(:semantic_pairs, llm: llm)
+    agent = Agent.new(:semantic_pairs, llm: llm, model: model)
 
-    # Semantic evaluation needs more resources
+    # RLM-style: generous limits, let the LLM work until done
+    # No token_limit - the paper had "no strong guarantees about controlling cost"
     run_opts = [
       context: %{"corpus" => data.corpus},
       llm: llm,
-      max_turns: 30,
       timeout: 600_000,
-      pmap_timeout: 120_000,
-      max_heap: 200_000_000,
-      token_limit: 300_000,
-      on_budget_exceeded: :return_partial
+      pmap_timeout: 600_000,
+      max_heap: 200_000_000
     ]
 
     {result, trace_path} = execute_with_tracing(agent, run_opts, trace?)
