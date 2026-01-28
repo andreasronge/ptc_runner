@@ -90,22 +90,26 @@ defmodule RlmRecursive.Agent do
   end
 
   def new(:semantic_pairs, opts) do
-    max_depth = Keyword.get(opts, :max_depth, 5)
-    max_turns = Keyword.get(opts, :max_turns, 20)
+    # RLM-style: generous limits, let the LLM work until done
+    max_depth = Keyword.get(opts, :max_depth, 3)
+    max_turns = Keyword.get(opts, :max_turns, 50)
+    turn_budget = Keyword.get(opts, :turn_budget, 100)
     llm = Keyword.get(opts, :llm)
+    model = Keyword.get(opts, :model)
 
     SubAgent.new(
-      prompt: semantic_pairs_prompt(),
+      prompt: semantic_pairs_prompt(model),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description:
         "Find pairs with semantically compatible interests - REQUIRES LLM judgment per pair",
       tools: %{"evaluate_pairs" => :self},
       max_depth: max_depth,
       max_turns: max_turns,
+      turn_budget: turn_budget,
       llm: llm,
-      # Long timeouts for recursive LLM calls (each child call needs 60-120s)
-      timeout: 300_000,
-      pmap_timeout: 300_000
+      # RLM-style: long timeouts, no rushing
+      timeout: 600_000,
+      pmap_timeout: 600_000
     )
   end
 
@@ -188,8 +192,7 @@ defmodule RlmRecursive.Agent do
     (def matching
       (filter
         (fn [line]
-          (let [age-match (re-find (re-pattern "age=(\\\\d+)") line)
-                age (if age-match (parse-long (get age-match 1)) 0)]
+          (let [age (extract-int "age=(\\\\d+)" line 1 0)]
             (and (> age data/min_age) (includes? line data/hobby))))
         lines))
 
@@ -237,40 +240,32 @@ defmodule RlmRecursive.Agent do
 
     ```clojure
     (def lines (split-lines data/corpus))
-    (def n (count lines))
-    (println "Processing" n "profiles...")
+    (println "Processing" (count lines) "profiles...")
 
-    ;; Parse profiles to extract city
+    ;; Parse profiles - use extract-int for cleaner numeric extraction
     (defn parse-profile [line]
-      (let [id-match (re-find (re-pattern "PROFILE (\\\\d+)") line)
-            city-match (re-find (re-pattern "city=([^,]+)") line)
-            hobbies-match (re-find (re-pattern "hobbies=\\\\[([^\\\\]]+)\\\\]") line)]
-        {:id (if id-match (parse-long (get id-match 1)) 0)
-         :city (if city-match (get city-match 1) "")
-         :hobbies (if hobbies-match (split (get hobbies-match 1) ", ") [])
-         :line line}))
+      {:id (extract-int "PROFILE (\\\\d+)" line 1 0)
+       :city (extract "city=([^,]+)" line)
+       :hobbies (let [h (extract "hobbies=\\\\[([^\\\\]]+)\\\\]" line)]
+                  (if h (split h ", ") []))
+       :line line})
 
     (def profiles (map parse-profile lines))
-
-    ;; Group by city
     (def by-city (group-by :city profiles))
     (println "Cities:" (keys by-city))
 
     ;; Find pairs within each city group
     (defn shares-hobby [p1 p2]
-      (not (empty? (filter #(includes? (join " " (:hobbies p2)) %) (:hobbies p1)))))
+      (some #(contains? (set (:hobbies p2)) %) (:hobbies p1)))
 
     (defn find-pairs-in-group [group]
       (if (> (count group) 30)
         ;; Too large - recurse with just this city's profiles
-        (let [corpus (join "\\n" (map :line group))
-              result (tool/find_pairs {:corpus corpus})]
-          (:pairs result))
-        ;; Small enough - find pairs directly
-        (for [p1 group
-              p2 group
-              :when (and (< (:id p1) (:id p2)) (shares-hobby p1 p2))]
-          (str (:id p1) "-" (:id p2)))))
+        (:pairs (tool/find_pairs {:corpus (join "\\n" (map :line group))}))
+        ;; Small enough - use pairs function to generate all combinations
+        (->> (pairs group)
+             (filter (fn [[p1 p2]] (shares-hobby p1 p2)))
+             (map (fn [[p1 p2]] (str (:id p1) "-" (:id p2)))))))
 
     (def all-pairs (flatten (map find-pairs-in-group (vals by-city))))
     (return {:count (count all-pairs) :pairs (take 20 all-pairs)})
@@ -278,78 +273,103 @@ defmodule RlmRecursive.Agent do
     """
   end
 
-  # Semantic pairs prompt - REQUIRES LLM judgment per pair (forces recursion)
-  defp semantic_pairs_prompt do
-    """
+  # Semantic pairs prompt - with complete example to reduce syntax struggles
+  defp semantic_pairs_prompt(model) do
+    base_prompt = """
     Find all pairs of people in the same city with SEMANTICALLY COMPATIBLE interests.
 
-    ## CRITICAL: This task REQUIRES LLM judgment for EACH pair
+    ## What is Semantic Compatibility?
 
-    You cannot solve this programmatically with simple set operations!
-    Compatibility is SEMANTIC - you must reason about whether interests are related:
-
-    Compatible examples:
-    - hiking + cycling (both active/outdoor)
-    - painting + photography (both creative/artistic)
-    - gaming + coding (both tech-oriented)
-    - cooking + board_games (both social)
-
-    NOT compatible:
-    - hiking + gaming (unrelated domains)
-    - pottery + robotics (no semantic connection)
-
-    ## MANDATORY: Use recursion for O(n^2) semantic comparisons
-
-    Since EACH pair needs LLM judgment, you MUST use `tool/evaluate_pairs` to
-    recursively process subsets. A single pass cannot evaluate all pairs semantically.
-
-    ## Strategy
-
-    1. Parse profiles and group by city
-    2. For each city group, use `tool/evaluate_pairs` to recursively evaluate pairs
-    3. In each recursive call, evaluate a subset of pairs semantically
-    4. Aggregate results
+    Two people are compatible if their interests are semantically related:
+    - hiking + cycling = compatible (both outdoor/active)
+    - painting + photography = compatible (both creative/artistic)
+    - gaming + robotics = compatible (both tech-oriented)
+    - hiking + pottery = NOT compatible (unrelated domains)
 
     ## Input
-    - data/corpus: Profile lines (format: "PROFILE N: name=..., city=CITY, interests=[...]")
+    - `data/corpus`: Profile data (format: "PROFILE N: name=..., city=CITY, interests=[...]")
 
     ## Output
     Return `{:count N :pairs ["1-2" "3-5" ...]}` where pairs have compatible interests.
+    Format pairs as "id1-id2" with id1 < id2.
 
-    ## Example recursive pattern
+    ## Strategy
+
+    1. **Group by city first** - pairs must be in the same city
+    2. **Generate ALL pairs** within each city group
+    3. **Evaluate semantic compatibility** - use `tool/evaluate_pairs` for batches
+    4. **Aggregate results** from all city groups
+
+    ## Example
 
     ```clojure
     (def lines (split-lines data/corpus))
-    (def n (count lines))
-    (println "Evaluating" n "profiles for semantic compatibility...")
+    (println "Total profiles:" (count lines))
 
-    ;; If small enough, evaluate pairs directly with semantic judgment
-    (if (<= n 10)
-      (do
-        (println "Direct evaluation of" (* n (dec n) 0.5) "pairs")
-        ;; For each pair, judge semantic compatibility
-        ;; ... semantic evaluation logic ...
-        (return {:count found-count :pairs found-pairs}))
+    ;; Parse profiles - use extract/extract-int for cleaner extraction
+    (defn parse-profile [line]
+      {:id (extract-int "PROFILE (\\\\d+):" line 1 0)
+       :city (extract "city=([^,]+)" line)
+       :interests (or (extract "interests=\\\\[([^\\\\]]+)\\\\]" line) "")
+       :line line})
 
-      ;; Too many pairs for direct evaluation - subdivide
-      (let [mid (quot n 2)
-            first-half (take mid lines)
-            second-half (drop mid lines)]
-        (println "Subdividing:" mid "+" (- n mid) "profiles")
+    (def profiles (map parse-profile lines))
+    (def by-city (group-by :city profiles))
+    (println "Cities:" (count by-city))
 
-        ;; Recursively evaluate each half
-        (def r1 (tool/evaluate_pairs {:corpus (join "\\n" first-half)}))
-        (def r2 (tool/evaluate_pairs {:corpus (join "\\n" second-half)}))
+    ;; Evaluate pairs for semantic compatibility
+    (defn compatible? [[p1 p2]]
+      ;; Use your judgment: are interests semantically related?
+      ;; outdoor/fitness, creative/social, tech/creative are related
+      true)  ;; Replace with actual semantic check
 
-        ;; Also need cross-pairs between halves
-        (def r3 (tool/evaluate_pairs {:corpus (join "\\n" (concat first-half second-half))}))
+    ;; Process each city - use pairs function to generate all combinations
+    (def results
+      (map (fn [[city group]]
+             (->> (pairs group)
+                  (filter compatible?)
+                  (map (fn [[p1 p2]] (str (:id p1) "-" (:id p2))))))
+           by-city))
 
-        ;; Aggregate (careful not to double-count)
-        (return {:count (+ (:count r1) (:count r2))
-                 :pairs (concat (:pairs r1) (:pairs r2))})))
+    (def all-pairs (flatten results))
+    (return {:count (count all-pairs) :pairs all-pairs})
     ```
 
-    REMEMBER: Each pair comparison needs YOUR semantic judgment. You cannot shortcut this.
+    ## Using Recursive Tool for Large Groups
+
+    For city groups with many profiles (> 20), use `tool/evaluate_pairs`:
+
+    ```clojure
+    (if (> (count group) 20)
+      ;; Recurse with subset
+      (let [corpus (join "\\n" (map :line group))]
+        (:pairs (tool/evaluate_pairs {:corpus corpus})))
+      ;; Process directly
+      (find-compatible-pairs group))
+    ```
+
+    ## Parallel Execution
+
+    Use `pmap` or `pcalls` to evaluate multiple city groups in parallel for faster execution:
+
+    ```clojure
+    ;; Process all cities in parallel
+    (def results (pmap (fn [[city group]] (process-city-group group)) by-city))
+    ```
     """
+
+    # Add cost-awareness warning for Qwen-coder models (as per RLM paper)
+    if model && String.contains?(to_string(model), "qwen") do
+      base_prompt <>
+        """
+
+        ## IMPORTANT: Cost Awareness
+
+        Be very careful about using `tool/evaluate_pairs` as it incurs high runtime costs.
+        Always batch as much information as reasonably possible into each call.
+        """
+    else
+      base_prompt
+    end
   end
 end
