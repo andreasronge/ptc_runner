@@ -235,17 +235,16 @@ The main agent calls it like any other tool:
 
 ### Batch Classification
 
-Process multiple items in one LLM call:
+Process multiple items in one LLM call. The input list is passed via the
+context data inventory (not template expansion), so the prompt describes
+what to do with the data:
 
 ```elixir
 "classify_batch" => LLMTool.new(
   prompt: """
   Classify each email by urgency.
-
-  Emails:
-  {{#emails}}
-  - ID {{id}}: "{{subject}}" from {{from}}
-  {{/emails}}
+  For each email in the input list, determine its urgency level
+  and provide a brief reason.
   """,
   signature: "(emails [{id :int, subject :string, from :string}]) ->
               [{id :int, urgency :string, reason :string}]",
@@ -268,6 +267,42 @@ Atoms like `:haiku` resolve via the `llm_registry` passed at the top-level `run/
   llm: :haiku
 )
 ```
+
+### Response Templates
+
+When an LLMTool makes a simple judgment (boolean, category), `response_template` lets you
+define the Lisp logic yourself while the LLM only fills in the data. The LLM returns JSON,
+the template produces a typed Lisp value.
+
+```elixir
+"semantic_judge" => LLMTool.new(
+  prompt: "Is '{{interests1}}' compatible with '{{interests2}}'?",
+  signature: "(interests1 :string, interests2 :string) -> :keyword",
+  json_signature: "(interests1 :string, interests2 :string) -> {compatible :bool}",
+  response_template: "(if {{compatible}} :compatible :unrelated)",
+  description: "Returns :compatible or :unrelated"
+)
+```
+
+Three fields work together:
+
+- `:json_signature` — The internal contract for the LLM call (returns `{compatible :bool}`)
+- `:response_template` — PTC-Lisp with Mustache placeholders filled from the JSON result
+- `:signature` — The public contract seen by the parent agent (returns `:keyword`)
+
+The parent agent sees a clean typed result:
+
+```clojure
+(if (= :compatible (tool/semantic_judge {:interests1 i1 :interests2 i2}))
+  (conj! pairs (str id1 "-" id2))
+  pairs)
+```
+
+The template runs in a no-tools sandbox (`PtcRunner.Lisp.run/2` with no tools or context),
+so built-in functions work but tool calls and data references do not.
+
+Use `response_template` for primitive transformations (booleans, numbers, keywords).
+Avoid string interpolation where quotes could break Lisp parsing.
 
 ## Orchestration Patterns
 
