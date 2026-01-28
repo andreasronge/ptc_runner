@@ -29,18 +29,18 @@ TraceLog (see `trace-log-specification.md`) provides structured trace logging vi
 
 ## Demo Benchmark Simplifications
 
-**Current state:** Custom tracing in `Agent.ex`, summary building in `Base.ex`, report generation in `Report.ex`.
+**Status:** ✅ Complete
 
-### Can Be Removed/Simplified
+The following custom serialization was removed from `Agent.ex` and replaced with TraceLog:
 
-| Component | Current Location | Replacement |
-|-----------|------------------|-------------|
-| `serialize_turns_for_json/1` | `Agent.ex:644-656` | TraceLog captures via `turn.stop` events |
-| `serialize_tool_calls/1` | `Agent.ex:658-668` | TraceLog captures via `tool.start/stop` |
-| Manual token accumulation | `Agent.ex:620-637` | `Analyzer.summary()` or `run.stop.tokens` |
-| `last_trace` state field | `Agent.ex:43` | Read from JSONL file instead |
+| Component | Status | Replacement |
+|-----------|--------|-------------|
+| `serialize_turns_for_json/1` | ✅ Removed | TraceLog captures via `turn.stop` events |
+| `serialize_tool_calls/1` | ✅ Removed | TraceLog captures via `tool.start/stop` |
+| `safe_inspect/1` | ✅ Removed | TraceLog handles serialization |
+| `last_trace` state field | ✅ Changed | `last_trace_path` + read from JSONL file |
 
-**Estimated reduction:** ~60 lines in Agent.ex
+**Actual change:** -53 lines removed, +47 lines added (net -6 lines)
 
 ### Must Keep (Test-Specific Logic)
 
@@ -90,18 +90,18 @@ These TraceLog features are needed for full benchmark integration:
 
 | Feature | Status | Impact |
 |---------|--------|--------|
-| Turn type in Telemetry | Spec'd as "High Priority" | Required for retry counting |
+| Turn type in Telemetry | ✅ Complete | Required for retry counting |
 | Cost calculation | Spec'd | Required for cost reports |
-| Custom metadata | Spec'd | Required for test context |
+| Custom metadata | ✅ Complete | Required for test context |
 | `aggregate_stream/1` | Spec'd | Required for large test suites |
 
 ## Migration Path
 
-1. **Phase 1:** Implement TraceLog core (start/stop, JSONL writing)
-2. **Phase 2:** Implement Analyzer (summary, compare, aggregate)
-3. **Phase 3:** Add Telemetry enhancements (turn type, program, result_preview)
-4. **Phase 4:** Update demo benchmark to use TraceLog
-5. **Phase 5:** Remove deprecated custom tracing code from Agent.ex
+1. **Phase 1:** Implement TraceLog core (start/stop, JSONL writing) ✅
+2. **Phase 2:** Implement Analyzer (summary, compare, aggregate) ✅
+3. **Phase 3:** Add Telemetry enhancements (turn type, program, result_preview) ✅
+4. **Phase 4:** Update demo benchmark to use TraceLog ✅
+5. **Phase 5:** Remove deprecated custom tracing code from Agent.ex ✅
 
 ## Non-Goals
 

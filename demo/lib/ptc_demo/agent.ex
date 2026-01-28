@@ -23,6 +23,7 @@ defmodule PtcDemo.Agent do
   alias PtcDemo.SearchTool
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop.ResponseHandler
+  alias PtcRunner.TraceLog
 
   @model_env "PTC_DEMO_MODEL"
   @timeout 60_000
@@ -39,7 +40,7 @@ defmodule PtcDemo.Agent do
     :datasets,
     :last_program,
     :last_result,
-    :last_trace,
+    :last_trace_path,
     :last_retry_count,
     :memory,
     :usage,
@@ -77,11 +78,22 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Get the trace from the last failed execution.
-  Returns a list of turn data for debugging, or nil if last execution succeeded.
+  Get the trace from the last execution.
+  Returns a list of trace events loaded from the JSONL trace file, or nil if no trace.
   """
   def last_trace do
-    GenServer.call(__MODULE__, :last_trace)
+    GenServer.call(__MODULE__, :last_trace_path)
+    |> load_trace_from_path()
+  end
+
+  defp load_trace_from_path(nil), do: nil
+
+  defp load_trace_from_path(path) do
+    if File.exists?(path) do
+      TraceLog.Analyzer.load(path)
+    else
+      nil
+    end
   end
 
   @doc """
@@ -244,7 +256,7 @@ defmodule PtcDemo.Agent do
        datasets: datasets,
        last_program: nil,
        last_result: nil,
-       last_trace: nil,
+       last_trace_path: nil,
        last_retry_count: 0,
        memory: %{},
        usage: empty_usage(),
@@ -277,12 +289,24 @@ defmodule PtcDemo.Agent do
 
     if verbose, do: IO.puts("\n   [Agent] Generating response...")
 
-    case SubAgent.run(agent,
-           llm: llm_callback(state.model),
-           context: context,
-           max_turns: max_turns,
-           debug: debug
-         ) do
+    # Generate unique trace file path
+    trace_path = trace_file_path()
+
+    # Run with TraceLog to capture execution trace
+    {:ok, run_result, _path} =
+      TraceLog.with_trace(
+        fn ->
+          SubAgent.run(agent,
+            llm: llm_callback(state.model),
+            context: context,
+            max_turns: max_turns,
+            debug: debug
+          )
+        end,
+        path: trace_path
+      )
+
+    case run_result do
       {:ok, step} ->
         # Show trace: verbose shows program + usage, debug adds raw LLM responses
         if debug or verbose, do: SubAgent.Debug.print_trace(step, raw: debug, usage: verbose)
@@ -308,15 +332,12 @@ defmodule PtcDemo.Agent do
           do:
             IO.puts("   [Result] #{ResponseHandler.format_result(result, result_max_chars: 80)}")
 
-        # Store trace even on success (needed for debugging validation failures)
-        trace = serialize_turns_for_json(step.turns)
-
         {:reply, {:ok, answer},
          %{
            state
            | last_program: program,
              last_result: result,
-             last_trace: trace,
+             last_trace_path: trace_path,
              last_retry_count: retry_count,
              memory: new_memory,
              usage: new_usage,
@@ -340,16 +361,13 @@ defmodule PtcDemo.Agent do
         # Count retry turns
         retry_count = count_retry_turns(step.turns)
 
-        # Store trace for debugging failed executions
-        trace = serialize_turns_for_json(step.turns)
-
         {:reply, {:error, error_msg},
          %{
            state
            | usage: new_usage,
              programs_history: new_programs,
              last_program: program,
-             last_trace: trace,
+             last_trace_path: trace_path,
              last_retry_count: retry_count
          }}
     end
@@ -363,7 +381,7 @@ defmodule PtcDemo.Agent do
        | data_mode: :schema,
          last_program: nil,
          last_result: nil,
-         last_trace: nil,
+         last_trace_path: nil,
          last_retry_count: 0,
          memory: %{},
          usage: empty_usage(),
@@ -387,8 +405,8 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
-  def handle_call(:last_trace, _from, state) do
-    {:reply, state.last_trace, state}
+  def handle_call(:last_trace_path, _from, state) do
+    {:reply, state.last_trace_path, state}
   end
 
   @impl true
@@ -636,38 +654,14 @@ defmodule PtcDemo.Agent do
     }
   end
 
-  # --- Trace Serialization ---
+  # --- Trace File Helpers ---
 
-  defp serialize_turns_for_json(nil), do: nil
-  defp serialize_turns_for_json([]), do: nil
+  @trace_dir "traces"
 
-  defp serialize_turns_for_json(turns) when is_list(turns) do
-    Enum.map(turns, fn turn ->
-      %{
-        number: turn.number,
-        program: turn.program,
-        result: safe_inspect(turn.result),
-        success: turn.success?,
-        tool_calls: serialize_tool_calls(turn.tool_calls),
-        prints: turn.prints || [],
-        memory_keys: if(turn.memory, do: Map.keys(turn.memory), else: [])
-      }
-    end)
-  end
-
-  defp serialize_tool_calls(nil), do: []
-
-  defp serialize_tool_calls(tool_calls) do
-    Enum.map(tool_calls, fn tc ->
-      %{
-        name: tc.name,
-        args: tc.args,
-        result: safe_inspect(tc.result)
-      }
-    end)
-  end
-
-  defp safe_inspect(value) do
-    inspect(value, limit: 50, printable_limit: 500)
+  defp trace_file_path do
+    File.mkdir_p!(@trace_dir)
+    timestamp = System.system_time(:millisecond)
+    unique_id = :erlang.unique_integer([:positive])
+    Path.join(@trace_dir, "agent_trace_#{timestamp}_#{unique_id}.jsonl")
   end
 end
