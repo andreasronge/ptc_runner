@@ -1,6 +1,6 @@
-# examples/rlm/run.exs
+# examples/parallel_workers/run.exs
 
-# RLM (Recursive Language Model) pattern using real LLMs.
+# Parallel orchestration pattern using real LLMs.
 #
 # Key features in this example:
 # 1. Token-based chunking with overlap - handles variable line lengths and boundary incidents
@@ -11,10 +11,10 @@
 # The planner (Sonnet) orchestrates, workers (Haiku) process chunks in parallel.
 #
 # Usage:
-#   mix run examples/rlm/run.exs           # Run without tracing
-#   mix run examples/rlm/run.exs --trace   # Run with hierarchical tracing
+#   mix run examples/parallel_workers/run.exs           # Run without tracing
+#   mix run examples/parallel_workers/run.exs --trace   # Run with hierarchical tracing
 
-defmodule RLM.Runner do
+defmodule ParallelWorkers.Runner do
   alias PtcRunner.SubAgent
   alias PtcRunner.Chunker
   alias PtcRunner.TraceLog
@@ -28,7 +28,7 @@ defmodule RLM.Runner do
 
   def run do
     load_aws_credentials_if_needed()
-    trace? = "--trace" in System.argv() or System.get_env("PTC_RLM_TRACE") == "1"
+    trace? = "--trace" in System.argv() or System.get_env("PTC_PARALLEL_WORKERS_TRACE") == "1"
 
     # 1. Load and pre-chunk the corpus in Elixir
     corpus = load_corpus()
@@ -56,7 +56,7 @@ defmodule RLM.Runner do
     worker_tool = SubAgent.as_tool(worker_agent)
 
     # 3. Run the Planner with pre-chunked data
-    IO.puts("\n=== Starting RLM Orchestration (Sonnet -> Haiku) ===\n")
+    IO.puts("\n=== Starting Parallel Orchestration (Sonnet -> Haiku) ===\n")
 
     if trace?, do: IO.puts("Tracing enabled - trace files will be created\n")
 
@@ -105,7 +105,7 @@ defmodule RLM.Runner do
 
   defp execute_with_tracing(prompt, opts, true) do
     # Traces go to gitignored folder
-    trace_path = Path.join(base_dir(), "traces/rlm_trace.jsonl")
+    trace_path = Path.join(base_dir(), "traces/parallel_workers_trace.jsonl")
 
     # Ensure directory exists
     File.mkdir_p!(Path.dirname(trace_path))
@@ -148,21 +148,21 @@ defmodule RLM.Runner do
     File.read!(corpus_path)
   end
 
-  # Detect whether we're running from project root or examples/rlm/
+  # Detect whether we're running from project root or examples/parallel_workers/
   defp base_dir do
     cwd = File.cwd!()
 
-    if String.ends_with?(cwd, "examples/rlm") do
+    if String.ends_with?(cwd, "examples/parallel_workers") do
       "."
     else
-      "examples/rlm"
+      "examples/parallel_workers"
     end
   end
 
   defp count_lines(text), do: length(String.split(text, "\n"))
 
   defp print_success(step) do
-    IO.puts("\n=== RLM Audit Complete ===")
+    IO.puts("\n=== Audit Complete ===")
     IO.inspect(step.return, pretty: true)
 
     # Show detailed execution trace with usage and tool call stats
@@ -172,7 +172,7 @@ defmodule RLM.Runner do
   end
 
   defp print_failure(step) do
-    IO.puts("\n=== RLM Audit Failed ===")
+    IO.puts("\n=== Audit Failed ===")
     IO.inspect(step.fail)
 
     # Show trace even on failure - helps debug what went wrong
@@ -210,4 +210,4 @@ defmodule RLM.Runner do
   end
 end
 
-RLM.Runner.run()
+ParallelWorkers.Runner.run()

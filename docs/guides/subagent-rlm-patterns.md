@@ -338,7 +338,7 @@ For complex aggregation (merging time-series, conflict resolution, weighted scor
 
 ## Example: Log Analysis
 
-See `examples/rlm/` for a complete working example that:
+See `examples/parallel_workers/` for a complete working example that:
 - Generates a 10k+ line test corpus with hidden incidents
 - Uses Sonnet as planner, Haiku as workers
 - Demonstrates parallel chunk processing
@@ -346,10 +346,10 @@ See `examples/rlm/` for a complete working example that:
 
 ```bash
 # Generate test data
-mix run examples/rlm/gen_data.exs
+mix run examples/parallel_workers/gen_data.exs
 
-# Run the RLM workflow
-mix run examples/rlm/run.exs
+# Run the parallel workers workflow
+mix run examples/parallel_workers/run.exs
 ```
 
 ## See Also

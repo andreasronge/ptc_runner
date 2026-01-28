@@ -1,24 +1,24 @@
-defmodule Mix.Tasks.Rlm do
-  @shortdoc "Run the RLM example with optional tracing"
+defmodule Mix.Tasks.ParallelWorkers do
+  @shortdoc "Run the parallel workers example with optional tracing"
   @moduledoc """
-  Run the RLM (Recursive Language Model) example.
+  Run the parallel workers (LLM-orchestrated map-reduce) example.
 
   ## Usage
 
       # Run without tracing
-      mix rlm
+      mix parallel_workers
 
       # Run with tracing enabled
-      mix rlm --trace
+      mix parallel_workers --trace
 
       # Export existing trace to Chrome DevTools format
-      mix rlm --export
+      mix parallel_workers --export
 
       # View trace tree in terminal
-      mix rlm --tree
+      mix parallel_workers --tree
 
       # Clean up trace files
-      mix rlm --clean
+      mix parallel_workers --clean
 
   ## Options
 
@@ -31,18 +31,18 @@ defmodule Mix.Tasks.Rlm do
   ## Examples
 
       # Full workflow: run with tracing, export, and open in Chrome
-      mix rlm --trace
-      mix rlm --export --open
+      mix parallel_workers --trace
+      mix parallel_workers --export --open
 
       # Quick trace analysis
-      mix rlm --tree
+      mix parallel_workers --tree
 
   ## Trace Files
 
-  When tracing is enabled, files are created in `examples/rlm/traces/` (gitignored):
-    * `rlm_trace.jsonl` - Main planner trace
+  When tracing is enabled, files are created in `examples/parallel_workers/traces/` (gitignored):
+    * `parallel_workers_trace.jsonl` - Main planner trace
     * `trace_<id>.jsonl` - One per worker (child traces)
-    * `rlm_trace.json` - Chrome DevTools format (after --export)
+    * `parallel_workers_trace.json` - Chrome DevTools format (after --export)
   """
 
   use Mix.Task
@@ -80,9 +80,9 @@ defmodule Mix.Tasks.Rlm do
     Mix.Task.run("app.start")
 
     # Set argv so the script sees --trace flag
-    if trace?, do: System.put_env("PTC_RLM_TRACE", "1")
+    if trace?, do: System.put_env("PTC_PARALLEL_WORKERS_TRACE", "1")
 
-    IO.puts("Running RLM example#{if trace?, do: " with tracing", else: ""}...\n")
+    IO.puts("Running parallel workers example#{if trace?, do: " with tracing", else: ""}...\n")
 
     # Run the example script
     Code.eval_file(example_script())
@@ -90,9 +90,9 @@ defmodule Mix.Tasks.Rlm do
     if trace? do
       IO.puts("\n" <> String.duplicate("─", 60))
       IO.puts("Trace files created in #{trace_dir()}/")
-      IO.puts("  • View tree:   mix rlm --tree")
-      IO.puts("  • Export:      mix rlm --export")
-      IO.puts("  • Clean up:    mix rlm --clean")
+      IO.puts("  • View tree:   mix parallel_workers --tree")
+      IO.puts("  • Export:      mix parallel_workers --export")
+      IO.puts("  • Clean up:    mix parallel_workers --clean")
     end
   end
 
@@ -104,7 +104,7 @@ defmodule Mix.Tasks.Rlm do
     main_trace = main_trace_path()
 
     unless File.exists?(main_trace) do
-      Mix.raise("No trace file found at #{main_trace}. Run `mix rlm --trace` first.")
+      Mix.raise("No trace file found at #{main_trace}. Run `mix parallel_workers --trace` first.")
     end
 
     IO.puts("Loading trace tree...")
@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Rlm do
     main_trace = main_trace_path()
 
     unless File.exists?(main_trace) do
-      Mix.raise("No trace file found at #{main_trace}. Run `mix rlm --trace` first.")
+      Mix.raise("No trace file found at #{main_trace}. Run `mix parallel_workers --trace` first.")
     end
 
     case Analyzer.load_tree(main_trace) do
@@ -212,21 +212,21 @@ defmodule Mix.Tasks.Rlm do
     end
   end
 
-  # Path helpers that detect whether we're running from project root or examples/rlm/
+  # Path helpers that detect whether we're running from project root or examples/parallel_workers/
   defp base_dir do
     cwd = File.cwd!()
 
-    if String.ends_with?(cwd, "examples/rlm") do
-      # Running from examples/rlm/ directory
+    if String.ends_with?(cwd, "examples/parallel_workers") do
+      # Running from examples/parallel_workers/ directory
       ""
     else
       # Running from project root
-      "examples/rlm/"
+      "examples/parallel_workers/"
     end
   end
 
   defp trace_dir, do: Path.join(base_dir(), "traces")
-  defp main_trace_path, do: Path.join(trace_dir(), "rlm_trace.jsonl")
-  defp chrome_trace_path, do: Path.join(trace_dir(), "rlm_trace.json")
+  defp main_trace_path, do: Path.join(trace_dir(), "parallel_workers_trace.jsonl")
+  defp chrome_trace_path, do: Path.join(trace_dir(), "parallel_workers_trace.json")
   defp example_script, do: Path.join(base_dir(), "run.exs")
 end

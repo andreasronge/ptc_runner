@@ -1,8 +1,8 @@
-# RLM Example: Large Corpus Analysis
+# Parallel Orchestration Example: LLM-Orchestrated Map-Reduce
 
-This example demonstrates the **Recursive Language Model (RLM)** pattern as described in [arXiv:2512.24601](https://arxiv.org/abs/2512.24601).
+Demonstrates an LLM acting as an **orchestrator** that dispatches work to parallel sub-agents and aggregates results. Inspired by the [RLM paper (arXiv:2512.24601)](https://arxiv.org/abs/2512.24601), but uses pre-chunking and single-level fan-out—no recursion.
 
-An LLM acts as an **orchestrator** that dispatches work to parallel sub-agents and aggregates results.
+> **For recursive decomposition**, see [`examples/rlm_recursive/`](../rlm_recursive/).
 
 ## Key Features
 
@@ -50,7 +50,7 @@ An LLM acts as an **orchestrator** that dispatches work to parallel sub-agents a
 | Sequential chunk processing | Slow, loses cross-chunk patterns |
 | RAG retrieval | Only sees "relevant" snippets |
 
-## The Solution: RLM with PTC-Lisp
+## The Solution: Parallel Orchestration with PTC-Lisp
 
 - **Context firewall**: Large data stays in `data/*`, never bloats the prompt
 - **Native parallelism**: `pmap` spawns concurrent BEAM processes
@@ -63,28 +63,28 @@ An LLM acts as an **orchestrator** that dispatches work to parallel sub-agents a
 
 ```bash
 # Generate test corpus (10k lines with hidden incidents)
-mix run examples/rlm/gen_data.exs
+mix run examples/parallel_workers/gen_data.exs
 
-# Run the RLM workflow
-mix rlm
+# Run the parallel workers workflow
+mix parallel_workers
 
 # Run with hierarchical tracing
-mix rlm --trace
+mix parallel_workers --trace
 
 # View trace tree in terminal
-mix rlm --tree
+mix parallel_workers --tree
 
 # Export to Chrome DevTools format and open
-mix rlm --export --open
+mix parallel_workers --export --open
 
 # Clean up all trace files
-mix rlm --clean
+mix parallel_workers --clean
 ```
 
-### Standalone (from examples/rlm directory)
+### Standalone (from examples/parallel_workers directory)
 
 ```bash
-cd examples/rlm
+cd examples/parallel_workers
 mix deps.get
 mix run run.exs
 mix run run.exs --trace
@@ -95,9 +95,9 @@ mix run run.exs --trace
 ```
 Corpus: 5001 lines -> 28 chunks of ~4000 tokens (200 overlap)
 
-=== Starting RLM Orchestration (Sonnet -> Haiku) ===
+=== Starting Parallel Orchestration (Sonnet -> Haiku) ===
 
-=== RLM Audit Complete ===
+=== Audit Complete ===
 %{"total_incidents" => 17, "first_10_unique" => ["CRITICAL: Database connection timeout...", ...]}
 
 +- Turn 1 ----------------------------------------+
@@ -133,18 +133,18 @@ Sequential processing of 28 Haiku calls at ~10-15s each would take **280-420 sec
 Use the `--trace` flag to capture detailed execution traces for the planner and every worker:
 
 ```bash
-mix run examples/rlm/run.exs --trace
+mix run examples/parallel_workers/run.exs --trace
 ```
 
 This creates trace files in the gitignored `traces/` folder:
-- `examples/rlm/traces/rlm_trace.jsonl` - Main planner trace
-- `examples/rlm/traces/trace_<id>.jsonl` - One per worker
+- `examples/parallel_workers/traces/parallel_workers_trace.jsonl` - Main planner trace
+- `examples/parallel_workers/traces/trace_<id>.jsonl` - One per worker
 
 The execution tree visualization shows duration and status for each:
 
 ```
 === Trace Summary ===
-Main trace: examples/rlm/traces/rlm_trace.jsonl
+Main trace: examples/parallel_workers/traces/parallel_workers_trace.jsonl
 Child traces: 28
 
 Execution tree:
@@ -170,8 +170,8 @@ Export to Chrome Trace Event format and open in DevTools for flame chart visuali
 alias PtcRunner.TraceLog.Analyzer
 
 # Load the trace tree and export to Chrome format
-{:ok, tree} = Analyzer.load_tree("examples/rlm/traces/rlm_trace.jsonl")
-Analyzer.export_chrome_trace(tree, "examples/rlm/traces/rlm_trace.json")
+{:ok, tree} = Analyzer.load_tree("examples/parallel_workers/traces/parallel_workers_trace.jsonl")
+Analyzer.export_chrome_trace(tree, "examples/parallel_workers/traces/parallel_workers_trace.json")
 ```
 
 Then open in Chrome:
@@ -190,8 +190,8 @@ Or use `chrome://tracing`:
 Open `trace_viewer.html` in Chrome and drag & drop the `.jsonl` files:
 
 ```bash
-open examples/rlm/trace_viewer.html
-# Then drag rlm_trace.jsonl and all trace_*.jsonl files into the browser
+open examples/parallel_workers/trace_viewer.html
+# Then drag parallel_workers_trace.jsonl and all trace_*.jsonl files into the browser
 ```
 
 **Option 3: IEx with Analyzer**
@@ -200,11 +200,11 @@ open examples/rlm/trace_viewer.html
 alias PtcRunner.TraceLog.Analyzer
 
 # Load and visualize the full tree
-{:ok, tree} = Analyzer.load_tree("examples/rlm/traces/rlm_trace.jsonl")
+{:ok, tree} = Analyzer.load_tree("examples/parallel_workers/traces/parallel_workers_trace.jsonl")
 Analyzer.print_tree(tree)
 
 # View timeline for a specific trace
-events = Analyzer.load("examples/rlm/traces/rlm_trace.jsonl")
+events = Analyzer.load("examples/parallel_workers/traces/parallel_workers_trace.jsonl")
 Analyzer.print_timeline(events)
 
 # Get summary statistics
@@ -215,20 +215,20 @@ Analyzer.summary(events)
 
 ```bash
 # Pretty print all events
-cat examples/rlm/traces/rlm_trace.jsonl | jq .
+cat examples/parallel_workers/traces/parallel_workers_trace.jsonl | jq .
 
 # Show just event types and durations
-cat examples/rlm/traces/rlm_trace.jsonl | jq '{event, duration_ms}'
+cat examples/parallel_workers/traces/parallel_workers_trace.jsonl | jq '{event, duration_ms}'
 
 # Find slow workers (>10s)
-cat examples/rlm/traces/trace_*.jsonl | jq 'select(.duration_ms > 10000)'
+cat examples/parallel_workers/traces/trace_*.jsonl | jq 'select(.duration_ms > 10000)'
 ```
 
 **Cleanup**
 
 ```elixir
 # Delete all trace files in the tree
-{:ok, tree} = Analyzer.load_tree("examples/rlm/traces/rlm_trace.jsonl")
+{:ok, tree} = Analyzer.load_tree("examples/parallel_workers/traces/parallel_workers_trace.jsonl")
 {:ok, count} = Analyzer.delete_tree(tree)
 IO.puts("Deleted #{count} trace files")
 ```
