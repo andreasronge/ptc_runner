@@ -150,11 +150,28 @@ Analyzer.print_timeline(events)
 - **Performance analysis** - Identify slow LLM calls or bottlenecks
 - **Comparison** - Compare traces across different configurations or models
 
+### Chrome DevTools Export
+
+Export traces to Chrome Trace Event format for flame chart visualization:
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+{:ok, tree} = Analyzer.load_tree("trace.jsonl")
+:ok = Analyzer.export_chrome_trace(tree, "trace.json")
+```
+
+Then view in Chrome:
+1. Open DevTools (F12) → **Performance** tab → **Load profile...**
+2. Or navigate to `chrome://tracing` and load the file
+
+The flame chart shows execution timing with nested spans. Click any span to see details including arguments and results.
+
 ### Known Limitations
 
 Tool telemetry events (`tool.start`, `tool.stop`) are not captured because tool execution runs inside a sandboxed process. The main events (`run`, `turn`, `llm`) are captured correctly.
 
-> **Full API:** See `PtcRunner.TraceLog.with_trace/2` and `PtcRunner.TraceLog.Analyzer.summary/1`.
+> **Full API:** See `PtcRunner.TraceLog.with_trace/2`, `PtcRunner.TraceLog.Analyzer.summary/1`, and `PtcRunner.TraceLog.Analyzer.export_chrome_trace/2`.
 
 ## Telemetry Events
 

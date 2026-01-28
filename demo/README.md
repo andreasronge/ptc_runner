@@ -231,6 +231,8 @@ mix json [options]
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--return-retries=<n>` | Extra retry turns after must-return phase (default: 0) |
+| `--export-traces` | Export all traces to Chrome DevTools format |
+| `--clean-traces` | Delete all trace files |
 
 Model aliases: `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt` (use `provider:alias` syntax)
 
@@ -269,6 +271,8 @@ mix lisp --help        # Show all available options
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--return-retries=<n>` | Extra retry turns after must-return phase (default: 0) |
 | `--validate-clojure` | Validate generated programs against Babashka |
+| `--export-traces` | Export all traces to Chrome DevTools format |
+| `--clean-traces` | Delete all trace files |
 
 Model aliases: `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt` (use `provider:alias` syntax)
 
@@ -658,6 +662,82 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 │  • Receives small result                                    │
 │  • Generates natural language answer                        │
 └─────────────────────────────────────────────────────────────┘
+
+## Tracing & Performance Analysis
+
+Trace files are created automatically for every query, capturing execution timing for LLM calls, turns, and the overall run. These can be visualized in Chrome DevTools for performance analysis.
+
+### Trace Files
+
+Traces are saved to the `traces/` directory (git-ignored):
+- `traces/agent_trace_<timestamp>_<id>.jsonl` - One file per agent run
+
+### Exporting to Chrome DevTools
+
+Export all traces to Chrome Trace Event format:
+
+```bash
+# Export all .jsonl traces to .json (Chrome format)
+mix lisp --export-traces
+
+# Delete all trace files
+mix lisp --clean-traces
+```
+
+Example output:
+```
+Found 21 trace file(s) in traces/
+
+  ✓ agent_trace_1769587985862_258.jsonl → agent_trace_1769587985862_258.json
+  ✓ agent_trace_1769587989558_322.jsonl → agent_trace_1769587989558_322.json
+  ...
+
+Exported 21/21 traces to Chrome format.
+
+To view:
+  1. Open Chrome DevTools (F12) → Performance → Load profile
+  2. Or navigate to chrome://tracing and load the .json file
+```
+
+### Viewing in Chrome
+
+**Option 1: Chrome DevTools Performance Panel**
+1. Open Chrome DevTools (F12)
+2. Go to **Performance** tab
+3. Click **Load profile...** (or drag & drop the `.json` file)
+4. Explore the flame chart - wider bars = longer duration
+5. Click any span to see details (arguments, results, token counts)
+
+**Option 2: chrome://tracing**
+1. Navigate to `chrome://tracing` in Chrome
+2. Click **Load** and select the `.json` file
+3. Use WASD keys to navigate, mouse to zoom
+
+### Programmatic Export
+
+You can also export traces programmatically:
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+# Load a trace tree from JSONL
+{:ok, tree} = Analyzer.load_tree("traces/agent_trace_123.jsonl")
+
+# Export to Chrome format
+Analyzer.export_chrome_trace(tree, "traces/agent_trace_123.json")
+```
+
+### What's Captured
+
+Each trace includes:
+- **run.start/stop** - Total agent execution time
+- **turn.start/stop** - Per-turn timing and token counts
+- **llm.start/stop** - LLM API call latency
+
+This helps identify:
+- Slow LLM responses
+- Excessive turn counts
+- Token usage patterns
 
 ## Troubleshooting
 
