@@ -171,14 +171,16 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
       end
 
       # Build run options (without trace_context - that's handled by TraceLog)
-      run_opts = [
-        llm: resolved_llm,
-        llm_registry: state.llm_registry,
-        context: args,
-        _nesting_depth: state.nesting_depth + 1,
-        _remaining_turns: state.remaining_turns,
-        _mission_deadline: state.mission_deadline
-      ]
+      run_opts =
+        [
+          llm: resolved_llm,
+          llm_registry: state.llm_registry,
+          context: args,
+          _nesting_depth: state.nesting_depth + 1,
+          _remaining_turns: state.remaining_turns,
+          _mission_deadline: state.mission_deadline
+        ]
+        |> maybe_add_opt(:max_heap, state[:max_heap])
 
       # If parent has tracing enabled, create a child trace file
       if has_trace_context?(state) do
@@ -300,4 +302,8 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   defp generate_trace_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
+
+  # Add option to keyword list if value is not nil
+  defp maybe_add_opt(opts, _key, nil), do: opts
+  defp maybe_add_opt(opts, key, value), do: Keyword.put(opts, key, value)
 end

@@ -330,6 +330,24 @@ See [Core Concepts](subagent-concepts.md) for the full state persistence documen
 
 **Note:** This limitation only affects observability (what appears in the trace). The actual computation results from closures are returned correctly. Tool calls inside parallel execution still execute - they just aren't tracked in the turn's tool call history.
 
+## Agent Crashes with "maximum heap size reached"
+
+**Symptom:** Agent crashes with Erlang error log showing `maximum heap size reached`.
+
+**Cause:** The default heap limit (~10MB) is too small for the workload.
+
+**Solution:** Pass `max_heap` option to increase the limit:
+
+```elixir
+SubAgent.run(agent,
+  llm: llm,
+  context: context,
+  max_heap: 200_000_000  # ~1.6GB (in words, not bytes)
+)
+```
+
+Child agents automatically inherit this setting from their parent.
+
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage

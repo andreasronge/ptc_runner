@@ -141,6 +141,9 @@ defmodule PtcRunner.SubAgent.Loop do
     mission_deadline = Keyword.get(opts, :_mission_deadline)
     trace_context = Keyword.get(opts, :trace_context)
 
+    # Extract Lisp.run resource limits (propagated to child agents)
+    max_heap = Keyword.get(opts, :max_heap)
+
     # Check nesting depth limit before starting
     if nesting_depth >= agent.max_depth do
       step =
@@ -179,7 +182,8 @@ defmodule PtcRunner.SubAgent.Loop do
           token_limit: token_limit,
           on_budget_exceeded: on_budget_exceeded,
           budget_callback: budget_callback,
-          trace_context: trace_context
+          trace_context: trace_context,
+          max_heap: max_heap
         }
 
         run_with_telemetry(agent, run_opts)
@@ -272,7 +276,9 @@ defmodule PtcRunner.SubAgent.Loop do
       on_budget_exceeded: run_opts.on_budget_exceeded,
       budget_callback: run_opts.budget_callback,
       # Trace context for nested agent tracing
-      trace_context: run_opts.trace_context
+      trace_context: run_opts.trace_context,
+      # Lisp resource limits (propagated to child agents)
+      max_heap: run_opts.max_heap
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -679,18 +685,20 @@ defmodule PtcRunner.SubAgent.Loop do
         ) ::
           {:stop, {:ok | :error, Step.t()}, Turn.t(), map() | nil} | {:continue, map(), Turn.t()}
   defp execute_code_with_tools(code, response, agent, state, exec_context, all_tools) do
-    lisp_opts = [
-      context: exec_context,
-      memory: state.memory,
-      tools: all_tools,
-      turn_history: state.turn_history,
-      float_precision: agent.float_precision,
-      max_print_length: Keyword.get(agent.format_options, :max_print_length),
-      timeout: agent.timeout,
-      pmap_timeout: agent.pmap_timeout,
-      budget: build_budget_introspection_map(agent, state),
-      trace_context: state.trace_context
-    ]
+    lisp_opts =
+      [
+        context: exec_context,
+        memory: state.memory,
+        tools: all_tools,
+        turn_history: state.turn_history,
+        float_precision: agent.float_precision,
+        max_print_length: Keyword.get(agent.format_options, :max_print_length),
+        timeout: agent.timeout,
+        pmap_timeout: agent.pmap_timeout,
+        budget: build_budget_introspection_map(agent, state),
+        trace_context: state.trace_context
+      ]
+      |> maybe_add_max_heap(state.max_heap)
 
     case Lisp.run(code, lisp_opts) do
       {:ok, lisp_step} ->
@@ -1020,6 +1028,10 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   defp check_memory_limit(_memory, nil), do: {:ok, 0}
+
+  # Add max_heap to opts if provided (nil means use Lisp.run default)
+  defp maybe_add_max_heap(opts, nil), do: opts
+  defp maybe_add_max_heap(opts, max_heap), do: Keyword.put(opts, :max_heap, max_heap)
 
   # Calculate mission deadline from timeout in milliseconds
   defp calculate_mission_deadline(nil), do: nil
