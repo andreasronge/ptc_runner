@@ -407,4 +407,61 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       refute msg =~ "special form"
     end
   end
+
+  describe "tool call argument errors" do
+    test "positional arguments to tool returns invalid_tool_args error" do
+      # (tool/query "corpus string") - positional arg instead of {:corpus "..."}
+      tool_call_ast = {:tool_call, :query, [{:string, "some corpus"}]}
+
+      tool_exec = fn _name, _args -> {:ok, %{}} end
+
+      assert {:error, {:invalid_tool_args, msg}} =
+               Eval.eval(tool_call_ast, %{}, %{}, %{}, tool_exec)
+
+      assert msg =~ "Tool calls require named arguments"
+      assert msg =~ "tool/name {:key value}"
+    end
+
+    test "multiple positional arguments to tool returns invalid_tool_args error" do
+      # (tool/search "query" 10) - two positional args
+      tool_call_ast = {:tool_call, :search, [{:string, "query"}, 10]}
+
+      tool_exec = fn _name, _args -> {:ok, %{}} end
+
+      assert {:error, {:invalid_tool_args, msg}} =
+               Eval.eval(tool_call_ast, %{}, %{}, %{}, tool_exec)
+
+      assert msg =~ "Tool calls require named arguments"
+    end
+
+    test "map argument to tool succeeds" do
+      # (tool/query {:corpus "..."}) - correct format
+      tool_call_ast =
+        {:tool_call, :query, [{:map, [{{:keyword, :corpus}, {:string, "test"}}]}]}
+
+      tool_exec = fn _name, args ->
+        assert args == %{"corpus" => "test"}
+        {:ok, %{"result" => "found"}}
+      end
+
+      # Tool returns {:ok, value}, which becomes the eval result
+      assert {:ok, {:ok, %{"result" => "found"}}, _} =
+               Eval.eval(tool_call_ast, %{}, %{}, %{}, tool_exec)
+    end
+
+    test "keyword-style arguments to tool succeeds" do
+      # (tool/query :corpus "..." :limit 10) - keyword style
+      tool_call_ast =
+        {:tool_call, :query, [{:keyword, :corpus}, {:string, "test"}, {:keyword, :limit}, 10]}
+
+      tool_exec = fn _name, args ->
+        assert args == %{"corpus" => "test", "limit" => 10}
+        {:ok, %{"result" => "found"}}
+      end
+
+      # Tool returns {:ok, value}, which becomes the eval result
+      assert {:ok, {:ok, %{"result" => "found"}}, _} =
+               Eval.eval(tool_call_ast, %{}, %{}, %{}, tool_exec)
+    end
+  end
 end

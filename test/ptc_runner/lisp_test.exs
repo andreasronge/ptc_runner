@@ -317,5 +317,15 @@ defmodule PtcRunner.LispTest do
     test "not callable error" do
       assert {:error, %{fail: %{reason: :not_callable}}} = Lisp.run("(42)")
     end
+
+    test "tool call with positional args returns invalid_tool_args error" do
+      # Simulate what the LLM might generate: (tool/query "corpus") instead of (tool/query {:corpus "..."})
+      tools = %{"query" => fn _args -> {:ok, %{}} end}
+
+      assert {:error, %{fail: %{reason: :invalid_tool_args, message: msg}}} =
+               Lisp.run(~S|(tool/query "some corpus")|, tools: tools)
+
+      assert msg =~ "Tool calls require named arguments"
+    end
   end
 end
