@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 24 -->
+<!-- version: 26 -->
 <!-- date: 2026-01-28 -->
-<!-- changes: Add sum/avg and aggregators section -->
+<!-- changes: Add extract, extract-int, pairs, combinations, parse-int functions -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -52,21 +52,30 @@ data/products                      ; read-only input data
 
 ### Common Mistakes
 
-| Wrong | Right |
-|-------|-------|
-| `(max [1 2 3])` | `(apply max [1 2 3])` |
-| `(apply min-by :k coll)` | `(min-by :k coll)` — min-by/max-by take 2 args |
-| `(sort-by :price coll >)` | `(sort-by :price > coll)` |
-| `(includes s "x")` | `(includes? s "x")` |
-| `(includes? list elem)` | `(contains? list elem)` — includes? is for strings only |
-| `(-> coll (filter f))` | `(->> coll (filter f))` |
-| `(for [[k v] m] ...)` | `(map (fn [[k v]] ...) m)` |
-| `(doseq [x xs] (swap! acc ...))` | `(reduce (fn [acc x] ...) {} xs)` |
-| `(reduce (fn [acc x] (update acc k ...)) {} coll)` | `(group-by :field coll)` + `(map (fn [[k items]] ...) grouped)` |
-| `(take 100 str)` | `(subs str 0 100)` — take on strings returns char list |
-| `(take (/ n 2) coll)` | `(take (quot n 2) coll)` — `/` returns float |
-| `(clojure.string/split s #"\\s+")` | `(re-split (re-pattern "\\s+") s)` or `(split s ",")` for literals |
-| `(grep text pattern)` | `(grep pattern text)` — pattern first, like Unix grep |
+**Collections:**
+- ✗ `(max [1 2 3])` → ✓ `(apply max [1 2 3])` — max takes args, not collection
+- ✗ `(take 100 str)` → ✓ `(subs str 0 100)` — take on strings returns char list
+- ✗ `(take (/ n 2) coll)` → ✓ `(take (quot n 2) coll)` — `/` returns float
+
+**Predicates:**
+- ✗ `(includes s "x")` → ✓ `(includes? s "x")` — predicate needs `?`
+- ✗ `(includes? list elem)` → ✓ `(contains? list elem)` — `includes?` is for strings
+
+**Functions:**
+- ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
+- ✗ `(apply min-by :k coll)` → ✓ `(min-by :k coll)` — takes 2 args, no apply
+- ✗ `(grep text pattern)` → ✓ `(grep pattern text)` — pattern first
+
+**Regex & Parsing:**
+- ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
+- ✗ `Integer/parseInt` → ✓ `parse-long` or `parse-int` — no Java interop
+- ✗ `(parse-long (second (re-find ...)))` → ✓ `(extract-int "pattern" str)` — simplified extraction
+- ✗ `clojure.string/split` → ✓ `(split s ",")` or `(re-split (re-pattern "\\s+") s)`
+
+**Threading & Iteration:**
+- ✗ `(-> coll (filter f))` → ✓ `(->> coll (filter f))` — use `->>` for collections
+- ✗ `(for [[k v] m] ...)` → ✓ `(map (fn [[k v]] ...) m)` — no `for` comprehensions
+- ✗ `(doseq [x xs] (swap! acc ...))` → ✓ `(reduce (fn [acc x] ...) {} xs)`
 
 ### Line Search (grep)
 
@@ -89,6 +98,23 @@ data/products                      ; read-only input data
 (avg-by :price products)         ; average field values
 (min-by :price products)         ; item with minimum field
 (max-by :years employees)        ; item with maximum field
+```
+
+### Extraction & Combinations
+
+```clojure
+;; Extract regex capture groups
+(extract "ID:(\\d+)" "ID:42")             ; => "42" (group 1)
+(extract "ID:(\\d+)" "ID:42" 0)           ; => "ID:42" (full match)
+
+;; Extract and parse as integer
+(extract-int "age=(\\d+)" "age=25")       ; => 25 (group 1)
+(extract-int "x=(\\d+) y=(\\d+)" s 2)     ; => group 2, nil on failure
+(extract-int "age=(\\d+)" "no match" 1 0) ; => 0 (group 1, default 0)
+
+;; Generate pairs/combinations
+(pairs [1 2 3])                           ; => [[1 2] [1 3] [2 3]]
+(combinations [:a :b :c :d] 3)            ; => [[:a :b :c] [:a :b :d] ...]
 ```
 
 <!-- PTC_PROMPT_END -->

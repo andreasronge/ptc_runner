@@ -4,6 +4,8 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
   Uses Erlang's :re directly with match limits for ReDoS protection.
   """
 
+  alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
+
   @match_limit 100_000
   @recursion_limit 1_000
   @max_input_bytes 32_768
@@ -148,6 +150,61 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
 
       {:error, reason} ->
         raise RuntimeError, "Regex execution error: #{inspect(reason)}"
+    end
+  end
+
+  # ============================================================
+  # Extract Functions - Simplified regex capture group extraction
+  # ============================================================
+
+  @doc """
+  Extract a capture group from a regex match.
+
+  - `(extract "ID:(\\d+)" "ID:42")` => "42" (group 1)
+  - `(extract "ID:(\\d+)" "ID:42" 0)` => "ID:42" (full match)
+  - `(extract regex string 2)` => group 2
+
+  Accepts both string patterns and compiled regex objects.
+  """
+  def extract(pattern, string) when is_binary(string) do
+    extract(pattern, string, 1)
+  end
+
+  def extract(pattern, string, group) when is_binary(string) and is_integer(group) do
+    # Accept both string patterns and compiled regex
+    re = if is_binary(pattern), do: re_pattern(pattern), else: pattern
+
+    case re_find(re, string) do
+      nil -> nil
+      result when is_binary(result) -> if group == 0, do: result, else: nil
+      result when is_list(result) -> Enum.at(result, group)
+    end
+  end
+
+  @doc """
+  Extract a capture group and parse as integer.
+
+  2-arity: extracts group 1, returns nil on failure
+  - `(extract-int "age=(\\d+)" "age=25")` => 25
+
+  4-arity: extracts specified group with default value
+  - `(extract-int "age=(\\d+)" "no match" 1 0)` => 0 (group 1, default 0)
+  - `(extract-int "x=(\\d+) y=(\\d+)" s 2 0)` => group 2 with default 0
+
+  Accepts both string patterns and compiled regex objects.
+  """
+  def extract_int(pattern, string) when is_binary(string) do
+    extract_int(pattern, string, 1, nil)
+  end
+
+  def extract_int(pattern, string, group) when is_binary(string) and is_integer(group) do
+    extract_int(pattern, string, group, nil)
+  end
+
+  def extract_int(pattern, string, group, default) when is_binary(string) and is_integer(group) do
+    case extract(pattern, string, group) do
+      nil -> default
+      s -> RuntimeString.parse_long(s) || default
     end
   end
 end
