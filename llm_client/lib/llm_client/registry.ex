@@ -73,6 +73,15 @@ defmodule LLMClient.Registry do
         bedrock: %{input: 0.14, output: 0.14}
       }
     },
+    "qwen-coder-480b" => %{
+      description: "Qwen3 Coder 480B - Large code model via Bedrock",
+      providers: %{
+        bedrock: "qwen.qwen3-coder-480b-a35b-v1:0"
+      },
+      costs: %{
+        bedrock: %{input: 1.50, output: 7.50}
+      }
+    },
     "gemini" => %{
       description: "Gemini 2.5 Flash - Google's fast model",
       providers: %{

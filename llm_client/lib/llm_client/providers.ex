@@ -23,6 +23,7 @@ defmodule LLMClient.Providers do
 
   @default_timeout 120_000
   @ollama_base_url "http://localhost:11434"
+  @default_bedrock_region "eu-north-1"
 
   @type message :: %{role: :system | :user | :assistant, content: String.t()}
   @type response :: %{
@@ -59,6 +60,13 @@ defmodule LLMClient.Providers do
     - `:cache` - Enable prompt caching for supported providers (default: false).
       Works with direct Anthropic API (`anthropic:`) and OpenRouter Anthropic models
       (`openrouter:anthropic/...`). Uses 5-minute ephemeral cache.
+
+  ## AWS Bedrock Region
+
+  For Bedrock models, the region is determined in this order:
+  1. `AWS_REGION` environment variable
+  2. `config :llm_client, :bedrock_region, "region-name"`
+  3. Default: `#{@default_bedrock_region}`
 
   ## Returns
     - `{:ok, %{content: string, tokens: %{input: int, output: int, cache_creation: int, cache_read: int}}}`
@@ -313,6 +321,9 @@ defmodule LLMClient.Providers do
     # Apply caching: either via provider_options (Anthropic) or message/opts transformation (OpenRouter)
     {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
 
+    # Apply Bedrock region if needed
+    extra_opts = apply_bedrock_region(model, extra_opts)
+
     req_opts =
       [receive_timeout: timeout, req_http_options: http_opts]
       |> Keyword.merge(extra_opts)
@@ -337,6 +348,9 @@ defmodule LLMClient.Providers do
 
     # Apply caching (reuse existing apply_caching/3)
     {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
+
+    # Apply Bedrock region if needed
+    extra_opts = apply_bedrock_region(model, extra_opts)
 
     req_opts =
       [receive_timeout: timeout, req_http_options: http_opts]
@@ -386,6 +400,25 @@ defmodule LLMClient.Providers do
   end
 
   defp apply_caching(_model, messages, false), do: {messages, []}
+
+  # Ensure AWS_REGION is set for Bedrock models
+  # AWS SDK reads region from environment, so we set it if not already present
+  # Priority: AWS_REGION env var > config > default
+  defp apply_bedrock_region(model, opts) do
+    if bedrock_model?(model) and System.get_env("AWS_REGION") == nil do
+      region =
+        Application.get_env(:llm_client, :bedrock_region) ||
+          @default_bedrock_region
+
+      System.put_env("AWS_REGION", region)
+    end
+
+    opts
+  end
+
+  defp bedrock_model?(model) do
+    String.starts_with?(model, "amazon_bedrock:") or String.starts_with?(model, "bedrock:")
+  end
 
   defp anthropic_model_on_openrouter?(model) do
     String.contains?(model, "anthropic") or String.contains?(model, "claude")

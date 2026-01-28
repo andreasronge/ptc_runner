@@ -53,6 +53,7 @@ Aliases map to provider-specific model IDs. Use `provider:alias` syntax:
 | `haiku` | `anthropic/claude-haiku-4.5` | `anthropic.claude-haiku-4-5-20251001-v1:0` |
 | `sonnet` | `anthropic/claude-sonnet-4` | `anthropic.claude-sonnet-4-20250514-v1:0` |
 | `qwen-coder` | ❌ Not available | `qwen.qwen3-coder-30b-a3b-v1:0` |
+| `qwen-coder-480b` | ❌ Not available | `qwen.qwen3-coder-480b-a35b-v1:0` |
 | `gemini` | `google/gemini-2.5-flash` | ❌ Not available |
 | `deepseek` | `deepseek/deepseek-chat-v3-0324` | ❌ Not available |
 | `gpt` | `openai/gpt-4.1-mini` | ❌ Not available |
@@ -86,6 +87,15 @@ config :llm_client, :default_provider, :bedrock
 | Anthropic | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Google | `GOOGLE_API_KEY` |
+
+### AWS Bedrock Region
+
+Bedrock region is determined in this order:
+1. `AWS_REGION` environment variable
+2. `config :llm_client, :bedrock_region, "region-name"`
+3. Default: `eu-north-1`
+
+Some models (like `qwen-coder-480b`) are only available in specific regions.
 
 ### AWS Bedrock with SSO
 
