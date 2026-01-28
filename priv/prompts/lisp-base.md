@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 23 -->
-<!-- date: 2026-01-23 -->
-<!-- changes: Clarify one program per response; add min-by/max-by arity hint -->
+<!-- version: 24 -->
+<!-- date: 2026-01-28 -->
+<!-- changes: Add sum/avg and aggregators section -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -78,6 +78,17 @@ data/products                      ; read-only input data
 (def matches (grep-n "error" log))
 (:line (first matches))          ; => 1
 (:text (first matches))          ; => "error: connection failed"
+```
+
+### Aggregators
+
+```clojure
+(sum [1 2 3])                    ; => 6
+(avg [1 2 3 4])                  ; => 2.5
+(sum-by :amount expenses)        ; sum field values
+(avg-by :price products)         ; average field values
+(min-by :price products)         ; item with minimum field
+(max-by :years employees)        ; item with maximum field
 ```
 
 <!-- PTC_PROMPT_END -->

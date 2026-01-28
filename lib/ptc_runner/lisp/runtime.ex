@@ -88,6 +88,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate seq(coll), to: Collection
   defdelegate reduce(f, coll), to: Collection
   defdelegate reduce(f, init, coll), to: Collection
+  defdelegate sum(coll), to: Collection
+  defdelegate avg(coll), to: Collection
   defdelegate sum_by(keyfn, coll), to: Collection
   defdelegate avg_by(keyfn, coll), to: Collection
   defdelegate min_by(keyfn, coll), to: Collection

@@ -256,6 +256,8 @@ defmodule PtcRunner.Lisp.Env do
       {:"not-empty", {:normal, &Runtime.not_empty/1}},
       {:seq, {:normal, &Runtime.seq/1}},
       {:reduce, {:multi_arity, :reduce, {&Runtime.reduce/2, &Runtime.reduce/3}}},
+      {:sum, {:normal, &Runtime.sum/1}},
+      {:avg, {:normal, &Runtime.avg/1}},
       {:"sum-by", {:normal, &Runtime.sum_by/2}},
       {:"avg-by", {:normal, &Runtime.avg_by/2}},
       {:"min-by", {:normal, &Runtime.min_by/2}},

@@ -29,7 +29,7 @@ defmodule PtcRunner.Lisp.VariadicFnTest do
     end
 
     test "variadic with reduce" do
-      code = "(defn sum [& nums] (reduce + 0 nums)) (sum 1 2 3 4 5)"
+      code = "(defn my-variadic-sum [& nums] (reduce + 0 nums)) (my-variadic-sum 1 2 3 4 5)"
       assert {:ok, %{return: 15}} = Lisp.run(code)
     end
 
