@@ -32,8 +32,7 @@ defmodule RlmRecursive.Agent do
       * `:sniah` - Needle-in-haystack search with grep probing
       * `:counting` - Count profiles matching criteria
       * `:pairs` - Find pairs sharing city + hobby (keyword matching)
-      * `:semantic_pairs` - Find semantically compatible pairs (guided prompt)
-      * `:semantic_pairs_rlm` - Pure RLM mode: minimal prompt, model discovers algorithm
+      * `:semantic_pairs` - Find semantically compatible pairs (pure RLM, minimal prompt)
     * `opts` - Options passed to SubAgent.new/1
 
   ## Options
@@ -95,36 +94,10 @@ defmodule RlmRecursive.Agent do
   end
 
   def new(:semantic_pairs, opts) do
-    # RLM-style two-phase approach:
-    # Phase 1: Batch classify profiles using sub-agent (semantic reasoning, not keyword matching)
-    # Phase 2: Find pairs programmatically using code
-    # With batch_size=10, turn_budget=100 supports ~1000 profiles
-    max_depth = Keyword.get(opts, :max_depth, 3)
-    max_turns = Keyword.get(opts, :max_turns, 50)
-    turn_budget = Keyword.get(opts, :turn_budget, 100)
-    llm = Keyword.get(opts, :llm)
-
-    SubAgent.new(
-      prompt: semantic_pairs_prompt(),
-      signature: "(corpus :string) -> {count :int, pairs [:string]}",
-      description:
-        "Find pairs with semantically compatible interests using RLM two-phase approach",
-      tools: %{"evaluate_pairs" => :self},
-      max_depth: max_depth,
-      max_turns: max_turns,
-      turn_budget: turn_budget,
-      llm: llm,
-      # RLM-style: long timeouts for batch classification
-      timeout: 600_000,
-      pmap_timeout: 600_000
-    )
-  end
-
-  def new(:semantic_pairs_rlm, opts) do
     # Pure RLM mode: minimal prompt, model discovers algorithm
-    # This tests whether the model can independently discover:
+    # Tests whether the model can independently discover:
     # 1. The need to batch process for efficiency
-    # 2. The two-phase approach (semantic classification → programmatic pairing)
+    # 2. A two-phase approach (semantic classification → programmatic pairing)
     # 3. Category-based compatibility matching
     max_depth = Keyword.get(opts, :max_depth, 4)
     max_turns = Keyword.get(opts, :max_turns, 100)
@@ -132,7 +105,7 @@ defmodule RlmRecursive.Agent do
     llm = Keyword.get(opts, :llm)
 
     SubAgent.new(
-      prompt: semantic_pairs_rlm_prompt(),
+      prompt: semantic_pairs_prompt(),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description: "Find pairs with semantically compatible interests",
       tools: %{"process" => :self},
@@ -305,161 +278,8 @@ defmodule RlmRecursive.Agent do
     """
   end
 
-  # Semantic pairs prompt - RLM-style two-phase approach
-  # Phase 1: Batch classify profiles using sub-agent calls (semantic reasoning)
-  # Phase 2: Find pairs programmatically among classified profiles
-  defp semantic_pairs_prompt do
-    """
-    Find all pairs of people in the same city with SEMANTICALLY COMPATIBLE interests.
-
-    ## What is Semantic Compatibility?
-
-    Two people are compatible if their interests suggest they would ENJOY ACTIVITIES TOGETHER.
-    Use your semantic understanding - do NOT use keyword matching.
-
-    Examples of compatibility:
-    - "enjoys scaling peaks on weekends" + "trail running enthusiast" → COMPATIBLE (both outdoor/active)
-    - "captures moments with my DSLR" + "weekend watercolor painter" → COMPATIBLE (both creative/artistic)
-    - "builds custom mechanical keyboards" + "Arduino tinkerer" → COMPATIBLE (both maker/tech)
-    - "loves mountain biking" + "pottery studio regular" → NOT COMPATIBLE (unrelated domains)
-
-    Semantic categories to consider:
-    - :outdoor (nature, adventure, exploration activities)
-    - :creative (artistic expression, making things, visual arts)
-    - :tech (electronics, programming, gaming, building)
-    - :social (group activities, community, interpersonal)
-    - :fitness (exercise, sports, physical wellness)
-
-    Compatible category pairs: outdoor+fitness, creative+social, tech+creative
-
-    ## Input
-    - `data/corpus`: Profile data (format: "PROFILE N: name=..., city=CITY, interests=[...]")
-
-    ## Output
-    Return `{:count N :pairs ["1-2" "3-5" ...]}` where pairs have compatible interests.
-    Format pairs as "id1-id2" with id1 < id2.
-
-    ## RLM Strategy: Two-Phase Approach
-
-    **PHASE 1: Batch Semantic Classification**
-    Use `tool/evaluate_pairs` with `{:task "classify_batch"}` to classify profiles
-    in batches of 10. The sub-agent uses SEMANTIC REASONING (not keyword matching)
-    to determine categories. This reduces turn usage from O(n) to O(n/10).
-
-    **PHASE 2: Programmatic Pair Finding**
-    After classification, use code with `(pairs ...)` to find pairs where both
-    profiles have compatible semantic categories. This is instant - no LLM needed.
-
-    ## Example
-
-    ```clojure
-    (def lines (split-lines data/corpus))
-    (println "Total profiles:" (count lines))
-
-    ;; Parse profiles - use simple patterns to avoid complex escaping
-    (defn parse-profile [line]
-      {:id (extract-int "PROFILE (\\\\d+):" line 1 0)
-       :city (extract "city=([^,]+)" line)
-       :interests (let [raw (extract "interests=(.+)" line)]
-                    (if raw (subs raw 1 (dec (count raw))) ""))  ; trim [ and ]
-       :line line})
-
-    (def profiles (map parse-profile lines))
-    (println "Parsed" (count profiles) "profiles")
-
-    ;; PHASE 1: Batch classify profiles (10 at a time to save turns)
-    (def batch-size 10)
-    (def batches (partition-all batch-size profiles))
-    (println "Classifying in" (count batches) "batches...")
-
-    (def classified
-      (mapcat
-        (fn [batch]
-          (let [;; Send batch of {id, interests} pairs for classification
-                items (map #(select-keys % [:id :interests]) batch)
-                result (tool/evaluate_pairs {:task "classify_batch" :items items})
-                ;; Result: {:classifications [{:id 1 :categories [:outdoor]} ...]}
-                class-map (into {} (map (fn [c] [(:id c) (:categories c)])
-                                        (or (:classifications result) [])))]
-            ;; Merge categories back into profiles
-            (map (fn [p] (assoc p :categories (or (get class-map (:id p)) [])))
-                 batch)))
-        batches))
-
-    (println "Classification complete")
-
-    ;; PHASE 2: Group by city, then find pairs with compatible categories
-    (def by-city (group-by :city classified))
-
-    ;; Define which category pairs are compatible
-    (def compatible-pairs
-      #{[:outdoor :fitness] [:fitness :outdoor]
-        [:creative :social] [:social :creative]
-        [:tech :creative] [:creative :tech]})
-
-    (defn categories-compatible? [cats1 cats2]
-      (some (fn [c1]
-              (some (fn [c2]
-                      (or (= c1 c2) (contains? compatible-pairs [c1 c2])))
-                    cats2))
-            cats1))
-
-    ;; Find all compatible pairs within each city
-    (def all-pairs
-      (mapcat (fn [[city group]]
-                (->> (pairs group)
-                     (filter (fn [[p1 p2]]
-                               (categories-compatible?
-                                 (:categories p1) (:categories p2))))
-                     (map (fn [[p1 p2]] (str (:id p1) "-" (:id p2))))))
-              by-city))
-
-    (println "Found" (count all-pairs) "compatible pairs")
-    (return {:count (count all-pairs) :pairs all-pairs})
-    ```
-
-    ## Sub-Agent Task Modes
-
-    **Batch classification** `{:task "classify_batch" :items [{:id 1 :interests "..."} ...]}`:
-    - Classify multiple profiles in one call (saves turns and tokens)
-    - Return `{:classifications [{:id 1 :categories [:outdoor :fitness]} ...]}`
-
-    **Recursive mode** `{:task "find_pairs" :corpus "..."}` (for very large datasets):
-    - Process a subset of the corpus recursively
-    - Return `{:count N :pairs [...]}` directly
-
-    ## Handling the Classification Sub-Task
-
-    When `data/task` equals "classify_batch", classify each profile's interests
-    using SEMANTIC REASONING. Do NOT use keyword matching - understand the MEANING.
-
-    ```clojure
-    (if (= data/task "classify_batch")
-      ;; Batch classification mode
-      (let [items data/items]
-        (return
-          {:classifications
-           (map (fn [item]
-                  ;; USE SEMANTIC REASONING HERE - understand what the interests MEAN
-                  ;; "loves scaling peaks" → :outdoor, :fitness
-                  ;; "Arduino projects" → :tech, :creative
-                  ;; Do NOT just match keywords - reason about the activity type
-                  {:id (:id item)
-                   :categories [...your semantic classification...]})
-                items)}))
-      ;; Main task mode
-      ...)
-    ```
-
-    **IMPORTANT**: The classification must use your semantic understanding.
-    "weekend warrior on the trails" should map to [:outdoor :fitness] even though
-    it contains no explicit keywords. Reason about what the person DOES, not what
-    words appear in their interests.
-    """
-  end
-
   # Pure RLM prompt - minimal guidance, model discovers algorithm
-  defp semantic_pairs_rlm_prompt do
+  defp semantic_pairs_prompt do
     """
     Find all pairs of people in the same city with semantically compatible interests.
 
