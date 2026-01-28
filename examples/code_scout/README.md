@@ -1,8 +1,8 @@
 # Code Scout Example
 
-Code Scout is a mini-library and Mix task that demonstrates how to use `ptc_runner` SubAgents to investigate a codebase.
+A simple demonstration of a multi-turn SubAgent that investigates a codebase. This is a **naive example** using a basic prompt and two tools (`grep`, `read_file`) — intended to show the minimal setup, not production-quality code exploration.
 
-It uses an LLM-driven agent that has access to `grep` and `read_file` tools to navigate your source code and answer questions.
+For more advanced patterns (parallel processing, recursive decomposition, budget-aware strategies), see the [rlm](../rlm/) and [rlm_recursive](../rlm_recursive/) examples.
 
 ## Concepts Demonstrated
 
@@ -76,9 +76,9 @@ SubAgent.run(agent, llm: llm_fn)
 
 Inspect agent behavior with `--trace` (add `--verbose` for full messages), or view the system prompt with `--system-prompt`.
 
-## Prerequisite
+## LLM Provider Setup
 
-You must have an LLM configured. By default, this example uses `llm_client` (local sibling project) and will attempt to load a `.env` file from the project root (containing e.g., `OPENROUTER_API_KEY`).
+This example uses `llm_client`. See [llm_client/README.md](../../llm_client/README.md) for provider configuration (OpenRouter, AWS Bedrock, etc.).
 
 ## Installation
 
@@ -115,6 +115,8 @@ To see the agent's multi-turn reasoning and tool calls, use the `--trace` flag:
 mix code.scout "How are PTC-Lisp special forms handled?" --trace
 ```
 
+Traces are saved to the `traces/` folder (gitignored).
+
 Add `--verbose` (or `-v`) to include full LLM messages:
 
 ```bash
@@ -126,6 +128,26 @@ Add `--raw` (or `-r`) to see the raw LLM response including thinking/reasoning b
 ```bash
 mix code.scout "Find the evaluator" --trace --raw
 ```
+
+### Chrome DevTools Export
+
+After running with `--trace`, export for flame chart visualization:
+
+```bash
+# Export all traces to Chrome format
+mix run -e '
+alias PtcRunner.TraceLog.Analyzer
+for jsonl <- Path.wildcard("traces/*.jsonl") do
+  {:ok, tree} = Analyzer.load_tree(jsonl)
+  Analyzer.export_chrome_trace(tree, String.replace(jsonl, ".jsonl", ".json"))
+  IO.puts("Exported: #{jsonl}")
+end
+'
+```
+
+Then load in Chrome: DevTools (F12) → Performance → Load profile.
+
+See [Observability Guide](../../docs/guides/subagent-observability.md#chrome-devtools-export) for details.
 
 ### Compression
 

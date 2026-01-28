@@ -7,8 +7,10 @@ defmodule Mix.Tasks.Code.Scout do
   """
   use Mix.Task
   alias CodeScout
+  alias PtcRunner.TraceLog
 
   @shortdoc "Scout your codebase with an LLM agent"
+  @trace_dir "traces"
 
   def run(args) do
     # Load application and deps
@@ -57,7 +59,23 @@ defmodule Mix.Tasks.Code.Scout do
           max_turns: opts[:max_turns] || 10
         ]
 
-        case CodeScout.query(query_string, query_opts) do
+        # Run with or without tracing
+        {result, trace_path} =
+          if opts[:trace] do
+            trace_path = trace_file_path()
+
+            {:ok, result, _} =
+              TraceLog.with_trace(
+                fn -> CodeScout.query(query_string, query_opts) end,
+                path: trace_path
+              )
+
+            {result, trace_path}
+          else
+            {CodeScout.query(query_string, query_opts), nil}
+          end
+
+        case result do
           {:ok, step} ->
             if opts[:trace] do
               PtcRunner.SubAgent.Debug.print_trace(step,
@@ -65,6 +83,8 @@ defmodule Mix.Tasks.Code.Scout do
                 raw: opts[:raw],
                 usage: true
               )
+
+              Mix.shell().info("\nTrace saved to: #{trace_path}")
             end
 
             print_result(step.return)
@@ -76,6 +96,8 @@ defmodule Mix.Tasks.Code.Scout do
                 raw: opts[:raw],
                 usage: true
               )
+
+              Mix.shell().info("\nTrace saved to: #{trace_path}")
             end
 
             Mix.shell().error("Code Scout failed!")
@@ -112,5 +134,12 @@ defmodule Mix.Tasks.Code.Scout do
     Mix.shell().info(String.duplicate("=", 60))
     Mix.shell().info(system_prompt)
     Mix.shell().info(String.duplicate("=", 60))
+  end
+
+  defp trace_file_path do
+    File.mkdir_p!(@trace_dir)
+    timestamp = System.system_time(:millisecond)
+    unique_id = :erlang.unique_integer([:positive])
+    Path.join(@trace_dir, "scout_trace_#{timestamp}_#{unique_id}.jsonl")
   end
 end
