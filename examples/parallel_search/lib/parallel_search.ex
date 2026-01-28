@@ -25,12 +25,12 @@ defmodule ParallelSearch do
     tools = %{"grep" => &do_grep/1}
 
     # Build parallel search expression using pcalls
-    # (let [results (pcalls #(ctx/grep {:pattern "p1"})
-    #                       #(ctx/grep {:pattern "p2"}))]
+    # (let [results (pcalls #(tool/grep {:pattern "p1"})
+    #                       #(tool/grep {:pattern "p2"}))]
     #   (distinct-by :snippet (apply concat results)))
     thunks =
       patterns
-      |> Enum.map(fn pattern -> ~s|#(ctx/grep {:pattern "#{pattern}"})| end)
+      |> Enum.map(fn pattern -> ~s|#(tool/grep {:pattern "#{pattern}"})| end)
       |> Enum.join(" ")
 
     code = "(let [results (pcalls #{thunks})] (apply concat results))"
@@ -57,7 +57,8 @@ defmodule ParallelSearch do
   end
 
   # Tool implementation (private, called by PTC-Lisp via tools map)
-  defp do_grep(%{pattern: pattern}) do
+  # PTC-Lisp passes string keys: %{"pattern" => "..."}
+  defp do_grep(%{"pattern" => pattern}) do
     root = Path.expand("../../..", __DIR__)
     search_path = Path.join(root, "lib/ptc_runner")
 

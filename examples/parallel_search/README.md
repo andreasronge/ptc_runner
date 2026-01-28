@@ -7,8 +7,8 @@ A minimal example demonstrating parallel tool execution in PTC-Lisp (lowlevel AP
 PTC-Lisp's `pcalls` executes thunks concurrently:
 
 ```clojure
-(let [results (pcalls #(ctx/grep {:pattern "defmodule"})
-                      #(ctx/grep {:pattern "defstruct"}))]
+(let [results (pcalls #(tool/grep {:pattern "defmodule"})
+                      #(tool/grep {:pattern "defstruct"}))]
   (apply concat results))
 ```
 
@@ -64,8 +64,8 @@ The `search/1` function:
 
 ```clojure
 ;; For patterns ["defmodule", "defstruct"], generates:
-(let [results (pcalls #(ctx/grep {:pattern "defmodule"})
-                      #(ctx/grep {:pattern "defstruct"}))]
+(let [results (pcalls #(tool/grep {:pattern "defmodule"})
+                      #(tool/grep {:pattern "defstruct"}))]
   (apply concat results))
 ```
 
