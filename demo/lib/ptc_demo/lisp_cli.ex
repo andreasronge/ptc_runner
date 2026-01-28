@@ -21,6 +21,10 @@ defmodule PtcDemo.LispCLI do
     CLIBase.handle_list_models(opts)
     CLIBase.handle_list_prompts(opts)
 
+    # Handle trace management (no API key or agent needed)
+    CLIBase.handle_export_traces(opts)
+    CLIBase.handle_clean_traces(opts)
+
     # Handle --show-prompt (needs agent but not API key)
     CLIBase.handle_show_prompt(opts, PtcDemo.LispAgent)
 

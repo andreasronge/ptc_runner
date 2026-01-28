@@ -21,6 +21,10 @@ defmodule PtcDemo.JsonCLI do
     CLIBase.handle_help(opts, "json")
     CLIBase.handle_list_models(opts)
 
+    # Handle trace management (no API key or agent needed)
+    CLIBase.handle_export_traces(opts)
+    CLIBase.handle_clean_traces(opts)
+
     # Handle --show-prompt (needs agent but not API key)
     CLIBase.handle_show_prompt(opts, PtcDemo.Agent)
 
