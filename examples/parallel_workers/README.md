@@ -164,26 +164,20 @@ This reveals:
 
 **Option 1: Chrome DevTools (Flame Chart)**
 
-Export to Chrome Trace Event format and open in DevTools for flame chart visualization:
+Export to Chrome Trace Event format using the mix task:
 
-```elixir
-alias PtcRunner.TraceLog.Analyzer
+```bash
+# Export to Chrome format
+mix parallel_workers --export
 
-# Load the trace tree and export to Chrome format
-{:ok, tree} = Analyzer.load_tree("examples/parallel_workers/traces/parallel_workers_trace.jsonl")
-Analyzer.export_chrome_trace(tree, "examples/parallel_workers/traces/parallel_workers_trace.json")
+# Export and auto-open in Chrome
+mix parallel_workers --export --open
 ```
 
 Then open in Chrome:
-1. Open Chrome DevTools (F12)
-2. Go to **Performance** tab
-3. Click **Load profile...** (or drag & drop the .json file)
-4. Explore the flame chart - wider bars = longer duration
-
-Or use `chrome://tracing`:
-1. Navigate to `chrome://tracing` in Chrome
-2. Click **Load** and select the .json file
-3. Use WASD keys to navigate, mouse to zoom
+1. Open Chrome DevTools (F12) → **Performance** tab
+2. Click **Load profile...** and select the `.json` file
+3. Or navigate to `chrome://tracing` and load the file
 
 **Option 2: Simple Browser Viewer**
 
