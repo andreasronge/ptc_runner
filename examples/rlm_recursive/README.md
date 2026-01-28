@@ -184,9 +184,9 @@ lib/
 (tool/count {:corpus subset :min_age data/min_age :hobby data/hobby})
 ```
 
-## Comparison with `examples/rlm/`
+## Comparison with `examples/parallel_workers/`
 
-| Feature | `rlm/` (Simple) | `rlm_recursive/` (Advanced) |
+| Feature | `parallel_workers/` (Simple) | `rlm_recursive/` (Advanced) |
 |---------|-----------------|----------------------------|
 | Chunking | Pre-chunked in Elixir | LLM decides |
 | Tools | External worker agents | `:self` for recursion |
@@ -201,19 +201,26 @@ Enable tracing to see execution:
 mix run run.exs --trace
 ```
 
-Open `trace_viewer.html` and load `traces/recursive_trace.jsonl`.
+Traces are saved to the `traces/` folder (gitignored).
 
-## Environment
+### Chrome DevTools Export
 
-AWS Bedrock (default):
-```bash
-export AWS_PROFILE=sandbox
+Export traces for flame chart visualization:
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+{:ok, tree} = Analyzer.load_tree("traces/recursive_trace.jsonl")
+Analyzer.export_chrome_trace(tree, "traces/recursive_trace.json")
 ```
 
-Or OpenRouter:
-```bash
-export OPENROUTER_API_KEY=your_key
-```
+Then load in Chrome: DevTools (F12) → Performance → Load profile.
+
+See [Observability Guide](../../docs/guides/subagent-observability.md#chrome-devtools-export) for details.
+
+## LLM Provider Setup
+
+See [llm_client/README.md](../../llm_client/README.md) for provider configuration (OpenRouter, AWS Bedrock, etc.).
 
 ## Future Work
 
@@ -224,5 +231,5 @@ To further explore recursive behavior, add:
 ## References
 
 - [arXiv:2512.24601](https://arxiv.org/abs/2512.24601) - Recursive Language Models (Zhang, Kraska, Khattab)
-- [examples/rlm/](../rlm/) - Simpler RLM with pre-chunking
+- [examples/parallel_workers/](../parallel_workers/) - Simpler parallel orchestration with pre-chunking
 - [RLM Patterns Guide](../../docs/guides/subagent-rlm-patterns.md)

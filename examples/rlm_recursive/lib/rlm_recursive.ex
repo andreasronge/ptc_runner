@@ -28,7 +28,7 @@ defmodule RlmRecursive do
 
   ## See Also
 
-  - `examples/rlm/` - Simpler RLM example with pre-chunking
+  - `examples/parallel_workers/` - Simpler parallel orchestration with pre-chunking
   - `docs/guides/subagent-rlm-patterns.md` - RLM pattern documentation
   """
 
