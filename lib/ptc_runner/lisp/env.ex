@@ -145,7 +145,10 @@ defmodule PtcRunner.Lisp.Env do
       :grep,
       :"grep-n",
       :"parse-long",
-      :"parse-double"
+      :"parse-int",
+      :"parse-double",
+      :extract,
+      :"extract-int"
     ]
   end
 
@@ -154,7 +157,16 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:regex) do
-    [:"re-pattern", :"re-find", :"re-matches", :"re-split", :"re-seq", :regex?]
+    [
+      :"re-pattern",
+      :"re-find",
+      :"re-matches",
+      :"re-split",
+      :"re-seq",
+      :regex?,
+      :extract,
+      :"extract-int"
+    ]
   end
 
   def builtins_by_category(:math) do
@@ -272,6 +284,8 @@ defmodule PtcRunner.Lisp.Env do
       {:"not-any?", {:normal, &Runtime.not_any?/2}},
       {:contains?, {:normal, &Runtime.contains?/2}},
       {:range, {:multi_arity, :range, {&Runtime.range/1, &Runtime.range/2, &Runtime.range/3}}},
+      {:pairs, {:normal, &Runtime.pairs/1}},
+      {:combinations, {:normal, &Runtime.combinations/2}},
 
       # ============================================================
       # Map operations
@@ -381,6 +395,7 @@ defmodule PtcRunner.Lisp.Env do
       # String parsing
       # ============================================================
       {:"parse-long", {:normal, &Runtime.parse_long/1}},
+      {:"parse-int", {:normal, &Runtime.parse_long/1}},
       {:"parse-double", {:normal, &Runtime.parse_double/1}},
 
       # ============================================================
@@ -392,6 +407,10 @@ defmodule PtcRunner.Lisp.Env do
       {:"re-split", {:normal, &Runtime.re_split/2}},
       {:"re-seq", {:normal, &Runtime.re_seq/2}},
       {:regex?, {:normal, &Runtime.regex?/1}},
+      {:extract, {:multi_arity, :extract, {&Runtime.extract/2, &Runtime.extract/3}}},
+      {:"extract-int",
+       {:multi_arity, :"extract-int",
+        {&Runtime.extract_int/2, &Runtime.extract_int/3, &Runtime.extract_int/4}}},
 
       # ============================================================
       # Numeric predicates

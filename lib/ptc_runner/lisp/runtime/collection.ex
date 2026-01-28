@@ -932,4 +932,60 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def intersection(%MapSet{} = s1, %MapSet{} = s2), do: MapSet.intersection(s1, s2)
   def union(%MapSet{} = s1, %MapSet{} = s2), do: MapSet.union(s1, s2)
   def difference(%MapSet{} = s1, %MapSet{} = s2), do: MapSet.difference(s1, s2)
+
+  # ============================================================
+  # Combinatorial Operations
+  # ============================================================
+
+  @doc """
+  Generate all unique pairs (2-combinations) from a collection.
+
+  Works with any seqable: lists, strings, maps.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.pairs([1, 2, 3])
+      [[1, 2], [1, 3], [2, 3]]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.pairs("abc")
+      [["a", "b"], ["a", "c"], ["b", "c"]]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.pairs([1])
+      []
+  """
+  def pairs(coll), do: combinations(coll, 2)
+
+  @doc """
+  Generate all n-combinations from a collection.
+
+  Works with any seqable: lists, strings, maps.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.combinations([1, 2, 3, 4], 3)
+      [[1, 2, 3], [1, 2, 4], [1, 3, 4], [2, 3, 4]]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.combinations([1, 2], 0)
+      [[]]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.combinations([1, 2], 3)
+      []
+  """
+  def combinations(coll, n) when is_integer(n) and n >= 0 do
+    case seq(coll) do
+      nil -> if n == 0, do: [[]], else: []
+      list -> do_combinations(list, n)
+    end
+  end
+
+  def combinations(_coll, _n), do: []
+
+  defp do_combinations(_, 0), do: [[]]
+  defp do_combinations([], _), do: []
+
+  defp do_combinations([h | t], n) do
+    with_h = Enum.map(do_combinations(t, n - 1), &[h | &1])
+    without_h = do_combinations(t, n)
+    with_h ++ without_h
+  end
 end

@@ -1474,6 +1474,27 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
 ```
 
+#### Combinatorial
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `pairs` | `(pairs coll)` | Generate all 2-combinations (unique pairs) |
+| `combinations` | `(combinations coll n)` | Generate all n-combinations |
+
+```clojure
+(pairs [1 2 3])            ; => [[1 2] [1 3] [2 3]]
+(pairs "abc")              ; => [["a" "b"] ["a" "c"] ["b" "c"]]
+(pairs [1])                ; => [] (need at least 2 elements)
+(combinations [1 2 3 4] 3) ; => [[1 2 3] [1 2 4] [1 3 4] [2 3 4]]
+(combinations [1 2 3] 0)   ; => [[]] (empty subset)
+(combinations [1 2] 3)     ; => [] (n > length)
+
+;; Practical: find pairs that sum to target
+(->> (pairs [1 2 3 4 5])
+     (filter (fn [[a b]] (= (+ a b) 6))))
+;; => [[1 5] [2 4]]
+```
+
 #### Conversion
 
 | Function | Signature | Description |
@@ -1979,6 +2000,7 @@ Since division always returns floats (see Section 8.3), avoid using `even?`/`odd
 | Function | Description |
 |----------|-------------|
 | `parse-long` | Parse string to integer, returns nil on failure |
+| `parse-int` | Alias for `parse-long` |
 | `parse-double` | Parse string to double, returns nil on failure |
 
 String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
@@ -2009,6 +2031,11 @@ Regex functions provide validation and extraction capabilities. To ensure system
 | `re-seq` | `(re-seq re s)` | Returns all matches of `re` in `s` as a list |
 | `re-split` | `(re-split re s)` | Split string `s` by regex pattern `re` |
 | `regex?` | `(regex? x)` | Returns true if `x` is a regex object |
+| `extract` | `(extract pattern s)` | Extract capture group 1 from match |
+| `extract` | `(extract pattern s n)` | Extract capture group n (0 = full match) |
+| `extract-int` | `(extract-int pattern s)` | Extract group 1 and parse as integer |
+| `extract-int` | `(extract-int pattern s n)` | Extract group n and parse as integer |
+| `extract-int` | `(extract-int pattern s n default)` | Extract group n, parse as int, return default on failure |
 
 **Opaque Regex Type:** Regexes do not have a literal syntax. They must be created using `re-pattern`. Internally, they are opaque objects that can be passed to functions but not inspected directly.
 
@@ -2026,6 +2053,19 @@ Regex functions provide validation and extraction capabilities. To ensure system
 (re-seq (re-pattern "(\\d)(\\w)") "1a2b")       ; => [["1a" "1" "a"] ["2b" "2" "b"]]
 (re-split (re-pattern "\\s+") "a  b   c")       ; => ["a" "b" "c"]
 (re-split (re-pattern ",") "a,b,c")             ; => ["a" "b" "c"]
+
+;; extract - simplified capture group extraction
+(extract "ID:(\\d+)" "ID:42")                   ; => "42" (group 1)
+(extract "ID:(\\d+)" "ID:42" 0)                 ; => "ID:42" (full match)
+(extract "x=(\\d+) y=(\\d+)" "x=10 y=20" 2)     ; => "20" (group 2)
+(extract "ID:(\\d+)" "no match")                ; => nil
+
+;; extract-int - extract and parse as integer
+(extract-int "age=(\\d+)" "age=25")             ; => 25
+(extract-int "age=(\\d+)" "no match")           ; => nil (2-arity)
+(extract-int "x=(\\d+) y=(\\d+)" "x=10 y=20" 2) ; => 20 (group 2)
+(extract-int "age=(\\d+)" "no match" 1 0)       ; => 0 (4-arity with default)
+(extract-int "x=(\\d+) y=(\\d+)" "x=10 y=20" 2 0) ; => 20 (group 2 with default)
 ```
 
 **Note:** Regex literals (`#"..."`) are not supported. Use `(re-pattern "...")` instead. For simple delimiter splitting, prefer `(split s "delimiter")` or `(split-lines s)` for newlines.
@@ -2192,7 +2232,7 @@ Programs that call `println` will have their output available in the `prints` li
 }}
 ```
 
-**Note:** In parallel operations like `pmap`, `println` output from parallel branches is NOT captured. Only the main execution thread's output is captured.
+**Note:** In parallel operations like `pmap` and `pcalls`, `println` output from parallel branches is not captured. This is intentional—parallel branches communicate via return values, not side effects. Use `println` for sequential debugging between turns.
 
 ### 8.13 Date and Time (Minimal Java Interop)
 

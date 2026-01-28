@@ -106,6 +106,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate range(end_val), to: Collection
   defdelegate range(start, end_val), to: Collection
   defdelegate range(start, end_val, step), to: Collection
+  defdelegate pairs(coll), to: Collection
+  defdelegate combinations(coll, n), to: Collection
 
   # ============================================================
   # Map Operations
@@ -213,6 +215,11 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate re_matches(re, s), to: Regex
   defdelegate re_split(re, s), to: Regex
   defdelegate re_seq(re, s), to: Regex
+  defdelegate extract(pattern, string), to: Regex
+  defdelegate extract(pattern, string, group), to: Regex
+  defdelegate extract_int(pattern, string), to: Regex
+  defdelegate extract_int(pattern, string, group), to: Regex
+  defdelegate extract_int(pattern, string, group, default), to: Regex
 
   # ============================================================
   # Type Predicates
