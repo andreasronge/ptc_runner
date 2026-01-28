@@ -88,7 +88,7 @@ This is fundamentally different from stuffing everything into the prompt.
 (defn find-pairs-in-group [group]
   (if (> (count group) 30)
     ;; Too large - recurse with just this city's profiles
-    (tool/find_pairs {:corpus (profiles->corpus group)})
+    (tool/query {:corpus (profiles->corpus group)})
     ;; Small enough - enumerate pairs directly
     (for [p1 group, p2 group
           :when (and (< (:id p1) (:id p2)) (shares-hobby? p1 p2))]
@@ -98,6 +98,22 @@ This is fundamentally different from stuffing everything into the prompt.
 ```
 
 **Key Insight**: The paper found OOLONG-Pairs went from **0% to 60% F1** with recursion - this is the benchmark where RLM truly shines.
+
+### Semantic Pairs (Recursion + LLM Judgment)
+
+**Task**: Find all pairs of people in the same city with *semantically compatible* interests.
+
+**Example**: "enjoys scaling peaks" and "trail running enthusiast" are compatible (both outdoor/active), but "builds Arduino projects" and "pottery hobbyist" are not.
+
+**Why Two Tools**: This benchmark separates concerns using the RLM paper's approach:
+- `tool/evaluate_pairs` (`:self`) — Recursive data decomposition for large datasets
+- `tool/judge_pairs` (`LLMTool`) — Batch semantic judgment via a single-shot LLM call
+
+The LLMTool handles semantic evaluation that can't be done programmatically, while recursion handles data that exceeds context limits.
+
+```bash
+mix run run.exs --benchmark semantic_pairs --profiles 40 --trace --progress
+```
 
 ## When Would Recursion Be Used?
 
@@ -113,8 +129,8 @@ The `:self` tool is available for these cases:
 ```clojure
 ;; Recursive subdivision (when needed)
 (let [mid (quot n 2)
-      r1 (tool/count {:corpus (take mid lines) ...})
-      r2 (tool/count {:corpus (drop mid lines) ...})]
+      r1 (tool/query {:corpus (take mid lines) ...})
+      r2 (tool/query {:corpus (drop mid lines) ...})]
   (return {:count (+ (:count r1) (:count r2))}))
 ```
 
@@ -144,7 +160,7 @@ mix run run.exs --help
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--benchmark` | `-b` | "sniah", "counting", or "pairs" | sniah |
+| `--benchmark` | `-b` | "sniah", "counting", "pairs", or "semantic_pairs" | sniah |
 | `--lines` | `-l` | Corpus lines for S-NIAH | 1000 |
 | `--profiles` | `-p` | Profiles for counting/pairs | 500 |
 | `--seed` | `-s` | Random seed | 42 |
@@ -181,7 +197,7 @@ lib/
 
 **Recursive self-calls** (when complexity requires it):
 ```clojure
-(tool/count {:corpus subset :min_age data/min_age :hobby data/hobby})
+(tool/query {:corpus subset :min_age data/min_age :hobby data/hobby})
 ```
 
 ## Comparison with `examples/parallel_workers/`
@@ -203,18 +219,33 @@ mix run run.exs --trace
 
 Traces are saved to the `traces/` folder (gitignored).
 
-### Chrome DevTools Export
+### Managing Traces
 
-Export traces for flame chart visualization:
+Use the `mix rlm_traces` task to export, view, or clean traces:
 
-```elixir
-alias PtcRunner.TraceLog.Analyzer
+```bash
+# Export all traces to Chrome DevTools format
+mix rlm_traces --export
 
-{:ok, tree} = Analyzer.load_tree("traces/recursive_trace.jsonl")
-Analyzer.export_chrome_trace(tree, "traces/recursive_trace.json")
+# Export and open in Chrome
+mix rlm_traces --export --open
+
+# Export a specific trace file
+mix rlm_traces --export --file traces/recursive_trace.jsonl
+
+# Print trace tree(s) to terminal
+mix rlm_traces --tree
+
+# Clean up all trace files
+mix rlm_traces --clean
 ```
 
-Then load in Chrome: DevTools (F12) → Performance → Load profile.
+### Chrome DevTools Export
+
+After running `mix rlm_traces --export`, load the `.json` files in Chrome:
+1. Open DevTools (F12) → Performance tab
+2. Click 'Load profile...' and select a `.json` file
+3. Or navigate to `chrome://tracing` and load the file
 
 See [Observability Guide](../../docs/guides/subagent-observability.md#chrome-devtools-export) for details.
 

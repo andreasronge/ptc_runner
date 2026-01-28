@@ -40,6 +40,8 @@ defmodule RlmRecursive.Runner do
           profiles: :integer,
           seed: :integer,
           trace: :boolean,
+          progress: :boolean,
+          model: :string,
           min_age: :integer,
           hobby: :string,
           help: :boolean
@@ -50,6 +52,7 @@ defmodule RlmRecursive.Runner do
           p: :profiles,
           s: :seed,
           t: :trace,
+          m: :model,
           h: :help
         ]
       )
@@ -87,6 +90,7 @@ defmodule RlmRecursive.Runner do
           raise "Unknown benchmark: #{other}. Use 'sniah', 'counting', 'pairs', or 'semantic_pairs'."
       end
 
+    # Build LLM callback if model specified
     run_opts =
       opts
       |> Keyword.put(:benchmark, benchmark)
@@ -96,6 +100,7 @@ defmodule RlmRecursive.Runner do
       |> Keyword.put_new(:trace, false)
       |> Keyword.put_new(:min_age, 30)
       |> Keyword.put_new(:hobby, "hiking")
+      |> maybe_add_llm()
 
     IO.puts("""
 
@@ -126,12 +131,21 @@ defmodule RlmRecursive.Runner do
         )
     end
 
+    if run_opts[:model], do: IO.puts("Model: #{run_opts[:model]}")
     if run_opts[:trace], do: IO.puts("Tracing: enabled")
+    if run_opts[:progress], do: IO.puts("Progress: enabled")
 
     IO.puts("")
 
-    # Run the benchmark
-    result = RlmRecursive.run(run_opts)
+    # Run the benchmark (with optional progress indicator)
+    result =
+      if run_opts[:progress] do
+        RlmRecursive.Progress.with_progress(fn ->
+          RlmRecursive.run(run_opts)
+        end)
+      else
+        RlmRecursive.run(run_opts)
+      end
 
     # Summary
     IO.puts("""
@@ -147,6 +161,17 @@ defmodule RlmRecursive.Runner do
     if result.trace_path do
       IO.puts("Trace: #{result.trace_path}")
       IO.puts("View: Open trace_viewer.html in browser and load the trace file")
+    end
+  end
+
+  defp maybe_add_llm(opts) do
+    case Keyword.get(opts, :model) do
+      nil ->
+        opts
+
+      model ->
+        llm = LLMClient.callback(model)
+        Keyword.put(opts, :llm, llm)
     end
   end
 
@@ -167,10 +192,12 @@ defmodule RlmRecursive.Runner do
 
     Options:
       --benchmark, -b TYPE    Benchmark type: sniah, counting, pairs, or semantic_pairs
+      --model, -m MODEL       LLM model (default: bedrock:sonnet)
       --lines, -l N           Corpus lines for S-NIAH (default: 1000)
       --profiles, -p N        Profile count for counting/pairs (default: 500)
       --seed, -s N            Random seed for reproducibility (default: 42)
       --trace, -t             Enable hierarchical tracing
+      --progress              Show live progress (turn-by-turn updates)
       --min-age N             Minimum age for counting (default: 30)
       --hobby NAME            Hobby to match for counting (default: hiking)
       --help, -h              Show this help message
