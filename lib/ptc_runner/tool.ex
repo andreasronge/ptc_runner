@@ -190,6 +190,17 @@ defmodule PtcRunner.Tool do
      }}
   end
 
+  defp normalize_format(name, %PtcRunner.SubAgent.LLMTool{} = tool) do
+    {:ok,
+     %__MODULE__{
+       name: name,
+       function: nil,
+       signature: tool.signature,
+       description: tool.description,
+       type: :llm
+     }}
+  end
+
   defp normalize_format(name, %PtcRunner.SubAgent.SubAgentTool{} = tool) do
     # SubAgentTool - extract signature and description from the wrapped agent
     {:ok,

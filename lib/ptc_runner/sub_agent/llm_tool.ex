@@ -35,8 +35,8 @@ defmodule PtcRunner.SubAgent.LLMTool do
   1. Arguments validated against signature parameters
   2. Template expanded with arguments
   3. LLM called for response
-  4. Response parsed as PTC-Lisp, executed
-  5. Result validated against signature return type
+  4. LLM called with `output: :json` mode
+  5. Response parsed as JSON, validated against signature return type
 
   ## Examples
 

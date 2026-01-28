@@ -1,9 +1,44 @@
+# credo:disable-for-this-file Credo.Check.Design.AliasUsage
 defmodule PtcRunner.SubAgent.LLMToolTest do
   use ExUnit.Case, async: true
 
   doctest PtcRunner.SubAgent.LLMTool
 
+  alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.LLMTool
+  alias PtcRunner.Tool
+
+  describe "Tool.new/2 normalization" do
+    test "normalizes LLMTool to Tool struct with type :llm" do
+      llm_tool =
+        LLMTool.new(
+          prompt: "Classify {{text}}",
+          signature: "(text :string) -> {category :string}",
+          description: "Classifies text"
+        )
+
+      {:ok, tool} = Tool.new("classify", llm_tool)
+
+      assert tool.name == "classify"
+      assert tool.type == :llm
+      assert tool.signature == "(text :string) -> {category :string}"
+      assert tool.description == "Classifies text"
+      assert tool.function == nil
+    end
+
+    test "normalizes LLMTool without description" do
+      llm_tool =
+        LLMTool.new(
+          prompt: "Hello {{name}}",
+          signature: "(name :string) -> :string"
+        )
+
+      {:ok, tool} = Tool.new("greet", llm_tool)
+
+      assert tool.type == :llm
+      assert tool.description == nil
+    end
+  end
 
   describe "new/1" do
     test "creates LLMTool with minimal valid input (prompt + signature)" do
@@ -307,6 +342,67 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
 
       assert tool.prompt == "Test {{x}}"
       refute Map.has_key?(tool, :unknown_field)
+    end
+  end
+
+  describe "ToolNormalizer.normalize/3 with LLMTool" do
+    alias PtcRunner.SubAgent.Loop.ToolNormalizer
+
+    test "wraps LLMTool into executable function" do
+      llm_tool =
+        LLMTool.new(
+          prompt: "Classify {{text}}",
+          signature: "(text :string) -> {category :string}",
+          description: "Classifies text"
+        )
+
+      agent = SubAgent.new(prompt: "test", signature: "() -> :string")
+
+      state = %{
+        llm: fn _input -> {:ok, "response"} end,
+        llm_registry: nil,
+        nesting_depth: 0,
+        remaining_turns: 10,
+        mission_deadline: nil,
+        trace_context: nil
+      }
+
+      tools = ToolNormalizer.normalize(%{"classify" => llm_tool}, state, agent)
+
+      assert is_function(tools["classify"], 1)
+    end
+  end
+
+  describe "LLMTool E2E execution" do
+    @tag :e2e
+    test "executes LLMTool via SubAgent and returns JSON result" do
+      llm_tool =
+        LLMTool.new(
+          prompt: "Is the number {{value}} even or odd? Return the parity.",
+          signature: "(value :int) -> {parity :string}",
+          description: "Determine if a number is even or odd"
+        )
+
+      agent =
+        SubAgent.new(
+          prompt: """
+          You have a tool called judge that determines if a number is even or odd.
+          Call it with the value from the input, then return the result.
+          """,
+          signature: "(value :int) -> {parity :string}",
+          tools: %{"judge" => llm_tool},
+          max_turns: 3
+        )
+
+      llm = PtcRunner.LLM.OpenRouter.new()
+
+      case SubAgent.run(agent, llm: llm, context: %{"value" => 42}) do
+        {:ok, step} ->
+          assert step.return["parity"] in ["even", "Even"]
+
+        {:error, step} ->
+          flunk("LLMTool E2E failed: #{inspect(step.fail)}")
+      end
     end
   end
 end

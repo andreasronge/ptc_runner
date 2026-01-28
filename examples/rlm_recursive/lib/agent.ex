@@ -92,21 +92,35 @@ defmodule RlmRecursive.Agent do
   end
 
   def new(:semantic_pairs, opts) do
-    # Pure RLM mode: minimal prompt, model discovers algorithm
-    # Tests whether the model can independently discover:
-    # 1. The need to batch process for efficiency
-    # 2. A two-phase approach (semantic classification → programmatic pairing)
-    # 3. Category-based compatibility matching
+    # RLM + LLMTool: recursive decomposition for data, LLM judgment for semantics
+    # - tool/evaluate_pairs: recursive self-call for data decomposition
+    # - tool/judge_pairs: LLMTool for batch semantic compatibility judgment
     max_depth = Keyword.get(opts, :max_depth, 4)
     max_turns = Keyword.get(opts, :max_turns, 100)
     turn_budget = Keyword.get(opts, :turn_budget, 200)
     llm = Keyword.get(opts, :llm)
 
+    judge_tool =
+      PtcRunner.SubAgent.LLMTool.new(
+        prompt: """
+        Judge semantic compatibility for each pair of interests.
+        Compatible = related domains (outdoor/fitness, creative/artistic, tech/science).
+        NOT compatible = unrelated domains.
+
+        {{#pairs}}
+        - Pair {{id1}}-{{id2}}: "{{interests1}}" vs "{{interests2}}"
+        {{/pairs}}
+        """,
+        signature:
+          "(pairs [{id1 :int, id2 :int, interests1 :string, interests2 :string}]) -> [{id1 :int, id2 :int, compatible :bool}]",
+        description: "Judge semantic compatibility of interest pairs in batch"
+      )
+
     SubAgent.new(
       prompt: semantic_pairs_prompt(),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description: "Find pairs with semantically compatible interests",
-      tools: %{"query" => :self},
+      tools: %{"evaluate_pairs" => :self, "judge_pairs" => judge_tool},
       max_depth: max_depth,
       max_turns: max_turns,
       turn_budget: turn_budget,
@@ -178,8 +192,11 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:count N :pairs ["id1-id2" ...]}` where pairs are "id1-id2" strings (id1 < id2).
 
-    ## Tool
-    - `tool/query`: Recursive self-call
+    ## Tools
+    - `tool/evaluate_pairs`: Recursive self-call for data decomposition (splitting large datasets)
+    - `tool/judge_pairs`: Judges semantic compatibility of interest pairs in batch.
+      Call with a list of pairs to evaluate. Returns compatibility verdicts.
+      Use this for ALL semantic judgment — do NOT try to judge compatibility in code.
     """
   end
 end

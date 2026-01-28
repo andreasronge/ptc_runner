@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.{SubAgentTool, Telemetry}
+  alias PtcRunner.SubAgent.{LLMTool, SubAgentTool, Telemetry}
 
   @doc """
   Normalize tools map to convert SubAgentTool instances into executable functions.
@@ -49,6 +49,10 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   @spec normalize(map(), map(), SubAgent.t()) :: map()
   def normalize(tools, state, agent) when is_map(tools) do
     Map.new(tools, fn
+      {name, %LLMTool{} = tool} ->
+        wrapped = wrap_llm_tool(name, tool, state)
+        {name, wrap_with_telemetry(name, wrapped, agent)}
+
       {name, %SubAgentTool{} = tool} ->
         wrapped = wrap_sub_agent_tool(name, tool, state)
         {name, wrap_with_telemetry(name, wrapped, agent)}
@@ -146,6 +150,57 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
       end
     end
   end
+
+  @doc """
+  Wrap an LLMTool in a function closure that executes an ephemeral single-shot SubAgent.
+
+  The wrapped function:
+  - Resolves LLM from tool config or inherits from parent
+  - Creates a single-shot SubAgent with `output: :json`
+  - Inherits system limits (nesting_depth, remaining_turns, mission_deadline)
+  - Creates a child trace file when parent has tracing enabled
+  """
+  @spec wrap_llm_tool(String.t(), LLMTool.t(), map()) :: function()
+  def wrap_llm_tool(name, %LLMTool{} = tool, state) do
+    fn args ->
+      resolved_llm = resolve_llm_tool_llm(tool.llm, state)
+
+      unless resolved_llm do
+        raise ArgumentError, "No LLM available for LLMTool execution"
+      end
+
+      # Create ephemeral single-shot SubAgent with output: :json
+      agent =
+        SubAgent.new(
+          prompt: tool.prompt,
+          signature: tool.signature,
+          output: :json,
+          max_turns: 1
+        )
+
+      # Propagate system limits from parent
+      run_opts =
+        [
+          llm: resolved_llm,
+          llm_registry: state.llm_registry,
+          context: args,
+          _nesting_depth: state.nesting_depth + 1,
+          _remaining_turns: state.remaining_turns,
+          _mission_deadline: state.mission_deadline
+        ]
+        |> maybe_add_opt(:max_heap, state[:max_heap])
+
+      if has_trace_context?(state) do
+        execute_with_trace(name, agent, run_opts, state)
+      else
+        execute_without_trace(name, agent, run_opts)
+      end
+    end
+  end
+
+  defp resolve_llm_tool_llm(:caller, state), do: state.llm
+  defp resolve_llm_tool_llm(nil, state), do: state.llm
+  defp resolve_llm_tool_llm(llm, _state), do: llm
 
   @doc """
   Wrap a SubAgentTool in a function closure that executes the child agent.
