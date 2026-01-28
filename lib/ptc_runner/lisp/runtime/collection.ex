@@ -645,6 +645,25 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.reduce(graphemes(coll), init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
 
+  # sum: sum of numbers in collection
+  def sum(coll) when is_list(coll) do
+    coll |> Enum.reject(&is_nil/1) |> Enum.sum()
+  end
+
+  def sum(nil), do: 0
+
+  # avg: average of numbers in collection
+  def avg(coll) when is_list(coll) do
+    values = Enum.reject(coll, &is_nil/1)
+
+    case values do
+      [] -> nil
+      vs -> Enum.sum(vs) / length(vs)
+    end
+  end
+
+  def avg(nil), do: nil
+
   # sum_by: atom or string keys
   def sum_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     coll

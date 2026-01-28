@@ -2,9 +2,9 @@
 
 Rules for single-shot execution (one turn, no memory).
 
-<!-- version: 4 -->
-<!-- date: 2026-01-08 -->
-<!-- changes: Removed mention of return/fail to avoid priming -->
+<!-- version: 5 -->
+<!-- date: 2026-01-28 -->
+<!-- changes: Removed where from example, use standard Clojure pattern -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -19,7 +19,7 @@ The user wants electronics count. I'll filter products by category and count.
 
 ```clojure
 (->> data/products
-     (filter (where :category = "electronics"))
+     (filter #(= (:category %) "electronics"))
      (count))
 ```
 

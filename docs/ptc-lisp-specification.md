@@ -41,7 +41,8 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `data/path`, `tool/name` | Namespace-qualified access to context data and tool invocation (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
-| `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Collection aggregators (§8) |
+| `sum`, `avg` | Simple collection aggregators (§8) |
+| `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Field-based collection aggregators (§8) |
 | `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
 | `re-pattern` | Compile string to regex without literal syntax (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
@@ -1503,6 +1504,8 @@ The `seq` function converts a collection to a sequence:
 |----------|-----------|-------------|
 | `count` | `(count coll)` | Number of items |
 | `reduce` | `(reduce f init coll)` | Fold collection |
+| `sum` | `(sum coll)` | Sum of numbers |
+| `avg` | `(avg coll)` | Average of numbers |
 | `sum-by` | `(sum-by key coll)` | Sum field values |
 | `avg-by` | `(avg-by key coll)` | Average field values |
 | `min-by` | `(min-by key coll)` | Item with minimum field |
@@ -1527,6 +1530,13 @@ The `seq` function converts a collection to a sequence:
 
 ;; reduce on sets
 (reduce + 0 #{1 2 3})              ; => 6
+
+;; sum and avg for simple number collections
+(sum [1 2 3 4 5])                 ; => 15
+(avg [1 2 3 4 5])                 ; => 3.0
+(avg [10 20])                     ; => 15.0
+(avg [])                          ; => nil (empty collection)
+(sum [])                          ; => 0
 
 (sum-by :amount expenses)         ; sum of :amount fields
 (avg-by :price products)          ; average of :price fields
@@ -2625,6 +2635,8 @@ Filter by nested field:
 | `(count [])` | `[]` | `0` |
 | `(first [])` | `[]` | `nil` |
 | `(last [])` | `[]` | `nil` |
+| `(sum [])` | `[]` | `0` |
+| `(avg [])` | `[]` | `nil` |
 | `(sum-by :x [])` | `[]` | `0` |
 | `(avg-by :x [])` | `[]` | `nil` |
 | `(min-by :x [])` | `[]` | `nil` |
