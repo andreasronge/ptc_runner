@@ -196,8 +196,9 @@ defmodule PtcRunner.Mustache do
         {IO.iodata_to_binary(Enum.reverse(acc)), pos, line, col}
 
       _ ->
-        <<c::utf8>> = binary_part(template, pos, 1)
+        <<c::utf8, _rest::binary>> = binary_part(template, pos, byte_size(template) - pos)
         char = <<c::utf8>>
+        char_bytes = byte_size(char)
 
         {new_line, new_col} =
           if char == "\n" do
@@ -206,7 +207,7 @@ defmodule PtcRunner.Mustache do
             {line, col + 1}
           end
 
-        read_until_tag_start(template, pos + 1, new_line, new_col, [char | acc])
+        read_until_tag_start(template, pos + char_bytes, new_line, new_col, [char | acc])
     end
   end
 
@@ -266,8 +267,9 @@ defmodule PtcRunner.Mustache do
         {:ok, IO.iodata_to_binary(Enum.reverse(acc)), pos}
 
       _ ->
-        char = binary_part(template, pos, 1)
-        find_close_braces(template, pos + 1, [char | acc])
+        <<c::utf8, _rest::binary>> = binary_part(template, pos, byte_size(template) - pos)
+        char = <<c::utf8>>
+        find_close_braces(template, pos + byte_size(char), [char | acc])
     end
   end
 

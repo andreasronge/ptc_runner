@@ -695,4 +695,29 @@ defmodule PtcRunner.MustacheTest do
       assert {:ok, "Tags: a b c "} = Mustache.render(template, %{tags: ["a", "b", "c"]})
     end
   end
+
+  describe "UTF-8 multi-byte characters" do
+    test "parses template with smart quotes (3-byte UTF-8)" do
+      template = ~s(She said \u201CHello\u201D to {{name}})
+      assert {:ok, tokens} = Mustache.parse(template)
+      assert [{:text, text}, {:variable, ["name"], _}] = tokens
+      assert text =~ "\u201CHello\u201D"
+    end
+
+    test "renders template with multi-byte UTF-8 in text" do
+      template = ~s(Café {{name}} — Pro)
+      assert {:ok, "Café Alice — Pro"} = Mustache.render(template, %{name: "Alice"})
+    end
+
+    test "renders template with multi-byte UTF-8 in variable value" do
+      template = "Hello {{name}}"
+      assert {:ok, "Hello André"} = Mustache.render(template, %{name: "André"})
+    end
+
+    test "parses template with emoji (4-byte UTF-8)" do
+      template = "Rating: 🌟 {{score}}"
+      assert {:ok, tokens} = Mustache.parse(template)
+      assert [{:text, "Rating: 🌟 "}, {:variable, ["score"], _}] = tokens
+    end
+  end
 end
