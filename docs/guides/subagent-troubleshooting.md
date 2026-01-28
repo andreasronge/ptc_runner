@@ -293,42 +293,38 @@ If you don't see "Output:" in the trace, either no `println` was called or the L
 
 See [Core Concepts](subagent-concepts.md) for the full state persistence documentation.
 
-## Side Effects Lost in Parallel/HOF Execution
+## Parallel Execution and println
 
-**Symptom:** `println` output or tool calls inside `pmap`, `map`, `filter`, or other higher-order functions don't appear in the trace.
+**Observation:** `println` output inside `pmap`, `pcalls`, or higher-order functions like `map` doesn't appear in the trace.
 
-**Cause:** When closures are passed to higher-order functions (HOFs) or executed in parallel (`pmap`, `pcalls`), side effects like `println` and tool calls are discarded. This is a known limitation of the current architecture.
+**This is intentional.** Parallel branches communicate via return values, not side effects.
 
-**Why this happens:** Higher-order functions convert PTC-Lisp closures to Erlang functions for execution. The evaluation context (which tracks prints and tool calls) is not threaded back from these function calls. For parallel execution, merging side effects from multiple concurrent branches would require complex ordering semantics.
+**Design rationale:**
 
-**Solutions:**
+1. **Return values are the contract** - Child agents and parallel branches return their results. If you need to communicate something, include it in the return value.
 
-1. **Use `doseq` for side-effectful iterations:**
-   ```clojure
-   ;; DON'T: println inside map (output lost)
-   (map (fn [x] (println x) (+ x 1)) items)
+2. **Ordering would be non-deterministic** - If 8 parallel tasks each called `println`, what order should they appear? Random ordering is worse than nothing.
 
-   ;; DO: Use doseq for side effects
-   (doseq [x items] (println x))
-   (map (fn [x] (+ x 1)) items)
-   ```
+3. **Trace files exist for debugging** - When tracing is enabled, each child SubAgent has its own trace file with its own `println` output.
 
-2. **Separate side effects from transformations:**
-   ```clojure
-   ;; Process data first
-   (def results (map process-item items))
-   ;; Then observe
-   (println "Processed:" (count results))
-   ```
+4. **Simpler mental model** - Parallel branches are pure transformations. Use `println` for sequential debugging between turns.
 
-3. **For debugging parallel code**, use explicit `println` before/after parallel operations:
-   ```clojure
-   (println "Starting parallel processing...")
-   (def results (pmap expensive-fn items))
-   (println "Finished with" (count results) "results")
-   ```
+**Patterns:**
 
-**Note:** This limitation only affects observability (what appears in the trace). The actual computation results from closures are returned correctly. Tool calls inside parallel execution still execute - they just aren't tracked in the turn's tool call history.
+```clojure
+;; Parallel branches - communicate via return values
+(def results (pmap (fn [chunk] (tool/process {:data chunk})) chunks))
+
+;; Sequential debugging - println works normally
+(println "Processing" (count chunks) "chunks...")
+(def results (pmap process-fn chunks))
+(println "Got" (count results) "results")
+
+;; Side-effectful iteration - use doseq
+(doseq [x items] (println "Item:" x))
+```
+
+**Note:** Tool calls inside parallel execution DO execute and return values correctly. They just aren't tracked in the parent turn's tool call history (telemetry events are still emitted).
 
 ## Agent Crashes with "maximum heap size reached"
 
