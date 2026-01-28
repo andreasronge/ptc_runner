@@ -102,25 +102,19 @@ defmodule RlmRecursive.Agent do
 
     judge_tool =
       PtcRunner.SubAgent.LLMTool.new(
-        prompt: """
-        Judge semantic compatibility for each pair of interests.
-        Compatible = related domains (outdoor/fitness, creative/artistic, tech/science).
-        NOT compatible = unrelated domains.
-
-        {{#pairs}}
-        - Pair {{id1}}-{{id2}}: "{{interests1}}" vs "{{interests2}}"
-        {{/pairs}}
-        """,
-        signature:
-          "(pairs [{id1 :int, id2 :int, interests1 :string, interests2 :string}]) -> [{id1 :int, id2 :int, compatible :bool}]",
-        description: "Judge semantic compatibility of interest pairs in batch"
+        prompt:
+          "Is '{{interests1}}' semantically compatible with '{{interests2}}'? Compatible means related domains (outdoor/fitness, creative/artistic, tech/science).",
+        signature: "(interests1 :string, interests2 :string) -> :keyword",
+        json_signature: "(interests1 :string, interests2 :string) -> {compatible :bool}",
+        response_template: "(if {{compatible}} :compatible :unrelated)",
+        description: "Judge semantic compatibility — returns :compatible or :unrelated"
       )
 
     SubAgent.new(
       prompt: semantic_pairs_prompt(),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description: "Find pairs with semantically compatible interests",
-      tools: %{"evaluate_pairs" => :self, "judge_pairs" => judge_tool},
+      tools: %{"evaluate_pairs" => :self, "semantic_judge" => judge_tool},
       max_depth: max_depth,
       max_turns: max_turns,
       turn_budget: turn_budget,
@@ -194,8 +188,8 @@ defmodule RlmRecursive.Agent do
 
     ## Tools
     - `tool/evaluate_pairs`: Recursive self-call for data decomposition (splitting large datasets)
-    - `tool/judge_pairs`: Judges semantic compatibility of interest pairs in batch.
-      Call with a list of pairs to evaluate. Returns compatibility verdicts.
+    - `tool/semantic_judge`: Judge semantic compatibility of two interests.
+      Call with `{:interests1 "..." :interests2 "..."}`. Returns `:compatible` or `:unrelated`.
       Use this for ALL semantic judgment — do NOT try to judge compatibility in code.
     """
   end

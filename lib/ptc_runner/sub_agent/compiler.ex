@@ -40,7 +40,7 @@ defmodule PtcRunner.SubAgent.Compiler do
   ## Tool Support
 
   - Pure Elixir tools - Supported, executed directly
-  - `LLMTool` - NOT supported (raises ArgumentError)
+  - `LLMTool` - Supported (requires LLM at runtime)
   - `SubAgentTool` - Supported if child agent has no `mission_timeout`
 
   When SubAgentTools are present, the compiled agent requires an `llm` option
@@ -78,13 +78,14 @@ defmodule PtcRunner.SubAgent.Compiler do
       iex> result.return.result
       20
 
-  Rejects agents with LLM-dependent tools:
+  Agents with LLMTool compile successfully (LLMTool requires LLM at runtime):
 
       iex> alias PtcRunner.SubAgent.LLMTool
       iex> tools = %{"classify" => LLMTool.new(prompt: "Classify {{x}}", signature: "(x :string) -> :string")}
       iex> agent = PtcRunner.SubAgent.new(prompt: "Process {{item}}", signature: "(item :string) -> {category :string}", tools: tools, max_turns: 1)
-      iex> PtcRunner.SubAgent.Compiler.compile(agent, llm: fn _ -> {:ok, ""} end)
-      ** (ArgumentError) cannot compile agent with LLM-dependent tool: classify
+      iex> {:ok, compiled} = PtcRunner.SubAgent.Compiler.compile(agent, llm: fn _ -> {:ok, ~S|(return {:category "test"})|} end)
+      iex> compiled.llm_required?
+      true
   """
   @spec compile(SubAgent.t(), keyword()) ::
           {:ok, CompiledAgent.t()} | {:error, PtcRunner.Step.t()}
@@ -112,7 +113,11 @@ defmodule PtcRunner.SubAgent.Compiler do
 
         # Separate pure tools from SubAgentTools using single pass
         {sub_agent_list, pure_list} =
-          Enum.split_with(agent.tools, fn {_, t} -> match?(%SubAgentTool{}, t) end)
+          Enum.split_with(agent.tools, fn
+            {_, %SubAgentTool{}} -> true
+            {_, %PtcRunner.SubAgent.LLMTool{}} -> true
+            _ -> false
+          end)
 
         pure_tools = Map.new(pure_list)
         sub_agent_tools = Map.new(sub_agent_list)
@@ -203,8 +208,9 @@ defmodule PtcRunner.SubAgent.Compiler do
   # - Allows SubAgentTool but rejects if mission_timeout is set
   defp validate_compilable_tools!(tools) do
     Enum.each(tools, fn
-      {name, %PtcRunner.SubAgent.LLMTool{}} ->
-        raise ArgumentError, "cannot compile agent with LLM-dependent tool: #{name}"
+      {_name, %PtcRunner.SubAgent.LLMTool{}} ->
+        # LLMTool requires LLM at runtime, handled by llm_required? flag
+        :ok
 
       {name, %SubAgentTool{agent: agent}} ->
         if agent.mission_timeout do
@@ -233,19 +239,24 @@ defmodule PtcRunner.SubAgent.Compiler do
   defp validate_runtime_llm!(_llm, _llm_registry), do: :ok
 
   # Validate that atom LLMs used by SubAgentTools are in the registry
-  defp validate_llm_registry_for_sub_agents!(sub_agent_tools, _llm, llm_registry) do
-    Enum.each(sub_agent_tools, fn {name, %SubAgentTool{agent: agent, bound_llm: bound_llm}} ->
-      # Check agent.llm (highest priority)
-      if is_atom(agent.llm) and agent.llm != nil and not Map.has_key?(llm_registry, agent.llm) do
-        raise ArgumentError,
-              "SubAgentTool #{name} requires LLM :#{agent.llm} which is not in llm_registry"
-      end
+  defp validate_llm_registry_for_sub_agents!(llm_dependent_tools, _llm, llm_registry) do
+    Enum.each(llm_dependent_tools, fn
+      {name, %SubAgentTool{agent: agent, bound_llm: bound_llm}} ->
+        # Check agent.llm (highest priority)
+        if is_atom(agent.llm) and agent.llm != nil and not Map.has_key?(llm_registry, agent.llm) do
+          raise ArgumentError,
+                "SubAgentTool #{name} requires LLM :#{agent.llm} which is not in llm_registry"
+        end
 
-      # Check bound_llm (second priority)
-      if is_atom(bound_llm) and bound_llm != nil and not Map.has_key?(llm_registry, bound_llm) do
-        raise ArgumentError,
-              "SubAgentTool #{name} requires LLM :#{bound_llm} which is not in llm_registry"
-      end
+        # Check bound_llm (second priority)
+        if is_atom(bound_llm) and bound_llm != nil and not Map.has_key?(llm_registry, bound_llm) do
+          raise ArgumentError,
+                "SubAgentTool #{name} requires LLM :#{bound_llm} which is not in llm_registry"
+        end
+
+      {_name, %PtcRunner.SubAgent.LLMTool{}} ->
+        # LLMTool resolves LLM from :caller or state at runtime
+        :ok
     end)
   end
 
