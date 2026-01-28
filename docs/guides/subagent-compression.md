@@ -1,5 +1,7 @@
 # Message Compression
 
+> **⚠️ Experimental Feature**: Compression is experimental and may produce worse results for certain task types. In particular, exploratory searches that require building understanding incrementally can suffer from context loss. Test with and without compression for your specific use case.
+
 This guide explains message compression: what problem it solves, how to enable it, and how to implement custom strategies.
 
 ## The Problem
@@ -246,6 +248,37 @@ Without compression (or with single-turn execution), we've observed:
 - Premature returns with low-confidence answers
 
 These patterns suggest that the iterative feedback loop enabled by compression helps the LLM stay on track.
+
+### When Compression Can Hurt
+
+Compression can degrade performance for **exploratory tasks** where the agent needs to build understanding incrementally. In one comparison of a code search task:
+
+| Metric | Without Compression | With Compression |
+|--------|---------------------|------------------|
+| Turns | 10 | 6 |
+| Input tokens | 57k | 19k |
+| Tool calls | 21 | 5 |
+| Answer accuracy | Correct | Incorrect |
+| Confidence | 0.92 | 0.78 |
+
+The compressed version:
+- **Lost context** about what it had already searched
+- **Hallucinated file names** that didn't exist
+- **Made coding errors** it had to recover from
+- **Missed the actual answer** (never found the dispatch code)
+- **Listed wrong files** in its response
+
+The non-compressed version used more tokens but correctly identified the implementation pattern by refining its search based on prior results.
+
+**Compression works best for:**
+- Structured tasks with predictable steps
+- Agents where each turn is relatively independent
+- Cost-sensitive applications where accuracy trade-offs are acceptable
+
+**Compression may hurt for:**
+- Exploratory code search requiring iterative refinement
+- Tasks where the agent needs to remember failed approaches
+- Complex investigations building on prior discoveries
 
 ## Implementing Custom Strategies
 
