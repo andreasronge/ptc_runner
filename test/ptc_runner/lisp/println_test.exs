@@ -52,11 +52,10 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert step.prints == ["debug x: 10"]
   end
 
-  test "println works in pmap (collected from side effects)" do
-    # Note: pmap in PTC-Lisp captures the context but updates to it (like prints)
-    # might be tricky depending on how they are merged back.
-    # Current implementation of pmap DOES NOT merge back context updates from parallel tasks
-    # because they are executed in separate tasks and only the result is collected.
+  test "println in pmap is not captured (by design)" do
+    # Parallel branches communicate via return values, not side effects.
+    # This is intentional: ordering would be non-deterministic, and return
+    # values are the proper communication channel for parallel execution.
 
     source = """
     (pmap (fn [x] (println "item" x) (* x x)) [1 2 3])
@@ -64,10 +63,6 @@ defmodule PtcRunner.Lisp.PrintlnTest do
 
     {:ok, step} = Lisp.run(source)
     assert step.return == [1, 4, 9]
-    # Current expectation: prints inside pmap are LOST because pmap
-    # doesn't collect context changes from parallel tasks.
-    # If we wanted to support this, we'd need to change pmap to return context too.
-    # For now, we only support prints in the main thread.
     assert step.prints == []
   end
 
