@@ -31,12 +31,21 @@ defmodule PtcRunner.SubAgent.LLMTool do
 
   ## Execution
 
-  LLMTool executes as a single-shot SubAgent when called:
-  1. Arguments validated against signature parameters
-  2. Template expanded with arguments
-  3. LLM called for response
-  4. LLM called with `output: :json` mode
-  5. Response parsed as JSON, validated against signature return type
+  ## Three Output Modes
+
+  1. **JSON mode** (default) — LLM returns JSON, validated against signature return type.
+  2. **Template mode** — LLM returns JSON (`json_signature`), then `response_template`
+     renders a PTC-Lisp expression with Mustache placeholders filled from the JSON.
+     The template runs in a no-tools sandbox. Best for turning simple LLM judgments
+     (booleans, numbers) into typed Lisp values (keywords, expressions).
+
+  Template mode fields:
+  - `:json_signature` — Signature for the internal JSON call (falls back to `:signature`)
+  - `:response_template` — PTC-Lisp string with `{{placeholder}}` references to JSON fields
+
+  **Safety note:** `response_template` injects raw JSON values into PTC-Lisp source.
+  This is safe for structural primitives (booleans, keywords, numbers). Avoid string
+  interpolation where quotes could break Lisp parsing.
 
   ## Examples
 
@@ -49,7 +58,9 @@ defmodule PtcRunner.SubAgent.LLMTool do
         signature: "(email :string, tier :string) -> {urgent :bool, reason :string}",
         llm: :caller,
         description: nil,
-        tools: nil
+        tools: nil,
+        response_template: nil,
+        json_signature: nil
       }
 
       iex> PtcRunner.SubAgent.LLMTool.new(
@@ -63,19 +74,23 @@ defmodule PtcRunner.SubAgent.LLMTool do
         signature: "(text :string) -> {category :string}",
         llm: :haiku,
         description: "Classifies text into categories",
-        tools: nil
+        tools: nil,
+        response_template: nil,
+        json_signature: nil
       }
 
   """
 
-  defstruct [:prompt, :signature, :llm, :description, :tools]
+  defstruct [:prompt, :signature, :llm, :description, :tools, :response_template, :json_signature]
 
   @type t :: %__MODULE__{
           prompt: String.t(),
           signature: String.t(),
           llm: :caller | atom() | function() | nil,
           description: String.t() | nil,
-          tools: map() | nil
+          tools: map() | nil,
+          response_template: String.t() | nil,
+          json_signature: String.t() | nil
         }
 
   @doc """
@@ -88,14 +103,16 @@ defmodule PtcRunner.SubAgent.LLMTool do
   - `:llm` - `:caller` (default), atom (registry lookup), or function
   - `:description` - For schema generation
   - `:tools` - If provided, runs as multi-turn agent
+  - `:response_template` - PTC-Lisp template with `{{placeholder}}` for JSON fields
+  - `:json_signature` - Signature for the internal JSON call (falls back to `:signature`)
 
   ## Examples
 
       iex> PtcRunner.SubAgent.LLMTool.new(prompt: "Hello {{name}}", signature: "(name :string) -> :string")
-      %PtcRunner.SubAgent.LLMTool{prompt: "Hello {{name}}", signature: "(name :string) -> :string", llm: :caller, description: nil, tools: nil}
+      %PtcRunner.SubAgent.LLMTool{prompt: "Hello {{name}}", signature: "(name :string) -> :string", llm: :caller, description: nil, tools: nil, response_template: nil, json_signature: nil}
 
       iex> PtcRunner.SubAgent.LLMTool.new(prompt: "Hi", signature: ":string")
-      %PtcRunner.SubAgent.LLMTool{prompt: "Hi", signature: ":string", llm: :caller, description: nil, tools: nil}
+      %PtcRunner.SubAgent.LLMTool{prompt: "Hi", signature: ":string", llm: :caller, description: nil, tools: nil, response_template: nil, json_signature: nil}
 
   """
   @spec new(keyword()) :: t()
@@ -130,6 +147,8 @@ defmodule PtcRunner.SubAgent.LLMTool do
     validate_llm!(opts)
     validate_description!(opts)
     validate_tools!(opts)
+    validate_response_template!(opts)
+    validate_json_signature!(opts)
   end
 
   defp validate_prompt!(opts) do
@@ -174,6 +193,24 @@ defmodule PtcRunner.SubAgent.LLMTool do
       {:ok, tools} when is_map(tools) -> :ok
       {:ok, nil} -> :ok
       {:ok, _} -> raise ArgumentError, "tools must be a map or nil"
+      :error -> :ok
+    end
+  end
+
+  defp validate_response_template!(opts) do
+    case Keyword.fetch(opts, :response_template) do
+      {:ok, t} when is_binary(t) -> :ok
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "response_template must be a string or nil"
+      :error -> :ok
+    end
+  end
+
+  defp validate_json_signature!(opts) do
+    case Keyword.fetch(opts, :json_signature) do
+      {:ok, s} when is_binary(s) -> :ok
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "json_signature must be a string or nil"
       :error -> :ok
     end
   end

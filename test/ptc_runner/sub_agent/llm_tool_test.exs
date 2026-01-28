@@ -53,6 +53,8 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
       assert tool.llm == :caller
       assert tool.description == nil
       assert tool.tools == nil
+      assert tool.response_template == nil
+      assert tool.json_signature == nil
     end
 
     test "creates LLMTool with all fields provided" do
@@ -329,6 +331,45 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
         )
 
       assert tool.prompt == "Hello {{name}}"
+    end
+
+    test "accepts response_template as string" do
+      tool =
+        LLMTool.new(
+          prompt: "Is {{a}} compatible with {{b}}?",
+          signature: "(a :string, b :string) -> :keyword",
+          response_template: "(if {{compatible}} :compatible :unrelated)",
+          json_signature: "(a :string, b :string) -> {compatible :bool}"
+        )
+
+      assert tool.response_template == "(if {{compatible}} :compatible :unrelated)"
+      assert tool.json_signature == "(a :string, b :string) -> {compatible :bool}"
+    end
+
+    test "defaults response_template and json_signature to nil" do
+      tool = LLMTool.new(prompt: "Test {{x}}", signature: "(x :string) -> :string")
+      assert tool.response_template == nil
+      assert tool.json_signature == nil
+    end
+
+    test "raises when response_template is not a string or nil" do
+      assert_raise ArgumentError, "response_template must be a string or nil", fn ->
+        LLMTool.new(
+          prompt: "Test {{x}}",
+          signature: "(x :string) -> :string",
+          response_template: 123
+        )
+      end
+    end
+
+    test "raises when json_signature is not a string or nil" do
+      assert_raise ArgumentError, "json_signature must be a string or nil", fn ->
+        LLMTool.new(
+          prompt: "Test {{x}}",
+          signature: "(x :string) -> :string",
+          json_signature: 123
+        )
+      end
     end
 
     test "ignores unknown options (lenient per Elixir convention)" do

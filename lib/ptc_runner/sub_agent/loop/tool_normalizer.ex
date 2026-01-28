@@ -161,40 +161,66 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   - Creates a child trace file when parent has tracing enabled
   """
   @spec wrap_llm_tool(String.t(), LLMTool.t(), map()) :: function()
+  def wrap_llm_tool(name, %LLMTool{response_template: template} = tool, state)
+      when is_binary(template) do
+    fn args ->
+      json_result = execute_llm_json(name, tool, args, state)
+
+      {:ok, lisp_source} = PtcRunner.Mustache.render(template, json_result)
+
+      case PtcRunner.Lisp.run(lisp_source, []) do
+        {:ok, step} ->
+          step.return
+
+        {:error, step} ->
+          raise ExecutionError,
+            reason: :tool_error,
+            message: "#{name} response_template failed",
+            data: step.fail.message
+      end
+    end
+  end
+
   def wrap_llm_tool(name, %LLMTool{} = tool, state) do
     fn args ->
-      resolved_llm = resolve_llm_tool_llm(tool.llm, state)
+      json_result = execute_llm_json(name, tool, args, state)
+      json_result
+    end
+  end
 
-      unless resolved_llm do
-        raise ArgumentError, "No LLM available for LLMTool execution"
-      end
+  # Shared helper: runs ephemeral SubAgent with output: :json
+  defp execute_llm_json(name, %LLMTool{} = tool, args, state) do
+    resolved_llm = resolve_llm_tool_llm(tool.llm, state)
 
-      # Create ephemeral single-shot SubAgent with output: :json
-      agent =
-        SubAgent.new(
-          prompt: tool.prompt,
-          signature: tool.signature,
-          output: :json,
-          max_turns: 1
-        )
+    unless resolved_llm do
+      raise ArgumentError, "No LLM available for LLMTool execution"
+    end
 
-      # Propagate system limits from parent
-      run_opts =
-        [
-          llm: resolved_llm,
-          llm_registry: state.llm_registry,
-          context: args,
-          _nesting_depth: state.nesting_depth + 1,
-          _remaining_turns: state.remaining_turns,
-          _mission_deadline: state.mission_deadline
-        ]
-        |> maybe_add_opt(:max_heap, state[:max_heap])
+    sig = tool.json_signature || tool.signature
 
-      if has_trace_context?(state) do
-        execute_with_trace(name, agent, run_opts, state)
-      else
-        execute_without_trace(name, agent, run_opts)
-      end
+    agent =
+      SubAgent.new(
+        prompt: tool.prompt,
+        signature: sig,
+        output: :json,
+        max_turns: 1
+      )
+
+    run_opts =
+      [
+        llm: resolved_llm,
+        llm_registry: state.llm_registry,
+        context: args,
+        _nesting_depth: state.nesting_depth + 1,
+        _remaining_turns: state.remaining_turns,
+        _mission_deadline: state.mission_deadline
+      ]
+      |> maybe_add_opt(:max_heap, state[:max_heap])
+
+    if has_trace_context?(state) do
+      execute_with_trace(name, agent, run_opts, state)
+    else
+      execute_without_trace(name, agent, run_opts)
     end
   end
 

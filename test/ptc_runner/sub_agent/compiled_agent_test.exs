@@ -48,7 +48,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert step.fail != nil
     end
 
-    test "raises ArgumentError if agent has LLMTool" do
+    test "compiles agent with LLMTool and sets llm_required?" do
       llm_tool =
         LLMTool.new(prompt: "Classify {{x}}", signature: "(x :string) -> :string")
 
@@ -62,9 +62,12 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
           max_turns: 1
         )
 
-      assert_raise ArgumentError, ~r/LLM-dependent tool: classify/, fn ->
-        SubAgent.compile(agent, llm: fn _ -> {:ok, ""} end)
-      end
+      {:ok, compiled} =
+        SubAgent.compile(agent,
+          llm: fn _ -> {:ok, ~S|(return {:category "test"})|} end
+        )
+
+      assert compiled.llm_required? == true
     end
 
     test "raises ArgumentError if agent has SubAgentTool with mission_timeout" do
