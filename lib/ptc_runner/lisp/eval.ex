@@ -648,7 +648,8 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, args_to_string_map(args)}
     else
       {:error,
-       "Tool calls require named arguments. Use (tool/name {:key value}) or (tool/name :key value), not positional args."}
+       {:invalid_tool_args,
+        "Tool calls require named arguments. Use (tool/name {:key value}) or (tool/name :key value), not positional args."}}
     end
   end
 
