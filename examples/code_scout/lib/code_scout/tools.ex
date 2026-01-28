@@ -15,7 +15,7 @@ defmodule CodeScout.Tools do
   @spec grep(%{pattern: String.t()}) :: [
           %{file: String.t(), line: integer(), snippet: String.t()}
         ]
-  def grep(%{pattern: pattern}) when is_binary(pattern) do
+  def grep(%{"pattern" => pattern}) when is_binary(pattern) do
     # Restrict search to lib/ptc_runner
     # lib/code_scout/tools.ex -> lib/code_scout -> lib -> examples -> root
     root = Path.expand("../../../../", __DIR__)
@@ -58,7 +58,7 @@ defmodule CodeScout.Tools do
   Read an entire file. Returns content with line numbers.
   """
   @spec read_file(%{path: String.t()}) :: String.t()
-  def read_file(%{path: path}) do
+  def read_file(%{"path" => path}) do
     root = Path.expand("../../../../", __DIR__)
     full_path = if Path.type(path) == :absolute, do: path, else: Path.join(root, path)
 
