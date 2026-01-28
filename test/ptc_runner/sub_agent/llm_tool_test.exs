@@ -414,6 +414,50 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
     end
   end
 
+  describe "response_template with tracing" do
+    alias PtcRunner.SubAgent.Loop.ToolNormalizer
+
+    test "response_template works when trace_context is enabled" do
+      mock_llm = fn _input -> {:ok, ~s|{"compatible": true}|} end
+
+      llm_tool =
+        LLMTool.new(
+          prompt: "Is '{{a}}' compatible with '{{b}}'?",
+          signature: "(a :string, b :string) -> :keyword",
+          json_signature: "(a :string, b :string) -> {compatible :bool}",
+          response_template: "(if {{compatible}} :compatible :unrelated)"
+        )
+
+      agent = SubAgent.new(prompt: "test", signature: "() -> :string")
+
+      trace_dir = System.tmp_dir!() |> Path.join("ptc_test_traces_#{System.unique_integer()}")
+      File.mkdir_p!(trace_dir)
+
+      state = %{
+        llm: mock_llm,
+        llm_registry: %{},
+        nesting_depth: 0,
+        remaining_turns: 10,
+        mission_deadline: nil,
+        trace_context: %{
+          trace_id: "test_parent_trace",
+          parent_span_id: nil,
+          depth: 0,
+          trace_dir: trace_dir
+        }
+      }
+
+      tools = ToolNormalizer.normalize(%{"judge" => llm_tool}, state, agent)
+      result = tools["judge"].(%{"a" => "hiking", "b" => "camping"})
+
+      assert result == :compatible
+    after
+      for path <- Path.wildcard(System.tmp_dir!() |> Path.join("ptc_test_traces_*")) do
+        File.rm_rf!(path)
+      end
+    end
+  end
+
   describe "LLMTool E2E execution" do
     @tag :e2e
     test "executes LLMTool via SubAgent and returns JSON result" do

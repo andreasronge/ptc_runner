@@ -164,7 +164,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   def wrap_llm_tool(name, %LLMTool{response_template: template} = tool, state)
       when is_binary(template) do
     fn args ->
-      json_result = execute_llm_json(name, tool, args, state)
+      json_result = execute_llm_json(name, tool, args, state) |> unwrap_trace_result()
 
       {:ok, lisp_source} = PtcRunner.Mustache.render(template, json_result)
 
@@ -223,6 +223,10 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
       execute_without_trace(name, agent, run_opts)
     end
   end
+
+  # Unwrap trace wrapper from execute_with_trace (returns %{__child_trace_id__: _, value: result})
+  defp unwrap_trace_result(%{__child_trace_id__: _, value: value}), do: value
+  defp unwrap_trace_result(result), do: result
 
   defp resolve_llm_tool_llm(:caller, state), do: state.llm
   defp resolve_llm_tool_llm(nil, state), do: state.llm

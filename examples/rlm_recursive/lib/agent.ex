@@ -102,19 +102,24 @@ defmodule RlmRecursive.Agent do
 
     judge_tool =
       PtcRunner.SubAgent.LLMTool.new(
-        prompt:
-          "Is '{{interests1}}' semantically compatible with '{{interests2}}'? Compatible means related domains (outdoor/fitness, creative/artistic, tech/science).",
-        signature: "(interests1 :string, interests2 :string) -> :keyword",
-        json_signature: "(interests1 :string, interests2 :string) -> {compatible :bool}",
-        response_template: "(if {{compatible}} :compatible :unrelated)",
-        description: "Judge semantic compatibility — returns :compatible or :unrelated"
+        prompt: """
+        Judge semantic compatibility for each pair of interests.
+        Compatible = related domains (outdoor/fitness, creative/artistic, tech/science).
+        NOT compatible = unrelated domains.
+
+        For each pair in the input, return whether the interests are compatible.
+        """,
+        signature:
+          "(pairs [{id1 :int, id2 :int, interests1 :string, interests2 :string}]) -> [{id1 :int, id2 :int, compatible :bool}]",
+        description:
+          "Judge semantic compatibility of interest pairs in batch — returns list with compatible boolean per pair"
       )
 
     SubAgent.new(
       prompt: semantic_pairs_prompt(),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description: "Find pairs with semantically compatible interests",
-      tools: %{"evaluate_pairs" => :self, "semantic_judge" => judge_tool},
+      tools: %{"evaluate_pairs" => :self, "judge_pairs" => judge_tool},
       max_depth: max_depth,
       max_turns: max_turns,
       turn_budget: turn_budget,
@@ -188,8 +193,10 @@ defmodule RlmRecursive.Agent do
 
     ## Tools
     - `tool/evaluate_pairs`: Recursive self-call for data decomposition (splitting large datasets)
-    - `tool/semantic_judge`: Judge semantic compatibility of two interests.
-      Call with `{:interests1 "..." :interests2 "..."}`. Returns `:compatible` or `:unrelated`.
+    - `tool/judge_pairs`: Judge semantic compatibility of interest pairs in batch.
+      Call with `{:pairs [{:id1 N :id2 M :interests1 "..." :interests2 "..."} ...]}`.
+      Returns `[{:id1 N :id2 M :compatible true/false} ...]`.
+      Group pairs by city first, then call judge_pairs once per city with all same-city pairs.
       Use this for ALL semantic judgment — do NOT try to judge compatibility in code.
     """
   end
