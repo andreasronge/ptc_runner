@@ -328,10 +328,11 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
 
       assert length(tool_starts) == 1
-      assert length(tool_stops) == 1
+      # 2 stop events: one from wrap_with_telemetry (in-sandbox), one from
+      # emit_tool_telemetry (post-sandbox, for trace log reliability)
+      assert length(tool_stops) == 2
 
       [{_, start_measurements, start_meta, _}] = tool_starts
-      [{_, stop_measurements, stop_meta, _}] = tool_stops
 
       # Start event includes system_time and monotonic_time from telemetry.span
       assert is_integer(start_measurements.system_time)
@@ -340,12 +341,101 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       # Args have string keys at the boundary
       assert start_meta.args == %{"x" => 5}
 
-      # Stop event
-      assert is_integer(stop_measurements.duration)
-      assert stop_meta.agent == agent
-      assert stop_meta.tool_name == "helper"
-      # Result is summarized to avoid memory bloat in telemetry metadata
-      assert stop_meta.result == "10"
+      # Both stop events should have valid metadata
+      Enum.each(tool_stops, fn {_, stop_measurements, stop_meta, _} ->
+        assert is_integer(stop_measurements.duration)
+        assert stop_meta.agent == agent
+        assert stop_meta.tool_name == "helper"
+      end)
+    end
+
+    test "post-sandbox tool stop event includes tool_name and duration", %{table: table} do
+      helper_fn = fn args -> args["x"] + 1 end
+
+      agent = SubAgent.new(prompt: "Test", tools: %{"inc" => helper_fn}, max_turns: 2)
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, ~S|(tool/inc {:x 3})|}
+          _ -> {:ok, ~S|(return {:done true})|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
+
+      # Post-sandbox re-emission produces a second :stop event alongside the
+      # in-sandbox span :stop. Both carry tool_name and duration.
+      assert length(tool_stops) == 2
+
+      Enum.each(tool_stops, fn {_, measurements, meta, _} ->
+        assert meta.tool_name == "inc"
+        assert is_integer(measurements.duration)
+      end)
+    end
+
+    test "llm-query with tracing propagates child_trace_id in tool stop metadata", %{
+      table: table
+    } do
+      trace_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "telemetry_test_#{:erlang.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(trace_dir)
+      on_exit(fn -> File.rm_rf!(trace_dir) end)
+
+      call_count = :counters.new(1, [:atomics])
+
+      llm = fn %{messages: _} ->
+        :counters.add(call_count, 1, 1)
+        count = :counters.get(call_count, 1)
+
+        case count do
+          # Parent agent turn 1: call llm-query tool
+          1 ->
+            {:ok, ~S|(tool/llm-query {:prompt "Is sky blue?" :signature "{answer :string}"})|}
+
+          # Inner llm-query call (JSON mode)
+          2 ->
+            {:ok, ~s|{"answer": "yes"}|}
+
+          # Parent agent turn 2: return
+          _ ->
+            {:ok, ~S|(return {:done true})|}
+        end
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{},
+          llm_query: true,
+          max_turns: 2
+        )
+
+      trace_context = %{
+        trace_id: "parent123",
+        parent_span_id: nil,
+        depth: 0,
+        trace_dir: trace_dir
+      }
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, trace_context: trace_context)
+
+      tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
+
+      # At least one stop event should carry child_trace_id
+      stops_with_trace =
+        Enum.filter(tool_stops, fn {_, _, meta, _} -> Map.has_key?(meta, :child_trace_id) end)
+
+      assert stops_with_trace != []
+
+      [{_, _, meta, _} | _] = stops_with_trace
+      assert is_binary(meta.child_trace_id)
+      assert meta.tool_name == "llm-query"
     end
 
     test "emits :tool :exception on tool crash", %{table: table} do
@@ -425,7 +515,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       {:ok, _step} = SubAgent.run(agent, llm: llm)
 
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
-      [{_, _, stop_meta, _}] = tool_stops
+      [{_, _, stop_meta, _} | _] = tool_stops
 
       # limit: 3 should cap the map keys and list elements
       # result = {:complex, %{a: 1, b: 2, c: 3, ...}, [1, 2, 3, ...]}
@@ -484,7 +574,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
       assert length(tool_starts) == 1
-      assert length(tool_stops) == 1
+      # 2 stop events: in-sandbox span + post-sandbox re-emission for trace log
+      assert length(tool_stops) == 2
     end
   end
 

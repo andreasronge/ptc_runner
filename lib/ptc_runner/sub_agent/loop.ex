@@ -507,7 +507,16 @@ defmodule PtcRunner.SubAgent.Loop do
         else: state
 
     # Strip tools in must-return mode
-    tool_names = if must_return_mode, do: [], else: Map.keys(agent.tools)
+    base_tool_names = Map.keys(agent.tools)
+
+    tool_names =
+      if must_return_mode do
+        []
+      else
+        if agent.llm_query,
+          do: ["llm-query" | base_tool_names],
+          else: base_tool_names
+      end
 
     llm_input = %{
       system: system_prompt,
@@ -664,8 +673,14 @@ defmodule PtcRunner.SubAgent.Loop do
         state.context
       end
 
+    # Inject builtin llm-query tool if enabled
+    tools =
+      if agent.llm_query,
+        do: Map.put(agent.tools, "llm-query", :builtin_llm_query),
+        else: agent.tools
+
     # Normalize SubAgentTool instances to functions with telemetry
-    normalized_tools = ToolNormalizer.normalize(agent.tools, state, agent)
+    normalized_tools = ToolNormalizer.normalize(tools, state, agent)
 
     execute_code_with_tools(code, response, agent, state, exec_context, normalized_tools)
   end
@@ -704,11 +719,13 @@ defmodule PtcRunner.SubAgent.Loop do
       {:ok, lisp_step} ->
         # Emit pmap/pcalls telemetry events if any
         emit_pmap_telemetry(agent, lisp_step)
+        emit_tool_telemetry(agent, lisp_step)
         handle_successful_execution(code, response, lisp_step, state, agent)
 
       {:error, lisp_step} ->
         # Emit pmap/pcalls telemetry events even on error
         emit_pmap_telemetry(agent, lisp_step)
+        emit_tool_telemetry(agent, lisp_step)
         # Build error message for LLM
         error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
 
@@ -1353,6 +1370,42 @@ defmodule PtcRunner.SubAgent.Loop do
       }
 
       Telemetry.emit(event_suffix, measurements, metadata)
+    end)
+  end
+
+  # ============================================================
+  # Tool Call Telemetry
+  # ============================================================
+
+  # Emit telemetry events for tool calls recorded during Lisp evaluation.
+  # Tools run inside the sandbox (isolated BEAM process) where the trace
+  # handler's process dictionary check causes events to be silently dropped.
+  # Re-emitting in the parent process ensures they appear in trace logs
+  # with correct span hierarchy.
+  defp emit_tool_telemetry(_agent, %{tool_calls: []}), do: :ok
+
+  defp emit_tool_telemetry(agent, %{tool_calls: tool_calls}) do
+    Enum.each(tool_calls, fn tool_call ->
+      measurements = %{
+        duration: System.convert_time_unit(tool_call.duration_ms, :millisecond, :native)
+      }
+
+      metadata = %{
+        agent: agent,
+        tool_name: tool_call.name,
+        args: tool_call.args,
+        result: tool_call.result
+      }
+
+      # Include child_trace_id if present (SubAgentTool/LLMTool with tracing)
+      metadata =
+        if Map.has_key?(tool_call, :child_trace_id) and tool_call.child_trace_id do
+          Map.put(metadata, :child_trace_id, tool_call.child_trace_id)
+        else
+          metadata
+        end
+
+      Telemetry.emit([:tool, :stop], measurements, metadata)
     end)
   end
 end

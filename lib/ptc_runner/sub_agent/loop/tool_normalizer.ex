@@ -49,6 +49,10 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   @spec normalize(map(), map(), SubAgent.t()) :: map()
   def normalize(tools, state, agent) when is_map(tools) do
     Map.new(tools, fn
+      {name, :builtin_llm_query} ->
+        wrapped = wrap_builtin_llm_query(name, state)
+        {name, wrap_with_telemetry(name, wrapped, agent)}
+
       {name, %LLMTool{} = tool} ->
         wrapped = wrap_llm_tool(name, tool, state)
         {name, wrap_with_telemetry(name, wrapped, agent)}
@@ -78,7 +82,20 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
       Telemetry.span([:tool], start_meta, fn ->
         result = func.(args)
-        {result, %{agent: agent, tool_name: name, result: summarize_result(result)}}
+
+        stop_meta = %{agent: agent, tool_name: name, result: summarize_result(result)}
+
+        # Include child_trace_id if result contains trace wrapper
+        stop_meta =
+          case result do
+            %{__child_trace_id__: id} when not is_nil(id) ->
+              Map.put(stop_meta, :child_trace_id, id)
+
+            _ ->
+              stop_meta
+          end
+
+        {result, stop_meta}
       end)
     end
   end
@@ -185,6 +202,50 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
     fn args ->
       json_result = execute_llm_json(name, tool, args, state)
       json_result
+    end
+  end
+
+  @doc """
+  Wrap the builtin llm-query tool.
+
+  Splits args into control keys (`:prompt`, `:signature`, `:llm`, `:response_template`)
+  and template args (everything else). Constructs an ephemeral `%LLMTool{}` and
+  delegates to `execute_llm_json/4`.
+  """
+  @builtin_llm_query_control_keys ~w(prompt signature llm response_template)
+
+  @spec wrap_builtin_llm_query(String.t(), map()) :: function()
+  def wrap_builtin_llm_query(name, state) do
+    fn args ->
+      prompt =
+        Map.get(args, "prompt") ||
+          raise ExecutionError,
+            reason: :tool_error,
+            message: name,
+            data: "llm-query requires :prompt"
+
+      signature = Map.get(args, "signature", ":string")
+      llm_key = Map.get(args, "llm")
+      response_template = Map.get(args, "response_template")
+
+      # Template args = everything except control keys
+      template_args = Map.drop(args, @builtin_llm_query_control_keys)
+
+      # Build prompt with template args using Mustache
+      rendered_prompt =
+        case PtcRunner.Mustache.render(prompt, template_args) do
+          {:ok, rendered} -> rendered
+          {:error, _} -> prompt
+        end
+
+      tool = %LLMTool{
+        prompt: rendered_prompt,
+        signature: signature,
+        llm: llm_key || :caller,
+        response_template: response_template
+      }
+
+      execute_llm_json(name, tool, template_args, state)
     end
   end
 
