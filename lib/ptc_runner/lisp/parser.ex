@@ -49,6 +49,14 @@ defmodule PtcRunner.Lisp.Parser do
     |> lookahead_not(ascii_char(symbol_rest))
     |> replace(false)
 
+  special_literal =
+    ignore(string("##"))
+    |> choice([
+      string("-Inf") |> lookahead_not(ascii_char(symbol_rest)) |> replace(:negative_infinity),
+      string("Inf") |> lookahead_not(ascii_char(symbol_rest)) |> replace(:infinity),
+      string("NaN") |> lookahead_not(ascii_char(symbol_rest)) |> replace(:nan)
+    ])
+
   # Numbers
   sign = ascii_char([?-, ?+])
 
@@ -207,6 +215,7 @@ defmodule PtcRunner.Lisp.Parser do
       nil_literal,
       true_literal,
       false_literal,
+      special_literal,
       integer_with_exponent,
       float_literal,
       integer_literal,

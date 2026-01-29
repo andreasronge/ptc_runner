@@ -152,14 +152,15 @@ false
 1.23e-4
 ```
 
-**Special Values (IEEE 754)** — namespaced constants:
-```clojure
-Double/POSITIVE_INFINITY    ; => ##Inf
-Double/NEGATIVE_INFINITY    ; => ##-Inf
-Double/NaN                  ; => ##NaN (Not a Number)
-```
+**Special Values (IEEE 754)** — literals and namespaced constants:
 
-Special values are returned by operations like division by zero (`(/ 1.0 0.0)`) or indeterminate forms (`(/ 0.0 0.0)`). They are formatted using Clojure's reader syntax (`##Inf`, `##NaN`) but evaluate to their respective symbolic representations.
+| Literal | Constant | Description |
+|---------|----------|-------------|
+| `##Inf` | `Double/POSITIVE_INFINITY` | Positive infinity |
+| `##-Inf` | `Double/NEGATIVE_INFINITY` | Negative infinity |
+| `##NaN` | `Double/NaN` | Not a Number |
+
+Special values are returned by operations like division by zero (`(/ 1.0 0.0)`) or indeterminate forms (`(/ 0.0 0.0)`). They are formatted using Clojure's reader syntax (`##Inf`, `##NaN`) and are supported as both input literals and output format.
 
 **Not supported:** Ratios (`1/3`), BigDecimals (`1.0M`), octal/hex literals
 

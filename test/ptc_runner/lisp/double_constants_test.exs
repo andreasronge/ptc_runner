@@ -10,6 +10,12 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:ok, %{return: :nan}} = Lisp.run("Double/NaN")
     end
 
+    test "resolves special literals" do
+      assert {:ok, %{return: :infinity}} = Lisp.run("##Inf")
+      assert {:ok, %{return: :negative_infinity}} = Lisp.run("##-Inf")
+      assert {:ok, %{return: :nan}} = Lisp.run("##NaN")
+    end
+
     test "arithmetic with constants" do
       assert {:ok, %{return: :infinity}} = Lisp.run("(+ Double/POSITIVE_INFINITY 1)")
 

@@ -136,4 +136,5 @@ defmodule PtcRunner.Lisp.SymbolCounter do
   defp collect_symbols(n, acc) when is_number(n), do: acc
   defp collect_symbols(b, acc) when is_boolean(b), do: acc
   defp collect_symbols(nil, acc), do: acc
+  defp collect_symbols(a, acc) when a in [:infinity, :negative_infinity, :nan], do: acc
 end

@@ -19,6 +19,10 @@ defmodule PtcRunner.Lisp.Formatter do
     :erlang.float_to_binary(n, [:compact, decimals: 10])
   end
 
+  def format(:infinity), do: "##Inf"
+  def format(:negative_infinity), do: "##-Inf"
+  def format(:nan), do: "##NaN"
+
   def format({:string, s}), do: ~s("#{escape_string(s)}")
   def format({:keyword, k}), do: ":#{k}"
   def format({:symbol, name}), do: Atom.to_string(name)

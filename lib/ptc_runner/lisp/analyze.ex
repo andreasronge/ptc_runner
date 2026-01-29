@@ -49,6 +49,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp do_analyze(true, _tail?), do: {:ok, true}
   defp do_analyze(false, _tail?), do: {:ok, false}
   defp do_analyze(n, _tail?) when is_integer(n) or is_float(n), do: {:ok, n}
+  defp do_analyze(a, _tail?) when a in [:infinity, :negative_infinity, :nan], do: {:ok, a}
 
   defp do_analyze({:string, s}, _tail?), do: {:ok, {:string, s}}
   defp do_analyze({:keyword, k}, _tail?), do: {:ok, {:keyword, k}}
