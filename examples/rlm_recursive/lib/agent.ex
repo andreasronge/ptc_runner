@@ -112,12 +112,24 @@ defmodule RlmRecursive.Agent do
         - {{id1}} & {{id2}}: "{{interests1}}" vs "{{interests2}}"
         {{/pairs}}
 
-        For each pair in the input, return whether the interests are compatible.
+        For each pair in the input, return whether the interests are broadly compatible.
+        Be inclusive: if a person enjoying one interest might reasonably enjoy the other, mark as compatible.
         """,
         signature:
           "(pairs [{id1 :int, id2 :int, interests1 :string, interests2 :string}]) -> [{id1 :int, id2 :int, compatible :bool}]",
         description:
-          "Judge semantic compatibility of interest pairs in batch — returns list with compatible boolean per pair"
+          "Judge semantic compatibility of interest pairs in batch (MAX 50 pairs) — returns list with compatible boolean per pair",
+        validator: fn
+          %{"pairs" => pairs} when is_list(pairs) ->
+            if length(pairs) <= 50 do
+              :ok
+            else
+              {:error, "Too many pairs (#{length(pairs)}). Maximum is 50. Please split into smaller batches (e.g., group by city first)."}
+            end
+
+          _ ->
+            :ok
+        end
       )
 
     SubAgent.new(
