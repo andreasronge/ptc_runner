@@ -103,13 +103,18 @@ This is fundamentally different from stuffing everything into the prompt.
 
 **Task**: Find all pairs of people in the same city with *semantically compatible* interests.
 
-**Example**: "enjoys scaling peaks" and "trail running enthusiast" are compatible (both outdoor/active), but "builds Arduino projects" and "pottery hobbyist" are not.
+**Note**: This is our own benchmark, not from the OOLONG dataset. The [OOLONG benchmarks](https://huggingface.co/oolongbench) (oolong-synth, oolong-real) focus on counting and frequency tasks. Our semantic pairs benchmark extends the RLM approach by requiring LLM judgment per pair — something that can't be solved programmatically.
 
-**Why Two Tools**: This benchmark separates concerns using the RLM paper's approach:
+**Why Two Tools**: This benchmark separates concerns:
 - `tool/evaluate_pairs` (`:self`) — Recursive data decomposition for large datasets
-- `tool/judge_pairs` (`LLMTool`) — Batch semantic judgment via a single-shot LLM call
+- `tool/judge_pairs` (`LLMTool`) — Batch semantic judgment (max 50 pairs per call)
 
-The LLMTool handles semantic evaluation that can't be done programmatically, while recursion handles data that exceeds context limits.
+The `judge_pairs` tool validates input size before execution, forcing the agent to batch pairs into manageable chunks rather than sending all pairs in one massive call.
+
+**Results** (40 profiles, seed 42, 260 expected pairs):
+
+- **Accuracy**: 62% (162/260) in 10 turns, 118s
+- **Main bottleneck**: Judge calibration — the ground truth uses specific category relationships (outdoor↔fitness, creative↔social, tech↔creative, fitness↔social) that the judge must infer
 
 ```bash
 mix run run.exs --benchmark semantic_pairs --profiles 40 --trace --progress
@@ -178,7 +183,8 @@ lib/
 └── generators/
     ├── sniah.ex          # S-NIAH corpus generator
     ├── counting.ex       # OOLONG-Counting generator
-    └── pairs.ex          # OOLONG-Pairs generator (O(n²))
+    ├── pairs.ex          # OOLONG-Pairs generator (O(n²))
+    └── semantic_pairs.ex # Semantic compatibility pairs (custom benchmark)
 ```
 
 ### Key Patterns
