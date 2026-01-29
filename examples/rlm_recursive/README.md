@@ -107,9 +107,9 @@ This is fundamentally different from stuffing everything into the prompt.
 
 **Why Two Tools**: This benchmark separates concerns:
 - `tool/evaluate_pairs` (`:self`) — Recursive data decomposition for large datasets
-- `tool/judge_pairs` (`LLMTool`) — Batch semantic judgment (max 50 pairs per call)
+- `tool/llm-query` (builtin, via `llm_query: true`) — Ad-hoc LLM calls for batch semantic judgment
 
-The `judge_pairs` tool validates input size before execution, forcing the agent to batch pairs into manageable chunks rather than sending all pairs in one massive call.
+The agent uses `tool/llm-query` with a judgment prompt and structured signature to classify pairs as compatible or not, batching them as needed via `pmap`.
 
 **Results** (40 profiles, seed 42, 260 expected pairs):
 
@@ -195,7 +195,7 @@ lib/
 ;; => [{:line 472 :text "The access code for agent_7291 is XKQMTR"}]
 ```
 
-**Budget introspection** for adaptive behavior:
+**Budget introspection** (PtcRunner-specific, not from the RLM paper — not yet used in benchmarks):
 ```clojure
 (def b (budget/remaining))
 ;; => {:turns 15, :depth {:current 1, :max 4}, ...}
