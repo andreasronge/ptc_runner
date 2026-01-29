@@ -304,6 +304,62 @@ so built-in functions work but tool calls and data references do not.
 Use `response_template` for primitive transformations (booleans, numbers, keywords).
 Avoid string interpolation where quotes could break Lisp parsing.
 
+## Builtin Ad-Hoc LLM Queries (`llm_query`)
+
+For quick LLM judgments without defining an `LLMTool` struct, enable the builtin `tool/llm-query`:
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Classify each item and return the urgent ones",
+  signature: "(items [:map]) -> {urgent [:map]}",
+  llm_query: true,
+  max_turns: 5
+)
+
+{:ok, step} = SubAgent.run(agent, llm: llm, context: %{items: items})
+```
+
+The agent can now call `tool/llm-query` from PTC-Lisp for classification, judgment, or extraction:
+
+```clojure
+;; Simple query (default signature: ":string")
+(tool/llm-query {:prompt "Is this urgent? {{text}}" :text "Server is down!"})
+
+;; With structured output
+(tool/llm-query {:prompt "Classify: {{text}}"
+                 :signature "{category :string, score :float}"
+                 :text "Revenue dropped 50%"})
+
+;; Batch judgment with pmap
+(pmap (fn [item]
+        (tool/llm-query {:prompt "Rate urgency: {{desc}}"
+                         :signature "{urgent :bool}"
+                         :desc (:description item)}))
+      data/items)
+```
+
+### Control Keys
+
+| Key | Required | Default | Description |
+|-----|----------|---------|-------------|
+| `:prompt` | Yes | — | Template with `{{placeholders}}` |
+| `:signature` | No | `":string"` | Output type contract |
+| `:llm` | No | Parent's LLM | Model override (atom or function) |
+| `:response_template` | No | — | PTC-Lisp template with `{{placeholders}}` from JSON result |
+
+All other keys are template arguments available as `{{key}}` in the prompt.
+
+### When to Use `llm_query` vs `LLMTool`
+
+| | `llm_query: true` | `LLMTool.new/1` |
+|---|---|---|
+| Definition | No struct needed | Explicit struct |
+| Prompt | Written by agent at runtime | Fixed at definition time |
+| Reuse | Ad-hoc, single agent | Shareable across agents |
+| Use case | Agent needs dynamic LLM judgment | Known, reusable LLM tool |
+
+Use `llm_query` when the agent itself decides what to ask the LLM. Use `LLMTool` when you define the prompt upfront in Elixir.
+
 ## Orchestration Patterns
 
 ### Pattern 1: Dynamic Agent Creation (`spawn_agent`)
