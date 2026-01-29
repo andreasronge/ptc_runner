@@ -364,6 +364,22 @@ tools = %{
 | `{fun, signature: "...", description: "..."}` | Production tools with full documentation |
 | `fn args -> ... end` | Quick inline functions |
 
+## Builtin LLM Queries
+
+Enable `llm_query: true` to let the agent make ad-hoc LLM calls from PTC-Lisp without defining separate tools:
+
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "Classify each item by urgency",
+  signature: "(items [:map]) -> {urgent [:map]}",
+  llm_query: true,
+  llm: my_llm,
+  context: %{items: items}
+)
+```
+
+The agent can call `tool/llm-query` with a prompt and optional signature for classification, judgment, or extraction tasks. See [Composition Patterns](subagent-patterns.md#builtin-ad-hoc-llm-queries-llm_query) for details.
+
 ## Agent as Data
 
 For reusable agents, create the struct separately:
