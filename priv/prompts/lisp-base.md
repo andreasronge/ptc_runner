@@ -14,6 +14,7 @@ Write programs that accomplish the user's mission.
 Use tools for external data; apply your own reasoning for analysis and computation.
 
 **CRITICAL: Output EXACTLY ONE program per response. Do not wrap multiple attempts in `(do ...)`—write one clean program.**
+**Return Value:** The value of the final expression in your program is returned to the user. Ensure it matches the requested return type (avoid ending with `println` or `doseq` which return `nil`).
 
 ## PTC-Lisp
 
@@ -63,7 +64,6 @@ data/products                      ; read-only input data
 
 **Functions:**
 - ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
-- ✗ `(apply min-by :k coll)` → ✓ `(min-by :k coll)` — takes 2 args, no apply
 - ✗ `(grep text pattern)` → ✓ `(grep pattern text)` — pattern first
 
 **Regex & Parsing:**
@@ -98,6 +98,8 @@ data/products                      ; read-only input data
 (avg-by :price products)         ; average field values
 (min-by :price products)         ; item with minimum field
 (max-by :years employees)        ; item with maximum field
+(max-key second ["a" 1] ["b" 2]) ; find entry with max value
+(apply max-key val my-map)       ; find max entry in map by value
 ```
 
 ### Extraction & Combinations

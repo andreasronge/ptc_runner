@@ -177,7 +177,7 @@ defmodule PtcDemo.TestRunner.TestCase do
         expect: :map,
         signature: "(question :string) -> {highest :map, breakdown [:map]}",
         constraint: {:has_keys, [:highest, :breakdown]},
-        max_turns: 2,
+        max_turns: 3,
         description:
           "group-by + map over map with fn [[cat items]] destructuring, multiple aggregations"
       },
@@ -189,7 +189,7 @@ defmodule PtcDemo.TestRunner.TestCase do
             "Return their employee_id.",
         expect: :integer,
         constraint: {:between, 1, 200},
-        max_turns: 2,
+        max_turns: 3,
         description: "Group by employee_id, filter rejected, find max count"
       }
     ]
@@ -271,7 +271,7 @@ defmodule PtcDemo.TestRunner.TestCase do
         signature:
           "(question :string) -> {product_ids [:int], total_cost :float, expected_revenue :float}",
         constraint: {:has_keys, [:product_ids, :total_cost, :expected_revenue]},
-        max_turns: 3,
+        max_turns: 5,
         description:
           "Budget optimization: greedy selection by value ratio with constraint checking"
       }

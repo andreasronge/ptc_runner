@@ -130,12 +130,12 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
       assert {:error, {:not_callable, 1}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
-    test "apply with map as last argument raises error" do
+    test "apply with map as last argument converts to [key, value] pairs" do
       env = Env.initial()
-      # (apply merge {:a 1})
-      ast = {:call, {:var, :apply}, [{:var, :merge}, {:map, [{{:keyword, :a}, 1}]}]}
-      assert {:error, {:type_error, msg, _}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
-      assert msg =~ "apply expects collection as last argument, got map"
+      # (apply vector {:a 1}) — map {:a 1} is converted to [[:a, 1]], apply spreads it
+      # so this calls (vector [:a, 1]) which returns [[:a, 1]]
+      ast = {:call, {:var, :apply}, [{:var, :vector}, {:map, [{{:keyword, :a}, 1}]}]}
+      assert {:ok, [[:a, 1]], _} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "apply with closure arity mismatch" do
