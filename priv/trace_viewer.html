@@ -689,8 +689,9 @@
         }
       }
 
-      // Child traces
-      const childIds = stop?.metadata?.child_trace_ids || [];
+      // Child traces (support both plural child_trace_ids and singular child_trace_id)
+      const childIds = stop?.metadata?.child_trace_ids ||
+        (stop?.metadata?.child_trace_id ? [stop.metadata.child_trace_id] : []);
       if (childIds.length > 0) {
         bodyContent += `
           <div class="event-section">
