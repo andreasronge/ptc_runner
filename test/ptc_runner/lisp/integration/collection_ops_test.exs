@@ -631,6 +631,42 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # partition-all - like partition but keeps incomplete final chunk
+  # ==========================================================================
+
+  describe "partition-all" do
+    test "keeps incomplete final chunk" do
+      source = "(partition-all 3 [1 2 3 4 5 6 7 8])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2, 3], [4, 5, 6], [7, 8]]
+    end
+
+    test "basic partition-all by n" do
+      source = "(partition-all 2 [1 2 3 4 5])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2], [3, 4], [5]]
+    end
+
+    test "with step" do
+      source = "(partition-all 2 3 [1 2 3 4 5 6 7])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2], [4, 5], [7]]
+    end
+
+    test "nil returns empty" do
+      source = "(partition-all 2 nil)"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "exact fit behaves like partition" do
+      source = "(partition-all 3 [1 2 3 4 5 6])"
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [[1, 2, 3], [4, 5, 6]]
+    end
+  end
+
+  # ==========================================================================
   # interpose - Insert separator between elements
   # ==========================================================================
 

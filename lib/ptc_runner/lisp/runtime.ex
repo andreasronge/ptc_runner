@@ -82,6 +82,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate interpose(sep, coll), to: Collection
   defdelegate partition(n, coll), to: Collection
   defdelegate partition(n, step, coll), to: Collection
+  defdelegate partition(n, step, pad, coll), to: Collection
+  defdelegate partition_all(n, coll), to: Collection
+  defdelegate partition_all(n, step, coll), to: Collection
   defdelegate count(coll), to: Collection
   defdelegate empty?(coll), to: Collection
   defdelegate not_empty(coll), to: Collection
