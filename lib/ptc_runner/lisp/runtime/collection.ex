@@ -13,6 +13,27 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   defp truthy_key_pred(key), do: fn item -> !!FlexAccess.flex_get(item, key) end
 
+  defp to_seq_list(nil), do: []
+  defp to_seq_list(coll) when is_list(coll), do: coll
+  defp to_seq_list(coll) when is_binary(coll), do: graphemes(coll)
+  defp to_seq_list(%MapSet{} = set), do: MapSet.to_list(set)
+
+  defp to_seq_list(m) when is_map(m) and not is_struct(m) do
+    Enum.map(m, fn {k, v} -> [k, v] end)
+  end
+
+  defp to_seq_list(other), do: Enum.to_list(other)
+
+  defp validate_n(n, _name) when is_integer(n) and n > 0, do: :ok
+
+  defp validate_n(n, name),
+    do: raise("type_error: #{name}: n must be a positive integer, got #{inspect(n)}")
+
+  defp validate_step(step, _name) when is_integer(step) and step > 0, do: :ok
+
+  defp validate_step(step, name),
+    do: raise("type_error: #{name}: step must be a positive integer, got #{inspect(step)}")
+
   # Set-as-predicate: returns element if member, nil if not (used with filter/some/etc)
   defp set_pred(set), do: fn item -> if MapSet.member?(set, item), do: item, else: nil end
 
@@ -526,28 +547,39 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # ============================================================
 
   # partition with 2 args: (partition n coll) - chunks of n, discards incomplete
-  def partition(n, coll) when is_integer(n) and n > 0 and is_list(coll) do
-    Enum.chunk_every(coll, n, n, :discard)
+  def partition(n, coll) do
+    validate_n(n, "partition")
+    Enum.chunk_every(to_seq_list(coll), n, n, :discard)
   end
-
-  def partition(n, coll) when is_integer(n) and n > 0 and is_binary(coll) do
-    Enum.chunk_every(graphemes(coll), n, n, :discard)
-  end
-
-  def partition(_n, nil), do: []
 
   # partition with 3 args: (partition n step coll) - sliding window
-  def partition(n, step, coll)
-      when is_integer(n) and n > 0 and is_integer(step) and step > 0 and is_list(coll) do
-    Enum.chunk_every(coll, n, step, :discard)
+  def partition(n, step, coll) do
+    validate_n(n, "partition")
+    validate_step(step, "partition")
+    Enum.chunk_every(to_seq_list(coll), n, step, :discard)
   end
 
-  def partition(n, step, coll)
-      when is_integer(n) and n > 0 and is_integer(step) and step > 0 and is_binary(coll) do
-    Enum.chunk_every(graphemes(coll), n, step, :discard)
+  # partition with 4 args: (partition n step pad coll) - with padding
+  def partition(n, step, pad, coll) do
+    validate_n(n, "partition")
+    validate_step(step, "partition")
+    Enum.chunk_every(to_seq_list(coll), n, step, pad)
   end
 
-  def partition(_n, _step, nil), do: []
+  # ============================================================
+  # partition-all: like partition but keeps incomplete final chunk
+  # ============================================================
+
+  def partition_all(n, coll) do
+    validate_n(n, "partition-all")
+    Enum.chunk_every(to_seq_list(coll), n)
+  end
+
+  def partition_all(n, step, coll) do
+    validate_n(n, "partition-all")
+    validate_step(step, "partition-all")
+    Enum.chunk_every(to_seq_list(coll), n, step)
+  end
 
   def count(%MapSet{} = set), do: MapSet.size(set)
 
