@@ -71,7 +71,7 @@ defmodule PtcDemo.SearchTool do
   end
 
   defp do_search(query, args) do
-    limit = Map.get(args, "limit", 5)
+    limit = Map.get(args, "limit", 10)
     cursor = Map.get(args, "cursor")
     offset = parse_cursor(cursor)
 

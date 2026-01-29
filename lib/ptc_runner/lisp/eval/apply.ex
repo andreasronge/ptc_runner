@@ -524,6 +524,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp last_arg_to_list(list) when is_list(list), do: {:ok, list}
   defp last_arg_to_list(%MapSet{} = s), do: {:ok, MapSet.to_list(s)}
 
+  defp last_arg_to_list(m) when is_map(m) do
+    # Convert map to [key, value] pairs per Clojure seqable semantics
+    {:ok, Enum.map(m, fn {k, v} -> [k, v] end)}
+  end
+
   defp last_arg_to_list(other),
     do:
       {:error,

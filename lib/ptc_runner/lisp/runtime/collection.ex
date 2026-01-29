@@ -823,6 +823,40 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.min_by(args, &Callable.call(f, [&1]))
   end
 
+  @doc """
+  Variadic version of max-by that supports both (max-by key coll)
+  and (apply max-by key item1 item2 ...).
+  """
+  def max_by_variadic([key, coll])
+      when is_list(coll) or is_map(coll) or is_struct(coll, MapSet) do
+    max_by(key, coll)
+  end
+
+  def max_by_variadic([key | items]) when items != [] do
+    max_by(key, items)
+  end
+
+  def max_by_variadic(_) do
+    raise ArgumentError, "max-by requires at least a key and one value or collection"
+  end
+
+  @doc """
+  Variadic version of min-by that supports both (min-by key coll)
+  and (apply min-by key item1 item2 ...).
+  """
+  def min_by_variadic([key, coll])
+      when is_list(coll) or is_map(coll) or is_struct(coll, MapSet) do
+    min_by(key, coll)
+  end
+
+  def min_by_variadic([key | items]) when items != [] do
+    min_by(key, items)
+  end
+
+  def min_by_variadic(_) do
+    raise ArgumentError, "min-by requires at least a key and one value or collection"
+  end
+
   # group_by: atom or string keys
   def group_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)),
     do: Enum.group_by(coll, &FlexAccess.flex_get(&1, key))
