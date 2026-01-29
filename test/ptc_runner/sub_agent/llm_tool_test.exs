@@ -479,7 +479,7 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
           max_turns: 3
         )
 
-      llm = PtcRunner.LLM.OpenRouter.new()
+      llm = LLMClient.callback("haiku")
 
       case SubAgent.run(agent, llm: llm, context: %{"value" => 42}) do
         {:ok, step} ->
