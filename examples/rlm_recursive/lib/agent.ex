@@ -107,6 +107,11 @@ defmodule RlmRecursive.Agent do
         Compatible = related domains (outdoor/fitness, creative/artistic, tech/science).
         NOT compatible = unrelated domains.
 
+        Pairs to judge:
+        {{#pairs}}
+        - {{id1}} & {{id2}}: "{{interests1}}" vs "{{interests2}}"
+        {{/pairs}}
+
         For each pair in the input, return whether the interests are compatible.
         """,
         signature:
