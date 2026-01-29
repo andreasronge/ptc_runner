@@ -96,7 +96,8 @@ defmodule PtcRunner.TraceLog.Event do
       size = byte_size(value)
 
       if size > @max_string_size do
-        "String(#{size} bytes)"
+        preview = String.slice(value, 0, 200)
+        "#{preview}...\n\n[String truncated — #{size} bytes total]"
       else
         value
       end
