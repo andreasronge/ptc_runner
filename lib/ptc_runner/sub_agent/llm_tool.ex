@@ -81,7 +81,16 @@ defmodule PtcRunner.SubAgent.LLMTool do
 
   """
 
-  defstruct [:prompt, :signature, :llm, :description, :tools, :response_template, :json_signature]
+  defstruct [
+    :prompt,
+    :signature,
+    :llm,
+    :description,
+    :tools,
+    :response_template,
+    :json_signature,
+    :validator
+  ]
 
   @type t :: %__MODULE__{
           prompt: String.t(),
@@ -90,7 +99,8 @@ defmodule PtcRunner.SubAgent.LLMTool do
           description: String.t() | nil,
           tools: map() | nil,
           response_template: String.t() | nil,
-          json_signature: String.t() | nil
+          json_signature: String.t() | nil,
+          validator: (map() -> :ok | {:error, String.t()}) | nil
         }
 
   @doc """
@@ -105,7 +115,7 @@ defmodule PtcRunner.SubAgent.LLMTool do
   - `:tools` - If provided, runs as multi-turn agent
   - `:response_template` - PTC-Lisp template with `{{placeholder}}` for JSON fields
   - `:json_signature` - Signature for the internal JSON call (falls back to `:signature`)
-
+  - `:validator` - Function `(args -> :ok | {:error, msg})` to validate inputs before execution
   ## Examples
 
       iex> PtcRunner.SubAgent.LLMTool.new(prompt: "Hello {{name}}", signature: "(name :string) -> :string")
@@ -149,6 +159,7 @@ defmodule PtcRunner.SubAgent.LLMTool do
     validate_tools!(opts)
     validate_response_template!(opts)
     validate_json_signature!(opts)
+    validate_validator!(opts)
   end
 
   defp validate_prompt!(opts) do
@@ -211,6 +222,15 @@ defmodule PtcRunner.SubAgent.LLMTool do
       {:ok, s} when is_binary(s) -> :ok
       {:ok, nil} -> :ok
       {:ok, _} -> raise ArgumentError, "json_signature must be a string or nil"
+      :error -> :ok
+    end
+  end
+
+  defp validate_validator!(opts) do
+    case Keyword.fetch(opts, :validator) do
+      {:ok, v} when is_function(v, 1) -> :ok
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "validator must be a function/1 or nil"
       :error -> :ok
     end
   end

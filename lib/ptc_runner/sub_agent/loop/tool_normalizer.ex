@@ -190,6 +190,20 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   # Shared helper: runs ephemeral SubAgent with output: :json
   defp execute_llm_json(name, %LLMTool{} = tool, args, state) do
+    # Run validator if present
+    if tool.validator do
+      case tool.validator.(args) do
+        :ok ->
+          :ok
+
+        {:error, msg} ->
+          raise PtcRunner.Lisp.ExecutionError,
+            reason: :tool_error,
+            message: name,
+            data: msg
+      end
+    end
+
     resolved_llm = resolve_llm_tool_llm(tool.llm, state)
 
     unless resolved_llm do

@@ -433,15 +433,10 @@ defmodule PtcRunner.Lisp.Eval do
           |> Task.async_stream(
             fn elem ->
               try do
-                result = Callable.call(callable_fn, [elem])
-                # Check if result contains a child_trace_id (from SubAgentTool)
-                case result do
-                  %{__child_trace_id__: trace_id, value: value} ->
-                    {:ok, value, trace_id}
-
-                  _ ->
-                    {:ok, result, nil}
-                end
+                Process.delete(:last_child_trace_id)
+                value = Callable.call(callable_fn, [elem])
+                trace_id = Process.get(:last_child_trace_id)
+                {:ok, value, trace_id}
               rescue
                 e ->
                   {:error, {:pmap_error, Exception.message(e)}}
@@ -520,15 +515,10 @@ defmodule PtcRunner.Lisp.Eval do
             |> Task.async_stream(
               fn {erlang_fn, idx} ->
                 try do
-                  result = erlang_fn.()
-                  # Check if result contains a child_trace_id (from SubAgentTool)
-                  case result do
-                    %{__child_trace_id__: trace_id, value: value} ->
-                      {:ok, value, trace_id, idx}
-
-                    _ ->
-                      {:ok, result, nil, idx}
-                  end
+                  Process.delete(:last_child_trace_id)
+                  value = erlang_fn.()
+                  trace_id = Process.get(:last_child_trace_id)
+                  {:ok, value, trace_id, idx}
                 rescue
                   e ->
                     {:error, {:pcalls_error, idx, Exception.message(e)}}
@@ -741,13 +731,11 @@ defmodule PtcRunner.Lisp.Eval do
         eval_ctx: eval_ctx2,
         tool_name: tool_name
     else
-      # Return the original wrapper (if present) so pmap can extract child_trace_ids.
-      # The tool_call record already has the unwrapped result for logging.
-      # Non-pmap callers that go through do_eval will just see the wrapper as a map,
-      # but that's fine since they can access the value via :value key if needed.
-      # Pmap specifically checks for __child_trace_id__ wrapper.
-      return_value = if child_trace_id, do: raw_result, else: result
-      {:ok, return_value, eval_ctx2}
+      # Metadata like child_trace_id is smuggled via Process.put to avoid polluting
+      # the Lisp value space with framework-internal wrappers.
+      # This ensures tools always return data, not metadata, to the LLM.
+      if child_trace_id, do: Process.put(:last_child_trace_id, child_trace_id)
+      {:ok, result, eval_ctx2}
     end
   end
 
