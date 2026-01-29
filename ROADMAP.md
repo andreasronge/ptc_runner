@@ -1,420 +1,71 @@
-# PtcRunner Roadmap (Brain Dump)
+# PtcRunner Roadmap
 
-This document captures potential enhancements for ptc_runner, driven by real-world usage in production Phoenix applications (particularly an email/voice/calendar app).
-
-## Current State
-
-ptc_runner already has:
-- Sandboxed BEAM execution with memory/timeout limits
-- PTC-Lisp DSL for safe LLM-generated programs
-- Step chaining for pipeline composition
-- Comprehensive telemetry events (`[:ptc_runner, :sub_agent, :turn|:tool|:llm, :start|:stop]`)
-- SubAgent composition via `as_tool/2`
-- **v0.5 Observability**: Turn struct with tool_calls/prints, Debug API, message compression
-- **v0.5.1 JSON Mode**: Direct JSON structured output, extended LLM callback interface
-
-## Known Gaps
-
-_No critical gaps at this time. See release plan for planned features._
-
----
-
-## Tier 1: Foundational Features
-
-### 1. Unified Task System (replaces Async/Long-Running Tool Support)
-
-> See GitHub Issue #703 for full design and implementation plan.
-
-**Problem**: Multiple related concerns need a unified solution:
-- Idempotency/deduplication of side-effect tool calls (#700)
-- Long-running async tools (phone calls, human approval, slow APIs)
-- Workflow orchestration with parallel execution
-
-**Solution**: A unified `(task)` form that handles all three transparently.
-
-**Core Primitives**:
-
-| Form | Purpose |
-|------|---------|
-| `(task id expr)` | Idempotent execution - runs once, caches result, handles sync/async transparently |
-| `(parallel & tasks)` | Concurrent execution - starts all tasks, suspends until all complete |
-| `(checkpoint id msg)` | Human-in-the-loop - suspends for approval |
-
-**Key Insight**: The LLM doesn't need to know if a tool is sync or async. Same syntax works for both:
-
-```lisp
-;; Sync tool - executes immediately, caches result
-(task "fetch_data" (http-get "https://api.example.com"))
-
-;; Async tool - same syntax! System handles suspension/resume
-(task "call_bob" (phone-call "bob"))
-;; Tool returns {:pending, "call_123", %{status: "dialing"}}
-;; Task marked pending, execution suspends
-;; ... SubAgent.resume(step, "call_123", result) ...
-;; Task completed, execution continues
-
-;; Parallel async - both calls initiated, suspend until both complete
-(let [[alice bob]
-      (parallel
-        (task "call_alice" (phone-call "alice"))
-        (task "call_bob" (phone-call "bob")))]
-  (summarize alice bob))
-
-;; Human approval checkpoint
-(checkpoint "confirm_meeting" "Schedule for Tuesday 2pm?")
-```
-
-**Removed Concepts** (simplification from original async design):
-- ~~`(await id)`~~ - Task handles suspension implicitly
-- ~~`async: true` tool metadata~~ - Tool just returns `{:pending, ...}` or normal result
-- ~~Separate async vs sync mental model~~ - Unified under task
-
-**Task State** (tracked in Context, serialized with Step):
-
-```elixir
-ctx.tasks = %{
-  "call_bob" => %{
-    status: :completed,  # :pending | :running | :completed | :failed
-    output: %{transcript: "..."},
-    started_at: ~U[...],
-    completed_at: ~U[...]
-  }
-}
-```
-
-**Future Extensions** (documented but not initial scope):
-- Hierarchical tasks / subagents (`Context.child/1`)
-- Replanning with task invalidation
-- Task dependencies and conditional execution
-
-### 2. State Serialization
-
-**Problem**: Production apps need crash recovery, horizontal scaling, session hibernation.
-
-**Use Cases**:
-- Persist conversation to PostgreSQL
-- Resume on different node after crash
-- Hibernate long-idle sessions
-- Debug by inspecting serialized state
-
-**Proposed API**:
-
-```elixir
-# Serialize for storage
-{:ok, binary} = PtcRunner.SubAgent.serialize(step)
-# or
-{:ok, binary} = PtcRunner.SubAgent.serialize(pending_step)
-
-# Deserialize for recovery
-{:ok, step} = PtcRunner.SubAgent.deserialize(binary)
-
-# Continue execution
-{:ok, final_step} = PtcRunner.SubAgent.run(agent,
-  resume_from: step,
-  llm: llm
-)
-```
-
-**Design Considerations**:
-- What's serializable? Step fields, memory, pending ops, message history
-- Version the serialization format for migrations
-
-**Decision: JSON as default format**
-
-Leaning toward JSON over `:erlang.term_to_binary`:
-- Async state may sit in Postgres for minutes/hours (human-in-the-loop)
-- Debuggability matters: `jq` a suspended state to understand what's happening
-- Efficiency matters less than correctness during 0.x development
-- Can add binary as optional optimization later for high-throughput cases
-
-```elixir
-# Default: JSON for debuggability
-{:ok, json} = PtcRunner.SubAgent.serialize(step, format: :json)
-# Inspect with jq, store in JSONB column, debug easily
-
-# Optional: binary for performance-critical paths
-{:ok, binary} = PtcRunner.SubAgent.serialize(step, format: :binary)
-```
-
-**Decision: MFA tuples for serializable tools**
-
-Anonymous functions aren't serializable. Two approaches:
-
-```elixir
-# Option A: Tool registry (adds global state)
-PtcRunner.register_tool(:make_call, &MyApp.Phone.call/1)
-# Serialize stores :make_call, deserialize looks up
-
-# Option B: MFA tuples (no registry, already serializable) ← Preferred
-tools: %{
-  "make_call" => {MyApp.Phone, :call, []},
-  "send_email" => {MyApp.Email, :send, []}
-}
-```
-
-MFA tuples are simpler - no registry, no global state, naturally serializable. Less ergonomic than anonymous functions, but the trade-off is worth it for crash recovery and distributed resume.
-
-**Relationship to Task System**:
-- Required for tasks to work (pending task state must be persistable)
-- But also useful standalone for crash recovery
-
----
-
-## OTP Application Architecture
-
-**Current**: Pure library. `SubAgent.run/2` is synchronous, sandboxes are ephemeral.
-
-**Trigger**: Task system + state persistence (v0.7-v0.8) require shared state → processes.
-
-### Pattern: child_spec Without Auto-Start
-
-```elixir
-# User explicitly opts in
-children = [
-  {PtcRunner.Supervisor, name: :ptc, pool_size: 10},
-]
-```
-
-No surprise processes on dependency add. Host app controls the tree.
-
-### What to Supervise
-
-- ✅ Agent sessions, pending ops registry, pool manager
-- ❌ Sandbox processes (short-lived, meant to crash, disposable)
-
-### Potential Tree
+## Release Plan
 
 ```
-PtcRunner.Supervisor
-├── AgentRegistry
-├── PendingOps
-├── SandboxPool (manager only, not individual sandboxes)
-└── SessionSupervisor (DynamicSupervisor)
-    └── Session (GenServer per long-lived agent)
-```
+v0.5: Observability & Debugging ✅
+  - Turn struct, tool_calls, prints, Step introspection
+  - Message compression (SingleUserCoalesced strategy)
+  - Debug API (print_trace)
+  - Lisp error attribution (line/column)
 
-All components optional. Multi-instance via `:name` option
+v0.5.1: JSON Output Mode ✅
+  - output: :json for structured data (classification, extraction)
+  - Extended LLM callback interface: schema, tools, tool_choice
+  - Signature to JSON Schema conversion
 
----
+v0.5.2: Bugfixes ✅
 
-## Tier 2: UX & Debugging
+v0.6: Language, Composition & Tracing ✅
+  PTC-Lisp language:
+  - `for` list comprehension
+  - String functions: grep, grep-n, .indexOf, .lastIndexOf
+  - Collection functions: extract, extract-int, pairs, combinations,
+    mapcat, butlast, take-last, drop-last, partition-all
+  - Aggregators: sum, avg, quot
+  - Reader literals: ##Inf, ##-Inf, ##NaN
 
-### 3. Debugging & Inspectability
+  SubAgent core:
+  - return_retries for validation recovery (single-shot + multi-turn)
+  - :self sentinel for recursive agents
+  - memory_strategy :rollback for recoverable memory limit errors
+  - Budget introspection and callback for RLM patterns
+  - Last expression as return value on budget exhaustion
+  - Iterative driver loop (refactored from recursive)
+  - llm_query builtin integrated into system prompts
 
-**Problem**: When things go wrong (LLM generates bad Lisp, async resume fails, state corrupted), developers need visibility.
+  LLM-as-tool composition:
+  - LLMTool with response_template mode for typed LLM output
+  - Transparent tool unwrapping and LLMTool input validation
 
-**Challenges unique to PTC**:
-- LLM-generated code errors need clear attribution (line/column in generated Lisp)
-- Suspended async state may sit in storage - need to inspect it
-- Multi-turn conversations have complex message history
+  Tracing & observability:
+  - TraceLog + Analyzer for structured SubAgent tracing
+  - Hierarchical tracing for nested SubAgents (pmap, as_tool)
+  - Chrome DevTools trace export
+  - HTML trace viewer
+  - Post-sandbox tool telemetry + child trace propagation
+  - Span correlation in telemetry
 
-**Proposed Features**:
+  Utilities:
+  - PtcRunner.Chunker for text chunking
 
-```elixir
-# 1. Lisp execution tracing
-SubAgent.run(agent,
-  trace_lisp: true,  # Captures each form evaluated
-  on_lisp_error: fn error, source, line, col ->
-    Logger.error("Lisp error at #{line}:#{col}: #{error}")
-  end
-)
-
-# 2. JSON state inspection (enabled by JSON serialization decision)
-{:ok, json} = SubAgent.serialize(pending_step)
-# In shell: cat state.json | jq '.pending_ops'
-# In Elixir: Jason.decode!(json) |> get_in(["pending_ops"])
-
-# 3. Step introspection
-%Step{
-  trace: %{
-    turns: [...],           # Each LLM turn with timing
-    tool_calls: [...],      # Every tool invocation
-    lisp_forms: [...]       # Optional: each evaluated form
-  }
-}
-```
-
-**Why this matters**:
-- "Why did the agent do X?" → inspect message history and tool calls
-- "Why did async resume fail?" → `jq` the serialized state
-- "Why did Lisp crash?" → line/column error with source context
-
-### 4. Streaming Support
-
-**Problem**: Chat UX expects to see responses as they generate.
-
-**Complexity**: PTC-Lisp programs can have multiple tool calls before user-facing output. Need to distinguish:
-- LLM token streaming (reasoning/code generation phase)
-- Tool progress callbacks (during execution)
-- Final result streaming
-
-**Proposed API**:
-
-```elixir
-SubAgent.run(agent,
-  llm: streaming_llm,
-  on_token: fn token -> send(live_view_pid, {:token, token}) end,
-  on_tool_start: fn name, args -> log_tool_start(name) end,
-  on_tool_end: fn name, result, duration_ms -> log_tool_end(name, result) end
-)
-```
-
-**Design Considerations**:
-- LLM callback would need to support streaming mode
-- How to handle streaming + async tools together?
-- Phoenix.Channel / LiveView integration helpers?
-
-### 5. Conversation History & Serialization
-
-**Problem**: Track conversation state for serialization and multi-turn context.
-
-**Internal message struct (for serialization, not OpenAI-compatible):**
-
-```elixir
-@type turn_summary :: %{
-  definitions: [%{name: String.t(), kind: :data | :function, arity: integer() | nil, doc: String.t() | nil}],
-  output: [String.t()],  # println
-  status: :ok | {:error, String.t()},
-  program: String.t() | nil  # only on error
-}
-
-@type message :: %{
-  role: :system | :user | :assistant,
-  content: String.t() | nil,
-  turn: turn_summary() | nil
-}
-```
-
-**Purpose:** Internal state + serialization. LLM sees transformed view:
-- Old turns → summaries (docstrings + println)
-- Full program only on errors
-- Memory: `Data: {x, emails} Functions: {fetch/1, filter/2}`
-
----
-
-## Tier 3: Nice-to-Have
-
-### 6. Tool Timeout with Partial Results
-
-**Problem**: Long-running tools should return partial results on timeout rather than fail completely.
-
-**Can Be User-Land Today**:
-
-```elixir
-"slow_tool" => fn args ->
-  task = Task.async(fn -> do_slow_work(args) end)
-  case Task.yield(task, 60_000) || Task.shutdown(task) do
-    {:ok, result} -> result
-    nil -> %{status: "timed_out", partial: get_partial_state()}
-  end
-end
-```
-
-**If Built-In**:
-
-```elixir
-"slow_tool" => {fn args -> ... end,
-  timeout: 60_000,
-  on_timeout: fn args, partial_state ->
-    %{status: "timed_out", partial: partial_state}
-  end
-}
-```
-
-### 7. Pre/Post Hooks
-
-**Problem**: No lifecycle callbacks beyond telemetry.
-
-**Proposed API**:
-
-```elixir
-SubAgent.run(agent,
-  before_turn: fn state -> modified_state end,
-  after_turn: fn state, result -> :ok end,
-  before_tool: fn name, args -> modified_args end,
-  after_tool: fn name, args, result -> :ok end
-)
-```
-
-**Use Cases**:
-- Inject context before each turn
-- Log/audit all tool calls
-- Rate limiting
-- Cost tracking
-
----
-
-## BEAM-Native Differentiators
-
-Features that would make ptc_runner unique in the LLM tooling ecosystem:
-
-### Distributed Execution
-- Serialize state, resume on different node
-- Unique to BEAM - not possible in Python frameworks
-
-### Supervision Integration
-- SubAgent as supervised GenServer child
-- Restart strategies for long-running agents
-- Link to parent process for cleanup
-
-### Phoenix Integration
-- `PtcRunner.LiveView` - streaming to LiveView
-- `PtcRunner.Channel` - WebSocket streaming
-- `PtcRunner.Presence` - track active agents
-
-### Oban Integration
-- `PtcRunner.Oban.Worker` - run SubAgent as background job
-- Automatic state persistence
-- Retry with exponential backoff
-
----
-
-## Suggested Release Plan
-
-```
-v0.5: Observability & Debugging ✅ COMPLETE
-  - Fix tool call tracking in traces ✅
-  - Add messages to Step (opt-in via collect_messages: true) ✅
-  - Document existing telemetry ✅
-  - Lisp error attribution (line/column in error messages) ✅
-  - Step introspection (step.turns with Turn structs, tool_calls, prints) ✅
-  - Message compression (SingleUserCoalesced strategy, compression: option) ✅
-  - Turn struct for immutable per-turn history ✅
-  - Debug API (print_trace with view: :compressed, messages: true, etc.) ✅
-  Architecture: Pure library (no processes)
-
-v0.5.1: JSON Output Mode ✅ COMPLETE
-  - output: :json mode for direct structured data (classification, extraction) ✅
-  - Extended LLM callback interface: schema, tools, tool_choice ✅
-  - Signature to JSON Schema conversion ✅
-  Architecture: Pure library (no processes)
-
-v0.6: Unified Task System (see #703)
+v0.7: Unified Task System (see #703)
   - (task id expr) - idempotent execution, handles sync/async transparently
   - (parallel ...) - concurrent task execution
   - (checkpoint id msg) - human-in-the-loop suspension
   - Task state tracking in Context
   - PendingStep struct for suspended execution
   - SubAgent.resume/3 for continuing after async/checkpoint
-  - Task status in prompt template (show completed/pending tasks)
-  SIMPLIFICATION (vs original async design):
-  - No (await id) - task handles suspension implicitly
-  - No async: true metadata - tool just returns {:pending, ...} or not
   Architecture: Pure library (no processes initially)
 
-v0.7: State Management
+v0.8: State Management
   - JSON serialization as default (Step <-> JSON)
-  - Binary serialization as opt-in for high-throughput
   - Resume from serialized state
   - MFA tuple tool format for serializability
-  - Version format for migrations
-  - Task state included in serialization
   Architecture: First child_spec components (opt-in)
 
-v0.8: Streaming & Sessions
-  - on_token callback
-  - on_tool_start/end callbacks
-  - LiveView helper module
+v0.9: Streaming & Sessions
+  - on_token / on_tool_start / on_tool_end callbacks
   - Session GenServer for long-lived agents
   - SandboxPool for concurrency limiting
   Architecture: Complete supervision tree available
@@ -423,11 +74,10 @@ v1.0: Production Ready
   - Stable serialization format
   - Phoenix/Oban integration guides
   - Performance benchmarks
-  - Decide: auto-start Application or stay opt-in
   Architecture: Evaluate user feedback on OTP adoption
 
 UNDER CONSIDERATION (not scheduled):
-  - :ptc_json mode for JSON DSL programs with operations
+  - :ptc_json mode for JSON DSL programs
   - :text mode for free-form responses
   - :chat mode for traditional tool-calling agents
   See: docs/plans/question-mode-plan.md
@@ -435,82 +85,75 @@ UNDER CONSIDERATION (not scheduled):
 
 ---
 
-## Decisions Made
+## Design Notes
 
-These questions have been resolved based on real-world feedback:
+### Unified Task System (v0.7)
 
-1. **Async/idempotency design**: ✅ **Unified `(task)` form** - A single `(task id expr)` handles idempotency, sync tools, and async tools transparently. The LLM doesn't need to know if a tool is sync or async. Replaces separate `(await)` concept. See #703.
+Core primitives:
 
-2. **Parallel execution**: ✅ **`(parallel ...)` form** - Enables concurrent task execution. Combined with task idempotency, handles "call multiple async tools, combine results" patterns.
+| Form | Purpose |
+|------|---------|
+| `(task id expr)` | Idempotent execution - runs once, caches result, handles sync/async transparently |
+| `(parallel & tasks)` | Concurrent execution - starts all tasks, suspends until all complete |
+| `(checkpoint id msg)` | Human-in-the-loop - suspends for approval |
 
-3. **Human-in-the-loop**: ✅ **`(checkpoint id msg)` form** - Compiles to suspension, integrates with task system.
+The LLM doesn't need to know if a tool is sync or async. Same syntax works for both. See GitHub Issue #703 for full design.
 
-4. **Serialization format**: ✅ **JSON as default** - Debuggability (`jq`) matters more than efficiency for async state that may sit in storage for minutes/hours. Binary available as opt-in for high-throughput.
+### State Serialization (v0.8)
 
-5. **Tool serialization**: ✅ **MFA tuples** - No registry needed, naturally serializable, simpler than global tool registry.
+- JSON as default format (debuggability with `jq` over efficiency)
+- MFA tuples for serializable tools (no registry, no global state)
+- Binary serialization available as opt-in for high-throughput
 
-6. **Multi-instance naming**: ✅ **Default + explicit override** - Simple cases need no config; multi-instance passes `instance: :name` only when multiple supervisors exist.
+### OTP Architecture
 
-7. **Session lifecycle**: ✅ **Idle timeout + pending-aware + explicit** - Terminate after configurable idle timeout, but not if async ops pending, and allow explicit termination.
+Current: Pure library. `SubAgent.run/2` is synchronous, sandboxes are ephemeral.
+
+When task system + persistence require shared state, use `child_spec` without auto-start:
+
+```elixir
+children = [
+  {PtcRunner.Supervisor, name: :ptc, pool_size: 10},
+]
+```
+
+Recommended integration: use ptc_runner as a pure library within your own GenServer. Only adopt `PtcRunner.Supervisor` when you need sandbox pooling, pending ops tracking, or session management.
+
+### BEAM-Native Differentiators
+
+- **Distributed execution**: Serialize state, resume on different node
+- **Supervision integration**: SubAgent as supervised GenServer child
+- **Phoenix integration**: LiveView/Channel streaming helpers
+- **Oban integration**: SubAgent as background job with retry
 
 ---
 
-## Integration Patterns
+## Decisions Made
 
-**Recommended: Use as pure library within your GenServer**
-
-```
-Your app supervision tree:
-├── YourApp.SessionSupervisor
-│   └── YourApp.Orchestrator (your GenServer - owns lifecycle, PubSub, persistence)
-│       └── calls PtcRunner.SubAgent.run/2 (pure function, no processes)
-```
-
-ptc_runner shouldn't duplicate app-level orchestration. Your GenServer handles session lifecycle, persistence, PubSub - ptc_runner just runs the tool loop.
-
-**Optional: Use ptc_runner supervision for async-heavy workloads**
-
-Only adopt `PtcRunner.Supervisor` when you need:
-- Sandbox pooling (limit concurrent LLM-generated code execution)
-- Built-in pending ops tracking
-- Session GenServer with idle timeout + async-awareness
-
-Even then, your app may still own the outer session lifecycle.
+1. **Async/idempotency**: Unified `(task)` form - single syntax for sync/async. See #703.
+2. **Parallel execution**: `(parallel ...)` form with task idempotency.
+3. **Human-in-the-loop**: `(checkpoint id msg)` compiles to suspension.
+4. **Serialization format**: JSON default, binary opt-in.
+5. **Tool serialization**: MFA tuples (no registry needed).
+6. **Multi-instance naming**: Default + explicit `:name` override.
+7. **Session lifecycle**: Idle timeout + pending-aware + explicit termination.
 
 ---
 
 ## Open Questions
 
-### Task System
-
-1. **Task serialization scope**: Should task results be included in full serialization, or summarized?
-
-2. **Parallel error handling**: When one task in `(parallel ...)` fails, cancel others or wait for all?
-
-3. **Hierarchical tasks**: How should parent/child task IDs be scoped? Auto-prefix with agent path?
-
-### Streaming & Sessions
-
-4. **Backpressure**: How to handle LLM rate limits in streaming mode?
-
-5. **Message history**: Always collect, opt-in, or opt-out?
-
-### OTP Architecture
-
-6. **GenServer mode**: Should SubAgent optionally run as a process that receives messages? If yes, what's the API?
-
-7. **Auto-start vs opt-in**: Should v1.0 auto-start an Application, or always require explicit `child_spec` in host app?
-
-8. **Pool implementation**: Use existing library (Poolboy, NimblePool) or custom pool for sandbox workers?
-
-9. **State persistence hooks**: Is persistence a GenServer responsibility, or a callback module the user provides?
+1. **Task serialization scope**: Include full task results or summarized?
+2. **Parallel error handling**: Cancel siblings on failure or wait for all?
+3. **Hierarchical tasks**: How to scope parent/child task IDs?
+4. **Backpressure**: How to handle LLM rate limits in streaming?
+5. **Pool implementation**: Poolboy, NimblePool, or custom?
 
 ---
 
 ## References
 
-- Current architecture: `lib/ptc_runner/sub_agent/` (Loop, Telemetry, ToolNormalizer)
+- Architecture: `lib/ptc_runner/sub_agent/` (Loop, Telemetry, ToolNormalizer)
 - Step struct: `lib/ptc_runner/step.ex`
-- Sandbox execution: `lib/ptc_runner/sandbox.ex`
-- Issue #700: Idempotency and deduplication (motivation for task system)
-- Issue #703: Unified Task System epic (full design and implementation plan)
+- Sandbox: `lib/ptc_runner/sandbox.ex`
+- Issue #700: Idempotency motivation
+- Issue #703: Unified Task System epic
