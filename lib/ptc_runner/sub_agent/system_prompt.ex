@@ -195,10 +195,16 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     all_field_descriptions =
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
+    # Inject builtin llm-query tool if enabled
+    tools =
+      if agent.llm_query,
+        do: Map.put(agent.tools, "llm-query", :builtin_llm_query),
+        else: agent.tools
+
     # Use compact Namespace format (same as Turn 2+)
     namespace_content =
       Namespace.render(%{
-        tools: agent.tools,
+        tools: tools,
         data: context,
         field_descriptions: all_field_descriptions,
         context_signature: context_signature,
@@ -209,7 +215,9 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     # Expected output stays as markdown (shared with Turn 2+)
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
-    [namespace_content, expected_output]
+    llm_query_instructions = if agent.llm_query, do: llm_query_reference(), else: nil
+
+    [namespace_content, expected_output, llm_query_instructions]
     |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
   end
@@ -367,10 +375,16 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     all_field_descriptions =
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
+    # Inject builtin llm-query tool if enabled
+    base_tools =
+      if agent.llm_query,
+        do: Map.put(agent.tools, "llm-query", :builtin_llm_query),
+        else: agent.tools
+
     # Use compact Namespace format (same as Turn 2+)
     namespace_content =
       Namespace.render(%{
-        tools: agent.tools,
+        tools: base_tools,
         data: context,
         field_descriptions: all_field_descriptions,
         context_signature: context_signature,
@@ -380,6 +394,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
+    llm_query_instructions = if agent.llm_query, do: llm_query_reference(), else: nil
+
     mission = expand_prompt(agent.prompt, context)
 
     # Combine all sections
@@ -388,6 +404,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       language_ref,
       namespace_content,
       expected_output,
+      llm_query_instructions,
       output_fmt,
       "# Mission\n\n#{mission}"
     ]
@@ -421,6 +438,34 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       _ ->
         {LanguageSpec.get(default_spec), @output_format}
     end
+  end
+
+  # Instructions injected when llm_query: true
+  defp llm_query_reference do
+    """
+    # tool/llm-query — Ad-hoc LLM Calls
+
+    Call `tool/llm-query` to make runtime LLM queries for classification, judgment, or extraction.
+
+    ```clojure
+    ;; Minimal (returns string)
+    (tool/llm-query {:prompt "Is this urgent? {{text}}" :text "Help me!"})
+
+    ;; With signature and model
+    (tool/llm-query {:prompt "Classify: {{text}}"
+                     :signature "{category :string, score :float}"
+                     :llm :sonnet
+                     :text "Some input"})
+    ```
+
+    **Control keys:** `:prompt` (required), `:signature` (default `":string"`), `:llm`, `:response_template`.
+    All other keys are template args (available as `{{key}}` in prompt).
+
+    Use `pmap` for parallel queries (batched LLM calls):
+    ```clojure
+    (pmap (fn [item] (tool/llm-query {:prompt "Rate: {{x}}" :x item})) items)
+    ```
+    """
   end
 
   # Parse signature string to struct, returning nil on failure

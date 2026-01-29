@@ -213,6 +213,18 @@ defmodule PtcRunner.Tool do
      }}
   end
 
+  defp normalize_format(name, :builtin_llm_query) do
+    {:ok,
+     %__MODULE__{
+       name: name,
+       function: nil,
+       signature: nil,
+       description:
+         "Ad-hoc LLM call. Pass :prompt (required) and any template args. Optional: :signature (default \":string\"), :llm, :response_template",
+       type: :llm
+     }}
+  end
+
   defp normalize_format(name, :self) do
     # :self is resolved at runtime; for schema generation, return placeholder
     {:ok,

@@ -4,3 +4,6 @@
 
 # Traces
 /traces/
+
+# Benchmark results
+/results/
