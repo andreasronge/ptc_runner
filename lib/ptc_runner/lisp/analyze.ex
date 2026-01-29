@@ -134,6 +134,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :loop}, rest, _list, tail?), do: analyze_loop(rest, tail?)
   defp dispatch_list_form({:symbol, :recur}, rest, _list, tail?), do: analyze_recur(rest, tail?)
   defp dispatch_list_form({:symbol, :doseq}, rest, _list, tail?), do: analyze_doseq(rest, tail?)
+  defp dispatch_list_form({:symbol, :for}, rest, _list, tail?), do: analyze_for(rest, tail?)
   defp dispatch_list_form({:symbol, :fn}, rest, _list, _tail?), do: analyze_fn(rest)
 
   # Conditionals: if variants
@@ -314,7 +315,7 @@ defmodule PtcRunner.Lisp.Analyze do
        {:invalid_arity, :doseq,
         "doseq requires pairs of [binding collection], got #{length(bindings)} element#{if length(bindings) == 1, do: "", else: "s"}"}}
     else
-      case find_doseq_modifier(bindings) do
+      case find_iterator_modifier(bindings) do
         {:ok, mod} ->
           {:error,
            {:invalid_arity, :doseq,
@@ -337,7 +338,7 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error, {:invalid_arity, :doseq, "expected (doseq [bindings] body ...)"}}
   end
 
-  defp find_doseq_modifier(bindings) do
+  defp find_iterator_modifier(bindings) do
     bindings
     |> Enum.take_every(2)
     |> Enum.find_value(:none, fn
@@ -349,7 +350,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp do_build_doseq([pair | rest_pairs], body_asts) do
     [binding_ast, coll_ast] = pair
 
-    case check_doseq_collection(binding_ast, coll_ast) do
+    case check_iterator_collection(:doseq, binding_ast, coll_ast) do
       {:error, _} = err ->
         err
 
@@ -391,21 +392,19 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp check_doseq_collection(binding_ast, coll_ast) do
+  defp check_iterator_collection(op, binding_ast, coll_ast) do
     case coll_ast do
       n when is_number(n) ->
         name = binding_name_prefix(binding_ast)
 
         {:error,
-         {:invalid_arity, :doseq,
-          "doseq binding #{name}expected a collection, got: #{n} (integer)"}}
+         {:invalid_arity, op, "#{op} binding #{name}expected a collection, got: #{n} (number)"}}
 
       {:keyword, k} ->
         name = binding_name_prefix(binding_ast)
 
         {:error,
-         {:invalid_arity, :doseq,
-          "doseq binding #{name}expected a collection, got: :#{k} (keyword)"}}
+         {:invalid_arity, op, "#{op} binding #{name}expected a collection, got: :#{k} (keyword)"}}
 
       _ ->
         {:ok, coll_ast}
@@ -414,6 +413,104 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp binding_name_prefix({:symbol, sym}), do: "'#{sym}' "
   defp binding_name_prefix(_), do: ""
+
+  # ============================================================
+  # Special form: for (list comprehension)
+  # ============================================================
+
+  defp analyze_for([{:vector, bindings}, first_body | rest_body], _tail?) do
+    if rem(length(bindings), 2) != 0 do
+      {:error,
+       {:invalid_arity, :for,
+        "for requires pairs of [binding collection], got #{length(bindings)} element#{if length(bindings) == 1, do: "", else: "s"}"}}
+    else
+      case find_iterator_modifier(bindings) do
+        {:ok, mod} ->
+          {:error,
+           {:invalid_arity, :for, "for modifier #{inspect(mod)} is not supported in this version"}}
+
+        :none ->
+          body_asts = [first_body | rest_body]
+          pairs = Enum.chunk_every(bindings, 2)
+          do_build_for(pairs, body_asts)
+      end
+    end
+  end
+
+  defp analyze_for([{:vector, _bindings}], _tail?) do
+    {:error, {:invalid_arity, :for, "for requires at least one body expression"}}
+  end
+
+  defp analyze_for(_, _tail?) do
+    {:error, {:invalid_arity, :for, "expected (for [bindings] body ...)"}}
+  end
+
+  defp do_build_for([pair | rest_pairs], body_asts) do
+    [binding_ast, coll_ast] = pair
+
+    case check_iterator_collection(:for, binding_ast, coll_ast) do
+      {:error, _} = err ->
+        err
+
+      {:ok, _} ->
+        inner_form =
+          if rest_pairs == [] do
+            # Last pair: body result gets conj'd into accumulator
+            {:program, body_asts}
+          else
+            # More pairs: recursive inner (for ...) call
+            {:list, [{:symbol, :for}, {:vector, Enum.flat_map(rest_pairs, & &1)} | body_asts]}
+          end
+
+        seq_sym = {:symbol, :"$for_seq"}
+        acc_sym = {:symbol, :"$for_acc"}
+
+        body_expr =
+          if rest_pairs == [] do
+            # (conj $for_acc body)
+            {:list,
+             [
+               {:symbol, :conj},
+               acc_sym,
+               inner_form
+             ]}
+          else
+            # (into $for_acc (for [...] body))
+            {:list,
+             [
+               {:symbol, :into},
+               acc_sym,
+               inner_form
+             ]}
+          end
+
+        desugared =
+          {:list,
+           [
+             {:symbol, :loop},
+             {:vector, [seq_sym, {:list, [{:symbol, :seq}, coll_ast]}, acc_sym, {:vector, []}]},
+             {:list,
+              [
+                {:symbol, :if},
+                seq_sym,
+                {:list,
+                 [
+                   {:symbol, :let},
+                   {:vector, [binding_ast, {:list, [{:symbol, :first}, seq_sym]}]},
+                   {:list,
+                    [
+                      {:symbol, :recur},
+                      {:list, [{:symbol, :next}, seq_sym]},
+                      body_expr
+                    ]}
+                 ]},
+                acc_sym
+              ]}
+           ]}
+
+        do_analyze(desugared, true)
+    end
+  end
 
   # ============================================================
   # Pattern analysis (destructuring)

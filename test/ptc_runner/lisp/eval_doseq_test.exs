@@ -99,7 +99,7 @@ defmodule PtcRunner.Lisp.EvalDoseqTest do
     test "non-collection value" do
       assert {:error, %Step{fail: fail}} = Lisp.run("(doseq [x 42] (println x))")
       assert fail.reason == :invalid_arity
-      assert fail.message =~ "expected a collection, got: 42 (integer)"
+      assert fail.message =~ "expected a collection, got: 42 (number)"
     end
   end
 end
