@@ -80,15 +80,18 @@ This approach provides:
 
 ### Safe Lisp DSL
 
-- **LLM-friendly**: Minimal syntax, easy to generate correctly
+- **Built for agentic workflows**: Multi-turn memory persistence, recursive self-calls, and recoverable errors let agents adapt strategies across turns
 - **Safe by construction**: No side effects, no system access, bounded iteration
-- **Inspectable**: Debug by examining generated programs
+- **Observable**: Structured tracing via `PtcRunner.TraceLog` and telemetry spans for every turn, tool call, and child agent
 
 ### Unique Features
 
 - **Context firewall**: `_` prefixed fields stay in BEAM memory, hidden from LLM prompts
 - **Transactional memory**: `def` persists data across turns without bloating context
 - **Composable SubAgents**: Nest agents as tools with isolated state and turn budgets
+- **[Recursive agents (RLM)](https://arxiv.org/pdf/2512.24601)**: Agents call themselves via `:self` tools to subdivide large inputs, with `memory_strategy: :rollback` for automatic recovery
+- **LLM-powered tools**: Define tool behavior as Mustache prompt templates — no code, just a prompt and a signature
+- **Ad-hoc LLM queries**: `llm-query` calls an LLM from within PTC-Lisp with signature-validated responses
 - **Type-driven retry**: Signatures validate outputs; agents auto-correct on mismatch
 
 ### Examples
@@ -110,6 +113,19 @@ This approach provides:
 # Elixir gets: %{summary: "...", _email_ids: [101, 102, 103]}
 signature: "{summary :string, _email_ids [:int]}"
 ```
+
+**Ad-hoc LLM judgment from code** - the LLM writes programs that call other LLMs, with typed responses and parallel execution:
+
+```clojure
+;; LLM generates this - each llm-query runs in parallel via pmap
+(pmap (fn [item]
+        (tool/llm-query {:prompt "Rate urgency: {{desc}}"
+                         :signature "{urgent :bool, reason :string}"
+                         :desc (:description item)}))
+      data/items)
+```
+
+The agent decides *what* to ask and *how* to structure the response — at runtime, from within the generated program. Enable with `llm_query: true`.
 
 **Compile SubAgents** - LLM writes the orchestration logic once, execute deterministically:
 

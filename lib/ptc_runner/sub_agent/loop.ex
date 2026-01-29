@@ -865,7 +865,6 @@ defmodule PtcRunner.SubAgent.Loop do
             {:continue, new_state, turn}
 
           {:error, :memory_limit_exceeded, actual_size} ->
-            # Memory limit exceeded - return error
             # Build Turn struct (failure turn - memory limit exceeded) with turn type
             turn =
               Metrics.build_turn(state, response, code, lisp_step.return,
@@ -876,32 +875,49 @@ defmodule PtcRunner.SubAgent.Loop do
                 type: state.current_turn_type
               )
 
-            duration_ms = System.monotonic_time(:millisecond) - state.start_time
+            if agent.memory_strategy == :rollback do
+              # Rollback: revert memory to pre-turn state, feed error back to LLM
+              error_msg =
+                "Memory limit exceeded (#{actual_size} bytes > #{agent.memory_limit} bytes). " <>
+                  "Your last turn's memory changes have been rolled back. " <>
+                  "Try a different strategy to reduce memory usage, for example by using recursion or processing data in smaller batches."
 
-            error_msg =
-              "Memory limit exceeded: #{actual_size} bytes > #{agent.memory_limit} bytes"
+              new_state =
+                build_continuation_state(state, turn, response, error_msg,
+                  memory: state.memory,
+                  turn_history: state.turn_history
+                )
 
-            error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
+              {:continue, new_state, turn}
+            else
+              # Strict (default): fatal error
+              duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-            # Include the final assistant response in messages
-            final_messages = state.messages ++ [%{role: :assistant, content: response}]
+              error_msg =
+                "Memory limit exceeded: #{actual_size} bytes > #{agent.memory_limit} bytes"
 
-            final_step = %{
-              error_step
-              | usage: Metrics.build_final_usage(state, duration_ms, actual_size),
-                turns:
-                  Metrics.apply_trace_filter(
-                    Enum.reverse([turn | state.turns]),
-                    state.trace_mode,
-                    true
-                  ),
-                messages: build_collected_messages(state, final_messages),
-                prompt: state.expanded_prompt,
-                original_prompt: state.original_prompt,
-                tools: state.normalized_tools
-            }
+              error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
 
-            {:stop, {:error, final_step}, turn, state.turn_tokens}
+              # Include the final assistant response in messages
+              final_messages = state.messages ++ [%{role: :assistant, content: response}]
+
+              final_step = %{
+                error_step
+                | usage: Metrics.build_final_usage(state, duration_ms, actual_size),
+                  turns:
+                    Metrics.apply_trace_filter(
+                      Enum.reverse([turn | state.turns]),
+                      state.trace_mode,
+                      true
+                    ),
+                  messages: build_collected_messages(state, final_messages),
+                  prompt: state.expanded_prompt,
+                  original_prompt: state.original_prompt,
+                  tools: state.normalized_tools
+              }
+
+              {:stop, {:error, final_step}, turn, state.turn_tokens}
+            end
         end
     end
   end

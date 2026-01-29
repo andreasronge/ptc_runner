@@ -25,6 +25,16 @@ defmodule PtcRunner.SubAgent.LoopMemoryLimitTest do
       assert agent.memory_limit == nil
     end
 
+    test "memory_strategy defaults to :strict" do
+      agent = test_agent()
+      assert agent.memory_strategy == :strict
+    end
+
+    test "memory_strategy can be set to :rollback" do
+      agent = test_agent(memory_strategy: :rollback)
+      assert agent.memory_strategy == :rollback
+    end
+
     test "memory_limit is enforced during execution" do
       turn_counter = :counters.new(1, [:atomics])
 
@@ -64,6 +74,95 @@ defmodule PtcRunner.SubAgent.LoopMemoryLimitTest do
       assert step.fail.reason == :memory_limit_exceeded
       assert step.fail.message =~ "Memory limit exceeded"
       assert step.usage.turns == 1
+    end
+  end
+
+  describe "memory_strategy: :rollback" do
+    test "feeds error back to LLM and continues loop" do
+      tools = %{
+        "get-large" => fn %{} ->
+          String.duplicate("x", 300)
+        end
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Store large data then return done",
+          tools: tools,
+          memory_limit: 200,
+          memory_strategy: :rollback,
+          max_turns: 3
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(def large-data (tool/get-large {}))
+```|}
+
+          2 ->
+            # Verify the error message was fed back
+            last_msg = List.last(messages)
+            assert last_msg.content =~ "Memory limit exceeded"
+            assert last_msg.content =~ "rolled back"
+            {:ok, ~S|```clojure
+(return "recovered")
+```|}
+
+          _ ->
+            {:ok, ~S|(return "fallback")|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == "recovered"
+      assert step.usage.turns == 2
+    end
+
+    test "memory is rolled back to pre-turn state" do
+      tools = %{
+        "get-large" => fn %{} ->
+          String.duplicate("x", 300)
+        end
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: "Test memory rollback",
+          tools: tools,
+          memory_limit: 200,
+          memory_strategy: :rollback,
+          max_turns: 3
+        )
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 ->
+            # First store something small that fits
+            {:ok, ~S|```clojure
+(def small "ok")
+```|}
+
+          2 ->
+            # Now try to store something large - should exceed limit
+            {:ok, ~S|```clojure
+(def large-data (tool/get-large {}))
+```|}
+
+          3 ->
+            # After rollback, small should still be in memory
+            {:ok, ~S|```clojure
+(return small)
+```|}
+
+          _ ->
+            {:ok, ~S|(return "unexpected")|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == "ok"
     end
   end
 end

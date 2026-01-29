@@ -282,7 +282,9 @@ The callback receives `%{total_tokens, input_tokens, output_tokens, llm_requests
 
 5. **Set depth limits**: Recursive agents should have `max_depth: 3` or less to prevent runaway recursion.
 
-6. **Monitor with telemetry**: Track `llm_requests` and `duration_ms` to tune chunk sizes.
+6. **Use `memory_strategy: :rollback`**: Recursive agents that build large intermediate results can exceed memory limits. With `:rollback`, the memory is reverted to pre-turn state and the error is fed back to the LLM, giving it a chance to try a different approach (e.g., smaller batches or deeper recursion).
+
+7. **Monitor with telemetry**: Track `llm_requests` and `duration_ms` to tune chunk sizes.
 
 ## Production Considerations
 
