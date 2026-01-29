@@ -196,7 +196,7 @@ defmodule PtcRunner.Lisp.Env do
         builtins_by_category(:math) ++
         builtins_by_category(:interop)
 
-    (Map.keys(initial()) -- excluded) ++ [:doseq]
+    (Map.keys(initial()) -- excluded) ++ [:doseq, :for]
   end
 
   @doc """

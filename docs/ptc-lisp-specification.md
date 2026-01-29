@@ -906,6 +906,50 @@ Syntactic sugar for defining named functions in the user namespace:
 **Safety Mechanism:**
 To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive calls. If a loop exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error.
 
+### 5.12 `for` — List Comprehension
+
+`for` produces a list by evaluating a body expression for each element of one or more collections.
+
+**Single binding:**
+
+```clojure
+(for [x [1 2 3]] (* x 2))
+; => [2 4 6]
+```
+
+**Multiple bindings (cartesian product):**
+
+```clojure
+(for [x [1 2] y ["a" "b"]] [x y])
+; => [[1 "a"] [1 "b"] [2 "a"] [2 "b"]]
+```
+
+**Destructuring:**
+
+```clojure
+(for [[k v] {:a 1 :b 2}] (str k "=" v))
+; => [":a=1" ":b=2"]  (order may vary)
+```
+
+**Multi-expression body** (implicit `do`, last value collected):
+
+```clojure
+(for [x [1 2 3]]
+  (println x)
+  (* x 10))
+; prints 1, 2, 3
+; => [10 20 30]
+```
+
+**Comparison with `map`:** `for` supports multiple bindings (cartesian product) and destructuring in bindings. For simple single-collection transforms, `map` is equivalent:
+
+```clojure
+(map inc [1 2 3])           ; => [2 3 4]
+(for [x [1 2 3]] (inc x))  ; => [2 3 4]
+```
+
+> **Note:** Modifiers (`:let`, `:when`, `:while`) are not supported in this version.
+
 ---
 
 ## 6. Threading Macros
