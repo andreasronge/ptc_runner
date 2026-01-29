@@ -48,6 +48,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_context_descriptions!(opts)
     validate_format_options!(opts)
     validate_output!(opts)
+    validate_memory_strategy!(opts)
     validate_self_tool_requires_signature!(opts)
   end
 
@@ -588,6 +589,19 @@ defmodule PtcRunner.SubAgent.Validator do
       end)
 
     Enum.join(messages, "; ")
+  end
+
+  defp validate_memory_strategy!(opts) do
+    case Keyword.fetch(opts, :memory_strategy) do
+      {:ok, strategy} when strategy in [:strict, :rollback] ->
+        :ok
+
+      {:ok, other} ->
+        raise ArgumentError, "memory_strategy must be :strict or :rollback, got #{inspect(other)}"
+
+      :error ->
+        :ok
+    end
   end
 
   # Validate that :self tools require a signature

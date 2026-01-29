@@ -92,57 +92,27 @@ defmodule RlmRecursive.Agent do
   end
 
   def new(:semantic_pairs, opts) do
-    # RLM + LLMTool: recursive decomposition for data, LLM judgment for semantics
+    # RLM + llm_query: recursive decomposition for data, ad-hoc LLM judgment for semantics
     # - tool/evaluate_pairs: recursive self-call for data decomposition
-    # - tool/judge_pairs: LLMTool for batch semantic compatibility judgment
+    # - tool/llm-query: builtin for batch semantic compatibility judgment
     max_depth = Keyword.get(opts, :max_depth, 4)
     max_turns = Keyword.get(opts, :max_turns, 100)
     turn_budget = Keyword.get(opts, :turn_budget, 200)
     llm = Keyword.get(opts, :llm)
 
-    judge_tool =
-      PtcRunner.SubAgent.LLMTool.new(
-        prompt: """
-        Judge semantic compatibility for each pair of interests.
-        Compatible = related domains (outdoor/fitness, creative/artistic, tech/science).
-        NOT compatible = unrelated domains.
-
-        Pairs to judge:
-        {{#pairs}}
-        - {{id1}} & {{id2}}: "{{interests1}}" vs "{{interests2}}"
-        {{/pairs}}
-
-        For each pair in the input, return whether the interests are broadly compatible.
-        Be inclusive: if a person enjoying one interest might reasonably enjoy the other, mark as compatible.
-        """,
-        signature:
-          "(pairs [{id1 :int, id2 :int, interests1 :string, interests2 :string}]) -> [{id1 :int, id2 :int, compatible :bool}]",
-        description:
-          "Judge semantic compatibility of interest pairs in batch (MAX 50 pairs) — returns list with compatible boolean per pair",
-        validator: fn
-          %{"pairs" => pairs} when is_list(pairs) ->
-            if length(pairs) <= 50 do
-              :ok
-            else
-              {:error, "Too many pairs (#{length(pairs)}). Maximum is 50. Please split into smaller batches (e.g., group by city first)."}
-            end
-
-          _ ->
-            :ok
-        end
-      )
-
     SubAgent.new(
       prompt: semantic_pairs_prompt(),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description: "Find pairs with semantically compatible interests",
-      tools: %{"evaluate_pairs" => :self, "judge_pairs" => judge_tool},
+      tools: %{"evaluate_pairs" => :self},
+      llm_query: true,
       max_depth: max_depth,
       max_turns: max_turns,
       turn_budget: turn_budget,
       llm: llm,
       timeout: 600_000,
-      pmap_timeout: 600_000
+      pmap_timeout: 600_000,
+      memory_strategy: :rollback
     )
   end
 
@@ -208,13 +178,21 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:count N :pairs ["id1-id2" ...]}` where pairs are "id1-id2" strings (id1 < id2).
 
+    ## Strategy
+    The corpus may be very large. Do NOT generate all pairs in memory — this will exceed memory limits.
+    Instead, use a chunking strategy:
+    1. Split the corpus by city (each city is independent).
+    2. For each city, if the group has more than 50 profiles, split it further and use
+       `tool/evaluate_pairs` to process each sub-chunk recursively.
+    3. For manageable chunks (≤50 profiles), generate pairs and use `tool/llm-query` to judge them.
+    4. Merge results from all chunks.
+
     ## Tools
-    - `tool/evaluate_pairs`: Recursive self-call for data decomposition (splitting large datasets)
-    - `tool/judge_pairs`: Judge semantic compatibility of interest pairs in batch.
-      Call with `{:pairs [{:id1 N :id2 M :interests1 "..." :interests2 "..."} ...]}`.
-      Returns `[{:id1 N :id2 M :compatible true/false} ...]`.
-      Group pairs by city first, then call judge_pairs once per city with all same-city pairs.
-      Use this for ALL semantic judgment — do NOT try to judge compatibility in code.
+    - `tool/evaluate_pairs`: Recursive self-call. Pass a subset of the corpus as `{:corpus chunk}`.
+      Use this to divide large city groups into smaller pieces.
+    - `tool/llm-query`: Use for ALL semantic judgment — do NOT judge compatibility in code.
+      Use signature `"[{id :string, compatible :bool}]"` for batch judgment.
+      Pass pairs in batches of ≤50 to get accurate results.
     """
   end
 end

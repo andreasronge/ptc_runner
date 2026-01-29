@@ -187,6 +187,8 @@ The LLM handles state internally to cache tool results, track progress, and avoi
 | `max_turns` | `5` | Maximum LLM turns before timeout |
 | `timeout` | `5000` | Per-turn sandbox timeout (ms) |
 | `mission_timeout` | `60000` | Total mission timeout (ms) |
+| `memory_limit` | `1_048_576` | Max bytes for memory map (1MB) |
+| `memory_strategy` | `:strict` | `:strict` (fatal) or `:rollback` (recover) on memory limit exceeded |
 | `float_precision` | `2` | Decimal places for floats in results |
 | `compression` | `false` | Enable message history compression |
 

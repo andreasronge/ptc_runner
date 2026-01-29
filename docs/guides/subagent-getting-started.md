@@ -436,7 +436,11 @@ PtcRunner.SubAgent.new(
   ],
 
   # Float precision for output formatting (default: 2)
-  float_precision: 2
+  float_precision: 2,
+
+  # Memory limit and recovery strategy
+  memory_limit: 1_048_576,      # max bytes for memory map (default: 1MB)
+  memory_strategy: :rollback    # :strict (fatal) or :rollback (recover and retry)
 )
 ```
 

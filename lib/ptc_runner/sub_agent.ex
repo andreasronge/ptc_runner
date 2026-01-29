@@ -121,6 +121,7 @@ defmodule PtcRunner.SubAgent do
           signature: String.t() | nil,
           parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
+          llm_query: boolean(),
           max_turns: pos_integer(),
           return_retries: non_neg_integer(),
           prompt_limit: map() | nil,
@@ -138,7 +139,8 @@ defmodule PtcRunner.SubAgent do
           format_options: format_options(),
           float_precision: non_neg_integer(),
           compression: compression_opts(),
-          output: output_mode()
+          output: output_mode(),
+          memory_strategy: :strict | :rollback
         }
 
   alias PtcRunner.SubAgent.KeyNormalizer
@@ -169,6 +171,7 @@ defmodule PtcRunner.SubAgent do
     :context_descriptions,
     :compression,
     tools: %{},
+    llm_query: false,
     max_turns: 5,
     return_retries: 0,
     timeout: 5000,
@@ -178,7 +181,8 @@ defmodule PtcRunner.SubAgent do
     turn_budget: 20,
     format_options: @default_format_options,
     float_precision: 2,
-    output: :ptc_lisp
+    output: :ptc_lisp,
+    memory_strategy: :strict
   ]
 
   @doc "Returns the default format options."
@@ -211,6 +215,7 @@ defmodule PtcRunner.SubAgent do
   - `llm` - Atom or function for optional LLM override
   - `system_prompt` - System prompt customization (map, function, or string)
   - `memory_limit` - Positive integer for max bytes for memory map (default: 1MB = 1,048,576 bytes)
+  - `memory_strategy` - How to handle memory limit exceeded: `:strict` (fatal, default) or `:rollback` (roll back memory, feed error to LLM)
   - `description` - String describing the agent's purpose (for external docs)
   - `field_descriptions` - Map of field names to descriptions for signature fields
   - `context_descriptions` - Map of context variable names to descriptions (shown in Data Inventory)
@@ -355,6 +360,7 @@ defmodule PtcRunner.SubAgent do
       |> Keyword.take([
         :signature,
         :tools,
+        :llm_query,
         :max_turns,
         :return_retries,
         :timeout,
@@ -373,7 +379,8 @@ defmodule PtcRunner.SubAgent do
         :context_descriptions,
         :format_options,
         :float_precision,
-        :output
+        :output,
+        :memory_strategy
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -384,6 +391,7 @@ defmodule PtcRunner.SubAgent do
       Keyword.drop(opts, [
         :signature,
         :tools,
+        :llm_query,
         :max_turns,
         :return_retries,
         :prompt_limit,
@@ -400,7 +408,8 @@ defmodule PtcRunner.SubAgent do
         :context_descriptions,
         :format_options,
         :float_precision,
-        :output
+        :output,
+        :memory_strategy
       ])
 
     run(agent, runtime_opts)
