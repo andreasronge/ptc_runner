@@ -30,26 +30,15 @@ else
   Code.eval_string(code)
 end
 
-"LLM Setup loaded"
+setup = LLMSetup.setup()
 ```
 
 ```elixir
-provider_input = LLMSetup.provider_input()
+setup = LLMSetup.choose_provider(setup)
 ```
 
 ```elixir
-provider = Kino.Input.read(provider_input)
-LLMSetup.configure_provider(provider)
-```
-
-```elixir
-model_input = LLMSetup.model_input(provider)
-```
-
-```elixir
-model = Kino.Input.read(model_input)
-my_llm = LLMSetup.create_llm(model)
-"Ready: #{model}"
+my_llm = LLMSetup.choose_model(setup)
 ```
 
 ## The LangGraph Approach
