@@ -125,7 +125,7 @@ signature: "{summary :string, _email_ids [:int]}"
       data/items)
 ```
 
-The agent decides *what* to ask and *how* to structure the response — at runtime, from within the generated program. Enable with `llm_query: true`.
+The agent decides *what* to ask and *how* to structure the response — at runtime, from within the generated program. Enable with `llm_query: true`. See the [LLM Agent Livebook](livebooks/ptc_runner_llm_agent.livemd#ad-hoc-llm-queries-llm_query) for a full example.
 
 **Compile SubAgents** - LLM writes the orchestration logic once, execute deterministically:
 
