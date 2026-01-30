@@ -464,7 +464,8 @@ defmodule PtcRunner.SubAgent do
           # Determine execution mode
           # JSON mode always uses the loop (even for single-shot) since it has its own simpler flow
           # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
-          if agent.output == :ptc_lisp and agent.max_turns == 1 and map_size(agent.tools) == 0 do
+          if agent.output == :ptc_lisp and agent.max_turns == 1 and map_size(agent.tools) == 0 and
+               agent.return_retries == 0 do
             # PTC-Lisp single-shot mode
             run_single_shot(
               agent,

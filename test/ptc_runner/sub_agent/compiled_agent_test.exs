@@ -953,6 +953,49 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert result2.return.result == "Hello from LLM2"
     end
 
+    test "compile retries when LLM produces invalid tool call syntax" do
+      tools = %{
+        "classify" =>
+          {fn %{"text" => text} ->
+             if String.contains?(text, "good"), do: "positive", else: "negative"
+           end, signature: "(text :string) -> :string", description: "Classify sentiment"}
+      }
+
+      orchestrator =
+        SubAgent.new(
+          prompt: "Classify the sentiment of {{text}}",
+          signature: "(text :string) -> {sentiment :string}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      # Track call count to simulate LLM fixing its mistake on retry
+      call_count = :counters.new(1, [:atomics])
+
+      mock_llm = fn _params ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        if count == 0 do
+          # First attempt: invalid syntax (missing map wrapper)
+          {:ok, ~S|(return {:sentiment (tool/classify data/text)})|}
+        else
+          # Retry: correct syntax
+          {:ok, ~S|(return {:sentiment (tool/classify {:text data/text})})|}
+        end
+      end
+
+      # Should succeed thanks to return_retries: 2 set by compiler
+      assert {:ok, compiled} =
+               SubAgent.compile(orchestrator, llm: mock_llm, sample: %{text: "good"})
+
+      assert :counters.get(call_count, 1) > 1, "Expected LLM to be called more than once (retry)"
+
+      # Verify the compiled agent works
+      result = compiled.execute.(%{text: "good stuff"}, [])
+      assert result.return.sentiment == "positive"
+    end
+
     test "raises error if llm not provided at execute time with SubAgentTools" do
       child =
         SubAgent.new(

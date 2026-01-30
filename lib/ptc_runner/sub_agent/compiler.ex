@@ -105,6 +105,12 @@ defmodule PtcRunner.SubAgent.Compiler do
     user_sample = Keyword.get(opts, :sample, %{})
     sample = build_sample_data(agent, user_sample)
 
+    # When tools are present, allow retries for tool call syntax errors
+    agent =
+      if map_size(agent.tools) > 0 and agent.return_retries == 0,
+        do: %{agent | return_retries: 2},
+        else: agent
+
     # Run the agent once to derive the PTC-Lisp program
     case SubAgent.run(agent, Keyword.put(opts, :context, sample)) do
       {:ok, step} ->
