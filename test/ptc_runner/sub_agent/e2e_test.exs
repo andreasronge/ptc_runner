@@ -100,6 +100,53 @@ defmodule PtcRunner.SubAgent.E2ETest do
       step3 = compiled.execute.(%{"word" => "hello"}, [])
       assert step3.return == 0
     end
+
+    test "compiled orchestrator with SubAgentTool child" do
+      # Child agent: classifies text sentiment (requires LLM at runtime)
+      classifier =
+        SubAgent.new(
+          prompt:
+            "Classify the sentiment of this text as positive, negative, or neutral: {{text}}",
+          signature: "(text :string) -> {sentiment :string}",
+          description: "Classify text sentiment",
+          max_turns: 1
+        )
+
+      # Pure Elixir tool: uppercase
+      upcase_tool = {
+        fn %{"s" => s} -> String.upcase(s) end,
+        signature: "(s :string) -> :string", description: "Convert string to uppercase"
+      }
+
+      # Orchestrator: classify then uppercase the sentiment
+      orchestrator =
+        SubAgent.new(
+          prompt: "Classify the sentiment of {{text}}, then uppercase the sentiment label.",
+          signature: "(text :string) -> {sentiment :string}",
+          tools: %{
+            "classify" => SubAgent.as_tool(classifier),
+            "upcase" => upcase_tool
+          },
+          max_turns: 1
+        )
+
+      # Compile with real LLM
+      assert {:ok, compiled} = SubAgent.compile(orchestrator, llm: llm_callback())
+      assert compiled.llm_required? == true
+
+      # Execute with real LLM for the child SubAgentTool
+      result =
+        compiled.execute.(
+          %{"text" => "I love this product, it is amazing!"},
+          llm: llm_callback(),
+          timeout: @timeout
+        )
+
+      assert result.return != nil,
+             "Expected return value but got nil. Fail: #{inspect(result.fail)}"
+
+      assert result.return.sentiment in ["POSITIVE", "NEGATIVE", "NEUTRAL"]
+    end
   end
 
   defp model, do: LispLLMClient.model()
