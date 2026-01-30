@@ -30,6 +30,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :turn_history,
     :budget,
     :trace_context,
+    :journal,
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
@@ -107,6 +108,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           turn_history: list(),
           budget: map() | nil,
           trace_context: trace_context(),
+          journal: map() | nil,
           iteration_count: integer(),
           loop_limit: integer(),
           max_print_length: pos_integer(),
@@ -157,6 +159,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
       budget: Keyword.get(opts, :budget),
       trace_context: Keyword.get(opts, :trace_context),
+      journal: Keyword.get(opts, :journal),
       prints: [],
       tool_calls: [],
       pmap_calls: []

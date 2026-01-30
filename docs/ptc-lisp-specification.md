@@ -950,6 +950,54 @@ To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive call
 
 > **Note:** Modifiers (`:let`, `:when`, `:while`) are not supported in this version.
 
+### 5.13 `task` — Journaled Task Execution
+
+`task` executes an expression with caching and idempotency semantics. When a journal is available, tasks are memoized by ID, enabling safe retry loops in agentic execution.
+
+**Syntax:**
+
+```clojure
+(task "unique-id" expr)
+```
+
+**Semantics:**
+
+- **With journal:** Expression result is cached by ID on first execution. Subsequent calls with the same ID return the cached result without re-executing.
+- **Without journal:** Expression executes normally with no caching. A warning is emitted to alert developers that idempotency is inactive.
+- **Failure handling:** If `expr` raises an error or calls `(fail)`, the result is not cached and the error propagates.
+
+**Examples:**
+
+```clojure
+;; Cache expensive operation
+(task "fetch-users" (tool/get-users {:limit 1000}))
+; First call: executes tool, caches result
+; Second call: returns cached result
+
+;; Use with conditional execution
+(let [users (task "fetch-users" (tool/get-users {}))]
+  (count users))
+
+;; Multiple tasks in sequence
+(do
+  (def step1 (task "step1" (tool/process {:data data/input})))
+  (def step2 (task "step2" (tool/analyze step1)))
+  step2)
+```
+
+**Use Cases:**
+
+- **Safe retries:** Cache intermediate results during multi-turn agentic loops, ensuring tool calls aren't repeated
+- **Deterministic replay:** Re-run a program with the same journal to get identical results
+- **Resource optimization:** Avoid redundant API calls or expensive computations
+
+**Important Notes:**
+
+- Task IDs must be **string literals** (not variables or expressions)
+- IDs should be **semantically meaningful** to enable consistent caching across retries (e.g., `"fetch-users"` rather than `"step1"`)
+- The journal is provided at execution time; running without a journal disables caching but still executes the expression
+- Task results must be serializable (maps, lists, primitives, etc.)
+
 ---
 
 ## 6. Threading Macros

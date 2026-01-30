@@ -142,6 +142,7 @@ defmodule PtcRunner.Lisp do
     budget = Keyword.get(opts, :budget)
     pmap_timeout = Keyword.get(opts, :pmap_timeout)
     trace_context = Keyword.get(opts, :trace_context)
+    journal = Keyword.get(opts, :journal)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -185,7 +186,8 @@ defmodule PtcRunner.Lisp do
         filter_context: filter_context,
         budget: budget,
         pmap_timeout: pmap_timeout,
-        trace_context: trace_context
+        trace_context: trace_context,
+        journal: journal
       }
 
       execute_program(source, opts)
@@ -215,7 +217,8 @@ defmodule PtcRunner.Lisp do
       filter_context: filter_context,
       budget: budget,
       pmap_timeout: pmap_timeout,
-      trace_context: trace_context
+      trace_context: trace_context,
+      journal: journal
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
@@ -234,7 +237,8 @@ defmodule PtcRunner.Lisp do
           max_print_length: max_print_length,
           budget: budget,
           pmap_timeout: pmap_timeout,
-          trace_context: trace_context
+          trace_context: trace_context,
+          journal: journal
         ]
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
@@ -280,7 +284,8 @@ defmodule PtcRunner.Lisp do
               float_precision,
               eval_ctx.prints,
               eval_ctx.tool_calls,
-              eval_ctx.pmap_calls
+              eval_ctx.pmap_calls,
+              eval_ctx.journal
             )
 
           {:ok, %{step | usage: metrics}}
@@ -293,7 +298,8 @@ defmodule PtcRunner.Lisp do
               float_precision,
               eval_ctx.prints,
               eval_ctx.tool_calls,
-              eval_ctx.pmap_calls
+              eval_ctx.pmap_calls,
+              eval_ctx.journal
             )
 
           {:ok, %{step | usage: metrics}}
@@ -327,7 +333,8 @@ defmodule PtcRunner.Lisp do
             prints: eval_ctx.prints,
             tool_calls: eval_ctx.tool_calls,
             pmap_calls: eval_ctx.pmap_calls,
-            child_traces: child_traces
+            child_traces: child_traces,
+            journal: eval_ctx.journal
           }
 
           {:error, step}
@@ -340,7 +347,8 @@ defmodule PtcRunner.Lisp do
               float_precision,
               eval_ctx.prints,
               eval_ctx.tool_calls,
-              eval_ctx.pmap_calls
+              eval_ctx.pmap_calls,
+              eval_ctx.journal
             )
 
           step_with_usage = %{step | usage: metrics}
@@ -434,7 +442,7 @@ defmodule PtcRunner.Lisp do
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
-  defp apply_memory_contract(value, memory, precision, prints, tool_calls, pmap_calls) do
+  defp apply_memory_contract(value, memory, precision, prints, tool_calls, pmap_calls, journal) do
     reversed_tool_calls = Enum.reverse(tool_calls)
     reversed_pmap_calls = Enum.reverse(pmap_calls)
 
@@ -454,6 +462,7 @@ defmodule PtcRunner.Lisp do
       return: round_floats(value, precision),
       fail: nil,
       memory: memory,
+      journal: journal,
       signature: nil,
       usage: nil,
       turns: nil,
