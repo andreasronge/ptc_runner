@@ -68,10 +68,15 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
   end
 
   describe "(task) analyzer validation" do
-    test "rejects symbol as task ID" do
+    test "symbol as task ID resolves dynamically" do
+      # Unbound symbol fails at runtime, not analysis
       {:error, step} = Lisp.run(~S|(task my-id 42)|)
+      assert step.fail.reason == :unbound_var
 
-      assert step.fail.reason == :invalid_form
+      # Bound symbol works as dynamic task ID
+      {:ok, step} = Lisp.run(~S|(def my-id "test-1") (task my-id 42)|, journal: %{})
+      assert step.return == 42
+      assert step.journal == %{"test-1" => 42}
     end
 
     test "rejects wrong arity" do
@@ -84,6 +89,29 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
       {:error, step} = Lisp.run(~S|(task "id" 1 2)|)
 
       assert step.fail.reason == :invalid_arity
+    end
+  end
+
+  describe "(task) dynamic IDs with (str ...)" do
+    test "str expression as task ID" do
+      {:ok, step} =
+        Lisp.run(
+          ~S|(def name "bob") (task (str "prepare_" name) 42)|,
+          journal: %{}
+        )
+
+      assert step.return == 42
+      assert step.journal == %{"prepare_bob" => 42}
+    end
+
+    test "str expression with cache hit" do
+      {:ok, step} =
+        Lisp.run(
+          ~S|(def name "bob") (task (str "prepare_" name) 42)|,
+          journal: %{"prepare_bob" => "cached"}
+        )
+
+      assert step.return == "cached"
     end
   end
 

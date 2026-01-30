@@ -588,6 +588,14 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Dynamic task ID: (task id-expr expr) — evaluate id-expr to get the string ID
+  defp do_eval({:task_dynamic, id_ast, body_ast}, eval_ctx) do
+    with {:ok, id, eval_ctx} <- do_eval(id_ast, eval_ctx) do
+      id = to_string(id)
+      do_eval({:task, id, body_ast}, eval_ctx)
+    end
+  end
+
   # Journaled task: (task "id" expr)
   # Cache hit: return stored value, skip expr
   # Cache miss: evaluate expr, commit to journal
