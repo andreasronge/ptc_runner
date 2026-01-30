@@ -247,7 +247,6 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
     end
 
     test "early return failure consumes work turn, not retry turn" do
-      # Per spec (docs/specs/return-retries.md lines 87-99):
       # If LLM calls (return ...) before the final turn and it fails validation,
       # consume a work turn, not a retry turn.
       agent =
@@ -280,7 +279,6 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
     end
 
     test "context is collapsed during retry phase (single-shot with return_retries)" do
-      # Per spec (docs/specs/return-retries.md lines 108-128):
       # Previous failed responses are NOT accumulated in message history.
       # Only the most recent error is shown.
       #
