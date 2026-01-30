@@ -83,6 +83,8 @@ Use `(task "id" expr)` to record idempotent steps. If the task ID was already co
 
 **Task IDs must be string literals.** The Mission Log in the system prompt shows which tasks have completed.
 
+**Semantic IDs:** Encode intent and data in IDs — use `"charge_order_42"` not `"step_1"`. Positional IDs break when the plan changes. One task per side-effect; avoid nesting tasks inside other tasks.
+
 ### State Persistence
 
 ```clojure
