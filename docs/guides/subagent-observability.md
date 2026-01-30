@@ -98,7 +98,7 @@ Full turn history is always preserved in `step.turns` regardless of compression.
 
 ## TraceLog
 
-For detailed offline analysis, use `TraceLog` to capture execution events to JSONL files:
+For detailed offline analysis, use `PtcRunner.TraceLog.with_trace/2` to capture execution events to JSONL files:
 
 ```elixir
 alias PtcRunner.TraceLog
@@ -118,7 +118,7 @@ end)
 
 ### Analyzing Traces
 
-Use `TraceLog.Analyzer` to inspect captured traces:
+Use `PtcRunner.TraceLog.Analyzer.load/1` and related functions to inspect captured traces:
 
 ```elixir
 alias PtcRunner.TraceLog.Analyzer
