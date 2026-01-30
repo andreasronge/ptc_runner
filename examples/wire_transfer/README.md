@@ -113,31 +113,28 @@ The transfer executes. If the process crashes and re-runs, `"execute_wire_bob_50
 - **Crash-safe at every step.** Each `(task ...)` is atomic. Re-run from any point and the journal prevents duplicate side effects.
 - **Task IDs are a shared contract.** The naming convention (e.g., `"manager_decision_bob_5000"`) must be agreed between the system prompt and the application code. The prompt tells the LLM: *"When checking for external decisions, use the task ID `manager_decision_RECIPIENT_AMOUNT`."* The app writes to that same key. Without this contract, the LLM might look up `"approval_status"` while the app wrote to `"manager_decision_bob_5000"`, and the pattern silently breaks.
 
-## Running the Example (Planned API)
-
-> **Note:** This example is not runnable yet. It shows the intended developer experience once v0.7 is implemented.
+## Running the Example
 
 Start IEx:
 
 ```bash
 cd examples/wire_transfer
+mix deps.get
 iex -S mix
 ```
 
 ### Initiate the transfer
 
 ```elixir
-alias WireTransfer.Workflow
-
 # Turn 1: Agent prepares wire and requests approval
-{:ok, step} = Workflow.run(%{}, "Transfer $5,000 to Bob")
-step.result
+{:ok, step} = WireTransfer.run(%{}, "bob", 5000)
+step.return
 # => %{status: :waiting, msg: "Pending manager approval"}
 
 step.journal
 # => %{
-#   "prepare_wire_bob_5000" => "hold_abc",
-#   "request_approval_bob_5000" => %{request_id: "req_789"}
+#   "prepare_wire_bob_5000" => "hold_bob_5000",
+#   "request_approval_bob_5000" => %{"request_id" => "req_bob_5000"}
 # }
 ```
 
@@ -153,26 +150,18 @@ journal = Map.put(step.journal, "manager_decision_bob_5000", :approved)
 
 ```elixir
 # Turn 2: Agent sees approval, executes wire
-{:ok, step} = Workflow.run(journal, "Transfer $5,000 to Bob")
-step.result
-# => %{status: :completed, wire_id: "wire_456"}
-
-step.journal
-# => %{
-#   "prepare_wire_bob_5000" => "hold_abc",
-#   "request_approval_bob_5000" => %{request_id: "req_789"},
-#   "manager_decision_bob_5000" => :approved,
-#   "execute_wire_bob_5000" => "wire_456"
-# }
+{:ok, step} = WireTransfer.run(journal, "bob", 5000)
+step.return
+# => %{status: :completed, wire_id: "wire_bob_5000"}
 ```
 
 ### Simulate a crash and re-run
 
 ```elixir
 # Re-running with the same journal is safe — all tasks are cached
-{:ok, step} = Workflow.run(step.journal, "Transfer $5,000 to Bob")
-step.result
-# => %{status: :completed, wire_id: "wire_456"}
+{:ok, step} = WireTransfer.run(step.journal, "bob", 5000)
+step.return
+# => %{status: :completed, wire_id: "wire_bob_5000"}
 # No side effects re-executed. Money moved exactly once.
 ```
 
@@ -180,11 +169,11 @@ step.result
 
 ```elixir
 # Alternative: manager rejects
-{:ok, step} = Workflow.run(%{}, "Transfer $5,000 to Bob")
+{:ok, step} = WireTransfer.run(%{}, "bob", 5000)
 journal = Map.put(step.journal, "manager_decision_bob_5000", :rejected)
 
-{:ok, step} = Workflow.run(journal, "Transfer $5,000 to Bob")
-step.result
+{:ok, step} = WireTransfer.run(journal, "bob", 5000)
+step.return
 # => %{status: :cancelled, msg: "Hold released"}
 ```
 
