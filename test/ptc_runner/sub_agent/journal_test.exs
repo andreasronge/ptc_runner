@@ -76,6 +76,76 @@ defmodule PtcRunner.SubAgent.JournalTest do
       {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{})
     end
 
+    test "mission log shows completed task results on turn 2" do
+      tools = %{"lookup" => fn %{"id" => id} -> "user_#{id}" end}
+      agent = test_agent(max_turns: 3, tools: tools)
+
+      llm = fn %{system: system, turn: turn} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(task "fetch_user_42" (tool/lookup {:id 42}))
+```|}
+
+          2 ->
+            # Turn 2: verify the LLM sees the completed task in the system prompt
+            assert system =~ "[done] fetch_user_42: \"user_42\""
+
+            {:ok, ~S|```clojure
+(return "ok")
+```|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{})
+    end
+
+    test "mission log shows multiple completed tasks with correct values" do
+      agent = test_agent(max_turns: 3)
+
+      llm = fn %{system: system, turn: turn} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(do (task "check_auth" (> 1 0)) (task "fetch_total" (+ 100 50)))
+```|}
+
+          2 ->
+            # Both tasks should appear in the mission log
+            assert system =~ "[done] check_auth: true"
+            assert system =~ "[done] fetch_total: 150"
+
+            {:ok, ~S|```clojure
+(return "done")
+```|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{})
+    end
+
+    test "re-invocation: mission log shows tasks from previous run" do
+      agent = test_agent(max_turns: 2)
+
+      # The LLM sees pre-populated journal entries in the mission log
+      # and can use the values in its program
+      llm = fn %{system: system, turn: 1} ->
+        assert system =~ "[done] prepare_wire: \"hold_abc\""
+        assert system =~ "[done] approval: \"approved\""
+
+        {:ok, ~S|```clojure
+(return (task "execute_wire" (str (task "prepare_wire" nil) "_sent")))
+```|}
+      end
+
+      journal = %{"prepare_wire" => "hold_abc", "approval" => "approved"}
+      {:ok, step} = SubAgent.run(agent, llm: llm, journal: journal)
+
+      # LLM used cached "hold_abc" from journal and appended "_sent"
+      assert step.return == "hold_abc_sent"
+      assert step.journal["execute_wire"] == "hold_abc_sent"
+    end
+
     test "re-invocation pattern: second run skips completed tasks" do
       tools = %{"charge" => fn %{"amount" => n} -> "tx_#{n}" end}
       agent = test_agent(max_turns: 2, tools: tools)
