@@ -451,10 +451,9 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     ;; Minimal (returns string)
     (tool/llm-query {:prompt "Is this urgent? {{text}}" :text "Help me!"})
 
-    ;; With signature and model
+    ;; With signature
     (tool/llm-query {:prompt "Classify: {{text}}"
                      :signature "{category :string, score :float}"
-                     :llm :sonnet
                      :text "Some input"})
     ```
 
@@ -465,6 +464,10 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     ```clojure
     (pmap (fn [item] (tool/llm-query {:prompt "Rate: {{x}}" :x item})) items)
     ```
+
+    **Signature types:** `:string`, `:int`, `:float`, `:bool`, `:keyword`, `:any`.
+    Lists: `[:type]`. Maps: `{field :type}`. Optional: `{field :type?}`.
+    Example signatures: `":string"`, `"{score :int, reason :string}"`, `"{is_urgent :bool, reason :string}"`, `"[{id :int, label :string}]"`.
     """
   end
 
