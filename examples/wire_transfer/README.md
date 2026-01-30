@@ -123,11 +123,13 @@ mix deps.get
 iex -S mix
 ```
 
+The `model:` option selects the LLM provider. Examples: `"bedrock:haiku"`, `"bedrock:sonnet"`, `"haiku"` (OpenRouter). Omit it to use `LLMClient.default_model()`. See the [llm_client README](../../llm_client/README.md) for provider setup.
+
 ### Initiate the transfer
 
 ```elixir
 # Turn 1: Agent prepares wire and requests approval
-{:ok, step} = WireTransfer.run(%{}, "bob", 5000)
+{:ok, step} = WireTransfer.run(%{}, "bob", 5000, model: "bedrock:haiku")
 step.return
 # => %{status: :waiting, msg: "Pending manager approval"}
 
@@ -150,7 +152,7 @@ journal = Map.put(step.journal, "manager_decision_bob_5000", :approved)
 
 ```elixir
 # Turn 2: Agent sees approval, executes wire
-{:ok, step} = WireTransfer.run(journal, "bob", 5000)
+{:ok, step} = WireTransfer.run(journal, "bob", 5000, model: "bedrock:haiku")
 step.return
 # => %{status: :completed, wire_id: "wire_bob_5000"}
 ```
@@ -159,7 +161,7 @@ step.return
 
 ```elixir
 # Re-running with the same journal is safe — all tasks are cached
-{:ok, step} = WireTransfer.run(step.journal, "bob", 5000)
+{:ok, step} = WireTransfer.run(step.journal, "bob", 5000, model: "bedrock:haiku")
 step.return
 # => %{status: :completed, wire_id: "wire_bob_5000"}
 # No side effects re-executed. Money moved exactly once.
@@ -169,10 +171,10 @@ step.return
 
 ```elixir
 # Alternative: manager rejects
-{:ok, step} = WireTransfer.run(%{}, "bob", 5000)
+{:ok, step} = WireTransfer.run(%{}, "bob", 5000, model: "bedrock:haiku")
 journal = Map.put(step.journal, "manager_decision_bob_5000", :rejected)
 
-{:ok, step} = WireTransfer.run(journal, "bob", 5000)
+{:ok, step} = WireTransfer.run(journal, "bob", 5000, model: "bedrock:haiku")
 step.return
 # => %{status: :cancelled, msg: "Hold released"}
 ```

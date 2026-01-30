@@ -16,23 +16,19 @@ defmodule WireTransfer.Agent do
       **Current request:** Transfer ${{amount}} to {{recipient}}.
 
       ## Steps
-      1. Prepare the wire transfer using `prepare_wire`
+      1. Prepare the wire transfer using `prepare_wire` — returns a hold_id
       2. Request manager approval using `request_approval`
-      3. Check the journal for the manager decision task
-         - If the decision is not yet in the journal, return `{:status :waiting :msg "Pending manager approval"}`
-         - If approved, execute the wire using `execute_wire` (pass the hold_id from step 1)
-         - If rejected, cancel the hold using `cancel_hold`
+      3. Check the journal for the manager's decision using task ID
+         `(str "manager_decision_" recipient "_" amount)` — returns nil if not yet decided
+         - If nil, return `{:status :waiting :msg "Pending manager approval"}`
+         - If `:approved`, execute the wire using `execute_wire` (pass the hold_id from step 1)
+         - If `:rejected`, cancel the hold using `cancel_hold`
+      4. Always execute ALL steps in order — completed tasks return cached results instantly.
 
       ## Task IDs
-      IMPORTANT: `(task id expr)` requires a string literal ID — you cannot use `(str ...)`.
-      Read data/recipient and data/amount, then write the actual values into the ID string.
-
-      For example, if recipient is "bob" and amount is 5000, use:
-      - `(task "prepare_wire_bob_5000" ...)`
-      - `(task "request_approval_bob_5000" ...)`
-      - `(task "manager_decision_bob_5000" nil)` — reads external decision from journal
-      - `(task "execute_wire_bob_5000" ...)`
-      - `(task "cancel_wire_bob_5000" ...)`
+      EVERY tool call MUST be wrapped in `(task ...)` for idempotency.
+      Use `(str ...)` to build semantic task IDs, e.g.:
+      `(task (str "prepare_wire_" recipient "_" amount) (tool/prepare_wire ...))`
       """,
       signature: "(recipient :string, amount :int) -> {status :keyword}",
       tools: %{

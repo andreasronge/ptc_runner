@@ -969,7 +969,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # Journaled task: (task "id" expr)
+  # Journaled task: (task "id" expr) or (task id-expr expr)
   # ============================================================
 
   defp analyze_task([{:string, id}, body_ast], _tail?) do
@@ -978,9 +978,11 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp analyze_task([{:symbol, _} | _], _tail?) do
-    {:error,
-     {:invalid_form, "task ID must be a string literal, got symbol. Use (task \"my-id\" expr)"}}
+  defp analyze_task([id_ast, body_ast], _tail?) do
+    with {:ok, id_expr} <- do_analyze(id_ast, false),
+         {:ok, body} <- do_analyze(body_ast, false) do
+      {:ok, {:task_dynamic, id_expr, body}}
+    end
   end
 
   defp analyze_task(_, _tail?) do

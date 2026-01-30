@@ -50,8 +50,9 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Control flow signals
           | {:return, t()}
           | {:fail, t()}
-          # Journaled task: (task "id" expr)
+          # Journaled task: (task "id" expr) or (task id-expr expr)
           | {:task, String.t(), t()}
+          | {:task_dynamic, t(), t()}
           # Tool invocation via tool/ namespace: (tool/name args...)
           | {:tool_call, atom(), [t()]}
           # Define binding in user namespace: (def name value) with optional metadata
