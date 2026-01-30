@@ -4,7 +4,7 @@ defmodule PtcRunner.MixProject do
   def project do
     [
       app: :ptc_runner,
-      version: "0.5.2",
+      version: "0.6.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
