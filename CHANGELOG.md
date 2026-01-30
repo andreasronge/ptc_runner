@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-30
+
+### Added
+
+**Language**
+
+- `for` (minimal) list comprehension
+- String functions: `grep`, `grep-n`, `.indexOf`, `.lastIndexOf`
+- Collection functions: `extract`, `extract-int`, `pairs`, `combinations`, `mapcat`, `butlast`, `take-last`, `drop-last`, `partition-all`
+- Aggregators: `sum`, `avg`, `quot`
+- Reader literals: `##Inf`, `##-Inf`, `##NaN`
+
+**SubAgent**
+
+- `return_retries` for validation recovery with compression support
+- `:self` sentinel for recursive agents
+- `memory_strategy :rollback` for recoverable memory limit errors
+- Budget introspection and callback for RLM patterns
+- Last expression as return value on budget exhaustion
+- `llm_query` builtin integrated into system prompts and tool normalization
+- Auto-set `return_retries` for agents with tools during compile
+
+**LLM-as-Tool Composition**
+
+- `LLMTool` with `response_template` mode for typed LLM output
+- Transparent tool unwrapping and input validation
+
+**Tracing & Observability**
+
+- `TraceLog` + `Analyzer` for structured SubAgent tracing
+- Hierarchical tracing for nested SubAgents
+- Chrome DevTools trace export
+- HTML trace viewer
+- Post-sandbox tool telemetry with span correlation
+
+**Utilities**
+
+- `PtcRunner.Chunker` for text chunking
+- Configurable `pmap_timeout` for LLM-backed tools
+
+### Changed
+
+- Refactored SubAgent loop from recursive to iterative driver loop
+- Extracted chaining, validation, and prompt modules into focused files
+
+### Fixed
+
+- Propagate `max_heap` option to Lisp.run and child agents
+- Handle tool call positional args error gracefully
+- Support `apply` with maps and variadic `max-by`/`min-by`
+
 ## [0.5.2] - 2026-01-23
 
 ### Added
@@ -364,6 +415,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.6.0]: https://github.com/andreasronge/ptc_runner/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/andreasronge/ptc_runner/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/andreasronge/ptc_runner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/andreasronge/ptc_runner/compare/v0.4.1...v0.5.0

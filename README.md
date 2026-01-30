@@ -105,7 +105,7 @@ See the [Joke Workflow Livebook](livebooks/joke_workflow.livemd) for a complete 
 
 ```elixir
 def deps do
-  [{:ptc_runner, "~> 0.5.0"}]
+  [{:ptc_runner, "~> 0.6.0"}]
 end
 ```
 
