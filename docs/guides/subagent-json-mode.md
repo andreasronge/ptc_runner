@@ -209,3 +209,5 @@ process_agent = SubAgent.new(
 - [Patterns](subagent-patterns.md) - Chaining and composition patterns
 - [Signature Syntax](../signature-syntax.md) - Full type syntax reference
 - `PtcRunner.SubAgent.run/2` - API reference
+- `PtcRunner.SubAgent.Loop.JsonMode.run/3` - JSON mode execution loop
+- `PtcRunner.SubAgent.JsonParser.parse/1` - JSON extraction from LLM responses
