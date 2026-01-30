@@ -49,14 +49,14 @@ v0.6: Language, Composition & Tracing ✅
   Utilities:
   - PtcRunner.Chunker for text chunking
 
-v0.7: Unified Task System (see #703)
-  - (task id expr) - idempotent execution, handles sync/async transparently
-  - (parallel ...) - concurrent task execution
-  - (checkpoint id msg) - human-in-the-loop suspension
-  - Task state tracking in Context
-  - PendingStep struct for suspended execution
-  - SubAgent.resume/3 for continuing after async/checkpoint
-  Architecture: Pure library (no processes initially)
+v0.7: Journaled Task System (The Navigator)
+  - (task id expr) - idempotent journaled execution
+  - Journal: pure map passed via context, returned in Step.journal
+  - Mission Log: automatic prompt injection of completed tasks
+  - Semantic IDs: task IDs encode intent + data (e.g., "charge_invoice_123")
+  - Implicit re-planning: LLM re-navigates from journal state each turn
+  - Progressive enhancement: works without journal (trace warning)
+  Architecture: Pure library, stateless navigator, developer owns persistence
 
 v0.8: State Management
   - JSON serialization as default (Step <-> JSON)
@@ -87,17 +87,18 @@ UNDER CONSIDERATION (not scheduled):
 
 ## Design Notes
 
-### Unified Task System (v0.7)
+### Journaled Task System (v0.7) — The Navigator
 
-Core primitives:
+The Navigator is a stateless agent that "re-navigates" a mission by checking a Journal of completed tasks. See `docs/plans/v0.7-journaled-tasks.md` for full design.
 
-| Form | Purpose |
-|------|---------|
-| `(task id expr)` | Idempotent execution - runs once, caches result, handles sync/async transparently |
-| `(parallel & tasks)` | Concurrent execution - starts all tasks, suspends until all complete |
-| `(checkpoint id msg)` | Human-in-the-loop - suspends for approval |
+| Concept | Description |
+|---------|-------------|
+| `(task id expr)` | Idempotent execution — checks journal, skips if already done |
+| Journal | Pure map of task ID → result, passed in via context |
+| Mission Log | Auto-injected prompt section showing completed tasks to the LLM |
+| Semantic IDs | Task IDs encode intent + data to prevent stale cache (e.g., `"charge_invoice_123"`) |
 
-The LLM doesn't need to know if a tool is sync or async. Same syntax works for both. See GitHub Issue #703 for full design.
+No plan objects, no process state, no suspension primitives. The LLM re-plans implicitly on every invocation by reading the Mission Log and deciding what to do next.
 
 ### State Serialization (v0.8)
 
@@ -130,23 +131,20 @@ Recommended integration: use ptc_runner as a pure library within your own GenSer
 
 ## Decisions Made
 
-1. **Async/idempotency**: Unified `(task)` form - single syntax for sync/async. See #703.
-2. **Parallel execution**: `(parallel ...)` form with task idempotency.
-3. **Human-in-the-loop**: `(checkpoint id msg)` compiles to suspension.
-4. **Serialization format**: JSON default, binary opt-in.
-5. **Tool serialization**: MFA tuples (no registry needed).
-6. **Multi-instance naming**: Default + explicit `:name` override.
-7. **Session lifecycle**: Idle timeout + pending-aware + explicit termination.
+1. **Idempotency**: `(task id expr)` with journal-based caching. Semantic IDs over expression hashing.
+2. **No plan objects**: Implicit re-planning — LLM re-navigates from journal state each turn.
+3. **No suspension primitives**: Use `(return {:status :waiting})` instead of checkpoint/resume.
+4. **Developer owns persistence**: Journal is a pure map; no DB/Oban dependency.
+5. **Serialization format**: JSON default, binary opt-in.
+6. **Tool serialization**: MFA tuples (no registry needed).
 
 ---
 
 ## Open Questions
 
-1. **Task serialization scope**: Include full task results or summarized?
-2. **Parallel error handling**: Cancel siblings on failure or wait for all?
-3. **Hierarchical tasks**: How to scope parent/child task IDs?
-4. **Backpressure**: How to handle LLM rate limits in streaming?
-5. **Pool implementation**: Poolboy, NimblePool, or custom?
+1. **Journal truncation**: How aggressively to truncate results in Mission Log?
+2. **Backpressure**: How to handle LLM rate limits in streaming?
+3. **Pool implementation**: Poolboy, NimblePool, or custom?
 
 ---
 
