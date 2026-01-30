@@ -37,7 +37,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     pmap_timeout: @default_pmap_timeout,
     prints: [],
     tool_calls: [],
-    pmap_calls: []
+    pmap_calls: [],
+    trace_warnings: []
   ]
 
   @typedoc """
@@ -115,7 +116,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           pmap_timeout: pos_integer(),
           prints: [String.t()],
           tool_calls: [tool_call()],
-          pmap_calls: [pmap_call()]
+          pmap_calls: [pmap_call()],
+          trace_warnings: [map()]
         }
 
   @doc """
@@ -162,7 +164,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       journal: Keyword.get(opts, :journal),
       prints: [],
       tool_calls: [],
-      pmap_calls: []
+      pmap_calls: [],
+      trace_warnings: []
     }
   end
 
@@ -197,6 +200,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec append_pmap_call(t(), pmap_call()) :: t()
   def append_pmap_call(%__MODULE__{pmap_calls: pmap_calls} = context, pmap_call) do
     %{context | pmap_calls: [pmap_call | pmap_calls]}
+  end
+
+  @doc """
+  Appends a trace warning to the context.
+  """
+  @spec append_trace_warning(t(), map()) :: t()
+  def append_trace_warning(%__MODULE__{trace_warnings: warnings} = context, warning) do
+    %{context | trace_warnings: [warning | warnings]}
   end
 
   @doc """
@@ -237,7 +248,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Merges two contexts, specifically combining prints, tool calls, and pmap calls.
+  Merges two contexts, specifically combining prints, tool calls, pmap calls, and trace warnings.
   Used to merge results from parallel execution branches (pmap, pcalls).
   """
   @spec merge(t(), t()) :: t()
@@ -247,6 +258,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       | prints: ctx2.prints ++ ctx1.prints,
         tool_calls: ctx2.tool_calls ++ ctx1.tool_calls,
         pmap_calls: ctx2.pmap_calls ++ ctx1.pmap_calls,
+        trace_warnings: ctx2.trace_warnings ++ ctx1.trace_warnings,
         user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
         iteration_count: ctx1.iteration_count + ctx2.iteration_count
     }

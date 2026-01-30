@@ -596,8 +596,16 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:task, id, body_ast}, %EvalContext{journal: journal} = eval_ctx) do
     case journal do
       nil ->
-        # No journal - execute without caching, emit trace warning via process dictionary
-        Process.put(:ptc_task_no_journal_warning, true)
+        # No journal - execute without caching, emit trace warning
+        warning = %{
+          type: :task_no_journal,
+          message: "Task executed without journal - caching and idempotency are inactive",
+          task_id: id,
+          timestamp: DateTime.utc_now()
+        }
+
+        eval_ctx = EvalContext.append_trace_warning(eval_ctx, warning)
+        IO.warn("PTC task '#{id}' executed without journal: caching and idempotency are inactive")
         do_eval(body_ast, eval_ctx)
 
       %{} ->
