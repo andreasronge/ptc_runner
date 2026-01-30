@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 26 -->
-<!-- date: 2026-01-28 -->
-<!-- changes: Add extract, extract-int, pairs, combinations, parse-int functions -->
+<!-- version: 27 -->
+<!-- date: 2026-01-30 -->
+<!-- changes: Add common mistakes for max-by vs apply max-key, missing list/cons -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -57,6 +57,14 @@ data/products                      ; read-only input data
 - ✗ `(max [1 2 3])` → ✓ `(apply max [1 2 3])` — max takes args, not collection
 - ✗ `(take 100 str)` → ✓ `(subs str 0 100)` — take on strings returns char list
 - ✗ `(take (/ n 2) coll)` → ✓ `(take (quot n 2) coll)` — `/` returns float
+
+**Aggregators:**
+- ✗ `(apply max-key :price products)` → ✓ `(max-by :price products)` — use aggregators for collections
+- ✗ `(apply min-key :price products)` → ✓ `(min-by :price products)`
+
+**Missing from Clojure:**
+- No `list` — use `[]` vector literals or `(vector ...)`
+- No `cons` — use `(conj coll x)` to add at end, or `(concat [x] coll)` to add at front
 
 **Predicates:**
 - ✗ `(includes s "x")` → ✓ `(includes? s "x")` — predicate needs `?`
