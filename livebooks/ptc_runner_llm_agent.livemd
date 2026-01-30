@@ -29,28 +29,15 @@ else
   Code.eval_string(code)
 end
 
-"LLM Setup loaded"
-```
-
-Choose your provider:
-
-```elixir
-provider_input = LLMSetup.provider_input()
+setup = LLMSetup.setup()
 ```
 
 ```elixir
-provider = Kino.Input.read(provider_input)
-LLMSetup.configure_provider(provider)
+setup = LLMSetup.choose_provider(setup)
 ```
 
 ```elixir
-model_input = LLMSetup.model_input(provider)
-```
-
-```elixir
-model = Kino.Input.read(model_input)
-my_llm = LLMSetup.create_llm(model)
-"Ready: #{model}"
+my_llm = LLMSetup.choose_model(setup)
 ```
 
 ## Output Modes
@@ -72,7 +59,7 @@ alias PtcRunner.SubAgent.Debug
 
 review = "Great product, fast shipping! Would buy again."
 
-{:ok, step} = SubAgent.run(
+{_, step} = SubAgent.run(
   "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
   output: :json,
   signature: "(review :string) -> {sentiment :string, confidence :float}",
@@ -80,7 +67,7 @@ review = "Great product, fast shipping! Would buy again."
   llm: my_llm
 )
 
-Debug.print_trace(step, raw: true)
+# Debug.print_trace(step, raw: true)
 step.return
 ```
 
@@ -89,13 +76,13 @@ step.return
 The default mode. The LLM writes a program to solve tasks that need accurate computation:
 
 ```elixir
-{:ok, step} = SubAgent.run(
+{_, step} = SubAgent.run(
   "How many r's are in raspberry?",
   llm: my_llm,
   max_turns: 1
 )
 
-Debug.print_trace(step, raw: true)
+Debug.print_trace(step)
 step.return
 ```
 
@@ -208,14 +195,95 @@ question = Kino.Input.read(question_input)
 
 case SubAgent.run(question, tools: tools, llm: my_llm) do
   {:ok, step} ->
-    Debug.print_trace(step)
+    # Debug.print_trace(step)
     step.return
 
   {:error, step} ->
     Debug.print_trace(step)
-    "Failed: #{step.fail.message}"
+    "Failed: #{step.fail["message"]}"
 end
 ```
+
+## Ad-Hoc LLM Queries (`llm_query`)
+
+Enable `llm_query: true` to let the agent make runtime LLM calls from PTC-Lisp — useful when the task requires **LLM judgment combined with programmatic logic**.
+
+```elixir
+tickets = [
+  %{"id" => 1, "text" => "Server is completely down, all customers affected"},
+  %{"id" => 2, "text" => "Typo in the footer of the about page"},
+  %{"id" => 3, "text" => "Payment processing failing for all users"},
+  %{"id" => 4, "text" => "Would be nice to have dark mode"}
+]
+
+alias PtcRunner.TraceLog
+
+{:ok, result, trace_path} = TraceLog.with_trace(fn ->
+  SubAgent.run(
+    """
+    Classify each ticket's urgency using tool/llm-query, then return only the critical ones.
+    """,
+    signature: "(tickets [{id :int, text :string}]) -> {critical [{id :int, text :string, reason :string}]}",
+    llm_query: true,
+    context: %{tickets: tickets},
+    llm: my_llm
+  )
+end)
+
+# Show execution trace
+case result do
+  {:ok, step} ->
+    Debug.print_trace(step, raw: true)
+    step.return
+
+  {:error, step} ->
+    Debug.print_trace(step, raw: true)
+    "Failed: #{step.fail["message"]}"
+end
+```
+
+**Example generated program** (for those without LLM access):
+
+```
+(def tickets data/tickets)
+
+(def classified
+  (pmap (fn [ticket]
+          (assoc ticket
+                 :classification
+                 (tool/llm-query {:prompt "Is this support ticket critical/urgent? Respond with {is_critical :bool, reason :string}\n\nTicket: {{text}}"
+                                  :signature "{is_critical :bool, reason :string}"
+                                  :text (:text ticket)})))
+        tickets))
+
+(def critical
+  (filter (fn [t] (get-in t [:classification :is_critical])) classified))
+
+(return {:critical (map (fn [t] {:id (:id t) :text (:text t) :reason (get-in t [:classification :reason])}) critical)})
+```
+
+This uses `pmap` to classify all tickets in parallel via `tool/llm-query`, then filters for critical ones.
+
+### Analyzing the Trace
+
+`TraceLog` captures all events (LLM calls, turns) to a JSONL file. Use `TraceLog.Analyzer` to inspect timing and token usage:
+
+```elixir
+events = TraceLog.Analyzer.load(trace_path)
+summary = TraceLog.Analyzer.summary(events)
+
+IO.puts("Duration: #{summary.duration_ms}ms")
+IO.puts("LLM calls: #{summary.llm_calls}")
+IO.puts("Turns: #{summary.turns}")
+IO.puts("Tokens: #{summary.total_tokens}")
+
+# Print timeline of all events
+TraceLog.Analyzer.print_timeline(events)
+```
+
+> **Performance tip:** Replace `mapv` with `pmap` to classify all tickets in parallel.
+> TraceLog supports concurrent traces — each `tool/llm-query` call is captured with
+> its own trace ID, so parallel execution is fully observable.
 
 ## Debug Options
 
