@@ -144,7 +144,7 @@ case PtcRunner.Lisp.run(bad_program, tools: %{}) do
 end
 ```
 
-## Advanced: Data Transformation
+## Data Transformation
 
 Transform and join data from multiple sources:
 
