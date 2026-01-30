@@ -61,8 +61,23 @@ SubAgent.Debug.print_trace(step, usage: true)
 | `raw: true` | Include `raw_response` in turns view |
 | `messages: true` | Show full messages sent to LLM each turn |
 | `usage: true` | Add token statistics after trace |
+| `system: :section` | Show a system prompt section (e.g., `:mission`) |
+| `system: :all` | Show the full system prompt per turn |
 
 Options can be combined: `print_trace(step, messages: true, usage: true)`.
+
+### System Prompt Sections
+
+Inspect specific sections of the system prompt by markdown header:
+
+```elixir
+Debug.print_trace(step, system: :mission)       # just the Mission section
+Debug.print_trace(step, system: :mission_log)    # just the Mission Log
+Debug.print_trace(step, system: :all)            # full system prompt
+Debug.print_trace(step, system: :nope)           # lists available section names
+```
+
+Sections are parsed from both system prompt and user messages. Known sections: `:role`, `:ptc_lisp`, `:output_format`, `:mission`, `:mission_log`, `:expected_output`, `:error`. Unrecognized headers are converted to snake_case atoms.
 
 > **Full API:** See `PtcRunner.SubAgent.Debug.print_trace/2`.
 

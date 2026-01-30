@@ -105,33 +105,46 @@ defmodule PtcRunner.SubAgent.Debug do
   def print_trace(%Step{turns: turns, usage: usage} = step, opts) when is_list(turns) do
     view = Keyword.get(opts, :view, :turns)
     show_usage = Keyword.get(opts, :usage, false)
+    system_opt = Keyword.get(opts, :system)
     original_prompt = step.original_prompt
 
-    case view do
-      :turns ->
-        show_raw = opts[:raw] == true
-        show_all_messages = opts[:messages] == true
-        raw_mode = show_raw and not show_all_messages
-        Enum.each(turns, &print_turn(&1, show_raw, show_all_messages, raw_mode, original_prompt))
+    # If system: option is given, show system prompt sections and return
+    if system_opt do
+      print_system_sections(turns, system_opt)
+      return_ok()
+    else
+      case view do
+        :turns ->
+          show_raw = opts[:raw] == true
+          show_all_messages = opts[:messages] == true
+          raw_mode = show_raw and not show_all_messages
 
-      :compressed ->
-        print_compressed_view(step)
-    end
+          Enum.each(
+            turns,
+            &print_turn(&1, show_raw, show_all_messages, raw_mode, original_prompt)
+          )
 
-    if show_usage and usage do
-      print_usage_summary(usage)
-
-      # Print tool call statistics
-      print_tool_stats(turns)
-
-      # Print compression stats if available
-      if compression = Map.get(usage, :compression) do
-        print_compression_summary(compression)
+        :compressed ->
+          print_compressed_view(step)
       end
-    end
 
-    :ok
+      if show_usage and usage do
+        print_usage_summary(usage)
+
+        # Print tool call statistics
+        print_tool_stats(turns)
+
+        # Print compression stats if available
+        if compression = Map.get(usage, :compression) do
+          print_compression_summary(compression)
+        end
+      end
+
+      :ok
+    end
   end
+
+  defp return_ok, do: :ok
 
   @doc """
   Pretty-print a chain of SubAgent executions.
@@ -655,4 +668,155 @@ defmodule PtcRunner.SubAgent.Debug do
   }
 
   defp ansi(code), do: Map.get(@ansi_codes, code, "")
+
+  # ============================================================
+  # Private Helpers - System Prompt Sections
+  # ============================================================
+
+  # Known header-to-key mappings
+  @header_to_key %{
+    "Role" => :role,
+    "PTC-Lisp" => :ptc_lisp,
+    "Output Format" => :output_format,
+    "Mission" => :mission,
+    "Mission Log (Completed Tasks)" => :mission_log,
+    "Expected Output" => :expected_output,
+    "Previous Turn Error" => :error
+  }
+
+  # Collect all text from system prompt + messages for a turn
+  defp collect_turn_text(turn) do
+    parts = []
+
+    parts =
+      case turn.system_prompt do
+        nil -> parts
+        prompt -> [prompt | parts]
+      end
+
+    parts =
+      case turn.messages do
+        nil ->
+          parts
+
+        msgs ->
+          msg_texts =
+            msgs
+            |> Enum.map(fn msg -> Map.get(msg, :content, "") end)
+
+          msg_texts ++ parts
+      end
+
+    parts |> Enum.reverse() |> Enum.join("\n")
+  end
+
+  # Print system prompt sections for all turns
+  defp print_system_sections(turns, section_key) do
+    turns
+    |> Enum.each(fn turn ->
+      full_text = collect_turn_text(turn)
+
+      if full_text == "" do
+        IO.puts(
+          "#{ansi(:cyan)}|#{ansi(:reset)} Turn #{turn.number}: #{ansi(:dim)}(no prompt captured)#{ansi(:reset)}"
+        )
+      else
+        sections = parse_system_sections(full_text)
+        print_system_for_turn(turn.number, sections, full_text, section_key)
+      end
+    end)
+  end
+
+  defp print_system_for_turn(turn_number, _sections, full_prompt, :all) do
+    header = " Turn #{turn_number} — System Prompt "
+
+    IO.puts(
+      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", max(@box_width - 3 - String.length(header), 0))}+#{ansi(:reset)}"
+    )
+
+    full_prompt
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
+    end)
+
+    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+  end
+
+  defp print_system_for_turn(turn_number, sections, _full_prompt, keys) when is_list(keys) do
+    Enum.each(keys, fn key ->
+      print_system_for_turn(turn_number, sections, nil, key)
+    end)
+  end
+
+  defp print_system_for_turn(turn_number, sections, _full_prompt, key) when is_atom(key) do
+    case Map.fetch(sections, key) do
+      {:ok, content} ->
+        header = " Turn #{turn_number} — :#{key} "
+
+        IO.puts(
+          "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", max(@box_width - 3 - String.length(header), 0))}+#{ansi(:reset)}"
+        )
+
+        content
+        |> String.trim()
+        |> String.split("\n")
+        |> Enum.each(fn line ->
+          IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
+        end)
+
+        IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+
+      :error ->
+        available = sections |> Map.keys() |> Enum.sort()
+
+        IO.puts(
+          "\n#{ansi(:yellow)}Unknown section :#{key} for turn #{turn_number}.#{ansi(:reset)}"
+        )
+
+        IO.puts("#{ansi(:dim)}Available sections: #{inspect(available)}#{ansi(:reset)}")
+    end
+  end
+
+  @doc false
+  def parse_system_sections(prompt) do
+    prompt
+    |> String.split("\n")
+    |> Enum.reduce({nil, [], %{}}, fn line, {current_key, current_lines, sections} ->
+      case Regex.run(~r/^(\#{1,2})\s+(.+)$/, line) do
+        [_, _hashes, title] ->
+          # Save previous section
+          sections = save_section(sections, current_key, current_lines)
+          key = header_to_key(title)
+          {key, [], sections}
+
+        _ ->
+          {current_key, current_lines ++ [line], sections}
+      end
+    end)
+    |> then(fn {current_key, current_lines, sections} ->
+      save_section(sections, current_key, current_lines)
+    end)
+  end
+
+  defp save_section(sections, nil, _lines), do: sections
+
+  defp save_section(sections, key, lines) do
+    Map.put(sections, key, Enum.join(lines, "\n"))
+  end
+
+  defp header_to_key(title) do
+    case Map.get(@header_to_key, title) do
+      nil ->
+        title
+        |> String.downcase()
+        |> String.replace(~r/[^a-z0-9]+/, "_")
+        |> String.trim_leading("_")
+        |> String.trim_trailing("_")
+        |> String.to_atom()
+
+      key ->
+        key
+    end
+  end
 end
