@@ -95,5 +95,40 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
       assert {:__ptc_fail__, "oops"} = step.return
       assert step.journal == %{}
     end
+
+    test "fail inside task halts execution - code after task does not run" do
+      {:ok, step} =
+        Lisp.run(~S|(do (task "x" (fail "oops")) (+ 1 2))|, journal: %{})
+
+      # Should get the fail signal, NOT 3
+      assert {:__ptc_fail__, "oops"} = step.return
+      assert step.journal == %{}
+    end
+  end
+
+  describe "(task) re-invocation pattern" do
+    test "second run with journal skips cached tasks and continues" do
+      tools = %{"send_email" => fn %{"to" => to} -> "sent_to_#{to}" end}
+
+      # Turn 1: execute task, get journal
+      {:ok, step1} =
+        Lisp.run(~S|(task "email" (tool/send_email {:to "bob"}))|,
+          journal: %{},
+          tools: tools
+        )
+
+      assert step1.journal == %{"email" => "sent_to_bob"}
+
+      # Turn 2: re-run with journal - tool should NOT be called again
+      # Using a tool map without the tool proves it wasn't called
+      {:ok, step2} =
+        Lisp.run(
+          ~S|(do (task "email" (tool/send_email {:to "bob"})) (str (task "email" (tool/send_email {:to "bob"})) "_done"))|,
+          journal: step1.journal
+        )
+
+      assert step2.return == "sent_to_bob_done"
+      assert step2.journal == %{"email" => "sent_to_bob"}
+    end
   end
 end
