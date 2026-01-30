@@ -69,6 +69,20 @@ Reason: I have 5 item IDs. The user asked for active items, and I've verified th
 
 **Note:** `return`/`fail` exit immediately — don't `println` on the same turn, no one will see it.
 
+### Journaled Tasks
+
+Use `(task "id" expr)` to record idempotent steps. If the task ID was already completed in a previous turn, the cached result is returned without re-executing. If the task fails, the result is NOT recorded.
+
+```clojure
+;; First execution: calls tool and records result
+(task "fetch-user" (tool/get-user {:id 123}))
+
+;; Later turn: returns cached result without calling tool again
+(task "fetch-user" (tool/get-user {:id 123}))
+```
+
+**Task IDs must be string literals.** The Mission Log in the system prompt shows which tasks have completed.
+
 ### State Persistence
 
 ```clojure

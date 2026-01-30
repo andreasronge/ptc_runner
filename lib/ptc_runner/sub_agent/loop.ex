@@ -140,6 +140,7 @@ defmodule PtcRunner.SubAgent.Loop do
     remaining_turns = Keyword.get(opts, :_remaining_turns, agent.turn_budget)
     mission_deadline = Keyword.get(opts, :_mission_deadline)
     trace_context = Keyword.get(opts, :trace_context)
+    journal = Keyword.get(opts, :journal)
 
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
@@ -183,7 +184,8 @@ defmodule PtcRunner.SubAgent.Loop do
           on_budget_exceeded: on_budget_exceeded,
           budget_callback: budget_callback,
           trace_context: trace_context,
-          max_heap: max_heap
+          max_heap: max_heap,
+          journal: journal
         }
 
         run_with_telemetry(agent, run_opts)
@@ -278,7 +280,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Trace context for nested agent tracing
       trace_context: run_opts.trace_context,
       # Lisp resource limits (propagated to child agents)
-      max_heap: run_opts.max_heap
+      max_heap: run_opts.max_heap,
+      # Journal for (task) idempotent execution
+      journal: run_opts.journal
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -383,6 +387,7 @@ defmodule PtcRunner.SubAgent.Loop do
         work_turns_remaining: new_work_turns,
         retry_turns_remaining: new_retry_turns,
         memory: Keyword.get(opts, :memory, state.memory),
+        journal: Keyword.get(opts, :journal, state.journal),
         last_fail: Keyword.get(opts, :last_fail),
         last_return_error: Keyword.get(opts, :last_return_error),
         turn_history: Keyword.get(opts, :turn_history, state.turn_history),
@@ -489,13 +494,14 @@ defmodule PtcRunner.SubAgent.Loop do
       messages: state.messages
     }
 
-    # Build system prompt
+    # Build system prompt (with mission log if journal has entries)
     system_prompt =
       build_system_prompt(
         agent,
         state.context,
         resolution_context,
-        state.received_field_descriptions
+        state.received_field_descriptions,
+        state.journal
       )
 
     # Build messages - use compression if enabled and turn > 1
@@ -711,7 +717,8 @@ defmodule PtcRunner.SubAgent.Loop do
         timeout: agent.timeout,
         pmap_timeout: agent.pmap_timeout,
         budget: build_budget_introspection_map(agent, state),
-        trace_context: state.trace_context
+        trace_context: state.trace_context,
+        journal: state.journal
       ]
       |> maybe_add_max_heap(state.max_heap)
 
@@ -745,6 +752,7 @@ defmodule PtcRunner.SubAgent.Loop do
         new_state =
           build_continuation_state(state, turn, response, feedback,
             memory: lisp_step.memory,
+            journal: lisp_step.journal,
             last_fail: lisp_step.fail,
             last_return_error: error_message
           )
@@ -859,6 +867,7 @@ defmodule PtcRunner.SubAgent.Loop do
             new_state =
               build_continuation_state(state, turn, response, execution_result,
                 memory: lisp_step.memory,
+                journal: lisp_step.journal,
                 turn_history: updated_history
               )
 
@@ -961,8 +970,23 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # System prompt generation - static sections only (cacheable)
   # Dynamic sections (data inventory, tools, expected output) are in the first user message
-  defp build_system_prompt(agent, _context, resolution_context, _received_field_descriptions) do
-    SystemPrompt.generate_system(agent, resolution_context: resolution_context)
+  defp build_system_prompt(
+         agent,
+         _context,
+         resolution_context,
+         _received_field_descriptions,
+         journal
+       ) do
+    base = SystemPrompt.generate_system(agent, resolution_context: resolution_context)
+
+    case journal do
+      %{} when map_size(journal) > 0 ->
+        mission_log = SystemPrompt.render_mission_log(journal)
+        base <> "\n\n" <> mission_log
+
+      _ ->
+        base
+    end
   end
 
   # Build the first user message with dynamic context prepended to mission
@@ -1177,6 +1201,7 @@ defmodule PtcRunner.SubAgent.Loop do
     new_state =
       build_continuation_state(state, turn, response, feedback,
         memory: lisp_step.memory,
+        journal: lisp_step.journal,
         last_return_error: error_message
       )
 

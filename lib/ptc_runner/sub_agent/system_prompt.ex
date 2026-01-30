@@ -412,6 +412,36 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     |> Enum.join("\n\n")
   end
 
+  @doc """
+  Render a Mission Log section from a journal map.
+
+  Shows completed tasks with truncated values (~200 chars).
+  Used to inject journal state into the system prompt so the LLM
+  knows which tasks have already been completed.
+  """
+  @spec render_mission_log(map()) :: String.t()
+  def render_mission_log(journal) when is_map(journal) and map_size(journal) > 0 do
+    entries =
+      Enum.map_join(journal, "\n", fn {id, value} ->
+        truncated = truncate_value(value, 200)
+        "- [done] #{id}: #{truncated}"
+      end)
+
+    "## Mission Log (Completed Tasks)\n\n#{entries}"
+  end
+
+  def render_mission_log(_), do: ""
+
+  defp truncate_value(value, max_len) do
+    str = inspect(value, limit: 10, printable_limit: max_len)
+
+    if String.length(str) > max_len do
+      String.slice(str, 0, max_len) <> "..."
+    else
+      str
+    end
+  end
+
   defp expand_prompt(prompt, context) do
     case PromptExpander.expand(prompt, context) do
       {:ok, expanded} -> expanded
