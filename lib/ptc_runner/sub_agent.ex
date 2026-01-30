@@ -222,6 +222,11 @@ defmodule PtcRunner.SubAgent do
   - `format_options` - Keyword list controlling output truncation (merged with defaults)
   - `float_precision` - Non-negative integer for decimal places in floats (default: 2)
   - `compression` - Compression strategy for turn history (see `t:compression_opts/0`)
+  - `pmap_timeout` - Positive integer for max milliseconds per `pmap` parallel operation (default: 5000)
+  - `max_depth` - Positive integer for maximum recursion depth in nested agents (default: 3)
+  - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
+  - `output` - Output mode: `:ptc_lisp` (default) or `:json`
+  - `llm_query` - Boolean enabling LLM query mode (default: false)
 
   ## Returns
 

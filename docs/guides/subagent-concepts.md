@@ -191,6 +191,11 @@ The LLM handles state internally to cache tool results, track progress, and avoi
 | `memory_strategy` | `:strict` | `:strict` (fatal) or `:rollback` (recover) on memory limit exceeded |
 | `float_precision` | `2` | Decimal places for floats in results |
 | `compression` | `false` | Enable message history compression |
+| `pmap_timeout` | `5000` | Timeout (ms) for parallel `pmap` operations |
+| `max_depth` | `3` | Maximum recursion depth for nested agents |
+| `turn_budget` | `20` | Total turn budget across retries |
+| `return_retries` | `0` | Retry budget after return validation failures |
+| `output` | `:ptc_lisp` | Output mode (`:ptc_lisp` or `:json`) |
 
 ## See Also
 
