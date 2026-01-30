@@ -88,6 +88,7 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-json-mode.md",
         "docs/guides/subagent-concepts.md",
         "docs/guides/subagent-patterns.md",
+        "docs/guides/subagent-rlm-patterns.md",
         "docs/guides/subagent-testing.md",
         "docs/guides/subagent-troubleshooting.md",
         "docs/guides/subagent-observability.md",
