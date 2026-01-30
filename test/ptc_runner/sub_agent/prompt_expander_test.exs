@@ -202,5 +202,28 @@ defmodule PtcRunner.SubAgent.PromptExpanderTest do
       assert PromptExpander.expand("{{a}}, {{b}}, {{c}}", %{b: "middle"}, on_missing: :keep) ==
                {:ok, "{{a}}, middle, {{c}}"}
     end
+
+    test "expands variables and sections together" do
+      context = %{
+        topic: "quantum computing",
+        articles: [%{id: 1, name: "Alpha"}, %{id: 2, name: "Beta"}]
+      }
+
+      template = """
+      Topic: {{topic}}
+
+      {{#articles}}
+      - ID {{id}}: {{name}}
+      {{/articles}}
+      """
+
+      {:ok, result} = PromptExpander.expand(template, context, on_missing: :keep)
+      assert result =~ "Topic: quantum computing"
+      assert result =~ "ID 1"
+      assert result =~ "ID 2"
+      assert result =~ "Alpha"
+      refute result =~ "{{topic}}"
+      refute result =~ "{{#articles}}"
+    end
   end
 end

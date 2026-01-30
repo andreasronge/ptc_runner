@@ -320,13 +320,13 @@ defmodule PtcRunner.SubAgent.PromptExpander do
       {:variable, path, _loc} ->
         if has_nested_value?(context, path), do: [], else: [Enum.join(path, ".")]
 
-      {:section, _name, inner, _loc} ->
-        # Recursively check inner content for missing simple variables
-        find_missing_simple_keys(inner, context)
+      {:section, _name, _inner, _loc} ->
+        # Don't recurse: inner variables resolve against the section's iteration context
+        []
 
-      {:inverted_section, _name, inner, _loc} ->
-        # Recursively check inner content for missing simple variables
-        find_missing_simple_keys(inner, context)
+      {:inverted_section, _name, _inner, _loc} ->
+        # Don't recurse: inner variables resolve against the section's iteration context
+        []
 
       _ ->
         []
