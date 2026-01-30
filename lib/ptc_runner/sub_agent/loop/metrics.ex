@@ -273,11 +273,14 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         }
       end)
 
+    system_prompt = Map.get(state, :current_system_prompt)
+
     params = %{
       prints: prints,
       tool_calls: simplified_tool_calls,
       memory: memory,
       messages: messages,
+      system_prompt: system_prompt,
       type: turn_type
     }
 

@@ -43,6 +43,7 @@ defmodule PtcRunner.Turn do
     :memory,
     :success?,
     :messages,
+    :system_prompt,
     type: :normal
   ]
 
@@ -86,6 +87,7 @@ defmodule PtcRunner.Turn do
           memory: map(),
           success?: boolean(),
           messages: [message()] | nil,
+          system_prompt: String.t() | nil,
           type: turn_type()
         }
 
@@ -138,6 +140,7 @@ defmodule PtcRunner.Turn do
       memory: Map.get(params, :memory, %{}),
       success?: true,
       messages: Map.get(params, :messages),
+      system_prompt: Map.get(params, :system_prompt),
       type: Map.get(params, :type, :normal)
     }
   end
@@ -187,6 +190,7 @@ defmodule PtcRunner.Turn do
       memory: Map.get(params, :memory, %{}),
       success?: false,
       messages: Map.get(params, :messages),
+      system_prompt: Map.get(params, :system_prompt),
       type: Map.get(params, :type, :normal)
     }
   end
