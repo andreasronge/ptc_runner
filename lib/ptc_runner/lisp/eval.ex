@@ -588,6 +588,33 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Journaled task: (task "id" expr)
+  # Cache hit: return stored value, skip expr
+  # Cache miss: evaluate expr, commit to journal
+  # No journal (nil): execute normally, emit trace warning
+  # Fail/crash inside expr: do NOT commit to journal, propagate failure
+  defp do_eval({:task, id, body_ast}, %EvalContext{journal: journal} = eval_ctx) do
+    case journal do
+      nil ->
+        # No journal - execute without caching, emit trace warning
+        IO.warn("PTC task '#{id}' executed without journal: caching and idempotency are inactive")
+        do_eval(body_ast, eval_ctx)
+
+      %{} ->
+        if Map.has_key?(journal, id) do
+          # Cache hit - return stored value without evaluating expr
+          {:ok, Map.get(journal, id), eval_ctx}
+        else
+          # Cache miss - evaluate and commit on success
+          # If body throws (fail_signal or crash), it propagates without committing
+          with {:ok, value, eval_ctx2} <- do_eval(body_ast, eval_ctx) do
+            updated_journal = Map.put(eval_ctx2.journal, id, value)
+            {:ok, value, %{eval_ctx2 | journal: updated_journal}}
+          end
+        end
+    end
+  end
+
   # Tool invocation via tool/ namespace: (tool/name args...)
   defp do_eval({:tool_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     # Evaluate all arguments

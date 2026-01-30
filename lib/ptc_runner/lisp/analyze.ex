@@ -198,6 +198,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :return}, rest, _list, tail?), do: analyze_return(rest, tail?)
   defp dispatch_list_form({:symbol, :fail}, rest, _list, tail?), do: analyze_fail(rest, tail?)
+  defp dispatch_list_form({:symbol, :task}, rest, _list, tail?), do: analyze_task(rest, tail?)
   defp dispatch_list_form({:symbol, :def}, rest, _list, tail?), do: analyze_def(rest, tail?)
   defp dispatch_list_form({:symbol, :defn}, rest, _list, tail?), do: analyze_defn(rest, tail?)
 
@@ -965,6 +966,25 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_fail(_, _tail?) do
     {:error, {:invalid_arity, :fail, "expected (fail error)"}}
+  end
+
+  # ============================================================
+  # Journaled task: (task "id" expr)
+  # ============================================================
+
+  defp analyze_task([{:string, id}, body_ast], _tail?) do
+    with {:ok, body} <- do_analyze(body_ast, false) do
+      {:ok, {:task, id, body}}
+    end
+  end
+
+  defp analyze_task([{:symbol, _} | _], _tail?) do
+    {:error,
+     {:invalid_form, "task ID must be a string literal, got symbol. Use (task \"my-id\" expr)"}}
+  end
+
+  defp analyze_task(_, _tail?) do
+    {:error, {:invalid_arity, :task, "expected (task \"id\" expr)"}}
   end
 
   # ============================================================
