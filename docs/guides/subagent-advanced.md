@@ -177,18 +177,7 @@ IO.puts(compiled.source)
 #=> (fn [report] (let [...] {...}))
 ```
 
-### 2. Validate (Optional)
-
-Test against known cases:
-
-```elixir
-case SubAgent.validate_compiled(compiled, test_reports) do
-  :ok -> IO.puts("Verified!")
-  {:error, failures} -> Logger.warning("Failed: #{length(failures)}")
-end
-```
-
-### 3. Apply Phase
+### 2. Apply Phase
 
 Execute at scale with zero LLM cost:
 
@@ -196,20 +185,6 @@ Execute at scale with zero LLM cost:
 results = Enum.map(all_reports, fn r ->
   compiled.execute(%{report: r})
 end)
-```
-
-### Persistence
-
-Save derived logic for later:
-
-```elixir
-File.write!("agents/scorer.lisp", compiled.source)
-
-# Load later
-{:ok, compiled} = SubAgent.load(
-  File.read!("agents/scorer.lisp"),
-  signature: "(report :map) -> {score :float, reason :string}"
-)
 ```
 
 ## Prompt Structure
@@ -344,5 +319,5 @@ key                            ; Access stored value
 - [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Type system details
-- `PtcRunner.SubAgent` - Full API reference
+- `PtcRunner.SubAgent.run/2` - Full API reference
 - [PTC-Lisp Specification](../ptc-lisp-specification.md) - Language reference
