@@ -98,14 +98,14 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
         {:ok, result}
 
       blocks ->
-        # Multiple blocks - wrap in do
-        code = Enum.map_join(blocks, "\n", &List.last/1)
-        result = sanitize_code("(do #{code})")
+        # Multiple blocks - use the last one (LLM self-corrected)
+        code = blocks |> List.last() |> List.last() |> String.trim()
+        result = sanitize_code(code)
 
         if System.get_env("DEBUG_PARSE"),
           do:
             IO.puts(
-              "=== DEBUG: Multiple clojure/lisp blocks (#{length(blocks)}) wrapped in do ===\n#{result}\n=== END EXTRACTED ===\n"
+              "=== DEBUG: Using last of #{length(blocks)} clojure/lisp blocks ===\n#{result}\n=== END EXTRACTED ===\n"
             )
 
         {:ok, result}
@@ -122,8 +122,8 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   end
 
   defp process_lisp_blocks(multiple, _response) do
-    code = Enum.join(multiple, "\n")
-    {:ok, sanitize_code("(do #{code})")}
+    # Multiple blocks - use the last one (LLM self-corrected)
+    {:ok, sanitize_code(List.last(multiple))}
   end
 
   # Try to extract raw s-expression from response

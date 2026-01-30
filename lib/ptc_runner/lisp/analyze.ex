@@ -427,7 +427,8 @@ defmodule PtcRunner.Lisp.Analyze do
       case find_iterator_modifier(bindings) do
         {:ok, mod} ->
           {:error,
-           {:invalid_arity, :for, "for modifier #{inspect(mod)} is not supported in this version"}}
+           {:invalid_arity, :for,
+            "for modifier #{inspect(mod)} is not supported. Use (filter pred coll) instead"}}
 
         :none ->
           body_asts = [first_body | rest_body]

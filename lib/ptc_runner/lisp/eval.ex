@@ -438,6 +438,9 @@ defmodule PtcRunner.Lisp.Eval do
                 trace_id = Process.get(:last_child_trace_id)
                 {:ok, value, trace_id}
               rescue
+                e in PtcRunner.ToolExecutionError ->
+                  {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
+
                 e ->
                   {:error, {:pmap_error, Exception.message(e)}}
               catch
