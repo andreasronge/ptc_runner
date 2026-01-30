@@ -38,61 +38,21 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 
 ## Why PtcRunner?
 
-**LLMs as programmers, not computers.** Most agent frameworks treat LLMs as the runtime. PtcRunner inverts this: LLMs generate programs that execute deterministically in a sandbox.
+**LLMs as programmers, not computers.** Most agent frameworks treat LLMs as the runtime. PtcRunner inverts this: LLMs generate programs that execute deterministically in a sandbox. Tool results stay in memory — the LLM explores data through code, exposing only relevant findings. This scales to thousands of items without context limits and eliminates hallucinated counts.
 
-### Design Philosophy
+**Best suited for:** Email processing, log analysis, data aggregation, multi-source joins — any task where raw data volume would overwhelm an LLM's context window.
 
-PtcRunner is designed for **data-heavy agent tasks** where traditional approaches bloat context with tool results.
+### Key Features
 
-**The key insight:** Tool results and input data are stored in memory but never shown to the LLM. The agent explores data programmatically through PTC-Lisp, exposing only relevant findings via `println`.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Traditional Agent (full context)                       │
-│                                                         │
-│  Tool call → 500 emails in context → LLM reads all      │
-│            → Token explosion                            │
-└─────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────┐
-│  PtcRunner (code-first exploration)                     │
-│                                                         │
-│  Tool call → 500 emails in memory → LLM writes code     │
-│            → Filter/aggregate     → println findings    │
-│            → Only relevant data in context              │
-└─────────────────────────────────────────────────────────┘
-```
-
-This approach provides:
-
-- **Scale**: Process thousands of items without context limits
-- **Precision**: Exact filtering, regex, math - no hallucinated counts
-- **Determinism**: Code executes the same way every time
-- **Token efficiency**: Pay for computation, not context
-
-**Best suited for:** Email processing, log analysis, data aggregation, multi-source joins, any task where raw data volume would overwhelm an LLM's context window.
-
-### BEAM-Native Advantages
-
-- **Parallel tool calling**: `pmap`/`pcalls` execute I/O concurrently using lightweight BEAM processes
-- **Process isolation**: Each execution runs in a sandboxed process with timeout and heap limits
-- **Fault tolerance**: Crashes don't propagate; built-in supervision patterns
-
-### Safe Lisp DSL
-
-- **Built for agentic workflows**: Multi-turn memory persistence, recursive self-calls, and recoverable errors let agents adapt strategies across turns
-- **Safe by construction**: No side effects, no system access, bounded iteration
-- **Observable**: Structured tracing via `PtcRunner.TraceLog` and telemetry spans for every turn, tool call, and child agent
-
-### Unique Features
-
+- **Two execution modes**: [PTC-Lisp](docs/ptc-lisp-specification.md) for multi-turn agentic workflows with tools, or [JSON mode](docs/guides/subagent-json-mode.md) for single-turn structured output via Mustache templates
+- **Signatures**: Type contracts (`{sentiment :string, score :float}`) that validate outputs and drive auto-retry on mismatch
 - **Context firewall**: `_` prefixed fields stay in BEAM memory, hidden from LLM prompts
 - **Transactional memory**: `def` persists data across turns without bloating context
 - **Composable SubAgents**: Nest agents as tools with isolated state and turn budgets
-- **[Recursive agents (RLM)](https://arxiv.org/pdf/2512.24601)**: Agents call themselves via `:self` tools to subdivide large inputs, with `memory_strategy: :rollback` for automatic recovery
-- **LLM-powered tools**: Define tool behavior as Mustache prompt templates — no code, just a prompt and a signature
+- **[Recursive agents (RLM)](https://arxiv.org/pdf/2512.24601)**: Agents call themselves via `:self` tools to subdivide large inputs
 - **Ad-hoc LLM queries**: `llm-query` calls an LLM from within PTC-Lisp with signature-validated responses
-- **Type-driven retry**: Signatures validate outputs; agents auto-correct on mismatch
+- **Observable**: [Telemetry spans](docs/guides/subagent-observability.md) for every turn, LLM call, and tool call with parent-child correlation. JSONL trace logs with Chrome DevTools flame chart export for debugging multi-agent flows
+- **BEAM-native**: Parallel tool calling (`pmap`/`pcalls`), process isolation with timeout and heap limits, fault tolerance
 
 ### Examples
 

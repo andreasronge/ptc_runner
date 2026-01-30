@@ -92,7 +92,7 @@ The callback receives:
 | Key | Type | Description |
 |-----|------|-------------|
 | `:turn` | integer | Current turn number (1-indexed) |
-| `:model` | atom \| function | The LLM reference |
+| `:model` | atom or function | The LLM (atom resolved via `llm_registry`, or callback function) |
 | `:memory` | map | Current memory state |
 | `:messages` | list | Conversation history |
 
@@ -170,39 +170,12 @@ SubAgent.new(
 
 ## Single-Turn vs Multi-Turn
 
-### Single-Turn (Classification, Extraction)
-
-For simple tasks with one LLM call:
-
-```elixir
-SubAgent.new(
-  prompt: "Classify sentiment: {{text}}",
-  signature: "{sentiment :string, confidence :float}",
-  max_turns: 1,
-  system_prompt: %{language_spec: :single_shot}
-)
-```
-
-No `return` call needed - the expression result is returned directly.
-
-### Multi-Turn (Investigation, Analysis)
-
-For complex tasks requiring iteration:
-
-```elixir
-SubAgent.new(
-  prompt: "Find anomalies in the dataset",
-  signature: "{anomalies [:map], summary :string}",
-  tools: analysis_tools,
-  max_turns: 10,
-  system_prompt: %{language_spec: :multi_turn}
-)
-```
-
-The `:multi_turn` profile documents:
+The `:multi_turn` profile adds documentation for:
 - `return`/`fail` for finishing the agentic loop and returning values to caller
 - `println` for outputting values to LLM context (expression results are NOT shown)
 - State persistence with `def` and `*1/*2/*3` for previous results
+
+See [Language Spec Profiles](#language-spec-profiles) for examples.
 
 ## Prompt Preview
 
@@ -234,5 +207,5 @@ See [JSON Mode Guide](subagent-json-mode.md) for Mustache syntax including `{{#s
 - [JSON Mode Guide](subagent-json-mode.md) - Mustache templates and structured output
 - [Core Concepts](subagent-concepts.md) - Context, memory, and firewalls
 - [Advanced Topics](subagent-advanced.md) - System prompt structure details
-- `PtcRunner.SubAgent.SystemPrompt` - API reference for prompt generation
-- `PtcRunner.Lisp.LanguageSpec` - Available language spec profiles
+- `PtcRunner.SubAgent.SystemPrompt.generate/2` - API reference for prompt generation
+- `PtcRunner.Lisp.LanguageSpec.get/1` - Available language spec profiles
