@@ -4,7 +4,7 @@ This guide walks you through your first SubAgent - from a minimal example to und
 
 ## Prerequisites
 
-- Elixir 1.14+
+- Elixir 1.15+
 - An LLM provider (OpenRouter, Anthropic, OpenAI, etc.)
 
 ## The Simplest SubAgent
@@ -223,47 +223,7 @@ The callback receives:
 
 ### Using Atoms with a Registry
 
-For convenience, you can use atoms like `:haiku` or `:sonnet` by providing an `llm_registry`:
-
-```elixir
-# Define your callbacks
-defmodule MyApp.LLM do
-  def haiku(input), do: call_anthropic("claude-3-haiku-20240307", input)
-  def sonnet(input), do: call_anthropic("claude-3-5-sonnet-20241022", input)
-end
-
-# Create registry
-registry = %{
-  haiku: &MyApp.LLM.haiku/1,
-  sonnet: &MyApp.LLM.sonnet/1
-}
-
-# Use atoms - resolved via registry
-PtcRunner.SubAgent.run(prompt,
-  llm: :sonnet,
-  llm_registry: registry,
-  signature: "..."
-)
-```
-
-The registry is inherited by child SubAgents, so you only pass it once at the top level. See `PtcRunner.SubAgent.run/2` for more details.
-
-### App-Level Default Registry
-
-For applications that want to avoid passing the registry on every call:
-
-```elixir
-# In your application.ex start/2
-def start(_type, _args) do
-  Application.put_env(:ptc_runner, :default_llm_registry, MyApp.llm_registry())
-  # ... rest of supervision tree
-end
-
-# Now llm_registry is optional - falls back to default
-PtcRunner.SubAgent.run(prompt, llm: :sonnet, signature: "...")
-```
-
-This is useful for production apps but not available in Livebook (use explicit registry there).
+For convenience, use atoms like `:sonnet` by providing an `llm_registry` map. The registry is inherited by child SubAgents. See `PtcRunner.SubAgent.run/2` for registry options and app-level defaults.
 
 ### Example with ReqLLM
 
@@ -337,32 +297,18 @@ tools = %{
 }
 ```
 
-### Adding Descriptions
-
-Descriptions help the LLM understand when and how to use each tool. Use keyword list format:
+For production tools, add descriptions and explicit signatures using keyword list format:
 
 ```elixir
 tools = %{
   "search" => {&MyApp.search/2,
     signature: "(query :string, limit :int?) -> [{id :int, title :string}]",
     description: "Search for items matching query. Returns up to limit results (default 10)."
-  },
-
-  "get_user" => {&MyApp.get_user/1,
-    signature: "(id :int) -> {name :string, email :string?}",
-    description: "Fetch user by ID. Returns nil if not found."
   }
 }
 ```
 
-### Tool Format Summary
-
-| Format | When to Use |
-|--------|-------------|
-| `&Mod.fun/n` | Functions with @spec and @doc |
-| `{fun, "signature"}` | Explicit signature, no description needed |
-| `{fun, signature: "...", description: "..."}` | Production tools with full documentation |
-| `fn args -> ... end` | Quick inline functions |
+See `PtcRunner.Tool` for all supported tool formats.
 
 ## Builtin LLM Queries
 
@@ -399,52 +345,7 @@ product_finder = PtcRunner.SubAgent.new(
 
 This separation enables testing, composition, and reuse.
 
-### Additional Struct Fields
-
-SubAgents support additional optional fields for documentation and output control:
-
-```elixir
-PtcRunner.SubAgent.new(
-  prompt: "Find products matching {{query}}",
-  signature: "(query :string) -> [{name :string, price :float}]",
-  tools: product_tools,
-
-  # Human-readable description for external documentation
-  description: "Searches the product catalog and returns matching items",
-
-  # Descriptions for individual signature fields
-  field_descriptions: %{
-    query: "Search term to match against product names",
-    name: "Product name",
-    price: "Price in USD"
-  },
-
-  # Descriptions for context variables (shown in Data Inventory)
-  context_descriptions: %{
-    user_id: "ID of the customer performing the search",
-    region: "ISO region code (e.g. US, UK)"
-  },
-
-  # Output formatting options (shown with defaults)
-  format_options: [
-    feedback_limit: 10,        # max collection items in turn feedback
-    feedback_max_chars: 512,   # max chars in turn feedback
-    history_max_bytes: 512,    # truncation limit for *1/*2/*3 history
-    result_limit: 50,          # inspect :limit for final result
-    result_max_chars: 500,     # final string truncation
-    max_print_length: 2000     # max chars per println call
-  ],
-
-  # Float precision for output formatting (default: 2)
-  float_precision: 2,
-
-  # Memory limit and recovery strategy
-  memory_limit: 1_048_576,      # max bytes for memory map (default: 1MB)
-  memory_strategy: :rollback    # :strict (fatal) or :rollback (recover and retry)
-)
-```
-
-These fields are used by the v2 namespace model for enhanced documentation flow and output control. See `PtcRunner.SubAgent` for full details.
+SubAgents also support fields for documentation (`description`, `field_descriptions`, `context_descriptions`), output formatting (`format_options`, `float_precision`), and memory limits (`memory_limit`, `memory_strategy`). See `PtcRunner.SubAgent.new/1` for all options.
 
 ## The Firewall Convention
 
