@@ -374,6 +374,7 @@ defmodule PtcRunner.Lisp.Env do
       {:vector, {:collect, &Function.identity/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},
+      {:type, {:normal, &Runtime.type_of/1}},
 
       # ============================================================
       # String manipulation

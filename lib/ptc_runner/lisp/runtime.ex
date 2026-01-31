@@ -242,6 +242,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate set?(x), to: Predicates
   defdelegate map?(x), to: Predicates
   defdelegate coll?(x), to: Predicates
+  defdelegate type_of(x), to: Predicates
   defdelegate set(coll), to: Predicates
   defdelegate vec(coll), to: Predicates
 
