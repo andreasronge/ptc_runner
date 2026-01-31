@@ -159,14 +159,19 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
-  Return lines containing the pattern (literal substring match).
+  Return lines matching the pattern (regex).
+  String patterns are compiled as regex with BRE-to-PCRE translation
+  (e.g. `\\|` becomes `|` for alternation).
   - (grep "error" text) returns lines containing "error"
-  - (grep "" "a\nb") returns ["a", "b"] (empty pattern matches all)
+  - (grep "error\\|warn" text) returns lines matching error or warn
+  - (grep "" "a\\nb") returns ["a", "b"] (empty pattern matches all)
   """
+  def grep("", text) when is_binary(text) do
+    split_lines(text)
+  end
+
   def grep(pattern, text) when is_binary(pattern) and is_binary(text) do
-    text
-    |> split_lines()
-    |> Enum.filter(&String.contains?(&1, pattern))
+    grep(compile_grep_pattern(pattern), text)
   end
 
   def grep({:re_mp, _, _, _} = re, text) when is_binary(text) do
@@ -178,15 +183,19 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
-  Return lines containing the pattern with 1-based line numbers.
+  Return lines matching the pattern with 1-based line numbers.
+  String patterns are compiled as regex with BRE-to-PCRE translation.
   - (grep-n "error" text) returns [{:line 1 :text "error here"} ...]
   """
-  def grep_n(pattern, text) when is_binary(pattern) and is_binary(text) do
+  def grep_n("", text) when is_binary(text) do
     text
     |> split_lines()
     |> Enum.with_index(1)
-    |> Enum.filter(fn {line, _idx} -> String.contains?(line, pattern) end)
     |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
+  end
+
+  def grep_n(pattern, text) when is_binary(pattern) and is_binary(text) do
+    grep_n(compile_grep_pattern(pattern), text)
   end
 
   def grep_n({:re_mp, _, _, _} = re, text) when is_binary(text) do
@@ -197,6 +206,25 @@ defmodule PtcRunner.Lisp.Runtime.String do
     |> Enum.with_index(1)
     |> Enum.filter(fn {line, _idx} -> RuntimeRegex.re_find(re, line) != nil end)
     |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
+  end
+
+  # Translate BRE escapes to PCRE and compile as regex.
+  # LLMs often write \| for alternation (BRE style) but PCRE treats \| as literal pipe.
+  defp compile_grep_pattern(pattern) do
+    alias PtcRunner.Lisp.Runtime.Regex, as: RuntimeRegex
+
+    pattern
+    |> bre_to_pcre()
+    |> RuntimeRegex.re_pattern()
+  end
+
+  # Convert common BRE escape sequences to PCRE equivalents.
+  # BRE uses \| \( \) for special meaning; PCRE uses | ( ) unescaped.
+  defp bre_to_pcre(pattern) do
+    pattern
+    |> String.replace("\\|", "|")
+    |> String.replace("\\(", "(")
+    |> String.replace("\\)", ")")
   end
 
   # ============================================================

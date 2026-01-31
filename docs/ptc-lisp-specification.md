@@ -1815,8 +1815,8 @@ The `seq` function converts a collection to a sequence:
 | `starts-with?` | `(starts-with? s prefix)` | Check if string starts with prefix |
 | `ends-with?` | `(ends-with? s suffix)` | Check if string ends with suffix |
 | `includes?` | `(includes? s substring)` | Check if string contains substring |
-| `grep` | `(grep pattern text)` | Return lines containing pattern (substring match) |
-| `grep-n` | `(grep-n pattern text)` | Return lines with 1-based line numbers as `{:line n :text s}` |
+| `grep` | `(grep pattern text)` | Return lines matching regex pattern (BRE `\|` auto-converted to PCRE `|`) |
+| `grep-n` | `(grep-n pattern text)` | Return matching lines with 1-based line numbers as `{:line n :text s}` |
 
 **Type coercion:** `str` converts values to strings using these rules:
 - `nil` → `""`
@@ -1863,7 +1863,8 @@ The `seq` function converts a collection to a sequence:
 - `(includes? "hello" "ll")` → `true` (substring check)
 - `(includes? "hello" "x")` → `false` (does not contain)
 - `(includes? "hello" "")` → `true` (empty substring always matches)
-- `(grep "error" "info\nerror: bad\nok")` → `["error: bad"]` (lines containing pattern)
+- `(grep "error" "info\nerror: bad\nok")` → `["error: bad"]` (regex match on lines)
+- `(grep "error\|warn" text)` → lines matching "error" or "warn" (BRE `\|` auto-converted)
 - `(grep "" "a\nb")` → `["a" "b"]` (empty pattern matches all lines)
 - `(grep-n "error" "info\nerror: bad")` → `[{:line 2 :text "error: bad"}]` (with line numbers)
 
