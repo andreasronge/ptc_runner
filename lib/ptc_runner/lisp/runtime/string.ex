@@ -169,6 +169,14 @@ defmodule PtcRunner.Lisp.Runtime.String do
     |> Enum.filter(&String.contains?(&1, pattern))
   end
 
+  def grep({:re_mp, _, _, _} = re, text) when is_binary(text) do
+    alias PtcRunner.Lisp.Runtime.Regex, as: RuntimeRegex
+
+    text
+    |> split_lines()
+    |> Enum.filter(&(RuntimeRegex.re_find(re, &1) != nil))
+  end
+
   @doc """
   Return lines containing the pattern with 1-based line numbers.
   - (grep-n "error" text) returns [{:line 1 :text "error here"} ...]
@@ -178,6 +186,16 @@ defmodule PtcRunner.Lisp.Runtime.String do
     |> split_lines()
     |> Enum.with_index(1)
     |> Enum.filter(fn {line, _idx} -> String.contains?(line, pattern) end)
+    |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
+  end
+
+  def grep_n({:re_mp, _, _, _} = re, text) when is_binary(text) do
+    alias PtcRunner.Lisp.Runtime.Regex, as: RuntimeRegex
+
+    text
+    |> split_lines()
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _idx} -> RuntimeRegex.re_find(re, line) != nil end)
     |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
   end
 

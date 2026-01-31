@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 27 -->
-<!-- date: 2026-01-30 -->
-<!-- changes: Add common mistakes for max-by vs apply max-key, missing list/cons -->
+<!-- version: 28 -->
+<!-- date: 2026-01-31 -->
+<!-- changes: Add regex support to grep/grep-n, document grep common mistakes -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -23,10 +23,12 @@ Safe Clojure subset.
 ### Data & Tools
 ```clojure
 data/products                      ; read-only input data
-(tool/search {:query "budget"})    ; tool invocation
+(tool/search {:query "budget"})    ; tool invocation — ALWAYS use named args
 (def results (tool/search {...}))  ; store result in variable
 (count results)                    ; access variable (no data/)
 ```
+
+**Tool calls require named arguments** — use `(tool/name {:key value})`, never `(tool/name value)`. Even single-parameter tools: `(tool/fetch {:url "..."})` not `(tool/fetch "...")`.
 
 **Tip:** `(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
 
@@ -75,11 +77,19 @@ data/products                      ; read-only input data
 - ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
 - ✗ `(grep text pattern)` → ✓ `(grep pattern text)` — pattern first
 
+**Grep:**
+- ✗ `(grep "A\|B" text)` → ✓ `(grep (re-pattern "A|B") text)` — string grep is literal; use `re-pattern` for regex alternation
+- ✗ `(grep "error\\d+" text)` → ✓ `(grep (re-pattern "error\\d+") text)` — string grep has no regex support
+
 **Regex & Parsing:**
 - ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
 - ✗ `Integer/parseInt` → ✓ `parse-long` or `parse-int` — no Java interop
 - ✗ `(parse-long (second (re-find ...)))` → ✓ `(extract-int "pattern" str)` — simplified extraction
 - ✗ `clojure.string/split` → ✓ `(split s ",")` or `(re-split (re-pattern "\\s+") s)`
+
+**Tool calls:**
+- ✗ `(tool/fetch "https://...")` → ✓ `(tool/fetch {:url "https://..."})` — always use named args
+- ✗ `(tool/search "query" 10)` → ✓ `(tool/search {:query "query" :limit 10})`
 
 **Threading & Iteration:**
 - ✗ `(-> coll (filter f))` → ✓ `(->> coll (filter f))` — use `->>` for collections
@@ -89,8 +99,13 @@ data/products                      ; read-only input data
 ### Line Search (grep)
 
 ```clojure
+;; Literal substring match (fast)
 (grep "error" text)              ; => ["error: first" "error: second"]
 (grep-n "agent_42" corpus)       ; => [{:line 4523 :text "agent_42 code: XYZ"}]
+
+;; Regex match — use (re-pattern ...) for alternation/patterns
+(grep (re-pattern "feature|improvement") text)  ; regex alternation
+(grep-n (re-pattern "v\\d+\\.\\d+") changelog)  ; version numbers
 
 ; Access line number from result
 (def matches (grep-n "error" log))
