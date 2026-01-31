@@ -94,7 +94,10 @@ defmodule PtcRunner.Lisp.Parser do
       string("\"") |> replace(?"),
       string("n") |> replace(?\n),
       string("t") |> replace(?\t),
-      string("r") |> replace(?\r)
+      string("r") |> replace(?\r),
+      # Passthrough: unknown escapes like \| \d \w preserve the backslash
+      utf8_char(not: ?\\, not: ?", not: ?\n, not: ?\r)
+      |> map({ParserHelpers, :passthrough_escape, []})
     ])
 
   # Single-line strings only - exclude literal newlines

@@ -37,6 +37,8 @@ defmodule PtcRunner.Lisp.ParserHelpers do
 
   def char_to_string(char), do: <<char::utf8>>
 
+  def passthrough_escape(char) when is_integer(char), do: <<?\\, char::utf8>>
+
   def build_string(chars) do
     str = Enum.map_join(chars, &to_string_part/1)
     {:string, str}
