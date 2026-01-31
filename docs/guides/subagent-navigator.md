@@ -13,7 +13,7 @@ The Navigator is a stateless agent that "re-navigates" its mission by checking a
 
 ```elixir
 # Turn 1: empty journal
-{:ok, step} = SubAgent.run(agent, llm: llm, context: %{journal: %{}})
+{:ok, step} = SubAgent.run(agent, llm: llm, context: %{}, journal: %{})
 # step.journal => %{"fetch-data" => [1, 2, 3]}
 
 # Turn 2: re-invoke with saved journal
@@ -25,7 +25,7 @@ The app owns persistence. Save `step.journal` to your database between runs; pas
 
 ## How It Works
 
-1. The agent receives a journal (possibly empty) via `context`
+1. The agent receives a journal (possibly empty) via the `journal:` option
 2. The engine injects a **Mission Log** into the system prompt showing completed tasks
 3. The LLM sees what's done and generates code for remaining work
 4. `(task "id" expr)` checks the journal: cache hit skips `expr`, cache miss evaluates and records
@@ -45,7 +45,7 @@ agent = SubAgent.new(
   max_turns: 5
 )
 
-{:ok, step} = SubAgent.run(agent, llm: llm, context: %{order_id: 42, journal: %{}})
+{:ok, step} = SubAgent.run(agent, llm: llm, context: %{order_id: 42}, journal: %{})
 # step.journal => %{"charge_order_42" => "tx_abc"}
 # step.return => %{status: :waiting}
 
@@ -76,7 +76,7 @@ The journal is a plain map. Any code can write to it between runs.
 
 ```elixir
 journal = MyRepo.get_journal(order_id)
-{:ok, step} = SubAgent.run(agent, llm: llm, context: %{order_id: 42, journal: journal})
+{:ok, step} = SubAgent.run(agent, llm: llm, context: %{order_id: 42}, journal: journal)
 # step.return => %{status: :shipped}
 ```
 

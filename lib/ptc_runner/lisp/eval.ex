@@ -629,7 +629,7 @@ defmodule PtcRunner.Lisp.Eval do
     case eval_all(arg_asts, eval_ctx) do
       {:ok, arg_vals, eval_ctx2} ->
         # Convert args list to map for tool executor
-        case build_args_map(arg_vals) do
+        case build_args_map(arg_vals, tool_name) do
           {:ok, args_map} ->
             # Convert atom to string for backward compatibility with tool_exec
             tool_name_str = Atom.to_string(tool_name)
@@ -668,16 +668,28 @@ defmodule PtcRunner.Lisp.Eval do
   # All maps are converted to string keys at the tool boundary to:
   # - Prevent atom memory leaks from LLM-generated keywords
   # - Match JSON conventions (like Phoenix params)
-  defp build_args_map([]), do: {:ok, %{}}
-  defp build_args_map([arg]) when is_map(arg), do: {:ok, stringify_keys(arg)}
+  defp build_args_map([], _tool_name), do: {:ok, %{}}
+  defp build_args_map([arg], _tool_name) when is_map(arg), do: {:ok, stringify_keys(arg)}
 
-  defp build_args_map(args) do
+  defp build_args_map(args, tool_name) do
     if keyword_style_args?(args) do
       {:ok, args_to_string_map(args)}
     else
+      hint =
+        case args do
+          [single] when is_binary(single) ->
+            " Got string \"#{String.slice(single, 0, 40)}\" — try (tool/#{tool_name} {:url \"...\"})"
+
+          [single] ->
+            " Got #{inspect(single, limit: 3, printable_limit: 40)} — wrap in {:key value}"
+
+          _ ->
+            ""
+        end
+
       {:error,
        {:invalid_tool_args,
-        "Tool calls require named arguments. Use (tool/name {:key value}) or (tool/name :key value), not positional args."}}
+        "Tool calls require named arguments. Use (tool/#{tool_name} {:key value}), not positional args.#{hint}"}}
     end
   end
 
