@@ -4,7 +4,7 @@ Core language reference for PTC-Lisp. Always included.
 
 <!-- version: 28 -->
 <!-- date: 2026-01-31 -->
-<!-- changes: Add regex support to grep/grep-n, document grep common mistakes -->
+<!-- changes: grep now always uses regex with BRE-to-PCRE auto-translation -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -76,10 +76,7 @@ data/products                      ; read-only input data
 **Functions:**
 - ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
 - ✗ `(grep text pattern)` → ✓ `(grep pattern text)` — pattern first
-
-**Grep:**
-- ✗ `(grep "A\|B" text)` → ✓ `(grep (re-pattern "A|B") text)` — string grep is literal; use `re-pattern` for regex alternation
-- ✗ `(grep "error\\d+" text)` → ✓ `(grep (re-pattern "error\\d+") text)` — string grep has no regex support
+- For literal substring search, use `filter` with `includes?` (grep is regex)
 
 **Regex & Parsing:**
 - ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
@@ -96,22 +93,23 @@ data/products                      ; read-only input data
 - ✗ `(for [x xs :when (odd? x)] ...)` → ✓ `(for [x (filter odd? xs)] ...)` — no `:when` modifier
 - ✗ `(doseq [x xs] (swap! acc ...))` → ✓ `(reduce (fn [acc x] ...) {} xs)`
 
-### Line Search (grep)
+### Regex Line Search (grep)
 
 ```clojure
-;; Literal substring match (fast)
+;; grep treats string patterns as regex (like unix grep)
 (grep "error" text)              ; => ["error: first" "error: second"]
+(grep "error\|warn" text)        ; alternation (BRE \| is auto-converted)
+(grep "error|warn" text)         ; alternation (PCRE style also works)
+(grep "v\\d+\\.\\d+" changelog)  ; regex patterns work directly
 (grep-n "agent_42" corpus)       ; => [{:line 4523 :text "agent_42 code: XYZ"}]
-
-;; Regex match — use (re-pattern ...) for alternation/patterns
-(grep (re-pattern "feature|improvement") text)  ; regex alternation
-(grep-n (re-pattern "v\\d+\\.\\d+") changelog)  ; version numbers
 
 ; Access line number from result
 (def matches (grep-n "error" log))
 (:line (first matches))          ; => 1
 (:text (first matches))          ; => "error: connection failed"
 ```
+
+**For literal substring search**, use `filter` with `includes?`.
 
 ### Aggregators
 

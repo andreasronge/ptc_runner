@@ -42,6 +42,27 @@ defmodule PtcRunner.Lisp.Runtime.StringGrepTest do
       assert Runtime.grep("error", text) == ["error: small"]
       assert Runtime.grep("Error", text) == ["Error: big"]
     end
+
+    test "string pattern is treated as regex" do
+      text = "info: ok\nerror: bad\nwarn: meh"
+      assert Runtime.grep("error|warn", text) == ["error: bad", "warn: meh"]
+    end
+
+    test "BRE-style \\| is auto-converted to PCRE alternation" do
+      text = "info: ok\nerror: bad\nwarn: meh"
+      # LLMs often write \| for alternation (BRE habit)
+      assert Runtime.grep("error\\|warn", text) == ["error: bad", "warn: meh"]
+    end
+
+    test "regex patterns like \\d+ work in string grep" do
+      text = "item1\nno match\nitem42"
+      assert Runtime.grep("item\\d+", text) == ["item1", "item42"]
+    end
+
+    test "BRE-style \\( \\) are converted to PCRE groups" do
+      text = "foo123\nbar456\nbaz"
+      assert Runtime.grep("\\(foo\\|bar\\)\\d+", text) == ["foo123", "bar456"]
+    end
   end
 
   describe "grep_n" do
@@ -84,6 +105,15 @@ defmodule PtcRunner.Lisp.Runtime.StringGrepTest do
       assert Runtime.grep_n("error", text) == [
                %{line: 2, text: "error: win"},
                %{line: 4, text: "error: unix"}
+             ]
+    end
+
+    test "BRE-style \\| alternation works in grep_n" do
+      text = "info\nerror: bad\nwarn: meh\nok"
+
+      assert Runtime.grep_n("error\\|warn", text) == [
+               %{line: 2, text: "error: bad"},
+               %{line: 3, text: "warn: meh"}
              ]
     end
   end
