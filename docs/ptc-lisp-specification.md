@@ -1997,6 +1997,7 @@ The `seq` function converts a collection to a sequence:
 | `map?` | Is map? |
 | `set?` | Is set? |
 | `coll?` | Is collection? (vectors only, not maps or strings) |
+| `type` | Returns type as keyword: `:nil`, `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function` |
 
 **Note:** In PTC-Lisp, `coll?` returns `true` only for vectors (and any future sequence types). Maps and strings are not considered collections by `coll?`. This affects functions like `flatten` which only flatten values where `coll?` is true.
 

@@ -126,6 +126,33 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def coll?(x), do: is_list(x)
 
+  @doc "Returns the type of a value as a keyword."
+  # credo:disable-for-next-line
+  def type_of(nil), do: nil
+  def type_of(x) when is_boolean(x), do: :boolean
+  def type_of(x) when is_number(x), do: :number
+  def type_of(x) when is_binary(x), do: :string
+  def type_of(x) when is_list(x), do: :vector
+  def type_of(%MapSet{}), do: :set
+
+  def type_of(x) when is_atom(x) do
+    if SpecialValues.special?(x), do: :number, else: :keyword
+  end
+
+  def type_of(x) when is_tuple(x) do
+    case x do
+      {:re_mp, _, _, _} -> :regex
+      {:closure, _, _, _, _, _} -> :function
+      {tag, _} when tag in [:normal, :collect] -> :function
+      {tag, _, _} when tag in [:variadic, :variadic_nonempty, :multi_arity, :special] -> :function
+      _ -> :unknown
+    end
+  end
+
+  def type_of(x) when is_map(x), do: :map
+  def type_of(x) when is_function(x), do: :function
+  def type_of(_), do: :unknown
+
   @doc "Convert collection to set"
   def set(coll) when is_list(coll), do: MapSet.new(coll)
   def set(%MapSet{} = set), do: set
