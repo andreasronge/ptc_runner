@@ -397,6 +397,52 @@ Validation happens at registration time, not runtime.
 
 ---
 
+## Calling Tools from PTC-Lisp
+
+Tool calls in PTC-Lisp **always use named arguments** — never positional. The signature parameters become the keys in a map literal:
+
+```clojure
+;; Signature: (query :string, limit :int) -> [{id :int}]
+
+;; CORRECT — map literal with named keys
+(tool/search {:query "budget" :limit 10})
+
+;; CORRECT — keyword-style (equivalent, no braces)
+(tool/search :query "budget" :limit 10)
+
+;; WRONG — positional arguments
+(tool/search "budget" 10)
+```
+
+This is a common LLM mistake, especially with **single-parameter tools**:
+
+```clojure
+;; Signature: (url :string) -> {text :string}
+
+;; CORRECT
+(tool/fetch_page {:url "https://example.com"})
+
+;; WRONG — passing the string directly
+(tool/fetch_page "https://example.com")
+```
+
+**No-argument tools** are called with an empty map or no arguments:
+
+```clojure
+;; Signature: () -> {count :int}
+(tool/get_count {})
+(tool/get_count)
+```
+
+### Why Named Arguments?
+
+- **Self-documenting** — `{:query "budget" :limit 10}` is clearer than `"budget" 10`
+- **Order-independent** — Parameters can appear in any order
+- **Extensible** — Adding optional parameters doesn't break existing calls
+- **JSON-compatible** — Maps serialize naturally to JSON objects at the tool boundary
+
+---
+
 ## Schema Generation for Prompts
 
 Tool schemas are rendered in the LLM prompt using signature syntax:

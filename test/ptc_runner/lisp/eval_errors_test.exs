@@ -419,7 +419,8 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                Eval.eval(tool_call_ast, %{}, %{}, %{}, tool_exec)
 
       assert msg =~ "Tool calls require named arguments"
-      assert msg =~ "tool/name {:key value}"
+      assert msg =~ "tool/query {:key value}"
+      assert msg =~ "Got string"
     end
 
     test "multiple positional arguments to tool returns invalid_tool_args error" do

@@ -1,0 +1,235 @@
+# Plan & Execute: Web Research with Journaled Tasks
+
+## Setup
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+  else
+    [{:ptc_runner, "~> 0.6.0"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+```elixir
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} = Req.get!("https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs")
+  Code.eval_string(code)
+end
+
+setup = LLMSetup.setup()
+```
+
+```elixir
+setup = LLMSetup.choose_provider(setup)
+```
+
+```elixir
+my_llm = LLMSetup.choose_model(setup)
+```
+
+## The `fetch_page` Tool
+
+A simple tool that fetches a URL and returns the text content (HTML stripped, truncated to keep context manageable):
+
+```elixir
+fetch_page = fn %{"url" => url} ->
+  case Req.get(url, redirect: true, max_redirects: 3, receive_timeout: 15_000) do
+    {:ok, %{status: 200, body: body}} when is_binary(body) ->
+      # Strip HTML tags, collapse whitespace, truncate
+      text =
+        body
+        |> String.replace(~r/<script[^>]*>.*?<\/script>/s, "")
+        |> String.replace(~r/<style[^>]*>.*?<\/style>/s, "")
+        |> String.replace(~r/<[^>]+>/, " ")
+        |> String.replace(~r/&\w+;/, " ")
+        |> String.replace(~r/\s+/, " ")
+        |> String.trim()
+        |> String.slice(0, 4000)
+
+      %{url: url, text: text}
+
+    {:ok, %{status: status}} ->
+      {:error, "HTTP #{status} for #{url}"}
+
+    {:error, reason} ->
+      {:error, "Request failed for #{url}: #{inspect(reason)}"}
+  end
+end
+
+# Quick test
+fetch_page.(%{"url" => "https://elixir-lang.org"}) |> Map.update!(:text, &String.slice(&1, 0, 200))
+```
+
+## Phase 1: The Planner
+
+The planner agent receives a research question and produces a numbered plan. It does NOT execute anything — just thinks about what steps are needed.
+
+```elixir
+alias PtcRunner.SubAgent
+
+planner = SubAgent.new(
+  prompt: """
+  Research question: {{question}}
+
+  You have access to a `fetch_page` tool that retrieves web page text content.
+  You also have `(grep pattern text)` to search for lines matching a pattern,
+  and `(grep-n pattern text)` which returns matches with line numbers.
+  Plan the steps needed to answer this question. Each step should be a short
+  action description. Return 3-6 concrete steps.
+  """,
+  signature: "(question :string) -> {steps [:string]}",
+  max_turns: 1,
+  output: :json
+)
+
+question = "What are the latest stable versions of Elixir and Erlang/OTP, and what are the key new features in each?"
+
+{:ok, plan_step} = SubAgent.run(planner, llm: my_llm, context: %{question: question})
+
+plan = plan_step.return["steps"]
+IO.puts("=== Generated Plan ===")
+Enum.with_index(plan, 1) |> Enum.each(fn {step, i} -> IO.puts("  #{i}. #{step}") end)
+
+plan
+```
+
+## Phase 2: The Executor
+
+The executor receives the plan in its prompt and uses `(task "step-N" ...)` for each step. The journal + Mission Log track progress across turns.
+
+```elixir
+# Format plan as a numbered list for the prompt
+plan_text = Enum.with_index(plan, 1) |> Enum.map_join("\n", fn {s, i} -> "#{i}. #{s}" end)
+
+executor = SubAgent.new(
+  prompt: """
+  Answer this research question: {{question}}
+
+  Follow this plan, one step per turn. Use `(task "step-N" ...)` for each step
+  so progress is tracked. Inspect results with `println` before moving on.
+  Only `return` when you have enough information to answer fully.
+
+  Use `(grep pattern text)` to search fetched page content for relevant lines
+  instead of reading raw text. Use `(grep-n pattern text)` for matches with
+  line numbers.
+
+  Plan:
+  {{plan}}
+  """,
+  signature: "(question :string, plan :string) -> :map",
+  tools: %{
+    "fetch_page" => {fetch_page,
+      signature: "(url :string) -> {url :string, text :string}",
+      description: "Fetch a web page and return its text content. Example: (tool/fetch_page {:url \"https://example.com\"})"}
+  },
+  max_turns: 8,
+  timeout: 30_000
+)
+
+{result, step} =
+  SubAgent.run(executor,
+    llm: my_llm,
+    context: %{question: question, plan: plan_text},
+    journal: %{},
+    debug: true
+  )
+
+SubAgent.Debug.print_trace(step, raw: true)
+
+{result, step.return}
+```
+
+## Inspect the Journal
+
+The journal shows all completed tasks with their cached results:
+
+```elixir
+if step.journal && map_size(step.journal) > 0 do
+  IO.puts("=== Journal (#{map_size(step.journal)} entries) ===\n")
+
+  Enum.each(step.journal, fn {id, value} ->
+    val_str = inspect(value, limit: 5, printable_limit: 120)
+    IO.puts("  [done] #{id}: #{String.slice(val_str, 0, 120)}")
+  end)
+else
+  IO.puts("(no journal entries)")
+end
+
+:ok
+```
+
+## Try a Different Question
+
+```elixir
+question_input = Kino.Input.text("Research question",
+  default: "Compare the package download counts of Phoenix, Plug, and Ecto on hex.pm — which is most popular?"
+)
+```
+
+```elixir
+question2 = Kino.Input.read(question_input)
+
+# Phase 1: Plan
+{:ok, plan_step2} = SubAgent.run(planner, llm: my_llm, context: %{question: question2})
+plan2 = plan_step2.return.steps
+
+IO.puts("=== Plan ===")
+Enum.with_index(plan2, 1) |> Enum.each(fn {s, i} -> IO.puts("  #{i}. #{s}") end)
+
+# Phase 2: Execute
+plan_text2 = Enum.with_index(plan2, 1) |> Enum.map_join("\n", fn {s, i} -> "#{i}. #{s}" end)
+
+{result2, step2} =
+  SubAgent.run(executor,
+    llm: my_llm,
+    context: %{question: question2, plan: plan_text2},
+    journal: %{},
+    debug: true
+  )
+
+SubAgent.Debug.print_trace(step2, raw: true)
+
+IO.puts("\n=== Answer ===")
+IO.inspect(step2.return, pretty: true, limit: 20)
+```
+
+## Discussion
+
+This livebook demonstrates the **plan-and-execute** pattern:
+
+1. **Planner** (single-shot, JSON mode) generates a step-by-step plan
+2. **Executor** (multi-turn, PTC-Lisp) follows the plan using `(task)` for each step
+
+The executor sees two sources of progress information each turn:
+
+* **The plan** (static, in the prompt) — what needs to be done
+* **The Mission Log** (dynamic, in the system prompt) — what's already done
+
+This is analogous to how Claude Code works: it maintains a todo list and checks off items as it goes. The LLM can see both pending and completed work.
+
+### When This Helps
+
+* **Multi-page web research** — fetch, read, decide what to fetch next
+* **Data pipelines** — each step depends on the previous result
+* **Tasks that require adaptation** — the LLM can deviate from the plan if it finds unexpected data
+
+### What's Next
+
+* Show pending vs completed items together in the system prompt (requires a small code change to Mission Log rendering)
+* Let the LLM revise the plan mid-execution if it discovers the original plan won't work
+* Benchmark against single-shot on the harder TODO test cases
+
+## Learn More
+
+* [Navigator Pattern Guide](https://hexdocs.pm/ptc_runner/subagent-navigator.html)
+* [Composition Patterns](https://hexdocs.pm/ptc_runner/subagent-patterns.html)
+* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
