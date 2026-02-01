@@ -193,10 +193,14 @@ defmodule PtcRunner.Lisp do
       execute_program(source, opts)
     else
       {:error, {:invalid_tool, tool_name, reason}} ->
-        {:error, Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory)}
+        {:error,
+         Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory, %{},
+           journal: journal
+         )}
 
       {:error, {:invalid_signature, msg}} ->
-        {:error, Step.error(:parse_error, "Invalid signature: #{msg}", memory)}
+        {:error,
+         Step.error(:parse_error, "Invalid signature: #{msg}", memory, %{}, journal: journal)}
     end
   end
 
@@ -222,7 +226,7 @@ defmodule PtcRunner.Lisp do
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
-         :ok <- check_symbol_limit(raw_ast, max_symbols, memory),
+         :ok <- check_symbol_limit(raw_ast, max_symbols, memory, journal),
          {:ok, core_ast} <- Analyze.analyze(raw_ast) do
       # Filter context to only include data keys accessed by the program
       # This reduces memory pressure by not loading unused datasets
@@ -360,22 +364,26 @@ defmodule PtcRunner.Lisp do
           end
 
         {:error, {:timeout, ms}} ->
-          {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory)}
+          {:error,
+           Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
 
         {:error, {:memory_exceeded, bytes}} ->
-          {:error, Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory)}
+          {:error,
+           Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory, %{},
+             journal: journal
+           )}
 
         {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
           # Handle 3-tuple error format: {:error, {:type_error, message, data}}
-          {:error, Step.error(reason_atom, format_error(reason), memory)}
+          {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
 
         {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
           # Handle 2-tuple error format: {:error, {:type_error, message}}
-          {:error, Step.error(reason_atom, format_error(reason), memory)}
+          {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
       end
     else
       {:error, {:parse_error, msg}} ->
-        {:error, Step.error(:parse_error, msg, memory)}
+        {:error, Step.error(:parse_error, msg, memory, %{}, journal: journal)}
 
       {:error, %Step{} = step} ->
         # Pass through Step errors from check_symbol_limit
@@ -383,11 +391,11 @@ defmodule PtcRunner.Lisp do
 
       {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
         # Preserve specific error atoms from Analyze phase (e.g., {:invalid_arity, :if, "msg"})
-        {:error, Step.error(reason_atom, format_error(reason), memory)}
+        {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
 
       {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
         # Handle other 2-tuple errors from Analyze phase
-        {:error, Step.error(reason_atom, format_error(reason), memory)}
+        {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
     end
   end
 
@@ -500,7 +508,7 @@ defmodule PtcRunner.Lisp do
   defp round_floats(value, _precision), do: value
 
   # Check if symbol count exceeds limit
-  defp check_symbol_limit(ast, max_symbols, memory) do
+  defp check_symbol_limit(ast, max_symbols, memory, journal) do
     count = SymbolCounter.count(ast)
 
     if count <= max_symbols do
@@ -510,7 +518,9 @@ defmodule PtcRunner.Lisp do
        Step.error(
          :symbol_limit_exceeded,
          "program contains #{count} unique symbols/keywords, exceeds limit of #{max_symbols}",
-         memory
+         memory,
+         %{},
+         journal: journal
        )}
     end
   end
@@ -546,7 +556,7 @@ defmodule PtcRunner.Lisp do
 
       {:error, errors} ->
         msg = format_validation_errors(errors)
-        {:error, Step.error(:validation_error, msg, step.memory)}
+        {:error, Step.error(:validation_error, msg, step.memory, %{}, journal: step.journal)}
     end
   end
 
