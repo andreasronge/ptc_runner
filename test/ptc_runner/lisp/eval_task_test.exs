@@ -134,6 +134,55 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
     end
   end
 
+  describe "journal preserved on error paths" do
+    test "memory_exceeded preserves input journal" do
+      # Directly build a huge structure to exceed heap
+      {:error, step} =
+        Lisp.run(~S|(range 1 999999)|,
+          journal: %{"prev" => 1},
+          max_heap_size: 100
+        )
+
+      assert step.fail.reason == :memory_exceeded
+      assert step.journal == %{"prev" => 1}
+    end
+
+    test "timeout preserves input journal" do
+      {:error, step} =
+        Lisp.run(~S|(reduce (fn [acc _] (append acc [1])) [] (range 1 999999))|,
+          journal: %{"prev" => 1},
+          timeout: 1
+        )
+
+      assert step.fail.reason == :timeout
+      assert step.journal == %{"prev" => 1}
+    end
+
+    test "runtime error preserves input journal" do
+      {:error, step} =
+        Lisp.run(~S|(+ 1 "bad")|,
+          journal: %{"prev" => 1}
+        )
+
+      assert step.fail.reason == :type_error
+      assert step.journal == %{"prev" => 1}
+    end
+
+    test "parse error preserves input journal" do
+      {:error, step} = Lisp.run("(unclosed", journal: %{"prev" => 1})
+
+      assert step.fail.reason == :parse_error
+      assert step.journal == %{"prev" => 1}
+    end
+
+    test "analysis error preserves input journal" do
+      {:error, step} = Lisp.run(~S|(if 1 2 3 4)|, journal: %{"prev" => 1})
+
+      assert step.fail.reason == :invalid_arity
+      assert step.journal == %{"prev" => 1}
+    end
+  end
+
   describe "(task) re-invocation pattern" do
     test "second run with journal skips cached tasks and continues" do
       tools = %{"send_email" => fn %{"to" => to} -> "sent_to_#{to}" end}

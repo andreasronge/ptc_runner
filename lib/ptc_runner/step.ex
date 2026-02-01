@@ -375,10 +375,30 @@ defmodule PtcRunner.Step do
   """
   @spec error(atom(), String.t(), map(), map()) :: t()
   def error(reason, message, memory, details) do
+    error(reason, message, memory, details, [])
+  end
+
+  @doc """
+  Creates a failed Step with additional details and options.
+
+  ## Options
+
+  - `:journal` - journal to preserve on the error step
+
+  ## Examples
+
+      iex> step = PtcRunner.Step.error(:timeout, "timed out", %{}, %{}, journal: %{"a" => 1})
+      iex> step.journal
+      %{"a" => 1}
+
+  """
+  @spec error(atom(), String.t(), map(), map(), keyword()) :: t()
+  def error(reason, message, memory, details, opts) do
     %__MODULE__{
       return: nil,
       fail: %{reason: reason, message: message, details: details},
       memory: memory,
+      journal: Keyword.get(opts, :journal),
       signature: nil,
       usage: nil,
       turns: nil,
