@@ -12,6 +12,11 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def not_(x), do: not truthy?(x)
 
+  @doc "Coerces a value to boolean. nil and false are false, everything else is true."
+  def boolean(nil), do: false
+  def boolean(false), do: false
+  def boolean(_), do: true
+
   @doc """
   Identity function: returns its argument unchanged.
   Useful as a default function argument or for composition.

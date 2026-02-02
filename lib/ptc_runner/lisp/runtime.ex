@@ -181,6 +181,7 @@ defmodule PtcRunner.Lisp.Runtime do
   # ============================================================
 
   defdelegate not_(x), to: Predicates
+  defdelegate boolean(x), to: Predicates
   defdelegate identity(x), to: Predicates
   defdelegate fnil(f, default), to: Predicates
 

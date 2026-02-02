@@ -356,6 +356,7 @@ defmodule PtcRunner.Lisp.Env do
       # Logic
       # ============================================================
       {:not, {:normal, &Runtime.not_/1}},
+      {:boolean, {:normal, &Runtime.boolean/1}},
 
       # ============================================================
       # Type predicates

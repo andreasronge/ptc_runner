@@ -598,4 +598,46 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert tool_call.args == %{"url" => "http://example.com"}
     end
   end
+
+  describe "boolean builtin" do
+    test "nil returns false" do
+      {:ok, %{return: result}} = Lisp.run("(boolean nil)")
+      assert result == false
+    end
+
+    test "false returns false" do
+      {:ok, %{return: result}} = Lisp.run("(boolean false)")
+      assert result == false
+    end
+
+    test "true returns true" do
+      {:ok, %{return: result}} = Lisp.run("(boolean true)")
+      assert result == true
+    end
+
+    test "numbers are truthy" do
+      {:ok, %{return: result}} = Lisp.run("(boolean 0)")
+      assert result == true
+    end
+
+    test "empty string is truthy" do
+      {:ok, %{return: result}} = Lisp.run(~s|(boolean "")|)
+      assert result == true
+    end
+
+    test "empty vector is truthy" do
+      {:ok, %{return: result}} = Lisp.run("(boolean [])")
+      assert result == true
+    end
+
+    test "map is truthy" do
+      {:ok, %{return: result}} = Lisp.run("(boolean {})")
+      assert result == true
+    end
+
+    test "keyword is truthy" do
+      {:ok, %{return: result}} = Lisp.run("(boolean :foo)")
+      assert result == true
+    end
+  end
 end
