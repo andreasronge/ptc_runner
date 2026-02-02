@@ -244,4 +244,44 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandlerParseTest do
       assert String.contains?(code, "(filter pred items)")
     end
   end
+
+  describe "XML-style code blocks" do
+    test "extracts code from ```clojure with </clojure> closer" do
+      response = "```clojure\n(+ 1 2)\n</clojure>"
+      assert {:ok, "(+ 1 2)"} = ResponseHandler.parse(response)
+    end
+
+    test "extracts code from fully XML-style <clojure> block" do
+      response = "Some text\n<clojure>\n(def x 42)\n</clojure>\nMore text"
+      assert {:ok, "(def x 42)"} = ResponseHandler.parse(response)
+    end
+
+    test "extracts code from <lisp> XML block" do
+      response = "<lisp>\n(+ 1 2)\n</lisp>"
+      assert {:ok, "(+ 1 2)"} = ResponseHandler.parse(response)
+    end
+
+    test "extracts code from ```clojure with </lisp> closer" do
+      response = "```clojure\n(map inc [1 2 3])\n</lisp>"
+      assert {:ok, "(map inc [1 2 3])"} = ResponseHandler.parse(response)
+    end
+
+    test "normal ```python block is not affected by XML closer support" do
+      # Ensure a non-clojure block with </clojure> in prose doesn't cause issues
+      response = "```python\nprint('hello')\n```\nSome text mentioning </clojure> later"
+      assert {:error, :no_code_in_response} = ResponseHandler.parse(response)
+    end
+
+    test "prefers standard ``` closer over XML closer" do
+      response = "```clojure\n(+ 1 2)\n```"
+      assert {:ok, "(+ 1 2)"} = ResponseHandler.parse(response)
+    end
+
+    test "multiline code with XML closer" do
+      response = "```clojure\n(defn foo [x]\n  (+ x 1))\n\n(foo 42)\n</clojure>"
+      {:ok, code} = ResponseHandler.parse(response)
+      assert String.contains?(code, "(defn foo [x]")
+      assert String.contains?(code, "(foo 42)")
+    end
+  end
 end
