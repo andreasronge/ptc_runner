@@ -53,6 +53,7 @@ defmodule PtcRunner.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:kino, "~> 0.14", optional: true},
       {:llm_client, path: "llm_client", only: [:test, :dev]}
     ]
   end
