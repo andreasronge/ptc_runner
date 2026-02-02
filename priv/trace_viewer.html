@@ -298,6 +298,56 @@
       font-family: monospace;
     }
 
+    /* Agent tree */
+    .agent-tree {
+      background: var(--bg-light);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      display: none;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .agent-tree.visible { display: block; }
+    .agent-tree h3 { margin: 0 0 12px 0; font-size: 14px; color: var(--muted); }
+
+    .agent-tree ul {
+      list-style: none;
+      padding-left: 20px;
+      margin: 0;
+    }
+    .agent-tree > ul { padding-left: 0; }
+
+    .agent-tree li { margin: 2px 0; }
+
+    .agent-tree-node {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      user-select: none;
+    }
+    .agent-tree-node:hover { background: var(--bg-hover); }
+    .agent-tree-node.active { background: rgba(86, 156, 214, 0.2); color: var(--accent); }
+
+    .agent-tree-node .name { font-weight: 500; }
+    .agent-tree-node .badge {
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--bg);
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+    .agent-tree-node .toggle {
+      font-size: 10px;
+      color: var(--muted);
+      width: 12px;
+      text-align: center;
+    }
+
     /* Tabs */
     .tabs {
       display: flex;
@@ -376,6 +426,11 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="agent-tree" id="agentTree">
+    <h3>Agent Hierarchy</h3>
+    <div id="agentTreeContent"></div>
   </div>
 
   <div class="timeline" id="timeline">
@@ -514,6 +569,11 @@
       tabs.style.display = 'flex';
       eventsContainer.classList.add('visible');
       renderEvents(paired);
+
+      // Update tree active state
+      document.querySelectorAll('.agent-tree-node').forEach(el => {
+        el.classList.toggle('active', el.dataset.filename === filename);
+      });
     }
 
     function pairEvents(events) {
@@ -884,6 +944,110 @@
 
     // Wire up the load children button
     document.getElementById('loadChildrenBtn').addEventListener('click', loadAllChildren);
+
+    // --- Agent Hierarchy Tree ---
+
+    function buildAgentTree() {
+      const nodes = new Map(); // traceId -> {traceId, name, duration, tokens, children, filename, timestamp}
+
+      for (const [filename, data] of loadedFiles) {
+        const events = data.events;
+        const traceStart = events.find(e => e.event === 'trace.start');
+        const runStop = events.find(e => e.event === 'run.stop');
+        const traceStop = events.find(e => e.event === 'trace.stop');
+        const paired = pairEvents(events);
+        const llmEvents = paired.filter(e => e.type === 'llm');
+        const tokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
+        const duration = runStop?.duration_ms || traceStop?.duration_ms || 0;
+        const parentId = traceStart?.metadata?.parent_trace_id || null;
+        const name = traceStart?.metadata?.tool_name || traceStart?.metadata?.agent_name || filename.replace(/\.jsonl$/, '');
+
+        nodes.set(data.traceId, {
+          traceId: data.traceId,
+          name,
+          duration,
+          tokens,
+          children: [],
+          filename,
+          parentId,
+          timestamp: traceStart?.timestamp || ''
+        });
+      }
+
+      // Link children to parents
+      const roots = [];
+      for (const node of nodes.values()) {
+        if (node.parentId && nodes.has(node.parentId)) {
+          nodes.get(node.parentId).children.push(node);
+        } else {
+          roots.push(node);
+        }
+      }
+
+      // Sort children by timestamp
+      for (const node of nodes.values()) {
+        node.children.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      }
+
+      return roots;
+    }
+
+    function renderAgentTree() {
+      const roots = buildAgentTree();
+      const panel = document.getElementById('agentTree');
+      const content = document.getElementById('agentTreeContent');
+
+      if (roots.length <= 1 && roots[0]?.children.length === 0) {
+        panel.classList.remove('visible');
+        return;
+      }
+
+      panel.classList.add('visible');
+      content.innerHTML = renderTreeUl(roots);
+
+      // Click handlers
+      content.querySelectorAll('.agent-tree-node').forEach(el => {
+        el.addEventListener('click', () => {
+          const fn = el.dataset.filename;
+          if (fn && loadedFiles.has(fn)) {
+            currentFile = fn;
+            displayTrace(fn);
+            updateFileList();
+            // Highlight active node
+            content.querySelectorAll('.agent-tree-node').forEach(n => n.classList.remove('active'));
+            el.classList.add('active');
+          }
+        });
+      });
+    }
+
+    function renderTreeUl(nodes) {
+      if (!nodes.length) return '';
+      let html = '<ul>';
+      for (const node of nodes) {
+        const hasChildren = node.children.length > 0;
+        const toggle = hasChildren ? '▼' : '•';
+        const isActive = node.filename === currentFile;
+        html += `<li>
+          <span class="agent-tree-node${isActive ? ' active' : ''}" data-filename="${escapeHtml(node.filename)}">
+            <span class="toggle">${toggle}</span>
+            <span class="name">${escapeHtml(node.name)}</span>
+            <span class="badge">${formatDuration(node.duration)}</span>
+            ${node.tokens ? `<span class="badge">${node.tokens} tk</span>` : ''}
+          </span>
+          ${hasChildren ? renderTreeUl(node.children) : ''}
+        </li>`;
+      }
+      html += '</ul>';
+      return html;
+    }
+
+    // Rebuild tree whenever files change
+    const origHandleFiles = handleFiles;
+    handleFiles = async function(files) {
+      await origHandleFiles(files);
+      renderAgentTree();
+    };
   </script>
 </body>
 </html>
