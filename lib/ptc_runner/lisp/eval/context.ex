@@ -38,7 +38,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
     pmap_timeout: @default_pmap_timeout,
     prints: [],
     tool_calls: [],
-    pmap_calls: []
+    pmap_calls: [],
+    tool_cache: %{},
+    tools_meta: %{}
   ]
 
   @typedoc """
@@ -118,7 +120,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
           pmap_timeout: pos_integer(),
           prints: [String.t()],
           tool_calls: [tool_call()],
-          pmap_calls: [pmap_call()]
+          pmap_calls: [pmap_call()],
+          tool_cache: map(),
+          tools_meta: %{String.t() => %{cache: boolean()}}
         }
 
   @doc """
@@ -163,6 +167,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       budget: Keyword.get(opts, :budget),
       trace_context: Keyword.get(opts, :trace_context),
       journal: Keyword.get(opts, :journal),
+      tool_cache: Keyword.get(opts, :tool_cache, %{}),
+      tools_meta: Keyword.get(opts, :tools_meta, %{}),
       prints: [],
       tool_calls: [],
       pmap_calls: []
@@ -252,7 +258,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
         pmap_calls: ctx2.pmap_calls ++ ctx1.pmap_calls,
         user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
         iteration_count: ctx1.iteration_count + ctx2.iteration_count,
-        summaries: Map.merge(ctx1.summaries, ctx2.summaries)
+        summaries: Map.merge(ctx1.summaries, ctx2.summaries),
+        tool_cache: Map.merge(ctx1.tool_cache, ctx2.tool_cache)
     }
   end
 end

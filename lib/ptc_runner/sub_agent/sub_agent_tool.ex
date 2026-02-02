@@ -23,14 +23,17 @@ defmodule PtcRunner.SubAgent.SubAgentTool do
   - `bound_llm` - Optional LLM (atom or function) bound at tool creation
   - `signature` - Type signature (copied from agent.signature)
   - `description` - Optional description (defaults to agent's prompt)
+  - `cache` - Enable result caching by input args (default: `false`).
+    Only use for deterministic agents where same inputs always produce same outputs.
   """
 
-  defstruct [:agent, :bound_llm, :signature, :description]
+  defstruct [:agent, :bound_llm, :signature, :description, cache: false]
 
   @type t :: %__MODULE__{
           agent: PtcRunner.SubAgent.t(),
           bound_llm: atom() | (map() -> {:ok, String.t()} | {:error, term()}) | nil,
           signature: String.t() | nil,
-          description: String.t() | nil
+          description: String.t() | nil,
+          cache: boolean()
         }
 end

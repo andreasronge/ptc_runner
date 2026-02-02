@@ -667,7 +667,9 @@ defmodule PtcRunner.Lisp.Eval do
           {:ok, args_map} ->
             # Convert atom to string for backward compatibility with tool_exec
             tool_name_str = Atom.to_string(tool_name)
-            record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2)
+            # Check if this tool has caching enabled
+            cacheable? = get_in(eval_ctx2.tools_meta, [tool_name_str, :cache]) == true
+            record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2, cacheable?)
 
           {:error, _} = err ->
             err
@@ -764,9 +766,37 @@ defmodule PtcRunner.Lisp.Eval do
   # Captures the error field if the tool raises an exception, records it, and throws a special
   # exception that includes the updated eval_ctx so the error can be properly reported.
   #
+  # When `cacheable?` is true, results are cached by `{tool_name, args_map}`.
+  # Cache hits return immediately with `duration_ms: 0` and `cached: true`.
+  # Only successful results are cached; errors are not stored.
+  #
   # Also handles SubAgentTool results that may be wrapped with child_trace_id metadata.
   # The wrapper is unwrapped here so the Lisp interpreter only sees the actual value.
-  defp record_tool_call(tool_name, args_map, tool_exec, eval_ctx) do
+  defp record_tool_call(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
+    cache_key = {tool_name, args_map}
+
+    # Check cache for hit
+    if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do
+      cached_result = Map.get(eval_ctx.tool_cache, cache_key)
+
+      tool_call = %{
+        name: tool_name,
+        args: args_map,
+        result: cached_result,
+        error: nil,
+        timestamp: DateTime.utc_now(),
+        duration_ms: 0,
+        cached: true
+      }
+
+      eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
+      {:ok, cached_result, eval_ctx2}
+    else
+      record_tool_call_execute(tool_name, args_map, tool_exec, eval_ctx, cacheable?, cache_key)
+    end
+  end
+
+  defp record_tool_call_execute(tool_name, args_map, tool_exec, eval_ctx, cacheable?, cache_key) do
     start_time = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
 
@@ -832,12 +862,20 @@ defmodule PtcRunner.Lisp.Eval do
         eval_ctx: eval_ctx2,
         tool_name: tool_name
     else
+      # Store in cache on success if cacheable
+      eval_ctx3 =
+        if cacheable? do
+          %{eval_ctx2 | tool_cache: Map.put(eval_ctx2.tool_cache, cache_key, result)}
+        else
+          eval_ctx2
+        end
+
       # Metadata like child_trace_id is smuggled via Process.put to avoid polluting
       # the Lisp value space with framework-internal wrappers.
       # This ensures tools always return data, not metadata, to the LLM.
       if child_trace_id, do: Process.put(:last_child_trace_id, child_trace_id)
       if child_step, do: Process.put(:last_child_step, child_step)
-      {:ok, result, eval_ctx2}
+      {:ok, result, eval_ctx3}
     end
   end
 

@@ -308,6 +308,24 @@ tools = %{
 }
 ```
 
+### Result Caching
+
+For tools with stable, pure outputs (same inputs always produce the same result),
+enable `cache: true` to avoid redundant calls across turns:
+
+```elixir
+tools = %{
+  "get-config" => {&MyApp.get_config/1,
+    signature: "(key :string) -> :any",
+    cache: true
+  }
+}
+```
+
+Cached results persist across turns within a single `SubAgent.run/2` call. Only
+successful results are cached — errors are never stored. Do not use on tools that
+read mutable state modifiable by other tools in the session.
+
 See `PtcRunner.Tool` for all supported tool formats.
 
 ## Builtin LLM Queries

@@ -198,7 +198,8 @@ defmodule PtcRunner.Step do
     :prompt,
     :original_prompt,
     :tools,
-    summaries: %{}
+    summaries: %{},
+    tool_cache: %{}
   ]
 
   @typedoc """
@@ -317,7 +318,8 @@ defmodule PtcRunner.Step do
           messages: [message()] | nil,
           prompt: String.t() | nil,
           tools: map() | nil,
-          summaries: %{String.t() => String.t()}
+          summaries: %{String.t() => String.t()},
+          tool_cache: map()
         }
 
   @doc """
@@ -414,6 +416,7 @@ defmodule PtcRunner.Step do
       fail: %{reason: reason, message: message, details: details},
       memory: memory,
       journal: Keyword.get(opts, :journal),
+      tool_cache: Keyword.get(opts, :tool_cache, %{}),
       signature: nil,
       usage: nil,
       turns: nil,

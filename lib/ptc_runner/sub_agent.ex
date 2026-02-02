@@ -996,6 +996,8 @@ defmodule PtcRunner.SubAgent do
   - `:llm` - Bind specific LLM (atom or function). Overrides parent inheritance.
   - `:description` - Override agent's description (falls back to `agent.description`)
   - `:name` - Suggested tool name (informational, not enforced by the struct)
+  - `:cache` - Cache results by input args (default: `false`). Only use for
+    deterministic agents where same inputs always produce same outputs.
 
   ## Description Requirement
 
@@ -1057,7 +1059,8 @@ defmodule PtcRunner.SubAgent do
       agent: agent,
       bound_llm: Keyword.get(opts, :llm),
       signature: agent.signature,
-      description: description
+      description: description,
+      cache: Keyword.get(opts, :cache, false)
     }
   end
 
