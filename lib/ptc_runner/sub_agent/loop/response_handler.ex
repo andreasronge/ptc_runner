@@ -68,13 +68,14 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
     # Try extracting from code blocks - prefer clojure/lisp tagged blocks
     # Allow optional whitespace/newline after language tag
-    case Regex.scan(~r/```(?:clojure|lisp)[ \t]*\n?(.*?)```/s, response) do
+    # Also handle XML-style closers like </clojure> that LLMs sometimes produce
+    case Regex.scan(~r/```(?:clojure|lisp)[ \t]*\n?(.*?)(?:```|<\/(?:clojure|lisp)>)/s, response) do
       [] ->
         # Try any code blocks (skip optional language tag, then capture content)
         # Regex: ``` followed by optional non-newline chars (language tag), optional whitespace/newline, then content
         case Regex.scan(~r/```[^\n]*[ \t]*\n?(.*?)```/s, response) do
           [] ->
-            try_raw_sexp(response)
+            try_xml_blocks(response)
 
           blocks ->
             # Filter blocks that look like Lisp code (start with parenthesis after trimming)
@@ -124,6 +125,22 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   defp process_lisp_blocks(multiple, _response) do
     # Multiple blocks - use the last one (LLM self-corrected)
     {:ok, sanitize_code(List.last(multiple))}
+  end
+
+  # Try fully XML-style blocks: <clojure>...</clojure> or <lisp>...</lisp>
+  defp try_xml_blocks(response) do
+    case Regex.scan(~r/<(?:clojure|lisp)>[ \t]*\n?(.*?)<\/(?:clojure|lisp)>/s, response) do
+      [] ->
+        try_raw_sexp(response)
+
+      blocks ->
+        lisp_blocks =
+          blocks
+          |> Enum.map(fn [_, code] -> String.trim(code) end)
+          |> Enum.filter(&String.starts_with?(&1, "("))
+
+        process_lisp_blocks(lisp_blocks, response)
+    end
   end
 
   # Try to extract raw s-expression from response
