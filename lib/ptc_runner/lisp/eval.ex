@@ -776,10 +776,10 @@ defmodule PtcRunner.Lisp.Eval do
       rescue
         e in ExecutionError ->
           if e.child_step do
-            # ExecutionError from SubAgent with child_step — record the error with child info
-            {nil, Exception.message(e), e.child_step, e.child_trace_id}
+            # Failed SubAgent call — capture child info and record as tool error
+            {nil, format_execution_error(e), e.child_step, e.child_trace_id}
           else
-            # Let other ExecutionErrors propagate
+            # Other ExecutionErrors (unknown tool, validation, etc.) — propagate as before
             reraise e, __STACKTRACE__
           end
 
@@ -841,6 +841,13 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Format ExecutionError into a human-readable error string preserving the data field
+  defp format_execution_error(%ExecutionError{reason: :tool_error, message: name, data: data}) do
+    "Tool '#{name}' failed: #{inspect(data)}"
+  end
+
+  defp format_execution_error(%ExecutionError{} = e), do: Exception.message(e)
+
   # Unwrap SubAgentTool results that contain child_trace_id and child_step metadata.
   # Returns {actual_result, child_trace_id, child_step} or {result, nil, nil} if not wrapped.
   defp unwrap_tool_result(%{__child_trace_id__: trace_id, __child_step__: step, value: value}) do
@@ -849,6 +856,10 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp unwrap_tool_result(%{__child_trace_id__: trace_id, value: value}) do
     {value, trace_id, nil}
+  end
+
+  defp unwrap_tool_result(%{__child_step__: step, value: value}) do
+    {value, nil, step}
   end
 
   defp unwrap_tool_result(result), do: {result, nil, nil}

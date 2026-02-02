@@ -41,7 +41,9 @@ defmodule PtcRunner.SubAgent.BuiltinLlmQueryTest do
       result =
         func.(%{"prompt" => "Say hello", "signature" => "{answer :string}"})
 
-      assert result == %{"answer" => "test result"}
+      # Result may be wrapped with __child_step__ metadata (unwrapped by record_tool_call in eval)
+      actual = if is_map(result) && Map.has_key?(result, :value), do: result.value, else: result
+      assert actual == %{"answer" => "test result"}
     end
 
     test "splits control keys from template args" do
