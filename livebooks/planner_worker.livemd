@@ -84,8 +84,8 @@ planner = SubAgent.new(
   You have access to a `fetch_page` tool that retrieves web page text, plus
   `(grep pattern text)` and `(grep-n pattern text)` for searching text.
 
-  Plan the steps needed to answer this question. Each step should be a short
-  action description. Return 3-5 concrete steps.
+  Plan the steps needed to answer this question. Return exactly 3 steps:
+  one per research topic, plus a final compilation step.
   """,
   signature: "(question :string) -> {steps [:string]}",
   max_turns: 1,
@@ -114,8 +114,8 @@ Three agents with distinct roles:
 * **Planner** — orchestrates worker→reviewer chains. Never sees raw results.
 
 The planner writes PTC-Lisp programs that wire worker and reviewer together.
-It defines a `do-step` helper that handles the dispatch→review→retry loop,
-then calls it for each plan step. Independent steps can run in the same turn.
+It defines a `do-step` helper that dispatches to the worker, reviews the result,
+and reports progress. The planner handles retries at the orchestration level.
 
 ```elixir
 # Worker: multi-turn research agent for one focused task
@@ -128,8 +128,8 @@ worker = SubAgent.new(
     `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
   - Use `(grep pattern text)` or `(grep-n pattern text)` to search text.
     Note: `grep-n` is a function name, NOT `grep -n`.
-  - Explore and verify before returning. Never return on the first turn.
-  - Return a map with your findings.
+  - Return a map with your findings as soon as you have useful data.
+    Partial results are better than no results.
   """,
   description: "Research worker: fetches web pages and extracts information for a specific task",
   signature: "(task :string) -> :map",
@@ -140,7 +140,7 @@ worker = SubAgent.new(
        description:
          "Fetch a web page and return its text content. For GitHub files, use raw.githubusercontent.com URLs."}
   },
-  max_turns: 5,
+  max_turns: 3,
   retry_turns: 1,
   timeout: 30_000
 )
@@ -160,9 +160,10 @@ reviewer = SubAgent.new(
   ## Result to Review
   {{result}}
 
-  If the result meets the criteria, set approved to true and write a concise
-  summary of the key findings. If not, set approved to false and explain
-  what is missing or insufficient in the feedback field.
+  Be pragmatic: approve results that contain useful information even if
+  not perfect. Set approved=true with notes about gaps in the summary.
+  Only reject if the result is empty, completely wrong, or missing
+  critical information.
   """,
   description: "Reviews research results against acceptance criteria",
   signature: "(step :string, criteria :string, result :string) -> {approved :bool, summary :string, feedback :string}",
@@ -181,34 +182,30 @@ planner_executor = SubAgent.new(
   and verify results with `reviewer`. You never fetch pages yourself.
 
   ## The `do-step` Pattern
-  Define a helper that chains worker→reviewer with automatic retry:
+  Define a helper that dispatches to worker and reviewer (no retry — you
+  handle failures at the orchestration level):
 
   (defn do-step [id task criteria]
     (let [result (tool/research_worker {:task task})
-          result_str (str result)  ; OK for reviewer — it reads inspect format as text
+          result_str (str result)
           review (tool/reviewer {:step task :criteria criteria :result result_str})]
       (if (:approved review)
         (do (step-done id (:summary review)) result)
-        (let [retry-task (str task " — Previous attempt rejected: " (:feedback review))
-              result2 (tool/research_worker {:task retry-task})
-              result2_str (str result2)
-              review2 (tool/reviewer {:step task :criteria criteria :result result2_str})]
-          (if (:approved review2)
-            (do (step-done id (:summary review2)) result2)
-            (do (step-done id (str "INCOMPLETE: " (:feedback review2))) nil))))))
+        (do (step-done id (str "REJECTED: " (:feedback review))) nil))))
 
   ## Rules
   - Always define `do-step` first, then use it for each plan step.
   - Use the step IDs from the Progress checklist.
-  - Batch independent steps in the same turn when possible.
+  - Batch independent steps in the same turn (e.g. steps 1 and 2 together).
   - When threading results from earlier steps into later tasks, extract
     specific fields with keywords (e.g. `(:version data)`, `(:features data)`)
     and compose a readable task string. NEVER pass a raw map via `(str result)` —
     the worker receives it as an opaque string it cannot parse.
     Good: `(str "Compare Elixir " (:version elixir) " with Erlang " (:version erlang))`
     Bad: `(str "Compare these: " elixir-data erlang-data)`
-  - Write specific acceptance criteria for each step (e.g. "Must include
-    version number, release date, and at least 3 specific named features").
+  - Write specific but achievable acceptance criteria.
+  - If a step returns nil (rejected), you can retry with a refined task
+    on the next turn, or skip and work with what you have.
   - Only `(return ...)` when all steps are done.
   """,
   signature: "(question :string) -> :map",
@@ -217,9 +214,9 @@ planner_executor = SubAgent.new(
     "research_worker" => SubAgent.as_tool(worker),
     "reviewer" => SubAgent.as_tool(reviewer)
   },
-  max_turns: 6,
+  max_turns: 8,
   max_depth: 2,
-  timeout: 120_000
+  timeout: 180_000
 )
 
 {result, step} =
@@ -276,11 +273,11 @@ This livebook demonstrates the **planner-worker-reviewer** pattern — a three-r
 ### The `do-step` Pattern
 
 The key insight: the planner never inspects raw worker output. Instead, it writes
-a `do-step` helper that chains worker→reviewer→retry mechanically:
+a `do-step` helper that chains worker→reviewer mechanically:
 
 ```
 worker produces result → reviewer judges against criteria → approved? → step-done
-                                                          → rejected? → retry with feedback → reviewer again
+                                                          → rejected? → planner retries or skips
 ```
 
 This eliminates the problem where the planner marks steps done despite poor results.
@@ -300,8 +297,8 @@ The reviewer is a dedicated judge with explicit acceptance criteria.
 | ------------------------ | ---------------- | -------------- | ------------------------------- |
 | Verification             | Self-assessment  | Planner judges | Dedicated reviewer              |
 | Planner sees raw results | Yes              | Yes            | No — only verdicts            |
-| Retry on poor results    | Manual           | Manual         | Automatic via `do-step`         |
-| LLM calls per step       | 1                | 2              | 3-5 (worker + reviewer + retry) |
+| Retry on poor results    | Manual           | Manual         | Planner-controlled via `do-step`|
+| LLM calls per step       | 1                | 2              | 2-4 (worker + reviewer)         |
 
 ### When to Use This Pattern
 
@@ -331,7 +328,7 @@ handles verification inline. Dependent steps can reference earlier results:
 
 ### Limitations
 
-* **More LLM calls** — 3-5 per step (worker turns + reviewer). The reviewer is cheap
+* **More LLM calls** — 2-4 per step (worker turns + reviewer). The reviewer is cheap
   (single-shot JSON) but it adds up.
 
 * **Prompt complexity** — the planner must write the `do-step` helper correctly.
