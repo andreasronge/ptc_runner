@@ -35,7 +35,7 @@ defmodule PtcDemo.JsonCLI do
     verbose = opts[:verbose]
     report_path = opts[:report]
     runs = opts[:runs]
-    return_retries = Map.get(opts, :return_retries, 0)
+    retry_turns = Map.get(opts, :retry_turns, 0)
 
     # Resolve model early so we can check if it's a local provider
     resolved_model = if model, do: CLIBase.resolve_model(model), else: nil
@@ -44,7 +44,7 @@ defmodule PtcDemo.JsonCLI do
     CLIBase.ensure_api_key!(resolved_model)
 
     # Start the agent
-    {:ok, _pid} = PtcDemo.Agent.start_link(data_mode: data_mode, return_retries: return_retries)
+    {:ok, _pid} = PtcDemo.Agent.start_link(data_mode: data_mode, retry_turns: retry_turns)
 
     # Set model if specified
     if resolved_model do

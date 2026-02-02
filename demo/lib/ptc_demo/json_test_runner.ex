@@ -72,7 +72,7 @@ defmodule PtcDemo.JsonTestRunner do
     data_mode = Keyword.get(opts, :data_mode, :schema)
     report_path = Keyword.get(opts, :report)
     runs = Keyword.get(opts, :runs, 1)
-    return_retries = Keyword.get(opts, :return_retries, 0)
+    retry_turns = Keyword.get(opts, :retry_turns, 0)
 
     # Ensure agent is started
     ensure_agent_started(data_mode, agent_mod)
@@ -106,7 +106,7 @@ defmodule PtcDemo.JsonTestRunner do
           verbose,
           agent_mod,
           current_model,
-          return_retries
+          retry_turns
         )
       end
 
@@ -159,7 +159,7 @@ defmodule PtcDemo.JsonTestRunner do
          verbose,
          agent_mod,
          current_model,
-         return_retries
+         retry_turns
        ) do
     if total_runs > 1 do
       IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
@@ -181,7 +181,7 @@ defmodule PtcDemo.JsonTestRunner do
 
     summary =
       Base.build_summary(results, start_time, current_model, data_mode, stats,
-        return_retries: return_retries
+        retry_turns: retry_turns
       )
 
     if verbose do

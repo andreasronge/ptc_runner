@@ -465,7 +465,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
     test "fallback normalizes hyphenated keys to underscored" do
       # Use max_turns: 2 to actually trigger the fallback path
-      # (max_turns: 1 with no return_retries skips validation and uses normal path)
+      # (max_turns: 1 with no retry_turns skips validation and uses normal path)
       agent = test_agent(max_turns: 2, signature: "{growth_rate :float}")
 
       llm = fn _ ->
@@ -503,7 +503,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
     test "fallback fails when result doesn't match signature" do
       # Use max_turns: 2 so we actually exhaust budget and try fallback
-      # (max_turns: 1 with no return_retries skips validation entirely)
+      # (max_turns: 1 with no retry_turns skips validation entirely)
       agent = test_agent(max_turns: 2, signature: "{name :string}")
 
       llm = fn _ ->
@@ -548,8 +548,8 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.usage.fallback_used == true
     end
 
-    test "fallback works with return_retries > 0 (budget_exhausted)" do
-      agent = test_agent(max_turns: 1, return_retries: 1, signature: "{value :int}")
+    test "fallback works with retry_turns > 0 (budget_exhausted)" do
+      agent = test_agent(max_turns: 1, retry_turns: 1, signature: "{value :int}")
 
       llm = fn %{turn: turn} ->
         case turn do

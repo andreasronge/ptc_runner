@@ -33,7 +33,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_prompt!(opts)
     validate_tools!(opts)
     validate_max_turns!(opts)
-    validate_return_retries!(opts)
+    validate_retry_turns!(opts)
     validate_timeout!(opts)
     validate_mission_timeout!(opts)
     validate_signature!(opts)
@@ -76,10 +76,10 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  defp validate_return_retries!(opts) do
-    case Keyword.fetch(opts, :return_retries) do
+  defp validate_retry_turns!(opts) do
+    case Keyword.fetch(opts, :retry_turns) do
       {:ok, retries} when is_integer(retries) and retries >= 0 -> :ok
-      {:ok, _} -> raise ArgumentError, "return_retries must be a non-negative integer"
+      {:ok, _} -> raise ArgumentError, "retry_turns must be a non-negative integer"
       :error -> :ok
     end
   end
@@ -604,7 +604,6 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  # Validate that :self tools require a signature
   defp validate_self_tool_requires_signature!(opts) do
     tools = Keyword.get(opts, :tools, %{})
     signature = Keyword.get(opts, :signature)

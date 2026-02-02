@@ -985,7 +985,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         end
       end
 
-      # Should succeed thanks to return_retries: 2 set by compiler
+      # Should succeed thanks to retry_turns: 2 set by compiler
       assert {:ok, compiled} =
                SubAgent.compile(orchestrator, llm: mock_llm, sample: %{text: "good"})
 

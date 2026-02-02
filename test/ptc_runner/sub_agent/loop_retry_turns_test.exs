@@ -4,15 +4,15 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
 
-  describe "return_retries option" do
-    test "return_retries: 0 (default) uses only work turns" do
+  describe "retry_turns option" do
+    test "retry_turns: 0 (default) uses only work turns" do
       agent =
         SubAgent.new(
           prompt: "Return a value",
           max_turns: 2
         )
 
-      assert agent.return_retries == 0
+      assert agent.retry_turns == 0
 
       llm = fn %{turn: turn} ->
         case turn do
@@ -29,16 +29,16 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       assert step.usage.turns == 2
     end
 
-    test "return_retries gives extra turns after validation failure" do
+    test "retry_turns gives extra turns after validation failure" do
       agent =
         SubAgent.new(
           prompt: "Return a float",
           signature: "{value :float}",
           max_turns: 2,
-          return_retries: 2
+          retry_turns: 2
         )
 
-      assert agent.return_retries == 2
+      assert agent.retry_turns == 2
 
       llm = fn %{turn: turn, messages: messages} ->
         case turn do
@@ -78,7 +78,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
           prompt: "Get value and return",
           tools: tools,
           max_turns: 2,
-          return_retries: 1
+          retry_turns: 1
         )
 
       llm = fn %{turn: turn, tool_names: tool_names} ->
@@ -114,7 +114,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
           signature: "{value :float}",
           tools: tools,
           max_turns: 1,
-          return_retries: 2
+          retry_turns: 2
         )
 
       llm = fn %{turn: turn, tool_names: tool_names} ->
@@ -144,7 +144,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
         SubAgent.new(
           prompt: "Maybe fail",
           max_turns: 1,
-          return_retries: 2
+          retry_turns: 2
         )
 
       llm = fn %{turn: turn} ->
@@ -171,7 +171,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
           prompt: "Return a float",
           signature: "{value :float}",
           max_turns: 1,
-          return_retries: 1
+          retry_turns: 1
         )
 
       llm = fn _ ->
@@ -192,7 +192,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
           prompt: "Return a float",
           signature: "{value :float}",
           max_turns: 2,
-          return_retries: 1
+          retry_turns: 1
         )
 
       llm = fn %{turn: turn} ->
@@ -222,7 +222,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
         SubAgent.new(
           prompt: "Multi-turn with retries",
           max_turns: 3,
-          return_retries: 2
+          retry_turns: 2
         )
 
       llm = fn %{turn: turn, messages: messages} ->
@@ -254,7 +254,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
           prompt: "Return a valid integer",
           signature: "{x :int}",
           max_turns: 5,
-          return_retries: 1
+          retry_turns: 1
         )
 
       llm = fn %{turn: turn} ->
@@ -278,18 +278,18 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       assert turn2.type == :normal
     end
 
-    test "context is collapsed during retry phase (single-shot with return_retries)" do
+    test "context is collapsed during retry phase (single-shot with retry_turns)" do
       # Previous failed responses are NOT accumulated in message history.
       # Only the most recent error is shown.
       #
       # This test verifies that compression is enabled for single-shot mode
-      # when return_retries > 0, preventing context window inflation.
+      # when retry_turns > 0, preventing context window inflation.
       agent =
         SubAgent.new(
           prompt: "Return a float",
           signature: "{value :float}",
           max_turns: 1,
-          return_retries: 3,
+          retry_turns: 3,
           compression: true
         )
 
@@ -334,7 +334,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
 
     test "budget exhausted when LLM continues without (return ...) in retry phase" do
       # Bug scenario: LLM ignores must-return warning and returns expression
-      # instead of calling (return ...). With return_retries > 0, the loop
+      # instead of calling (return ...). With retry_turns > 0, the loop
       # should properly decrement retry_turns_remaining and terminate.
       #
       # Uses a signature that the expression result doesn't match, preventing
@@ -343,7 +343,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
         SubAgent.new(
           prompt: "Return a value",
           max_turns: 1,
-          return_retries: 2,
+          retry_turns: 2,
           signature: "{result :string}"
         )
 
