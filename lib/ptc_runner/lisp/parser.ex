@@ -270,19 +270,9 @@ defmodule PtcRunner.Lisp.Parser do
   end
 
   defp check_unsupported_syntax(source) do
-    # Regex literals: #"pattern"
-    if Regex.match?(~r/#"/, source) do
-      {:error,
-       {:parse_error,
-        """
-        regex literals (#"...") are not supported. Use instead:
-        - (split s "delimiter") for literal delimiters
-        - (split-lines s) for newlines
-        - (re-split (re-pattern "\\\\s+") s) for regex patterns
-        - (re-find (re-pattern "...") s) for matching\
-        """}}
-    else
-      :ok
+    case check_unsupported_patterns(source) do
+      nil -> :ok
+      message -> {:error, {:parse_error, message}}
     end
   end
 
@@ -382,6 +372,16 @@ defmodule PtcRunner.Lisp.Parser do
     source_clean = Regex.replace(~r/;[^\n]*/, source_without_strings, "")
 
     cond do
+      # Regex literals: #"pattern"
+      Regex.match?(~r/#"/, source_clean) ->
+        """
+        regex literals (#"...") are not supported. Use instead:
+        - (split s "delimiter") for literal delimiters
+        - (split-lines s) for newlines
+        - (re-split (re-pattern "\\\\s+") s) for regex patterns
+        - (re-find (re-pattern "...") s) for matching\
+        """
+
       # Reader discard macro: #_ (Clojure-specific, not supported)
       Regex.match?(~r/#_/, source_clean) ->
         "reader discard syntax (#_) is not supported. Use ; for comments"
@@ -390,8 +390,8 @@ defmodule PtcRunner.Lisp.Parser do
       Regex.match?(~r/@[a-zA-Z]/, source_clean) ->
         "deref syntax (@var) is not supported. Atoms and refs are not available"
 
-      # Quote syntax: 'symbol or '(list)
-      Regex.match?(~r/'[a-zA-Z(]/, source_clean) ->
+      # Quote syntax: 'symbol or '(list) — but not #'var (var reader syntax)
+      Regex.match?(~r/(?<!#)'[a-zA-Z(]/, source_clean) ->
         "quote syntax ('expr) is not supported. Use vectors [1 2 3] instead of quoted lists"
 
       true ->
