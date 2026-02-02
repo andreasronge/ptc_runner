@@ -200,8 +200,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   def wrap_llm_tool(name, %LLMTool{} = tool, state) do
     fn args ->
-      json_result = execute_llm_json(name, tool, args, state)
-      json_result
+      execute_llm_json(name, tool, args, state)
     end
   end
 
@@ -301,6 +300,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   # Unwrap trace wrapper from execute_with_trace (returns %{__child_trace_id__: _, value: result})
   defp unwrap_trace_result(%{__child_trace_id__: _, value: value}), do: value
+  defp unwrap_trace_result(%{__child_step__: _, value: value}), do: value
   defp unwrap_trace_result(result), do: result
 
   defp resolve_llm_tool_llm(:caller, state), do: state.llm
@@ -419,16 +419,18 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   end
 
   # Execute SubAgentTool without tracing
+  # Still wraps result with __child_step__ so TraceTree can show the hierarchy
   defp execute_without_trace(name, agent, run_opts) do
     case SubAgent.run(agent, run_opts) do
       {:ok, step} ->
-        step.return
+        %{__child_step__: prune_child_step(step), value: step.return}
 
       {:error, step} ->
         raise PtcRunner.Lisp.ExecutionError,
           reason: :tool_error,
           message: name,
-          data: step.fail.message
+          data: step.fail.message,
+          child_step: prune_child_step(step)
     end
   end
 
