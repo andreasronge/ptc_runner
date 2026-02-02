@@ -379,7 +379,7 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # String manipulation
       # ============================================================
-      {:str, {:variadic, &Runtime.str2/2, ""}},
+      {:str, {:collect, &Runtime.str_variadic/1}},
       {:subs, {:multi_arity, :subs, {&Runtime.subs/2, &Runtime.subs/3}}},
       {:join, {:multi_arity, :join, {&Runtime.join/1, &Runtime.join/2}}},
       {:split, {:normal, &Runtime.split/2}},
