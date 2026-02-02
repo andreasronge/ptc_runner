@@ -61,7 +61,7 @@ defmodule PtcRunner.SubAgent.ProgressRenderer do
 
     sections = [
       "## Progress\n",
-      "Complete exactly one step per turn: fetch/compute → verify → `(step-done \"id\" \"summary\")`.\n\n",
+      "Batch independent steps in the same turn. Use `(step-done \"id\" \"summary\")` for each completed step.\n\n",
       Enum.join(plan_lines, "\n")
     ]
 

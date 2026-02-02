@@ -39,6 +39,8 @@ my_llm = LLMSetup.choose_model(setup)
 ## The `fetch_page` Tool
 
 ```elixir
+# Returns status: "ok" on success, "error" on failure (404, timeout, etc.)
+# This way the LLM can branch on status instead of the whole turn failing.
 fetch_page = fn %{"url" => url} ->
   case Req.get(url, redirect: true, max_redirects: 3, receive_timeout: 15_000) do
     {:ok, %{status: 200, body: body}} when is_binary(body) ->
@@ -59,13 +61,13 @@ fetch_page = fn %{"url" => url} ->
         |> String.trim()
         |> String.slice(0, 6000)
 
-      %{url: url, text: text}
+      %{status: "ok", text: text}
 
     {:ok, %{status: status}} ->
-      {:error, "HTTP #{status} for #{url}"}
+      %{status: "error", text: "HTTP #{status}"}
 
     {:error, reason} ->
-      {:error, "Request failed for #{url}: #{inspect(reason)}"}
+      %{status: "error", text: "Request failed: #{inspect(reason)}"}
   end
 end
 
@@ -84,8 +86,9 @@ planner = SubAgent.new(
   You have access to a `fetch_page` tool that retrieves web page text, plus
   `(grep pattern text)` and `(grep-n pattern text)` for searching text.
 
-  Plan the steps needed to answer this question. Return exactly 3 steps:
-  one per research topic, plus a final compilation step.
+  Plan the steps needed to answer this question. Return exactly 2 steps:
+  one per research topic. Do NOT include a compilation/synthesis step —
+  the orchestrator will build the final answer itself.
   """,
   signature: "(question :string) -> {steps [:string]}",
   max_turns: 1,
@@ -111,7 +114,7 @@ Three agents with distinct roles:
 
 * **Worker** — fetches pages, extracts data. Multi-turn, has tools.
 * **Reviewer** — judges worker output against criteria. Single-shot JSON, no tools.
-* **Planner** — orchestrates worker→reviewer chains. Never sees raw results.
+* **Planner** — orchestrates worker→reviewer chains. Builds the final answer itself.
 
 The planner writes PTC-Lisp programs that wire worker and reviewer together.
 It defines a `do-step` helper that dispatches to the worker, reviews the result,
@@ -124,8 +127,12 @@ worker = SubAgent.new(
   {{task}}
 
   ## Rules
-  - Use `fetch_page` to retrieve web pages. For GitHub files, use raw URLs:
-    `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
+  - You MUST call `fetch_page` at least once. Never return the task description as your result.
+  - Your return map must contain data extracted from web pages, not the task text.
+  - Use `fetch_page` to retrieve web pages. It returns `{status :string, text :string}`.
+    Check `(:status result)` — `"ok"` means success, `"error"` means failure (404, timeout, etc.).
+    On error, try an alternative URL instead of retrying the same one.
+  - For GitHub files, use raw URLs: `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
   - Use `(grep pattern text)` or `(grep-n pattern text)` to search text.
     Note: `grep-n` is a function name, NOT `grep -n`.
   - Return a map with your findings as soon as you have useful data.
@@ -136,9 +143,10 @@ worker = SubAgent.new(
   tools: %{
     "fetch_page" =>
       {fetch_page,
-       signature: "(url :string) -> {url :string, text :string}",
+       signature: "(url :string) -> {status :string, text :string}",
        description:
-         "Fetch a web page and return its text content. For GitHub files, use raw.githubusercontent.com URLs."}
+         "Fetch a web page and return its text content. status is \"ok\" on success or \"error\" on failure (404, timeout, etc.). For GitHub files, use raw.githubusercontent.com URLs.",
+       cache: true}
   },
   max_turns: 3,
   retry_turns: 1,
@@ -160,10 +168,11 @@ reviewer = SubAgent.new(
   ## Result to Review
   {{result}}
 
-  Be pragmatic: approve results that contain useful information even if
-  not perfect. Set approved=true with notes about gaps in the summary.
-  Only reject if the result is empty, completely wrong, or missing
-  critical information.
+  Be pragmatic:
+  - Approve if the result contains a version number and at least some feature information.
+  - Only reject if the result is completely empty or contains no relevant data at all.
+  - A version number alone is sufficient — features are nice-to-have.
+  - Partial results with real data should be approved with notes about gaps.
   """,
   description: "Reviews research results against acceptance criteria",
   signature: "(step :string, criteria :string, result :string) -> {approved :bool, summary :string, feedback :string}",
@@ -172,7 +181,7 @@ reviewer = SubAgent.new(
   output: :json
 )
 
-# Planner: orchestrates worker→reviewer, reports progress
+# Planner: orchestrates worker→reviewer, reports progress, builds final answer
 planner_executor = SubAgent.new(
   prompt: """
   Answer this research question: {{question}}
@@ -182,37 +191,42 @@ planner_executor = SubAgent.new(
   and verify results with `reviewer`. You never fetch pages yourself.
 
   ## The `do-step` Pattern
-  Define a helper that dispatches to worker and reviewer (no retry — you
-  handle failures at the orchestration level):
+  Define a helper that dispatches to worker and reviewer. Format the result
+  as readable key-value pairs before sending to the reviewer:
+
+  (defn format-result [m]
+    (reduce (fn [acc k] (str acc k ": " (get m k) "\\n")) "" (keys m)))
 
   (defn do-step [id task criteria]
     (let [result (tool/research_worker {:task task})
-          result_str (str result)
+          result_str (format-result result)
           review (tool/reviewer {:step task :criteria criteria :result result_str})]
       (if (:approved review)
         (do (step-done id (:summary review)) result)
         (do (step-done id (str "REJECTED: " (:feedback review))) nil))))
 
   ## Rules
-  - Always define `do-step` first, then use it for each plan step.
+  - Always define `format-result` and `do-step` first, then use them for each plan step.
   - Use the step IDs from the Progress checklist.
   - Batch independent steps in the same turn (e.g. steps 1 and 2 together).
-  - When threading results from earlier steps into later tasks, extract
-    specific fields with keywords (e.g. `(:version data)`, `(:features data)`)
-    and compose a readable task string. NEVER pass a raw map via `(str result)` —
-    the worker receives it as an opaque string it cannot parse.
-    Good: `(str "Compare Elixir " (:version elixir) " with Erlang " (:version erlang))`
-    Bad: `(str "Compare these: " elixir-data erlang-data)`
+  - Maximum 1 retry per step. If a step fails twice, skip it and move on.
+  - After all research steps are done, build the final answer map yourself
+    from the collected data. Do NOT delegate synthesis to the worker.
+    Extract fields with keywords: `(:version data)`, `(:features data)`.
   - Write specific but achievable acceptance criteria.
-  - If a step returns nil (rejected), you can retry with a refined task
-    on the next turn, or skip and work with what you have.
-  - Only `(return ...)` when all steps are done.
+    Good: "Must include a version number"
+    Bad: "Must include version, release date, 5+ features with descriptions"
+  - If a step returns nil (rejected), you may retry once with a refined task.
+    After that, skip and work with what you have.
+  - Only `(return ...)` when all steps are done or skipped.
+    Build the return map yourself:
+    (return {:elixir elixir-data :erlang erlang-data})
   """,
   signature: "(question :string) -> :map",
   plan: plan,
   tools: %{
-    "research_worker" => SubAgent.as_tool(worker),
-    "reviewer" => SubAgent.as_tool(reviewer)
+    "research_worker" => SubAgent.as_tool(worker, cache: true),
+    "reviewer" => SubAgent.as_tool(reviewer, cache: true)
   },
   max_turns: 8,
   max_depth: 2,
@@ -276,8 +290,8 @@ The key insight: the planner never inspects raw worker output. Instead, it write
 a `do-step` helper that chains worker→reviewer mechanically:
 
 ```
-worker produces result → reviewer judges against criteria → approved? → step-done
-                                                          → rejected? → planner retries or skips
+worker produces result → format-result → reviewer judges against criteria → approved? → step-done
+                                                                          → rejected? → planner retries (max 1) or skips
 ```
 
 This eliminates the problem where the planner marks steps done despite poor results.
@@ -289,16 +303,25 @@ The reviewer is a dedicated judge with explicit acceptance criteria.
 | -------- | ------------------- | --------------------------------- | ------------------------------------------------ |
 | Planner  | Multi-turn PTC-Lisp | Reviewer verdicts (via checklist) | What to research, acceptance criteria, data flow |
 | Worker   | Multi-turn PTC-Lisp | One focused task prompt           | How to fetch and extract data                    |
-| Reviewer | Single-shot JSON    | Step + criteria + result          | Whether result is sufficient                     |
+| Reviewer | Single-shot JSON    | Step + criteria + formatted result | Whether result is sufficient                     |
+
+### Key Design Decisions
+
+- **No synthesis step**: The planner builds the final answer map itself from collected data,
+  rather than delegating to the worker. This avoids the worker echoing back task text.
+- **Formatted results for reviewer**: `format-result` converts maps to readable key-value
+  strings instead of passing opaque `%{...}` via `(str map)`.
+- **Max 1 retry per step**: Prevents the planner from burning all turns retrying one step.
+- **Pragmatic reviewer**: Approves partial results with real data; only rejects empty/irrelevant output.
 
 ### Comparison with Other Patterns
 
-|                          | Plan-and-Execute | Planner-Worker | Planner-Worker-Reviewer         |
-| ------------------------ | ---------------- | -------------- | ------------------------------- |
-| Verification             | Self-assessment  | Planner judges | Dedicated reviewer              |
-| Planner sees raw results | Yes              | Yes            | No — only verdicts            |
-| Retry on poor results    | Manual           | Manual         | Planner-controlled via `do-step`|
-| LLM calls per step       | 1                | 2              | 2-4 (worker + reviewer)         |
+|                          | Plan-and-Execute | Planner-Worker | Planner-Worker-Reviewer          |
+| ------------------------ | ---------------- | -------------- | -------------------------------- |
+| Verification             | Self-assessment  | Planner judges | Dedicated reviewer               |
+| Planner sees raw results | Yes              | Yes            | No — only verdicts             |
+| Retry on poor results    | Manual           | Manual         | Planner-controlled via `do-step` |
+| LLM calls per step       | 1                | 2              | 2-4 (worker + reviewer)          |
 
 ### When to Use This Pattern
 
@@ -312,18 +335,18 @@ The reviewer is a dedicated judge with explicit acceptance criteria.
 The planner can dispatch independent steps in the same turn:
 
 ```clojure
-(def elixir-data (do-step "1" "Find Elixir version..." "Must include version, date, 3+ features"))
-(def erlang-data (do-step "2" "Find Erlang version..." "Must include version, key features"))
+(def elixir-data (do-step "1" "Find Elixir version..." "Must include a version number"))
+(def erlang-data (do-step "2" "Find Erlang version..." "Must include a version number"))
 ```
 
 Steps 1 and 2 run sequentially within one planner turn (PTC-Lisp is single-threaded),
 but the planner doesn't need an extra turn to see their results — the reviewer
-handles verification inline. Dependent steps can reference earlier results:
+handles verification inline.
+
+After all steps complete, the planner builds the final answer itself:
 
 ```clojure
-(do-step "3"
-  (str "Compare Elixir " (:version elixir-data) " and Erlang " (:version erlang-data))
-  "Must compare both versions side by side")
+(return {:elixir elixir-data :erlang erlang-data})
 ```
 
 ### Limitations
