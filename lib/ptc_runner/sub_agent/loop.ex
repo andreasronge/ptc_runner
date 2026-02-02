@@ -141,6 +141,7 @@ defmodule PtcRunner.SubAgent.Loop do
     mission_deadline = Keyword.get(opts, :_mission_deadline)
     trace_context = Keyword.get(opts, :trace_context)
     journal = Keyword.get(opts, :journal)
+    tool_cache = Keyword.get(opts, :tool_cache, %{})
 
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
@@ -185,7 +186,8 @@ defmodule PtcRunner.SubAgent.Loop do
           budget_callback: budget_callback,
           trace_context: trace_context,
           max_heap: max_heap,
-          journal: journal
+          journal: journal,
+          tool_cache: tool_cache
         }
 
         run_with_telemetry(agent, run_opts)
@@ -284,7 +286,11 @@ defmodule PtcRunner.SubAgent.Loop do
       # Journal for (task) idempotent execution
       journal: run_opts.journal,
       # Summaries from (step-done) calls
-      summaries: %{}
+      summaries: %{},
+      # Tool result cache for tools with cache: true
+      tool_cache: run_opts.tool_cache,
+      # Accumulated child steps across all turns (for TraceTree)
+      child_steps: []
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -394,6 +400,8 @@ defmodule PtcRunner.SubAgent.Loop do
         last_fail: Keyword.get(opts, :last_fail),
         last_return_error: Keyword.get(opts, :last_return_error),
         turn_history: Keyword.get(opts, :turn_history, state.turn_history),
+        tool_cache: Keyword.get(opts, :tool_cache, state.tool_cache),
+        child_steps: Keyword.get(opts, :child_steps, state.child_steps),
         # Preserve turn_tokens from the LLM call (for telemetry)
         turn_tokens: state.turn_tokens
     }
@@ -569,7 +577,8 @@ defmodule PtcRunner.SubAgent.Loop do
             messages: build_collected_messages(state, state.messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt,
-            tools: state.normalized_tools
+            tools: state.normalized_tools,
+            child_steps: state.child_steps
         }
 
         {:stop, {:error, step_with_metrics}, nil, nil}
@@ -721,7 +730,8 @@ defmodule PtcRunner.SubAgent.Loop do
         pmap_timeout: agent.pmap_timeout,
         budget: build_budget_introspection_map(agent, state),
         trace_context: state.trace_context,
-        journal: state.journal
+        journal: state.journal,
+        tool_cache: state.tool_cache
       ]
       |> maybe_add_max_heap(state.max_heap)
 
@@ -757,6 +767,8 @@ defmodule PtcRunner.SubAgent.Loop do
           build_continuation_state(state, turn, response, feedback,
             memory: lisp_step.memory,
             journal: lisp_step.journal,
+            tool_cache: lisp_step.tool_cache,
+            child_steps: state.child_steps ++ (lisp_step.child_steps || []),
             last_fail: lisp_step.fail,
             last_return_error: error_message
           )
@@ -843,7 +855,8 @@ defmodule PtcRunner.SubAgent.Loop do
             original_prompt: state.original_prompt,
             tools: state.normalized_tools,
             summaries: state.summaries,
-            journal: lisp_step.journal
+            journal: lisp_step.journal,
+            child_steps: state.child_steps ++ (lisp_step.child_steps || [])
         }
 
         {:stop, {:error, final_step}, turn, state.turn_tokens}
@@ -874,6 +887,8 @@ defmodule PtcRunner.SubAgent.Loop do
               build_continuation_state(state, turn, response, execution_result,
                 memory: lisp_step.memory,
                 journal: lisp_step.journal,
+                tool_cache: lisp_step.tool_cache,
+                child_steps: state.child_steps ++ (lisp_step.child_steps || []),
                 summaries: Map.merge(state.summaries, lisp_step.summaries),
                 turn_history: updated_history
               )
@@ -931,7 +946,8 @@ defmodule PtcRunner.SubAgent.Loop do
                   original_prompt: state.original_prompt,
                   tools: state.normalized_tools,
                   summaries: state.summaries,
-                  journal: lisp_step.journal
+                  journal: lisp_step.journal,
+                  child_steps: state.child_steps ++ (lisp_step.child_steps || [])
               }
 
               {:stop, {:error, final_step}, turn, state.turn_tokens}
@@ -1130,7 +1146,8 @@ defmodule PtcRunner.SubAgent.Loop do
         original_prompt: state.original_prompt,
         tools: state.normalized_tools,
         summaries: state.summaries,
-        journal: state.journal
+        journal: state.journal,
+        child_steps: state.child_steps
     }
 
     {:error, step_with_metrics}
@@ -1159,6 +1176,9 @@ defmodule PtcRunner.SubAgent.Loop do
     # Include the final assistant response in messages
     final_messages = state.messages ++ [%{role: :assistant, content: response}]
 
+    # Merge child_steps: accumulated from previous turns + current turn's
+    all_child_steps = state.child_steps ++ (lisp_step.child_steps || [])
+
     final_step = %{
       lisp_step
       | usage: Metrics.build_final_usage(state, duration_ms, lisp_step.usage.memory_bytes),
@@ -1173,7 +1193,8 @@ defmodule PtcRunner.SubAgent.Loop do
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
         tools: state.normalized_tools,
-        summaries: Map.merge(state.summaries, lisp_step.summaries)
+        summaries: Map.merge(state.summaries, lisp_step.summaries),
+        child_steps: all_child_steps
     }
 
     {:ok, final_step}
@@ -1219,6 +1240,8 @@ defmodule PtcRunner.SubAgent.Loop do
       build_continuation_state(state, turn, response, feedback,
         memory: lisp_step.memory,
         journal: lisp_step.journal,
+        tool_cache: lisp_step.tool_cache,
+        child_steps: state.child_steps ++ (lisp_step.child_steps || []),
         last_return_error: error_message
       )
 
@@ -1280,7 +1303,8 @@ defmodule PtcRunner.SubAgent.Loop do
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
         tools: state.normalized_tools,
-        summaries: state.summaries
+        summaries: state.summaries,
+        child_steps: state.child_steps
     }
 
     {:ok, final_step}

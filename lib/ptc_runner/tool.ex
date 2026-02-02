@@ -63,6 +63,24 @@ defmodule PtcRunner.Tool do
   - `signature` - Optional signature for validation: `"(inputs) -> outputs"`
   - `description` - Optional description for LLM visibility
   - `type` - Tool type: `:native`, `:llm`, `:subagent`
+  - `cache` - Enable result caching by `{tool_name, args}` (default: `false`)
+
+  ## Result Caching
+
+  Set `cache: true` on tools with **stable, pure outputs** — identical inputs always
+  produce the same result. Cached results persist across turns within a single
+  `SubAgent.run/2` call.
+
+      "get-config" => {&MyApp.get_config/1,
+        signature: "(key :string) -> :any",
+        cache: true
+      }
+
+  **Do not use** `cache: true` on tools that read mutable state modifiable by other
+  tools in the session, as the cache has no automatic invalidation.
+
+  In `pmap`, two parallel branches may both miss the cache and execute — last-write-wins
+  on merge. Only successful results are cached; errors are never stored.
   """
 
   @type tool_format ::
@@ -76,10 +94,11 @@ defmodule PtcRunner.Tool do
           function: (map() -> term()) | nil,
           signature: String.t() | nil,
           description: String.t() | nil,
-          type: :native | :llm | :subagent
+          type: :native | :llm | :subagent,
+          cache: boolean()
         }
 
-  defstruct [:name, :function, :signature, :description, :type]
+  defstruct [:name, :function, :signature, :description, :type, cache: false]
 
   alias PtcRunner.SubAgent.TypeExtractor
 
@@ -179,6 +198,7 @@ defmodule PtcRunner.Tool do
     # Function with keyword list options
     signature = Keyword.get(options, :signature)
     description = Keyword.get(options, :description)
+    cache = Keyword.get(options, :cache, false)
 
     {:ok,
      %__MODULE__{
@@ -186,7 +206,8 @@ defmodule PtcRunner.Tool do
        function: function,
        signature: signature,
        description: description,
-       type: :native
+       type: :native,
+       cache: cache
      }}
   end
 
@@ -209,7 +230,8 @@ defmodule PtcRunner.Tool do
        function: nil,
        signature: tool.signature,
        description: tool.description,
-       type: :subagent
+       type: :subagent,
+       cache: tool.cache
      }}
   end
 

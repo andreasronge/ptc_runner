@@ -59,7 +59,7 @@ defmodule PtcRunner.SubAgent.ProgressRendererTest do
       result = ProgressRenderer.render(plan, %{})
 
       assert result =~ "step-done"
-      assert result =~ "one step per turn"
+      assert result =~ "Batch independent steps"
     end
   end
 end
