@@ -92,6 +92,15 @@ defmodule PtcRunner.Step do
   - **Nil when:** `collect_messages: false` (default)
   - **Used for:** Debugging, persistence, and displaying the LLM conversation
 
+  ### `summaries`
+
+  Accumulated `step-done` summaries from semantic progress reporting.
+
+  - **Type:** `%{String.t() => String.t()}`
+  - **Default:** `%{}`
+  - **Set when:** LLM calls `(step-done "id" "summary")` during execution
+  - **Used for:** Progress checklist rendering when agent has a `plan`
+
   ## Error Reasons
 
   Complete list of error reasons in `step.fail.reason`:
@@ -184,10 +193,12 @@ defmodule PtcRunner.Step do
     :tool_calls,
     :pmap_calls,
     :child_traces,
+    :child_steps,
     :messages,
     :prompt,
     :original_prompt,
-    :tools
+    :tools,
+    summaries: %{}
   ]
 
   @typedoc """
@@ -301,9 +312,11 @@ defmodule PtcRunner.Step do
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
           child_traces: [String.t()],
+          child_steps: [t()],
           messages: [message()] | nil,
           prompt: String.t() | nil,
-          tools: map() | nil
+          tools: map() | nil,
+          summaries: %{String.t() => String.t()}
         }
 
   @doc """
@@ -333,7 +346,8 @@ defmodule PtcRunner.Step do
       prints: [],
       tool_calls: [],
       pmap_calls: [],
-      child_traces: []
+      child_traces: [],
+      child_steps: []
     }
   end
 
@@ -408,7 +422,8 @@ defmodule PtcRunner.Step do
       prints: [],
       tool_calls: [],
       pmap_calls: [],
-      child_traces: []
+      child_traces: [],
+      child_steps: []
     }
   end
 end

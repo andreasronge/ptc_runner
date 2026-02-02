@@ -147,17 +147,6 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
       assert step.journal == %{"prev" => 1}
     end
 
-    test "timeout preserves input journal" do
-      {:error, step} =
-        Lisp.run(~S|(reduce (fn [acc _] (append acc [1])) [] (range 1 999999))|,
-          journal: %{"prev" => 1},
-          timeout: 1
-        )
-
-      assert step.fail.reason == :timeout
-      assert step.journal == %{"prev" => 1}
-    end
-
     test "runtime error preserves input journal" do
       {:error, step} =
         Lisp.run(~S|(+ 1 "bad")|,

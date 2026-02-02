@@ -400,15 +400,21 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
     case result do
       {:ok, step} ->
-        # Return wrapper with trace_id so callers can collect it
-        %{__child_trace_id__: child_trace_id, value: step.return}
+        # Return wrapper with trace_id and child step so callers can collect them
+        %{
+          __child_trace_id__: child_trace_id,
+          __child_step__: prune_child_step(step),
+          value: step.return
+        }
 
       {:error, step} ->
-        # Propagate child agent failure
+        # Propagate child agent failure with child step for tree visibility
         raise PtcRunner.Lisp.ExecutionError,
           reason: :tool_error,
           message: name,
-          data: step.fail.message
+          data: step.fail.message,
+          child_trace_id: child_trace_id,
+          child_step: prune_child_step(step)
     end
   end
 
@@ -461,6 +467,11 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   # Generate a 32-character hex trace ID
   defp generate_trace_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  # Prune large fields from child step to keep the tree lightweight
+  defp prune_child_step(step) do
+    %{step | messages: nil, original_prompt: nil, prompt: nil, tools: nil}
   end
 
   # Add option to keyword list if value is not nil

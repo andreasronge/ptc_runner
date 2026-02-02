@@ -289,7 +289,8 @@ defmodule PtcRunner.Lisp do
               eval_ctx.prints,
               eval_ctx.tool_calls,
               eval_ctx.pmap_calls,
-              eval_ctx.journal
+              eval_ctx.journal,
+              eval_ctx.summaries
             )
 
           {:ok, %{step | usage: metrics}}
@@ -303,7 +304,8 @@ defmodule PtcRunner.Lisp do
               eval_ctx.prints,
               eval_ctx.tool_calls,
               eval_ctx.pmap_calls,
-              eval_ctx.journal
+              eval_ctx.journal,
+              eval_ctx.summaries
             )
 
           {:ok, %{step | usage: metrics}}
@@ -324,6 +326,22 @@ defmodule PtcRunner.Lisp do
 
           child_traces = tool_child_traces ++ pmap_child_traces
 
+          # Extract child_steps from tool calls and pmap/pcalls
+          tool_child_steps =
+            eval_ctx.tool_calls
+            |> Enum.filter(&Map.has_key?(&1, :child_step))
+            |> Enum.map(& &1.child_step)
+
+          pmap_child_steps =
+            eval_ctx.pmap_calls
+            |> Enum.flat_map(&Map.get(&1, :child_steps, []))
+
+          child_steps = tool_child_steps ++ pmap_child_steps
+
+          # Strip child_step/child_steps from tool/pmap_calls
+          cleaned_tool_calls = Enum.map(eval_ctx.tool_calls, &Map.delete(&1, :child_step))
+          cleaned_pmap_calls = Enum.map(eval_ctx.pmap_calls, &Map.delete(&1, :child_steps))
+
           step = %Step{
             return: nil,
             fail: %{reason: reason_atom, message: format_error(reason)},
@@ -335,10 +353,12 @@ defmodule PtcRunner.Lisp do
             parent_trace_id: nil,
             field_descriptions: nil,
             prints: eval_ctx.prints,
-            tool_calls: eval_ctx.tool_calls,
-            pmap_calls: eval_ctx.pmap_calls,
+            tool_calls: cleaned_tool_calls,
+            pmap_calls: cleaned_pmap_calls,
             child_traces: child_traces,
-            journal: eval_ctx.journal
+            child_steps: child_steps,
+            journal: eval_ctx.journal,
+            summaries: eval_ctx.summaries
           }
 
           {:error, step}
@@ -352,7 +372,8 @@ defmodule PtcRunner.Lisp do
               eval_ctx.prints,
               eval_ctx.tool_calls,
               eval_ctx.pmap_calls,
-              eval_ctx.journal
+              eval_ctx.journal,
+              eval_ctx.summaries
             )
 
           step_with_usage = %{step | usage: metrics}
@@ -450,7 +471,16 @@ defmodule PtcRunner.Lisp do
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
-  defp apply_memory_contract(value, memory, precision, prints, tool_calls, pmap_calls, journal) do
+  defp apply_memory_contract(
+         value,
+         memory,
+         precision,
+         prints,
+         tool_calls,
+         pmap_calls,
+         journal,
+         summaries
+       ) do
     reversed_tool_calls = Enum.reverse(tool_calls)
     reversed_pmap_calls = Enum.reverse(pmap_calls)
 
@@ -466,18 +496,36 @@ defmodule PtcRunner.Lisp do
 
     child_traces = tool_child_traces ++ pmap_child_traces
 
+    # Extract child_steps from tool calls and pmap/pcalls
+    tool_child_steps =
+      reversed_tool_calls
+      |> Enum.filter(&Map.has_key?(&1, :child_step))
+      |> Enum.map(& &1.child_step)
+
+    pmap_child_steps =
+      reversed_pmap_calls
+      |> Enum.flat_map(&Map.get(&1, :child_steps, []))
+
+    child_steps = tool_child_steps ++ pmap_child_steps
+
+    # Strip child_step/child_steps from tool/pmap_calls to avoid double storage
+    cleaned_tool_calls = Enum.map(reversed_tool_calls, &Map.delete(&1, :child_step))
+    cleaned_pmap_calls = Enum.map(reversed_pmap_calls, &Map.delete(&1, :child_steps))
+
     %Step{
       return: round_floats(value, precision),
       fail: nil,
       memory: memory,
       journal: journal,
+      summaries: summaries,
       signature: nil,
       usage: nil,
       turns: nil,
       prints: Enum.reverse(prints),
-      tool_calls: reversed_tool_calls,
-      pmap_calls: reversed_pmap_calls,
-      child_traces: child_traces
+      tool_calls: cleaned_tool_calls,
+      pmap_calls: cleaned_pmap_calls,
+      child_traces: child_traces,
+      child_steps: child_steps
     }
   end
 
