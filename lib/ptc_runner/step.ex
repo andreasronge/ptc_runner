@@ -291,6 +291,7 @@ defmodule PtcRunner.Step do
           type: :pmap | :pcalls,
           count: non_neg_integer(),
           child_trace_ids: [String.t()],
+          child_steps: [any()],
           timestamp: DateTime.t(),
           duration_ms: non_neg_integer(),
           success_count: non_neg_integer(),

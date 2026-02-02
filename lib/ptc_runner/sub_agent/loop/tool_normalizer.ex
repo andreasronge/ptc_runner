@@ -301,7 +301,6 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   # Unwrap trace wrapper from execute_with_trace (returns %{__child_trace_id__: _, value: result})
   defp unwrap_trace_result(%{__child_trace_id__: _, value: value}), do: value
   defp unwrap_trace_result(%{__child_step__: _, value: value}), do: value
-  defp unwrap_trace_result(result), do: result
 
   defp resolve_llm_tool_llm(:caller, state), do: state.llm
   defp resolve_llm_tool_llm(nil, state), do: state.llm
