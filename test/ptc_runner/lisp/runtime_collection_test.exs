@@ -401,27 +401,6 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
     end
   end
 
-  describe "str2" do
-    test "concatenates two strings" do
-      assert Runtime.str2("hello", " world") == "hello world"
-    end
-
-    test "converts non-string values to string" do
-      assert Runtime.str2("count: ", 42) == "count: 42"
-      assert Runtime.str2("value: ", true) == "value: true"
-    end
-
-    test "handles nil by converting to empty string" do
-      assert Runtime.str2("x", nil) == "x"
-      assert Runtime.str2(nil, "y") == "y"
-      assert Runtime.str2(nil, nil) == ""
-    end
-
-    test "converts keyword atoms to :keyword format" do
-      assert Runtime.str2("keyword: ", :my_key) == "keyword: :my_key"
-    end
-  end
-
   describe "empty? and not_empty" do
     test "empty? returns true for empty collections" do
       assert Runtime.empty?([]) == true

@@ -188,7 +188,7 @@ defmodule PtcRunner.Lisp.Runtime do
   # String Manipulation
   # ============================================================
 
-  defdelegate str2(a, b), to: RuntimeString
+  defdelegate str_variadic(args), to: RuntimeString
   defdelegate subs(s, start), to: RuntimeString
   defdelegate subs(s, start, end_idx), to: RuntimeString
   defdelegate join(coll), to: RuntimeString

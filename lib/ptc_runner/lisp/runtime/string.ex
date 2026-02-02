@@ -6,26 +6,26 @@ defmodule PtcRunner.Lisp.Runtime.String do
   """
 
   @doc """
-  Convert one or more values to string and concatenate.
-  - (str) returns ""
-  - (str "hello") returns "hello"
-  - (str "a" "b") returns "ab"
-  - (str 42) returns "42"
-  - (str nil) returns "" (not "nil")
-  - (str :keyword) returns ":keyword"
-  - (str true) returns "true"
+  Convert zero or more values to string and concatenate.
 
-  Binary reducer used with :variadic binding type.
+  Used as a `:collect` binding for the `str` builtin.
+
+  - `(str)` returns `""`
+  - `(str 42)` returns `"42"`
+  - `(str "a" "b")` returns `"ab"`
+  - `(str nil)` returns `""` (not `"nil"`)
+  - `(str :keyword)` returns `":keyword"`
+  - `(str true)` returns `"true"`
   """
-  def str2(a, b), do: to_str(a) <> to_str(b)
+  def str_variadic(args), do: Enum.map_join(args, &to_str/1)
 
-  defp to_str(nil), do: ""
-  defp to_str(s) when is_binary(s), do: s
-  defp to_str(:infinity), do: "Infinity"
-  defp to_str(:negative_infinity), do: "-Infinity"
-  defp to_str(:nan), do: "NaN"
-  defp to_str(atom) when is_atom(atom), do: inspect(atom)
-  defp to_str(x), do: inspect(x)
+  def to_str(nil), do: ""
+  def to_str(s) when is_binary(s), do: s
+  def to_str(:infinity), do: "Infinity"
+  def to_str(:negative_infinity), do: "-Infinity"
+  def to_str(:nan), do: "NaN"
+  def to_str(atom) when is_atom(atom), do: inspect(atom)
+  def to_str(x), do: inspect(x)
 
   @doc """
   Return substring starting at index (2-arity) or from start to end (3-arity).

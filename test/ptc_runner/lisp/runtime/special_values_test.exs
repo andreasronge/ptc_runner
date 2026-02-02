@@ -68,10 +68,9 @@ defmodule PtcRunner.Lisp.Runtime.SpecialValuesTest do
     end
 
     test "str (to_str)" do
-      # LispString.str2 is variadic, it uses to_str internally
-      assert LispString.str2(:infinity, "") == "Infinity"
-      assert LispString.str2(:negative_infinity, "") == "-Infinity"
-      assert LispString.str2(:nan, "") == "NaN"
+      assert LispString.to_str(:infinity) == "Infinity"
+      assert LispString.to_str(:negative_infinity) == "-Infinity"
+      assert LispString.to_str(:nan) == "NaN"
     end
   end
 
