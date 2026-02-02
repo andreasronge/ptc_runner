@@ -434,9 +434,11 @@ defmodule PtcRunner.Lisp.Eval do
             fn elem ->
               try do
                 Process.delete(:last_child_trace_id)
+                Process.delete(:last_child_step)
                 value = Callable.call(callable_fn, [elem])
                 trace_id = Process.get(:last_child_trace_id)
-                {:ok, value, trace_id}
+                child_step = Process.get(:last_child_step)
+                {:ok, value, trace_id, child_step}
               rescue
                 e in PtcRunner.ToolExecutionError ->
                   {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
@@ -461,7 +463,7 @@ defmodule PtcRunner.Lisp.Eval do
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
         case collect_parallel_results(results, :pmap) do
-          {:ok, values, child_trace_ids} ->
+          {:ok, values, child_trace_ids, child_steps} ->
             # Count successes and errors
             success_count = length(values)
             error_count = count - success_count
@@ -471,6 +473,7 @@ defmodule PtcRunner.Lisp.Eval do
               type: :pmap,
               count: count,
               child_trace_ids: Enum.reject(child_trace_ids, &is_nil/1),
+              child_steps: Enum.reject(child_steps, &is_nil/1),
               timestamp: timestamp,
               duration_ms: duration_ms,
               success_count: success_count,
@@ -519,9 +522,11 @@ defmodule PtcRunner.Lisp.Eval do
               fn {erlang_fn, idx} ->
                 try do
                   Process.delete(:last_child_trace_id)
+                  Process.delete(:last_child_step)
                   value = erlang_fn.()
                   trace_id = Process.get(:last_child_trace_id)
-                  {:ok, value, trace_id, idx}
+                  child_step = Process.get(:last_child_step)
+                  {:ok, value, trace_id, idx, child_step}
                 rescue
                   e ->
                     {:error, {:pcalls_error, idx, Exception.message(e)}}
@@ -543,7 +548,7 @@ defmodule PtcRunner.Lisp.Eval do
           duration_ms = System.monotonic_time(:millisecond) - start_time
 
           case collect_parallel_results(results, :pcalls) do
-            {:ok, values, child_trace_ids} ->
+            {:ok, values, child_trace_ids, child_steps} ->
               # Count successes and errors
               success_count = length(values)
               error_count = count - success_count
@@ -553,6 +558,7 @@ defmodule PtcRunner.Lisp.Eval do
                 type: :pcalls,
                 count: count,
                 child_trace_ids: Enum.reject(child_trace_ids, &is_nil/1),
+                child_steps: Enum.reject(child_steps, &is_nil/1),
                 timestamp: timestamp,
                 duration_ms: duration_ms,
                 success_count: success_count,
@@ -620,6 +626,34 @@ defmodule PtcRunner.Lisp.Eval do
             {:ok, value, %{eval_ctx2 | journal: updated_journal}}
           end
         end
+    end
+  end
+
+  # Step done: (step-done id summary)
+  # Stores summary in summaries map, returns the summary string
+  defp do_eval({:step_done, id_ast, summary_ast}, eval_ctx) do
+    with {:ok, id, eval_ctx} <- do_eval(id_ast, eval_ctx),
+         {:ok, summary, eval_ctx} <- do_eval(summary_ast, eval_ctx) do
+      id = require_string_arg!(id, "step-done", "id")
+      summary = require_string_arg!(summary, "step-done", "summary")
+      updated_summaries = Map.put(eval_ctx.summaries, id, summary)
+      {:ok, summary, %{eval_ctx | summaries: updated_summaries}}
+    end
+  end
+
+  # Task reset: (task-reset id)
+  # Deletes key from journal map, returns nil
+  defp do_eval({:task_reset, id_ast}, eval_ctx) do
+    with {:ok, id, eval_ctx} <- do_eval(id_ast, eval_ctx) do
+      id = require_string_arg!(id, "task-reset", "id")
+
+      updated_journal =
+        case eval_ctx.journal do
+          %{} -> Map.delete(eval_ctx.journal, id)
+          nil -> nil
+        end
+
+      {:ok, nil, %{eval_ctx | journal: updated_journal}}
     end
   end
 
@@ -736,24 +770,33 @@ defmodule PtcRunner.Lisp.Eval do
     start_time = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
 
-    {raw_result, error} =
+    {raw_result, error, error_child_step, error_child_trace_id} =
       try do
-        {tool_exec.(tool_name, args_map), nil}
+        {tool_exec.(tool_name, args_map), nil, nil, nil}
       rescue
         e in ExecutionError ->
-          # Let ExecutionErrors from tools (e.g., {:error, reason} returns) propagate
-          reraise e, __STACKTRACE__
+          if e.child_step do
+            # ExecutionError from SubAgent with child_step — record the error with child info
+            {nil, Exception.message(e), e.child_step, e.child_trace_id}
+          else
+            # Let other ExecutionErrors propagate
+            reraise e, __STACKTRACE__
+          end
 
         e ->
           # Catch unexpected exceptions and record the error
-          {nil, Exception.message(e)}
+          {nil, Exception.message(e), nil, nil}
       end
 
     duration_ms = System.monotonic_time(:millisecond) - start_time
 
-    # Unwrap SubAgentTool results that include child_trace_id metadata
+    # Unwrap SubAgentTool results that include child_trace_id/child_step metadata
     # This prevents internal trace metadata from leaking to the Lisp interpreter
-    {result, child_trace_id} = unwrap_tool_result(raw_result)
+    {result, child_trace_id, child_step} = unwrap_tool_result(raw_result)
+
+    # Merge in child info from error path (failed SubAgent tools)
+    child_trace_id = child_trace_id || error_child_trace_id
+    child_step = child_step || error_child_step
 
     tool_call = %{
       name: tool_name,
@@ -772,6 +815,14 @@ defmodule PtcRunner.Lisp.Eval do
         tool_call
       end
 
+    # Add child_step if present (for TraceTree hierarchy)
+    tool_call =
+      if child_step do
+        Map.put(tool_call, :child_step, child_step)
+      else
+        tool_call
+      end
+
     eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
 
     if error do
@@ -785,17 +836,22 @@ defmodule PtcRunner.Lisp.Eval do
       # the Lisp value space with framework-internal wrappers.
       # This ensures tools always return data, not metadata, to the LLM.
       if child_trace_id, do: Process.put(:last_child_trace_id, child_trace_id)
+      if child_step, do: Process.put(:last_child_step, child_step)
       {:ok, result, eval_ctx2}
     end
   end
 
-  # Unwrap SubAgentTool results that contain child_trace_id metadata.
-  # Returns {actual_result, child_trace_id} or {result, nil} if not wrapped.
-  defp unwrap_tool_result(%{__child_trace_id__: trace_id, value: value}) do
-    {value, trace_id}
+  # Unwrap SubAgentTool results that contain child_trace_id and child_step metadata.
+  # Returns {actual_result, child_trace_id, child_step} or {result, nil, nil} if not wrapped.
+  defp unwrap_tool_result(%{__child_trace_id__: trace_id, __child_step__: step, value: value}) do
+    {value, trace_id, step}
   end
 
-  defp unwrap_tool_result(result), do: {result, nil}
+  defp unwrap_tool_result(%{__child_trace_id__: trace_id, value: value}) do
+    {value, trace_id, nil}
+  end
+
+  defp unwrap_tool_result(result), do: {result, nil, nil}
 
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do
@@ -821,6 +877,28 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, vals, ctx} -> {:ok, Enum.reverse(vals), ctx}
       {:error, _} = err -> err
     end
+  end
+
+  # Require a string or stringifiable scalar argument, raise on nil/collection
+  defp require_string_arg!(value, _form, _arg_name) when is_binary(value), do: value
+
+  defp require_string_arg!(value, form, arg_name)
+       when is_integer(value) or is_float(value) or is_atom(value) do
+    case value do
+      nil ->
+        raise ExecutionError,
+          reason: :type_error,
+          message: "(#{form}) #{arg_name} must be a string, got nil"
+
+      v ->
+        to_string(v)
+    end
+  end
+
+  defp require_string_arg!(value, form, arg_name) do
+    raise ExecutionError,
+      reason: :type_error,
+      message: "(#{form}) #{arg_name} must be a string, got #{inspect(value, limit: 3)}"
   end
 
   # ============================================================
@@ -915,34 +993,47 @@ defmodule PtcRunner.Lisp.Eval do
   # Parallel execution helpers (shared by pmap and pcalls)
   # ============================================================
 
-  # Unified helper to collect parallel results with child trace IDs
-  # Works for both pmap ({:ok, val, trace_id}) and pcalls ({:ok, val, trace_id, idx})
+  # Unified helper to collect parallel results with child trace IDs and child steps
+  # Works for both pmap and pcalls result formats
   defp collect_parallel_results(results, type) do
-    collect_parallel_results(results, [], [], type)
+    collect_parallel_results(results, [], [], [], type)
   end
 
-  defp collect_parallel_results([], acc, trace_ids, _type) do
-    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids)}
+  defp collect_parallel_results([], acc, trace_ids, child_steps, _type) do
+    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids), Enum.reverse(child_steps)}
   end
 
-  defp collect_parallel_results([{:ok, result} | rest], acc, trace_ids, type) do
+  defp collect_parallel_results([{:ok, result} | rest], acc, trace_ids, child_steps, type) do
     case extract_parallel_result(result) do
-      {:ok, val, trace_id} ->
-        collect_parallel_results(rest, [val | acc], [trace_id | trace_ids], type)
+      {:ok, val, trace_id, child_step} ->
+        collect_parallel_results(
+          rest,
+          [val | acc],
+          [trace_id | trace_ids],
+          [child_step | child_steps],
+          type
+        )
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp collect_parallel_results([{:exit, reason} | _rest], _acc, _trace_ids, type) do
+  defp collect_parallel_results([{:exit, reason} | _rest], _acc, _trace_ids, _child_steps, type) do
     error_type = if type == :pmap, do: :pmap_error, else: :pcalls_error
     {:error, {error_type, "parallel task failed: #{inspect(reason)}"}}
   end
 
-  # Extract value and trace_id from different result formats
-  defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id}
-  defp extract_parallel_result({:ok, val, trace_id, _idx}), do: {:ok, val, trace_id}
+  # Extract value, trace_id, and child_step from different result formats
+  defp extract_parallel_result({:ok, val, trace_id, child_step})
+       when is_map(child_step) or is_nil(child_step) do
+    {:ok, val, trace_id, child_step}
+  end
+
+  defp extract_parallel_result({:ok, val, trace_id, _idx, child_step}),
+    do: {:ok, val, trace_id, child_step}
+
+  defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id, nil}
   defp extract_parallel_result({:error, _reason} = error), do: error
 
   # ============================================================

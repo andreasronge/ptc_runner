@@ -6,5 +6,5 @@ defmodule PtcRunner.Lisp.ExecutionError do
   to propagate structured errors (like unknown tools or tool failures)
   out of the evaluation loop and into the `Step` failure result.
   """
-  defexception [:reason, :message, :data]
+  defexception [:reason, :message, :data, :child_trace_id, :child_step]
 end
