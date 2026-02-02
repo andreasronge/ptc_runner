@@ -53,6 +53,7 @@ data/products                      ; read-only input data
 - No reader macros — no `#_` (discard), `#'` (var quote), `#""` (regex literal)
 - No `try/catch/throw` — use `fail` for errors
 - `(task "id" expr)` — journaled execution: if ID was already completed, returns cached result; otherwise evaluates expr and records it
+- `(step-done "id" "summary")` — report progress on a plan step; `(task-reset "id")` — clear a cached task
 
 ### Common Mistakes
 

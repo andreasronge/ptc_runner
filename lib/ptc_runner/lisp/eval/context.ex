@@ -31,6 +31,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :budget,
     :trace_context,
     :journal,
+    summaries: %{},
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
@@ -109,6 +110,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           budget: map() | nil,
           trace_context: trace_context(),
           journal: map() | nil,
+          summaries: %{String.t() => String.t()},
           iteration_count: integer(),
           loop_limit: integer(),
           max_print_length: pos_integer(),
@@ -248,7 +250,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
         tool_calls: ctx2.tool_calls ++ ctx1.tool_calls,
         pmap_calls: ctx2.pmap_calls ++ ctx1.pmap_calls,
         user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
-        iteration_count: ctx1.iteration_count + ctx2.iteration_count
+        iteration_count: ctx1.iteration_count + ctx2.iteration_count,
+        summaries: Map.merge(ctx1.summaries, ctx2.summaries)
     }
   end
 end
