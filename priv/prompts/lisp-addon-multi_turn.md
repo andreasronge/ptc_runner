@@ -83,7 +83,29 @@ Use `(task "id" expr)` to record idempotent steps. If the task ID was already co
 
 **Task IDs must be string literals.** The Mission Log in the system prompt shows which tasks have completed.
 
-**Semantic IDs:** Encode intent and data in IDs — use `"charge_order_42"` not `"step_1"`. Positional IDs break when the plan changes. One task per side-effect; avoid nesting tasks inside other tasks.
+**Semantic IDs:** Encode intent and data in IDs — use `"charge_order_42"` not `"step_1"`. **Never use bare numbers** like `"1"` or `"2"` as task IDs — these collide with plan step IDs and cause false progress. One task per side-effect; avoid nesting tasks inside other tasks.
+
+**⚠ Reusing an ID returns the cached result.** If you retry with different arguments, you **must** use a different ID — otherwise you silently get the old result.
+
+### Semantic Progress
+
+When a plan is provided, **each turn should complete one step**: fetch/compute, verify the result, then call `(step-done "id" "summary")`. The step-done call marks the step as done in the Progress checklist.
+
+**Verify before marking done.** If a page contains conflicting values (e.g., old examples vs. current text), use `grep` to find all candidates and reason through which is correct before calling `step-done`.
+
+Use `(task-reset "id")` to clear a cached task result from the journal. Call `step-done` at top level in `do` blocks — it does not work inside `pmap`/`pcalls`/`map` closures.
+
+**Checklist update:** `step-done` summaries appear in the Progress checklist on the next turn. If the current turn errors, summaries are discarded.
+
+```clojure
+;; Typical turn: fetch, verify, mark done
+(def page (task "fetch-docs" (tool/fetch_page {:url "https://example.com/docs"})))
+(println "Length:" (count (:text page)))
+(step-done "1" (str "Fetched docs, " (count (:text page)) " chars"))
+
+;; Clear a cached task to re-execute it
+(task-reset "fetch-docs")
+```
 
 ### State Persistence
 

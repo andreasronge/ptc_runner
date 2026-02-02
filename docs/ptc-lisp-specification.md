@@ -1000,6 +1000,68 @@ To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive call
 
 ---
 
+### 5.14 `step-done` — Semantic Progress Reporting
+
+`step-done` records a summary for a plan step, signaling completion with a human-readable description. Used with the `plan` option on SubAgent to render progress checklists.
+
+**Syntax:**
+
+```clojure
+(step-done "step-id" "summary of what was accomplished")
+```
+
+**Semantics:**
+
+- Stores the summary string in the step's `summaries` map, keyed by ID
+- Returns the summary string
+- Summaries accumulate across turns within a SubAgent run
+- If called multiple times with the same ID, the last summary wins
+- **Deferred visibility:** summaries appear in the Progress checklist on the *next* turn, not the current one. If the current turn errors, its summaries are discarded.
+- **Must be called at top level** — summaries inside `pmap`, `pcalls`, or `map` closures are not propagated (closures run in isolated contexts)
+
+**Examples:**
+
+```clojure
+;; Report completion of a plan step
+(do
+  (def users (task "gather" (tool/get-users {})))
+  (step-done "gather" (str "Found " (count users) " users")))
+
+;; Multiple steps
+(do
+  (step-done "1" "Fetched 42 records from API")
+  (step-done "2" "Filtered to 12 matching criteria"))
+```
+
+---
+
+### 5.15 `task-reset` — Clear Journaled Task Cache
+
+`task-reset` removes a cached task result from the journal, allowing it to be re-executed on the next call to `(task id expr)`.
+
+**Syntax:**
+
+```clojure
+(task-reset "task-id")
+```
+
+**Semantics:**
+
+- Deletes the given key from the journal map
+- Returns `nil`
+- No-op if the key doesn't exist in the journal
+- Only affects the journal (task cache), not summaries
+
+**Examples:**
+
+```clojure
+;; Re-fetch stale data
+(task-reset "fetch-users")
+(def users (task "fetch-users" (tool/get-users {:limit 1000})))
+```
+
+---
+
 ## 6. Threading Macros
 
 Threading macros transform nested function calls into linear pipelines.

@@ -442,7 +442,7 @@ tools = %{
 
 ### Pattern 3: Plan Then Execute
 
-Separate planning from execution:
+Use the `plan:` field for built-in progress tracking. The LLM reports step completions via `(step-done "id" "summary")` and sees a progress checklist between turns.
 
 ```elixir
 def plan_and_execute(prompt, opts) do
@@ -461,22 +461,21 @@ def plan_and_execute(prompt, opts) do
     llm: llm
   )
 
-  # Phase 2: Execute with plan as context
+  # Phase 2: Execute with plan and progress tracking
   SubAgent.run(
     """
     Execute: #{prompt}
-
-    Your plan:
-    #{Enum.join(plan.return.steps, "\n")}
-
-    Follow your plan, adapting as needed.
+    Follow your plan, calling step-done after each step completes.
     """,
+    plan: plan.return.steps,
     tools: tools,
     llm: llm,
     context: Keyword.get(opts, :context, %{})
   )
 end
 ```
+
+The `plan:` field accepts a string list (auto-numbered) or `{id, description}` tuples. See [Navigator Pattern](subagent-navigator.md#semantic-progress-with-plans) for details.
 
 ### Pattern 4: Structured Plan Executor
 

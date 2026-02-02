@@ -199,6 +199,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :return}, rest, _list, tail?), do: analyze_return(rest, tail?)
   defp dispatch_list_form({:symbol, :fail}, rest, _list, tail?), do: analyze_fail(rest, tail?)
   defp dispatch_list_form({:symbol, :task}, rest, _list, tail?), do: analyze_task(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"step-done"}, rest, _list, tail?),
+    do: analyze_step_done(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"task-reset"}, rest, _list, tail?),
+    do: analyze_task_reset(rest, tail?)
+
   defp dispatch_list_form({:symbol, :def}, rest, _list, tail?), do: analyze_def(rest, tail?)
   defp dispatch_list_form({:symbol, :defn}, rest, _list, tail?), do: analyze_defn(rest, tail?)
 
@@ -987,6 +994,35 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_task(_, _tail?) do
     {:error, {:invalid_arity, :task, "expected (task \"id\" expr)"}}
+  end
+
+  # ============================================================
+  # Step done: (step-done "id" "summary")
+  # ============================================================
+
+  defp analyze_step_done([id_ast, summary_ast], _tail?) do
+    with {:ok, id} <- do_analyze(id_ast, false),
+         {:ok, summary} <- do_analyze(summary_ast, false) do
+      {:ok, {:step_done, id, summary}}
+    end
+  end
+
+  defp analyze_step_done(_, _tail?) do
+    {:error, {:invalid_arity, :"step-done", "expected (step-done id summary)"}}
+  end
+
+  # ============================================================
+  # Task reset: (task-reset "id")
+  # ============================================================
+
+  defp analyze_task_reset([id_ast], _tail?) do
+    with {:ok, id} <- do_analyze(id_ast, false) do
+      {:ok, {:task_reset, id}}
+    end
+  end
+
+  defp analyze_task_reset(_, _tail?) do
+    {:error, {:invalid_arity, :"task-reset", "expected (task-reset id)"}}
   end
 
   # ============================================================

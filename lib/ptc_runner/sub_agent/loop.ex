@@ -268,9 +268,9 @@ defmodule PtcRunner.SubAgent.Loop do
       original_prompt: agent.prompt,
       # Normalized tools for Step.tools (used by Debug.print_trace compressed view)
       normalized_tools: normalized_tools,
-      # Unified budget model for return_retries
+      # Unified budget model for retry_turns
       work_turns_remaining: agent.max_turns,
-      retry_turns_remaining: agent.return_retries,
+      retry_turns_remaining: agent.retry_turns,
       # Last error message for retry feedback (collapsed context)
       last_return_error: nil,
       # Budget callback options
@@ -282,7 +282,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Lisp resource limits (propagated to child agents)
       max_heap: run_opts.max_heap,
       # Journal for (task) idempotent execution
-      journal: run_opts.journal
+      journal: run_opts.journal,
+      # Summaries from (step-done) calls
+      summaries: %{}
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -325,7 +327,7 @@ defmodule PtcRunner.SubAgent.Loop do
         {:ok, step}
 
       :no_fallback ->
-        if agent.return_retries == 0 do
+        if agent.retry_turns == 0 do
           # Legacy behavior: no retry budget, so this is max_turns_exceeded
           build_termination_error(
             :max_turns_exceeded,
@@ -388,6 +390,7 @@ defmodule PtcRunner.SubAgent.Loop do
         retry_turns_remaining: new_retry_turns,
         memory: Keyword.get(opts, :memory, state.memory),
         journal: Keyword.get(opts, :journal, state.journal),
+        summaries: Keyword.get(opts, :summaries, state.summaries),
         last_fail: Keyword.get(opts, :last_fail),
         last_return_error: Keyword.get(opts, :last_return_error),
         turn_history: Keyword.get(opts, :turn_history, state.turn_history),
@@ -463,7 +466,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
     telemetry_metadata =
       if in_retry_phase do
-        attempt_num = agent.return_retries - state.retry_turns_remaining + 1
+        attempt_num = agent.retry_turns - state.retry_turns_remaining + 1
 
         Map.merge(telemetry_metadata, %{
           attempt: attempt_num,
@@ -749,6 +752,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Build feedback with appropriate turn info
         feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
+        # Deferred step-done: discard current turn's summaries on error
         new_state =
           build_continuation_state(state, turn, response, feedback,
             memory: lisp_step.memory,
@@ -795,8 +799,8 @@ defmodule PtcRunner.SubAgent.Loop do
             )
         end
 
-      # Single-shot mode without return_retries - skip validation (no retry possible anyway)
-      agent.max_turns == 1 and agent.return_retries == 0 ->
+      # Single-shot mode without retry_turns - skip validation (no retry possible anyway)
+      agent.max_turns == 1 and agent.retry_turns == 0 ->
         # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
         normalized_step = %{lisp_step | return: KeyNormalizer.normalize_keys(lisp_step.return)}
         turn = build_success_turn(code, response, normalized_step, state)
@@ -837,7 +841,9 @@ defmodule PtcRunner.SubAgent.Loop do
             messages: build_collected_messages(state, final_messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt,
-            tools: state.normalized_tools
+            tools: state.normalized_tools,
+            summaries: state.summaries,
+            journal: lisp_step.journal
         }
 
         {:stop, {:error, final_step}, turn, state.turn_tokens}
@@ -868,6 +874,7 @@ defmodule PtcRunner.SubAgent.Loop do
               build_continuation_state(state, turn, response, execution_result,
                 memory: lisp_step.memory,
                 journal: lisp_step.journal,
+                summaries: Map.merge(state.summaries, lisp_step.summaries),
                 turn_history: updated_history
               )
 
@@ -922,7 +929,9 @@ defmodule PtcRunner.SubAgent.Loop do
                   messages: build_collected_messages(state, final_messages),
                   prompt: state.expanded_prompt,
                   original_prompt: state.original_prompt,
-                  tools: state.normalized_tools
+                  tools: state.normalized_tools,
+                  summaries: state.summaries,
+                  journal: lisp_step.journal
               }
 
               {:stop, {:error, final_step}, turn, state.turn_tokens}
@@ -979,8 +988,9 @@ defmodule PtcRunner.SubAgent.Loop do
        ) do
     base = SystemPrompt.generate_system(agent, resolution_context: resolution_context)
 
-    case journal do
-      %{} when map_size(journal) > 0 ->
+    # When agent has a plan, progress checklist in user messages supersedes Mission Log
+    case {agent.plan, journal} do
+      {[], %{} = j} when map_size(j) > 0 ->
         mission_log = SystemPrompt.render_mission_log(journal)
         base <> "\n\n" <> mission_log
 
@@ -997,8 +1007,11 @@ defmodule PtcRunner.SubAgent.Loop do
         received_field_descriptions: run_opts.received_field_descriptions
       )
 
+    # Initial progress checklist (all pending) if agent has a plan
+    initial_progress = TurnFeedback.render_initial_progress(agent)
+
     # Combine context sections with mission
-    [context_prompt, "# Mission\n\n#{expanded_mission}"]
+    [context_prompt, "# Mission\n\n#{expanded_mission}", initial_progress]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
@@ -1014,8 +1027,8 @@ defmodule PtcRunner.SubAgent.Loop do
     # 1. Compression strategy is enabled (not nil)
     # 2. We're past turn 1 (have history to compress)
     # 3. Not in single-shot mode without retries (SS-001: max_turns == 1 skips compression)
-    #    BUT: single-shot with return_retries > 0 DOES use compression for context collapsing
-    if strategy && state.turn > 1 && (agent.max_turns > 1 or agent.return_retries > 0) do
+    #    BUT: single-shot with retry_turns > 0 DOES use compression for context collapsing
+    if strategy && state.turn > 1 && (agent.max_turns > 1 or agent.retry_turns > 0) do
       build_compressed_messages(agent, state, system_prompt, strategy, opts)
     else
       # Uncompressed mode - use accumulated messages as-is, no compression stats
@@ -1041,7 +1054,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
     # Calculate turns left for the indicator
     # In retry phase (work_turns_remaining <= 0), we're always on final turn (turns_left = 0)
-    # This handles single-shot with return_retries where turn > max_turns
+    # This handles single-shot with retry_turns where turn > max_turns
     turns_left = max(0, state.work_turns_remaining - 1)
 
     # Build compression options with context
@@ -1115,7 +1128,9 @@ defmodule PtcRunner.SubAgent.Loop do
         messages: build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
-        tools: state.normalized_tools
+        tools: state.normalized_tools,
+        summaries: state.summaries,
+        journal: state.journal
     }
 
     {:error, step_with_metrics}
@@ -1157,7 +1172,8 @@ defmodule PtcRunner.SubAgent.Loop do
         messages: build_collected_messages(state, final_messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
-        tools: state.normalized_tools
+        tools: state.normalized_tools,
+        summaries: Map.merge(state.summaries, lisp_step.summaries)
     }
 
     {:ok, final_step}
@@ -1198,6 +1214,7 @@ defmodule PtcRunner.SubAgent.Loop do
     # Build feedback with appropriate turn info
     feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
 
+    # Deferred step-done: discard current turn's summaries on error
     new_state =
       build_continuation_state(state, turn, response, feedback,
         memory: lisp_step.memory,
@@ -1262,7 +1279,8 @@ defmodule PtcRunner.SubAgent.Loop do
         messages: build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
-        tools: state.normalized_tools
+        tools: state.normalized_tools,
+        summaries: state.summaries
     }
 
     {:ok, final_step}

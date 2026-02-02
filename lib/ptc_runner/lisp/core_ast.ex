@@ -53,6 +53,9 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Journaled task: (task "id" expr) or (task id-expr expr)
           | {:task, String.t(), t()}
           | {:task_dynamic, t(), t()}
+          # Semantic progress: (step-done id summary), (task-reset id)
+          | {:step_done, t(), t()}
+          | {:task_reset, t()}
           # Tool invocation via tool/ namespace: (tool/name args...)
           | {:tool_call, atom(), [t()]}
           # Define binding in user namespace: (def name value) with optional metadata
