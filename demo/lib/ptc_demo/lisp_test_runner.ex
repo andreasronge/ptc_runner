@@ -37,7 +37,8 @@ defmodule PtcDemo.LispTestRunner do
   defp test_cases do
     TestCase.common_test_cases() ++
       TestCase.lisp_specific_cases() ++
-      TestCase.multi_turn_cases()
+      TestCase.multi_turn_cases() ++
+      TestCase.plan_cases()
   end
 
   @doc """
@@ -174,7 +175,7 @@ defmodule PtcDemo.LispTestRunner do
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
     compression = Keyword.get(opts, :compression, false)
     filter = Keyword.get(opts, :filter, :all)
-    return_retries = Keyword.get(opts, :return_retries, 0)
+    retry_turns = Keyword.get(opts, :retry_turns, 0)
 
     # Check Babashka availability if Clojure validation requested
     clojure_available = check_clojure_validation(validate_clojure)
@@ -243,7 +244,7 @@ defmodule PtcDemo.LispTestRunner do
           agent_mod,
           current_model,
           clojure_available,
-          return_retries
+          retry_turns
         )
       end
 
@@ -285,7 +286,7 @@ defmodule PtcDemo.LispTestRunner do
          agent_mod,
          current_model,
          clojure_available,
-         return_retries
+         retry_turns
        ) do
     if total_runs > 1 do
       IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
@@ -321,7 +322,7 @@ defmodule PtcDemo.LispTestRunner do
 
     summary =
       Base.build_summary(results, start_time, current_model, data_mode, stats,
-        return_retries: return_retries
+        retry_turns: retry_turns
       )
 
     if verbose do
@@ -384,7 +385,7 @@ defmodule PtcDemo.LispTestRunner do
       report_path = Keyword.get(opts, :report)
       runs = Keyword.get(opts, :runs, 1)
       compression = Keyword.get(opts, :compression, false)
-      return_retries = Keyword.get(opts, :return_retries, 0)
+      retry_turns = Keyword.get(opts, :retry_turns, 0)
 
       test_case = Enum.at(cases, index - 1)
 
@@ -439,7 +440,7 @@ defmodule PtcDemo.LispTestRunner do
           stats = agent_mod.stats()
 
           Base.build_summary([result], start_time, current_model, data_mode, stats,
-            return_retries: return_retries
+            retry_turns: retry_turns
           )
         end
 
@@ -511,6 +512,10 @@ defmodule PtcDemo.LispTestRunner do
     Enum.filter(cases, fn tc -> Map.get(tc, :max_turns, 1) == 1 end)
   end
 
+  defp filter_test_cases(cases, :plan) do
+    Enum.filter(cases, fn tc -> Map.has_key?(tc, :plan) end)
+  end
+
   # Select appropriate prompt for test type
   defp prompt_for_test(test_case, :auto) do
     if Map.get(test_case, :max_turns, 1) > 1, do: :multi_turn, else: :single_shot
@@ -555,17 +560,29 @@ defmodule PtcDemo.LispTestRunner do
     max_turns = Map.get(test_case, :max_turns, 1)
     expect = Map.get(test_case, :expect)
     signature = Map.get(test_case, :signature)
+    plan = Map.get(test_case, :plan)
 
     if verbose do
-      prefix = if max_turns > 1, do: "[MULTI-TURN] ", else: ""
+      prefix =
+        cond do
+          plan != nil -> "[PLAN] "
+          max_turns > 1 -> "[MULTI-TURN] "
+          true -> ""
+        end
+
       IO.puts("\n[#{index}/#{total}] #{prefix}#{query}")
     else
-      IO.write(if max_turns > 1, do: "M", else: ".")
+      cond do
+        plan != nil -> IO.write("P")
+        max_turns > 1 -> IO.write("M")
+        true -> IO.write(".")
+      end
     end
 
     # Build ask options - signature takes precedence over expect for type validation
     ask_opts = [max_turns: max_turns, expect: expect, debug: debug]
     ask_opts = if signature, do: Keyword.put(ask_opts, :signature, signature), else: ask_opts
+    ask_opts = if plan, do: Keyword.put(ask_opts, :plan, plan), else: ask_opts
 
     result =
       case agent_mod.ask(query, ask_opts) do

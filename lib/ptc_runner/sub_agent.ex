@@ -116,6 +116,15 @@ defmodule PtcRunner.SubAgent do
           max_print_length: pos_integer()
         ]
 
+  @typedoc """
+  Plan step definition.
+
+  Each step is a `{id, description}` tuple where:
+  - `id` is a string identifier (used as key in summaries)
+  - `description` is a human-readable description of the step
+  """
+  @type plan_step :: {String.t(), String.t()}
+
   @type t :: %__MODULE__{
           prompt: String.t(),
           signature: String.t() | nil,
@@ -123,7 +132,7 @@ defmodule PtcRunner.SubAgent do
           tools: map(),
           llm_query: boolean(),
           max_turns: pos_integer(),
-          return_retries: non_neg_integer(),
+          retry_turns: non_neg_integer(),
           prompt_limit: map() | nil,
           timeout: pos_integer(),
           mission_timeout: pos_integer() | nil,
@@ -140,7 +149,8 @@ defmodule PtcRunner.SubAgent do
           float_precision: non_neg_integer(),
           compression: compression_opts(),
           output: output_mode(),
-          memory_strategy: :strict | :rollback
+          memory_strategy: :strict | :rollback,
+          plan: [plan_step()]
         }
 
   alias PtcRunner.SubAgent.KeyNormalizer
@@ -173,7 +183,7 @@ defmodule PtcRunner.SubAgent do
     tools: %{},
     llm_query: false,
     max_turns: 5,
-    return_retries: 0,
+    retry_turns: 0,
     timeout: 5000,
     pmap_timeout: 5000,
     memory_limit: 1_048_576,
@@ -182,7 +192,8 @@ defmodule PtcRunner.SubAgent do
     format_options: @default_format_options,
     float_precision: 2,
     output: :ptc_lisp,
-    memory_strategy: :strict
+    memory_strategy: :strict,
+    plan: []
   ]
 
   @doc "Returns the default format options."
@@ -207,7 +218,7 @@ defmodule PtcRunner.SubAgent do
   - `signature` - String contract defining expected inputs and outputs
   - `tools` - Map of callable tools (default: %{})
   - `max_turns` - Positive integer for maximum LLM calls (default: 5)
-  - `return_retries` - Non-negative integer for extra turns in must-return mode (default: 0)
+  - `retry_turns` - Non-negative integer for extra turns in must-return mode (default: 0)
   - `prompt_limit` - Map with truncation config for LLM view
   - `timeout` - Positive integer for max milliseconds per Lisp execution (default: 1000)
   - `mission_timeout` - Positive integer for max milliseconds for entire execution
@@ -227,6 +238,7 @@ defmodule PtcRunner.SubAgent do
   - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
   - `output` - Output mode: `:ptc_lisp` (default) or `:json`
   - `llm_query` - Boolean enabling LLM query mode (default: false)
+  - `plan` - List of plan steps (strings, `{id, description}` tuples, or keyword list)
 
   ## Returns
 
@@ -280,7 +292,58 @@ defmodule PtcRunner.SubAgent do
           opts
       end
 
+    # Normalize and validate plan to [{id, description}] format
+    opts =
+      case Keyword.fetch(opts, :plan) do
+        {:ok, plan} when is_list(plan) ->
+          Keyword.put(opts, :plan, normalize_plan(plan))
+
+        {:ok, _} ->
+          raise ArgumentError, "plan must be a list"
+
+        :error ->
+          opts
+      end
+
     struct(__MODULE__, opts)
+  end
+
+  # Normalize plan: accept ["step1", "step2"] or [{"id", "desc"}, ...] or keyword list
+  # Also validates — raises ArgumentError on bad input
+  defp normalize_plan(plan) do
+    normalized =
+      plan
+      |> Enum.with_index(1)
+      |> Enum.map(fn
+        {{id, desc}, _idx} when is_binary(id) and is_binary(desc) ->
+          if desc == "",
+            do: raise(ArgumentError, "plan description cannot be empty for id #{inspect(id)}")
+
+          {id, desc}
+
+        {{id, desc}, _idx} when is_atom(id) and is_binary(desc) ->
+          if desc == "",
+            do: raise(ArgumentError, "plan description cannot be empty for id #{inspect(id)}")
+
+          {to_string(id), desc}
+
+        {desc, idx} when is_binary(desc) ->
+          if desc == "", do: raise(ArgumentError, "plan description cannot be empty")
+          {to_string(idx), desc}
+
+        {other, _idx} ->
+          raise ArgumentError, "invalid plan item: #{inspect(other)}"
+      end)
+
+    # Check for duplicate IDs
+    ids = Enum.map(normalized, fn {id, _} -> id end)
+    dupes = ids -- Enum.uniq(ids)
+
+    if dupes != [] do
+      raise ArgumentError, "duplicate plan IDs: #{inspect(Enum.uniq(dupes))}"
+    end
+
+    normalized
   end
 
   @doc """
@@ -367,7 +430,7 @@ defmodule PtcRunner.SubAgent do
         :tools,
         :llm_query,
         :max_turns,
-        :return_retries,
+        :retry_turns,
         :timeout,
         :pmap_timeout,
         :prompt_limit,
@@ -385,7 +448,8 @@ defmodule PtcRunner.SubAgent do
         :format_options,
         :float_precision,
         :output,
-        :memory_strategy
+        :memory_strategy,
+        :plan
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -398,7 +462,7 @@ defmodule PtcRunner.SubAgent do
         :tools,
         :llm_query,
         :max_turns,
-        :return_retries,
+        :retry_turns,
         :prompt_limit,
         :mission_timeout,
         :llm_retry,
@@ -414,7 +478,8 @@ defmodule PtcRunner.SubAgent do
         :format_options,
         :float_precision,
         :output,
-        :memory_strategy
+        :memory_strategy,
+        :plan
       ])
 
     run(agent, runtime_opts)
@@ -470,7 +535,7 @@ defmodule PtcRunner.SubAgent do
           # JSON mode always uses the loop (even for single-shot) since it has its own simpler flow
           # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
           if agent.output == :ptc_lisp and agent.max_turns == 1 and map_size(agent.tools) == 0 and
-               agent.return_retries == 0 do
+               agent.retry_turns == 0 do
             # PTC-Lisp single-shot mode
             run_single_shot(
               agent,

@@ -36,7 +36,7 @@ defmodule PtcDemo.Agent do
     :prompt_profile,
     :compression,
     :max_turns,
-    :return_retries,
+    :retry_turns,
     :datasets,
     :last_program,
     :last_result,
@@ -235,7 +235,7 @@ defmodule PtcDemo.Agent do
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
     compression = Keyword.get(opts, :compression, false)
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
-    return_retries = Keyword.get(opts, :return_retries, 0)
+    retry_turns = Keyword.get(opts, :retry_turns, 0)
 
     # Note: documents not included in ctx - use search tool instead
     datasets = %{
@@ -252,7 +252,7 @@ defmodule PtcDemo.Agent do
        prompt_profile: prompt_profile,
        compression: compression,
        max_turns: max_turns,
-       return_retries: return_retries,
+       retry_turns: retry_turns,
        datasets: datasets,
        last_program: nil,
        last_result: nil,
@@ -267,13 +267,14 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call({:ask, question, opts}, _from, state) do
     max_turns = Keyword.get(opts, :max_turns, state.max_turns)
-    return_retries = Keyword.get(opts, :return_retries, state.return_retries)
+    retry_turns = Keyword.get(opts, :retry_turns, state.retry_turns)
     debug = Keyword.get(opts, :debug, false)
     verbose = Keyword.get(opts, :verbose, false)
     # Signature for return type validation (explicit or inferred from expect)
     signature = Keyword.get(opts, :signature) || infer_signature(Keyword.get(opts, :expect))
+    plan = Keyword.get(opts, :plan)
 
-    # Build the SubAgent with requested max_turns, signature, compression, and return_retries
+    # Build the SubAgent with requested max_turns, signature, compression, and retry_turns
     agent =
       build_agent(
         state.data_mode,
@@ -281,7 +282,8 @@ defmodule PtcDemo.Agent do
         state.compression,
         max_turns,
         signature,
-        return_retries
+        retry_turns,
+        plan: plan
       )
 
     # Build context with datasets (memory is handled internally by SubAgent)
@@ -487,20 +489,36 @@ defmodule PtcDemo.Agent do
   # --- Private Functions ---
 
   defp build_agent(data_mode, prompt_profile, compression) do
-    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0)
+    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0, plan: nil)
   end
 
-  defp build_agent(data_mode, prompt_profile, compression, max_turns, signature, return_retries) do
-    SubAgent.new(
+  defp build_agent(
+         data_mode,
+         prompt_profile,
+         compression,
+         max_turns,
+         signature,
+         retry_turns,
+         extra_opts
+       ) do
+    plan = Keyword.get(extra_opts, :plan)
+
+    base_opts = [
       prompt: "{{question}}",
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
-      return_retries: return_retries,
+      retry_turns: retry_turns,
       tools: build_tools(),
       context_descriptions: context_descriptions_for(data_mode),
       system_prompt: build_system_prompt(prompt_profile, max_turns),
       compression: compression
-    )
+    ]
+
+    # Add plan only when present
+    base_opts =
+      if plan, do: Keyword.put(base_opts, :plan, plan), else: base_opts
+
+    SubAgent.new(base_opts)
   end
 
   defp context_descriptions_for(:schema), do: SampleData.context_descriptions()

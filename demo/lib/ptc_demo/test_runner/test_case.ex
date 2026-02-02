@@ -346,4 +346,165 @@ defmodule PtcDemo.TestRunner.TestCase do
       # Reasoning: Search strategy, convergence criteria
     ]
   end
+
+  @doc """
+  Return plan-mode test cases for benchmarking sequential vs flexible execution.
+
+  These are multi-step analysis tasks where the LLM receives an explicit plan
+  (list of step descriptions) and executes them using plan mode.
+
+  Each test case has:
+    - `:query` - the question to answer
+    - `:plan` - list of step descriptions for the plan
+    - `:expect` - expected return type
+    - `:constraint` - validation constraint
+    - `:max_turns` - maximum turns allowed
+    - `:description` - what the test validates
+
+  Returns a list of plan-mode test case maps.
+  """
+  @spec plan_cases() :: [map()]
+  def plan_cases do
+    [
+      # ETL Pipeline: customer spend aggregation → tier segmentation → count per tier
+      %{
+        query:
+          "Create a customer value report: calculate total spend per customer " <>
+            "from orders, segment into tiers (Bronze <$1000, Silver <$5000, " <>
+            "Gold >= $5000), return count per tier as a map with keys :bronze, :silver, :gold.",
+        plan: [
+          "Aggregate total spend per customer_id from orders (sum the :total field)",
+          "Segment customers into tiers: Bronze (<1000), Silver (<5000), Gold (>=5000)",
+          "Count customers in each tier and return as a map with keys :bronze, :silver, :gold"
+        ],
+        expect: :map,
+        constraint: {:has_keys, [:bronze, :silver, :gold]},
+        max_turns: 6,
+        description: "Plan: ETL pipeline - aggregate, segment, summarize"
+      },
+
+      # Comparative Period Analysis: Q1 vs Q2 order totals and percentage change
+      %{
+        query:
+          "Compare Q1 (Jan-Mar) vs Q2 (Apr-Jun) 2024 order totals. " <>
+            "Orders have created_at dates in 'YYYY-MM-DD' format. " <>
+            "Return a map with :q1_total, :q2_total, and :change_pct (percentage change as decimal).",
+        plan: [
+          "Filter orders to Q1 2024 (created_at between 2024-01-01 and 2024-03-31) and sum totals",
+          "Filter orders to Q2 2024 (created_at between 2024-04-01 and 2024-06-30) and sum totals",
+          "Calculate percentage change ((q2 - q1) / q1) and return map with :q1_total, :q2_total, :change_pct"
+        ],
+        expect: :map,
+        constraint: {:has_keys, [:q1_total, :q2_total, :change_pct]},
+        max_turns: 6,
+        description: "Plan: Comparative period analysis - Q1 vs Q2"
+      },
+
+      # Remote vs Office Expenses: cross-dataset join, group averages, boolean comparison
+      %{
+        query:
+          "Compare average expense amounts between remote and office employees. " <>
+            "Join employees with expenses by employee_id, group by remote status, " <>
+            "calculate average expense amount for each group. " <>
+            "Return a map with :remote_avg, :office_avg, and :remote_higher (boolean).",
+        plan: [
+          "Get employee IDs grouped by remote status (true/false) from employees dataset",
+          "For each group, find matching expenses by employee_id and calculate average amount",
+          "Return map with :remote_avg, :office_avg, and :remote_higher (boolean comparing the two)"
+        ],
+        expect: :map,
+        constraint: {:has_keys, [:remote_avg, :office_avg, :remote_higher]},
+        max_turns: 6,
+        description: "Plan: Remote vs office expenses - cross-dataset join"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # HARDER PLAN CASES: designed to differentiate sequential vs flexible
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # Independent sub-tasks: 6 department stats computed independently, then combined.
+      # Flexible mode can pick any department first; sequential is locked to plan order.
+      # Tests whether the LLM tracks 6 independent sub-results and combines them correctly.
+      %{
+        query:
+          "For each of the 6 departments (engineering, sales, marketing, support, hr, finance), " <>
+            "calculate: headcount, average salary, and total approved expense amount " <>
+            "(join employees→expenses by employee_id, filter status='approved'). " <>
+            "Return a map keyed by department name, where each value is a map with " <>
+            ":headcount, :avg_salary, and :total_approved_expenses.",
+        plan: [
+          "Calculate headcount and average salary for the engineering department",
+          "Calculate total approved expense amount for engineering (join employees→expenses by employee_id, filter status='approved')",
+          "Calculate headcount and average salary for the sales department",
+          "Calculate total approved expense amount for sales",
+          "Calculate headcount and average salary for the marketing department",
+          "Calculate total approved expense amount for marketing",
+          "Calculate headcount and average salary for the support department",
+          "Calculate total approved expense amount for support",
+          "Calculate headcount and average salary for the hr department",
+          "Calculate total approved expense amount for hr",
+          "Calculate headcount and average salary for the finance department",
+          "Calculate total approved expense amount for finance",
+          "Combine all department results into a single map keyed by department name"
+        ],
+        expect: :map,
+        constraint: {:has_keys, [:engineering, :sales, :marketing, :support, :hr, :finance]},
+        max_turns: 16,
+        description: "Plan: 6-department stats - independent sub-tasks"
+      },
+
+      # Multi-hop pipeline: 5-step cross-dataset join chain.
+      # Each step genuinely depends on the previous — sequential should match well,
+      # flexible might try to skip ahead and fail.
+      %{
+        query:
+          "Find the top 3 product categories by total revenue from delivered orders, " <>
+            "then for each category find how many distinct employees (from any department) " <>
+            "have submitted approved expenses in the same month as those delivered orders. " <>
+            "Steps: (1) filter delivered orders, (2) join with products to get categories, " <>
+            "(3) aggregate revenue per category and pick top 3, " <>
+            "(4) collect the months of delivered orders for those top 3 categories, " <>
+            "(5) count distinct employees with approved expenses in those months. " <>
+            "Return a list of maps with :category, :revenue, and :employee_count.",
+        plan: [
+          "Filter orders to status='delivered' and collect their totals, product_ids, and created_at months",
+          "Join delivered orders with products by product_id to get the category for each order",
+          "Aggregate total revenue per category and select the top 3 categories by revenue",
+          "For the top 3 categories, collect all unique months (YYYY-MM) of their delivered orders",
+          "Count distinct employee_ids with approved expenses (status='approved') in those months",
+          "Return a list of maps with :category, :revenue, and :employee_count for each top category"
+        ],
+        expect: :list,
+        constraint: {:length, 3},
+        max_turns: 10,
+        description: "Plan: 5-hop cross-dataset pipeline - products→orders→expenses"
+      },
+
+      # Threshold search with early exit potential.
+      # Check departments one-by-one for a condition. Flexible mode can pick the most
+      # promising department first; sequential must follow the plan order.
+      # The condition is: department where average salary of remote senior+ employees > $150k.
+      %{
+        query:
+          "Find ALL departments where remote senior-level employees (level is 'senior', 'lead', " <>
+            "'manager', or 'director') have an average salary above $120,000. " <>
+            "Check each department independently. " <>
+            "Return a map with :qualifying_departments (list of department names) " <>
+            "and :department_details (map of department name → average salary for qualifying ones).",
+        plan: [
+          "Check engineering: filter remote senior+ employees, calculate avg salary, record if > $120k",
+          "Check sales: filter remote senior+ employees, calculate avg salary, record if > $120k",
+          "Check marketing: filter remote senior+ employees, calculate avg salary, record if > $120k",
+          "Check support: filter remote senior+ employees, calculate avg salary, record if > $120k",
+          "Check hr: filter remote senior+ employees, calculate avg salary, record if > $120k",
+          "Check finance: filter remote senior+ employees, calculate avg salary, record if > $120k",
+          "Collect qualifying departments and return map with :qualifying_departments and :department_details"
+        ],
+        expect: :map,
+        constraint: {:has_keys, [:qualifying_departments, :department_details]},
+        max_turns: 10,
+        description: "Plan: Department threshold search - independent checks"
+      }
+    ]
+  end
 end
