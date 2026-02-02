@@ -1,0 +1,347 @@
+# Planner-Worker-Reviewer: Delegating Research with Quality Gates
+
+## Setup
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+  else
+    [{:ptc_runner, "~> 0.6.0"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+```elixir
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} = Req.get!("https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs")
+  Code.eval_string(code)
+end
+
+setup = LLMSetup.setup()
+```
+
+```elixir
+setup = LLMSetup.choose_provider(setup)
+```
+
+```elixir
+my_llm = LLMSetup.choose_model(setup)
+```
+
+## The `fetch_page` Tool
+
+```elixir
+fetch_page = fn %{"url" => url} ->
+  case Req.get(url, redirect: true, max_redirects: 3, receive_timeout: 15_000) do
+    {:ok, %{status: 200, body: body}} when is_binary(body) ->
+      text =
+        body
+        |> String.replace(~r/<!--.*?-->/s, "")
+        |> String.replace(~r/<script[^>]*>.*?<\/script>/s, "")
+        |> String.replace(~r/<style[^>]*>.*?<\/style>/s, "")
+        |> String.replace(~r/<nav[^>]*>.*?<\/nav>/s, "")
+        |> String.replace(~r/<header[^>]*>.*?<\/header>/s, "")
+        |> String.replace(~r/<footer[^>]*>.*?<\/footer>/s, "")
+        |> String.replace(~r/<(br|\/p|\/div|\/li|\/h\d|\/tr|\/td|\/dt|\/dd)[^>]*>/i, "\n")
+        |> String.replace(~r/<[^>]+>/, " ")
+        |> String.replace(~r/&\w+;/, " ")
+        |> String.replace(~r/[ \t]+/, " ")
+        |> String.replace(~r/\n[ \t]*/, "\n")
+        |> String.replace(~r/\n{3,}/, "\n\n")
+        |> String.trim()
+        |> String.slice(0, 6000)
+
+      %{url: url, text: text}
+
+    {:ok, %{status: status}} ->
+      {:error, "HTTP #{status} for #{url}"}
+
+    {:error, reason} ->
+      {:error, "Request failed for #{url}: #{inspect(reason)}"}
+  end
+end
+
+fetch_page.(%{"url" => "https://elixir-lang.org"}) |> Map.update!(:text, &String.slice(&1, 0, 200))
+```
+
+## Phase 1: Generate the Plan
+
+```elixir
+alias PtcRunner.SubAgent
+
+planner = SubAgent.new(
+  prompt: """
+  Research question: {{question}}
+
+  You have access to a `fetch_page` tool that retrieves web page text, plus
+  `(grep pattern text)` and `(grep-n pattern text)` for searching text.
+
+  Plan the steps needed to answer this question. Each step should be a short
+  action description. Return 3-5 concrete steps.
+  """,
+  signature: "(question :string) -> {steps [:string]}",
+  max_turns: 1,
+  retry_turns: 1,
+  output: :json
+)
+
+question =
+  "What are the latest stable versions of Elixir and Erlang/OTP, and what are the key new features in each?"
+
+{:ok, plan_step} = SubAgent.run(planner, llm: my_llm, context: %{question: question})
+
+plan = plan_step.return["steps"]
+IO.puts("=== Generated Plan ===")
+Enum.with_index(plan, 1) |> Enum.each(fn {step, i} -> IO.puts("  #{i}. #{step}") end)
+
+plan
+```
+
+## Phase 2: The Three-Role Architecture
+
+Three agents with distinct roles:
+
+* **Worker** — fetches pages, extracts data. Multi-turn, has tools.
+* **Reviewer** — judges worker output against criteria. Single-shot JSON, no tools.
+* **Planner** — orchestrates worker→reviewer chains. Never sees raw results.
+
+The planner writes PTC-Lisp programs that wire worker and reviewer together.
+It defines a `do-step` helper that handles the dispatch→review→retry loop,
+then calls it for each plan step. Independent steps can run in the same turn.
+
+```elixir
+# Worker: multi-turn research agent for one focused task
+worker = SubAgent.new(
+  prompt: """
+  {{task}}
+
+  ## Rules
+  - Use `fetch_page` to retrieve web pages. For GitHub files, use raw URLs:
+    `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
+  - Use `(grep pattern text)` or `(grep-n pattern text)` to search text.
+    Note: `grep-n` is a function name, NOT `grep -n`.
+  - Explore and verify before returning. Never return on the first turn.
+  - Return a map with your findings.
+  """,
+  description: "Research worker: fetches web pages and extracts information for a specific task",
+  signature: "(task :string) -> :map",
+  tools: %{
+    "fetch_page" =>
+      {fetch_page,
+       signature: "(url :string) -> {url :string, text :string}",
+       description:
+         "Fetch a web page and return its text content. For GitHub files, use raw.githubusercontent.com URLs."}
+  },
+  max_turns: 5,
+  retry_turns: 1,
+  timeout: 30_000
+)
+
+# Reviewer: single-shot judge, returns structured verdict
+reviewer = SubAgent.new(
+  prompt: """
+  You are a quality reviewer. Evaluate whether the research result
+  satisfies the acceptance criteria.
+
+  ## Step
+  {{step}}
+
+  ## Acceptance Criteria
+  {{criteria}}
+
+  ## Result to Review
+  {{result}}
+
+  If the result meets the criteria, set approved to true and write a concise
+  summary of the key findings. If not, set approved to false and explain
+  what is missing or insufficient in the feedback field.
+  """,
+  description: "Reviews research results against acceptance criteria",
+  signature: "(step :string, criteria :string, result :string) -> {approved :bool, summary :string, feedback :string}",
+  max_turns: 1,
+  retry_turns: 2,
+  output: :json
+)
+
+# Planner: orchestrates worker→reviewer, reports progress
+planner_executor = SubAgent.new(
+  prompt: """
+  Answer this research question: {{question}}
+
+  ## Your Role
+  You are a planner-orchestrator. You delegate research to `research_worker`
+  and verify results with `reviewer`. You never fetch pages yourself.
+
+  ## The `do-step` Pattern
+  Define a helper that chains worker→reviewer with automatic retry:
+
+  (defn do-step [id task criteria]
+    (let [result (tool/research_worker {:task task})
+          result_str (str result)  ; OK for reviewer — it reads inspect format as text
+          review (tool/reviewer {:step task :criteria criteria :result result_str})]
+      (if (:approved review)
+        (do (step-done id (:summary review)) result)
+        (let [retry-task (str task " — Previous attempt rejected: " (:feedback review))
+              result2 (tool/research_worker {:task retry-task})
+              result2_str (str result2)
+              review2 (tool/reviewer {:step task :criteria criteria :result result2_str})]
+          (if (:approved review2)
+            (do (step-done id (:summary review2)) result2)
+            (do (step-done id (str "INCOMPLETE: " (:feedback review2))) nil))))))
+
+  ## Rules
+  - Always define `do-step` first, then use it for each plan step.
+  - Use the step IDs from the Progress checklist.
+  - Batch independent steps in the same turn when possible.
+  - When threading results from earlier steps into later tasks, extract
+    specific fields with keywords (e.g. `(:version data)`, `(:features data)`)
+    and compose a readable task string. NEVER pass a raw map via `(str result)` —
+    the worker receives it as an opaque string it cannot parse.
+    Good: `(str "Compare Elixir " (:version elixir) " with Erlang " (:version erlang))`
+    Bad: `(str "Compare these: " elixir-data erlang-data)`
+  - Write specific acceptance criteria for each step (e.g. "Must include
+    version number, release date, and at least 3 specific named features").
+  - Only `(return ...)` when all steps are done.
+  """,
+  signature: "(question :string) -> :map",
+  plan: plan,
+  tools: %{
+    "research_worker" => SubAgent.as_tool(worker),
+    "reviewer" => SubAgent.as_tool(reviewer)
+  },
+  max_turns: 6,
+  max_depth: 2,
+  timeout: 120_000
+)
+
+{result, step} =
+  SubAgent.run(planner_executor,
+    llm: my_llm,
+    context: %{question: question},
+    journal: %{},
+    max_heap: 2_500_000,
+    debug: true
+  )
+
+SubAgent.Debug.print_trace(step, raw: true)
+
+{result, step.return}
+```
+
+```elixir
+# Render interactive trace tree (agent hierarchy with expandable details)
+PtcRunner.Kino.TraceTree.new(step)
+```
+
+```elixir
+if step.summaries && map_size(step.summaries) > 0 do
+  IO.puts("=== Summaries (#{map_size(step.summaries)} entries) ===\n")
+
+  Enum.each(step.summaries, fn {id, summary} ->
+    IO.puts("  [done] #{id}: #{summary}")
+  end)
+else
+  IO.puts("(no summaries)")
+end
+
+IO.puts("")
+
+if step.journal && map_size(step.journal) > 0 do
+  IO.puts("=== Journal (#{map_size(step.journal)} entries) ===\n")
+
+  Enum.each(step.journal, fn {id, value} ->
+    val_str = inspect(value, limit: 5, printable_limit: 120)
+    IO.puts("  [cached] #{id}: #{String.slice(val_str, 0, 120)}")
+  end)
+else
+  IO.puts("(no journal entries)")
+end
+```
+
+This livebook demonstrates the **planner-worker-reviewer** pattern — a three-role hierarchy:
+
+1. **Planner** (JSON, single-shot) generates a step list
+2. **Planner-executor** (multi-turn, PTC-Lisp) orchestrates the workflow
+3. **Worker** (multi-turn, PTC-Lisp) handles one focused research task
+4. **Reviewer** (single-shot, JSON) judges worker output against criteria
+
+### The `do-step` Pattern
+
+The key insight: the planner never inspects raw worker output. Instead, it writes
+a `do-step` helper that chains worker→reviewer→retry mechanically:
+
+```
+worker produces result → reviewer judges against criteria → approved? → step-done
+                                                          → rejected? → retry with feedback → reviewer again
+```
+
+This eliminates the problem where the planner marks steps done despite poor results.
+The reviewer is a dedicated judge with explicit acceptance criteria.
+
+### Three Roles, Clear Responsibilities
+
+| Role     | Mode                | Sees                              | Decides                                          |
+| -------- | ------------------- | --------------------------------- | ------------------------------------------------ |
+| Planner  | Multi-turn PTC-Lisp | Reviewer verdicts (via checklist) | What to research, acceptance criteria, data flow |
+| Worker   | Multi-turn PTC-Lisp | One focused task prompt           | How to fetch and extract data                    |
+| Reviewer | Single-shot JSON    | Step + criteria + result          | Whether result is sufficient                     |
+
+### Comparison with Other Patterns
+
+|                          | Plan-and-Execute | Planner-Worker | Planner-Worker-Reviewer         |
+| ------------------------ | ---------------- | -------------- | ------------------------------- |
+| Verification             | Self-assessment  | Planner judges | Dedicated reviewer              |
+| Planner sees raw results | Yes              | Yes            | No — only verdicts            |
+| Retry on poor results    | Manual           | Manual         | Automatic via `do-step`         |
+| LLM calls per step       | 1                | 2              | 3-5 (worker + reviewer + retry) |
+
+### When to Use This Pattern
+
+* **Quality matters more than speed** — the reviewer catches vague or incomplete results
+* **Acceptance criteria are definable** — each step has clear success conditions
+* **Results vary in quality** — web scraping, API calls, data extraction
+* **Audit trail needed** — reviewer verdicts are structured, loggable data
+
+### Batching Independent Steps
+
+The planner can dispatch independent steps in the same turn:
+
+```clojure
+(def elixir-data (do-step "1" "Find Elixir version..." "Must include version, date, 3+ features"))
+(def erlang-data (do-step "2" "Find Erlang version..." "Must include version, key features"))
+```
+
+Steps 1 and 2 run sequentially within one planner turn (PTC-Lisp is single-threaded),
+but the planner doesn't need an extra turn to see their results — the reviewer
+handles verification inline. Dependent steps can reference earlier results:
+
+```clojure
+(do-step "3"
+  (str "Compare Elixir " (:version elixir-data) " and Erlang " (:version erlang-data))
+  "Must compare both versions side by side")
+```
+
+### Limitations
+
+* **More LLM calls** — 3-5 per step (worker turns + reviewer). The reviewer is cheap
+  (single-shot JSON) but it adds up.
+
+* **Prompt complexity** — the planner must write the `do-step` helper correctly.
+  If the LLM struggles with this, consider providing it as a built-in function.
+
+* **`step-done` in `defn`** — works because `defn` calls run in the same process.
+  Would NOT work if `do-step` were called inside `pmap`/`pcalls`.
+
+* [Plan & Execute Livebook](plan_and_execute.livemd) — Single-agent plan-and-execute pattern
+
+* [Navigator Pattern Guide](https://hexdocs.pm/ptc_runner/subagent-navigator.html) — Journaled tasks and planning design space
+
+* [Composition Patterns](https://hexdocs.pm/ptc_runner/subagent-patterns.html) — Dynamic agent creation and orchestration

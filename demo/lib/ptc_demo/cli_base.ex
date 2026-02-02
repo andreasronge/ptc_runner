@@ -222,24 +222,27 @@ defmodule PtcDemo.CLIBase do
             "single_turn" ->
               Map.put(acc, :filter, :single_turn)
 
+            "plan" ->
+              Map.put(acc, :filter, :plan)
+
             "all" ->
               Map.put(acc, :filter, :all)
 
             _ ->
-              IO.puts("Error: --filter must be one of: multi_turn, single_turn, all")
+              IO.puts("Error: --filter must be one of: multi_turn, single_turn, plan, all")
               System.halt(1)
           end
 
-        String.starts_with?(arg, "--return-retries=") ->
-          retries_str = String.replace_prefix(arg, "--return-retries=", "")
+        String.starts_with?(arg, "--retry-turns=") ->
+          retries_str = String.replace_prefix(arg, "--retry-turns=", "")
 
           case Integer.parse(retries_str) do
             {n, ""} when n >= 0 ->
-              Map.put(acc, :return_retries, n)
+              Map.put(acc, :retry_turns, n)
 
             _ ->
               IO.puts(
-                "Error: --return-retries must be a non-negative integer (e.g., --return-retries=2)"
+                "Error: --retry-turns must be a non-negative integer (e.g., --retry-turns=2)"
               )
 
               System.halt(1)
@@ -397,7 +400,7 @@ defmodule PtcDemo.CLIBase do
     Test Options:
       --test                  Run all automated tests
       --test=N                Run a single test by index (e.g., --test=16)
-      --filter=TYPE           Filter tests: multi_turn, single_turn, or all (default: all)
+      --filter=TYPE           Filter tests: multi_turn, single_turn, plan, or all (default: all)
       --runs=N                Run tests N times (e.g., --runs=3)
       --report                Generate markdown report (auto-named)
       --report=FILE           Generate report with custom filename

@@ -1,4 +1,4 @@
-# Plan & Execute: Web Research with Journaled Tasks
+# Plan & Execute: Web Research with Progress Tracking
 
 ## Setup
 
@@ -44,16 +44,23 @@ A simple tool that fetches a URL and returns the text content (HTML stripped, tr
 fetch_page = fn %{"url" => url} ->
   case Req.get(url, redirect: true, max_redirects: 3, receive_timeout: 15_000) do
     {:ok, %{status: 200, body: body}} when is_binary(body) ->
-      # Strip HTML tags, collapse whitespace, truncate
+      # Strip non-content elements, convert block tags to newlines, clean up
       text =
         body
+        |> String.replace(~r/<!--.*?-->/s, "")
         |> String.replace(~r/<script[^>]*>.*?<\/script>/s, "")
         |> String.replace(~r/<style[^>]*>.*?<\/style>/s, "")
+        |> String.replace(~r/<nav[^>]*>.*?<\/nav>/s, "")
+        |> String.replace(~r/<header[^>]*>.*?<\/header>/s, "")
+        |> String.replace(~r/<footer[^>]*>.*?<\/footer>/s, "")
+        |> String.replace(~r/<(br|\/p|\/div|\/li|\/h\d|\/tr|\/td|\/dt|\/dd)[^>]*>/i, "\n")
         |> String.replace(~r/<[^>]+>/, " ")
         |> String.replace(~r/&\w+;/, " ")
-        |> String.replace(~r/\s+/, " ")
+        |> String.replace(~r/[ \t]+/, " ")
+        |> String.replace(~r/\n[ \t]*/, "\n")
+        |> String.replace(~r/\n{3,}/, "\n\n")
         |> String.trim()
-        |> String.slice(0, 4000)
+        |> String.slice(0, 6000)
 
       %{url: url, text: text}
 
@@ -104,32 +111,31 @@ plan
 
 ## Phase 2: The Executor
 
-The executor receives the plan in its prompt and uses `(task "step-N" ...)` for each step. The journal + Mission Log track progress across turns.
+The executor receives the plan via `plan:` and uses `(step-done id summary)` to report progress. The progress checklist is automatically rendered and shown to the LLM each turn.
 
 ```elixir
-# Format plan as a numbered list for the prompt
-plan_text = Enum.with_index(plan, 1) |> Enum.map_join("\n", fn {s, i} -> "#{i}. #{s}" end)
-
 executor = SubAgent.new(
   prompt: """
   Answer this research question: {{question}}
 
-  Follow this plan, one step per turn. Use `(task "step-N" ...)` for each step
-  so progress is tracked. Inspect results with `println` before moving on.
-  Only `return` when you have enough information to answer fully.
-
-  Use `(grep pattern text)` to search fetched page content for relevant lines
-  instead of reading raw text. Use `(grep-n pattern text)` for matches with
-  line numbers.
-
-  Plan:
-  {{plan}}
+  ## Rules
+  - **One step per turn.** Fetch/compute → verify with `println` → call `(step-done id "summary")`.
+    Do NOT move to the next step until the current one is marked done.
+  - Use `(task id ...)` to cache results. Use the step IDs from the Progress checklist.
+  - If a fetch fails, retry with a different URL on the same step — don't skip ahead.
+  - Use `(grep pattern text)` or `(grep-n pattern text)` to search text.
+    Note: `grep-n` is a function name, NOT `grep -n`.
+  - For GitHub file content, use raw URLs:
+    `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
+    (GitHub blob pages render via JavaScript and return only HTML wrapper text.)
+  - Only `(return ...)` when you have enough information to answer fully.
   """,
-  signature: "(question :string, plan :string) -> :map",
+  signature: "(question :string) -> :map",
+  plan: plan,
   tools: %{
     "fetch_page" => {fetch_page,
       signature: "(url :string) -> {url :string, text :string}",
-      description: "Fetch a web page and return its text content. Example: (tool/fetch_page {:url \"https://example.com\"})"}
+      description: "Fetch a web page and return its text content. For GitHub files, use raw.githubusercontent.com URLs. Example: (tool/fetch_page {:url \"https://raw.githubusercontent.com/elixir-lang/elixir/main/CHANGELOG.md\"})"}
   },
   max_turns: 8,
   timeout: 30_000
@@ -138,8 +144,9 @@ executor = SubAgent.new(
 {result, step} =
   SubAgent.run(executor,
     llm: my_llm,
-    context: %{question: question, plan: plan_text},
+    context: %{question: question},
     journal: %{},
+    max_heap: 2_500_000,
     debug: true
   )
 
@@ -148,58 +155,33 @@ SubAgent.Debug.print_trace(step, raw: true)
 {result, step.return}
 ```
 
-## Inspect the Journal
+## Inspect Progress
 
-The journal shows all completed tasks with their cached results:
+The step now carries both journal (cached task results) and summaries (semantic progress from `step-done`):
 
 ```elixir
+if step.summaries && map_size(step.summaries) > 0 do
+  IO.puts("=== Summaries (#{map_size(step.summaries)} entries) ===\n")
+
+  Enum.each(step.summaries, fn {id, summary} ->
+    IO.puts("  [done] #{id}: #{summary}")
+  end)
+else
+  IO.puts("(no summaries)")
+end
+
+IO.puts("")
+
 if step.journal && map_size(step.journal) > 0 do
   IO.puts("=== Journal (#{map_size(step.journal)} entries) ===\n")
 
   Enum.each(step.journal, fn {id, value} ->
     val_str = inspect(value, limit: 5, printable_limit: 120)
-    IO.puts("  [done] #{id}: #{String.slice(val_str, 0, 120)}")
+    IO.puts("  [cached] #{id}: #{String.slice(val_str, 0, 120)}")
   end)
 else
   IO.puts("(no journal entries)")
 end
-
-:ok
-```
-
-## Try a Different Question
-
-```elixir
-question_input = Kino.Input.text("Research question",
-  default: "Compare the package download counts of Phoenix, Plug, and Ecto on hex.pm — which is most popular?"
-)
-```
-
-```elixir
-question2 = Kino.Input.read(question_input)
-
-# Phase 1: Plan
-{:ok, plan_step2} = SubAgent.run(planner, llm: my_llm, context: %{question: question2})
-plan2 = plan_step2.return.steps
-
-IO.puts("=== Plan ===")
-Enum.with_index(plan2, 1) |> Enum.each(fn {s, i} -> IO.puts("  #{i}. #{s}") end)
-
-# Phase 2: Execute
-plan_text2 = Enum.with_index(plan2, 1) |> Enum.map_join("\n", fn {s, i} -> "#{i}. #{s}" end)
-
-{result2, step2} =
-  SubAgent.run(executor,
-    llm: my_llm,
-    context: %{question: question2, plan: plan_text2},
-    journal: %{},
-    debug: true
-  )
-
-SubAgent.Debug.print_trace(step2, raw: true)
-
-IO.puts("\n=== Answer ===")
-IO.inspect(step2.return, pretty: true, limit: 20)
 ```
 
 ## Discussion
@@ -207,14 +189,22 @@ IO.inspect(step2.return, pretty: true, limit: 20)
 This livebook demonstrates the **plan-and-execute** pattern:
 
 1. **Planner** (single-shot, JSON mode) generates a step-by-step plan
-2. **Executor** (multi-turn, PTC-Lisp) follows the plan using `(task)` for each step
+2. **Executor** (multi-turn, PTC-Lisp) follows the plan with built-in progress tracking
 
-The executor sees two sources of progress information each turn:
+The executor gets a **progress checklist** each turn showing:
 
-* **The plan** (static, in the prompt) — what needs to be done
-* **The Mission Log** (dynamic, in the system prompt) — what's already done
+* **Completed steps** — marked with `[x]` and the summary from `(step-done)`
+* **Cached steps** — marked with `[x]` when `(task)` journal has a result
+* **Pending steps** — marked with `[ ]`
 
-This is analogous to how Claude Code works: it maintains a todo list and checks off items as it goes. The LLM can see both pending and completed work.
+The LLM sees a unified view of what's done and what remains, similar to how Claude Code maintains a todo list.
+
+### Two Forms, Two Purposes
+
+* `(task "id" ...)` — caches a computed result in the journal. Skips re-computation on retry.
+* `(step-done "id" "summary")` — records a human-readable summary of what was accomplished. Shown in the progress checklist.
+
+Use both together: `(task)` for caching, `(step-done)` for reporting.
 
 ### When This Helps
 
@@ -224,9 +214,8 @@ This is analogous to how Claude Code works: it maintains a todo list and checks 
 
 ### What's Next
 
-* Show pending vs completed items together in the system prompt (requires a small code change to Mission Log rendering)
-* Let the LLM revise the plan mid-execution if it discovers the original plan won't work
-* Benchmark against single-shot on the harder TODO test cases
+* Let the LLM create or revise the plan mid-execution (dynamic `set-plan` form)
+* A single agent that decides whether to plan based on question complexity
 
 ## Learn More
 

@@ -12,6 +12,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   alias PtcRunner.Mustache
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.ProgressRenderer
 
   # Load templates at compile time
   @prompts_dir Path.join(__DIR__, "../../../../priv/prompts")
@@ -33,13 +34,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   @doc """
   Append turn progress info to a feedback message.
 
-  For multi-turn agents with return_retries, shows unified budget info.
-  For multi-turn agents without return_retries, shows legacy turn count.
+  For multi-turn agents with retry_turns, shows unified budget info.
+  For multi-turn agents without retry_turns, shows legacy turn count.
   """
   @spec append_turn_info(String.t(), SubAgent.t(), map()) :: String.t()
   def append_turn_info(message, agent, state) do
-    # Use unified budget model if return_retries is configured
-    if agent.return_retries > 0 do
+    # Use unified budget model if retry_turns is configured
+    if agent.retry_turns > 0 do
       append_unified_budget_info(message, state, agent)
     else
       append_legacy_turn_info(message, agent, state)
@@ -57,13 +58,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
       cond do
         # In retry phase - use retry_feedback template
         in_retry_phase ->
-          attempt_num = agent.return_retries - retry_left + 1
+          attempt_num = agent.retry_turns - retry_left + 1
           is_final_retry = retry_left == 1
 
           context = %{
             is_final_retry: is_final_retry,
             current_retry: attempt_num,
-            total_retries: agent.return_retries,
+            total_retries: agent.retry_turns,
             retries_remaining: retry_left,
             next_turn: next_turn
           }
@@ -90,7 +91,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     message <> turn_info
   end
 
-  # Legacy turn info (no return_retries)
+  # Legacy turn info (no retry_turns)
   defp append_legacy_turn_info(message, agent, state) do
     if agent.max_turns > 1 do
       next_turn = state.turn + 1
@@ -178,7 +179,40 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     # Add turn info for multi-turn agents
     feedback = append_turn_info(feedback, agent, state)
 
+    # Append progress checklist if agent has a plan
+    feedback = append_progress(feedback, agent, state, lisp_step)
+
     {feedback, truncated?}
+  end
+
+  @doc """
+  Render initial progress checklist (all pending) for the first user message.
+
+  Returns empty string if agent has no plan.
+  """
+  @spec render_initial_progress(SubAgent.t()) :: String.t()
+  def render_initial_progress(%SubAgent{plan: []} = _agent), do: ""
+
+  def render_initial_progress(%SubAgent{plan: plan}) do
+    ProgressRenderer.render(plan, %{})
+  end
+
+  # Append progress checklist if agent has a plan
+  defp append_progress(feedback, %SubAgent{plan: []}, _state, _lisp_step), do: feedback
+
+  defp append_progress(feedback, agent, state, lisp_step) do
+    # Merge current turn's summaries so they appear in the next turn's prompt.
+    # The loop calls format() before merging into state, so we merge here.
+    merged_summaries = Map.merge(state.summaries, lisp_step.summaries || %{})
+
+    checklist =
+      ProgressRenderer.render(agent.plan, merged_summaries)
+
+    if checklist == "" do
+      feedback
+    else
+      feedback <> "\n\n" <> checklist
+    end
   end
 
   # Private helpers
