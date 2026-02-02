@@ -777,20 +777,31 @@ defmodule PtcRunner.Lisp.Eval do
 
     # Check cache for hit
     if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do
-      cached_result = Map.get(eval_ctx.tool_cache, cache_key)
+      cached = Map.get(eval_ctx.tool_cache, cache_key)
 
       tool_call = %{
         name: tool_name,
         args: args_map,
-        result: cached_result,
+        result: cached.result,
         error: nil,
         timestamp: DateTime.utc_now(),
         duration_ms: 0,
         cached: true
       }
 
+      # Restore child_step and child_trace_id from cache for TraceTree
+      tool_call =
+        if cached.child_trace_id,
+          do: Map.put(tool_call, :child_trace_id, cached.child_trace_id),
+          else: tool_call
+
+      tool_call =
+        if cached.child_step,
+          do: Map.put(tool_call, :child_step, cached.child_step),
+          else: tool_call
+
       eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
-      {:ok, cached_result, eval_ctx2}
+      {:ok, cached.result, eval_ctx2}
     else
       record_tool_call_execute(tool_name, args_map, tool_exec, eval_ctx, cacheable?, cache_key)
     end
@@ -862,10 +873,11 @@ defmodule PtcRunner.Lisp.Eval do
         eval_ctx: eval_ctx2,
         tool_name: tool_name
     else
-      # Store in cache on success if cacheable
+      # Store in cache on success if cacheable (include child metadata for TraceTree)
       eval_ctx3 =
         if cacheable? do
-          %{eval_ctx2 | tool_cache: Map.put(eval_ctx2.tool_cache, cache_key, result)}
+          cached_entry = %{result: result, child_step: child_step, child_trace_id: child_trace_id}
+          %{eval_ctx2 | tool_cache: Map.put(eval_ctx2.tool_cache, cache_key, cached_entry)}
         else
           eval_ctx2
         end
