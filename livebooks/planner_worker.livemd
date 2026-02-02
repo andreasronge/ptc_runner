@@ -299,20 +299,20 @@ The reviewer is a dedicated judge with explicit acceptance criteria.
 
 ### Three Roles, Clear Responsibilities
 
-| Role     | Mode                | Sees                              | Decides                                          |
-| -------- | ------------------- | --------------------------------- | ------------------------------------------------ |
-| Planner  | Multi-turn PTC-Lisp | Reviewer verdicts (via checklist) | What to research, acceptance criteria, data flow |
-| Worker   | Multi-turn PTC-Lisp | One focused task prompt           | How to fetch and extract data                    |
+| Role     | Mode                | Sees                               | Decides                                          |
+| -------- | ------------------- | ---------------------------------- | ------------------------------------------------ |
+| Planner  | Multi-turn PTC-Lisp | Reviewer verdicts (via checklist)  | What to research, acceptance criteria, data flow |
+| Worker   | Multi-turn PTC-Lisp | One focused task prompt            | How to fetch and extract data                    |
 | Reviewer | Single-shot JSON    | Step + criteria + formatted result | Whether result is sufficient                     |
 
 ### Key Design Decisions
 
-- **No synthesis step**: The planner builds the final answer map itself from collected data,
+* **No synthesis step**: The planner builds the final answer map itself from collected data,
   rather than delegating to the worker. This avoids the worker echoing back task text.
-- **Formatted results for reviewer**: `format-result` converts maps to readable key-value
+* **Formatted results for reviewer**: `format-result` converts maps to readable key-value
   strings instead of passing opaque `%{...}` via `(str map)`.
-- **Max 1 retry per step**: Prevents the planner from burning all turns retrying one step.
-- **Pragmatic reviewer**: Approves partial results with real data; only rejects empty/irrelevant output.
+* **Max 1 retry per step**: Prevents the planner from burning all turns retrying one step.
+* **Pragmatic reviewer**: Approves partial results with real data; only rejects empty/irrelevant output.
 
 ### Comparison with Other Patterns
 
