@@ -58,7 +58,7 @@ defmodule PtcDemo.TestRunner.Report do
     **Generated:** #{format_timestamp(summary.timestamp)}
     **Model:** #{summary.model}
     **Data Mode:** #{summary.data_mode}
-    **Return Retries:** #{summary[:return_retries] || 0}
+    **Return Retries:** #{summary[:retry_turns] || 0}
     **PtcRunner Version:** #{summary[:version] || "unknown"}
     **Git Commit:** #{summary[:commit] || "unknown"}#{if summary[:git_dirty], do: " (uncommitted changes)", else: ""}
 
@@ -124,7 +124,7 @@ defmodule PtcDemo.TestRunner.Report do
       generated: format_timestamp(summary.timestamp),
       model: summary.model,
       data_mode: to_string(summary.data_mode),
-      return_retries: summary[:return_retries] || 0,
+      retry_turns: summary[:retry_turns] || 0,
       version: summary[:version] || "unknown",
       commit: summary[:commit] || "unknown",
       git_dirty: summary[:git_dirty] || false,

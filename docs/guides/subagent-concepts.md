@@ -180,6 +180,8 @@ From your perspective as a library user:
 
 The LLM handles state internally to cache tool results, track progress, and avoid redundant work.
 
+For structured progress tracking, use the `plan:` option to define steps. The LLM reports completion with `(step-done "id" "summary")`, and a progress checklist is rendered between turns. See [Navigator Pattern](subagent-navigator.md#semantic-progress-with-plans).
+
 ## Defaults
 
 | Option | Default | Description |
@@ -194,7 +196,7 @@ The LLM handles state internally to cache tool results, track progress, and avoi
 | `pmap_timeout` | `5000` | Timeout (ms) for parallel `pmap` operations |
 | `max_depth` | `3` | Maximum recursion depth for nested agents |
 | `turn_budget` | `20` | Total turn budget across retries |
-| `return_retries` | `0` | Retry budget after return validation failures |
+| `retry_turns` | `0` | Retry budget after return validation failures |
 | `output` | `:ptc_lisp` | Output mode (`:ptc_lisp` or `:json`) |
 
 ## See Also

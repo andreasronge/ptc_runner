@@ -230,7 +230,7 @@ mix json [options]
 | `--compression` | Enable message compression (coalesces history into single message) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
-| `--return-retries=<n>` | Extra retry turns after must-return phase (default: 0) |
+| `--retry-turns=<n>` | Extra retry turns after must-return phase (default: 0) |
 | `--export-traces` | Export all traces to Chrome DevTools format |
 | `--clean-traces` | Delete all trace files |
 
@@ -269,7 +269,7 @@ mix lisp --help        # Show all available options
 | `--filter=<type>` | Filter tests: `multi_turn`, `single_turn`, or `all` (default: all) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
-| `--return-retries=<n>` | Extra retry turns after must-return phase (default: 0) |
+| `--retry-turns=<n>` | Extra retry turns after must-return phase (default: 0) |
 | `--validate-clojure` | Validate generated programs against Babashka |
 | `--export-traces` | Export all traces to Chrome DevTools format |
 | `--clean-traces` | Delete all trace files |

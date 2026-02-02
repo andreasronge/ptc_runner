@@ -107,8 +107,8 @@ defmodule PtcRunner.SubAgent.Compiler do
 
     # When tools are present, allow retries for tool call syntax errors
     agent =
-      if map_size(agent.tools) > 0 and agent.return_retries == 0,
-        do: %{agent | return_retries: 2},
+      if map_size(agent.tools) > 0 and agent.retry_turns == 0,
+        do: %{agent | retry_turns: 2},
         else: agent
 
     # Run the agent once to derive the PTC-Lisp program

@@ -126,15 +126,15 @@ In **single-shot mode**, the LLM's expression is evaluated and returned directly
 > `max_turns: 1` for single-shot execution, or ensure your prompt guides the LLM to
 > use `(return {:value ...})` when done.
 
-## Validation Retries with return_retries
+## Validation Retries with retry_turns
 
-By default, if return value validation fails, the agent stops with an error. To enable automatic recovery, use the `return_retries` option to give agents a limited budget for retrying after validation failures:
+By default, if return value validation fails, the agent stops with an error. To enable automatic recovery, use the `retry_turns` option to give agents a limited budget for retrying after validation failures:
 
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
   "Extract and return user data",
   signature: "{name :string, age :int}",
-  return_retries: 3,  # Budget for 3 retry attempts if validation fails
+  retry_turns: 3,  # Budget for 3 retry attempts if validation fails
   llm: my_llm
 )
 ```
@@ -146,13 +146,13 @@ When validation fails and retries are available:
 4. If validation passes, the loop continues normally
 5. If retries are exhausted, the agent returns an error
 
-The `return_retries` option uses a **unified budget model** alongside `max_turns`:
+The `retry_turns` option uses a **unified budget model** alongside `max_turns`:
 - **Work turns** (`max_turns`): Used for normal execution with tools available
-- **Retry turns** (`return_retries`): Used only after validation failures, with no tools
+- **Retry turns** (`retry_turns`): Used only after validation failures, with no tools
 
 This separation lets agents safely explore solutions during work turns, then recover from validation errors during retry turns without consuming the main work budget.
 
-> **Note:** Single-shot agents with `return_retries > 0` use compression to collapse previous failed attempts, preventing context window inflation during retries. For multi-turn agents with signatures, use signatures to enable validation in your return statement.
+> **Note:** Single-shot agents with `retry_turns > 0` use compression to collapse previous failed attempts, preventing context window inflation during retries. For multi-turn agents with signatures, use signatures to enable validation in your return statement.
 
 ## Debugging Execution
 

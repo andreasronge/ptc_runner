@@ -384,7 +384,7 @@ defmodule PtcDemo.TestRunner.Base do
       version: get_ptc_runner_version(),
       commit: get_git_commit(),
       git_dirty: get_git_dirty?(),
-      return_retries: Keyword.get(opts, :return_retries, 0)
+      retry_turns: Keyword.get(opts, :retry_turns, 0)
     }
   end
 
@@ -459,7 +459,7 @@ defmodule PtcDemo.TestRunner.Base do
       version: first[:version] || "unknown",
       commit: first[:commit] || "unknown",
       git_dirty: first[:git_dirty] || false,
-      return_retries: first[:return_retries] || 0,
+      retry_turns: first[:retry_turns] || 0,
       num_runs: num_runs
     }
   end
