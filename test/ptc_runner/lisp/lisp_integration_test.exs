@@ -599,6 +599,63 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
   end
 
+  describe "tool_calls preserved across closure calls" do
+    test "tool calls before a closure call are not lost" do
+      # Regression: execute_closure created a fresh EvalContext with tool_calls: [],
+      # so any tool calls made before the closure call were discarded.
+      tools = %{
+        "fetch" => fn %{"id" => id} -> "data_#{id}" end
+      }
+
+      source = ~S"""
+      (defn format-it [x] (str "formatted:" x))
+      (let [a (tool/fetch {:id "1"})
+            b (format-it a)
+            c (tool/fetch {:id "2"})]
+        {:first b :second c})
+      """
+
+      {:ok, step} = Lisp.run(source, tools: tools)
+
+      assert step.return == %{first: "formatted:data_1", second: "data_2"}
+      assert length(step.tool_calls) == 2
+      assert Enum.map(step.tool_calls, & &1.name) == ["fetch", "fetch"]
+    end
+
+    test "child_steps from tool calls survive intervening closure calls" do
+      # Simulates the planner-worker-reviewer do-step pattern:
+      # tool/worker → (format-result ...) → tool/reviewer
+      # The format-result closure must not discard worker's child_step.
+      worker_step = %PtcRunner.Step{return: %{data: "ok"}, trace_id: "worker_1"}
+      reviewer_step = %PtcRunner.Step{return: %{approved: true}, trace_id: "reviewer_1"}
+
+      tools = %{
+        "worker" =>
+          {fn %{"task" => _} ->
+             %{__child_step__: worker_step, value: %{data: "ok"}}
+           end, signature: "(task :string) -> :map"},
+        "reviewer" =>
+          {fn %{"result" => _} ->
+             %{__child_step__: reviewer_step, value: %{approved: true}}
+           end, signature: "(result :string) -> :map"}
+      }
+
+      source = ~S"""
+      (defn format-result [m]
+        (reduce (fn [acc k] (str acc k ": " (get m k) "\n")) "" (keys m)))
+      (let [result (tool/worker {:task "research"})
+            result_str (format-result result)
+            review (tool/reviewer {:result result_str})]
+        {:result result :review review})
+      """
+
+      {:ok, step} = Lisp.run(source, tools: tools)
+
+      assert length(step.child_steps) == 2
+      assert Enum.map(step.child_steps, & &1.trace_id) == ["worker_1", "reviewer_1"]
+    end
+  end
+
   describe "boolean builtin" do
     test "nil returns false" do
       {:ok, %{return: result}} = Lisp.run("(boolean nil)")

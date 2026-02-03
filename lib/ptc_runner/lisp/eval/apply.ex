@@ -605,13 +605,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         new_env = Map.merge(closure_env, bindings)
         closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
 
-        # Use iteration limit, prints, max_print_length and pmap_timeout from caller context
+        # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls
         closure_ctx = %{
           closure_ctx
           | loop_limit: caller_ctx.loop_limit,
             prints: caller_ctx.prints,
             max_print_length: caller_ctx.max_print_length,
-            pmap_timeout: caller_ctx.pmap_timeout
+            pmap_timeout: caller_ctx.pmap_timeout,
+            tool_calls: caller_ctx.tool_calls,
+            pmap_calls: caller_ctx.pmap_calls,
+            tool_cache: caller_ctx.tool_cache,
+            summaries: caller_ctx.summaries,
+            journal: caller_ctx.journal
         }
 
         case do_eval_fn.(body, closure_ctx) do

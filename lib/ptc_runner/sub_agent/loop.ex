@@ -768,7 +768,7 @@ defmodule PtcRunner.SubAgent.Loop do
             memory: lisp_step.memory,
             journal: lisp_step.journal,
             tool_cache: lisp_step.tool_cache,
-            child_steps: state.child_steps ++ (lisp_step.child_steps || []),
+            child_steps: state.child_steps ++ lisp_step.child_steps,
             last_fail: lisp_step.fail,
             last_return_error: error_message
           )
@@ -856,7 +856,7 @@ defmodule PtcRunner.SubAgent.Loop do
             tools: state.normalized_tools,
             summaries: state.summaries,
             journal: lisp_step.journal,
-            child_steps: state.child_steps ++ (lisp_step.child_steps || [])
+            child_steps: state.child_steps ++ lisp_step.child_steps
         }
 
         {:stop, {:error, final_step}, turn, state.turn_tokens}
@@ -888,7 +888,7 @@ defmodule PtcRunner.SubAgent.Loop do
                 memory: lisp_step.memory,
                 journal: lisp_step.journal,
                 tool_cache: lisp_step.tool_cache,
-                child_steps: state.child_steps ++ (lisp_step.child_steps || []),
+                child_steps: state.child_steps ++ lisp_step.child_steps,
                 summaries: Map.merge(state.summaries, lisp_step.summaries),
                 turn_history: updated_history
               )
@@ -947,7 +947,7 @@ defmodule PtcRunner.SubAgent.Loop do
                   tools: state.normalized_tools,
                   summaries: state.summaries,
                   journal: lisp_step.journal,
-                  child_steps: state.child_steps ++ (lisp_step.child_steps || [])
+                  child_steps: state.child_steps ++ lisp_step.child_steps
               }
 
               {:stop, {:error, final_step}, turn, state.turn_tokens}
@@ -1177,7 +1177,7 @@ defmodule PtcRunner.SubAgent.Loop do
     final_messages = state.messages ++ [%{role: :assistant, content: response}]
 
     # Merge child_steps: accumulated from previous turns + current turn's
-    all_child_steps = state.child_steps ++ (lisp_step.child_steps || [])
+    all_child_steps = state.child_steps ++ lisp_step.child_steps
 
     final_step = %{
       lisp_step
@@ -1241,7 +1241,7 @@ defmodule PtcRunner.SubAgent.Loop do
         memory: lisp_step.memory,
         journal: lisp_step.journal,
         tool_cache: lisp_step.tool_cache,
-        child_steps: state.child_steps ++ (lisp_step.child_steps || []),
+        child_steps: state.child_steps ++ lisp_step.child_steps,
         last_return_error: error_message
       )
 
