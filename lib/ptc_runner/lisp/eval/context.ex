@@ -62,7 +62,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
           required(:error) => String.t() | nil,
           required(:timestamp) => DateTime.t(),
           required(:duration_ms) => non_neg_integer(),
-          optional(:child_trace_id) => String.t()
+          optional(:child_trace_id) => String.t(),
+          optional(:child_step) => term(),
+          optional(:cached) => boolean()
         }
 
   @typedoc """

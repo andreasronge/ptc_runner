@@ -47,8 +47,8 @@ defmodule PtcDemo.LispTestRunnerTest do
     test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
       result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
 
-      # LispTestRunner: 13 common + 4 lisp_specific + 2 multi_turn = 19 test cases
-      assert result.total == 19
+      # LispTestRunner: 25 test cases in common_test_cases
+      assert result.total == 25
     end
   end
 
