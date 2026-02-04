@@ -1,435 +1,375 @@
-# Meta-Planner Architecture: From Script Generation to Execution Manifests
+# Meta-Planner Architecture
 
-**Status**: Research / Design
-**Created**: 2025-02-03
-**Related**: `test/ptc_runner/sub_agent/meta_planner_e2e_test.exs`
+**Status**: Phase 1 (Verification) and Phase 2 (Tail Replanning) Complete
+**Next Step**: E2E testing with real LLMs, then Phase 3 (Validation & Observability)
 
-## Problem Statement
+## Overview
 
-Current ptc_runner patterns (plan-and-execute, planner-worker-reviewer) require **hand-crafted orchestration logic** in prompts. The LLM is given explicit patterns like `do-step` and told how to structure its work.
-
-We want to explore: **Can the LLM design its own multi-agent architecture?**
-
-This shifts from "LLM as Coder" (generating scripts) to "LLM as DevOps Engineer" (generating deployment manifests with health checks and recovery logic).
-
-## Research Questions
-
-### Core Questions
-
-1. **Planning emergence**: Does the LLM naturally create plans when needed, or does it dive in?
-2. **Agent invention**: What specialized agents does it create? (researcher, reviewer, synthesizer)
-3. **Verification strategies**: When does it add review steps? Always, never, or selectively?
-4. **Recovery semantics**: Does it specify what happens on failure? (retry, skip, replan)
-5. **Parallelism awareness**: Does it batch independent work?
-
-### Architectural Questions
-
-1. **Schema convergence**: Do different LLMs produce similar plan structures?
-2. **Complexity calibration**: Do simple missions get simple plans?
-3. **Recursive planning**: Should a spawned agent be able to invoke the MetaPlanner?
-4. **Context management**: How do we prevent "context window death spiral" in long workflows?
-
-## Current State
-
-### What exists
-
-- `SubAgent` with flexible prompt/tool configuration
-- `SubAgent.as_tool` for nesting agents
-- PTC-Lisp sandbox with tracing, journaling, tool caching
-- `step-done` / `task-reset` for progress tracking
-- `meta_planner_e2e_test.exs` - initial experiments with plan generation
-
-### What's missing
-
-- Formalized plan schema (currently free-form JSON)
-- Plan executor that interprets the schema
-- Adversarial plan evaluation
-- Synthesis gates for context management
-- Challenge-response test framework
-
-## Proposed Architecture
-
-### The Plan as "Kubernetes Manifest"
-
-Instead of generating a script, the MetaPlanner generates a **deployment manifest**:
+The meta-planner enables LLMs to design multi-agent workflows as "deployment manifests" rather than hand-crafted orchestration. An LLM generates a plan (agents + tasks + dependencies), which PlanRunner executes with parallel phases and error handling.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         Plan                                 │
-├─────────────────────────────────────────────────────────────┤
-│ mission_analysis    │ Complexity, critical path, capabilities│
-│ agent_definitions   │ "Pod specs" - prompt, tools, reliability│
-│ workflow            │ Tasks with deps, verification, on_failure│
-│ control_logic       │ Replan triggers, turn limits, staleness │
-└─────────────────────────────────────────────────────────────┘
+LLM → Plan JSON → PlanCritic (validate) → PlanExecutor (execute + replan) → Results
 ```
 
-### Component Overview
+## Current Implementation
 
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│ MetaPlanner  │────▶│  PlanCritic  │────▶│  PlanRunner  │
-│ (Architect)  │     │ (Adv. SRE)   │     │ (Executor)   │
-└──────────────┘     └──────────────┘     └──────────────┘
-       │                    │                    │
-       ▼                    ▼                    ▼
-   Plan JSON          Critique +           Spawned agents
-   (manifest)         refinement           + event stream
-```
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `Plan` | ✅ Complete | Flexible parsing of LLM variations |
+| `PlanRunner` | ✅ Complete | Parallel phases, error handling, human review gates, initial_results |
+| `PlanCritic` | ✅ Complete | Static analysis + optional LLM review |
+| `MetaPlanner` | ✅ Complete | Repair plan generation for failed tasks |
+| `PlanExecutor` | ✅ Complete | Execution loop with automatic replanning |
+| Verification predicates | ✅ Complete | Lisp predicates with data/input, data/result, data/depends |
 
-## Detailed Design
-
-### 1. Plan Schema (The Contract)
+### Plan Schema
 
 ```elixir
-defmodule PtcRunner.Plan do
-  @type t :: %__MODULE__{
-    mission_analysis: mission_analysis(),
-    agent_definitions: %{String.t() => agent_spec()},
-    workflow: [task()],
-    control_logic: control_logic()
-  }
-
-  @type mission_analysis :: %{
-    estimated_complexity: :trivial | :low | :medium | :high,
-    critical_path: [String.t()],
-    required_capabilities: [String.t()]
-  }
-
-  @type agent_spec :: %{
-    system_prompt: String.t(),
-    tools: [String.t()],
-    reliability_weight: float(),  # 0.0-1.0
-    max_turns: pos_integer()
-  }
-
-  @type task :: %{
-    id: String.t(),
-    agent: String.t(),  # references agent_definitions
-    input: String.t() | map(),
-    depends_on: [String.t()],
-    parallel_group: String.t() | nil,
-    verification: verification_spec() | nil,
-    on_failure: :retry | :skip | :replan | :fail,
-    critical: boolean()
-  }
-
-  @type verification_spec :: %{
-    type: :schema_check | :llm_reviewer | :none,
-    criteria: String.t() | nil
-  }
-
-  @type control_logic :: %{
-    max_turns_per_phase: pos_integer(),
-    replan_on_empty_result: boolean(),
-    synthesis_gates: [synthesis_gate()]
-  }
-
-  @type synthesis_gate :: %{
-    after_tasks: [String.t()],
-    agent: String.t(),
-    max_output_tokens: pos_integer()
-  }
-end
-```
-
-### 2. MetaPlanner (The Architect)
-
-Multi-turn agent that thinks before architecting:
-
-```elixir
-defmodule PtcRunner.MetaPlanner do
-  def generate(mission, available_tools, opts \\ []) do
-    planner = SubAgent.new(
-      prompt: """
-      You are a Workflow Architect for a multi-agent system.
-
-      MISSION: {{mission}}
-      AVAILABLE_TOOLS: {{available_tools}}
-
-      PHASE 1 - ANALYZE:
-      - What is the complexity? (trivial/low/medium/high)
-      - What capabilities are required?
-      - What are the failure points?
-
-      PHASE 2 - DESIGN AGENTS:
-      - What specialized agents are needed?
-      - What tools does each agent need?
-      - What are their reliability characteristics?
-
-      PHASE 3 - DESIGN WORKFLOW:
-      - What tasks need to happen?
-      - What are the dependencies?
-      - Which tasks can run in parallel?
-      - Where is verification needed?
-      - What happens on failure?
-
-      PHASE 4 - OUTPUT:
-      Return the complete plan as JSON matching the schema.
-      """,
-      signature: "(mission :string, available_tools [:string]) -> :map",
-      output: :json,
-      max_turns: 1
-    )
-
-    SubAgent.run(planner,
-      context: %{mission: mission, available_tools: available_tools},
-      llm: opts[:llm]
-    )
-  end
-end
-```
-
-### 3. PlanCritic (The Adversarial SRE)
-
-Reviews plans for failure modes before execution:
-
-```elixir
-defmodule PtcRunner.PlanCritic do
-  def review(plan, mission, opts \\ []) do
-    critic = SubAgent.new(
-      prompt: """
-      You are a Senior SRE reviewing a deployment manifest. Find problems.
-
-      MISSION: {{mission}}
-      PLAN: {{plan}}
-
-      EVALUATE EACH DIMENSION (score 0-10):
-
-      1. SINGLE POINT OF FAILURE
-         Which task, if it fails, kills everything?
-         Is there a fallback?
-
-      2. OUTPUT FORMAT COUPLING
-         Does Task B assume Task A returns field X?
-         Is X guaranteed by A's agent prompt?
-
-      3. CONTEXT BUDGET
-         Will any task exceed ~8K tokens of input?
-         Are synthesis gates present for parallel phases?
-
-      4. MISSING FALLBACKS
-         Which critical tasks lack on_failure handlers?
-
-      5. PARALLEL MISSES
-         Are independent tasks incorrectly sequenced?
-
-      Return:
-      - scores: {dimension: 0-10}
-      - issues: [{dimension, task_id, description}]
-      - recommendations: [string]
-      - overall_score: 0-10
-      """,
-      signature: "(mission :string, plan :map) -> :map",
-      output: :json,
-      max_turns: 1
-    )
-
-    SubAgent.run(critic,
-      context: %{mission: mission, plan: Jason.encode!(plan)},
-      llm: opts[:llm]
-    )
-  end
-end
-```
-
-### 4. PlanRunner (The Executor)
-
-Executes plans by instantiating agents and managing workflow:
-
-```elixir
-defmodule PtcRunner.PlanRunner do
-  @doc """
-  Executes a validated plan.
-
-  Options:
-  - llm: LLM callback for spawned agents
-  - base_tools: Tool implementations to select from
-  - on_event: Callback for execution events
-  """
-  def execute(%Plan{} = plan, opts) do
-    state = %{
-      results: %{},           # task_id => result
-      events: [],             # execution trace
-      current_phase: 0,
-      replan_count: 0
-    }
-
-    # Validate plan structure
-    :ok = Plan.validate(plan)
-
-    # Group tasks by execution phase (respecting dependencies)
-    phases = compute_execution_phases(plan.workflow)
-
-    # Execute each phase
-    Enum.reduce_while(phases, state, fn phase, state ->
-      case execute_phase(phase, plan, state, opts) do
-        {:ok, new_state} -> {:cont, new_state}
-        {:replan, reason} -> handle_replan(plan, state, reason, opts)
-        {:error, reason} -> {:halt, {:error, reason, state}}
-      end
-    end)
-  end
-
-  defp execute_phase(tasks, plan, state, opts) do
-    # Group by parallel_group
-    groups = Enum.group_by(tasks, & &1.parallel_group)
-
-    # Execute groups (parallel within group, sequential across nil group)
-    # Compile to PTC-Lisp for execution in sandbox
-    lisp_code = compile_phase_to_lisp(groups, plan.agent_definitions)
-
-    agents = instantiate_agents(plan.agent_definitions, opts[:base_tools], opts[:llm])
-
-    case Lisp.run(lisp_code, tools: agents, ...) do
-      {:ok, step} ->
-        {:ok, merge_results(state, step)}
-      {:error, step} ->
-        handle_task_failure(step, plan.control_logic, state)
-    end
-  end
-end
-```
-
-### 5. Synthesis Gates
-
-Prevent context window overflow by forcing compression between phases:
-
-```elixir
-# In workflow definition:
-%{
-  workflow: [
-    %{id: "r1", parallel_group: "research", ...},
-    %{id: "r2", parallel_group: "research", ...},
-    %{id: "r3", parallel_group: "research", ...},
-
-    # Gate: compress before proceeding
+%Plan{
+  agents: %{"researcher" => %{prompt: "...", tools: ["search"]}},
+  tasks: [
     %{
-      id: "synthesize_research",
-      type: :synthesis_gate,
-      inputs: ["r1", "r2", "r3"],
-      agent: "synthesizer",
-      max_output_tokens: 2000
-    },
-
-    %{id: "analysis", depends_on: ["synthesize_research"], ...}
+      id: "fetch_data",
+      agent: "researcher",
+      input: "Find X",
+      depends_on: [],
+      type: :task,              # :task | :synthesis_gate | :human_review
+      on_failure: :retry,       # :stop | :skip | :retry
+      max_retries: 3,
+      critical: true
+    }
   ]
 }
 ```
 
-## Evaluation Framework
+### Execution Model
 
-### Metrics (replacing task_count)
+Tasks grouped by dependency level, executed in parallel phases:
 
 ```elixir
-def compute_metrics(plan) do
-  %{
-    # Resilience: ratio of fallbacks to critical tasks
-    resilience_score: fallback_coverage(plan),
-
-    # Efficiency: parallel utilization
-    parallelism_ratio: max_concurrent(plan) / length(plan.workflow),
-
-    # Quality: prompt specificity
-    prompt_precision: avg_prompt_specificity(plan.agent_definitions),
-
-    # Risk: single points of failure
-    spof_count: count_single_points_of_failure(plan),
-
-    # Context: synthesis gate coverage
-    synthesis_coverage: synthesis_gates_present?(plan)
-  }
-end
+phases = Plan.group_by_level(plan.tasks)
+# Phase 0: tasks with no dependencies (parallel)
+# Phase 1: tasks depending on phase 0 (parallel)
+# ...
 ```
 
-### Challenge-Response Tests
+### Task Types
 
-| Challenge | Scenario | Expected Plan Property |
-|-----------|----------|----------------------|
-| Blind Alley | Search for non-existent entity | `on_failure: :replan` or pivot strategy |
-| Data Flood | Process 50 files | `parallel_group` + batching + synthesis gate |
-| Unreliable Witness | Conflicting sources | Reviewer agent or conflict resolution |
-| Deep Chain | A→B→C→D dependency | Correct `depends_on` + intermediate verification |
-| Partial Failure | 2 of 3 sources fail | Graceful degradation, not total failure |
+| Type | Behavior |
+|------|----------|
+| `:task` | Run SubAgent with agent's prompt/tools |
+| `:synthesis_gate` | Compress results from `depends_on` tasks only. **Implicit checkpoint** - halts downstream on failure. |
+| `:human_review` | Pause execution, return `{:waiting, pending, partial_results}` |
 
-### Test Implementation
+### Error Handling
+
+| `on_failure` | `critical: true` | `critical: false` |
+|--------------|------------------|-------------------|
+| `:stop` | Halt execution | Log and continue |
+| `:skip` | Log and continue | Log and continue |
+| `:retry` | Retry with diagnosis → halt if exhausted | Retry with diagnosis → skip if exhausted |
+
+### Static Analysis (PlanCritic)
+
+| Check | Severity | Condition |
+|-------|----------|-----------|
+| `:missing_gate` | warning | ≥3 parallel tasks without downstream synthesis |
+| `:parallel_explosion` | critical | >10 parallel tasks |
+| `:optimism_bias` | warning | Flaky operation with `critical: true` |
+| `:missing_dependency` | critical | Depends on non-existent task |
+| `:disconnected_flow` | warning | Dependency declared but not used in input |
+
+---
+
+## Phase 1: Verification Predicates
+
+**Goal**: Tasks specify how their output should be validated using PTC-Lisp.
+
+**E2E Validation**: LLMs generate valid predicates (100% success rate in tests).
+
+### Three-Layer Model
+
+| Layer | Mechanism | Cost | When |
+|-------|-----------|------|------|
+| Schema | Signature output schema | Free | Always (existing) |
+| Predicate | Lisp expression | Cheap | Always |
+| LLM Review | Separate agent review | Expensive | Critical tasks |
+
+### Task Schema Extension
 
 ```elixir
-describe "challenge-response" do
-  test "blind alley triggers replan" do
-    # Mock search that always returns empty
-    mock_tools = %{"search" => fn _ -> %{results: []} end}
+%{
+  # existing fields...
+  verification: "(and (map? data/result) (> (count (get data/result \"items\")) 0))",
+  on_verification_failure: :retry  # :stop | :skip | :retry | :replan
+}
+```
 
-    {:ok, plan} = MetaPlanner.generate(
-      "Research the company XyzzyCorp",
-      ["search", "summarize"]
-    )
+### Predicate Bindings
 
-    # Execute with mock
-    events = PlanRunner.execute(plan, base_tools: mock_tools)
-              |> collect_events()
+```lisp
+;; Available bindings
+data/input    ;; task's input
+data/result   ;; task's output
+data/depends  ;; map of depends_on task_id => result
 
-    assert :replan in events or :pivot in events
-    refute :hard_fail in events
+;; Return values
+true                           ;; passed
+"Expected 5+ items, got 2"     ;; failed with diagnosis
+false                          ;; failed (generic)
+```
+
+### Predicate Examples
+
+```lisp
+;; BAD - hardcoded expectation
+(= (get data/result "city") "Tokyo")
+
+;; GOOD - references input
+(= (get data/result "city") (get data/input "city"))
+
+;; GOOD - compare against upstream task result
+(>= (count (get data/result "items"))
+    (count (get-in data/depends ["fetch_products" "items"])))
+
+;; GOOD - diagnosis string on failure
+(if (> (count (get data/result "items")) 0)
+    true
+    (str "Expected items, got " (count (get data/result "items"))))
+```
+
+### Failure Handling: Retry vs Replan
+
+| Strategy | Behavior | Cost | Use When |
+|----------|----------|------|----------|
+| `:retry` | Re-run agent with diagnosis feedback | Cheap | Recoverable errors (wrong format, missing fields) |
+| `:replan` | Return to MetaPlanner for structural changes | Expensive | Fundamental approach is wrong |
+
+**Smart Retry**: When `:retry` is triggered, the diagnosis is appended to the agent's prompt:
+
+```
+Previous attempt failed verification: "Expected 5+ items, got 2"
+Adjust your approach to satisfy this requirement.
+```
+
+Most verification failures are recoverable with feedback. Reserve `:replan` for cases where the task itself is misconceived.
+
+### Synthesis Gates as Checkpoints
+
+Synthesis gates are **implicit checkpoints**. If a synthesis gate fails (execution error or verification failure), downstream tasks are not run. This prevents "garbage in, garbage out" cascades.
+
+Rationale: Synthesis gates aggregate results from multiple upstream tasks. If aggregation fails, all downstream consumers would receive invalid data.
+
+### Implementation
+
+Add to `PlanRunner.execute_task/3`:
+
+```elixir
+defp execute_task(task, results, opts) do
+  case run_sub_agent(task, results, opts) do
+    {:ok, output} ->
+      case run_verification(task, output, results) do
+        :passed -> {:ok, output}
+        {:failed, diagnosis} -> handle_verification_failure(task, output, diagnosis, opts)
+      end
+    error -> error
   end
 end
+
+defp run_verification(%{verification: nil}, _output, _results), do: :passed
+defp run_verification(%{verification: predicate} = task, output, results) do
+  # Build depends map from task's depends_on
+  depends = Map.take(results, task.depends_on)
+
+  bindings = %{
+    "input" => task.input,
+    "result" => output,
+    "depends" => depends
+  }
+
+  case Lisp.run(predicate, context: bindings, timeout: 1000) do
+    {:ok, %{return: true}} -> :passed
+    {:ok, %{return: diagnosis}} when is_binary(diagnosis) -> {:failed, diagnosis}
+    {:ok, %{return: false}} -> {:failed, "Verification failed"}
+    {:error, step} -> {:error, {:verification_error, step.fail}}
+  end
+end
+
+defp handle_verification_failure(task, output, diagnosis, opts) do
+  case task.on_verification_failure do
+    :stop -> {:error, {:verification_failed, task.id, diagnosis}}
+    :skip -> {:skipped, diagnosis}
+    :retry -> retry_with_diagnosis(task, diagnosis, opts)
+    :replan -> {:replan_required, %{task_id: task.id, output: output, diagnosis: diagnosis}}
+  end
+end
+
+defp retry_with_diagnosis(task, diagnosis, opts) do
+  # Append diagnosis to task input for next attempt
+  feedback = """
+  Previous attempt failed verification: "#{diagnosis}"
+  Adjust your approach to satisfy this requirement.
+  """
+  updated_task = %{task | input: task.input <> "\n\n" <> feedback}
+  # ... retry logic with max_retries tracking
+end
 ```
 
-## Implementation Phases
+---
 
-### Phase 1: Critic Agent (Quick Win)
-- Add `PlanCritic` to existing `meta_planner_e2e_test.exs`
-- Generate plan → Critique → Log issues
-- No execution yet, just evaluation
+## Phase 2: Tail Replanning
 
-### Phase 2: Plan Struct + Validation
-- Define `PtcRunner.Plan` struct with types
-- Add validation: acyclic deps, referenced agents exist
-- Parse generated JSON into struct
+**Status**: ✅ Complete
 
-### Phase 3: Minimal PlanRunner
-- Elixir loop that iterates phases
-- Compiles each phase to PTC-Lisp
-- Spawns agents from definitions
-- Basic `on_failure` handling
+**Goal**: When `:replan` is triggered, redesign the workflow from that point forward.
 
-### Phase 4: Synthesis Gates
-- Add gate detection to PlanRunner
-- Spawn synthesizer agents between phases
-- Enforce max_output_tokens compression
+### Architecture
 
-### Phase 5: Challenge-Response Suite
-- Mock tool infrastructure
-- Event collection from PlanRunner
-- Property-based assertions on plan behavior
+```
+PlanExecutor.execute(plan, mission, opts)
+    │
+    ├── PlanRunner.execute(plan, initial_results: completed)
+    │       │
+    │       ├── Skip tasks in initial_results
+    │       └── Execute remaining tasks
+    │               │
+    │               └── {:replan_required, context} if verification fails
+    │
+    ├── MetaPlanner.replan(mission, completed, failure_context)
+    │       │
+    │       └── Generate repair plan via LLM
+    │
+    └── Loop until success or max_replans exceeded
+```
 
-## Open Questions
+### PlanRunner Skip-if-Present
 
-1. **Recursive MetaPlanner**: Should spawned agents be able to call MetaPlanner?
-   - Proposal: No by default. Return `{:needs_decomposition, subtask}` signal instead.
+The `initial_results` option allows PlanRunner to skip already-completed tasks:
 
-2. **Plan serialization**: JSON vs Elixir terms vs PTC-Lisp?
-   - Proposal: JSON for portability, convert to struct for execution.
+```elixir
+PlanRunner.execute(plan,
+  llm: my_llm,
+  initial_results: %{"step1" => cached_result}  # skip step1
+)
+```
 
-3. **Replan limits**: How many replans before giving up?
-   - Proposal: Configurable in `control_logic`, default 2.
+### MetaPlanner.replan/4
 
-4. **Agent caching**: Can we reuse spawned agents across tasks?
-   - Proposal: Yes if same `agent_definition` key, no state carryover.
+```elixir
+{:ok, repair_plan} = MetaPlanner.replan(
+  mission,
+  completed_results,
+  %{task_id: "fetch", task_output: bad_result, diagnosis: "count < 5"},
+  llm: my_llm
+)
+```
 
-5. **Human-in-the-loop**: Where do we pause for approval?
-   - Proposal: Optional gate type `:human_review` in workflow.
+The repair plan includes completed task IDs (so they're skipped) and redesigns the failed task.
 
-## Success Criteria
+### PlanExecutor
 
-1. **MetaPlanner generates valid plans** for all challenge scenarios
-2. **PlanCritic catches >80% of failure modes** in adversarial tests
-3. **PlanRunner executes plans** with correct dependency ordering
-4. **Synthesis gates prevent** context overflow in data-heavy missions
-5. **Challenge-response tests pass** with appropriate resilience properties
+High-level orchestrator that handles the replan loop:
 
-## References
+```elixir
+{:ok, metadata} = PlanExecutor.execute(plan, mission,
+  llm: my_llm,
+  max_replan_attempts: 3,    # per task
+  max_total_replans: 5,      # per execution
+  replan_cooldown_ms: 1000
+)
 
-- `test/ptc_runner/sub_agent/meta_planner_e2e_test.exs` - Current experiments
-- `test/ptc_runner/sub_agent/planner_worker_e2e_test.exs` - Hand-crafted pattern
-- `tmp/meta_planner_summary.md` - Generated plan examples
+# metadata includes:
+# - results: final task results
+# - replan_count: how many replans occurred
+# - execution_attempts: total execution attempts
+# - replan_history: [{task_id, diagnosis, ...}, ...]
+```
+
+---
+
+## Phase 3: Validation & Observability
+
+- `Plan.validate/1` with cycle detection and agent reference checks
+- `on_event` callback for execution tracing
+- Token counting for synthesis gate output
+
+---
+
+## API Reference
+
+### Plan.parse/1
+
+```elixir
+{:ok, plan} = Plan.parse(%{
+  "agents" => %{"worker" => %{"prompt" => "..."}},
+  "tasks" => [%{"id" => "t1", "agent" => "worker", "input" => "..."}]
+})
+```
+
+Handles variations: `tasks`/`steps`/`workflow`, `depends_on`/`requires`/`after`, etc.
+
+### PlanRunner.execute/2
+
+```elixir
+{:ok, results} = PlanRunner.execute(plan,
+  llm: fn req -> {:ok, "response"} end,
+  base_tools: %{"search" => &search/1},
+  timeout: 30_000,
+  max_turns: 5,
+  max_concurrency: 10
+)
+
+# Human review pause/resume
+{:waiting, pending, partial} = PlanRunner.execute(plan, llm: llm)
+{:ok, results} = PlanRunner.execute(plan, llm: llm, reviews: %{"review_id" => decision})
+```
+
+### PlanCritic.review/2
+
+```elixir
+{:ok, critique} = PlanCritic.static_review(plan)
+# => %{score: 7, issues: [...], summary: "...", recommendations: [...]}
+
+{:ok, critique} = PlanCritic.review(plan, llm: llm)  # with LLM analysis
+```
+
+### MetaPlanner.replan/4
+
+```elixir
+{:ok, repair_plan} = MetaPlanner.replan(
+  "Original mission description",
+  %{"step1" => result1, "step2" => result2},  # completed results
+  %{task_id: "step3", task_output: bad_output, diagnosis: "Price must be positive"},
+  llm: my_llm,
+  timeout: 30_000
+)
+```
+
+### PlanExecutor.execute/3
+
+```elixir
+{:ok, metadata} = PlanExecutor.execute(plan, mission,
+  llm: my_llm,
+  base_tools: %{"search" => &search/1},
+  max_replan_attempts: 3,
+  max_total_replans: 5
+)
+
+# metadata = %{
+#   results: %{"task1" => ..., "task2" => ...},
+#   replan_count: 1,
+#   execution_attempts: 2,
+#   total_duration_ms: 15000,
+#   replan_history: [%{task_id: "task2", diagnosis: "...", ...}]
+# }
+```
+
+---
+
+## Test Coverage
+
+- `test/ptc_runner/plan_test.exs` - Parsing, topological sort, verification fields
+- `test/ptc_runner/plan_runner_test.exs` - Execution, parallel phases, gates, initial_results, verification
+- `test/ptc_runner/plan_executor_test.exs` - Replan loop, max attempts, error handling
+- `test/ptc_runner/plan_critic_test.exs` - Static analysis, scoring
+- `test/ptc_runner/sub_agent/meta_planner_e2e_test.exs` - E2E tests with real LLM
