@@ -37,8 +37,9 @@ defmodule PtcRunner.CapabilityRegistry.TrialHistory do
           optional(:tools_used) => [String.t()],
           optional(:skills_used) => [String.t()],
           optional(:context_tags) => [String.t()],
-          optional(:model_id) => String.t(),
-          optional(:diagnosis) => String.t()
+          optional(:model_id) => String.t() | nil,
+          optional(:success) => boolean(),
+          optional(:diagnosis) => String.t() | nil
         }
 
   @doc """

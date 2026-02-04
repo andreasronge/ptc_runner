@@ -27,6 +27,10 @@ defmodule PtcRunner.CapabilityRegistry.Linker do
 
   alias PtcRunner.CapabilityRegistry.{Discovery, Registry, Skill, ToolEntry}
 
+  # Suppress dialyzer warnings for MapSet opaqueness in recursive dependency resolution
+  # and for resolve_skills which dialyzer incorrectly flags as having no return
+  @dialyzer {:nowarn_function, [resolve_deps_recursive: 5, resolve_skills: 4]}
+
   @type link_result :: %{
           tools: [ToolEntry.t()],
           skills: [Skill.t()],
