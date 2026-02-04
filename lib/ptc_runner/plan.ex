@@ -72,8 +72,11 @@ defmodule PtcRunner.Plan do
   """
   @spec parse(map()) :: {:ok, t()} | {:error, term()}
   def parse(raw_plan) when is_map(raw_plan) do
-    agents = extract_agents(raw_plan)
-    tasks = extract_tasks(raw_plan)
+    # Unwrap "object" key if present (JSON mode artifact)
+    plan = unwrap_object(raw_plan)
+
+    agents = extract_agents(plan)
+    tasks = extract_tasks(plan)
 
     {:ok,
      %__MODULE__{
@@ -83,6 +86,27 @@ defmodule PtcRunner.Plan do
   end
 
   def parse(_), do: {:error, :invalid_plan_format}
+
+  # JSON mode sometimes wraps the result under various keys
+  defp unwrap_object(%{"object" => inner}) when is_map(inner), do: inner
+  defp unwrap_object(%{"output" => inner}) when is_map(inner), do: inner
+  defp unwrap_object(%{"result" => inner}) when is_map(inner), do: inner
+
+  defp unwrap_object(%{"plan" => inner}) when is_map(inner) and is_map_key(inner, "tasks"),
+    do: inner
+
+  # Skip JSON Schema definitions (model returned schema instead of data)
+  defp unwrap_object(%{"$schema" => _} = plan) do
+    # Try to find actual data nested somewhere
+    plan
+    |> Map.drop(["$schema"])
+    |> case do
+      empty when map_size(empty) == 0 -> plan
+      remaining -> remaining
+    end
+  end
+
+  defp unwrap_object(plan), do: plan
 
   # Extract agents from various possible keys
   defp extract_agents(plan) do
