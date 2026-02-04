@@ -390,14 +390,10 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
     end
   end
 
+  # Tests whether the MetaPlanner can generate valid PTC-Lisp verification predicates.
+  # This is the critical first step before implementing verification in PlanRunner.
+  # If LLMs struggle with Lisp syntax, we need helper functions.
   describe "verification predicate generation" do
-    @moduledoc """
-    Tests whether the MetaPlanner can generate valid PTC-Lisp verification predicates.
-
-    This is the critical first step before implementing verification in PlanRunner.
-    If LLMs struggle with Lisp syntax, we need helper functions.
-    """
-
     alias PtcRunner.Lisp.Parser
 
     @verification_missions [
@@ -1233,16 +1229,12 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
     IO.puts("\nResults written to tmp/meta_planner_summary.md")
   end
 
+  # E2E tests for verification predicates in actual plan execution.
+  # These tests validate that:
+  # 1. LLM-generated verification predicates execute correctly
+  # 2. Smart retry recovers from verification failures
+  # 3. Verification integrates with the full execution flow
   describe "verification execution" do
-    @moduledoc """
-    E2E tests for verification predicates in actual plan execution.
-
-    These tests validate that:
-    1. LLM-generated verification predicates execute correctly
-    2. Smart retry recovers from verification failures
-    3. Verification integrates with the full execution flow
-    """
-
     @tag :verification_execution
     @tag :skip
     test "LLM-generated plan with verification executes correctly" do
@@ -1461,16 +1453,12 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
     end
   end
 
+  # E2E tests for the PlanExecutor replan loop.
+  # These tests validate that:
+  # 1. Verification failures with :replan trigger MetaPlanner
+  # 2. MetaPlanner generates valid repair plans
+  # 3. The execution loop completes successfully after replanning
   describe "tail replanning (Phase 2)" do
-    @moduledoc """
-    E2E tests for the PlanExecutor replan loop.
-
-    These tests validate that:
-    1. Verification failures with :replan trigger MetaPlanner
-    2. MetaPlanner generates valid repair plans
-    3. The execution loop completes successfully after replanning
-    """
-
     alias PtcRunner.MetaPlanner
     alias PtcRunner.PlanExecutor
 
@@ -1578,7 +1566,7 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
           # For exploration, don't hard-fail
           IO.puts("\n⚠ This may indicate the LLM couldn't satisfy the verification")
 
-        {:waiting, pending, metadata} ->
+        {:waiting, pending, _metadata} ->
           IO.puts("\n⏸ Paused for human review")
           IO.puts("  Pending: #{inspect(Enum.map(pending, & &1.task_id))}")
       end
