@@ -481,7 +481,7 @@ defmodule PtcRunner.PlanExecutor do
     end
 
     # Merge any new completed results from this execution attempt
-    completed_results = Map.merge(state.completed_results, context.completed_results || %{})
+    completed_results = Map.merge(state.completed_results, context.completed_results)
 
     failure_context = %{
       task_id: task_id,

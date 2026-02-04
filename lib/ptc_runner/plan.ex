@@ -481,11 +481,11 @@ defmodule PtcRunner.Plan do
         []
 
       # Valid data/ bindings
-      MapSet.member?(valid_bindings, name_str) ->
+      name_str in valid_bindings ->
         []
 
       # Locally bound (from let)
-      MapSet.member?(local_bindings, name_str) ->
+      name_str in local_bindings ->
         []
 
       # true/false/nil are literals, not variables
@@ -549,9 +549,7 @@ defmodule PtcRunner.Plan do
   # Catch-all
   defp find_undefined_vars(_, _valid, _local), do: []
 
-  defp format_parse_error({:error, message}) when is_binary(message), do: message
-  defp format_parse_error(message) when is_binary(message), do: message
-  defp format_parse_error(other), do: inspect(other)
+  defp format_parse_error({:parse_error, message}), do: message
 
   # DFS cycle detection with path tracking
   defp detect_cycle(id, task_map, visited, in_progress, issues, path) do
