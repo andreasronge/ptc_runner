@@ -92,12 +92,23 @@ defmodule PtcRunner.PlanExecutor do
           | {:error, term(), execution_metadata()}
           | {:waiting, [PlanRunner.pending_review()], execution_metadata()}
 
+  @type replan_record :: %{
+          attempt: pos_integer(),
+          task_id: String.t(),
+          timestamp: DateTime.t(),
+          input: String.t(),
+          approach: String.t(),
+          output: String.t(),
+          diagnosis: String.t(),
+          new_task_count: pos_integer()
+        }
+
   @type execution_metadata :: %{
           results: %{String.t() => term()},
           replan_count: non_neg_integer(),
           execution_attempts: non_neg_integer(),
           total_duration_ms: non_neg_integer(),
-          replan_history: [map()]
+          replan_history: [replan_record()]
         }
 
   @type execute_result ::
