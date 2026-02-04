@@ -16,6 +16,8 @@ defmodule PtcRunner.Lisp.Eval do
   - `Eval.Helpers` - Type errors and utilities
   """
 
+  require Logger
+
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval.{Apply, Patterns, Where}
@@ -611,7 +613,10 @@ defmodule PtcRunner.Lisp.Eval do
     case journal do
       nil ->
         # No journal - execute without caching, emit trace warning
-        IO.warn("PTC task '#{id}' executed without journal: caching and idempotency are inactive")
+        Logger.debug(
+          "PTC task '#{id}' executed without journal: caching and idempotency are inactive"
+        )
+
         do_eval(body_ast, eval_ctx)
 
       %{} ->
