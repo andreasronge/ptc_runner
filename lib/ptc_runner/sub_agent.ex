@@ -171,6 +171,7 @@ defmodule PtcRunner.SubAgent do
     :prompt,
     :signature,
     :parsed_signature,
+    :schema,
     :prompt_limit,
     :mission_timeout,
     :llm_retry,

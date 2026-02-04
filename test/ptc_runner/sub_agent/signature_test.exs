@@ -281,7 +281,7 @@ defmodule PtcRunner.SubAgent.SignatureTest do
         {":int", %{"type" => "integer"}},
         {":float", %{"type" => "number"}},
         {":bool", %{"type" => "boolean"}},
-        {":any", %{}},
+        {":any", %{"type" => "object"}},
         {":map", %{"type" => "object"}},
         {":keyword", %{"type" => "string"}}
       ]
@@ -310,6 +310,20 @@ defmodule PtcRunner.SubAgent.SignatureTest do
                "required" => [],
                "additionalProperties" => false
              }
+    end
+
+    test ":any signature generates valid schema for Bedrock (must have type field)" do
+      # BUG: Bedrock requires input_schema to have a "type" field.
+      # Currently :any returns %{} which causes Bedrock API error:
+      # "tools.0.custom.input_schema.type: Field required"
+      #
+      # This affects synthesis gates which use `signature: ":any"` for JSON mode.
+      {:ok, sig} = Signature.parse("() -> :any")
+      schema = Signature.to_json_schema(sig)
+
+      # Schema must have a type field for Bedrock compatibility
+      assert Map.has_key?(schema, "type"),
+             ":any schema must have 'type' field for Bedrock compatibility (currently returns #{inspect(schema)})"
     end
   end
 end

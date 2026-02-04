@@ -55,6 +55,7 @@ defmodule PtcRunner.PlanExecutor do
 
   """
 
+  alias PtcRunner.CapabilityRegistry.TrialHistory
   alias PtcRunner.MetaPlanner
   alias PtcRunner.Plan
   alias PtcRunner.PlanRunner
@@ -330,6 +331,8 @@ defmodule PtcRunner.PlanExecutor do
     replan_cooldown_ms = Keyword.get(opts, :replan_cooldown_ms, @default_replan_cooldown_ms)
     on_event = Keyword.get(opts, :on_event)
     initial_results = Keyword.get(opts, :initial_results, %{})
+    registry = Keyword.get(opts, :registry)
+    context_tags = Keyword.get(opts, :context_tags, [])
 
     # Filter out executor-specific options for PlanRunner
     # Keep on_event so PlanRunner can emit task-level events
@@ -359,6 +362,8 @@ defmodule PtcRunner.PlanExecutor do
       replan_cooldown_ms: replan_cooldown_ms,
       on_event: on_event,
       constraints: constraints,
+      registry: registry,
+      context_tags: context_tags,
       start_time: System.monotonic_time(:millisecond)
     }
 
@@ -383,6 +388,9 @@ defmodule PtcRunner.PlanExecutor do
       {:ok, results} ->
         # Success!
         metadata = build_metadata(state, results)
+
+        # Record trial if registry present
+        record_execution_trial(state, true, nil)
 
         emit_event(
           state,
@@ -411,6 +419,9 @@ defmodule PtcRunner.PlanExecutor do
         merged_results = Map.merge(state.completed_results, partial_results)
         metadata = build_metadata(state, merged_results)
 
+        # Record failure trial
+        record_execution_trial(state, false, "task error: #{inspect(reason)}")
+
         emit_event(
           state,
           {:execution_finished, %{status: :error, duration_ms: metadata.total_duration_ms}}
@@ -435,6 +446,9 @@ defmodule PtcRunner.PlanExecutor do
         Logger.warning("PlanExecutor: Max total replans (#{state.max_total_replans}) reached")
         metadata = build_metadata(state, state.completed_results)
 
+        # Record failure trial
+        record_execution_trial(state, false, "max replans exceeded")
+
         emit_event(
           state,
           {:execution_finished, %{status: :error, duration_ms: metadata.total_duration_ms}}
@@ -448,6 +462,9 @@ defmodule PtcRunner.PlanExecutor do
         )
 
         metadata = build_metadata(state, state.completed_results)
+
+        # Record failure trial
+        record_execution_trial(state, false, "per-task replan limit for #{task_id}")
 
         emit_event(
           state,
@@ -692,5 +709,30 @@ defmodule PtcRunner.PlanExecutor do
       {:ok, json} -> truncate_value(json, max_length)
       {:error, _} -> truncate_value(inspect(value), max_length)
     end
+  end
+
+  # ============================================================================
+  # Registry Trial Recording
+  # ============================================================================
+
+  # Extract all tools used across all agents in a plan
+  defp extract_tools_used(plan) do
+    plan.agents
+    |> Enum.flat_map(fn {_id, spec} -> Map.get(spec, :tools, []) end)
+    |> Enum.uniq()
+  end
+
+  # Record execution trial to the registry if present
+  defp record_execution_trial(%{registry: nil}, _success?, _diagnosis), do: :ok
+
+  defp record_execution_trial(state, success?, diagnosis) do
+    TrialHistory.record_trial(state.registry, %{
+      tools_used: extract_tools_used(state.plan),
+      skills_used: [],
+      context_tags: state.context_tags || [],
+      model_id: nil,
+      success: success?,
+      diagnosis: diagnosis
+    })
   end
 end

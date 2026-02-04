@@ -124,6 +124,155 @@ defmodule PtcRunner.PlanRunnerTest do
       assert Map.has_key?(results, "find")
     end
 
+    test "base_tools with signatures are documented in user message" do
+      # Tools are documented in the user message (not system prompt) as part of
+      # the namespace section. This test verifies that tools with explicit
+      # signatures are properly documented.
+
+      raw = %{
+        "agents" => %{
+          "fetcher" => %{
+            "prompt" => "You fetch stock prices",
+            "tools" => ["fetch_price"]
+          }
+        },
+        "tasks" => [
+          %{"id" => "get_price", "agent" => "fetcher", "input" => "Get AAPL price"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      # Capture the user message sent to LLM
+      captured_message = Agent.start_link(fn -> nil end) |> elem(1)
+
+      # Tool WITH signature - this should work correctly
+      fetch_price_tool =
+        {fn %{"symbol" => symbol} ->
+           %{"symbol" => symbol, "price" => 185.50, "currency" => "USD"}
+         end, "(symbol :string) -> {symbol :string, price :float, currency :string}"}
+
+      mock_llm = fn %{messages: [%{content: content} | _]} = _input ->
+        Agent.update(captured_message, fn _ -> content end)
+        {:ok, ~s|```clojure\n(return {:symbol "AAPL" :price 185.50})\n```|}
+      end
+
+      PlanRunner.execute(plan,
+        llm: mock_llm,
+        base_tools: %{"fetch_price" => fetch_price_tool},
+        max_turns: 2
+      )
+
+      user_message = Agent.get(captured_message, & &1)
+      Agent.stop(captured_message)
+
+      # Tools with explicit signatures should be documented in the user message
+      assert user_message =~ "fetch_price",
+             "User message should mention the tool name"
+
+      assert user_message =~ "symbol",
+             "User message should include parameter name 'symbol'"
+    end
+
+    test "function references with @spec are documented without available_tools" do
+      # Named function references have their @spec extracted by TypeExtractor,
+      # so they don't need available_tools descriptions.
+
+      raw = %{
+        "agents" => %{
+          "processor" => %{
+            "prompt" => "You process strings",
+            "tools" => ["upcase"]
+          }
+        },
+        "tasks" => [
+          %{"id" => "process", "agent" => "processor", "input" => "Uppercase hello"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      captured_message = Agent.start_link(fn -> nil end) |> elem(1)
+
+      mock_llm = fn %{messages: [%{content: content} | _]} = _input ->
+        Agent.update(captured_message, fn _ -> content end)
+        {:ok, ~s|```clojure\n(return "HELLO")\n```|}
+      end
+
+      # Use a real function reference - String.upcase/1 has @spec
+      PlanRunner.execute(plan,
+        llm: mock_llm,
+        base_tools: %{"upcase" => &String.upcase/1},
+        max_turns: 2
+      )
+
+      user_message = Agent.get(captured_message, & &1)
+      Agent.stop(captured_message)
+
+      # @spec extraction should provide the signature
+      assert user_message =~ "upcase",
+             "Tool should be mentioned"
+
+      # String.upcase/1 has @spec: (t(), :default | :ascii | :greek | :turkic) :: t()
+      # TypeExtractor converts this to a signature with parameters
+      assert user_message =~ ~r/upcase\([^)]+\)/,
+             "Tool should have parameters from @spec (not empty parens)"
+    end
+
+    test "base_tools enriched with available_tools descriptions" do
+      # FIX: When available_tools descriptions are passed alongside base_tools,
+      # the tool signatures are extracted and used to document the tools properly.
+
+      raw = %{
+        "agents" => %{
+          "fetcher" => %{
+            "prompt" => "You fetch stock prices",
+            "tools" => ["fetch_price"]
+          }
+        },
+        "tasks" => [
+          %{"id" => "get_price", "agent" => "fetcher", "input" => "Get AAPL price"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      captured_message = Agent.start_link(fn -> nil end) |> elem(1)
+
+      # Raw anonymous function - NO signature
+      fetch_price_tool = fn %{"symbol" => symbol} ->
+        %{"symbol" => symbol, "price" => 185.50, "currency" => "USD"}
+      end
+
+      # Tool description (same format used for MetaPlanner)
+      available_tools = %{
+        "fetch_price" =>
+          "Fetch stock price. Input: {symbol: string}. Output: {symbol: string, price: float, currency: string}"
+      }
+
+      mock_llm = fn %{messages: [%{content: content} | _]} = _input ->
+        Agent.update(captured_message, fn _ -> content end)
+        {:ok, ~s|```clojure\n(return {:symbol "AAPL" :price 185.50})\n```|}
+      end
+
+      PlanRunner.execute(plan,
+        llm: mock_llm,
+        base_tools: %{"fetch_price" => fetch_price_tool},
+        available_tools: available_tools,
+        max_turns: 2
+      )
+
+      user_message = Agent.get(captured_message, & &1)
+      Agent.stop(captured_message)
+
+      # With available_tools, the tool is properly documented
+      assert user_message =~ "fetch_price",
+             "Tool should be mentioned"
+
+      assert user_message =~ ~r/fetch_price\(.*symbol/,
+             "Tool should document the 'symbol' parameter"
+    end
+
     test "stops on first failure" do
       raw = %{
         "tasks" => [

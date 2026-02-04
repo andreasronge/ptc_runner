@@ -229,7 +229,10 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     end
   end
 
-  # Build JSON schema from agent's parsed signature (or nil if no signature)
+  # Build JSON schema from agent's custom schema or parsed signature
+  # Priority: custom schema > signature-generated schema > nil
+  defp build_schema(%{schema: schema}) when is_map(schema), do: schema
+
   defp build_schema(%{parsed_signature: sig}) when not is_nil(sig),
     do: Signature.to_json_schema(sig)
 
@@ -287,6 +290,10 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     end)
   end
 
+  defp format_type_description(:any, _field_descriptions) do
+    "(Return your response directly as a JSON object - no wrapper needed)"
+  end
+
   defp format_type_description(type, _field_descriptions) do
     "(#{format_type_name(type)})"
   end
@@ -319,7 +326,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp build_example_value(:float), do: 0.0
   defp build_example_value(:bool), do: true
   defp build_example_value(:keyword), do: "keyword"
-  defp build_example_value(:any), do: nil
+  # For :any, show a helpful object example rather than null
+  defp build_example_value(:any), do: %{"key" => "value", "data" => "..."}
   defp build_example_value(:map), do: %{}
   defp build_example_value({:list, inner}), do: [build_example_value(inner)]
   defp build_example_value({:optional, inner}), do: build_example_value(inner)

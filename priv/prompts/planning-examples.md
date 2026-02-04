@@ -16,6 +16,7 @@
       "id": "fetch_apple_price",
       "agent": "data_fetcher",
       "input": "Fetch the current stock price for AAPL",
+      "signature": "{price :float, currency :string}",
       "verification": "(if (number? (get data/result \"price\")) true \"Price must be a number\")",
       "on_verification_failure": "retry"
     },
@@ -23,6 +24,7 @@
       "id": "search_apple_news",
       "agent": "researcher",
       "input": "Search for recent Apple stock news and analyst opinions",
+      "signature": "{articles [{title :string, source :string}]}",
       "verification": "(> (count (get data/result \"articles\")) 0)",
       "on_verification_failure": "retry"
     },
@@ -30,6 +32,7 @@
       "id": "synthesize_findings",
       "agent": "summarizer",
       "type": "synthesis_gate",
+      "signature": "{symbol :string, price :float, trend :string, key_headlines [:string]}",
       "input": "Consolidate price data and news into a JSON summary with fields: symbol, price, trend, key_headlines",
       "depends_on": ["fetch_apple_price", "search_apple_news"]
     }
