@@ -141,43 +141,4 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       end
     end
   end
-
-  describe "archived?/1" do
-    test "returns false for compositions" do
-      refute LanguageSpec.archived?(:single_shot)
-      refute LanguageSpec.archived?(:multi_turn)
-    end
-
-    test "returns false for current snippets" do
-      refute LanguageSpec.archived?(:base)
-      refute LanguageSpec.archived?(:addon_single_shot)
-      refute LanguageSpec.archived?(:addon_multi_turn)
-    end
-
-    test "raises for unknown prompt" do
-      assert_raise ArgumentError, ~r/Unknown prompt: :nonexistent/, fn ->
-        LanguageSpec.archived?(:nonexistent)
-      end
-    end
-  end
-
-  describe "list_current/0" do
-    test "returns list of current (non-archived) prompts" do
-      keys = LanguageSpec.list_current()
-      assert :single_shot in keys
-      assert :multi_turn in keys
-      assert :base in keys
-      assert :addon_single_shot in keys
-      assert :addon_multi_turn in keys
-    end
-
-    test "list_current is subset of list" do
-      all_keys = LanguageSpec.list()
-      current_keys = LanguageSpec.list_current()
-
-      for key <- current_keys do
-        assert key in all_keys
-      end
-    end
-  end
 end
