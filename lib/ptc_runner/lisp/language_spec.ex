@@ -1,9 +1,9 @@
 defmodule PtcRunner.Lisp.LanguageSpec do
   @moduledoc """
-  Language specification loader for PTC-Lisp.
+  Language specification compositions for PTC-Lisp.
 
-  Loads language spec snippets from `priv/prompts/` directory at compile time and
-  provides compositions for common use cases.
+  Provides pre-composed language specs for common use cases. Raw prompts are
+  loaded via `PtcRunner.Prompts`.
 
   ## Available Specs
 
@@ -14,15 +14,15 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
   ## Raw Snippets
 
-  | Key | File | Description |
-  |-----|------|-------------|
-  | `:base` | `lisp-base.md` | Core language reference |
-  | `:addon_single_shot` | `lisp-addon-single_shot.md` | Single-shot mode rules |
-  | `:addon_multi_turn` | `lisp-addon-multi_turn.md` | Multi-turn mode rules |
+  | Key | Description |
+  |-----|-------------|
+  | `:base` | Core language reference |
+  | `:addon_single_shot` | Single-shot mode rules |
+  | `:addon_multi_turn` | Multi-turn mode rules |
 
   ## Version Metadata
 
-  Spec files can include optional metadata headers:
+  Spec files include metadata headers:
 
       <!-- version: 2 -->
       <!-- date: 2025-01-15 -->
@@ -40,36 +40,25 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
       # Raw snippets for custom compositions
       PtcRunner.Lisp.LanguageSpec.get(:base) <> my_custom_addon
-
-      # Use in SubAgent
-      SubAgent.new(
-        prompt: "...",
-        system_prompt: %{language_spec: PtcRunner.Lisp.LanguageSpec.get(:single_shot)}
-      )
   """
 
-  @prompts_dir Path.join(__DIR__, "../../../priv/prompts")
-  @archive_dir Path.join(@prompts_dir, "archive")
+  alias PtcRunner.Prompts
 
-  # Find all lisp-*.md files in main and archive directories
-  @prompt_files (fn ->
-                   @prompts_dir
-                   |> Path.join("lisp-*.md")
-                   |> Path.wildcard()
-                 end).()
+  # Compositions: predefined combinations of snippets
+  @compositions %{
+    single_shot: [:base, :addon_single_shot],
+    multi_turn: [:base, :addon_multi_turn]
+  }
 
-  @archive_files (fn ->
-                    @archive_dir
-                    |> Path.join("lisp-*.md")
-                    |> Path.wildcard()
-                  end).()
+  # Snippet keys mapped to Prompts module functions
+  @snippets %{
+    base: :lisp_base,
+    addon_single_shot: :lisp_addon_single_shot,
+    addon_multi_turn: :lisp_addon_multi_turn
+  }
 
-  for file <- @prompt_files ++ @archive_files do
-    @external_resource file
-  end
-
-  # Parse metadata from file header (before PTC_PROMPT_START marker)
-  @parse_metadata fn header ->
+  # Parse metadata from file header
+  defp parse_metadata(header) do
     ~r/<!--\s*(\w+):\s*(.+?)\s*-->/
     |> Regex.scan(header)
     |> Enum.reduce(%{}, fn [_full, k, v], acc ->
@@ -91,59 +80,11 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     end)
   end
 
-  # Helper function to load a prompt file (content + metadata extraction)
-  @load_prompt_file fn path, archived ->
-    filename = Path.basename(path, ".md")
-
-    key =
-      filename
-      |> String.replace_prefix("lisp-", "")
-      |> String.replace("-", "_")
-      |> String.to_atom()
-
-    file_content = File.read!(path)
-    {header, content} = PtcRunner.PromptLoader.extract_with_header(file_content)
-    metadata = @parse_metadata.(header)
-
-    {key, %{content: content, metadata: metadata, archived: archived}}
-  end
-
-  # Load all prompts at compile time (current prompts)
-  @current_prompts (fn ->
-                      @prompt_files
-                      |> Enum.map(&@load_prompt_file.(&1, false))
-                      |> Map.new()
-                    end).()
-
-  # Load archived prompts
-  @archived_prompts (fn ->
-                       @archive_files
-                       |> Enum.map(&@load_prompt_file.(&1, true))
-                       |> Map.new()
-                     end).()
-
-  # Combined prompts (current + archived)
-  @prompts Map.merge(@current_prompts, @archived_prompts)
-
-  # Compositions: predefined combinations of snippets
-  @compositions %{
-    single_shot: [:base, :addon_single_shot],
-    multi_turn: [:base, :addon_multi_turn]
-  }
-
   @doc """
   Get a prompt by key.
 
-  Supports both raw snippets (`:base`, `:addon_memory`) and compositions
+  Supports both raw snippets (`:base`, `:addon_single_shot`) and compositions
   (`:single_shot`, `:multi_turn`).
-
-  ## Parameters
-
-  - `key` - Atom identifying the prompt
-
-  ## Returns
-
-  The prompt content as a string, or nil if not found.
 
   ## Examples
 
@@ -160,25 +101,18 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   def get(key) when is_atom(key) do
     case Map.get(@compositions, key) do
       nil ->
-        # Direct file lookup
-        case Map.get(@prompts, key) do
-          %{content: content} -> content
+        # Direct snippet lookup
+        case Map.get(@snippets, key) do
           nil -> nil
+          prompts_key -> apply(Prompts, prompts_key, [])
         end
 
       parts ->
         # Compose from parts
         parts
-        |> Enum.map(&get_snippet/1)
+        |> Enum.map(&get/1)
         |> Enum.reject(&is_nil/1)
         |> Enum.join("\n\n")
-    end
-  end
-
-  defp get_snippet(key) do
-    case Map.get(@prompts, key) do
-      %{content: content} -> content
-      nil -> nil
     end
   end
 
@@ -208,17 +142,21 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   """
   @spec version(atom()) :: pos_integer()
   def version(key) when is_atom(key) do
-    # For compositions, use the first component's version
     actual_key =
       case Map.get(@compositions, key) do
         [first | _] -> first
         nil -> key
       end
 
-    case Map.get(@prompts, actual_key) do
-      %{metadata: %{version: v}} when is_integer(v) -> v
-      %{metadata: _} -> 1
-      nil -> raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
+    case Map.get(@snippets, actual_key) do
+      nil ->
+        raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
+
+      prompts_key ->
+        header_fn = String.to_atom("#{prompts_key}_with_header")
+        {header, _content} = apply(Prompts, header_fn, [])
+        meta = parse_metadata(header)
+        Map.get(meta, :version, 1)
     end
   end
 
@@ -237,48 +175,25 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   """
   @spec metadata(atom()) :: map()
   def metadata(key) when is_atom(key) do
-    # For compositions, use the first component's metadata
     actual_key =
       case Map.get(@compositions, key) do
         [first | _] -> first
         nil -> key
       end
 
-    case Map.get(@prompts, actual_key) do
-      %{metadata: meta} -> meta
-      nil -> raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
+    case Map.get(@snippets, actual_key) do
+      nil ->
+        raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
+
+      prompts_key ->
+        header_fn = String.to_atom("#{prompts_key}_with_header")
+        {header, _content} = apply(Prompts, header_fn, [])
+        parse_metadata(header)
     end
   end
 
   @doc """
-  Check if a prompt is archived.
-
-  Compositions are never archived.
-
-  ## Examples
-
-      iex> PtcRunner.Lisp.LanguageSpec.archived?(:single_shot)
-      false
-
-  """
-  @spec archived?(atom()) :: boolean()
-  def archived?(key) when is_atom(key) do
-    # Compositions are never archived
-    if Map.has_key?(@compositions, key) do
-      false
-    else
-      case Map.get(@prompts, key) do
-        %{archived: archived} ->
-          archived
-
-        nil ->
-          raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
-      end
-    end
-  end
-
-  @doc """
-  List all available prompt keys (compositions, snippets, and archived).
+  List all available prompt keys.
 
   ## Examples
 
@@ -292,39 +207,14 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @spec list() :: [atom()]
   def list do
     composition_keys = Map.keys(@compositions)
-    snippet_keys = Map.keys(@prompts)
+    snippet_keys = Map.keys(@snippets)
     Enum.uniq(composition_keys ++ snippet_keys)
-  end
-
-  @doc """
-  List only current (non-archived) prompt keys.
-
-  ## Examples
-
-      iex> keys = PtcRunner.Lisp.LanguageSpec.list_current()
-      iex> :single_shot in keys
-      true
-      iex> :base in keys
-      true
-
-  """
-  @spec list_current() :: [atom()]
-  def list_current do
-    composition_keys = Map.keys(@compositions)
-
-    current_snippet_keys =
-      @prompts
-      |> Enum.filter(fn {_key, %{archived: archived}} -> not archived end)
-      |> Enum.map(fn {key, _} -> key end)
-
-    Enum.uniq(composition_keys ++ current_snippet_keys)
   end
 
   @doc """
   List all prompts with descriptions.
 
-  Returns a list of `{key, description}` tuples for all available prompts.
-  Archived prompts have "[archived]" appended to their description.
+  Returns a list of `{key, description}` tuples.
 
   ## Examples
 
@@ -341,8 +231,9 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     ]
 
     snippet_descriptions =
-      Enum.map(@prompts, fn {key, %{content: content, archived: archived}} ->
-        # Extract first line as description
+      Enum.map(@snippets, fn {key, prompts_key} ->
+        content = apply(Prompts, prompts_key, [])
+
         desc =
           content
           |> String.split("\n", parts: 2)
@@ -350,8 +241,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
           |> String.replace(~r/^#\s*/, "")
           |> String.trim()
 
-        suffix = if archived, do: " [archived]", else: ""
-        {key, desc <> suffix}
+        {key, desc}
       end)
 
     composition_descriptions ++ snippet_descriptions
