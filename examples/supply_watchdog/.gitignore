@@ -1,0 +1,15 @@
+# Build artifacts
+/_build/
+/deps/
+
+# Generated data (recreated at runtime)
+/data/
+/flags/
+/fixes/
+/traces/
+
+# Lock file (deps pinned by parent project)
+mix.lock
+
+# Crash dumps
+erl_crash.dump
