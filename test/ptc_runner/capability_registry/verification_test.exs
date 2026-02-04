@@ -1,7 +1,7 @@
 defmodule PtcRunner.CapabilityRegistry.VerificationTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.CapabilityRegistry.{Registry, TestSuite, ToolEntry, Verification}
+  alias PtcRunner.CapabilityRegistry.{Registry, Skill, TestSuite, ToolEntry, Verification}
 
   describe "TestSuite" do
     test "new/2 creates empty suite" do
@@ -302,7 +302,7 @@ defmodule PtcRunner.CapabilityRegistry.VerificationTest do
         |> TestSuite.add_case(%{"x" => 1}, 1)
 
       skill =
-        PtcRunner.CapabilityRegistry.Skill.new("tip", "Tip", "...", applies_to: ["tool_v1"])
+        Skill.new("tip", "Tip", "...", applies_to: ["tool_v1"])
 
       registry =
         Registry.new()

@@ -115,15 +115,15 @@ defmodule PtcRunner.CapabilityRegistry.PlanRegistryE2ETest do
           # Accept various result formats
           case aapl_result do
             %{"price" => price} when is_number(price) ->
-              assert price == 185.50 or price == 185.5
+              assert price == 185.5
               IO.puts("  ✓ Got correct AAPL price: $#{price}")
 
             %{"symbol" => "AAPL", "price" => price} ->
-              assert price == 185.50 or price == 185.5
+              assert price == 185.5
               IO.puts("  ✓ Got correct AAPL price: $#{price}")
 
             price when is_number(price) ->
-              assert price == 185.50 or price == 185.5
+              assert price == 185.5
               IO.puts("  ✓ Got correct AAPL price: $#{price}")
 
             _ ->

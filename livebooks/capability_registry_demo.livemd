@@ -14,9 +14,10 @@ alias PtcRunner.PlanRunner
 ## Introduction
 
 The **Capability Registry** is a central repository for:
-- **Base Tools**: Raw Elixir functions documented with signatures.
-- **Composed Tools**: Reusable PTC-Lisp programs smithed from common patterns.
-- **Skills**: Expert advice and system prompt fragments that improve agent performance for specific tasks.
+
+* **Base Tools**: Raw Elixir functions documented with signatures.
+* **Composed Tools**: Reusable PTC-Lisp programs smithed from common patterns.
+* **Skills**: Expert advice and system prompt fragments that improve agent performance for specific tasks.
 
 This Livebook demonstrates how to use the registry to provide a "Context Economy"—where agents only see the tools and expertise they actually need—and how to dynamically grow the registry.
 

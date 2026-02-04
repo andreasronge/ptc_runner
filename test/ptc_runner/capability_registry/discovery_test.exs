@@ -1,7 +1,7 @@
 defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.CapabilityRegistry.{Discovery, Registry, Skill}
+  alias PtcRunner.CapabilityRegistry.{Capability, Discovery, Registry, Skill}
 
   describe "search/3" do
     test "finds tools by tag match" do
@@ -13,7 +13,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
         )
 
       results = Discovery.search(registry, "csv parsing", min_score: 0.5)
-      assert length(results) == 1
+      assert [_] = results
       assert hd(results).id == "parse_csv"
       assert hd(results).match_type == :tag
     end
@@ -27,7 +27,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
         )
 
       results = Discovery.search(registry, "csv parser")
-      assert length(results) >= 1
+      assert results != []
       assert hd(results).match_type == :fuzzy
     end
 
@@ -84,7 +84,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
         |> Registry.register_skill(skill2)
 
       results = Discovery.search_skills(registry, [], tool_ids: ["parse_csv"])
-      assert length(results) == 1
+      assert [_] = results
       assert hd(results).id == "csv_tips"
     end
 
@@ -98,7 +98,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
         |> Registry.register_skill(skill2)
 
       results = Discovery.search_skills(registry, ["european"])
-      assert length(results) == 1
+      assert [_] = results
       assert hd(results).id == "euro"
     end
 
@@ -118,7 +118,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
 
       results = Discovery.search_skills(registry, ["test"], model_id: "claude-3", min_score: 0.5)
 
-      assert length(results) == 1
+      assert [_] = results
       assert hd(results).id == "good_for_claude"
     end
 
@@ -214,7 +214,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
     test "returns error for capability with no implementations" do
       registry =
         Registry.new()
-        |> Registry.register_capability(PtcRunner.CapabilityRegistry.Capability.new("empty"))
+        |> Registry.register_capability(Capability.new("empty"))
 
       assert :error = Discovery.resolve(registry, "empty", [])
     end
@@ -232,7 +232,7 @@ defmodule PtcRunner.CapabilityRegistry.DiscoveryTest do
         end)
 
       warnings = Discovery.get_context_warnings(registry, ["unicode"])
-      assert length(warnings) == 1
+      assert [_] = warnings
       assert hd(warnings).tool_id == "risky"
       assert hd(warnings).warning =~ "20%"
     end

@@ -88,10 +88,10 @@ defmodule PtcRunner.CapabilityRegistry.E2ETest do
           # Accept either the float directly or a map containing the price
           case step.return do
             price when is_number(price) ->
-              assert price == 185.5 or price == 185.50
+              assert price == 185.5
 
             %{"price" => price} ->
-              assert price == 185.5 or price == 185.50
+              assert price == 185.5
 
             other ->
               flunk("Unexpected return type: #{inspect(other)}")

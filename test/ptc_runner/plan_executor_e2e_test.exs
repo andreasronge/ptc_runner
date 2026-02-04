@@ -597,7 +597,7 @@ defmodule PtcRunner.PlanExecutorE2ETest do
           IO.puts("  timestamp: #{first_entry.timestamp}")
 
           # Verify replan prompt has expected sections
-          if length(prompts) >= 1 do
+          if prompts != [] do
             first_prompt = hd(prompts)
 
             assert String.contains?(first_prompt, "What Failed"),
@@ -812,7 +812,7 @@ defmodule PtcRunner.PlanExecutorE2ETest do
       end
 
       # Always verify we exercised the replan path
-      assert length(prompts) >= 1, "Expected at least 1 replan prompt"
+      assert prompts != [], "Expected at least 1 replan prompt"
     end
 
     @tag :trial_learning_pattern

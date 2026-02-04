@@ -16,6 +16,7 @@ defmodule PtcRunner.CapabilityRegistry.IntegrationTest do
     Registry,
     Skill,
     TestSuite,
+    ToolEntry,
     TrialHistory,
     Verification
   }
@@ -31,7 +32,7 @@ defmodule PtcRunner.CapabilityRegistry.IntegrationTest do
         |> TestSuite.add_case(%{"x" => 0}, 0, tags: [:edge_case])
 
       tool =
-        PtcRunner.CapabilityRegistry.ToolEntry.new_base("double", double_fn,
+        ToolEntry.new_base("double", double_fn,
           signature: "(x :int) -> :int",
           tags: ["math", "arithmetic"]
         )
@@ -63,9 +64,7 @@ defmodule PtcRunner.CapabilityRegistry.IntegrationTest do
         |> TestSuite.add_case(%{"x" => 5}, 10, tags: [:smoke])
 
       tool =
-        PtcRunner.CapabilityRegistry.ToolEntry.new_base("bad_tool", bad_fn,
-          signature: "(x :int) -> :int"
-        )
+        ToolEntry.new_base("bad_tool", bad_fn, signature: "(x :int) -> :int")
 
       registry = Registry.new()
 
@@ -95,9 +94,7 @@ defmodule PtcRunner.CapabilityRegistry.IntegrationTest do
       repair_fn = fn %{"x" => x} -> x * 2 end
 
       repair_tool =
-        PtcRunner.CapabilityRegistry.ToolEntry.new_base("calc_v2", repair_fn,
-          supersedes: "calc_v1"
-        )
+        ToolEntry.new_base("calc_v2", repair_fn, supersedes: "calc_v1")
 
       {:ok, updated} = Verification.register_repair(registry, repair_tool, [])
 

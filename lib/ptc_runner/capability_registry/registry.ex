@@ -178,31 +178,29 @@ defmodule PtcRunner.CapabilityRegistry.Registry do
   def unregister_tool(registry, tool_id) do
     case Map.fetch(registry.tools, tool_id) do
       {:ok, entry} ->
-        tools = Map.delete(registry.tools, tool_id)
-        health = Map.delete(registry.health, tool_id)
-        test_suites = Map.delete(registry.test_suites, tool_id)
-
-        capabilities =
-          if entry.capability_id do
-            Map.update(registry.capabilities, entry.capability_id, nil, fn cap ->
-              if cap, do: Capability.remove_implementation(cap, tool_id), else: nil
-            end)
-            |> Map.reject(fn {_, v} -> v == nil end)
-          else
-            registry.capabilities
-          end
-
         %{
           registry
-          | tools: tools,
-            health: health,
-            test_suites: test_suites,
-            capabilities: capabilities
+          | tools: Map.delete(registry.tools, tool_id),
+            health: Map.delete(registry.health, tool_id),
+            test_suites: Map.delete(registry.test_suites, tool_id),
+            capabilities: remove_tool_from_capability(registry.capabilities, entry, tool_id)
         }
 
       :error ->
         registry
     end
+  end
+
+  defp remove_tool_from_capability(capabilities, %{capability_id: nil}, _tool_id),
+    do: capabilities
+
+  defp remove_tool_from_capability(capabilities, %{capability_id: cap_id}, tool_id) do
+    capabilities
+    |> Map.update(cap_id, nil, fn
+      nil -> nil
+      cap -> Capability.remove_implementation(cap, tool_id)
+    end)
+    |> Map.reject(fn {_, v} -> v == nil end)
   end
 
   # ============================================================================
