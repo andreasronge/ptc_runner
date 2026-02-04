@@ -301,8 +301,8 @@ defmodule PtcRunner.PlanCritic do
 
     plan.tasks
     |> Enum.flat_map(fn task ->
-      is_depended_upon = MapSet.member?(all_dependencies, task.id)
-      is_final = MapSet.member?(final_phase_tasks, task.id)
+      is_depended_upon = task.id in all_dependencies
+      is_final = task.id in final_phase_tasks
 
       if not is_depended_upon and not is_final and length(plan.tasks) > 1 do
         [

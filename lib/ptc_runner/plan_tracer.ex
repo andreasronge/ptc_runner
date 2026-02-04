@@ -144,11 +144,7 @@ defmodule PtcRunner.PlanTracer do
   def handle_event(tracer, event) do
     Agent.update(tracer, fn state ->
       {message, new_state} = format_event_stateful(event, state)
-
-      if message do
-        output_message(new_state.output, message)
-      end
-
+      output_message(new_state.output, message)
       new_state
     end)
   end
