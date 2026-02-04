@@ -90,6 +90,7 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-concepts.md",
         "docs/guides/subagent-patterns.md",
         "docs/guides/subagent-navigator.md",
+        "docs/guides/subagent-meta-planner.md",
         "docs/guides/subagent-rlm-patterns.md",
         "docs/guides/subagent-testing.md",
         "docs/guides/subagent-troubleshooting.md",
@@ -107,6 +108,7 @@ defmodule PtcRunner.MixProject do
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
         "livebooks/ptc_runner_llm_agent.livemd",
+        "livebooks/meta_planner.livemd",
         "livebooks/joke_workflow.livemd"
       ],
       groups_for_extras: [

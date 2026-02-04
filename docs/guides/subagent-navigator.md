@@ -268,6 +268,7 @@ This differs from in-process checkpointing (LangGraph's state snapshots) — Ptc
 
 ## See Also
 
+- [Meta Planner](subagent-meta-planner.md) — Autonomous planning with self-correction
 - [Composition Patterns](subagent-patterns.md) — Chaining, parallel execution, orchestration
 - [Wire Transfer Example](../../examples/wire_transfer/README.md) — Full human-in-the-loop workflow
 - [PTC-Lisp Specification](../ptc-lisp-specification.md) — Sections 5.13–5.15: `task`, `step-done`, `task-reset`
