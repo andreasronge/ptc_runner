@@ -251,7 +251,7 @@ defmodule PtcRunner.PlanCritic do
 
         # Flag completely disconnected flows (no deps used at all)
         cond do
-          length(unused_deps) == length(task.depends_on) and length(task.depends_on) > 0 ->
+          unused_deps == task.depends_on and task.depends_on != [] ->
             [
               %{
                 category: :disconnected_flow,
@@ -264,7 +264,7 @@ defmodule PtcRunner.PlanCritic do
               }
             ]
 
-          length(unused_deps) > 0 ->
+          unused_deps != [] ->
             # Some deps unused - info level (might be intentional for ordering)
             [
               %{

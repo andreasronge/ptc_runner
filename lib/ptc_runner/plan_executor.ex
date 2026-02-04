@@ -213,62 +213,32 @@ defmodule PtcRunner.PlanExecutor do
 
   # Generate initial plan with self-correcting validation retry
   defp generate_valid_initial_plan(mission, plan_opts, on_event) do
-    case MetaPlanner.plan(mission, plan_opts) do
-      {:ok, plan} ->
-        case Plan.validate(plan) do
-          :ok ->
-            # Sanitize: remove invalid verification predicates (log warnings)
-            {sanitized_plan, warnings} = Plan.sanitize(plan)
+    generator = fn opts -> MetaPlanner.plan(mission, opts) end
 
-            for warning <- warnings do
-              Logger.warning("PlanExecutor: #{warning.message}")
-            end
+    on_retry = fn validation_issues ->
+      Logger.warning(
+        "PlanExecutor: Initial plan invalid, attempting self-correction with feedback"
+      )
 
-            {:ok, sanitized_plan}
-
-          {:error, validation_issues} ->
-            Logger.warning(
-              "PlanExecutor: Initial plan invalid, attempting self-correction with feedback"
-            )
-
-            if on_event,
-              do: on_event.({:planning_retry, %{validation_errors: length(validation_issues)}})
-
-            # Second attempt with validation errors as feedback
-            retry_opts = Keyword.put(plan_opts, :validation_errors, validation_issues)
-
-            case MetaPlanner.plan(mission, retry_opts) do
-              {:ok, retry_plan} ->
-                case Plan.validate(retry_plan) do
-                  :ok ->
-                    Logger.info("PlanExecutor: Initial plan self-correction succeeded")
-                    # Sanitize: remove invalid verification predicates
-                    {sanitized_plan, warnings} = Plan.sanitize(retry_plan)
-
-                    for warning <- warnings do
-                      Logger.warning("PlanExecutor: #{warning.message}")
-                    end
-
-                    {:ok, sanitized_plan}
-
-                  {:error, retry_issues} ->
-                    Logger.error("PlanExecutor: Initial plan invalid after self-correction")
-
-                    for issue <- retry_issues do
-                      Logger.error("  [#{issue.category}] #{issue.message}")
-                    end
-
-                    {:error, {:initial_plan_invalid, retry_issues}}
-                end
-
-              {:error, reason} ->
-                {:error, reason}
-            end
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+      if on_event,
+        do: on_event.({:planning_retry, %{validation_errors: length(validation_issues)}})
     end
+
+    on_success = fn -> Logger.info("PlanExecutor: Initial plan self-correction succeeded") end
+
+    on_final_failure = fn retry_issues ->
+      Logger.error("PlanExecutor: Initial plan invalid after self-correction")
+
+      for issue <- retry_issues do
+        Logger.error("  [#{issue.category}] #{issue.message}")
+      end
+    end
+
+    validate_plan_with_retry(
+      generator,
+      plan_opts,
+      {:initial_plan_invalid, on_retry, on_success, on_final_failure}
+    )
   end
 
   # ============================================================================
@@ -571,54 +541,76 @@ defmodule PtcRunner.PlanExecutor do
         end
       end)
 
-    # First attempt
-    case MetaPlanner.replan(state.mission, completed_results, failure_context, base_opts) do
-      {:ok, repair_plan} ->
-        case Plan.validate(repair_plan) do
+    generator = fn opts ->
+      MetaPlanner.replan(state.mission, completed_results, failure_context, opts)
+    end
+
+    on_retry = fn _validation_issues ->
+      Logger.warning(
+        "PlanExecutor: Repair plan invalid, attempting self-correction with feedback"
+      )
+    end
+
+    on_success = fn -> Logger.info("PlanExecutor: Self-correction succeeded") end
+
+    validate_plan_with_retry(
+      generator,
+      base_opts,
+      {:repair_plan_invalid, on_retry, on_success, fn _ -> :ok end}
+    )
+  end
+
+  # Validate a generated plan with one retry on validation failure
+  # generator: fn opts -> {:ok, plan} | {:error, reason}
+  # callbacks: {error_tag, on_retry, on_success, on_final_failure}
+  defp validate_plan_with_retry(
+         generator,
+         opts,
+         {error_tag, on_retry, on_success, on_final_failure}
+       ) do
+    case generator.(opts) do
+      {:ok, plan} ->
+        case Plan.validate(plan) do
           :ok ->
-            # Sanitize: remove invalid verification predicates
-            {sanitized_plan, warnings} = Plan.sanitize(repair_plan)
-
-            for warning <- warnings do
-              Logger.warning("PlanExecutor: #{warning.message}")
-            end
-
-            {:ok, sanitized_plan}
+            {:ok, sanitize_plan(plan)}
 
           {:error, validation_issues} ->
-            Logger.warning(
-              "PlanExecutor: Repair plan invalid, attempting self-correction with feedback"
-            )
-
-            # Second attempt with validation errors as feedback
-            retry_opts = Keyword.put(base_opts, :validation_errors, validation_issues)
-
-            case MetaPlanner.replan(state.mission, completed_results, failure_context, retry_opts) do
-              {:ok, retry_plan} ->
-                case Plan.validate(retry_plan) do
-                  :ok ->
-                    Logger.info("PlanExecutor: Self-correction succeeded")
-                    # Sanitize: remove invalid verification predicates
-                    {sanitized_plan, warnings} = Plan.sanitize(retry_plan)
-
-                    for warning <- warnings do
-                      Logger.warning("PlanExecutor: #{warning.message}")
-                    end
-
-                    {:ok, sanitized_plan}
-
-                  {:error, retry_issues} ->
-                    {:error, {:repair_plan_invalid, retry_issues}}
-                end
-
-              {:error, reason} ->
-                {:error, reason}
-            end
+            on_retry.(validation_issues)
+            retry_opts = Keyword.put(opts, :validation_errors, validation_issues)
+            validate_plan_retry(generator, retry_opts, error_tag, on_success, on_final_failure)
         end
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp validate_plan_retry(generator, opts, error_tag, on_success, on_final_failure) do
+    case generator.(opts) do
+      {:ok, retry_plan} ->
+        case Plan.validate(retry_plan) do
+          :ok ->
+            on_success.()
+            {:ok, sanitize_plan(retry_plan)}
+
+          {:error, retry_issues} ->
+            on_final_failure.(retry_issues)
+            {:error, {error_tag, retry_issues}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp sanitize_plan(plan) do
+    {sanitized_plan, warnings} = Plan.sanitize(plan)
+
+    for warning <- warnings do
+      Logger.warning("PlanExecutor: #{warning.message}")
+    end
+
+    sanitized_plan
   end
 
   defp build_metadata(state, results) do

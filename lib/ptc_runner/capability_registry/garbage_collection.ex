@@ -234,41 +234,39 @@ defmodule PtcRunner.CapabilityRegistry.GarbageCollection do
     # Check if this tool passes tests that no sibling implementation passes
     suite = Verification.get_suite(registry, tool.id)
 
-    if suite == nil or suite.cases == [] do
-      false
-    else
-      case tool.capability_id do
-        nil ->
-          # No capability, can't have siblings
-          false
+    cond do
+      suite == nil or suite.cases == [] ->
+        false
 
-        cap_id ->
-          case Registry.get_capability(registry, cap_id) do
-            nil ->
-              false
+      tool.capability_id == nil ->
+        # No capability, can't have siblings
+        false
 
-            cap ->
-              siblings = Enum.reject(cap.implementations, &(&1 == tool.id))
-
-              if siblings == [] do
-                # Only implementation - keep it
-                true
-              else
-                # Check if any test case passes only for this tool
-                Enum.any?(suite.cases, fn test_case ->
-                  tool_passes = test_passes?(registry, tool.id, test_case)
-
-                  sibling_passes =
-                    Enum.any?(siblings, fn sib_id ->
-                      test_passes?(registry, sib_id, test_case)
-                    end)
-
-                  tool_passes and not sibling_passes
-                end)
-              end
-          end
-      end
+      true ->
+        check_unique_coverage_against_siblings(registry, tool, suite)
     end
+  end
+
+  defp check_unique_coverage_against_siblings(registry, tool, suite) do
+    case Registry.get_capability(registry, tool.capability_id) do
+      nil ->
+        false
+
+      cap ->
+        siblings = Enum.reject(cap.implementations, &(&1 == tool.id))
+
+        # Only implementation - keep it
+        siblings == [] or has_exclusive_test_pass?(registry, tool.id, siblings, suite.cases)
+    end
+  end
+
+  defp has_exclusive_test_pass?(registry, tool_id, siblings, test_cases) do
+    # Check if any test case passes only for this tool
+    Enum.any?(test_cases, fn test_case ->
+      tool_passes = test_passes?(registry, tool_id, test_case)
+      sibling_passes = Enum.any?(siblings, &test_passes?(registry, &1, test_case))
+      tool_passes and not sibling_passes
+    end)
   end
 
   defp test_passes?(registry, tool_id, test_case) do

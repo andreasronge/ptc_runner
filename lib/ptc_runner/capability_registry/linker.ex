@@ -199,8 +199,7 @@ defmodule PtcRunner.CapabilityRegistry.Linker do
   def generate_prelude(tools) do
     tools
     |> Enum.filter(&(&1.layer == :composed and &1.code != nil))
-    |> Enum.map(& &1.code)
-    |> Enum.join("\n\n")
+    |> Enum.map_join("\n\n", & &1.code)
   end
 
   @doc """

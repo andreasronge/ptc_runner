@@ -244,78 +244,71 @@ defmodule PtcRunner.CapabilityRegistry.Verification do
     failed = Enum.count(results, &match?({:fail, _}, &1))
     errors = Enum.filter(results, &match?({:fail, _}, &1))
 
-    status =
-      cond do
-        failed > 0 -> :fail
-        true -> :pass
-      end
+    status = if failed > 0, do: :fail, else: :pass
 
     {:ok,
      %{status: status, passed: passed, failed: failed, errors: errors, duration_ms: duration_ms}}
   end
 
   defp run_single_case(%ToolEntry{layer: :base, function: function}, test_case) do
-    try do
-      result = function.(test_case.input)
+    result = function.(test_case.input)
 
-      case test_case.expected do
-        :should_not_crash ->
-          # As long as it didn't crash, it passes
+    case test_case.expected do
+      :should_not_crash ->
+        # As long as it didn't crash, it passes
+        :pass
+
+      expected ->
+        if result == expected do
           :pass
-
-        expected ->
-          if result == expected do
-            :pass
-          else
-            {:fail, {:mismatch, expected: expected, actual: result}}
-          end
-      end
-    rescue
-      e ->
-        case test_case.expected do
-          :should_not_crash -> {:fail, {:crashed, e}}
-          _ -> {:fail, {:crashed, e}}
+        else
+          {:fail, {:mismatch, expected: expected, actual: result}}
         end
-    catch
-      kind, reason ->
-        {:fail, {:caught, kind, reason}}
     end
+  rescue
+    e ->
+      case test_case.expected do
+        :should_not_crash -> {:fail, {:crashed, e}}
+        _ -> {:fail, {:crashed, e}}
+      end
+  catch
+    kind, reason ->
+      {:fail, {:caught, kind, reason}}
   end
 
   defp run_single_case(%ToolEntry{layer: :composed, code: code}, test_case) do
     # For composed tools, we need to evaluate the PTC-Lisp code
     # This is a simplified version - full implementation would use Lisp.run
-    try do
-      # Create a context with the test input
-      context = %{"input" => test_case.input}
 
-      # Wrap the tool code with a call using the input
-      # This assumes the tool is a defn that takes one argument
-      call_expr = "(#{extract_fn_name(code)} data/input)"
+    # Create a context with the test input
+    context = %{"input" => test_case.input}
 
-      case PtcRunner.Lisp.run(call_expr, context: context, timeout: 5000) do
-        {:ok, step} ->
-          case test_case.expected do
-            :should_not_crash ->
+    # Wrap the tool code with a call using the input
+    # This assumes the tool is a defn that takes one argument
+    call_expr = "(#{extract_fn_name(code)} data/input)"
+
+    case PtcRunner.Lisp.run(call_expr, context: context, timeout: 5000) do
+      {:ok, step} ->
+        case test_case.expected do
+          :should_not_crash ->
+            :pass
+
+          expected ->
+            if step.return == expected do
               :pass
+            else
+              {:fail, {:mismatch, expected: expected, actual: step.return}}
+            end
+        end
 
-            expected ->
-              if step.return == expected do
-                :pass
-              else
-                {:fail, {:mismatch, expected: expected, actual: step.return}}
-              end
-          end
-
-        {:error, step} ->
-          case test_case.expected do
-            :should_not_crash -> {:fail, {:execution_error, step.fail}}
-            _ -> {:fail, {:execution_error, step.fail}}
-          end
-      end
-    rescue
-      e -> {:fail, {:crashed, e}}
+      {:error, step} ->
+        case test_case.expected do
+          :should_not_crash -> {:fail, {:execution_error, step.fail}}
+          _ -> {:fail, {:execution_error, step.fail}}
+        end
     end
+  rescue
+    e -> {:fail, {:crashed, e}}
   end
 
   defp run_single_case(%ToolEntry{function: nil, code: nil}, _test_case) do

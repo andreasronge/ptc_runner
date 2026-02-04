@@ -26,6 +26,9 @@ defmodule PtcRunner.Plan do
 
   @type on_failure :: :stop | :skip | :retry
   @type on_verification_failure :: :stop | :skip | :retry | :replan
+
+  alias PtcRunner.SubAgent.Signature
+
   @type task_type :: :task | :synthesis_gate | :human_review
 
   @type task :: %{
@@ -193,51 +196,18 @@ defmodule PtcRunner.Plan do
   defp normalize_tasks_structure(_), do: []
 
   defp normalize_task(task, idx) when is_map(task) do
-    id = task["id"] || task["step_id"] || task["name"] || "task_#{idx + 1}"
-    agent = task["agent"] || task["worker"] || task["assigned_to"] || "default"
-    input = task["input"] || task["query"] || task["action"] || task["description"] || ""
-
-    depends_on =
-      (task["depends_on"] || task["requires"] || task["after"] || task["dependencies"] || [])
-      |> List.wrap()
-      |> Enum.map(&to_string/1)
-
-    # Error handling - normalize on_failure to atom
-    on_failure = normalize_on_failure(task["on_failure"])
-    max_retries = task["max_retries"] || task["retries"] || 1
-
-    # Critical defaults to true unless explicitly set to false
-    critical =
-      case task["critical"] do
-        false -> false
-        "false" -> false
-        _ -> true
-      end
-
-    # Task type - detect synthesis gates
-    task_type = normalize_task_type(task["type"])
-
-    # Verification predicate (PTC-Lisp expression)
-    verification = task["verification"]
-
-    # How to handle verification failures
-    on_verification_failure = normalize_on_verification_failure(task["on_verification_failure"])
-
-    # Output signature for JSON mode (defines expected output structure)
-    signature = task["signature"] || task["output_signature"]
-
     %{
-      id: to_string(id),
-      agent: to_string(agent),
-      input: input,
-      depends_on: depends_on,
-      on_failure: on_failure,
-      max_retries: max_retries,
-      critical: critical,
-      type: task_type,
-      signature: signature,
-      verification: verification,
-      on_verification_failure: on_verification_failure
+      id: to_string(extract_task_id(task, idx)),
+      agent: to_string(extract_task_agent(task)),
+      input: extract_task_input(task),
+      depends_on: extract_depends_on(task),
+      on_failure: normalize_on_failure(task["on_failure"]),
+      max_retries: task["max_retries"] || task["retries"] || 1,
+      critical: normalize_critical(task["critical"]),
+      type: normalize_task_type(task["type"]),
+      signature: task["signature"] || task["output_signature"],
+      verification: task["verification"],
+      on_verification_failure: normalize_on_verification_failure(task["on_verification_failure"])
     }
   end
 
@@ -257,6 +227,28 @@ defmodule PtcRunner.Plan do
       on_verification_failure: :stop
     }
   end
+
+  defp extract_task_id(task, idx) do
+    task["id"] || task["step_id"] || task["name"] || "task_#{idx + 1}"
+  end
+
+  defp extract_task_agent(task) do
+    task["agent"] || task["worker"] || task["assigned_to"] || "default"
+  end
+
+  defp extract_task_input(task) do
+    task["input"] || task["query"] || task["action"] || task["description"] || ""
+  end
+
+  defp extract_depends_on(task) do
+    (task["depends_on"] || task["requires"] || task["after"] || task["dependencies"] || [])
+    |> List.wrap()
+    |> Enum.map(&to_string/1)
+  end
+
+  defp normalize_critical(false), do: false
+  defp normalize_critical("false"), do: false
+  defp normalize_critical(_), do: true
 
   defp normalize_task_type(nil), do: :task
   defp normalize_task_type("synthesis_gate"), do: :synthesis_gate
@@ -392,7 +384,7 @@ defmodule PtcRunner.Plan do
   defp validate_signature(""), do: :ok
 
   defp validate_signature(signature) when is_binary(signature) do
-    case PtcRunner.SubAgent.Signature.parse(signature) do
+    case Signature.parse(signature) do
       {:ok, _} -> :ok
       {:error, reason} -> {:invalid, reason}
     end

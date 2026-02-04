@@ -288,42 +288,35 @@ defmodule PtcRunner.PlanRunner do
             {:cont, {:ok, results, [task.id | skipped]}}
 
           {task, {:error, reason}}, {:ok, results, skipped} ->
-            case task.on_failure do
-              :skip ->
-                # Non-critical failure - log and continue
-                Logger.warning("Task #{task.id} failed (skipped): #{inspect(reason)}")
-                {:cont, {:ok, results, [task.id | skipped]}}
-
-              :stop ->
-                if task.critical do
-                  # Critical failure - stop
-                  {:halt, {:error, task.id, results, reason}}
-                else
-                  # Non-critical with :stop - treat as skip
-                  Logger.warning(
-                    "Task #{task.id} failed (non-critical, skipped): #{inspect(reason)}"
-                  )
-
-                  {:cont, {:ok, results, [task.id | skipped]}}
-                end
-
-              :retry ->
-                # Retries already exhausted in execute_task_with_retry
-                if task.critical do
-                  {:halt, {:error, task.id, results, reason}}
-                else
-                  Logger.warning(
-                    "Task #{task.id} failed after retries (skipped): #{inspect(reason)}"
-                  )
-
-                  {:cont, {:ok, results, [task.id | skipped]}}
-                end
-            end
+            handle_task_failure(task, reason, results, skipped)
 
           {:timeout, {:error, reason}}, {:ok, results, _skipped} ->
             # Task timed out at the async_stream level - we don't have the task info
             {:halt, {:error, "unknown", results, {:timeout, reason}}}
         end)
+    end
+  end
+
+  defp handle_task_failure(task, reason, results, skipped) do
+    case {task.on_failure, task.critical} do
+      {:skip, _} ->
+        Logger.warning("Task #{task.id} failed (skipped): #{inspect(reason)}")
+        {:cont, {:ok, results, [task.id | skipped]}}
+
+      {:stop, true} ->
+        {:halt, {:error, task.id, results, reason}}
+
+      {:stop, false} ->
+        Logger.warning("Task #{task.id} failed (non-critical, skipped): #{inspect(reason)}")
+        {:cont, {:ok, results, [task.id | skipped]}}
+
+      {:retry, true} ->
+        # Retries already exhausted in execute_task_with_retry
+        {:halt, {:error, task.id, results, reason}}
+
+      {:retry, false} ->
+        Logger.warning("Task #{task.id} failed after retries (skipped): #{inspect(reason)}")
+        {:cont, {:ok, results, [task.id | skipped]}}
     end
   end
 
@@ -535,7 +528,7 @@ defmodule PtcRunner.PlanRunner do
   end
 
   defp validate_synthesis_result(result) when is_list(result) do
-    if length(result) == 0 do
+    if result == [] do
       {:error, "Synthesis produced empty list"}
     else
       :ok
@@ -725,7 +718,7 @@ defmodule PtcRunner.PlanRunner do
   # Format all accumulated results for the synthesis gate
   defp format_results_for_gate(results) do
     results
-    |> Enum.map(fn {task_id, value} ->
+    |> Enum.map_join("\n\n", fn {task_id, value} ->
       formatted_value =
         case value do
           v when is_binary(v) -> v
@@ -734,7 +727,6 @@ defmodule PtcRunner.PlanRunner do
 
       "## #{task_id}\n#{formatted_value}"
     end)
-    |> Enum.join("\n\n")
   end
 
   # Build prompt for synthesis gate with compression instructions
@@ -919,13 +911,12 @@ defmodule PtcRunner.PlanRunner do
     params_str
     |> String.split(",")
     |> Enum.map(&String.trim/1)
-    |> Enum.map(fn param ->
+    |> Enum.map_join(", ", fn param ->
       case String.split(param, ":", parts: 2) do
         [name, type] -> "#{String.trim(name)} :#{String.trim(type)}"
         [name] -> "#{String.trim(name)} :any"
       end
     end)
-    |> Enum.join(", ")
   end
 
   # Select tools based on agent's requested tools

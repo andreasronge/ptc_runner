@@ -43,9 +43,7 @@ defmodule PtcRunner.PlanCriticTest do
       {:ok, critique} = PlanCritic.static_review(plan)
 
       missing_gate_issues = Enum.filter(critique.issues, &(&1.category == :missing_gate))
-      assert length(missing_gate_issues) > 0
-
-      issue = hd(missing_gate_issues)
+      assert [issue | _] = missing_gate_issues
       assert String.contains?(issue.message, "parallel tasks")
       assert String.contains?(issue.recommendation, "synthesis_gate")
     end
@@ -90,9 +88,7 @@ defmodule PtcRunner.PlanCriticTest do
       {:ok, critique} = PlanCritic.static_review(plan)
 
       optimism_issues = Enum.filter(critique.issues, &(&1.category == :optimism_bias))
-      assert length(optimism_issues) > 0
-
-      issue = hd(optimism_issues)
+      assert [issue | _] = optimism_issues
       assert issue.task_id == "search"
       assert String.contains?(issue.recommendation, "retry")
     end
@@ -128,9 +124,7 @@ defmodule PtcRunner.PlanCriticTest do
       {:ok, critique} = PlanCritic.static_review(plan)
 
       missing_dep_issues = Enum.filter(critique.issues, &(&1.category == :missing_dependency))
-      assert length(missing_dep_issues) > 0
-
-      issue = hd(missing_dep_issues)
+      assert [issue | _] = missing_dep_issues
       assert issue.task_id == "task2"
       assert issue.severity == :critical
       assert String.contains?(issue.message, "nonexistent")
@@ -149,9 +143,7 @@ defmodule PtcRunner.PlanCriticTest do
       {:ok, critique} = PlanCritic.static_review(plan)
 
       explosion_issues = Enum.filter(critique.issues, &(&1.category == :parallel_explosion))
-      assert length(explosion_issues) > 0
-
-      issue = hd(explosion_issues)
+      assert [issue | _] = explosion_issues
       assert issue.severity == :critical
       assert String.contains?(issue.message, "12")
     end
@@ -188,9 +180,7 @@ defmodule PtcRunner.PlanCriticTest do
       {:ok, critique} = PlanCritic.static_review(plan)
 
       disconnected_issues = Enum.filter(critique.issues, &(&1.category == :disconnected_flow))
-      assert length(disconnected_issues) > 0
-
-      issue = hd(disconnected_issues)
+      assert [issue | _] = disconnected_issues
       assert issue.task_id == "analyze"
       assert String.contains?(issue.message, "research")
       assert String.contains?(issue.recommendation, "{{results.")
@@ -295,7 +285,7 @@ defmodule PtcRunner.PlanCriticTest do
 
       # Should have LLM-detected issue
       llm_issues = Enum.filter(critique.issues, &(&1.category == :data_flow_gap))
-      assert length(llm_issues) > 0
+      assert llm_issues != []
     end
   end
 

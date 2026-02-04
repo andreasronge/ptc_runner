@@ -372,7 +372,7 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
 
       # The flawed plan should have issues
       assert critique_v1.score < 9, "Flawed plan should have low score"
-      assert length(critique_v1.issues) > 0, "Flawed plan should have issues"
+      assert critique_v1.issues != [], "Flawed plan should have issues"
 
       # Check we detected the expected issues
       issue_categories = Enum.map(critique_v1.issues, & &1.category)
@@ -1205,7 +1205,7 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
   defp write_summary(results) do
     content =
       results
-      |> Enum.map(fn {name, %{plan: plan, evaluation: eval, duration_ms: ms}} ->
+      |> Enum.map_join("\n---\n\n", fn {name, %{plan: plan, evaluation: eval, duration_ms: ms}} ->
         """
         ## #{name} (#{ms}ms)
 
@@ -1218,7 +1218,6 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
 
         """
       end)
-      |> Enum.join("\n---\n\n")
 
     header = """
     # Meta-Planner Results
@@ -1472,8 +1471,8 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
     3. The execution loop completes successfully after replanning
     """
 
-    alias PtcRunner.PlanExecutor
     alias PtcRunner.MetaPlanner
+    alias PtcRunner.PlanExecutor
 
     @tag :replan_e2e
     @tag :skip
@@ -1747,7 +1746,7 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
           IO.puts("  Contains 'get_location': #{has_location}")
           IO.puts("  Contains weather task: #{has_weather}")
 
-          assert length(repair_plan.tasks) >= 1
+          assert repair_plan.tasks != []
 
         {:error, reason} ->
           IO.puts("\n✗ Failed to generate repair plan")
