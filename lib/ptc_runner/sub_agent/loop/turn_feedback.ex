@@ -5,31 +5,15 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   Formats execution results and turn state information for LLM feedback.
   Supports the unified budget model with work turns and retry turns.
 
-  Templates are loaded from `priv/prompts/` at compile time:
-  - `must_return_warning.md` - Warning for final work turn
-  - `retry_feedback.md` - Turn info during retry phase
+  Uses Mustache templates from `PtcRunner.Prompts`:
+  - `must_return_warning/0` - Warning for final work turn
+  - `retry_feedback/0` - Turn info during retry phase
   """
 
   alias PtcRunner.Mustache
+  alias PtcRunner.Prompts
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.ProgressRenderer
-
-  # Load templates at compile time
-  @prompts_dir Path.join(__DIR__, "../../../../priv/prompts")
-
-  @must_return_warning_path Path.join(@prompts_dir, "must_return_warning.md")
-  @retry_feedback_path Path.join(@prompts_dir, "retry_feedback.md")
-
-  @external_resource @must_return_warning_path
-  @external_resource @retry_feedback_path
-
-  @must_return_warning_template @must_return_warning_path
-                                |> File.read!()
-                                |> PtcRunner.PromptLoader.extract_content()
-
-  @retry_feedback_template @retry_feedback_path
-                           |> File.read!()
-                           |> PtcRunner.PromptLoader.extract_content()
 
   @doc """
   Append turn progress info to a feedback message.
@@ -69,7 +53,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
             next_turn: next_turn
           }
 
-          {:ok, rendered} = Mustache.render(@retry_feedback_template, context)
+          {:ok, rendered} = Mustache.render(Prompts.retry_feedback(), context)
           emoji_prefix = if is_final_retry, do: "⚠️ ", else: ""
           "\n\n" <> emoji_prefix <> rendered
 
@@ -80,7 +64,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
             retry_count: retry_left
           }
 
-          {:ok, rendered} = Mustache.render(@must_return_warning_template, context)
+          {:ok, rendered} = Mustache.render(Prompts.must_return_warning(), context)
           "\n\n⚠️ " <> rendered
 
         # Normal work turns - simple string (no template needed)

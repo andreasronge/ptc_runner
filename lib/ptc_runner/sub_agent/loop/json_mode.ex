@@ -28,34 +28,12 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   This is an internal module called by `SubAgent.run/2` when `output: :json`.
   """
 
+  alias PtcRunner.Prompts
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{JsonParser, KeyNormalizer, Signature, Telemetry}
   alias PtcRunner.SubAgent.Loop.{LLMRetry, Metrics}
   alias PtcRunner.Turn
-
-  # Load JSON prompt templates at compile time
-  @prompts_dir Path.join(__DIR__, "../../../../priv/prompts")
-
-  @json_system_file Path.join(@prompts_dir, "json-system.md")
-  @json_user_file Path.join(@prompts_dir, "json-user.md")
-  @json_error_file Path.join(@prompts_dir, "json-error.md")
-
-  @external_resource @json_system_file
-  @external_resource @json_user_file
-  @external_resource @json_error_file
-
-  @json_system_prompt @json_system_file
-                      |> File.read!()
-                      |> PtcRunner.PromptLoader.extract_content()
-
-  @json_user_template @json_user_file
-                      |> File.read!()
-                      |> PtcRunner.PromptLoader.extract_content()
-
-  @json_error_template @json_error_file
-                       |> File.read!()
-                       |> PtcRunner.PromptLoader.extract_content()
 
   @doc """
   Generate a preview of the JSON mode prompts.
@@ -79,7 +57,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
     user_message = build_user_message(agent, state)
 
     %{
-      system: @json_system_prompt,
+      system: build_system_prompt(agent),
       user: user_message,
       schema: build_schema(agent)
     }
@@ -195,8 +173,8 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
           {:continue, map(), Turn.t()}
           | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
   defp execute_json_turn(agent, llm, state) do
-    # Build prompts
-    system_prompt = @json_system_prompt
+    # Build prompts - apply system_prompt customization if provided
+    system_prompt = build_system_prompt(agent)
 
     # For first turn, build user message from template
     # For subsequent turns, use accumulated messages
@@ -270,7 +248,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
 
     # Expand the user message template
     # Note: Data is embedded via mustache in expanded_prompt (no separate data section)
-    @json_user_template
+    Prompts.json_user()
     |> String.replace("{{task}}", state.expanded_prompt)
     |> String.replace("{{output_instruction}}", output_instruction)
     |> String.replace("{{field_descriptions}}", field_descriptions)
@@ -615,7 +593,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp build_error_feedback(error, invalid_response, agent) do
     expected_format = format_example_output(agent)
 
-    @json_error_template
+    Prompts.json_error()
     |> String.replace("{{error_message}}", to_string(error))
     |> String.replace("{{invalid_response}}", truncate(invalid_response, 500))
     |> String.replace("{{expected_format}}", expected_format)
@@ -750,7 +728,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp build_collected_messages(%{collect_messages: false}, _messages), do: nil
 
   defp build_collected_messages(%{collect_messages: true} = state, messages) do
-    system_prompt = Map.get(state, :current_system_prompt, @json_system_prompt)
+    system_prompt = Map.get(state, :current_system_prompt, Prompts.json_system())
     [%{role: :system, content: system_prompt} | messages]
   end
 
@@ -766,4 +744,29 @@ defmodule PtcRunner.SubAgent.Loop.JsonMode do
   defp add_schema_metrics(usage, nil) do
     Map.put(usage, :schema_used, false)
   end
+
+  # Build system prompt with optional customization from agent
+  # Supports the same customization options as PTC-Lisp mode:
+  # - %{prefix: "...", suffix: "..."} - Wrap default prompt
+  # - String - Complete override
+  # - Function - Transform default prompt
+  defp build_system_prompt(%{system_prompt: nil}), do: Prompts.json_system()
+
+  defp build_system_prompt(%{system_prompt: override}) when is_binary(override), do: override
+
+  defp build_system_prompt(%{system_prompt: transformer}) when is_function(transformer, 1) do
+    transformer.(Prompts.json_system())
+  end
+
+  defp build_system_prompt(%{system_prompt: opts}) when is_map(opts) do
+    base = Prompts.json_system()
+    prefix = Map.get(opts, :prefix, "")
+    suffix = Map.get(opts, :suffix, "")
+
+    [prefix, base, suffix]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  defp build_system_prompt(_agent), do: Prompts.json_system()
 end
