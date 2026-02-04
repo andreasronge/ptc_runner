@@ -121,6 +121,7 @@ defmodule PtcRunner.MetaPlanner do
         prompt: prompt,
         signature: ":map",
         output: :json,
+        schema: plan_schema(),
         max_turns: 1,
         retry_turns: 2,
         timeout: timeout,
@@ -131,7 +132,8 @@ defmodule PtcRunner.MetaPlanner do
           output_format: "",
           prefix:
             "You are a workflow architect. Design execution plans for multi-agent workflows.\n\n",
-          suffix: "\n\n#{Prompts.verification_guide()}\n\n#{Prompts.planning_examples()}"
+          suffix:
+            "\n\n#{Prompts.signature_guide()}\n\n#{Prompts.verification_guide()}\n\n#{Prompts.planning_examples()}"
         }
       )
 
@@ -179,8 +181,8 @@ defmodule PtcRunner.MetaPlanner do
 
     - **Regular tasks**: Use an agent with tools to accomplish work
     - **Synthesis gates**: Compress/summarize results from multiple upstream tasks (type: "synthesis_gate")
-      When designing a synthesis_gate, ensure the input description specifies the exact data points
-      to be consolidated (e.g., "Create a JSON object with fields: symbol, price, trend").
+      When designing a synthesis_gate, you MUST specify a `signature` that defines the exact output structure
+      (e.g., `"{stocks [{symbol :string, price :float, currency :string}]}"`). This ensures machine-readable results.
 
     ## Output Format
 
@@ -193,6 +195,7 @@ defmodule PtcRunner.MetaPlanner do
           "agent": "agent_name",
           "input": "What this task should accomplish",
           "depends_on": ["ids_of_upstream_tasks"],
+          "signature": "{field :type}",
           "verification": "(optional PTC-Lisp predicate)",
           "on_verification_failure": "retry"
         }
@@ -246,6 +249,66 @@ defmodule PtcRunner.MetaPlanner do
     ## Additional Constraints
     #{constraints}
     """
+  end
+
+  # JSON Schema for plan structure - helps LLMs generate valid plans
+  defp plan_schema do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "tasks" => %{
+          "type" => "array",
+          "items" => %{
+            "type" => "object",
+            "properties" => %{
+              "id" => %{"type" => "string", "description" => "Unique task identifier"},
+              "agent" => %{"type" => "string", "description" => "Agent to execute the task"},
+              "input" => %{"type" => "string", "description" => "Task description/instructions"},
+              "depends_on" => %{
+                "type" => "array",
+                "items" => %{"type" => "string"},
+                "description" => "IDs of tasks this depends on"
+              },
+              "verification" => %{
+                "type" => "string",
+                "description" => "PTC-Lisp predicate to verify output"
+              },
+              "on_verification_failure" => %{
+                "type" => "string",
+                "enum" => ["retry", "replan", "fail"],
+                "description" => "Action on verification failure"
+              },
+              "type" => %{
+                "type" => "string",
+                "description" => "Task type (e.g., synthesis_gate)"
+              },
+              "signature" => %{
+                "type" => "string",
+                "description" => "Output signature for JSON mode (REQUIRED for synthesis_gate)"
+              }
+            },
+            "required" => ["id", "input"]
+          },
+          "description" => "List of tasks to execute"
+        },
+        "agents" => %{
+          "type" => "object",
+          "additionalProperties" => %{
+            "type" => "object",
+            "properties" => %{
+              "prompt" => %{"type" => "string", "description" => "System prompt for the agent"},
+              "tools" => %{
+                "type" => "array",
+                "items" => %{"type" => "string"},
+                "description" => "Tool names available to this agent"
+              }
+            }
+          },
+          "description" => "Agent definitions keyed by agent name"
+        }
+      },
+      "required" => ["tasks"]
+    }
   end
 
   # ============================================================================
@@ -308,6 +371,7 @@ defmodule PtcRunner.MetaPlanner do
         prompt: prompt,
         signature: ":map",
         output: :json,
+        schema: plan_schema(),
         max_turns: 1,
         retry_turns: 2,
         timeout: timeout,
@@ -316,7 +380,7 @@ defmodule PtcRunner.MetaPlanner do
           language_spec: "",
           output_format: "",
           prefix: "You are a workflow repair specialist. Fix failed multi-agent plans.\n\n",
-          suffix: "\n\n#{Prompts.verification_reminder()}"
+          suffix: "\n\n#{Prompts.signature_guide()}\n\n#{Prompts.verification_reminder()}"
         }
       )
 
@@ -422,6 +486,7 @@ defmodule PtcRunner.MetaPlanner do
           "agent": "agent_type",
           "input": "task description",
           "depends_on": ["dependency_ids"],
+          "signature": "{field :type}",
           "verification": "(optional Lisp predicate)",
           "on_verification_failure": "retry"
         }

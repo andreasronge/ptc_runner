@@ -609,4 +609,56 @@ defmodule PtcRunner.PlanTest do
       assert Plan.validate(plan) == :ok
     end
   end
+
+  describe "sanitize/1" do
+    test "keeps valid signatures" do
+      plan = %Plan{
+        tasks: [
+          %{
+            id: "t1",
+            input: "test",
+            signature: "{name :string, age :int}",
+            agent: "default",
+            depends_on: [],
+            on_failure: :stop,
+            max_retries: 1,
+            critical: true,
+            type: :task,
+            verification: nil,
+            on_verification_failure: :stop
+          }
+        ]
+      }
+
+      {sanitized, warnings} = Plan.sanitize(plan)
+      assert hd(sanitized.tasks).signature == "{name :string, age :int}"
+      assert warnings == []
+    end
+
+    test "removes invalid signatures and adds warning" do
+      plan = %Plan{
+        tasks: [
+          %{
+            id: "t1",
+            input: "test",
+            signature: "{invalid_signature",
+            agent: "default",
+            depends_on: [],
+            on_failure: :stop,
+            max_retries: 1,
+            critical: true,
+            type: :task,
+            verification: nil,
+            on_verification_failure: :stop
+          }
+        ]
+      }
+
+      {sanitized, warnings} = Plan.sanitize(plan)
+      assert hd(sanitized.tasks).signature == nil
+      assert length(warnings) == 1
+      assert hd(warnings).category == :invalid_signature
+      assert hd(warnings).task_id == "t1"
+    end
+  end
 end

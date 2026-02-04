@@ -90,7 +90,7 @@ mission = "Compare the prices of AAPL and MSFT stocks"
 
 # Use debug_llm to see what's happening, or my_llm for normal operation
 result = MetaPlanner.plan(mission,
-  llm: debug_llm,  # Change to my_llm after debugging
+  llm: my_llm,  # Change to my_llm after debugging
   available_tools: %{
     "fetch_price" => "Fetch stock price. Input: {symbol: string}. Output: {symbol, price, currency}"
   }
@@ -157,6 +157,51 @@ case result do
 end
 
 result
+```
+
+## Visualize Execution with TraceTree
+
+Use the interactive TraceTree widget to visualize agent execution. Collect steps via the `on_event` callback:
+
+```elixir
+# Step collector using Agent
+{:ok, step_collector} = Agent.start_link(fn -> [] end)
+
+on_event = fn
+  {:task_step, %{task_id: _id, step: step}} ->
+    Agent.update(step_collector, fn steps -> [step | steps] end)
+  _other ->
+    :ok
+end
+
+mission = "Fetch stock prices for AAPL and GOOGL"
+
+result = PlanExecutor.run(mission,
+  llm: my_llm,
+  available_tools: %{
+    "fetch_price" => "Fetch stock price. Input: {symbol: string}. Output: {symbol, price, currency}"
+  },
+  base_tools: mock_tools,
+  max_turns: 3,
+  timeout: 60_000,
+  on_event: on_event
+)
+
+# Get collected steps
+steps = Agent.get(step_collector, & &1) |> Enum.reverse()
+Agent.stop(step_collector)
+
+IO.puts("Collected #{length(steps)} step(s)")
+steps
+```
+
+```elixir
+# Render interactive trace tree (agent hierarchy with expandable details)
+if steps != [] do
+  PtcRunner.Kino.TraceTree.new(steps)
+else
+  Kino.Markdown.new("*No steps collected - run the cell above first*")
+end
 ```
 
 ## Self-Correction with Verification
@@ -411,5 +456,3 @@ result
 * [Meta Planner Guide](https://hexdocs.pm/ptc_runner/subagent-meta-planner.html)
 * [Navigator Pattern](https://hexdocs.pm/ptc_runner/subagent-navigator.html) - Journaled tasks
 * [SubAgent Examples](ptc_runner_llm_agent.livemd) - Basic SubAgent usage
-
-<!-- livebook:{"offset":11034,"stamp":{"token":"XCP.qeJDZ0vJilntlBtyTU6tjkbAuW_OKOc44mzteK90pvKwsvvSXJuUWwWda2J5vpvO9W55IPFQM6TsgsSnjscyTj6IND4PSAfQmH8zk9McXhZvhusvhF-Tw4jW1rw-","version":2}} -->

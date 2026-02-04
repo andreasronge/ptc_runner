@@ -174,16 +174,19 @@ defmodule PtcRunner.Prompts do
   @planning_examples_file Path.join(@prompts_dir, "planning-examples.md")
   @verification_guide_file Path.join(@prompts_dir, "verification-predicate-guide.md")
   @verification_reminder_file Path.join(@prompts_dir, "verification-predicate-reminder.md")
+  @signature_guide_file Path.join(@prompts_dir, "signature-guide.md")
 
   @external_resource @planning_examples_file
   @external_resource @verification_guide_file
   @external_resource @verification_reminder_file
+  @external_resource @signature_guide_file
 
   @planning_examples @planning_examples_file |> File.read!() |> PromptLoader.extract_content()
   @verification_guide @verification_guide_file |> File.read!() |> PromptLoader.extract_content()
   @verification_reminder @verification_reminder_file
                          |> File.read!()
                          |> PromptLoader.extract_content()
+  @signature_guide @signature_guide_file |> File.read!() |> PromptLoader.extract_content()
 
   @doc "Example plan structure for MetaPlanner."
   @spec planning_examples() :: String.t()
@@ -196,6 +199,10 @@ defmodule PtcRunner.Prompts do
   @doc "Quick reference reminder for verification predicates."
   @spec verification_reminder() :: String.t()
   def verification_reminder, do: @verification_reminder
+
+  @doc "Guide for writing task signatures."
+  @spec signature_guide() :: String.t()
+  def signature_guide, do: @signature_guide
 
   # ============================================================================
   # Utility
@@ -224,7 +231,8 @@ defmodule PtcRunner.Prompts do
       :retry_feedback,
       :planning_examples,
       :verification_guide,
-      :verification_reminder
+      :verification_reminder,
+      :signature_guide
     ]
   end
 
@@ -253,5 +261,6 @@ defmodule PtcRunner.Prompts do
   def get(:planning_examples), do: planning_examples()
   def get(:verification_guide), do: verification_guide()
   def get(:verification_reminder), do: verification_reminder()
+  def get(:signature_guide), do: signature_guide()
   def get(_), do: nil
 end

@@ -201,7 +201,8 @@ defmodule PtcRunner.SubAgent.Signature do
   defp type_to_json_schema(:float), do: %{"type" => "number"}
   defp type_to_json_schema(:bool), do: %{"type" => "boolean"}
   defp type_to_json_schema(:keyword), do: %{"type" => "string"}
-  defp type_to_json_schema(:any), do: %{}
+  # Bedrock requires input_schema to have a "type" field, so :any uses "object"
+  defp type_to_json_schema(:any), do: %{"type" => "object"}
   defp type_to_json_schema(:map), do: %{"type" => "object"}
 
   defp type_to_json_schema({:list, inner_type}) do

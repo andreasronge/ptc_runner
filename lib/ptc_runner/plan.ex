@@ -37,6 +37,8 @@ defmodule PtcRunner.Plan do
           max_retries: non_neg_integer(),
           critical: boolean(),
           type: task_type(),
+          # Output signature for JSON mode (e.g., "{stocks [{symbol :string, price :float}]}")
+          signature: String.t() | nil,
           # Verification (Phase 1)
           verification: String.t() | nil,
           on_verification_failure: on_verification_failure()
@@ -86,25 +88,6 @@ defmodule PtcRunner.Plan do
   end
 
   def parse(_), do: {:error, :invalid_plan_format}
-
-  # JSON mode sometimes wraps the result under various keys
-  defp unwrap_object(%{"object" => inner}) when is_map(inner), do: inner
-  defp unwrap_object(%{"output" => inner}) when is_map(inner), do: inner
-  defp unwrap_object(%{"result" => inner}) when is_map(inner), do: inner
-
-  defp unwrap_object(%{"plan" => inner}) when is_map(inner) and is_map_key(inner, "tasks"),
-    do: inner
-
-  # Skip JSON Schema definitions (model returned schema instead of data)
-  defp unwrap_object(%{"$schema" => _} = plan) do
-    # Try to find actual data nested somewhere
-    plan
-    |> Map.drop(["$schema"])
-    |> case do
-      empty when map_size(empty) == 0 -> plan
-      remaining -> remaining
-    end
-  end
 
   defp unwrap_object(plan), do: plan
 
@@ -240,6 +223,9 @@ defmodule PtcRunner.Plan do
     # How to handle verification failures
     on_verification_failure = normalize_on_verification_failure(task["on_verification_failure"])
 
+    # Output signature for JSON mode (defines expected output structure)
+    signature = task["signature"] || task["output_signature"]
+
     %{
       id: to_string(id),
       agent: to_string(agent),
@@ -249,6 +235,7 @@ defmodule PtcRunner.Plan do
       max_retries: max_retries,
       critical: critical,
       type: task_type,
+      signature: signature,
       verification: verification,
       on_verification_failure: on_verification_failure
     }
@@ -265,6 +252,7 @@ defmodule PtcRunner.Plan do
       max_retries: 1,
       critical: true,
       type: :task,
+      signature: nil,
       verification: nil,
       on_verification_failure: :stop
     }
@@ -359,30 +347,58 @@ defmodule PtcRunner.Plan do
   """
   @spec sanitize(t()) :: {t(), [validation_issue()]}
   def sanitize(%__MODULE__{} = plan) do
-    alias PtcRunner.Lisp.Parser
-
     valid_bindings = MapSet.new(["data/result", "data/input", "data/depends"])
 
     {sanitized_tasks, warnings} =
       Enum.map_reduce(plan.tasks, [], fn task, acc ->
-        case validate_predicate(task[:verification], valid_bindings) do
+        # Validate verification predicate
+        {task, acc} =
+          case validate_predicate(task[:verification], valid_bindings) do
+            :ok ->
+              {task, acc}
+
+            {:invalid, reason} ->
+              warning = %{
+                severity: :warning,
+                category: :invalid_verification,
+                message: "Task '#{task.id}' verification removed: #{reason}",
+                task_id: task.id
+              }
+
+              {Map.put(task, :verification, nil), [warning | acc]}
+          end
+
+        # Validate signature
+        case validate_signature(task[:signature]) do
           :ok ->
             {task, acc}
 
           {:invalid, reason} ->
             warning = %{
               severity: :warning,
-              category: :invalid_verification,
-              message: "Task '#{task.id}' verification removed: #{reason}",
+              category: :invalid_signature,
+              message: "Task '#{task.id}' signature removed: #{reason}",
               task_id: task.id
             }
 
-            {Map.put(task, :verification, nil), [warning | acc]}
+            {Map.put(task, :signature, nil), [warning | acc]}
         end
       end)
 
     {%{plan | tasks: sanitized_tasks}, Enum.reverse(warnings)}
   end
+
+  defp validate_signature(nil), do: :ok
+  defp validate_signature(""), do: :ok
+
+  defp validate_signature(signature) when is_binary(signature) do
+    case PtcRunner.SubAgent.Signature.parse(signature) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:invalid, reason}
+    end
+  end
+
+  defp validate_signature(_), do: :ok
 
   defp validate_predicate(nil, _valid_bindings), do: :ok
   defp validate_predicate("", _valid_bindings), do: :ok

@@ -39,6 +39,11 @@ defmodule PtcRunner.PlanRunner do
   - `llm` - Required. LLM callback for all agents
   - `llm_registry` - Optional map of atom -> llm callback
   - `base_tools` - Tool implementations (map of name -> function)
+  - `available_tools` - Tool descriptions (map of name -> description string). Used to
+    enrich raw function tools with signatures so the LLM knows how to call them.
+    Format: `"Description. Input: {param: type}. Output: {field: type}"`
+  - `registry` - Optional Capability Registry for tool/skill resolution
+  - `context_tags` - Tags for context-aware skill matching (default: [])
   - `timeout` - Per-task timeout in ms (default: 30_000)
   - `max_turns` - Max turns per agent (default: 5)
   - `max_concurrency` - Max parallel tasks per phase (default: 10)
@@ -73,6 +78,7 @@ defmodule PtcRunner.PlanRunner do
       )
   """
 
+  alias PtcRunner.CapabilityRegistry.Linker
   alias PtcRunner.Lisp
   alias PtcRunner.Plan
   alias PtcRunner.SubAgent
@@ -130,6 +136,9 @@ defmodule PtcRunner.PlanRunner do
   def execute(%Plan{} = plan, opts) do
     llm = Keyword.fetch!(opts, :llm)
     base_tools = Keyword.get(opts, :base_tools, %{})
+    available_tools = Keyword.get(opts, :available_tools, %{})
+    registry = Keyword.get(opts, :registry)
+    context_tags = Keyword.get(opts, :context_tags, [])
     timeout = Keyword.get(opts, :timeout, 30_000)
     max_turns = Keyword.get(opts, :max_turns, 5)
     llm_registry = Keyword.get(opts, :llm_registry, %{})
@@ -138,13 +147,18 @@ defmodule PtcRunner.PlanRunner do
     initial_results = Keyword.get(opts, :initial_results, %{})
     on_event = Keyword.get(opts, :on_event)
 
+    # Enrich base_tools with signatures from available_tools descriptions
+    enriched_tools = enrich_tools_with_descriptions(base_tools, available_tools)
+
     # Group tasks into parallel phases by dependency level
     phases = Plan.group_by_level(plan.tasks)
 
     exec_opts = %{
       llm: llm,
       llm_registry: llm_registry,
-      base_tools: base_tools,
+      base_tools: enriched_tools,
+      registry: registry,
+      context_tags: context_tags,
       timeout: timeout,
       max_turns: max_turns,
       max_concurrency: max_concurrency,
@@ -455,10 +469,13 @@ defmodule PtcRunner.PlanRunner do
     gate_prompt = build_gate_prompt(agent_spec, task.input, results_summary)
 
     # Gates always use JSON mode (no tools needed for synthesis)
+    # Use task signature if provided, otherwise fall back to :any
+    signature = Map.get(task, :signature) || ":any"
+
     agent =
       SubAgent.new(
         prompt: gate_prompt,
-        signature: ":any",
+        signature: signature,
         max_turns: 1,
         timeout: opts.timeout,
         output: :json
@@ -476,6 +493,8 @@ defmodule PtcRunner.PlanRunner do
            context: context
          ) do
       {:ok, step} ->
+        emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
+
         # Validate synthesis result - blank/malformed is fatal for downstream tasks
         case validate_synthesis_result(step.return) do
           :ok -> {:ok, step.return}
@@ -483,6 +502,7 @@ defmodule PtcRunner.PlanRunner do
         end
 
       {:error, step} ->
+        emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
         {:error, step.fail}
     end
   end
@@ -543,8 +563,8 @@ defmodule PtcRunner.PlanRunner do
     # Build prompt from agent spec and task (with optional feedback)
     prompt = build_prompt(agent_spec, expanded_input, system_feedback)
 
-    # Select tools for this agent
-    tools = select_tools(agent_spec.tools, opts.base_tools)
+    # Resolve tools (and skills if registry is available)
+    {tools, skill_prompt} = resolve_tools_and_skills(agent_spec.tools, opts)
 
     # Choose mode based on whether tools are needed
     # JSON mode is simpler but can't use tools
@@ -552,17 +572,31 @@ defmodule PtcRunner.PlanRunner do
     agent_opts =
       if map_size(tools) > 0 do
         # PTC-Lisp mode with tools
-        [
+        base_opts = [
           prompt: prompt,
           tools: tools,
           max_turns: opts.max_turns,
           timeout: opts.timeout
         ]
+
+        # Add signature if present in task
+        base_opts =
+          if sig = Map.get(task, :signature),
+            do: Keyword.put(base_opts, :signature, sig),
+            else: base_opts
+
+        # Add skill prompt as system_prompt prefix if available
+        if skill_prompt && skill_prompt != "",
+          do: Keyword.put(base_opts, :system_prompt, %{prefix: skill_prompt}),
+          else: base_opts
       else
         # JSON mode without tools (simpler, no code generation needed)
+        # Use task signature if provided, otherwise fall back to :any
+        signature = Map.get(task, :signature) || ":any"
+
         [
           prompt: prompt,
-          signature: ":any",
+          signature: signature,
           max_turns: opts.max_turns,
           timeout: opts.timeout,
           output: :json
@@ -577,9 +611,11 @@ defmodule PtcRunner.PlanRunner do
            context: context
          ) do
       {:ok, step} ->
+        emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
         {:ok, step.return}
 
       {:error, step} ->
+        emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
         {:error, step.fail}
     end
   end
@@ -830,6 +866,68 @@ defmodule PtcRunner.PlanRunner do
   defp format_input(input) when is_list(input), do: Jason.encode!(input, pretty: true)
   defp format_input(input), do: to_string(input)
 
+  # Enrich base_tools with signatures from available_tools descriptions.
+  # This allows raw anonymous functions to be properly documented for the LLM.
+  #
+  # available_tools format: %{"tool_name" => "Description. Input: {param: type}. Output: ..."}
+  # base_tools format: %{"tool_name" => fn | {fn, signature} | {fn, opts}}
+  #
+  # If a base_tool is a raw function and there's a matching available_tool description,
+  # we convert the description to a signature and wrap the function.
+  defp enrich_tools_with_descriptions(base_tools, available_tools)
+       when map_size(available_tools) == 0 do
+    base_tools
+  end
+
+  defp enrich_tools_with_descriptions(base_tools, available_tools) do
+    Map.new(base_tools, fn {name, tool_def} ->
+      case {tool_def, Map.get(available_tools, name)} do
+        # Raw function with available description -> enrich with signature
+        {fun, desc} when is_function(fun) and is_binary(desc) ->
+          signature = description_to_signature(desc)
+          {name, {fun, signature: signature, description: desc}}
+
+        # Already has signature or no description -> keep as-is
+        _ ->
+          {name, tool_def}
+      end
+    end)
+  end
+
+  # Convert a tool description string to a PTC signature.
+  # Input format: "Description. Input: {param: type, ...}. Output: {field: type, ...}"
+  # Output format: "(param :type, ...) -> {field :type, ...}"
+  defp description_to_signature(description) do
+    input_part = extract_io_part(description, ~r/Input:\s*\{([^}]+)\}/i)
+    output_part = extract_io_part(description, ~r/Output:\s*\{([^}]+)\}/i)
+
+    input_sig = if input_part, do: "(#{format_params(input_part)})", else: "()"
+    output_sig = if output_part, do: "{#{format_params(output_part)}}", else: ":any"
+
+    "#{input_sig} -> #{output_sig}"
+  end
+
+  defp extract_io_part(description, regex) do
+    case Regex.run(regex, description) do
+      [_, match] -> match
+      nil -> nil
+    end
+  end
+
+  # Convert "param: type, param2: type2" to "param :type, param2 :type2"
+  defp format_params(params_str) do
+    params_str
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.map(fn param ->
+      case String.split(param, ":", parts: 2) do
+        [name, type] -> "#{String.trim(name)} :#{String.trim(type)}"
+        [name] -> "#{String.trim(name)} :any"
+      end
+    end)
+    |> Enum.join(", ")
+  end
+
   # Select tools based on agent's requested tools
   defp select_tools([], _base_tools), do: %{}
 
@@ -837,6 +935,27 @@ defmodule PtcRunner.PlanRunner do
     tool_names
     |> Enum.filter(&Map.has_key?(base_tools, &1))
     |> Map.new(fn name -> {name, Map.fetch!(base_tools, name)} end)
+  end
+
+  # Resolve tools and skills using registry or fallback to base_tools
+  defp resolve_tools_and_skills(tool_names, opts) do
+    case opts.registry do
+      nil ->
+        # Existing behavior: filter from base_tools
+        tools = select_tools(tool_names, opts.base_tools)
+        {tools, nil}
+
+      registry ->
+        # Registry-based resolution
+        case Linker.link(registry, tool_names, context_tags: opts.context_tags) do
+          {:ok, result} ->
+            {result.base_tools, result.skill_prompt}
+
+          {:error, reason} ->
+            Logger.warning("Registry link failed: #{inspect(reason)}, falling back to base_tools")
+            {select_tools(tool_names, opts.base_tools), nil}
+        end
+    end
   end
 
   # Emit event if callback is provided
