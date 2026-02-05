@@ -461,8 +461,8 @@ defmodule PtcRunner.PlanRunner do
     # Build gate prompt with compression instructions
     gate_prompt = build_gate_prompt(agent_spec, task.input, results_summary)
 
-    # Gates always use JSON mode (no tools needed for synthesis)
-    # Use task signature if provided, otherwise fall back to :any
+    # Gates default to JSON mode but can be overridden via task.output
+    output_mode = Map.get(task, :output) || :json
     signature = Map.get(task, :signature) || ":any"
 
     agent =
@@ -471,7 +471,7 @@ defmodule PtcRunner.PlanRunner do
         signature: signature,
         max_turns: 1,
         timeout: opts.timeout,
-        output: :json
+        output: output_mode
       )
 
     context = %{
@@ -559,42 +559,50 @@ defmodule PtcRunner.PlanRunner do
     # Resolve tools (and skills if registry is available)
     {tools, skill_prompt} = resolve_tools_and_skills(agent_spec.tools, opts)
 
-    # Choose mode based on whether tools are needed
-    # JSON mode is simpler but can't use tools
-    # PTC-Lisp mode supports tools but requires code generation
-    agent_opts =
-      if map_size(tools) > 0 do
-        # PTC-Lisp mode with tools
-        base_opts = [
-          prompt: prompt,
-          tools: tools,
-          output: :ptc_lisp,
-          max_turns: opts.max_turns,
-          timeout: opts.timeout
-        ]
+    # Determine output mode:
+    # 1. Use task.output if explicitly specified
+    # 2. Otherwise auto-detect: tools present -> :ptc_lisp, no tools -> :json
+    output_mode =
+      case Map.get(task, :output) do
+        nil -> if map_size(tools) > 0, do: :ptc_lisp, else: :json
+        mode -> mode
+      end
 
-        # Add signature if present in task
-        base_opts =
-          if sig = Map.get(task, :signature),
-            do: Keyword.put(base_opts, :signature, sig),
+    agent_opts =
+      case output_mode do
+        :ptc_lisp ->
+          # PTC-Lisp mode (with or without tools)
+          base_opts = [
+            prompt: prompt,
+            tools: tools,
+            output: :ptc_lisp,
+            max_turns: opts.max_turns,
+            timeout: opts.timeout
+          ]
+
+          # Add signature if present in task
+          base_opts =
+            if sig = Map.get(task, :signature),
+              do: Keyword.put(base_opts, :signature, sig),
+              else: base_opts
+
+          # Add skill prompt as system_prompt prefix if available
+          if skill_prompt && skill_prompt != "",
+            do: Keyword.put(base_opts, :system_prompt, %{prefix: skill_prompt}),
             else: base_opts
 
-        # Add skill prompt as system_prompt prefix if available
-        if skill_prompt && skill_prompt != "",
-          do: Keyword.put(base_opts, :system_prompt, %{prefix: skill_prompt}),
-          else: base_opts
-      else
-        # JSON mode without tools (simpler, no code generation needed)
-        # Use task signature if provided, otherwise fall back to :any
-        signature = Map.get(task, :signature) || ":any"
+        :json ->
+          # JSON mode (simpler, no code generation needed)
+          # Use task signature if provided, otherwise fall back to :any
+          signature = Map.get(task, :signature) || ":any"
 
-        [
-          prompt: prompt,
-          signature: signature,
-          max_turns: opts.max_turns,
-          timeout: opts.timeout,
-          output: :json
-        ]
+          [
+            prompt: prompt,
+            signature: signature,
+            max_turns: opts.max_turns,
+            timeout: opts.timeout,
+            output: :json
+          ]
       end
 
     agent = SubAgent.new(agent_opts)

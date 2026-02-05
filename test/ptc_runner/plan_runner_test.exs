@@ -963,5 +963,63 @@ defmodule PtcRunner.PlanRunnerTest do
       assert Map.has_key?(results, "search")
       assert Map.has_key?(results, "summarize")
     end
+
+    test "respects explicit output mode on task" do
+      # Task without tools but with explicit output: ptc_lisp
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "transform",
+            "input" => "Transform the data using map/filter",
+            "output" => "ptc_lisp"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      # Track which output mode was used
+      output_mode_used = Agent.start_link(fn -> nil end) |> elem(1)
+
+      mock_llm = fn input ->
+        Agent.update(output_mode_used, fn _ -> Map.get(input, :output) end)
+        # Return PTC-Lisp code since we requested ptc_lisp mode
+        {:ok, ~s|```clojure\n(return {:result "transformed"})\n```|}
+      end
+
+      {:ok, results} = PlanRunner.execute(plan, llm: mock_llm, max_turns: 2)
+
+      mode = Agent.get(output_mode_used, & &1)
+      Agent.stop(output_mode_used)
+
+      # Should use PTC-Lisp mode even though there are no tools
+      assert mode == :ptc_lisp
+      assert results["transform"] == %{"result" => "transformed"}
+    end
+
+    test "auto-detects json mode when no tools and no explicit output" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "simple", "input" => "Answer the question"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      output_mode_used = Agent.start_link(fn -> nil end) |> elem(1)
+
+      mock_llm = fn input ->
+        Agent.update(output_mode_used, fn _ -> Map.get(input, :output) end)
+        {:ok, ~s|{"answer": "42"}|}
+      end
+
+      {:ok, _results} = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
+
+      mode = Agent.get(output_mode_used, & &1)
+      Agent.stop(output_mode_used)
+
+      # Should auto-detect JSON mode (no tools, no explicit output)
+      assert mode == :json
+    end
   end
 end

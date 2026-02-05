@@ -283,6 +283,30 @@ defmodule PtcRunner.PlanTest do
         assert task.type == :human_review, "Task #{task.id} should be human_review"
       end
     end
+
+    test "parses output field for explicit mode selection" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "t1", "input" => "x", "output" => "ptc_lisp"},
+          %{"id" => "t2", "input" => "x", "output" => "lisp"},
+          %{"id" => "t3", "input" => "x", "output" => "json"},
+          %{"id" => "t4", "input" => "x"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      t1 = Enum.find(plan.tasks, &(&1.id == "t1"))
+      t2 = Enum.find(plan.tasks, &(&1.id == "t2"))
+      t3 = Enum.find(plan.tasks, &(&1.id == "t3"))
+      t4 = Enum.find(plan.tasks, &(&1.id == "t4"))
+
+      assert t1.output == :ptc_lisp
+      assert t2.output == :ptc_lisp
+      assert t3.output == :json
+      # Default is nil (auto-detect based on tools)
+      assert t4.output == nil
+    end
   end
 
   describe "topological_sort/1" do
