@@ -4,6 +4,28 @@ defmodule PtcRunner.PlanExecutor do
 
   PlanExecutor provides two levels of API:
 
+  ## Telemetry Events
+
+  PlanExecutor emits telemetry events for observability:
+
+  - `[:ptc_runner, :plan_executor, :plan, :generated]` - Plan generated
+    - metadata: `%{plan: plan, mission: mission}`
+  - `[:ptc_runner, :plan_executor, :execution, :start]` - Execution starting
+    - metadata: `%{plan: plan, mission: mission, attempt: n}`
+  - `[:ptc_runner, :plan_executor, :execution, :stop]` - Execution finished
+    - measurements: `%{duration: native_time}`
+    - metadata: `%{status: :ok | :error, results: map}`
+  - `[:ptc_runner, :plan_executor, :task, :start]` - Task starting
+    - metadata: `%{task_id: id, task: task, attempt: n}`
+  - `[:ptc_runner, :plan_executor, :task, :stop]` - Task finished
+    - measurements: `%{duration: native_time}`
+    - metadata: `%{task_id: id, status: :ok | :error | :skipped, result: term}`
+  - `[:ptc_runner, :plan_executor, :replan, :start]` - Replan starting
+    - metadata: `%{task_id: id, diagnosis: string, attempt: n}`
+  - `[:ptc_runner, :plan_executor, :replan, :stop]` - Replan finished
+    - metadata: `%{new_task_count: n}`
+
+
   ## High-Level API: `run/2`
 
   The "one-stop-shop" for autonomous execution. Generates a plan from a mission
@@ -184,6 +206,13 @@ defmodule PtcRunner.PlanExecutor do
       {:ok, plan} ->
         if on_event, do: on_event.({:planning_finished, %{task_count: length(plan.tasks)}})
 
+        # Emit telemetry with full plan structure
+        :telemetry.execute(
+          [:ptc_runner, :plan_executor, :plan, :generated],
+          %{system_time: System.system_time()},
+          %{plan: plan_to_map(plan), mission: mission, task_count: length(plan.tasks)}
+        )
+
         # Pass constraints through to execute for replanning
         execute_opts =
           if constraints do
@@ -340,7 +369,32 @@ defmodule PtcRunner.PlanExecutor do
     # Emit execution_started event
     emit_event(state, {:execution_started, %{mission: mission, task_count: length(plan.tasks)}})
 
-    execute_loop(state)
+    # Emit telemetry for execution start with full plan
+    :telemetry.execute(
+      [:ptc_runner, :plan_executor, :execution, :start],
+      %{system_time: System.system_time(), monotonic_time: System.monotonic_time()},
+      %{plan: plan_to_map(plan), mission: mission, task_count: length(plan.tasks), attempt: 1}
+    )
+
+    result = execute_loop(state)
+
+    # Emit telemetry for execution stop
+    duration = System.monotonic_time(:millisecond) - state.start_time
+
+    {status, results} =
+      case result do
+        {:ok, metadata} -> {:ok, metadata.results}
+        {:waiting, _, metadata} -> {:waiting, metadata.results}
+        {:error, _, metadata} -> {:error, metadata.results}
+      end
+
+    :telemetry.execute(
+      [:ptc_runner, :plan_executor, :execution, :stop],
+      %{duration: duration * 1_000_000},
+      %{status: status, results: results, replan_count: state.replan_count}
+    )
+
+    result
   end
 
   defp execute_loop(state) do
@@ -726,5 +780,36 @@ defmodule PtcRunner.PlanExecutor do
       success: success?,
       diagnosis: diagnosis
     })
+  end
+
+  # ============================================================================
+  # Telemetry Helpers
+  # ============================================================================
+
+  # Convert plan to a map suitable for telemetry (avoids struct serialization issues)
+  defp plan_to_map(%Plan{} = plan) do
+    %{
+      agents:
+        Map.new(plan.agents, fn {id, agent} ->
+          {id,
+           %{
+             prompt: agent.prompt,
+             tools: agent.tools
+           }}
+        end),
+      tasks:
+        Enum.map(plan.tasks, fn task ->
+          %{
+            id: task.id,
+            agent: task.agent,
+            input: task.input,
+            signature: task.signature,
+            depends_on: task.depends_on,
+            type: task.type,
+            verification: task.verification,
+            on_verification_failure: task.on_verification_failure
+          }
+        end)
+    }
   end
 end

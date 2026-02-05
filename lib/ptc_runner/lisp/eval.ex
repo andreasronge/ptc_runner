@@ -26,6 +26,8 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.SubAgent.Telemetry
+  alias PtcRunner.TraceLog
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -426,6 +428,10 @@ defmodule PtcRunner.Lisp.Eval do
         # The closure captures a read-only snapshot of the environment at creation time
         callable_fn = value_to_erlang_fn(fn_val, eval_ctx2)
 
+        # Capture trace context for propagation into worker processes
+        trace_collectors = TraceLog.active_collectors()
+        parent_span_id = Telemetry.current_span_id()
+
         # Execute in parallel using Task.async_stream
         # Limit concurrency to available schedulers to prevent resource exhaustion
         # when LLM generates pmap over large collections (e.g., unbounded search results)
@@ -434,6 +440,9 @@ defmodule PtcRunner.Lisp.Eval do
           coll_list
           |> Task.async_stream(
             fn elem ->
+              # Re-attach trace context in worker process
+              TraceLog.join(trace_collectors, parent_span_id)
+
               try do
                 Process.delete(:last_child_trace_id)
                 Process.delete(:last_child_step)
@@ -515,6 +524,10 @@ defmodule PtcRunner.Lisp.Eval do
               {pcalls_fn_to_erlang(fn_val, eval_ctx2), idx}
             end)
 
+          # Capture trace context for propagation into worker processes
+          trace_collectors = TraceLog.active_collectors()
+          parent_span_id = Telemetry.current_span_id()
+
           # Execute all thunks in parallel using Task.async_stream
           # Limit concurrency to prevent resource exhaustion
           # Timeout is configurable via pmap_timeout for LLM-backed tool calls
@@ -522,6 +535,9 @@ defmodule PtcRunner.Lisp.Eval do
             erlang_fns
             |> Task.async_stream(
               fn {erlang_fn, idx} ->
+                # Re-attach trace context in worker process
+                TraceLog.join(trace_collectors, parent_span_id)
+
                 try do
                   Process.delete(:last_child_trace_id)
                   Process.delete(:last_child_step)

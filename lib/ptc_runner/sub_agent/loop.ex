@@ -1462,10 +1462,13 @@ defmodule PtcRunner.SubAgent.Loop do
   # ============================================================
 
   # Emit telemetry events for tool calls recorded during Lisp evaluation.
-  # Tools run inside the sandbox (isolated BEAM process) where the trace
-  # handler's process dictionary check causes events to be silently dropped.
-  # Re-emitting in the parent process ensures they appear in trace logs
-  # with correct span hierarchy.
+  # Re-emit tool.stop telemetry from the parent process.
+  #
+  # Note: As of the trace propagation update, Sandbox now joins trace collectors,
+  # so tool events (tool.start, tool.stop) are captured naturally inside the sandbox.
+  # This re-emission is kept as a fallback for edge cases where sandbox propagation
+  # might fail (e.g., collectors die mid-execution). This may result in duplicate
+  # tool.stop events in traces - consider removing once sandbox propagation is verified.
   defp emit_tool_telemetry(_agent, %{tool_calls: []}), do: :ok
 
   defp emit_tool_telemetry(agent, %{tool_calls: tool_calls}) do

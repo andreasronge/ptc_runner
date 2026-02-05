@@ -36,7 +36,7 @@ defmodule PtcRunner.TraceLog do
         "duration_ms": 123              # Duration (for stop events)
       }
 
-  ## Process Isolation
+  ## Process Isolation and Cross-Process Propagation
 
   Traces are isolated by process. Only events from the process that called `start/1`
   are captured. This allows multiple concurrent traces without interference.
@@ -44,10 +44,24 @@ defmodule PtcRunner.TraceLog do
   Nested traces are supported - each `with_trace` call creates its own trace file,
   and events are routed to the innermost active collector.
 
-  **Note:** Tool telemetry events (`tool.start`, `tool.stop`) are currently not
-  captured because tool execution runs inside a sandboxed process that doesn't
-  inherit the trace collector. The main events (`run`, `turn`, `llm`) are captured
-  correctly.
+  ### Cross-Process Tracing
+
+  When execution spans multiple processes (e.g., PlanRunner parallel tasks), use
+  `join/2` to propagate trace context to child processes:
+
+      collectors = TraceLog.active_collectors()
+      parent_span = PtcRunner.SubAgent.Telemetry.current_span_id()
+
+      Task.async(fn ->
+        TraceLog.join(collectors, parent_span)
+        # Events from this process are now captured AND linked to parent
+      end)
+
+  PlanRunner automatically propagates trace context to parallel task workers.
+
+  **Note:** Tool telemetry events (`tool.start`, `tool.stop`) are currently
+  re-emitted by SubAgent.Loop after sandbox execution returns, as the sandbox
+  process doesn't inherit trace collectors.
 
   ## See Also
 
@@ -56,6 +70,7 @@ defmodule PtcRunner.TraceLog do
   - `PtcRunner.TraceLog.Handler` - Telemetry handler
   """
 
+  alias PtcRunner.SubAgent.Telemetry
   alias PtcRunner.TraceLog.{Collector, Handler}
 
   @doc """
@@ -214,4 +229,69 @@ defmodule PtcRunner.TraceLog do
   def active_collectors do
     Process.get(:ptc_trace_collectors, [])
   end
+
+  @doc """
+  Joins the current process to existing trace collectors.
+
+  This is used for trace propagation across process boundaries. When spawning
+  child processes (via Task.async_stream, Process.spawn, etc.), the parent's
+  trace collectors are not automatically inherited. Call this function at the
+  start of the child process to re-attach to the parent's trace session.
+
+  ## Parameters
+
+    * `collectors` - List of collector PIDs to join (from `active_collectors/0`)
+    * `parent_span_id` - Optional span ID from parent process for span hierarchy
+
+  ## Example
+
+      # In parent process
+      collectors = TraceLog.active_collectors()
+      parent_span = PtcRunner.SubAgent.Telemetry.current_span_id()
+
+      Task.async(fn ->
+        TraceLog.join(collectors, parent_span)
+        # Now trace events from this process will be captured
+        # AND linked to the parent span hierarchy
+        SubAgent.run(agent, llm: llm)
+      end)
+
+  ## Notes
+
+  - Only joins collectors that are still alive (stale PIDs are filtered out)
+  - Does not attach telemetry handlers (they are global and already attached)
+  - Safe to call multiple times or with an empty list
+  - When `parent_span_id` is provided, sets up span hierarchy so new spans
+    in this process have the parent span as their parent_span_id
+  """
+  @spec join([pid()], String.t() | nil) :: :ok
+  def join(collectors, parent_span_id \\ nil)
+
+  def join([], nil), do: :ok
+
+  def join([], parent_span_id) do
+    # Even without collectors, set up span hierarchy if provided
+    Telemetry.set_parent_span(parent_span_id)
+    :ok
+  end
+
+  def join(collectors, parent_span_id) when is_list(collectors) do
+    # Filter to only alive collectors (in case parent stopped tracing)
+    alive_collectors = Enum.filter(collectors, &Process.alive?/1)
+
+    if alive_collectors != [] do
+      # Merge with any existing collectors in this process
+      existing = Process.get(:ptc_trace_collectors, [])
+      # Deduplicate while preserving order (existing first, then new)
+      merged = Enum.uniq(existing ++ alive_collectors)
+      Process.put(:ptc_trace_collectors, merged)
+    end
+
+    # Set up span hierarchy for proper parent-child relationships
+    Telemetry.set_parent_span(parent_span_id)
+
+    :ok
+  end
+
+  def join(_, _), do: :ok
 end

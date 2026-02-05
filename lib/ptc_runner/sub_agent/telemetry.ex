@@ -140,6 +140,41 @@ defmodule PtcRunner.SubAgent.Telemetry do
     end
   end
 
+  @doc """
+  Sets the initial span stack for this process.
+
+  Used for trace propagation across process boundaries. When spawning child
+  processes, capture the parent's current span ID and call this function in
+  the child to establish the parent-child span relationship.
+
+  ## Parameters
+
+    * `parent_span_id` - The span ID from the parent process (or nil)
+
+  ## Example
+
+      # In parent process
+      parent_span = Telemetry.current_span_id()
+
+      Task.async(fn ->
+        Telemetry.set_parent_span(parent_span)
+        # New spans in this process will have parent_span as their parent_span_id
+      end)
+
+  """
+  @spec set_parent_span(String.t() | nil) :: :ok
+  def set_parent_span(nil), do: :ok
+
+  def set_parent_span(parent_span_id) when is_binary(parent_span_id) do
+    # Only set if stack is empty (don't override existing context)
+    case Process.get(@span_stack_key, []) do
+      [] -> Process.put(@span_stack_key, [parent_span_id])
+      _ -> :ok
+    end
+
+    :ok
+  end
+
   # Generate an 8-character hex span ID
   defp generate_span_id do
     :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)

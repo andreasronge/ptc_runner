@@ -27,6 +27,8 @@ defmodule PtcRunner.Sandbox do
 
   alias PtcRunner.Context
   alias PtcRunner.Json.Interpreter
+  alias PtcRunner.SubAgent.Telemetry
+  alias PtcRunner.TraceLog
 
   # Default resource limits
   @default_timeout 1000
@@ -75,6 +77,10 @@ defmodule PtcRunner.Sandbox do
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
     eval_fn = Keyword.get(opts, :eval_fn, &Interpreter.eval/2)
 
+    # Capture trace context for propagation into sandbox process
+    trace_collectors = TraceLog.active_collectors()
+    parent_span_id = Telemetry.current_span_id()
+
     # Spawn isolated process with resource limits
     start_time = System.monotonic_time(:millisecond)
 
@@ -83,6 +89,9 @@ defmodule PtcRunner.Sandbox do
     {pid, ref} =
       Process.spawn(
         fn ->
+          # Re-attach trace context for tool telemetry capture
+          TraceLog.join(trace_collectors, parent_span_id)
+
           # Set process priority to normal within the process
           Process.flag(:priority, :normal)
           result = eval_fn.(ast, context)

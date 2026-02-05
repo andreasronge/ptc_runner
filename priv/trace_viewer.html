@@ -367,6 +367,200 @@
     }
     .tab:hover { background: var(--bg-hover); color: var(--fg); }
     .tab.active { background: var(--accent); color: #fff; }
+
+    /* Plan Card */
+    .plan-card {
+      background: var(--bg-light);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: none;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .plan-card.visible { display: block; }
+
+    .plan-header {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+      background: linear-gradient(135deg, rgba(86, 156, 214, 0.1), rgba(197, 134, 192, 0.1));
+      border-bottom: 1px solid var(--border);
+    }
+    .plan-header:hover { background: linear-gradient(135deg, rgba(86, 156, 214, 0.15), rgba(197, 134, 192, 0.15)); }
+    .plan-header h3 { margin: 0; font-size: 15px; flex: 1; display: flex; align-items: center; gap: 8px; }
+    .plan-header .toggle { color: var(--muted); font-size: 14px; transition: transform 0.2s; }
+    .plan-card.expanded .plan-header .toggle { transform: rotate(90deg); }
+
+    .plan-body { display: none; }
+    .plan-card.expanded .plan-body { display: block; }
+
+    .plan-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .plan-section:last-child { border-bottom: none; }
+
+    .plan-section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .plan-section-title .count {
+      background: var(--accent);
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+    }
+
+    /* Agent cards in plan */
+    .agent-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .agent-card {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 12px;
+      border-left: 3px solid var(--keyword);
+    }
+    .agent-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .agent-card-name {
+      font-weight: 600;
+      color: var(--keyword);
+      font-family: monospace;
+    }
+    .agent-card-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+    }
+    .agent-tool-tag {
+      background: rgba(220, 220, 170, 0.2);
+      color: var(--warning);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: monospace;
+    }
+    .agent-card-prompt {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      max-height: 60px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Task flow in plan */
+    .task-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .task-item {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 12px;
+      border-left: 3px solid var(--success);
+      position: relative;
+    }
+    .task-item.synthesis { border-left-color: var(--accent); }
+    .task-item.human_review { border-left-color: var(--warning); }
+
+    .task-item-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .task-id {
+      font-weight: 600;
+      color: var(--success);
+      font-family: monospace;
+    }
+    .task-item.synthesis .task-id { color: var(--accent); }
+    .task-type-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: rgba(78, 201, 176, 0.2);
+      color: var(--success);
+      text-transform: uppercase;
+    }
+    .task-item.synthesis .task-type-badge { background: rgba(86, 156, 214, 0.2); color: var(--accent); }
+    .task-item.human_review .task-type-badge { background: rgba(220, 220, 170, 0.2); color: var(--warning); }
+
+    .task-agent-ref {
+      font-size: 11px;
+      color: var(--keyword);
+      font-family: monospace;
+    }
+    .task-input {
+      font-size: 12px;
+      color: var(--fg);
+      margin: 8px 0;
+      white-space: pre-wrap;
+      max-height: 80px;
+      overflow: hidden;
+    }
+    .task-deps {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .task-dep-tag {
+      background: var(--bg-light);
+      color: var(--muted);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-family: monospace;
+    }
+    .task-verification {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+    }
+    .task-verification code {
+      background: var(--bg-light);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: var(--comment);
+      display: block;
+      margin-top: 4px;
+      white-space: pre-wrap;
+    }
+
+    /* Mission display */
+    .mission-text {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 13px;
+      white-space: pre-wrap;
+      border-left: 3px solid var(--accent);
+      max-height: 200px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -426,6 +620,15 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="plan-card" id="planCard">
+    <div class="plan-header" onclick="document.getElementById('planCard').classList.toggle('expanded')">
+      <span class="toggle">▶</span>
+      <h3>📋 Execution Plan</h3>
+      <span id="planMeta" style="color: var(--muted); font-size: 12px;"></span>
+    </div>
+    <div class="plan-body" id="planBody"></div>
   </div>
 
   <div class="agent-tree" id="agentTree">
@@ -1047,6 +1250,200 @@
     handleFiles = async function(files) {
       await origHandleFiles(files);
       renderAgentTree();
+    };
+
+    // --- Plan Display ---
+
+    function extractPlanData(events) {
+      // Look for plan.generated event or run.start with plan metadata
+      // Event name is "plan.generated" (after dropping [:ptc_runner, :plan_executor] prefix)
+      const planGenerated = events.find(e => e.event === 'plan.generated');
+      const runStart = events.find(e => e.event === 'run.start');
+
+      // Try to find plan in various places
+      let plan = null;
+      let mission = null;
+      let agents = null;
+
+      // Primary source: plan.generated event from PlanExecutor
+      if (planGenerated?.metadata) {
+        plan = planGenerated.metadata.plan;
+        mission = planGenerated.metadata.mission;
+      }
+
+      // Fallback: run.start metadata (for SubAgent runs)
+      if (!mission && runStart?.metadata?.agent) {
+        const agentMeta = runStart.metadata.agent;
+        mission = agentMeta.prompt || agentMeta.mission;
+        // Parse plan from agent metadata if present
+        if (!plan && agentMeta.plan && typeof agentMeta.plan === 'object') {
+          plan = agentMeta.plan;
+        }
+      }
+
+      // Extract from trace.start meta
+      const traceStart = events.find(e => e.event === 'trace.start');
+      if (!mission && traceStart?.meta?.mission) {
+        mission = traceStart.meta.mission;
+      }
+
+      // Last resort: scan all events for plan-like structures
+      if (!plan) {
+        for (const event of events) {
+          const meta = event.metadata || {};
+          if (meta.tasks && Array.isArray(meta.tasks)) {
+            plan = { tasks: meta.tasks, agents: meta.agents };
+            break;
+          }
+          if (meta.plan?.tasks) {
+            plan = meta.plan;
+            break;
+          }
+        }
+      }
+
+      return { plan, mission, agents };
+    }
+
+    function renderPlanCard(events) {
+      const planCard = document.getElementById('planCard');
+      const planMeta = document.getElementById('planMeta');
+      const planBody = document.getElementById('planBody');
+
+      const { plan, mission, agents } = extractPlanData(events);
+
+      if (!plan && !mission) {
+        planCard.classList.remove('visible');
+        return;
+      }
+
+      planCard.classList.add('visible');
+      planCard.classList.add('expanded'); // Start expanded
+
+      let html = '';
+
+      // Mission section
+      if (mission) {
+        html += `
+          <div class="plan-section">
+            <div class="plan-section-title">🎯 Mission</div>
+            <div class="mission-text">${escapeHtml(truncatePlan(mission, 1500))}</div>
+          </div>`;
+      }
+
+      // Agents section
+      const planAgents = plan?.agents || agents;
+      if (planAgents && typeof planAgents === 'object') {
+        const agentNames = Object.keys(planAgents);
+        html += `
+          <div class="plan-section">
+            <div class="plan-section-title">
+              🤖 Agents
+              <span class="count">${agentNames.length}</span>
+            </div>
+            <div class="agent-cards">
+              ${agentNames.map(name => renderAgentCard(name, planAgents[name])).join('')}
+            </div>
+          </div>`;
+      }
+
+      // Tasks section
+      if (plan?.tasks && Array.isArray(plan.tasks)) {
+        html += `
+          <div class="plan-section">
+            <div class="plan-section-title">
+              📝 Tasks
+              <span class="count">${plan.tasks.length}</span>
+            </div>
+            <div class="task-flow">
+              ${plan.tasks.map(task => renderTaskItem(task)).join('')}
+            </div>
+          </div>`;
+
+        planMeta.textContent = `${plan.tasks.length} tasks`;
+      }
+
+      planBody.innerHTML = html || '<div class="plan-section" style="color: var(--muted);">No plan details available</div>';
+    }
+
+    function renderAgentCard(name, agent) {
+      const tools = agent.tools || [];
+      const prompt = agent.prompt || '';
+
+      return `
+        <div class="agent-card">
+          <div class="agent-card-header">
+            <span class="agent-card-name">${escapeHtml(name)}</span>
+          </div>
+          ${prompt ? `<div class="agent-card-prompt">${escapeHtml(truncatePlan(prompt, 150))}</div>` : ''}
+          ${tools.length > 0 ? `
+            <div class="agent-card-tools">
+              ${tools.map(t => `<span class="agent-tool-tag">🔧 ${escapeHtml(t)}</span>`).join('')}
+            </div>
+          ` : '<div style="font-size: 11px; color: var(--muted);">No tools</div>'}
+        </div>`;
+    }
+
+    function renderTaskItem(task) {
+      const taskType = task.type || 'task';
+      const isSynthesis = taskType === 'synthesis_gate' || taskType === 'synthesis';
+      const isHumanReview = taskType === 'human_review';
+      const typeClass = isSynthesis ? 'synthesis' : (isHumanReview ? 'human_review' : '');
+
+      const deps = task.depends_on || [];
+      const verification = task.verification;
+      const signature = task.signature;
+
+      return `
+        <div class="task-item ${typeClass}">
+          <div class="task-item-header">
+            <span class="task-id">${escapeHtml(task.id || 'unnamed')}</span>
+            ${taskType !== 'task' ? `<span class="task-type-badge">${escapeHtml(taskType)}</span>` : ''}
+            ${task.agent ? `<span class="task-agent-ref">→ ${escapeHtml(task.agent)}</span>` : ''}
+          </div>
+          ${task.input ? `<div class="task-input">${escapeHtml(truncatePlan(task.input, 200))}</div>` : ''}
+          ${deps.length > 0 ? `
+            <div class="task-deps">
+              <span style="font-size: 10px; color: var(--muted);">depends on:</span>
+              ${deps.map(d => `<span class="task-dep-tag">${escapeHtml(d)}</span>`).join('')}
+            </div>
+          ` : ''}
+          ${signature ? `
+            <div class="task-verification">
+              <span style="color: var(--muted);">📤 Output signature:</span>
+              <code>${escapeHtml(signature)}</code>
+            </div>
+          ` : ''}
+          ${verification ? `
+            <div class="task-verification">
+              <span style="color: var(--muted);">✓ Verification:</span>
+              <code>${escapeHtml(verification)}</code>
+            </div>
+          ` : ''}
+        </div>`;
+    }
+
+    function truncatePlan(str, len) {
+      if (!str) return '';
+      // Handle truncated strings from tracer
+      if (str.includes('[String truncated')) {
+        // Extract the preview portion
+        const match = str.match(/^([\s\S]*?)\.\.\.\s*\n?\n?\[String truncated/);
+        if (match) {
+          return match[1] + '... [truncated]';
+        }
+      }
+      return str.length > len ? str.slice(0, len) + '...' : str;
+    }
+
+    // Patch displayTrace to also render plan
+    const origDisplayTrace = displayTrace;
+    displayTrace = function(filename) {
+      origDisplayTrace(filename);
+      const data = loadedFiles.get(filename);
+      if (data) {
+        renderPlanCard(data.events);
+      }
     };
   </script>
 </body>

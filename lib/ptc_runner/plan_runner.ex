@@ -82,6 +82,8 @@ defmodule PtcRunner.PlanRunner do
   alias PtcRunner.Lisp
   alias PtcRunner.Plan
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Telemetry
+  alias PtcRunner.TraceLog
 
   require Logger
 
@@ -222,22 +224,60 @@ defmodule PtcRunner.PlanRunner do
     # Build results for skipped tasks (use existing values)
     skipped_results = Enum.map(completed, fn task -> {task, {:ok, Map.get(results, task.id)}} end)
 
+    # Emit task.start telemetry for all tasks about to run
+    for task <- to_run do
+      :telemetry.execute(
+        [:ptc_runner, :plan_executor, :task, :start],
+        %{system_time: System.system_time(), monotonic_time: System.monotonic_time()},
+        %{task_id: task.id, task: task_to_map(task), agent: task.agent, attempt: 1}
+      )
+    end
+
+    # Capture trace context for propagation to worker processes
+    trace_collectors = TraceLog.active_collectors()
+    parent_span_id = Telemetry.current_span_id()
+
     # Run remaining tasks in parallel
+    # Returns {task, result, duration_ms} tuples for telemetry
     executed_results =
       to_run
       |> Task.async_stream(
-        fn task -> {task, execute_task_with_events(task, agents, results, opts)} end,
+        fn task ->
+          execute_task_with_timing(task, agents, results, opts, trace_collectors, parent_span_id)
+        end,
         max_concurrency: opts.max_concurrency,
         timeout: opts.timeout * opts.max_turns + 5000,
         on_timeout: :kill_task
       )
       |> Enum.map(fn
         {:ok, result} -> result
-        {:exit, reason} -> {:timeout, {:error, reason}}
+        {:exit, reason} -> {:timeout, nil, {:error, reason}}
       end)
 
+    # Emit telemetry for each executed task from main process
+    for {task, duration_ms, result} <- executed_results do
+      {status, result_value} =
+        case result do
+          {:ok, value} -> {:ok, value}
+          {:waiting, pending} -> {:waiting, pending}
+          {:skipped, diagnosis} -> {:skipped, diagnosis}
+          {:error, reason} -> {:error, reason}
+          {:replan_required, context} -> {:replan_required, context}
+        end
+
+      :telemetry.execute(
+        [:ptc_runner, :plan_executor, :task, :stop],
+        %{duration: duration_ms * 1_000_000},
+        %{task_id: task.id, status: status, result: result_value, duration_ms: duration_ms}
+      )
+    end
+
+    # Convert back to {task, result} format
+    executed_as_pairs =
+      Enum.map(executed_results, fn {task, _duration, result} -> {task, result} end)
+
     # Combine skipped and executed results
-    all_results = skipped_results ++ executed_results
+    all_results = skipped_results ++ executed_as_pairs
 
     # Process results, respecting on_failure settings
     process_phase_results(all_results)
@@ -320,8 +360,12 @@ defmodule PtcRunner.PlanRunner do
     end
   end
 
-  # Wrapper that emits task lifecycle events
-  defp execute_task_with_events(task, agents, results, opts) do
+  # Execute task and return {task, duration_ms, result} for telemetry from main process
+  defp execute_task_with_timing(task, agents, results, opts, trace_collectors, parent_span_id) do
+    # Re-attach trace context in this worker process for cross-process trace propagation
+    # This ensures SubAgent events are captured AND linked to parent span hierarchy
+    TraceLog.join(trace_collectors, parent_span_id)
+
     start_time = System.monotonic_time(:millisecond)
     emit_event(opts, {:task_started, %{task_id: task.id, attempt: 1}})
 
@@ -334,22 +378,19 @@ defmodule PtcRunner.PlanRunner do
         emit_event(opts, {:task_succeeded, %{task_id: task.id, duration_ms: duration_ms}})
 
       {:waiting, _pending} ->
-        # Human review - not a success or failure, no event
         :ok
 
       {:skipped, _diagnosis} ->
-        # Verification skipped is not an error
         :ok
 
       {:error, reason} ->
         emit_event(opts, {:task_failed, %{task_id: task.id, reason: reason}})
 
       {:replan_required, _context} ->
-        # Replan is handled at PlanExecutor level
         :ok
     end
 
-    result
+    {task, duration_ms, result}
   end
 
   # Execute a task with retry support
@@ -963,4 +1004,18 @@ defmodule PtcRunner.PlanRunner do
 
   defp emit_event(%{on_event: callback}, event) when is_function(callback, 1),
     do: callback.(event)
+
+  # Convert task struct to map for telemetry
+  defp task_to_map(task) do
+    %{
+      id: task.id,
+      agent: task.agent,
+      input: task.input,
+      signature: task.signature,
+      depends_on: task.depends_on,
+      type: task.type,
+      verification: task.verification,
+      on_verification_failure: task.on_verification_failure
+    }
+  end
 end
