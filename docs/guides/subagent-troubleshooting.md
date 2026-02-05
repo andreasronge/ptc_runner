@@ -332,14 +332,24 @@ See [Core Concepts](subagent-concepts.md) for the full state persistence documen
 
 **Cause:** The default heap limit (~10MB) is too small for the workload.
 
-**Solution:** Pass `max_heap` option to increase the limit:
+**Solution:** Set `max_heap` in the agent or pass as a run option:
 
 ```elixir
+# Option 1: In agent definition
+agent = SubAgent.new(
+  prompt: "...",
+  max_heap: 200_000_000  # ~1.6GB (in words, not bytes)
+)
+
+# Option 2: As run option (overrides agent setting)
 SubAgent.run(agent,
   llm: llm,
   context: context,
-  max_heap: 200_000_000  # ~1.6GB (in words, not bytes)
+  max_heap: 200_000_000
 )
+
+# Option 3: Application-wide default in config.exs
+config :ptc_runner, default_max_heap: 200_000_000
 ```
 
 Child agents automatically inherit this setting from their parent.

@@ -281,8 +281,8 @@ defmodule PtcRunner.SubAgent.Loop do
       budget_callback: run_opts.budget_callback,
       # Trace context for nested agent tracing
       trace_context: run_opts.trace_context,
-      # Lisp resource limits (propagated to child agents)
-      max_heap: run_opts.max_heap,
+      # Lisp resource limits (run option overrides agent setting, propagated to child agents)
+      max_heap: run_opts.max_heap || agent.max_heap,
       # Journal for (task) idempotent execution
       journal: run_opts.journal,
       # Summaries from (step-done) calls
