@@ -3,7 +3,7 @@
 ```elixir
 Mix.install([
   {:ptc_runner, path: Path.expand("..", __DIR__)},
-  {:kino, "~> 0.12.0"}
+  {:kino, "~> 0.14"}
 ])
 
 alias PtcRunner.CapabilityRegistry.{Registry, Linker, Skill, ToolEntry, Discovery, Promotion}
@@ -25,15 +25,27 @@ This Livebook demonstrates how to use the registry to provide a "Context Economy
 
 First, let's create a registry and a mock LLM for our experiments.
 
-```elixir
+````elixir
 registry = Registry.new()
 
-# A mock LLM that generates simple plans
+# Track LLM calls for multi-turn handling
+call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+# A mock LLM that handles:
+# 1. MetaPlanner (JSON mode) - returns execution plan
+# 2. SubAgent with tools (PTC-Lisp mode) - multi-turn: call tool, then return result
+# 3. SubAgent in must-return mode (no tools) - return static result
+# 4. Synthesis gate (JSON mode) - return summary
 mock_llm = fn input ->
-  prompt = hd(input.messages).content
-  
+  count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
+  system = Map.get(input, :system, "")
+  is_json_mode = Map.get(input, :output) == :json
+  tool_names = Map.get(input, :tool_names, [])
+  has_tools = length(tool_names) > 0
+
   cond do
-    String.contains?(prompt, "Search for products") ->
+    # MetaPlanner - return JSON plan
+    String.contains?(system, "workflow architect") ->
       {:ok, ~S|{
         "tasks": [
           {"id": "search", "agent": "shopper", "input": "Search for electronics", "signature": "{items [{name :string, price :float}]}"},
@@ -43,19 +55,34 @@ mock_llm = fn input ->
           "shopper": {"prompt": "You search for products.", "tools": ["search_catalog"]}
         }
       }|}
-      
+
+    # PTC-Lisp with tools - first call executes tool, second returns result
+    has_tools and count == 1 ->
+      {:ok, ~s|```clojure\n(tool/search_catalog {:query "electronics"})\n```|}
+
+    has_tools ->
+      {:ok, ~s|```clojure\n(return {:items (tool/search_catalog {:query "electronics"})})\n```|}
+
+    # Must-return mode (tool_names=[] but still PTC-Lisp task)
+    not is_json_mode and tool_names == [] ->
+      {:ok, ~s|```clojure\n(return {:items [{:name "Phone" :price 699.0} {:name "Laptop" :price 1299.0}]})\n```|}
+
+    # JSON mode (synthesis gate)
+    is_json_mode ->
+      {:ok, ~S|{"summary": "Top items: Phone ($699) and Laptop ($1299)"}|}
+
     true ->
-      {:ok, "{\"tasks\": [], \"agents\": {}}"}
+      {:ok, "(return nil)"}
   end
 end
-```
+````
 
 ## 1. Registering Base Tools
 
 Base tools are the building blocks. They are Elixir functions with metadata.
 
 ```elixir
-search_fn = fn %{query: q} -> 
+search_fn = fn %{query: _q} -> 
   [%{name: "Phone", price: 699.0}, %{name: "Laptop", price: 1299.0}]
 end
 
@@ -155,6 +182,7 @@ Now let's see how all this comes together. The `PlanRunner` uses the `registry` 
   context_tags: ["shopping"]
 )
 
+# Kino.Tree.new(plan)
 Kino.Tree.new(results)
 ```
 
