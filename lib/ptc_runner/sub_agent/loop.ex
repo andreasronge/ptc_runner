@@ -539,6 +539,7 @@ defmodule PtcRunner.SubAgent.Loop do
       system: system_prompt,
       messages: messages,
       turn: state.turn,
+      output: :ptc_lisp,
       tool_names: tool_names,
       cache: state.cache
     }

@@ -901,7 +901,7 @@ defmodule PtcRunner.PlanRunnerTest do
         count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
 
         system = Map.get(input, :system, "")
-        is_json_mode = Map.get(input, :output) == :json
+        output_mode = Map.get(input, :output)
         tool_names = Map.get(input, :tool_names, [])
         has_tools = tool_names != []
 
@@ -919,20 +919,20 @@ defmodule PtcRunner.PlanRunnerTest do
             }|}
 
           # PTC-Lisp mode with tools - first call executes tool, second returns result
-          has_tools and count == 1 ->
+          output_mode == :ptc_lisp and has_tools and count == 1 ->
             {:ok, ~s|```clojure\n(tool/search_catalog {:query "electronics"})\n```|}
 
-          has_tools ->
+          output_mode == :ptc_lisp and has_tools ->
             {:ok,
              ~s|```clojure\n(return {:items (tool/search_catalog {:query "electronics"})})\n```|}
 
-          # Must-return mode (tool_names=[] but still PTC-Lisp task)
-          not is_json_mode and tool_names == [] ->
+          # PTC-Lisp mode without tools (must-return mode)
+          output_mode == :ptc_lisp ->
             {:ok,
              ~s|```clojure\n(return {:items [{:name "Phone" :price 699.0} {:name "Laptop" :price 1299.0}]})\n```|}
 
           # JSON mode (synthesis gate)
-          is_json_mode ->
+          output_mode == :json ->
             {:ok, ~S|{"summary": "Top items: Phone ($699) and Laptop ($1299)"}|}
 
           true ->
