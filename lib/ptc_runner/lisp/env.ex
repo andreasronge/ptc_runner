@@ -292,6 +292,14 @@ defmodule PtcRunner.Lisp.Env do
       {:combinations, {:normal, &Runtime.combinations/2}},
 
       # ============================================================
+      # Tree Traversal
+      # ============================================================
+      {:walk, {:normal, &Runtime.walk/3}},
+      {:prewalk, {:normal, &Runtime.prewalk/2}},
+      {:postwalk, {:normal, &Runtime.postwalk/2}},
+      {:"tree-seq", {:normal, &Runtime.tree_seq/3}},
+
+      # ============================================================
       # Map operations
       # ============================================================
       {:get, {:multi_arity, :get, {&Runtime.get/2, &Runtime.get/3}}},
@@ -375,6 +383,8 @@ defmodule PtcRunner.Lisp.Env do
       {:vector, {:collect, &Function.identity/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},
+      {:sequential?, {:normal, &Runtime.sequential?/1}},
+      {:seq?, {:normal, &Runtime.seq?/1}},
       {:type, {:normal, &Runtime.type_of/1}},
 
       # ============================================================

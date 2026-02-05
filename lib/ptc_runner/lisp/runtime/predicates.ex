@@ -129,7 +129,19 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def map?(x), do: is_map(x) and not is_struct(x, MapSet)
 
-  def coll?(x), do: is_list(x)
+  # coll? returns true for all collections: vectors, maps, and sets
+  def coll?(x) when is_list(x), do: true
+  def coll?(%MapSet{}), do: true
+  def coll?(x) when is_map(x), do: true
+  def coll?(_), do: false
+
+  # sequential? returns true for ordered collections (vectors in PTC-Lisp)
+  # In Clojure, this is true for lists and vectors but not maps or sets
+  def sequential?(x), do: is_list(x)
+
+  # seq? in Clojure returns true for actual seqs (ISeq implementations)
+  # PTC-Lisp has no lazy sequences, so this is effectively the same as sequential?
+  def seq?(x), do: is_list(x)
 
   @doc "Returns the type of a value as a keyword."
   # credo:disable-for-next-line

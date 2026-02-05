@@ -1650,6 +1650,57 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ;; => [[1 5] [2 4]]
 ```
 
+#### Tree Traversal
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `walk` | `(walk inner outer form)` | Generic tree walker - applies inner to children, outer to result |
+| `prewalk` | `(prewalk f form)` | Transform tree top-down (pre-order traversal) |
+| `postwalk` | `(postwalk f form)` | Transform tree bottom-up (post-order traversal) |
+| `tree-seq` | `(tree-seq branch? children root)` | Flatten tree to depth-first sequence |
+
+These functions work on all collection types: vectors, maps, and sets.
+
+```clojure
+;; walk: apply inner to each element, then outer to the result
+(walk inc #(apply + %) [1 2 3])  ; => 9 (inc each, then sum)
+(walk identity identity [1 2 3]) ; => [1 2 3]
+(walk inc identity #{1 2 3})     ; => #{2 3 4} (sets are preserved)
+
+;; prewalk: transform nodes top-down
+(prewalk #(if (number? %) (inc %) %) [1 [2 3]])
+; => [2 [3 4]]
+
+;; postwalk: transform nodes bottom-up
+(postwalk #(if (number? %) (inc %) %) [1 [2 3]])
+; => [2 [3 4]]
+
+;; postwalk can aggregate after children are processed
+(postwalk #(if (vector? %) (apply + %) %) [[1 2] [3 4]])
+; => 10 (inner lists sum first: [3 7], then outer sums: 10)
+
+;; tree-seq: flatten hierarchical data
+(let [tree {:id 1 :children [{:id 2 :children []} {:id 3 :children []}]}]
+  (map :id (tree-seq :children :children tree)))
+; => [1 2 3]
+
+;; Practical: find all nodes matching criteria in a tree
+(let [tree {:name "root" :value 10 :children [
+             {:name "a" :value 5 :children []}
+             {:name "b" :value 15 :children []}]}]
+  (->> (tree-seq :children :children tree)
+       (filter #(> (:value %) 10))
+       (map :name)))
+; => ["b"]
+
+;; Transform all values in a nested structure
+(prewalk #(if (and (map? %) (:value %))
+             (update % :value inc)
+             %)
+         {:value 1 :nested {:value 2}})
+; => {:value 2 :nested {:value 3}}
+```
+
 #### Conversion
 
 | Function | Signature | Description |
@@ -2059,10 +2110,32 @@ The `seq` function converts a collection to a sequence:
 | `vector?` | Is vector? |
 | `map?` | Is map? |
 | `set?` | Is set? |
-| `coll?` | Is collection? (vectors only, not maps or strings) |
+| `coll?` | Is collection? (vectors, maps, or sets) |
+| `sequential?` | Is ordered collection? (vectors only) |
+| `seq?` | Is sequence? (vectors only; same as `sequential?` in PTC-Lisp) |
 | `type` | Returns type as keyword: `:nil`, `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function` |
 
-**Note:** In PTC-Lisp, `coll?` returns `true` only for vectors (and any future sequence types). Maps and strings are not considered collections by `coll?`. This affects functions like `flatten` which only flatten values where `coll?` is true.
+```clojure
+;; coll? returns true for vectors, maps, and sets
+(coll? [1 2 3])    ; => true
+(coll? {:a 1})     ; => true
+(coll? #{1 2})     ; => true
+(coll? "hello")    ; => false
+(coll? 42)         ; => false
+
+;; sequential? returns true only for ordered collections (vectors)
+(sequential? [1 2 3])  ; => true
+(sequential? {:a 1})   ; => false
+(sequential? #{1 2})   ; => false
+
+;; seq? is effectively the same as sequential? (no lazy sequences in PTC-Lisp)
+(seq? [1 2 3])     ; => true
+
+;; Useful with tree-seq for walking nested vectors
+(tree-seq sequential? seq [[1 2] [3 [4 5]]])
+```
+
+**Note:** Strings are not considered collections by any predicate. This affects functions like `flatten` which only flatten values where `coll?` is true.
 
 **Collection Functions on Maps and Strings:**
 

@@ -114,6 +114,12 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate pairs(coll), to: Collection
   defdelegate combinations(coll, n), to: Collection
 
+  # Tree Traversal
+  defdelegate walk(inner, outer, form), to: Collection
+  defdelegate prewalk(f, form), to: Collection
+  defdelegate postwalk(f, form), to: Collection
+  defdelegate tree_seq(branch?, children, root), to: Collection
+
   # ============================================================
   # Map Operations
   # ============================================================
@@ -243,6 +249,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate set?(x), to: Predicates
   defdelegate map?(x), to: Predicates
   defdelegate coll?(x), to: Predicates
+  defdelegate sequential?(x), to: Predicates
+  defdelegate seq?(x), to: Predicates
   defdelegate type_of(x), to: Predicates
   defdelegate set(coll), to: Predicates
   defdelegate vec(coll), to: Predicates
