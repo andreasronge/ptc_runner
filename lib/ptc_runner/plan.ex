@@ -11,6 +11,16 @@ defmodule PtcRunner.Plan do
   - `agents` - Map of agent ID to agent spec (prompt, tools)
   - `tasks` - List of tasks in execution order
 
+  ## Task Output Mode
+
+  Tasks can specify an explicit `output` field to control execution mode:
+  - `"ptc_lisp"` or `"lisp"` - Use PTC-Lisp mode (supports tools and code generation)
+  - `"json"` - Use JSON mode (simpler, no code generation)
+  - `nil` (default) - Auto-detect: tools present → PTC-Lisp, no tools → JSON
+
+  This allows tasks without tools to still use PTC-Lisp for complex data
+  transformations using built-in functions like `map`, `filter`, `reduce`.
+
   ## Parsing
 
   The parser handles common LLM variations:
@@ -31,6 +41,8 @@ defmodule PtcRunner.Plan do
 
   @type task_type :: :task | :synthesis_gate | :human_review
 
+  @type output_mode :: :ptc_lisp | :json | nil
+
   @type task :: %{
           id: String.t(),
           agent: String.t(),
@@ -40,6 +52,8 @@ defmodule PtcRunner.Plan do
           max_retries: non_neg_integer(),
           critical: boolean(),
           type: task_type(),
+          # Output mode: :ptc_lisp, :json, or nil (auto-detect based on tools)
+          output: output_mode(),
           # Output signature for JSON mode (e.g., "{stocks [{symbol :string, price :float}]}")
           signature: String.t() | nil,
           # Verification (Phase 1)
@@ -205,6 +219,7 @@ defmodule PtcRunner.Plan do
       max_retries: task["max_retries"] || task["retries"] || 1,
       critical: normalize_critical(task["critical"]),
       type: normalize_task_type(task["type"]),
+      output: normalize_output_mode(task["output"]),
       signature: task["signature"] || task["output_signature"],
       verification: task["verification"],
       on_verification_failure: normalize_on_verification_failure(task["on_verification_failure"])
@@ -222,6 +237,7 @@ defmodule PtcRunner.Plan do
       max_retries: 1,
       critical: true,
       type: :task,
+      output: nil,
       signature: nil,
       verification: nil,
       on_verification_failure: :stop
@@ -262,6 +278,15 @@ defmodule PtcRunner.Plan do
   defp normalize_task_type("human_approval"), do: :human_review
   defp normalize_task_type("manual"), do: :human_review
   defp normalize_task_type(_), do: :task
+
+  # Normalize output mode - nil means auto-detect based on tools
+  defp normalize_output_mode(nil), do: nil
+  defp normalize_output_mode("ptc_lisp"), do: :ptc_lisp
+  defp normalize_output_mode("lisp"), do: :ptc_lisp
+  defp normalize_output_mode("json"), do: :json
+  defp normalize_output_mode(:ptc_lisp), do: :ptc_lisp
+  defp normalize_output_mode(:json), do: :json
+  defp normalize_output_mode(_), do: nil
 
   defp normalize_on_failure(nil), do: :stop
   defp normalize_on_failure("skip"), do: :skip
