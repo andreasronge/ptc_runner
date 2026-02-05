@@ -568,6 +568,7 @@ defmodule PtcRunner.PlanRunner do
         base_opts = [
           prompt: prompt,
           tools: tools,
+          output: :ptc_lisp,
           max_turns: opts.max_turns,
           timeout: opts.timeout
         ]
