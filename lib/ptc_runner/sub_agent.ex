@@ -135,6 +135,7 @@ defmodule PtcRunner.SubAgent do
           retry_turns: non_neg_integer(),
           prompt_limit: map() | nil,
           timeout: pos_integer(),
+          max_heap: pos_integer() | nil,
           mission_timeout: pos_integer() | nil,
           llm_retry: map() | nil,
           llm: atom() | (map() -> {:ok, llm_response()} | {:error, term()}) | nil,
@@ -173,6 +174,7 @@ defmodule PtcRunner.SubAgent do
     :parsed_signature,
     :schema,
     :prompt_limit,
+    :max_heap,
     :mission_timeout,
     :llm_retry,
     :llm,
@@ -221,7 +223,8 @@ defmodule PtcRunner.SubAgent do
   - `max_turns` - Positive integer for maximum LLM calls (default: 5)
   - `retry_turns` - Non-negative integer for extra turns in must-return mode (default: 0)
   - `prompt_limit` - Map with truncation config for LLM view
-  - `timeout` - Positive integer for max milliseconds per Lisp execution (default: 1000)
+  - `timeout` - Positive integer for max milliseconds per Lisp execution (default: 5000)
+  - `max_heap` - Positive integer for max heap size in words per Lisp execution (default: app config or 1,250,000 ~10MB)
   - `mission_timeout` - Positive integer for max milliseconds for entire execution
   - `llm_retry` - Map with infrastructure retry config
   - `llm` - Atom or function for optional LLM override
@@ -434,6 +437,7 @@ defmodule PtcRunner.SubAgent do
         :retry_turns,
         :timeout,
         :pmap_timeout,
+        :max_heap,
         :prompt_limit,
         :mission_timeout,
         :llm_retry,
