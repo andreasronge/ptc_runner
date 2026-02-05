@@ -28,6 +28,10 @@ defmodule PtcRunner.Sandbox do
   alias PtcRunner.Context
   alias PtcRunner.Json.Interpreter
 
+  # Default resource limits
+  @default_timeout 1000
+  @default_max_heap 1_250_000
+
   @typedoc """
   Execution metrics for a program run.
   """
@@ -51,8 +55,8 @@ defmodule PtcRunner.Sandbox do
     - context: The execution context
     - opts: Options (timeout, max_heap, eval_fn)
       - `:eval_fn` - Custom evaluator function (default: Interpreter.eval/2)
-      - `:timeout` - Timeout in milliseconds (default: 1000)
-      - `:max_heap` - Max heap size in words (default: 1_250_000)
+      - `:timeout` - Timeout in milliseconds (default: 1000, configurable via `:default_timeout`)
+      - `:max_heap` - Max heap size in words (default: 1_250_000, configurable via `:default_max_heap`)
 
   ## Returns
     - `{:ok, result, metrics, memory}` on success
@@ -64,8 +68,11 @@ defmodule PtcRunner.Sandbox do
              {atom(), non_neg_integer()} | {atom(), String.t()} | {atom(), String.t(), any()}}
 
   def execute(ast, context, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, 1000)
-    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)
+    default_max_heap = Application.get_env(:ptc_runner, :default_max_heap, @default_max_heap)
+
+    timeout = Keyword.get(opts, :timeout, default_timeout)
+    max_heap = Keyword.get(opts, :max_heap, default_max_heap)
     eval_fn = Keyword.get(opts, :eval_fn, &Interpreter.eval/2)
 
     # Spawn isolated process with resource limits
