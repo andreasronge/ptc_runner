@@ -430,4 +430,296 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(update-in [[1 2] [3 4]] [1 0] inc)")
     end
   end
+
+  describe "Clojure conformance - walk" do
+    @describetag :clojure
+
+    # Based on examples from https://clojuredocs.org/clojure.walk/walk
+    # Note: In Clojure these are in clojure.walk namespace, PTC-Lisp provides them at top level
+
+    test "walk with multiplication and sum" do
+      # (walk #(* 2 %) #(apply + %) [1 2 3 4 5]) => 30
+      assert_clojure_equivalent("(walk #(* 2 %) #(apply + %) [1 2 3 4 5])")
+    end
+
+    test "walk with second and max" do
+      # (walk second #(apply max %) [[1 2] [3 4] [5 6]]) => 6
+      assert_clojure_equivalent("(walk second #(apply max %) [[1 2] [3 4] [5 6]])")
+    end
+
+    test "walk with first and max" do
+      # (walk first #(apply max %) [[1 2] [3 4] [5 6]]) => 5
+      assert_clojure_equivalent("(walk first #(apply max %) [[1 2] [3 4] [5 6]])")
+    end
+
+    test "walk with first and reverse" do
+      # (walk first reverse [[1 2] [3 4] [5 6]]) => (5 3 1)
+      assert_clojure_equivalent("(walk first reverse [[1 2] [3 4] [5 6]])")
+    end
+
+    test "walk with identity on vectors" do
+      assert_clojure_equivalent("(walk identity identity [1 2 3])")
+    end
+
+    test "walk with inc and sum" do
+      assert_clojure_equivalent("(walk inc #(apply + %) [1 2 3])")
+    end
+
+    test "walk on sets" do
+      assert_clojure_equivalent(~S|(walk inc identity #{1 2 3})|)
+    end
+
+    test "walk identity on sets" do
+      assert_clojure_equivalent(~S|(walk identity identity #{1 2 3})|)
+    end
+  end
+
+  describe "Clojure conformance - prewalk" do
+    @describetag :clojure
+
+    # Based on examples from https://clojuredocs.org/clojure.walk/prewalk
+
+    test "prewalk increments all numbers in matrix" do
+      # (prewalk #(if (number? %) (inc %) %) [[1 2 3] [4 5 6] [7 8 9]])
+      assert_clojure_equivalent("(prewalk #(if (number? %) (inc %) %) [[1 2 3] [4 5 6] [7 8 9]])")
+    end
+
+    test "prewalk identity preserves structure" do
+      assert_clojure_equivalent("(prewalk identity [1 [2 3] [4 [5 6]]])")
+    end
+
+    test "prewalk doubles all numbers" do
+      assert_clojure_equivalent("(prewalk #(if (number? %) (* 2 %) %) [1 [2 [3 4]]])")
+    end
+
+    test "prewalk on nested maps" do
+      assert_clojure_equivalent("(prewalk #(if (number? %) (inc %) %) {:a 1 :b {:c 2 :d 3}})")
+    end
+
+    test "prewalk on scalar" do
+      assert_clojure_equivalent("(prewalk inc 5)")
+    end
+
+    test "prewalk on nil" do
+      assert_clojure_equivalent("(prewalk identity nil)")
+    end
+
+    test "prewalk on empty vector" do
+      assert_clojure_equivalent("(prewalk identity [])")
+    end
+
+    test "prewalk on sets" do
+      assert_clojure_equivalent(~S|(prewalk #(if (number? %) (inc %) %) #{1 2 3})|)
+    end
+
+    # Note: nested sets test skipped - validator can't parse nested sets from Clojure output
+
+    # Note: (name) not available in PTC-Lisp
+    # test "prewalk transforms keywords to strings" do
+    #   assert_clojure_equivalent("(prewalk #(if (keyword? %) (name %) %) [:a :b [:c :d]])")
+    # end
+  end
+
+  describe "Clojure conformance - postwalk" do
+    @describetag :clojure
+
+    # Based on examples from https://clojuredocs.org/clojure.walk/postwalk
+
+    test "postwalk increments all numbers" do
+      assert_clojure_equivalent("(postwalk #(if (number? %) (inc %) %) [1 [2 3]])")
+    end
+
+    test "postwalk identity preserves structure" do
+      assert_clojure_equivalent("(postwalk identity [1 [2 3] [4 [5 6]]])")
+    end
+
+    test "postwalk doubles all numbers" do
+      assert_clojure_equivalent("(postwalk #(if (number? %) (* 2 %) %) [1 [2 [3 4]]])")
+    end
+
+    test "postwalk on nested maps" do
+      assert_clojure_equivalent("(postwalk #(if (number? %) (inc %) %) {:a 1 :b {:c 2 :d 3}})")
+    end
+
+    test "postwalk on scalar" do
+      assert_clojure_equivalent("(postwalk inc 5)")
+    end
+
+    test "postwalk on nil" do
+      assert_clojure_equivalent("(postwalk identity nil)")
+    end
+
+    test "postwalk on empty vector" do
+      assert_clojure_equivalent("(postwalk identity [])")
+    end
+
+    test "postwalk can aggregate bottom-up" do
+      # Inner vectors are processed first, so we can sum them
+      assert_clojure_equivalent("(postwalk #(if (vector? %) (apply + %) %) [[1 2] [3 4]])")
+    end
+
+    test "postwalk on sets" do
+      assert_clojure_equivalent(~S|(postwalk #(if (number? %) (inc %) %) #{1 2 3})|)
+    end
+
+    # Note: nested sets test skipped - validator can't parse nested sets from Clojure output
+
+    # Note: (name) not available in PTC-Lisp
+    # test "postwalk transforms keywords to strings" do
+    #   assert_clojure_equivalent("(postwalk #(if (keyword? %) (name %) %) [:a :b [:c :d]])")
+    # end
+  end
+
+  describe "Clojure conformance - tree-seq" do
+    @describetag :clojure
+
+    # Based on examples from https://clojuredocs.org/clojure.core/tree-seq
+
+    test "tree-seq with vector? and seq on nested vectors" do
+      # Example: (tree-seq vector? seq [[1 2 [3]] [4]])
+      assert_clojure_equivalent("(tree-seq vector? seq [[1 2 [3]] [4]])")
+    end
+
+    test "tree-seq with coll? predicate" do
+      assert_clojure_equivalent("(tree-seq coll? seq [[1 2] [3 4]])")
+    end
+
+    test "tree-seq on deeply nested structure" do
+      assert_clojure_equivalent("(tree-seq vector? seq [1 [2 [3 [4]]]])")
+    end
+
+    test "tree-seq on flat vector returns just the vector and its elements" do
+      assert_clojure_equivalent("(tree-seq vector? seq [1 2 3])")
+    end
+
+    test "tree-seq with empty nested vectors" do
+      assert_clojure_equivalent("(tree-seq vector? seq [[] [1] []])")
+    end
+
+    test "tree-seq on single element" do
+      assert_clojure_equivalent("(tree-seq vector? seq [1])")
+    end
+
+    test "tree-seq on empty vector" do
+      assert_clojure_equivalent("(tree-seq vector? seq [])")
+    end
+
+    test "tree-seq with scalar root (non-branch)" do
+      assert_clojure_equivalent("(tree-seq vector? seq 42)")
+    end
+
+    test "tree-seq extracts values from tree via map" do
+      # DFS traversal extracting :value from each node
+      assert_clojure_equivalent(~S|
+        (let [tree {:value 1 :children [{:value 2 :children []} {:value 3 :children []}]}]
+          (map :value (tree-seq :children :children tree)))
+      |)
+    end
+
+    test "tree-seq with deeper tree structure" do
+      assert_clojure_equivalent(~S|
+        (let [tree {:id 1 :children [
+                     {:id 2 :children [{:id 4 :children []}]}
+                     {:id 3 :children []}]}]
+          (map :id (tree-seq :children :children tree)))
+      |)
+    end
+
+    test "tree-seq with custom branch? function" do
+      assert_clojure_equivalent(~S|
+        (tree-seq #(and (vector? %) (not (empty? %))) seq [[1] [2 [3]] []])
+      |)
+    end
+
+    test "tree-seq counts nodes correctly" do
+      assert_clojure_equivalent("(count (tree-seq vector? seq [[1 2] [3 [4 5]]]))")
+    end
+
+    test "tree-seq with filter to find specific nodes" do
+      assert_clojure_equivalent(~S|
+        (filter number? (tree-seq vector? seq [[1 2] [3 [4]]]))
+      |)
+    end
+
+    test "tree-seq with sequential? predicate" do
+      assert_clojure_equivalent("(tree-seq sequential? seq [[1 2] [3 [4]]])")
+    end
+  end
+
+  describe "Clojure conformance - collection predicates" do
+    @describetag :clojure
+
+    # sequential? - true for ordered collections (vectors/lists)
+    test "sequential? on vectors" do
+      assert_clojure_equivalent("(sequential? [1 2 3])")
+      assert_clojure_equivalent("(sequential? [])")
+    end
+
+    test "sequential? on non-sequential" do
+      assert_clojure_equivalent("(sequential? {:a 1})")
+      assert_clojure_equivalent(~S|(sequential? #{1 2})|)
+      assert_clojure_equivalent("(sequential? 42)")
+      assert_clojure_equivalent("(sequential? nil)")
+      assert_clojure_equivalent(~S|(sequential? "hello")|)
+    end
+
+    # coll? - true for all collections (vectors, maps, sets)
+    test "coll? on vectors" do
+      assert_clojure_equivalent("(coll? [1 2 3])")
+      assert_clojure_equivalent("(coll? [])")
+    end
+
+    test "coll? on maps" do
+      assert_clojure_equivalent("(coll? {:a 1})")
+      assert_clojure_equivalent("(coll? {})")
+    end
+
+    test "coll? on sets" do
+      assert_clojure_equivalent(~S|(coll? #{1 2 3})|)
+      assert_clojure_equivalent(~S|(coll? #{})|)
+    end
+
+    test "coll? on non-collections" do
+      assert_clojure_equivalent("(coll? 42)")
+      assert_clojure_equivalent("(coll? nil)")
+      assert_clojure_equivalent(~S|(coll? "hello")|)
+      assert_clojure_equivalent("(coll? :keyword)")
+    end
+
+    # vector? tests
+    test "vector? on vectors" do
+      assert_clojure_equivalent("(vector? [1 2 3])")
+      assert_clojure_equivalent("(vector? [])")
+    end
+
+    test "vector? on non-vectors" do
+      assert_clojure_equivalent("(vector? {:a 1})")
+      assert_clojure_equivalent(~S|(vector? #{1 2})|)
+      assert_clojure_equivalent("(vector? nil)")
+    end
+
+    # map? tests
+    test "map? on maps" do
+      assert_clojure_equivalent("(map? {:a 1})")
+      assert_clojure_equivalent("(map? {})")
+    end
+
+    test "map? on non-maps" do
+      assert_clojure_equivalent("(map? [1 2 3])")
+      assert_clojure_equivalent(~S|(map? #{1 2})|)
+      assert_clojure_equivalent("(map? nil)")
+    end
+
+    # set? tests
+    test "set? on sets" do
+      assert_clojure_equivalent(~S|(set? #{1 2 3})|)
+      assert_clojure_equivalent(~S|(set? #{})|)
+    end
+
+    test "set? on non-sets" do
+      assert_clojure_equivalent("(set? [1 2 3])")
+      assert_clojure_equivalent("(set? {:a 1})")
+      assert_clojure_equivalent("(set? nil)")
+    end
+  end
 end

@@ -1054,4 +1054,120 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     without_h = do_combinations(t, n)
     with_h ++ without_h
   end
+
+  # ============================================================
+  # Tree Traversal
+  # ============================================================
+
+  @doc """
+  Generic tree walker. Applies inner to each element of form, then applies outer to the result.
+
+  For lists, walks each element. For maps, walks each [key, value] pair.
+  For sets, walks each element and reconstructs the set.
+  For scalars, just applies outer.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.walk(&Function.identity/1, &Function.identity/1, [1, 2, 3])
+      [1, 2, 3]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.walk(&Function.identity/1, &Enum.sum/1, [1, 2, 3])
+      6
+  """
+  def walk(inner, outer, form) when is_list(form) do
+    Callable.call(outer, [Enum.map(form, &Callable.call(inner, [&1]))])
+  end
+
+  def walk(inner, outer, %MapSet{} = form) do
+    walked = form |> Enum.map(&Callable.call(inner, [&1])) |> MapSet.new()
+    Callable.call(outer, [walked])
+  end
+
+  def walk(inner, outer, form) when is_map(form) and not is_struct(form) do
+    walked =
+      Enum.map(form, fn {k, v} ->
+        result = Callable.call(inner, [[k, v]])
+
+        case result do
+          [wk, wv] -> {wk, wv}
+          other -> raise "walk: inner function must return [key, value], got: #{inspect(other)}"
+        end
+      end)
+
+    Callable.call(outer, [Map.new(walked)])
+  end
+
+  def walk(_inner, outer, form), do: Callable.call(outer, [form])
+
+  @doc """
+  Transform a tree top-down by applying f to each node before recursing into children.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.prewalk(&Function.identity/1, [1, [2, 3]])
+      [1, [2, 3]]
+  """
+  def prewalk(f, form) do
+    walked = Callable.call(f, [form])
+    walk(&prewalk(f, &1), &Function.identity/1, walked)
+  end
+
+  @doc """
+  Transform a tree bottom-up by applying f to each node after recursing into children.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.postwalk(&Function.identity/1, [1, [2, 3]])
+      [1, [2, 3]]
+  """
+  def postwalk(f, form) do
+    walked = walk(&postwalk(f, &1), &Function.identity/1, form)
+    Callable.call(f, [walked])
+  end
+
+  @doc """
+  Returns a depth-first lazy sequence of all nodes in a tree.
+
+  branch? is a predicate that returns true if a node has children.
+  children returns the children of a branch node.
+
+  When branch? or children is a keyword, it is used to access that key from maps.
+  For branch?, the result is checked for truthiness.
+
+  ## Examples
+
+      iex> tree = %{id: 1, children: [%{id: 2, children: []}, %{id: 3, children: []}]}
+      iex> result = PtcRunner.Lisp.Runtime.Collection.tree_seq(
+      ...>   fn node -> is_map(node) && Map.has_key?(node, :children) end,
+      ...>   fn node -> Map.get(node, :children, []) end,
+      ...>   tree
+      ...> )
+      iex> Enum.map(result, & &1.id)
+      [1, 2, 3]
+  """
+  def tree_seq(branch?, children, root) do
+    # Convert atoms to functions that do map access
+    branch_fn = to_callable(branch?)
+    children_fn = to_callable(children)
+    tree_seq_acc(branch_fn, children_fn, root, []) |> Enum.reverse()
+  end
+
+  # Convert an atom (keyword) to a function that accesses that key
+  defp to_callable(key) when is_atom(key), do: fn item -> FlexAccess.flex_get(item, key) end
+  defp to_callable(f), do: f
+
+  defp tree_seq_acc(branch_fn, children_fn, node, acc) do
+    acc = [node | acc]
+
+    if call_fn(branch_fn, node) do
+      kids = call_fn(children_fn, node) || []
+      Enum.reduce(kids, acc, &tree_seq_acc(branch_fn, children_fn, &1, &2))
+    else
+      acc
+    end
+  end
+
+  # Call a function (either a plain function or a Callable)
+  defp call_fn(f, arg) when is_function(f, 1), do: f.(arg)
+  defp call_fn(f, arg), do: Callable.call(f, [arg])
 end

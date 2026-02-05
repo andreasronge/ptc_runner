@@ -415,6 +415,9 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   # PTC-specific function stubs for Clojure
   defp ptc_stubs do
     ~S"""
+    ;; Import clojure.walk functions (walk, prewalk, postwalk)
+    (require '[clojure.walk :refer [walk prewalk postwalk]])
+
     ;; Helper to coerce keyword to string for comparison (PTC-Lisp behavior)
     (defn- coerce-for-compare [v]
       (if (keyword? v) (name v) v))
