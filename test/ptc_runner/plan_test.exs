@@ -615,9 +615,10 @@ defmodule PtcRunner.PlanTest do
                :duplicate_id in categories
     end
 
-    test "handles empty plan" do
+    test "rejects empty plan" do
       {:ok, plan} = Plan.parse(%{"tasks" => []})
-      assert Plan.validate(plan) == :ok
+      {:error, issues} = Plan.validate(plan)
+      assert Enum.any?(issues, &(&1.category == :empty_plan))
     end
 
     test "allows valid DAG with multiple roots" do

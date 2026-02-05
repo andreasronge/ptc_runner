@@ -59,11 +59,11 @@ defmodule PtcRunner.TraceLog.EventTest do
       assert Event.sanitize(string) == "hello world"
     end
 
-    test "summarizes large strings (>1KB) with preview" do
-      large_string = String.duplicate("a", 2000)
+    test "summarizes large strings (>8KB) with preview" do
+      large_string = String.duplicate("a", 10_000)
       result = Event.sanitize(large_string)
       assert result =~ String.duplicate("a", 200) <> "..."
-      assert result =~ "[String truncated — 2000 bytes total]"
+      assert result =~ "[String truncated — 10000 bytes total]"
     end
 
     test "keeps small lists" do

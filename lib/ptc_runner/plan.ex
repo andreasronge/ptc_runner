@@ -339,6 +339,7 @@ defmodule PtcRunner.Plan do
   def validate(%__MODULE__{} = plan) do
     issues =
       []
+      |> check_empty_tasks(plan)
       |> check_duplicate_ids(plan)
       |> check_missing_dependencies(plan)
       |> check_missing_agents(plan)
@@ -440,6 +441,23 @@ defmodule PtcRunner.Plan do
   end
 
   defp validate_predicate(_, _valid_bindings), do: :ok
+
+  # Check that the plan has at least one task
+  defp check_empty_tasks(issues, plan) do
+    if plan.tasks == [] do
+      [
+        %{
+          severity: :error,
+          category: :empty_plan,
+          message: "Plan has no tasks. The LLM may have failed to generate tasks.",
+          task_id: nil
+        }
+        | issues
+      ]
+    else
+      issues
+    end
+  end
 
   # Check for duplicate task IDs
   defp check_duplicate_ids(issues, plan) do

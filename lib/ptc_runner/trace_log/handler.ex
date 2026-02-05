@@ -14,6 +14,7 @@ defmodule PtcRunner.TraceLog.Handler do
   alias PtcRunner.TraceLog.{Collector, Event}
 
   @events [
+    # SubAgent events
     [:ptc_runner, :sub_agent, :run, :start],
     [:ptc_runner, :sub_agent, :run, :stop],
     [:ptc_runner, :sub_agent, :run, :exception],
@@ -30,7 +31,15 @@ defmodule PtcRunner.TraceLog.Handler do
     [:ptc_runner, :sub_agent, :pcalls, :stop],
     [:ptc_runner, :sub_agent, :compiled, :execute, :start],
     [:ptc_runner, :sub_agent, :compiled, :execute, :stop],
-    [:ptc_runner, :sub_agent, :compiled, :execute, :exception]
+    [:ptc_runner, :sub_agent, :compiled, :execute, :exception],
+    # PlanExecutor events
+    [:ptc_runner, :plan_executor, :plan, :generated],
+    [:ptc_runner, :plan_executor, :execution, :start],
+    [:ptc_runner, :plan_executor, :execution, :stop],
+    [:ptc_runner, :plan_executor, :task, :start],
+    [:ptc_runner, :plan_executor, :task, :stop],
+    [:ptc_runner, :plan_executor, :replan, :start],
+    [:ptc_runner, :plan_executor, :replan, :stop]
   ]
 
   @doc """
