@@ -171,11 +171,23 @@ defmodule PtcRunner.MetaPlanner do
     #{tools_section}#{constraints_section}#{validation_section}
     ## Plan Design Guidelines
 
-    1. **Break down the mission** into discrete, focused tasks
+    1. **Decompose first** - before creating tasks, work backwards from the desired outcome:
+       - What intermediate results must be produced to accomplish this mission?
+       - Does the mission require any computations, comparisons, or derived values?
+       - For each intermediate result, what specific inputs are needed?
+       Then create tasks that produce each required intermediate result.
     2. **Use appropriate tools** - only reference tools from the available list
     3. **Define dependencies** - tasks that need results from other tasks should declare depends_on
     4. **Add verification** - include predicates to validate task outputs (see system prompt for syntax)
     5. **Keep it simple** - prefer fewer, well-defined tasks over many small ones
+    6. **Create computation agents when needed** - if the mission requires calculations, derived metrics,
+       or data transformations, create a dedicated agent with no tools and a precise signature for that step.
+       Don't bury computation inside synthesis — make it an explicit task with typed inputs and outputs.
+       IMPORTANT: Set `"output": "ptc_lisp"` on computation tasks. This makes the agent write executable
+       PTC-Lisp programs with verified arithmetic instead of computing values mentally. Their prompt should
+       instruct them to extract values into `let` bindings and use arithmetic expressions (`/`, `*`, `+`, `-`).
+       PTC-Lisp also supports conditionals, string operations, and collection functions (`map`, `filter`,
+       `reduce`, `sort-by`) for data transformations.
 
     ## Task Types
 
@@ -195,6 +207,7 @@ defmodule PtcRunner.MetaPlanner do
           "agent": "agent_name",
           "input": "What this task should accomplish",
           "depends_on": ["ids_of_upstream_tasks"],
+          "output": "ptc_lisp or json (optional, auto-detects if omitted)",
           "signature": "{field :type}",
           "verification": "(optional PTC-Lisp predicate)",
           "on_verification_failure": "retry"
@@ -211,9 +224,14 @@ defmodule PtcRunner.MetaPlanner do
 
     ## Important Rules
 
-    - Task IDs must be unique and descriptive (e.g., "fetch_prices", "summarize_research")
+    - Task IDs must be unique and descriptive (e.g., "fetch_prices", "compute_ratio", "summarize_research")
     - Only reference tools that are in the available tools list
-    - Agents without tools will receive JSON input and produce JSON output
+    - Set `"output": "ptc_lisp"` on computation tasks (arithmetic, ratios, aggregations) so the interpreter
+      verifies the math. Omit `output` for tasks with tools (auto-detects to ptc_lisp) or pure Q&A/synthesis
+      (auto-detects to json).
+    - Computation agents receive upstream task results as context and produce PTC-Lisp programs.
+      Always give these agents a precise signature (e.g., `"{ratio :float, interpretation :string}"`).
+      Their prompt should instruct them to use `let` bindings and arithmetic expressions for calculations
     - Use `on_verification_failure: "replan"` for critical tasks that may need strategy changes
 
     Generate the execution plan now:
@@ -281,6 +299,12 @@ defmodule PtcRunner.MetaPlanner do
               "type" => %{
                 "type" => "string",
                 "description" => "Task type (e.g., synthesis_gate)"
+              },
+              "output" => %{
+                "type" => "string",
+                "enum" => ["ptc_lisp", "json"],
+                "description" =>
+                  "Execution mode: ptc_lisp for computation tasks (verified arithmetic), json for Q&A/synthesis. Default: auto-detect (tools → ptc_lisp, no tools → json)"
               },
               "signature" => %{
                 "type" => "string",
@@ -486,6 +510,7 @@ defmodule PtcRunner.MetaPlanner do
           "agent": "agent_type",
           "input": "task description",
           "depends_on": ["dependency_ids"],
+          "output": "ptc_lisp or json (optional, for computation tasks use ptc_lisp)",
           "signature": "{field :type}",
           "verification": "(optional Lisp predicate)",
           "on_verification_failure": "retry"

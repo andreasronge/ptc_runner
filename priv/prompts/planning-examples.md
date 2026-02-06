@@ -60,3 +60,74 @@
 - **Type-safe verification**: Checks data types and presence
 - **Clear synthesis input**: Specifies exact output fields
 - **Appropriate failure handling**: `retry` for recoverable failures
+
+## Example: Computation Between Fetch and Synthesis
+
+When a mission requires derived values (ratios, comparisons, aggregations), create a
+dedicated computation agent between the data-fetching and synthesis steps.
+
+**Mission:** "Which region had the fastest revenue growth last year?"
+
+**Available Tools:**
+- `fetch_section`: Retrieve a document section by ID
+
+**Ideal Plan:**
+```json
+{
+  "tasks": [
+    {
+      "id": "fetch_current_year",
+      "agent": "fetcher",
+      "input": "Fetch the section with current year regional revenue breakdown",
+      "signature": "{node_id :string, content :string}",
+      "on_verification_failure": "retry"
+    },
+    {
+      "id": "fetch_prior_year",
+      "agent": "fetcher",
+      "input": "Fetch the section with prior year regional revenue breakdown",
+      "signature": "{node_id :string, content :string}",
+      "on_verification_failure": "retry"
+    },
+    {
+      "id": "compute_growth",
+      "agent": "calculator",
+      "input": "Extract current and prior year revenue for each region, then compute year-over-year growth rate as ((current - prior) / prior) * 100 for each region",
+      "depends_on": ["fetch_current_year", "fetch_prior_year"],
+      "output": "ptc_lisp",
+      "signature": "{regions [{name :string, current :float, prior :float, growth_pct :float}]}",
+      "verification": "(> (count (get data/result \"regions\")) 0)",
+      "on_verification_failure": "retry"
+    },
+    {
+      "id": "final_answer",
+      "agent": "synthesizer",
+      "type": "synthesis_gate",
+      "input": "Identify which region grew fastest, by how much, and what might explain the difference",
+      "depends_on": ["compute_growth"],
+      "signature": "{fastest_region :string, growth_pct :float, summary :string}"
+    }
+  ],
+  "agents": {
+    "fetcher": {
+      "prompt": "Retrieve the requested document section. Return its content with metadata.",
+      "tools": ["fetch_section"]
+    },
+    "calculator": {
+      "prompt": "You are a quantitative analyst. Extract numeric values into let bindings and use arithmetic expressions (/, *, +, -) to compute results. Do NOT calculate values mentally — write the expressions and let the interpreter compute them. Example: (let [current 450.0 prior 380.0] {\"growth_pct\" (* 100.0 (/ (- current prior) prior))})",
+      "tools": []
+    },
+    "synthesizer": {
+      "prompt": "Synthesize the computed results into a clear, evidence-based answer.",
+      "tools": []
+    }
+  }
+}
+```
+
+**Why This Plan Works:**
+- **Decomposition first**: Works backwards from the question to identify what specific values and formulas are needed
+- **Targeted fetches**: Only fetches sections containing the required input values
+- **Explicit computation step**: The `calculator` agent extracts numbers and computes derived values — not buried in synthesis
+- **`output: "ptc_lisp"`**: The computation task uses PTC-Lisp mode so the interpreter verifies arithmetic instead of the LLM computing values mentally
+- **Typed signatures**: Each step has a precise schema so downstream tasks know what they receive
