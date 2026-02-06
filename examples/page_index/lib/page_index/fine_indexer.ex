@@ -92,7 +92,10 @@ defmodule PageIndex.FineIndexer do
 
   # Attach content from pages to each section
   defp attach_content(sections, pages) do
-    sorted = Enum.sort_by(sections, & &1.start_page)
+    sorted =
+      sections
+      |> Enum.filter(& &1.start_page)
+      |> Enum.sort_by(& &1.start_page)
 
     sorted
     |> Enum.with_index()
