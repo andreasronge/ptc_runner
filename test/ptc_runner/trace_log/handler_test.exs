@@ -55,8 +55,8 @@ defmodule PtcRunner.TraceLog.HandlerTest do
 
       content = File.read!(path)
       lines = String.split(content, "\n", trim: true)
-      # First line is trace.start, second is our event
-      assert length(lines) == 2
+      # First line is trace.start, second is our event, third is trace.stop
+      assert length(lines) == 3
 
       event = Jason.decode!(Enum.at(lines, 1))
       assert event["event"] == "run.start"
@@ -90,8 +90,8 @@ defmodule PtcRunner.TraceLog.HandlerTest do
 
       content = File.read!(path)
       lines = String.split(content, "\n", trim: true)
-      # Only the initial trace.start event
-      assert length(lines) == 1
+      # trace.start + trace.stop (no captured events since collector wasn't in stack)
+      assert length(lines) == 2
     after
       Process.delete(:ptc_trace_collectors)
     end
@@ -122,8 +122,8 @@ defmodule PtcRunner.TraceLog.HandlerTest do
 
       content = File.read!(path1)
       lines = String.split(content, "\n", trim: true)
-      # trace.start + our event
-      assert length(lines) == 2
+      # trace.start + our event + trace.stop
+      assert length(lines) == 3
 
       event = Jason.decode!(Enum.at(lines, 1))
       assert event["event"] == "run.start"

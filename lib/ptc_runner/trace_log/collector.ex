@@ -10,14 +10,15 @@ defmodule PtcRunner.TraceLog.Collector do
 
   alias PtcRunner.TraceLog.Event
 
-  defstruct [:file, :path, :trace_id, :meta, :write_errors]
+  defstruct [:file, :path, :trace_id, :meta, :write_errors, :start_time]
 
   @type t :: %__MODULE__{
           file: File.io_device() | nil,
           path: String.t(),
           trace_id: String.t(),
           meta: map(),
-          write_errors: non_neg_integer()
+          write_errors: non_neg_integer(),
+          start_time: integer()
         }
 
   @doc """
@@ -110,7 +111,8 @@ defmodule PtcRunner.TraceLog.Collector do
           path: path,
           trace_id: trace_id,
           meta: meta,
-          write_errors: 0
+          write_errors: 0,
+          start_time: System.monotonic_time(:millisecond)
         }
 
         # Write initial metadata event
@@ -134,6 +136,15 @@ defmodule PtcRunner.TraceLog.Collector do
 
   @impl true
   def handle_call(:stop, _from, state) do
+    # Write trace.stop event with total duration before closing
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+    try do
+      write_stop_event(state, duration_ms)
+    rescue
+      _ -> :ok
+    end
+
     File.close(state.file)
     {:stop, :normal, {:ok, state.path, state.write_errors}, %{state | file: nil}}
   end
@@ -165,6 +176,20 @@ defmodule PtcRunner.TraceLog.Collector do
       "trace_id" => state.trace_id,
       "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "meta" => state.meta
+    }
+
+    case Event.encode(event) do
+      {:ok, json} -> IO.puts(state.file, json)
+      {:error, _} -> :ok
+    end
+  end
+
+  defp write_stop_event(state, duration_ms) do
+    event = %{
+      "event" => "trace.stop",
+      "trace_id" => state.trace_id,
+      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "duration_ms" => duration_ms
     }
 
     case Event.encode(event) do
