@@ -226,10 +226,32 @@ defmodule PtcRunner.PlanRunner do
 
     # Emit task.start telemetry for all tasks about to run
     for task <- to_run do
+      # Add dependency result sizes for synthesis gates
+      dep_meta =
+        if task.type == :synthesis_gate do
+          dep_summary =
+            for key <- task.depends_on, Map.has_key?(results, key), into: %{} do
+              {key, byte_size(inspect(results[key]))}
+            end
+
+          %{dependency_result_sizes: dep_summary}
+        else
+          %{}
+        end
+
       :telemetry.execute(
         [:ptc_runner, :plan_executor, :task, :start],
         %{system_time: System.system_time(), monotonic_time: System.monotonic_time()},
-        %{task_id: task.id, task: task_to_map(task), agent: task.agent, attempt: 1}
+        Map.merge(
+          %{
+            task_id: task.id,
+            task: task_to_map(task),
+            agent: task.agent,
+            input: task.input,
+            attempt: 1
+          },
+          dep_meta
+        )
       )
     end
 
@@ -265,10 +287,20 @@ defmodule PtcRunner.PlanRunner do
           {:replan_required, context} -> {:replan_required, context}
         end
 
+      extra_meta =
+        case result do
+          {:error, {:synthesis_error, _id, reason}} -> %{validation_error: reason}
+          {:error, {:verification_failed, _id, diagnosis}} -> %{verification_error: diagnosis}
+          _ -> %{}
+        end
+
       :telemetry.execute(
         [:ptc_runner, :plan_executor, :task, :stop],
         %{duration: duration_ms * 1_000_000},
-        %{task_id: task.id, status: status, result: result_value, duration_ms: duration_ms}
+        Map.merge(
+          %{task_id: task.id, status: status, result: result_value, duration_ms: duration_ms},
+          extra_meta
+        )
       )
     end
 

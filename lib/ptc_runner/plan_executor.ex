@@ -369,11 +369,25 @@ defmodule PtcRunner.PlanExecutor do
     # Emit execution_started event
     emit_event(state, {:execution_started, %{mission: mission, task_count: length(plan.tasks)}})
 
+    # Compute phase summary for telemetry
+    phases = Plan.group_by_level(plan.tasks)
+
+    phase_summary =
+      Enum.with_index(phases, fn phase_tasks, idx ->
+        %{phase: idx, task_ids: Enum.map(phase_tasks, & &1.id)}
+      end)
+
     # Emit telemetry for execution start with full plan
     :telemetry.execute(
       [:ptc_runner, :plan_executor, :execution, :start],
       %{system_time: System.system_time(), monotonic_time: System.monotonic_time()},
-      %{plan: plan_to_map(plan), mission: mission, task_count: length(plan.tasks), attempt: 1}
+      %{
+        plan: plan_to_map(plan),
+        mission: mission,
+        task_count: length(plan.tasks),
+        phases: phase_summary,
+        attempt: 1
+      }
     )
 
     result = execute_loop(state)
@@ -381,17 +395,23 @@ defmodule PtcRunner.PlanExecutor do
     # Emit telemetry for execution stop
     duration = System.monotonic_time(:millisecond) - state.start_time
 
-    {status, results} =
+    {status, results, replan_count} =
       case result do
-        {:ok, metadata} -> {:ok, metadata.results}
-        {:waiting, _, metadata} -> {:waiting, metadata.results}
-        {:error, _, metadata} -> {:error, metadata.results}
+        {:ok, metadata} -> {:ok, metadata.results, metadata.replan_count}
+        {:waiting, _, metadata} -> {:waiting, metadata.results, metadata.replan_count}
+        {:error, _, metadata} -> {:error, metadata.results, metadata.replan_count}
       end
 
     :telemetry.execute(
       [:ptc_runner, :plan_executor, :execution, :stop],
       %{duration: duration * 1_000_000},
-      %{status: status, results: results, replan_count: state.replan_count}
+      %{
+        status: status,
+        results: results,
+        replan_count: replan_count,
+        total_tasks: map_size(results),
+        task_ids: Map.keys(results)
+      }
     )
 
     result
@@ -516,6 +536,13 @@ defmodule PtcRunner.PlanExecutor do
        %{task_id: task_id, diagnosis: diagnosis, total_replans: state.replan_count + 1}}
     )
 
+    # Emit replan telemetry
+    :telemetry.execute(
+      [:ptc_runner, :plan_executor, :replan, :start],
+      %{system_time: System.system_time()},
+      %{task_id: task_id, diagnosis: diagnosis, attempt: task_replan_count + 1}
+    )
+
     # Cooldown before replanning
     if state.replan_cooldown_ms > 0 do
       Process.sleep(state.replan_cooldown_ms)
@@ -535,6 +562,13 @@ defmodule PtcRunner.PlanExecutor do
       {:ok, repair_plan} ->
         # Emit replan_finished event
         emit_event(state, {:replan_finished, %{new_tasks: length(repair_plan.tasks)}})
+
+        # Emit replan stop telemetry
+        :telemetry.execute(
+          [:ptc_runner, :plan_executor, :replan, :stop],
+          %{},
+          %{new_task_count: length(repair_plan.tasks), task_id: task_id}
+        )
 
         # Build enriched replan record for trial history
         replan_record = build_replan_record(state, failure_context, length(repair_plan.tasks))
