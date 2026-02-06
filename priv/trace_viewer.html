@@ -564,6 +564,142 @@
       max-height: 200px;
       overflow-y: auto;
     }
+
+    /* DAG Graph */
+    .dag-graph {
+      background: var(--bg-light);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      display: none;
+      border: 1px solid var(--border);
+    }
+    .dag-graph.visible { display: block; }
+    .dag-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      padding-bottom: 4px;
+    }
+    .dag-header:hover { opacity: 0.8; }
+    .dag-header h3 {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted);
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dag-header .toggle {
+      color: var(--muted);
+      font-size: 14px;
+      transition: transform 0.2s;
+    }
+    .dag-graph.expanded .dag-header .toggle { transform: rotate(90deg); }
+    .dag-body { display: none; }
+    .dag-graph.expanded .dag-body { display: block; }
+    .dag-container {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 500px;
+    }
+    .dag-phase-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      fill: var(--muted);
+      font-weight: 600;
+    }
+    .dag-node { cursor: pointer; }
+    .dag-node rect {
+      rx: 8;
+      ry: 8;
+      stroke-width: 2;
+      transition: stroke-width 0.15s, filter 0.15s;
+    }
+    .dag-node:hover rect {
+      stroke-width: 3;
+      filter: brightness(1.2);
+    }
+    .dag-node text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .dag-node .node-id { font-size: 12px; font-weight: 600; }
+    .dag-node .node-agent { font-size: 10px; }
+    .dag-node .node-badge { font-size: 9px; font-weight: 600; }
+    .dag-node .node-duration { font-size: 10px; }
+    .dag-edge {
+      fill: none;
+      stroke: var(--border);
+      stroke-width: 1.5;
+      transition: stroke 0.15s, stroke-width 0.15s;
+    }
+    .dag-edge.highlighted {
+      stroke: var(--accent);
+      stroke-width: 2.5;
+    }
+    .dag-arrowhead { fill: var(--border); }
+    .dag-arrowhead.highlighted { fill: var(--accent); }
+
+    .dag-tooltip {
+      position: fixed;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--fg);
+      pointer-events: none;
+      z-index: 100;
+      max-width: 300px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      display: none;
+    }
+    .dag-tooltip .tt-label { color: var(--muted); font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
+    .dag-tooltip .tt-value { margin-bottom: 6px; }
+
+    /* DAG tabs for replan attempts */
+    .dag-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .dag-tab {
+      padding: 6px 14px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    .dag-tab:hover { background: var(--bg-hover); color: var(--fg); }
+    .dag-tab.active { background: var(--accent); color: #fff; }
+    .dag-tab.replan { border-color: var(--warning); }
+    .dag-tab.replan.active { background: var(--warning); color: var(--bg); }
+
+    .dag-replan-info {
+      background: rgba(220, 220, 170, 0.1);
+      border-left: 3px solid var(--warning);
+      border-radius: 0 6px 6px 0;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: var(--warning);
+    }
+    .dag-replan-info .trigger { color: var(--error); font-family: monospace; font-weight: 600; }
+
+    /* Flash animation for clicked event card */
+    .event-card.dag-highlight {
+      animation: dagFlash 1.5s ease-out;
+    }
+    @keyframes dagFlash {
+      0% { box-shadow: 0 0 0 3px var(--accent); }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
   </style>
 </head>
 <body>
@@ -637,6 +773,18 @@
     </div>
     <div class="plan-body" id="planBody"></div>
   </div>
+
+  <div class="dag-graph" id="dagGraph">
+    <div class="dag-header" onclick="document.getElementById('dagGraph').classList.toggle('expanded')">
+      <span class="toggle">▶</span>
+      <h3>📊 Task Execution Graph</h3>
+      <span id="dagMeta" style="color: var(--muted); font-size: 12px;"></span>
+    </div>
+    <div class="dag-body">
+      <div class="dag-container" id="dagGraphContainer"></div>
+    </div>
+  </div>
+  <div class="dag-tooltip" id="dagTooltip"></div>
 
   <div class="agent-tree" id="agentTree">
     <h3>Agent Hierarchy</h3>
@@ -1099,8 +1247,9 @@
         }
       }
 
+      const taskIdAttr = type === 'task' ? ` data-taskid="${escapeHtml(stop?.metadata?.task_id || start?.metadata?.task_id || '')}"` : '';
       return `
-        <div class="event-card ${type}${hasError ? ' error' : ''}">
+        <div class="event-card ${type}${hasError ? ' error' : ''}"${taskIdAttr}>
           <div class="event-header">
             <div class="event-toggle">▶</div>
             <div class="event-icon ${type}">${icon}</div>
@@ -1566,15 +1715,440 @@
       return str.length > len ? str.slice(0, len) + '...' : str;
     }
 
-    // Patch displayTrace to also render plan
+    // Patch displayTrace to also render plan and DAG
     const origDisplayTrace = displayTrace;
     displayTrace = function(filename) {
       origDisplayTrace(filename);
       const data = loadedFiles.get(filename);
       if (data) {
         renderPlanCard(data.events);
+        renderDAGGraph(data.events);
+        // Collapse plan card when DAG is visible (DAG replaces the task overview)
+        const dagPanel = document.getElementById('dagGraph');
+        const planCard = document.getElementById('planCard');
+        if (dagPanel.classList.contains('visible') && planCard.classList.contains('expanded')) {
+          planCard.classList.remove('expanded');
+        }
       }
     };
+
+    // --- DAG Execution Graph ---
+
+    function buildExecutionModel(planTasks, phases, agents, taskStarts, taskStops) {
+      // Compute phases from dependency graph if not provided
+      let phaseMap = {};
+      if (phases.length > 0) {
+        for (const p of phases) {
+          for (const tid of p.task_ids) phaseMap[tid] = p.phase;
+        }
+      } else {
+        // Topological sort fallback
+        const taskIds = new Set(planTasks.map(t => t.id));
+        const resolved = new Set();
+        let phase = 0;
+        const remaining = [...planTasks];
+        while (remaining.length > 0) {
+          const batch = remaining.filter(t =>
+            (t.depends_on || []).every(d => resolved.has(d) || !taskIds.has(d))
+          );
+          if (batch.length === 0) break;
+          for (const t of batch) { phaseMap[t.id] = phase; resolved.add(t.id); }
+          remaining.splice(0, remaining.length, ...remaining.filter(t => !resolved.has(t.id)));
+          phase++;
+        }
+      }
+
+      const tasks = planTasks.map(t => {
+        const stopEvt = taskStops[t.id];
+        const startEvt = taskStarts[t.id];
+        return {
+          id: t.id,
+          agent: t.agent || '',
+          phase: phaseMap[t.id] ?? 0,
+          type: t.type || 'task',
+          outputMode: startEvt?.metadata?.task?.output || t.output || null,
+          status: stopEvt?.metadata?.status || (startEvt ? 'running' : 'pending'),
+          durationMs: stopEvt?.duration_ms || stopEvt?.metadata?.duration_ms || 0,
+          dependsOn: t.depends_on || [],
+          input: t.input || '',
+          signature: t.signature || ''
+        };
+      });
+
+      const edges = [];
+      for (const t of tasks) {
+        for (const dep of t.dependsOn) {
+          edges.push({ from: dep, to: t.id });
+        }
+      }
+
+      // Build phases array
+      const phaseGroups = {};
+      for (const t of tasks) {
+        if (!phaseGroups[t.phase]) phaseGroups[t.phase] = [];
+        phaseGroups[t.phase].push(t.id);
+      }
+      const sortedPhases = Object.keys(phaseGroups).sort((a, b) => a - b).map(p => ({
+        phase: parseInt(p),
+        taskIds: phaseGroups[p]
+      }));
+
+      return { tasks, phases: sortedPhases, agents, edges };
+    }
+
+    function buildExecutionAttempts(events) {
+      const planEvt = events.find(e => e.event === 'plan.generated');
+      const execStart = events.find(e => e.event === 'execution.start');
+      if (!planEvt?.metadata?.plan?.tasks) return [];
+
+      const agents = planEvt.metadata.plan.agents || {};
+
+      // Collect all replan boundaries
+      const replanStarts = events.filter(e => e.event === 'replan.start');
+      const replanStops = events.filter(e => e.event === 'replan.stop');
+
+      // Collect all task.start / task.stop events with timestamps
+      const allTaskStarts = events.filter(e => e.event === 'task.start');
+      const allTaskStops = events.filter(e => e.event === 'task.stop');
+
+      // Helper: group task events by time window
+      function taskEventsInWindow(startTime, endTime) {
+        const starts = {};
+        const stops = {};
+        for (const e of allTaskStarts) {
+          const t = new Date(e.timestamp).getTime();
+          if (t >= startTime && t < endTime && e.metadata?.task_id) {
+            starts[e.metadata.task_id] = e;
+          }
+        }
+        for (const e of allTaskStops) {
+          const t = new Date(e.timestamp).getTime();
+          if (t >= startTime && t < endTime && e.metadata?.task_id) {
+            stops[e.metadata.task_id] = e;
+          }
+        }
+        return { starts, stops };
+      }
+
+      const attempts = [];
+
+      if (replanStarts.length === 0) {
+        // Single attempt — use plan.generated + execution.start directly
+        const taskStarts = {};
+        const taskStops = {};
+        for (const e of allTaskStarts) if (e.metadata?.task_id) taskStarts[e.metadata.task_id] = e;
+        for (const e of allTaskStops) if (e.metadata?.task_id) taskStops[e.metadata.task_id] = e;
+
+        const model = buildExecutionModel(
+          planEvt.metadata.plan.tasks,
+          execStart?.metadata?.phases || [],
+          agents,
+          taskStarts,
+          taskStops
+        );
+        if (model) attempts.push({ label: 'Plan', model });
+        return attempts;
+      }
+
+      // Multiple attempts — split at replan boundaries
+
+      // Attempt 0: from execution.start to first replan.start
+      const execStartTime = execStart ? new Date(execStart.timestamp).getTime() : 0;
+      const firstReplanTime = new Date(replanStarts[0].timestamp).getTime();
+      const a0Events = taskEventsInWindow(execStartTime, firstReplanTime);
+
+      const initialModel = buildExecutionModel(
+        planEvt.metadata.plan.tasks,
+        execStart?.metadata?.phases || [],
+        agents,
+        a0Events.starts,
+        a0Events.stops
+      );
+      if (initialModel) attempts.push({ label: 'Initial Plan', model: initialModel });
+
+      // Replan attempts
+      for (let i = 0; i < replanStarts.length; i++) {
+        const rpStart = replanStarts[i];
+        const rpStop = replanStops[i];
+        if (!rpStop) continue;
+
+        const triggerTaskId = rpStart.metadata?.task_id || '';
+        const diagnosis = rpStart.metadata?.diagnosis || '';
+
+        // Window: from replan.stop to next replan.start (or end)
+        const windowStart = new Date(rpStop.timestamp).getTime();
+        const windowEnd = replanStarts[i + 1]
+          ? new Date(replanStarts[i + 1].timestamp).getTime()
+          : Infinity;
+
+        const segEvents = taskEventsInWindow(windowStart, windowEnd);
+
+        // Reconstruct plan tasks from task.start metadata in this window
+        const repairTasks = Object.values(segEvents.starts).map(e => {
+          const taskDef = e.metadata?.task || {};
+          return {
+            id: e.metadata?.task_id || taskDef.id,
+            agent: e.metadata?.agent || taskDef.agent || '',
+            depends_on: taskDef.depends_on || [],
+            type: taskDef.type || 'task',
+            output: taskDef.output || null,
+            input: e.metadata?.input || taskDef.input || '',
+            signature: taskDef.signature || ''
+          };
+        });
+
+        if (repairTasks.length === 0) continue;
+
+        const model = buildExecutionModel(repairTasks, [], agents, segEvents.starts, segEvents.stops);
+        if (model) {
+          attempts.push({
+            label: `Replan ${i + 1}`,
+            model,
+            triggerTaskId,
+            diagnosis
+          });
+        }
+      }
+
+      return attempts;
+    }
+
+    function computeGraphLayout(model) {
+      const nodeW = 180, nodeH = 72;
+      const phaseGap = 60, nodeGap = 20;
+      const padX = 40, padY = 50;
+      const positions = {};
+
+      const maxTasksInPhase = Math.max(...model.phases.map(p => p.taskIds.length), 1);
+      const totalContentH = maxTasksInPhase * nodeH + (maxTasksInPhase - 1) * nodeGap;
+
+      for (const phase of model.phases) {
+        const x = padX + phase.phase * (nodeW + phaseGap);
+        const phaseH = phase.taskIds.length * nodeH + (phase.taskIds.length - 1) * nodeGap;
+        const offsetY = padY + 20 + (totalContentH - phaseH) / 2;
+        for (let i = 0; i < phase.taskIds.length; i++) {
+          positions[phase.taskIds[i]] = {
+            x,
+            y: offsetY + i * (nodeH + nodeGap),
+            w: nodeW,
+            h: nodeH
+          };
+        }
+      }
+
+      const maxPhase = model.phases.length > 0 ? model.phases[model.phases.length - 1].phase : 0;
+      const svgW = padX * 2 + (maxPhase + 1) * (nodeW + phaseGap) - phaseGap;
+      const svgH = padY + 20 + totalContentH + padX;
+
+      return { positions, svgW, svgH, nodeW, nodeH, padX, padY };
+    }
+
+    function getNodeStroke(task) {
+      if (task.type === 'synthesis_gate' || task.type === 'synthesis') return '#c586c0';
+      if (task.status === 'ok') return '#4ec9b0';
+      if (task.status === 'error' || task.status === 'failed') return '#f44747';
+      if (task.status === 'running') return '#569cd6';
+      return '#808080';
+    }
+
+    function getNodeFill(task) {
+      if (task.type === 'synthesis_gate' || task.type === 'synthesis') return 'rgba(197, 134, 192, 0.15)';
+      if (task.status === 'ok') return 'rgba(78, 201, 176, 0.12)';
+      if (task.status === 'error' || task.status === 'failed') return 'rgba(244, 71, 71, 0.12)';
+      if (task.status === 'running') return 'rgba(86, 156, 214, 0.15)';
+      return 'rgba(128, 128, 128, 0.1)';
+    }
+
+    function computeEdgePath(fromPos, toPos, nodeW, nodeH) {
+      const x1 = fromPos.x + nodeW;
+      const y1 = fromPos.y + nodeH / 2;
+      const x2 = toPos.x;
+      const y2 = toPos.y + nodeH / 2;
+      const cx = (x1 + x2) / 2;
+      return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
+    }
+
+    function truncateId(id, maxLen) {
+      return id.length > maxLen ? id.slice(0, maxLen - 1) + '\u2026' : id;
+    }
+
+    function renderDAGGraph(events) {
+      const container = document.getElementById('dagGraphContainer');
+      const panel = document.getElementById('dagGraph');
+      const tooltip = document.getElementById('dagTooltip');
+
+      const attempts = buildExecutionAttempts(events);
+      if (attempts.length === 0) {
+        panel.classList.remove('visible');
+        return;
+      }
+
+      panel.classList.add('visible');
+      panel.classList.add('expanded');
+
+      // Set meta summary
+      const totalTasks = attempts[0].model.tasks.length;
+      const totalPhases = attempts[0].model.phases.length;
+      const metaEl = document.getElementById('dagMeta');
+      let metaText = `${totalTasks} tasks, ${totalPhases} phases`;
+      if (attempts.length > 1) metaText += `, ${attempts.length - 1} replan(s)`;
+      metaEl.textContent = metaText;
+
+      // Build inner HTML: tabs (if >1 attempt) + SVG container
+      let html = '';
+      if (attempts.length > 1) {
+        html += '<div class="dag-tabs">';
+        attempts.forEach((attempt, idx) => {
+          const isReplan = idx > 0;
+          html += `<button class="dag-tab${idx === 0 ? ' active' : ''}${isReplan ? ' replan' : ''}" data-attempt="${idx}">${attempt.label}</button>`;
+        });
+        html += '</div>';
+      }
+      html += '<div id="dagReplanInfo"></div><div id="dagSvgContainer"></div>';
+      container.innerHTML = html;
+
+      const svgContainer = document.getElementById('dagSvgContainer');
+      const replanInfo = document.getElementById('dagReplanInfo');
+
+      // Render first attempt
+      renderDAGForModel(attempts[0], svgContainer, tooltip, replanInfo);
+
+      // Tab click handlers
+      if (attempts.length > 1) {
+        container.querySelectorAll('.dag-tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            container.querySelectorAll('.dag-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const idx = parseInt(tab.dataset.attempt);
+            renderDAGForModel(attempts[idx], svgContainer, tooltip, replanInfo);
+          });
+        });
+      }
+    }
+
+    function renderDAGForModel(attempt, svgContainer, tooltip, replanInfoEl) {
+      const model = attempt.model;
+
+      // Show replan info banner if applicable
+      if (attempt.triggerTaskId) {
+        replanInfoEl.innerHTML = `<div class="dag-replan-info">
+          Triggered by failed task <span class="trigger">${escapeHtml(attempt.triggerTaskId)}</span>
+          ${attempt.diagnosis ? ` — ${escapeHtml(truncate(attempt.diagnosis, 150))}` : ''}
+        </div>`;
+      } else {
+        replanInfoEl.innerHTML = '';
+      }
+
+      const layout = computeGraphLayout(model);
+      const { positions, svgW, svgH, nodeW, nodeH, padX, padY } = layout;
+      const taskMap = {};
+      for (const t of model.tasks) taskMap[t.id] = t;
+
+      // Build SVG
+      let svg = `<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">`;
+
+      // Arrowhead markers
+      svg += `<defs><marker id="dagArrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><polygon points="0 0, 10 3.5, 0 7" class="dag-arrowhead"/></marker>`;
+      svg += `<marker id="dagArrowHL" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><polygon points="0 0, 10 3.5, 0 7" class="dag-arrowhead highlighted"/></marker></defs>`;
+
+      // Phase labels
+      for (const phase of model.phases) {
+        const x = padX + phase.phase * (nodeW + 60) + nodeW / 2;
+        svg += `<text x="${x}" y="${padY - 5}" text-anchor="middle" class="dag-phase-label">Phase ${phase.phase}</text>`;
+      }
+
+      // Edges
+      for (const edge of model.edges) {
+        const from = positions[edge.from];
+        const to = positions[edge.to];
+        if (!from || !to) continue;
+        const path = computeEdgePath(from, to, nodeW, nodeH);
+        svg += `<path d="${path}" class="dag-edge" data-from="${edge.from}" data-to="${edge.to}" marker-end="url(#dagArrow)"/>`;
+      }
+
+      // Nodes
+      for (const task of model.tasks) {
+        const pos = positions[task.id];
+        if (!pos) continue;
+        const stroke = getNodeStroke(task);
+        const fill = getNodeFill(task);
+        const displayId = truncateId(task.id, 22);
+
+        let statusIcon = '';
+        if (task.status === 'ok') statusIcon = '\u2713';
+        else if (task.status === 'error' || task.status === 'failed') statusIcon = '\u2717';
+        else if (task.status === 'running') statusIcon = '\u25cb';
+        else statusIcon = '\u2022';
+
+        let badgeSvg = '';
+        if (task.outputMode === 'ptc_lisp') {
+          badgeSvg = `<rect x="${pos.x + nodeW - 42}" y="${pos.y + 4}" width="36" height="16" rx="3" fill="#569cd6" opacity="0.8"/><text x="${pos.x + nodeW - 24}" y="${pos.y + 15}" text-anchor="middle" class="node-badge" fill="#fff">PTC</text>`;
+        } else if (task.type === 'synthesis_gate' || task.type === 'synthesis') {
+          badgeSvg = `<rect x="${pos.x + nodeW - 56}" y="${pos.y + 4}" width="50" height="16" rx="3" fill="#c586c0" opacity="0.8"/><text x="${pos.x + nodeW - 31}" y="${pos.y + 15}" text-anchor="middle" class="node-badge" fill="#fff">SYNTH</text>`;
+        } else if (task.outputMode === 'json') {
+          badgeSvg = `<rect x="${pos.x + nodeW - 46}" y="${pos.y + 4}" width="40" height="16" rx="3" fill="#808080" opacity="0.6"/><text x="${pos.x + nodeW - 26}" y="${pos.y + 15}" text-anchor="middle" class="node-badge" fill="#fff">JSON</text>`;
+        }
+
+        svg += `<g class="dag-node" data-taskid="${task.id}">`;
+        svg += `<rect x="${pos.x}" y="${pos.y}" width="${nodeW}" height="${nodeH}" fill="${fill}" stroke="${stroke}"/>`;
+        svg += badgeSvg;
+        svg += `<text x="${pos.x + 10}" y="${pos.y + 26}" class="node-id" fill="${stroke}">${statusIcon} ${escapeHtml(displayId)}</text>`;
+        svg += `<text x="${pos.x + 10}" y="${pos.y + 42}" class="node-agent" fill="#808080">\u2192 ${escapeHtml(task.agent)}</text>`;
+        if (task.durationMs > 0) {
+          svg += `<text x="${pos.x + 10}" y="${pos.y + 58}" class="node-duration" fill="#808080">${formatDuration(task.durationMs)}</text>`;
+        }
+        svg += `</g>`;
+      }
+
+      svg += `</svg>`;
+      svgContainer.innerHTML = svg;
+
+      // Attach interactions
+      svgContainer.querySelectorAll('.dag-node').forEach(node => {
+        const taskId = node.dataset.taskid;
+        const task = taskMap[taskId];
+
+        node.addEventListener('click', () => {
+          const card = document.querySelector(`.event-card[data-taskid="${taskId}"]`);
+          if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.classList.remove('dag-highlight');
+            void card.offsetWidth;
+            card.classList.add('dag-highlight');
+            if (!card.classList.contains('expanded')) card.classList.add('expanded');
+          }
+        });
+
+        node.addEventListener('mouseenter', () => {
+          svgContainer.querySelectorAll('.dag-edge').forEach(edge => {
+            if (edge.dataset.from === taskId || edge.dataset.to === taskId) {
+              edge.classList.add('highlighted');
+              edge.setAttribute('marker-end', 'url(#dagArrowHL)');
+            }
+          });
+          if (task) {
+            let html = `<div class="tt-label">Task</div><div class="tt-value" style="font-weight:600;">${escapeHtml(task.id)}</div>`;
+            html += `<div class="tt-label">Agent</div><div class="tt-value">${escapeHtml(task.agent)}</div>`;
+            html += `<div class="tt-label">Status</div><div class="tt-value" style="color:${getNodeStroke(task)}">${task.status}</div>`;
+            if (task.durationMs > 0) html += `<div class="tt-label">Duration</div><div class="tt-value">${formatDuration(task.durationMs)}</div>`;
+            if (task.input) html += `<div class="tt-label">Input</div><div class="tt-value" style="font-size:11px;">${escapeHtml(truncate(task.input, 120))}</div>`;
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+            const rect = node.getBoundingClientRect();
+            tooltip.style.left = (rect.right + 8) + 'px';
+            tooltip.style.top = rect.top + 'px';
+          }
+        });
+
+        node.addEventListener('mouseleave', () => {
+          svgContainer.querySelectorAll('.dag-edge.highlighted').forEach(edge => {
+            edge.classList.remove('highlighted');
+            edge.setAttribute('marker-end', 'url(#dagArrow)');
+          });
+          tooltip.style.display = 'none';
+        });
+      });
+    }
   </script>
 </body>
 </html>
