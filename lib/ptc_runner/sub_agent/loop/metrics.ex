@@ -151,7 +151,13 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - `turn_start` - Monotonic timestamp when turn started
   - `turn_tokens` - Optional token counts from LLM call (overrides state.turn_tokens if provided)
   """
-  @spec emit_turn_stop_immediate(Turn.t() | nil, SubAgent.t(), map(), integer(), map() | nil) ::
+  @spec emit_turn_stop_immediate(
+          Turn.t() | nil,
+          SubAgent.t() | map(),
+          map(),
+          integer(),
+          map() | nil
+        ) ::
           :ok
   def emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens \\ nil) do
     turn_duration = System.monotonic_time() - turn_start
