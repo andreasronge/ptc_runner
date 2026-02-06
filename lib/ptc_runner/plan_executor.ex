@@ -104,6 +104,10 @@ defmodule PtcRunner.PlanExecutor do
           | {:task_failed, %{task_id: String.t(), reason: term()}}
           | {:task_skipped, %{task_id: String.t(), reason: :already_completed}}
           | {:verification_failed, %{task_id: String.t(), diagnosis: String.t()}}
+          | {:quality_gate_started, %{task_id: String.t()}}
+          | {:quality_gate_passed, %{task_id: String.t()}}
+          | {:quality_gate_failed, %{task_id: String.t(), missing: [String.t()]}}
+          | {:quality_gate_error, %{task_id: String.t(), reason: term()}}
           | {:replan_started,
              %{task_id: String.t(), diagnosis: String.t(), total_replans: non_neg_integer()}}
           | {:replan_finished, %{new_tasks: non_neg_integer()}}
@@ -162,6 +166,8 @@ defmodule PtcRunner.PlanExecutor do
 
   - `available_tools` - Map of tool_name => description for planning
   - `constraints` - Optional planning constraints/guidelines
+  - `quality_gate` - Enable pre-flight data sufficiency check (default: `false`)
+  - `quality_gate_llm` - Optional separate LLM for quality gate checks
 
   ## Returns
 
@@ -291,6 +297,9 @@ defmodule PtcRunner.PlanExecutor do
   - `max_total_replans` - Max total replans (default: 5)
   - `replan_cooldown_ms` - Delay between replans (default: 1000)
   - `on_event` - Optional callback for lifecycle events. See `t:event/0` for event types.
+  - `quality_gate` - Enable pre-flight data sufficiency check before tasks with dependencies
+    (default: `false`). A lightweight SubAgent validates upstream results are sufficient.
+  - `quality_gate_llm` - Optional separate LLM callback for quality gate checks.
 
   ## Returns
 
@@ -426,7 +435,10 @@ defmodule PtcRunner.PlanExecutor do
     )
 
     # Execute with current completed results as initial_results
-    runner_opts = Keyword.put(state.opts, :initial_results, state.completed_results)
+    runner_opts =
+      state.opts
+      |> Keyword.put(:initial_results, state.completed_results)
+      |> Keyword.put(:mission, state.mission)
 
     case PlanRunner.execute(state.plan, runner_opts) do
       {:ok, results} ->
@@ -837,6 +849,7 @@ defmodule PtcRunner.PlanExecutor do
             id: task.id,
             agent: task.agent,
             input: task.input,
+            output: task.output,
             signature: task.signature,
             depends_on: task.depends_on,
             type: task.type,

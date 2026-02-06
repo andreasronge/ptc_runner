@@ -505,7 +505,7 @@ defmodule PtcRunner.Plan do
     agent_ids = MapSet.new(Map.keys(plan.agents))
 
     Enum.reduce(plan.tasks, issues, fn task, acc ->
-      if task.agent == "default" or MapSet.member?(agent_ids, task.agent) do
+      if task.agent in ["default", "direct"] or MapSet.member?(agent_ids, task.agent) do
         acc
       else
         [
@@ -552,7 +552,7 @@ defmodule PtcRunner.Plan do
 
     cond do
       # Built-in functions (partial list of commonly used)
-      name_str in ~w(get get-in and or not if when let count empty? first rest map? number? string? coll? nil? str = > < >= <=) ->
+      name_str in ~w(get get-in and or not if when let count empty? first rest map? number? string? boolean? coll? nil? str = > < >= <=) ->
         []
 
       # Valid data/ bindings

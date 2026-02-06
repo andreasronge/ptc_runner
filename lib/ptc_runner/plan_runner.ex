@@ -784,6 +784,10 @@ defmodule PtcRunner.PlanRunner do
 
   defp validate_synthesis_result(_), do: :ok
 
+  defp execute_regular_task(%{agent: "direct"} = task, agents, results, opts) do
+    execute_direct_task(task, agents, results, opts)
+  end
+
   defp execute_regular_task(task, agents, results, opts) do
     # Get agent spec (or use default)
     agent_spec = Map.get(agents, task.agent, %{prompt: "", tools: []})
@@ -876,6 +880,43 @@ defmodule PtcRunner.PlanRunner do
         emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
         {:error, step.fail}
     end
+  end
+
+  # --- Direct Task Execution ---
+
+  # Execute a task with agent: "direct" by running the input as PTC-Lisp code.
+  # No SubAgent, no LLM call. The planner provides the code directly.
+  #
+  # Upstream results are available via `data/results` in the Lisp environment,
+  # avoiding string injection issues from template expansion into Lisp source.
+  # All base_tools are available by default (no "direct" agent definition needed).
+  defp execute_direct_task(task, _agents, results, opts) do
+    dep_results = Map.take(results, task.depends_on)
+
+    lisp_opts = [
+      tools: opts.base_tools,
+      context: %{"results" => dep_results},
+      timeout: opts.timeout,
+      max_heap: Map.get(opts, :max_heap, 1_250_000)
+    ]
+
+    lisp_opts =
+      if sig = Map.get(task, :signature),
+        do: Keyword.put(lisp_opts, :signature, sig),
+        else: lisp_opts
+
+    case Lisp.run(task.input, lisp_opts) do
+      {:ok, step} ->
+        emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
+        {:ok, step.return}
+
+      {:error, step} ->
+        emit_event(opts, {:task_step, %{task_id: task.id, step: step}})
+        {:error, step.fail}
+    end
+  rescue
+    e ->
+      {:error, {:direct_execution_error, Exception.message(e)}}
   end
 
   # --- Verification ---
@@ -1247,6 +1288,7 @@ defmodule PtcRunner.PlanRunner do
       id: task.id,
       agent: task.agent,
       input: task.input,
+      output: Map.get(task, :output),
       signature: Map.get(task, :signature),
       depends_on: task.depends_on,
       type: task.type,

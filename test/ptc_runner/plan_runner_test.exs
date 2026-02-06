@@ -1286,4 +1286,141 @@ defmodule PtcRunner.PlanRunnerTest do
       Agent.stop(main_llm_called_for_gate)
     end
   end
+
+  describe "direct agent" do
+    test "executes PTC-Lisp code without LLM call" do
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "fetch_data",
+            "agent" => "direct",
+            "input" => ~s|(tool/lookup {:id "abc"})|
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      lookup_tool = fn %{"id" => id} -> %{"id" => id, "value" => 42} end
+
+      # LLM should never be called
+      mock_llm = fn _input -> raise "LLM should not be called for direct agent" end
+
+      {:ok, results} =
+        PlanRunner.execute(plan,
+          llm: mock_llm,
+          base_tools: %{"lookup" => lookup_tool},
+          max_turns: 1
+        )
+
+      assert results["fetch_data"] == %{"id" => "abc", "value" => 42}
+    end
+
+    test "direct agent with multiple tool calls" do
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "fetch_all",
+            "agent" => "direct",
+            "input" => """
+            (def a (tool/fetch {:id "x"}))
+            (def b (tool/fetch {:id "y"}))
+            {:a a :b b}
+            """
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      fetch_tool = fn %{"id" => id} -> %{"id" => id, "data" => "content_#{id}"} end
+      mock_llm = fn _input -> raise "LLM should not be called" end
+
+      {:ok, results} =
+        PlanRunner.execute(plan,
+          llm: mock_llm,
+          base_tools: %{"fetch" => fetch_tool},
+          max_turns: 1
+        )
+
+      assert results["fetch_all"][:a] == %{"id" => "x", "data" => "content_x"}
+      assert results["fetch_all"][:b] == %{"id" => "y", "data" => "content_y"}
+    end
+
+    test "direct agent accesses upstream results via data/results" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "step1", "input" => "Get config"},
+          %{
+            "id" => "step2",
+            "agent" => "direct",
+            "input" => ~s|(tool/fetch {:id (get (get data/results "step1") "config_id")})|,
+            "depends_on" => ["step1"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      fetch_tool = fn %{"id" => id} -> %{"id" => id, "found" => true} end
+
+      mock_llm = fn _input ->
+        {:ok, ~s({"config_id": "item_99"})}
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan,
+          llm: mock_llm,
+          base_tools: %{"fetch" => fetch_tool},
+          max_turns: 1
+        )
+
+      assert results["step2"] == %{"id" => "item_99", "found" => true}
+    end
+
+    test "direct agent returns error on invalid code" do
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "bad",
+            "agent" => "direct",
+            "input" => "(undefined-function 42)"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+      mock_llm = fn _input -> raise "LLM should not be called" end
+
+      result = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
+      assert {:error, "bad", _, _reason} = result
+    end
+
+    test "direct agent with signature validation" do
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "typed",
+            "agent" => "direct",
+            "input" => ~s|(tool/lookup {:id "abc"})|,
+            "signature" => "{id :string, value :int}"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      lookup_tool = fn %{"id" => id} -> %{"id" => id, "value" => 42} end
+      mock_llm = fn _input -> raise "LLM should not be called" end
+
+      {:ok, results} =
+        PlanRunner.execute(plan,
+          llm: mock_llm,
+          base_tools: %{"lookup" => lookup_tool},
+          max_turns: 1
+        )
+
+      assert results["typed"] == %{"id" => "abc", "value" => 42}
+    end
+  end
 end
