@@ -129,6 +129,7 @@
     .timeline-segment.llm { background: var(--accent); }
     .timeline-segment.tool { background: var(--warning); }
     .timeline-segment.pmap { background: var(--keyword); }
+    .timeline-segment.task { background: var(--success); }
 
     /* Event cards */
     .events { display: none; }
@@ -144,6 +145,7 @@
     .event-card.llm { border-left-color: var(--accent); }
     .event-card.tool { border-left-color: var(--warning); }
     .event-card.pmap { border-left-color: var(--keyword); }
+    .event-card.task { border-left-color: var(--success); }
     .event-card.turn { border-left-color: var(--success); }
     .event-card.error { border-left-color: var(--error); }
 
@@ -179,6 +181,7 @@
     .event-icon.llm { background: rgba(86, 156, 214, 0.2); color: var(--accent); }
     .event-icon.tool { background: rgba(220, 220, 170, 0.2); color: var(--warning); }
     .event-icon.pmap { background: rgba(197, 134, 192, 0.2); color: var(--keyword); }
+    .event-icon.task { background: rgba(78, 201, 176, 0.2); color: var(--success); }
     .event-icon.turn { background: rgba(78, 201, 176, 0.2); color: var(--success); }
 
     .event-title { flex: 1; font-weight: 500; }
@@ -591,6 +594,10 @@
         <div class="summary-value" id="summaryTokens">-</div>
         <div class="summary-label">Tokens</div>
       </div>
+      <div class="summary-item" style="display: none;">
+        <div class="summary-value" id="summaryTasks">-</div>
+        <div class="summary-label">Tasks</div>
+      </div>
       <div class="summary-item">
         <div class="summary-value" id="summaryChildren">-</div>
         <div class="summary-label">Children</div>
@@ -646,6 +653,7 @@
     <button class="tab" data-filter="llm">LLM Calls</button>
     <button class="tab" data-filter="tool">Tools</button>
     <button class="tab" data-filter="pmap">Parallel</button>
+    <button class="tab" data-filter="task">Tasks</button>
   </div>
 
   <div class="events" id="events"></div>
@@ -740,10 +748,11 @@
       // Summary
       summary.classList.add('visible');
       const llmEvents = paired.filter(e => e.type === 'llm');
-      // Duration from run.stop (primary) or trace.stop (fallback)
+      // Duration: prefer execution.stop (plan executor), then run.stop (subagent), then trace.stop (fallback)
+      const execStop = events.find(e => e.event === 'execution.stop');
       const runStop = events.find(e => e.event === 'run.stop');
       const traceStop = events.find(e => e.event === 'trace.stop');
-      const totalDuration = runStop?.duration_ms || traceStop?.duration_ms || 0;
+      const totalDuration = execStop?.duration_ms || runStop?.duration_ms || traceStop?.duration_ms || 0;
       const totalTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
       const childIds = extractChildTraceIds(events);
 
@@ -753,6 +762,15 @@
       document.getElementById('summaryTurns').textContent = maxTurn;
       document.getElementById('summaryLLM').textContent = llmEvents.length;
       document.getElementById('summaryTokens').textContent = totalTokens.toLocaleString();
+      // Task count from paired task events
+      const taskEvents = paired.filter(e => e.type === 'task');
+      const taskCountEl = document.getElementById('summaryTasks');
+      if (taskEvents.length > 0) {
+        taskCountEl.textContent = taskEvents.length;
+        taskCountEl.closest('.summary-item').style.display = '';
+      } else {
+        taskCountEl.closest('.summary-item').style.display = 'none';
+      }
       document.getElementById('summaryChildren').textContent = childIds.length;
 
       // Show aggregate stats section if there are children
@@ -789,7 +807,8 @@
 
         // Use span_id for pairing (most reliable), fallback to type+turn/tool_name
         const spanId = event.span_id;
-        const key = spanId ? `${type}-${spanId}` : `${type}-${event.metadata?.turn || event.metadata?.tool_name || ''}`;
+        const key = spanId ? `${type}-${spanId}` :
+          `${type}-${event.metadata?.task_id || event.metadata?.turn || event.metadata?.tool_name || ''}`;
 
         if (action === 'start') {
           pending[key] = event;
@@ -804,6 +823,13 @@
           }
         }
       }
+
+      // Surface unpaired start events (e.g., from truncated/crashed traces)
+      for (const [key, startEvent] of Object.entries(pending)) {
+        const type = key.split('-')[0];
+        pairs.push({ type, start: startEvent, stop: null });
+      }
+
       return pairs;
     }
 
@@ -825,7 +851,7 @@
       const startTs = getEarliestTimestamp(pairs);
 
       for (const pair of pairs) {
-        if (!['llm', 'tool', 'pmap'].includes(pair.type)) continue;
+        if (!['llm', 'tool', 'pmap', 'pcalls', 'task'].includes(pair.type)) continue;
         const duration = pair.stop?.duration_ms || 0;
         if (duration === 0) continue;
 
@@ -843,7 +869,8 @@
         segment.className = `timeline-segment ${pair.type}`;
         segment.style.left = `${Math.max(0, left)}%`;
         segment.style.width = `${Math.max(width, 1)}%`;
-        segment.textContent = pair.type === 'llm' ? `T${pair.stop?.metadata?.turn || '?'}` : pair.type;
+        segment.textContent = pair.type === 'llm' ? `T${pair.stop?.metadata?.turn || '?'}` :
+          pair.type === 'task' ? (pair.stop?.metadata?.task_id || pair.start?.metadata?.task_id || 'task') : pair.type;
         segment.title = `${pair.type}: ${formatDuration(duration)}`;
         timelineBar.appendChild(segment);
       }
@@ -862,7 +889,7 @@
 
     function renderEvents(pairs) {
       // Filter out low-value structural events (turn, run) - their info is shown elsewhere
-      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls'];
+      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls', 'task'];
       let filtered = pairs.filter(p => displayableTypes.includes(p.type));
       if (currentFilter !== 'all') {
         filtered = filtered.filter(p => p.type === currentFilter);
@@ -914,6 +941,23 @@
         icon = '⚡';
         meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
         meta.push(`<span>✓ ${stop?.metadata?.success_count || 0} / ✗ ${stop?.metadata?.error_count || 0}</span>`);
+      } else if (type === 'task') {
+        const taskId = stop?.metadata?.task_id || start?.metadata?.task_id || '?';
+        const agentName = start?.metadata?.agent || stop?.metadata?.agent || '';
+        const status = stop?.metadata?.status;
+        title = `Task: ${taskId}${agentName ? ` → ${agentName}` : ''}`;
+        icon = '📋';
+        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+        if (status) {
+          const statusColor = status === 'ok' ? 'var(--success)' : (status === 'error' ? 'var(--error)' : 'var(--warning)');
+          meta.push(`<span style="color: ${statusColor}">${status}</span>`);
+        }
+        // Show output mode (PTC-Lisp vs JSON) from the task's run.start agent metadata
+        const taskOutput = start?.metadata?.output || stop?.metadata?.output;
+        if (taskOutput) {
+          const label = taskOutput === 'ptc_lisp' ? 'PTC-Lisp' : 'JSON';
+          meta.push(`<span style="color: var(--accent);">${label}</span>`);
+        }
       }
 
       let bodyContent = '';
@@ -992,6 +1036,69 @@
           </div>`;
       }
 
+      // Task-specific content
+      if (type === 'task') {
+        const taskInput = start?.metadata?.input;
+        if (taskInput) {
+          const inputStr = typeof taskInput === 'string' ? taskInput : JSON.stringify(taskInput, null, 2);
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">📥 Task Input</div>
+              <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(inputStr, 2000))}</div>
+            </div>`;
+        }
+
+        const taskDeps = start?.metadata?.task?.depends_on || [];
+        if (taskDeps.length > 0) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">🔗 Dependencies</div>
+              <div class="task-deps">${taskDeps.map(d => `<span class="task-dep-tag">${escapeHtml(d)}</span>`).join('')}</div>
+            </div>`;
+        }
+
+        // Find PTC-Lisp programs from LLM events within this task's time range
+        const taskPrograms = findTaskPrograms(start, stop);
+        if (taskPrograms.length > 0) {
+          taskPrograms.forEach((prog, idx) => {
+            const turnLabel = taskPrograms.length > 1 ? ` (Turn ${idx + 1})` : '';
+            bodyContent += `
+              <div class="event-section">
+                <div class="event-section-title">📝 Program${turnLabel}</div>
+                <div class="code-block">${highlightLisp(prog)}</div>
+              </div>`;
+          });
+        }
+
+        const taskResult = stop?.metadata?.result;
+        if (taskResult != null) {
+          const resultStr = typeof taskResult === 'string' ? taskResult : JSON.stringify(taskResult, null, 2);
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">📤 Result</div>
+              <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(resultStr, 2000))}</div>
+            </div>`;
+        }
+
+        const verificationErr = stop?.metadata?.verification_error;
+        if (verificationErr) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title" style="color: var(--error);">⚠ Verification Failed</div>
+              <div class="code-block" style="border-left: 3px solid var(--error);">${escapeHtml(verificationErr)}</div>
+            </div>`;
+        }
+
+        const validationErr = stop?.metadata?.validation_error;
+        if (validationErr) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title" style="color: var(--error);">⚠ Synthesis Validation Failed</div>
+              <div class="code-block" style="border-left: 3px solid var(--error);">${escapeHtml(validationErr)}</div>
+            </div>`;
+        }
+      }
+
       return `
         <div class="event-card ${type}${hasError ? ' error' : ''}">
           <div class="event-header">
@@ -1014,6 +1121,27 @@
       if (!response) return '';
       const match = response.match(/```clojure\n([\s\S]*?)```/);
       return match ? match[1].trim() : '';
+    }
+
+    // Find PTC-Lisp programs from LLM events that occurred during a task's execution
+    function findTaskPrograms(taskStart, taskStop) {
+      if (!taskStart || !taskStop || !currentFile) return [];
+      const data = loadedFiles.get(currentFile);
+      if (!data) return [];
+
+      const taskStartTime = new Date(taskStart.timestamp).getTime();
+      const taskStopTime = new Date(taskStop.timestamp).getTime();
+      const programs = [];
+
+      for (const event of data.events) {
+        if (event.event !== 'llm.stop') continue;
+        const eventTime = new Date(event.timestamp).getTime();
+        if (eventTime >= taskStartTime && eventTime <= taskStopTime) {
+          const program = extractProgram(event.metadata?.response || '');
+          if (program) programs.push(program);
+        }
+      }
+      return programs;
     }
 
     function getLastUserMessage(messages) {
@@ -1156,12 +1284,13 @@
       for (const [filename, data] of loadedFiles) {
         const events = data.events;
         const traceStart = events.find(e => e.event === 'trace.start');
+        const execStop = events.find(e => e.event === 'execution.stop');
         const runStop = events.find(e => e.event === 'run.stop');
         const traceStop = events.find(e => e.event === 'trace.stop');
         const paired = pairEvents(events);
         const llmEvents = paired.filter(e => e.type === 'llm');
         const tokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
-        const duration = runStop?.duration_ms || traceStop?.duration_ms || 0;
+        const duration = execStop?.duration_ms || runStop?.duration_ms || traceStop?.duration_ms || 0;
         const parentId = traceStart?.metadata?.parent_trace_id || null;
         const name = traceStart?.metadata?.tool_name || traceStart?.metadata?.agent_name || filename.replace(/\.jsonl$/, '');
 
@@ -1399,6 +1528,7 @@
           <div class="task-item-header">
             <span class="task-id">${escapeHtml(task.id || 'unnamed')}</span>
             ${taskType !== 'task' ? `<span class="task-type-badge">${escapeHtml(taskType)}</span>` : ''}
+            ${task.output ? `<span class="task-type-badge" style="background: ${task.output === 'ptc_lisp' ? 'var(--accent)' : 'var(--muted)'}; color: var(--bg);">${task.output === 'ptc_lisp' ? 'PTC-Lisp' : 'JSON'}</span>` : ''}
             ${task.agent ? `<span class="task-agent-ref">→ ${escapeHtml(task.agent)}</span>` : ''}
           </div>
           ${task.input ? `<div class="task-input">${escapeHtml(truncatePlan(task.input, 200))}</div>` : ''}

@@ -988,4 +988,83 @@ defmodule PtcRunner.PlanExecutorTest do
       assert Enum.any?(issues, &(&1.category == :cycle_detected))
     end
   end
+
+  describe "execute/3 - quality gate replan cycle" do
+    test "quality gate fails → replan → re-execution succeeds" do
+      # Plan: fetch data, then analyze (with quality gate enabled)
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch_balance", "input" => "Fetch balance sheet data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze all financial data: {{results.fetch_balance}}",
+            "depends_on" => ["fetch_balance"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+      gate_call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn input ->
+        count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
+        output_mode = Map.get(input, :output)
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        cond do
+          # Quality gate checks (JSON mode with sufficiency prompt)
+          output_mode == :json and String.contains?(prompt, "data sufficiency checker") ->
+            gate_count = Agent.get_and_update(gate_call_count, fn n -> {n, n + 1} end)
+
+            if gate_count == 0 do
+              # First gate: insufficient data
+              {:ok,
+               ~s|{"sufficient": false, "missing": ["income statement data"], "evidence": [{"field": "income data", "found": false, "source": "NOT FOUND"}]}|}
+            else
+              # Second gate (after replan): data is now sufficient
+              {:ok,
+               ~s|{"sufficient": true, "missing": [], "evidence": [{"field": "income data", "found": true, "source": "fetch_income"}]}|}
+            end
+
+          # MetaPlanner replan call
+          String.contains?(prompt, "repair specialist") ->
+            # Return a repair plan that adds the missing data fetch
+            {:ok, ~s({
+              "tasks": [
+                {"id": "fetch_balance", "input": "Fetch balance sheet data"},
+                {"id": "fetch_income", "input": "Fetch income statement data"},
+                {"id": "analyze", "input": "Analyze all financial data", "depends_on": ["fetch_balance", "fetch_income"]}
+              ]
+            })}
+
+          # Regular task execution
+          count == 0 ->
+            {:ok, ~s({"balance_sheet": {"assets": 100}})}
+
+          true ->
+            {:ok, ~s({"result": "analysis complete"})}
+        end
+      end
+
+      {:ok, metadata} =
+        PlanExecutor.execute(plan, "Analyze company finances",
+          llm: mock_llm,
+          max_turns: 1,
+          quality_gate: true,
+          replan_cooldown_ms: 0
+        )
+
+      Agent.stop(call_count)
+      Agent.stop(gate_call_count)
+
+      # Verify replan happened
+      assert metadata.replan_count == 1
+      # Verify final results contain the analyze task
+      assert Map.has_key?(metadata.results, "analyze")
+      assert Map.has_key?(metadata.results, "fetch_balance")
+    end
+  end
 end

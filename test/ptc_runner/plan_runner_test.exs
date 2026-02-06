@@ -1115,7 +1115,8 @@ defmodule PtcRunner.PlanRunnerTest do
 
         if output_mode == :json and count == 1 do
           # Quality gate check (JSON mode, triggered for "analyze" task)
-          {:ok, ~s|{"sufficient": true, "missing": []}|}
+          {:ok,
+           ~s|{"sufficient": true, "missing": [], "evidence": [{"field": "data", "found": true, "source": "fetch"}]}|}
         else
           # Regular task calls
           {:ok, ~s({"result": "done"})}
@@ -1153,9 +1154,10 @@ defmodule PtcRunner.PlanRunnerTest do
         messages = Map.get(input, :messages, [])
         prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
 
-        if output_mode == :json and String.contains?(prompt, "data sufficiency") do
+        if output_mode == :json and String.contains?(prompt, "data sufficiency checker") do
           # Quality gate check — says data is insufficient
-          {:ok, ~s|{"sufficient": false, "missing": ["income statement data"]}|}
+          {:ok,
+           ~s|{"sufficient": false, "missing": ["income statement data"], "evidence": [{"field": "revenue", "found": false, "source": "NOT FOUND"}]}|}
         else
           # Regular task
           {:ok, ~s({"result": "done"})}
@@ -1255,7 +1257,7 @@ defmodule PtcRunner.PlanRunnerTest do
         messages = Map.get(input, :messages, [])
         prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
 
-        if output_mode == :json and String.contains?(prompt, "data sufficiency") do
+        if output_mode == :json and String.contains?(prompt, "data sufficiency checker") do
           Agent.update(main_llm_called_for_gate, fn _ -> true end)
         end
 
@@ -1264,7 +1266,9 @@ defmodule PtcRunner.PlanRunnerTest do
 
       gate_llm = fn _input ->
         Agent.update(gate_llm_called, fn _ -> true end)
-        {:ok, ~s|{"sufficient": true, "missing": []}|}
+
+        {:ok,
+         ~s|{"sufficient": true, "missing": [], "evidence": [{"field": "data", "found": true, "source": "fetch"}]}|}
       end
 
       {:ok, _results} =

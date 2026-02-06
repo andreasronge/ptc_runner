@@ -533,7 +533,8 @@ defmodule PtcRunner.PlanRunner do
       SubAgent.new(
         prompt: prompt,
         output: :json,
-        signature: "{sufficient :bool, missing [:string]}",
+        signature:
+          "{sufficient :bool, missing [:string], evidence [{field :string, found :bool, source :string}]}",
         max_turns: 1,
         timeout: opts.timeout
       )
@@ -541,17 +542,29 @@ defmodule PtcRunner.PlanRunner do
     case SubAgent.run(agent, llm: gate_llm) do
       {:ok, step} ->
         case step.return do
-          %{"sufficient" => true} ->
-            emit_event(opts, {:quality_gate_passed, %{task_id: task.id}})
+          %{"sufficient" => true} = gate_result ->
+            evidence = Map.get(gate_result, "evidence", [])
+
+            emit_event(
+              opts,
+              {:quality_gate_passed, %{task_id: task.id, evidence: evidence}}
+            )
+
             :proceed
 
-          %{"sufficient" => false, "missing" => missing} ->
+          %{"sufficient" => false, "missing" => missing} = gate_result ->
+            evidence = Map.get(gate_result, "evidence", [])
+
             diagnosis =
               "Quality gate: upstream data insufficient for task '#{task.id}'. " <>
                 "Missing: #{Enum.join(missing, ", ")}"
 
             Logger.info(diagnosis)
-            emit_event(opts, {:quality_gate_failed, %{task_id: task.id, missing: missing}})
+
+            emit_event(
+              opts,
+              {:quality_gate_failed, %{task_id: task.id, missing: missing, evidence: evidence}}
+            )
 
             {:replan_required,
              %{
@@ -609,8 +622,8 @@ defmodule PtcRunner.PlanRunner do
       end
 
     """
-    You are a data sufficiency checker. Determine whether the available upstream data \
-    is sufficient for a downstream task to succeed.
+    You are a data sufficiency checker. Verify that available upstream data contains \
+    every data point the downstream task needs.
     #{mission_info}
 
     ## Downstream Task
@@ -621,15 +634,18 @@ defmodule PtcRunner.PlanRunner do
     #{dep_summaries}
 
     ## Instructions
-    Evaluate whether the upstream data contains the information needed for the \
-    downstream task to produce a correct result. Consider the original mission \
-    to understand what data points are essential.
+    1. Read the downstream task description and signature to identify every specific \
+    data point required (e.g., "net sales", "total assets", "employee count").
+    2. For EACH required data point, search the upstream data and record evidence:
+       - `field`: the data point name (e.g., "net sales")
+       - `found`: true only if the exact value appears in the upstream data
+       - `source`: the upstream task_id where the value was found, or "NOT FOUND"
+    3. Mark `sufficient: true` ONLY if every required data point has `found: true`.
+    4. List any unfound data points in `missing`.
 
-    Be pragmatic: only flag CLEAR material gaps where essential data is entirely \
-    missing. Minor formatting issues or extra data are fine.
-
-    Return `{"sufficient": true, "missing": []}` if the data is adequate, or \
-    `{"sufficient": false, "missing": ["description of missing data"]}` if not.
+    Be precise: a data point is "found" only if the actual numeric value or text \
+    is present in the upstream data. Do not assume values can be derived or inferred \
+    from unrelated fields.
     """
   end
 
