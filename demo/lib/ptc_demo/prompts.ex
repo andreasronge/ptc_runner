@@ -145,31 +145,4 @@ defmodule PtcDemo.Prompts do
   """
   @spec metadata(atom()) :: map()
   def metadata(profile), do: LibLanguageSpec.metadata(profile)
-
-  @doc """
-  Check if a prompt profile is archived.
-
-  ## Examples
-
-      iex> PtcDemo.Prompts.archived?(:single_shot)
-      false
-
-  """
-  @spec archived?(atom()) :: boolean()
-  def archived?(profile), do: LibLanguageSpec.archived?(profile)
-
-  @doc """
-  List only current (non-archived) prompt profiles.
-
-  ## Examples
-
-      iex> keys = PtcDemo.Prompts.list_current()
-      iex> :single_shot in keys
-      true
-
-  """
-  @spec list_current() :: [atom()]
-  def list_current do
-    LibLanguageSpec.list_current()
-  end
 end
