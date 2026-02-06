@@ -19,12 +19,11 @@ defmodule PageIndex do
       {:ok, tree} = PageIndex.load_index("data/3M_2022_10K_index.json")
   """
 
-  alias PageIndex.{Parser, Indexer}
+  alias PageIndex.{Parser, FineIndexer}
 
   @cache_table :page_index_pdf_cache
 
-  defdelegate index(pdf_path, opts), to: Indexer
-  defdelegate parse(pdf_path), to: Parser
+  defdelegate index(pdf_path, opts), to: FineIndexer
 
   @doc """
   Ensures the PDF cache table exists.
@@ -57,14 +56,14 @@ defmodule PageIndex do
   Saves an index tree to JSON file.
   """
   def save_index(tree, path) do
-    Indexer.save(tree, path)
+    FineIndexer.save(tree, path)
   end
 
   @doc """
   Loads an index tree from JSON file.
   """
   def load_index(path) do
-    Indexer.load(path)
+    FineIndexer.load(path)
   end
 
   @doc """

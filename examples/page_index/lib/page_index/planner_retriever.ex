@@ -18,13 +18,25 @@ defmodule PageIndex.PlannerRetriever do
   - Identify what data points are needed
   - Create tasks to fetch each from the document
   - Verify results contain the expected information
+  - Run quality gate before synthesis to check data sufficiency (if enabled)
   - Synthesize the final answer
+
+  ## Options
+
+  - `:llm` - Required. LLM callback
+  - `:pdf_path` - Required. Path to the PDF file
+  - `:max_replans` - Max replan attempts (default: 2)
+  - `:quality_gate` - Enable pre-flight data sufficiency check (default: false)
+  - `:quality_gate_llm` - Optional separate LLM for quality gate
+  - `:on_event` - Optional event callback
   """
   def retrieve(tree, query, opts \\ []) do
     llm = Keyword.fetch!(opts, :llm)
     pdf_path = Keyword.fetch!(opts, :pdf_path)
     max_replans = Keyword.get(opts, :max_replans, 2)
     on_event = Keyword.get(opts, :on_event)
+    quality_gate = Keyword.get(opts, :quality_gate, false)
+    quality_gate_llm = Keyword.get(opts, :quality_gate_llm)
 
     # Pre-warm the PDF cache before starting planner execution
     # This avoids timeout issues when the sandbox tries to extract pages
@@ -44,32 +56,35 @@ defmodule PageIndex.PlannerRetriever do
     DOCUMENT SECTIONS (use fetch_section tool to get content):
     #{sections_summary}
 
-    IMPORTANT: Use ONLY these pre-defined agents:
-    - "fetcher" - for fetching document sections (has fetch_section tool)
-    - "analyzer" - for synthesizing final answer (no tools)
-
     INSTRUCTIONS:
-    1. Read the section summaries to identify which sections are relevant
-    2. Create tasks with agent="fetcher" to fetch the relevant sections
-    3. Create a synthesis_gate task with agent="analyzer" that extracts the answer
-    4. Include verification predicates to ensure data was found
+    1. First, work backwards from the question: what specific data, computations, or comparisons
+       are needed to produce a well-supported answer?
+    2. Create "fetcher" tasks to retrieve only the sections that contain required data points
+    3. If the answer requires computation (ratios, comparisons, derived values), create a dedicated
+       computation task (agent with no tools) between the fetches and the final synthesis.
+       Give it a precise signature with the computed values.
+    4. Create a synthesis_gate task that produces the final answer from upstream results
+    5. Include verification predicates to ensure data was found
     """
 
-    # Pre-define agents so the LLM only needs to generate tasks
     constraints = """
     CRITICAL: You MUST generate a plan with BOTH "agents" AND "tasks" keys.
 
-    Use these exact agent definitions:
-    - "fetcher": has the "fetch_section" tool for retrieving document content
-    - "analyzer": has no tools, synthesizes data into final answer
-
     CRITICAL: The final synthesis task MUST have the id "final_answer".
+
+    For fetching document sections, use `agent: "direct"` with PTC-Lisp tool calls.
+    You know the exact section IDs from the document sections list above, so there is
+    no need for an LLM agent to figure them out. Example:
+    {"id": "fetch_balance_sheet", "agent": "direct", "input": "(tool/fetch_section {:node_id \"financial_state_consolidated_balance_sheet_at_\"})"}
+
+    You may define additional agents with no tools for computation, analysis, or synthesis.
+    Give each agent a clear prompt describing its role.
 
     You MUST generate at least one task in the "tasks" array. Example structure:
     {
-      "agents": {"fetcher": {...}, "analyzer": {...}},
+      "agents": {"analyzer": {...}},
       "tasks": [
-        {"id": "fetch_data", "agent": "fetcher", "input": "..."},
+        {"id": "fetch_data", "agent": "direct", "input": "(tool/fetch_section {:node_id \"section_id\"})"},
         {"id": "final_answer", "agent": "analyzer", "input": "...", "depends_on": ["fetch_data"], "type": "synthesis_gate"}
       ]
     }
@@ -101,21 +116,24 @@ defmodule PageIndex.PlannerRetriever do
       "fetch_section" => make_smart_fetch_tool(nodes, pdf_path)
     }
 
-    executor_opts = [
-      llm: llm,
-      available_tools: available_tools,
-      base_tools: base_tools,
-      max_total_replans: max_replans,
-      max_turns: 10,
-      constraints: constraints
-    ]
-
     executor_opts =
-      if on_event do
-        Keyword.put(executor_opts, :on_event, on_event)
-      else
-        executor_opts
-      end
+      [
+        llm: llm,
+        available_tools: available_tools,
+        base_tools: base_tools,
+        max_total_replans: max_replans,
+        max_turns: 10,
+        constraints: constraints,
+        quality_gate: quality_gate
+      ]
+      |> then(fn opts ->
+        if on_event, do: Keyword.put(opts, :on_event, on_event), else: opts
+      end)
+      |> then(fn opts ->
+        if quality_gate_llm,
+          do: Keyword.put(opts, :quality_gate_llm, quality_gate_llm),
+          else: opts
+      end)
 
     case PlanExecutor.run(mission, executor_opts) do
       {:ok, results, metadata} ->

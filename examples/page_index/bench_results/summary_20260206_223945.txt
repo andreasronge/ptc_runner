@@ -1,0 +1,12 @@
+========================================
+PlanRunner Benchmark — Fri Feb  6 22:39:45 CET 2026
+Model: bedrock:haiku
+Runs per question: 5
+========================================
+
+────────────────────────────────────────
+Q1 [medium]: Is 3M a capital-intensive business based on FY2022 data?
+Expected: No. CAPEX to Revenue ratio ~5.1%, efficient capital management
+────────────────────────────────────────
+OK (56s, ? replans, ? tasks)
+    Answer: 3M meets capital-intensive thresholds: CapEx-to-Revenue equals 0.05 (at the 0.05 benchmark), with $1.75B in capex agains

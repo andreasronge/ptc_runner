@@ -4,7 +4,6 @@
 #
 # Usage:
 #   mix run run.exs --index data/3M_2022_10K.pdf    # Create index
-#   mix run run.exs --parse data/3M_2022_10K.pdf    # Parse only (no LLM)
 #   mix run run.exs --show data/3M_2022_10K_index.json  # Show existing index
 
 # Start PdfExtractor GenServer (requires Python with pdfplumber)
@@ -17,17 +16,16 @@ defmodule CLI do
       OptionParser.parse(args,
         switches: [
           index: :string,
-          fine: :string,
-          parse: :string,
           show: :string,
           query: :string,
+          pdf: :string,
           simple: :boolean,
           planner: :boolean,
           trace: :boolean,
           model: :string,
           help: :boolean
         ],
-        aliases: [h: :help, m: :model, f: :fine, q: :query, s: :simple, p: :planner, t: :trace]
+        aliases: [h: :help, m: :model, q: :query, s: :simple, p: :planner, t: :trace]
       )
 
     cond do
@@ -37,14 +35,8 @@ defmodule CLI do
       opts[:query] ->
         query_index(opts[:query], opts)
 
-      opts[:fine] ->
-        fine_index_document(opts[:fine], opts)
-
       opts[:index] ->
         index_document(opts[:index], opts)
-
-      opts[:parse] ->
-        parse_document(opts[:parse])
 
       opts[:show] ->
         show_index(opts[:show])
@@ -59,44 +51,24 @@ defmodule CLI do
     PageIndex - Hierarchical Document Retrieval
 
     Usage:
-      mix run run.exs --query "<question>"  Query the index (uses fine index)
-      mix run run.exs --fine <pdf>          Create fine-grained index (TOC-based)
-      mix run run.exs --index <pdf>         Create basic index (Item-level only)
-      mix run run.exs --parse <pdf>         Parse structure only (no LLM)
-      mix run run.exs --show <json>         Display existing index
+      mix run run.exs --index <pdf>                   Create index (TOC-based)
+      mix run run.exs --query "<question>" --pdf <pdf> Query the index
+      mix run run.exs --show <json>                    Display existing index
 
     Options:
       -m, --model <name>    LLM model (default: bedrock:haiku)
+      --pdf <path>          PDF path for queries (required with --query)
       -s, --simple          Use simple retrieval (score all nodes, no recursion)
       -p, --planner         Use MetaPlanner for complex multi-hop questions
       -t, --trace           Enable tracing (writes to traces/ directory)
       -h, --help            Show this help
 
     Examples:
-      mix run run.exs --query "What are 3M's business segments?"
-      mix run run.exs --query "What drove operating margin change?" --simple
-      mix run run.exs --fine data/3M_2022_10K.pdf
-      mix run run.exs --show data/3M_2022_10K_fine_index.json
+      mix run run.exs --index data/3M_2022_10K.pdf
+      mix run run.exs --query "What are 3M's business segments?" --pdf data/3M_2022_10K.pdf
+      mix run run.exs --query "What drove operating margin change?" --pdf data/3M_2022_10K.pdf --simple
+      mix run run.exs --show data/3M_2022_10K_index.json
     """)
-  end
-
-  defp parse_document(pdf_path) do
-    IO.puts("Parsing: #{pdf_path}\n")
-
-    case PageIndex.parse(pdf_path) do
-      {:ok, sections} ->
-        IO.puts("Found #{length(sections)} sections:\n")
-
-        for section <- sections do
-          IO.puts("  #{section.id}: #{section.title}")
-          IO.puts("    Pages: #{section.start_page}-#{section.end_page}")
-          IO.puts("    Content: #{String.length(section.content)} chars")
-          IO.puts("")
-        end
-
-      {:error, reason} ->
-        IO.puts("Error: #{reason}")
-    end
   end
 
   defp index_document(pdf_path, opts) do
@@ -105,45 +77,17 @@ defmodule CLI do
     IO.puts("Indexing: #{pdf_path}")
     IO.puts("Model: #{model}\n")
 
-    # Create LLM callback for SubAgent
     llm = LLMClient.callback(model)
 
     case PageIndex.index(pdf_path, llm: llm) do
       {:ok, tree} ->
-        # Save index
-        index_path = String.replace(pdf_path, ~r/\.pdf$/i, "_index.json")
+        index_path = index_path_for(pdf_path)
         PageIndex.save_index(tree, index_path)
-        IO.puts("\n✓ Index saved to: #{index_path}\n")
 
-        # Print tree
-        IO.puts("Index structure:")
-        PageIndex.print_tree(tree)
-
-      {:error, reason} ->
-        IO.puts("Error: #{inspect(reason)}")
-    end
-  end
-
-  defp fine_index_document(pdf_path, opts) do
-    model = opts[:model] || "bedrock:haiku"
-
-    IO.puts("Fine-grained Indexing: #{pdf_path}")
-    IO.puts("Model: #{model}\n")
-
-    llm = LLMClient.callback(model)
-
-    case PageIndex.FineIndexer.index(pdf_path, llm: llm) do
-      {:ok, tree} ->
-        # Save index
-        index_path = String.replace(pdf_path, ~r/\.pdf$/i, "_fine_index.json")
-        PageIndex.FineIndexer.save(tree, index_path)
-        IO.puts("\n✓ Fine index saved to: #{index_path}")
-
-        # Count nodes
         node_count = count_nodes(tree)
+        IO.puts("\n✓ Index saved to: #{index_path}")
         IO.puts("Total nodes: #{node_count}\n")
 
-        # Print tree
         IO.puts("Index structure:")
         PageIndex.print_tree(tree)
 
@@ -163,9 +107,14 @@ defmodule CLI do
     planner = opts[:planner] || false
     trace = opts[:trace] || false
 
-    # Default paths
-    index_path = "data/3M_2022_10K_fine_index.json"
-    pdf_path = "data/3M_2022_10K.pdf"
+    pdf_path = opts[:pdf]
+
+    unless pdf_path do
+      IO.puts("Error: --pdf <path> is required with --query")
+      System.halt(1)
+    end
+
+    index_path = index_path_for(pdf_path)
 
     mode =
       cond do
@@ -176,13 +125,14 @@ defmodule CLI do
 
     IO.puts("Query: #{query}")
     IO.puts("Model: #{model}")
+    IO.puts("Index: #{index_path}")
     IO.puts("Mode: #{mode}")
     if trace, do: IO.puts("Tracing: enabled")
     IO.puts("")
 
     llm = LLMClient.callback(model)
 
-    case PageIndex.FineIndexer.load(index_path) do
+    case PageIndex.load_index(index_path) do
       {:ok, tree} ->
         cond do
           planner ->
@@ -197,8 +147,12 @@ defmodule CLI do
 
       {:error, reason} ->
         IO.puts("Error loading index: #{inspect(reason)}")
-        IO.puts("Run --fine first to create the index.")
+        IO.puts("Run --index #{pdf_path} first to create the index.")
     end
+  end
+
+  defp index_path_for(pdf_path) do
+    String.replace(pdf_path, ~r/\.pdf$/i, "_index.json")
   end
 
   defp with_optional_trace(trace?, prefix, query, func) do
@@ -221,7 +175,7 @@ defmodule CLI do
   end
 
   defp run_planner_query(tree, query, llm, pdf_path, opts) do
-    retriever_opts = [llm: llm, pdf_path: pdf_path]
+    retriever_opts = [llm: llm, pdf_path: pdf_path, quality_gate: true]
 
     result =
       with_optional_trace(opts[:trace], "planner", query, fn ->
@@ -291,7 +245,11 @@ defmodule CLI do
   end
 
   defp inspect_answer(answer) when is_binary(answer), do: answer
-  defp inspect_answer(answer) when is_map(answer), do: answer["answer"] || inspect(answer)
+
+  defp inspect_answer(answer) when is_map(answer) do
+    answer["answer"] || answer["reasoning"] || inspect(answer)
+  end
+
   defp inspect_answer(answer), do: inspect(answer)
 
   defp show_index(json_path) do
