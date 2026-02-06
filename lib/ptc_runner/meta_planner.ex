@@ -184,14 +184,25 @@ defmodule PtcRunner.MetaPlanner do
        or data transformations, create a dedicated agent with no tools and a precise signature for that step.
        Don't bury computation inside synthesis — make it an explicit task with typed inputs and outputs.
        IMPORTANT: Set `"output": "ptc_lisp"` on computation tasks. This makes the agent write executable
-       PTC-Lisp programs with verified arithmetic instead of computing values mentally. Their prompt should
-       instruct them to extract values into `let` bindings and use arithmetic expressions (`/`, `*`, `+`, `-`).
+       PTC-Lisp programs with verified arithmetic instead of computing values mentally. The agent's prompt
+       must reference PTC-Lisp (not JSON) — instruct it to extract values into `let` bindings and use
+       arithmetic expressions (`/`, `*`, `+`, `-`).
        PTC-Lisp also supports conditionals, string operations, and collection functions (`map`, `filter`,
        `reduce`, `sort-by`) for data transformations.
+       Computation task signatures should contain only numeric and boolean fields — no `:string` fields
+       for analysis or interpretation. Prose belongs in the downstream synthesis gate, which can read
+       the computed numbers and write accurate narrative. String fields in computation signatures tempt
+       the LLM to hardcode numbers in text before the interpreter verifies them.
 
     ## Task Types
 
     - **Regular tasks**: Use an agent with tools to accomplish work
+    - **Direct tasks**: When you already know the exact tool call or computation, use `"agent": "direct"` and
+      write PTC-Lisp code in the `input` field. This executes instantly without an LLM call. All base tools
+      are available. Upstream results are accessible via `data/results`. Use this whenever the plan can
+      determine the precise tool arguments upfront — it eliminates unnecessary LLM round-trips.
+      Example: `{"id": "get_data", "agent": "direct", "input": "(tool/search {:query \"quarterly revenue\"})"}`
+      With upstream data: `{"id": "transform", "agent": "direct", "input": "(map :name (get data/results \"lookup\"))", "depends_on": ["lookup"]}`
     - **Synthesis gates**: Compress/summarize results from multiple upstream tasks (type: "synthesis_gate")
       When designing a synthesis_gate, you MUST specify a `signature` that defines the exact output structure
       (e.g., `"{stocks [{symbol :string, price :float, currency :string}]}"`). This ensures machine-readable results.
@@ -230,7 +241,8 @@ defmodule PtcRunner.MetaPlanner do
       verifies the math. Omit `output` for tasks with tools (auto-detects to ptc_lisp) or pure Q&A/synthesis
       (auto-detects to json).
     - Computation agents receive upstream task results as context and produce PTC-Lisp programs.
-      Always give these agents a precise signature (e.g., `"{ratio :float, interpretation :string}"`).
+      Always give these agents a precise numeric signature (e.g., `"{ratio :float, growth_pct :float}"`).
+      Do NOT include `:string` fields for analysis — leave interpretation to the synthesis gate.
       Their prompt should instruct them to use `let` bindings and arithmetic expressions for calculations
     - Use `on_verification_failure: "replan"` for critical tasks that may need strategy changes
 

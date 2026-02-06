@@ -130,4 +130,5 @@ dedicated computation agent between the data-fetching and synthesis steps.
 - **Targeted fetches**: Only fetches sections containing the required input values
 - **Explicit computation step**: The `calculator` agent extracts numbers and computes derived values — not buried in synthesis
 - **`output: "ptc_lisp"`**: The computation task uses PTC-Lisp mode so the interpreter verifies arithmetic instead of the LLM computing values mentally
+- **Numeric-only computation signature**: The `calculator` signature contains only `:string` labels (region names) and `:float` numbers — no analysis or interpretation fields. Prose belongs in the synthesis gate, which reads the verified numbers and writes accurate narrative
 - **Typed signatures**: Each step has a precise schema so downstream tasks know what they receive
