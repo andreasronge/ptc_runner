@@ -20,6 +20,8 @@ Document PDF → TocParser (LLM) → Section tree → Parallel summarization →
 | (default) | Single SubAgent with `get-content` tool | Most questions |
 | `--planner` | MetaPlanner decomposes into fetch/compute/synthesize tasks | Multi-hop, computation-heavy |
 
+The default agent mode runs a single LLM conversation that iteratively fetches sections and synthesizes an answer — simple but can't decompose complex reasoning. The planner mode generates a structured plan with separate fetch, compute, and synthesize tasks executed in dependency order, with optional quality gates and replanning. Fetches run in parallel without LLM calls (direct PTC-Lisp), while analysis and synthesis use dedicated SubAgents.
+
 ## Setup
 
 ```bash
@@ -79,6 +81,10 @@ lib/page_index/
 ├── retriever.ex           # Agent-based and simple retrieval
 └── planner_retriever.ex   # MetaPlanner-based multi-hop retrieval
 ```
+
+## Known Limitation: Planner Interpretation Instability
+
+The planner mode reliably extracts consistent numbers (e.g., PPE=9178, CapEx=1749, revenue=34229) but the synthesis step is unstable for subjective questions like "Is 3M capital-intensive?" — different runs pick different metrics and thresholds (CapEx/Revenue ~5% vs PPE/Assets ~20%), leading to contradictory conclusions from identical data. Root cause: the planner prompt has no canonical definition of analytical concepts, so each generated plan embeds different interpretation criteria.
 
 ## Alternative Approaches to Consider
 
