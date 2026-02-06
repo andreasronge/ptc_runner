@@ -1,0 +1,474 @@
+{
+  "title": "10-K Annual Report",
+  "children": [
+    {
+      "title": "Item 1: Business",
+      "children": [],
+      "start_page": 4,
+      "end_page": 9,
+      "node_id": "item_1",
+      "summary": "3M operates four business segments—Safety and Industrial, Transportation and Electronics, Health Care, and Consumer—generating revenue across diverse product categories including abrasives, adhesives, medical solutions, and consumer goods, with brands like Post-it®, Scotch-Brite™, and Nexcare™. The Consumer segment experiences seasonal demand fluctuations related to back-to-school purchasing in Q3, while growth opportunities span personal safety, automotive connectivity, semiconductor materials, healthcare IT, and biopharma filtration."
+    },
+    {
+      "title": "Item 1A: Risk Factors",
+      "children": [],
+      "start_page": 10,
+      "end_page": 15,
+      "node_id": "item_1a",
+      "summary": "3M faces material financial and regulatory risks from PFAS (perfluoroalkyl and polyfluoroalkyl substances) regulation and litigation, with approximately 60% of revenues exposed to foreign currency fluctuations; the company committed to exiting all PFAS manufacturing and discontinuing PFAS use across its product portfolio by end of 2025, which could require significant investigation, remediation, and compliance costs."
+    },
+    {
+      "title": "Item 1B: Unresolved Staff Comments",
+      "children": [],
+      "start_page": 16,
+      "end_page": 16,
+      "node_id": "item_1b",
+      "summary": "Legal proceedings details are incorporated by reference from Note 16 on Commitments and Contingencies, and mine safety violations and regulatory matters required under the Dodd-Frank Act are disclosed in Exhibit 95 of the annual report."
+    },
+    {
+      "title": "Item 2: Properties",
+      "children": [],
+      "start_page": 16,
+      "end_page": 16,
+      "node_id": "item_2",
+      "summary": "The company incorporates legal proceedings from contingencies disclosures, and pursuant to the Dodd-Frank Act, discloses mine safety violations and regulatory matters in Exhibit 95 of the annual report."
+    },
+    {
+      "title": "Item 3: Legal Proceedings",
+      "children": [],
+      "start_page": 17,
+      "end_page": 17,
+      "node_id": "item_3",
+      "summary": "3M repurchased approximately 10.7 million shares in 2022 at an average price of $134.31 per share under a $10 billion authorization program with no expiration date, while maintaining consistent quarterly cash dividends of $1.49 per share. As of January 31, 2023, the company had 62,488 shareholders of record and approximately $4.2 billion remaining in authorized repurchase capacity."
+    },
+    {
+      "title": "Item 4: Mine Safety Disclosures",
+      "children": [],
+      "start_page": 17,
+      "end_page": 17,
+      "node_id": "item_4",
+      "summary": "3M repurchased 10.65 million shares in 2022 at an average price of $134.31 per share under a $10 billion authorization program with no expiration date, while maintaining quarterly dividend payments of $1.49 per share and operating with 62,488 shareholders of record as of January 31, 2023."
+    },
+    {
+      "title": "Item 5: Market for Registrant's Common Equity, Related Stockholder Matters and Issuer Purchases of Equity Securities",
+      "children": [],
+      "start_page": 18,
+      "end_page": 18,
+      "node_id": "item_5",
+      "summary": "3M's MD&A outlines the company's management perspective across eight sections and includes significant 2022 changes to segment reporting and non-GAAP measures; notably, 3M faced approximately $2.3 billion in pre-tax litigation costs in 2022 while navigating COVID-19 impacts and global supply chain disruptions across its four operating business segments."
+    },
+    {
+      "title": "Item 7: Management's Discussion and Analysis of Financial Condition and Results of Operations",
+      "children": [
+        {
+          "title": "Overview",
+          "children": [],
+          "start_page": 19,
+          "end_page": 26,
+          "node_id": "management_s_di_overview",
+          "summary": "3M faced significant operational challenges in 2022, including manufacturing interruptions at its Belgium facility (working toward restart after June 2022 agreement), suspension of Russian operations (less than 1% of 2021 sales), and supply chain disruptions from the Russia-Ukraine conflict. Operating income margin declined from 22.3% in 2021 to 19.1% in 2022, with diluted EPS decreasing from $10.12 to $10.18, primarily driven by raw material cost impacts (-2.4% margin) and significant litigation costs (-6.7% margin, -$3.20 per share), partially offset by gains on business divestitures ($4.73 per share)."
+        },
+        {
+          "title": "Results of Operations",
+          "children": [],
+          "start_page": 27,
+          "end_page": 27,
+          "node_id": "management_s_di_results_of_operations",
+          "summary": "3M's 2022 net interest expense decreased due to debt maturities and investment income, while the effective tax rate improved to 9.6% from 17.8% in 2021. The company posted $11 million in income from unconsolidated subsidiaries (equity method investments including its remaining Kindeva stake sold in Q4 2022) and $14 million in noncontrolling interest, primarily from its 75% ownership in 3M India Limited."
+        },
+        {
+          "title": "Performance by Business Segment",
+          "children": [],
+          "start_page": 28,
+          "end_page": 32,
+          "node_id": "management_s_di_performance_by_business_segmen",
+          "summary": "3M's Safety and Industrial segment represented 33.9% of consolidated sales with $11.6 billion in 2022 revenue, declining 3.2% year-over-year due to currency headwinds despite 1.0% organic growth; reported operating income fell 51.4% to $1.2 billion, but adjusted operating income of $2.6 billion remained relatively flat at 22.5% margin, with the decline primarily driven by litigation costs from Combat Arms Earplugs and Aearo respirator matters during the chapter 11 bankruptcy period that began July 2022."
+        },
+        {
+          "title": "Performance by Geographic Area",
+          "children": [],
+          "start_page": 33,
+          "end_page": 33,
+          "node_id": "management_s_di_performance_by_geographic_area",
+          "summary": "In 2022, 3M's total workforce decreased from 95,000 to 92,000 employees across three geographic regions, with the Americas representing the largest operational footprint. Capital spending totaled $9.2 billion in 2022, representing a strategic investment in manufacturing and sourcing capabilities to align product capability with regional sales and enhance operational efficiency globally."
+        },
+        {
+          "title": "Critical Accounting Estimates",
+          "children": [],
+          "start_page": 34,
+          "end_page": 35,
+          "node_id": "management_s_di_critical_accounting_estimates",
+          "summary": "As of December 31, 2022, the company's defined benefit pension and postretirement service cost was $426 million, with total consolidated pre-tax expense of $178 million (down from $206 million in 2021), while goodwill totaled approximately $12.8 billion and is subject to annual impairment testing. For 2023, pension and postretirement expenses are anticipated to decrease to approximately $145 million due to higher expected asset returns (7.50% for U.S. plans) and lower service costs estimated at $270 million."
+        },
+        {
+          "title": "New Accounting Pronouncements",
+          "children": [],
+          "start_page": 36,
+          "end_page": 36,
+          "node_id": "management_s_di_new_accounting_pronouncements",
+          "summary": "3M maintains a strong liquidity profile with total debt decreasing from 2021 to 2022 due to $1.1 billion in repayments across euro and dollar-denominated notes, while holding an A1 credit rating from Moody's and relying on a $5 billion commercial paper program and capital market access to fund operations and execute its capital deployment priorities of organic growth investment, shareholder returns, and strategic portfolio management."
+        },
+        {
+          "title": "Financial Condition and Liquidity",
+          "children": [],
+          "start_page": 37,
+          "end_page": 41,
+          "node_id": "management_s_di_financial_condition_and_liquid",
+          "summary": "At December 31, 2022, 3M's liquidity position included $3.9 billion in cash and marketable securities (down from $4.8 billion in 2021), resulting in net debt of $12.0 billion, while working capital declined by $1.2 billion year-over-year to $5.2 billion due to decreased cash and increased short-term borrowings, though the company maintains a strong balance sheet providing significant financial flexibility for growth investments and acquisitions."
+        },
+        {
+          "title": "Financial Instruments",
+          "children": [],
+          "start_page": 42,
+          "end_page": 42,
+          "node_id": "management_s_di_financial_instruments",
+          "summary": "3M conducted an annual value at risk analysis using Monte Carlo simulation (95% confidence, 12-month horizon) showing that as of December 31, 2022, foreign exchange exposure posed the largest risk with potential adverse after-tax earnings impact of $315 million, while commodity and interest rate exposure presented relatively minor risks of $5 million and $18 million respectively. Additionally, the company faces significant operational cost exposure of approximately $85 million per 1% change in purchased component prices and $45 million per 10% change in energy costs, highlighting the materiality of commodity and currency volatility to 3M's profitability."
+        }
+      ],
+      "start_page": 19,
+      "end_page": 26,
+      "node_id": "item_7",
+      "summary": "3M faced significant operational challenges in 2022, including manufacturing interruptions at its Belgium facility requiring government oversight and an infraction report in December 2022, plus suspension of Russian operations (less than 1% of 2021 sales) due to the Ukraine conflict. Operating income margin declined from 20.8% to 19.1% year-over-year, driven primarily by raw material costs (-2.4%), litigation expenses (-6.7%), and PFAS manufacturing exit costs (-2.4%), partially offset by gains on business divestitures (8.0%), with diluted EPS slightly increasing to $10.18 from $10.12 despite these headwinds."
+    },
+    {
+      "title": "Item 7A: Quantitative and Qualitative Disclosures About Market Risk",
+      "children": [],
+      "start_page": 42,
+      "end_page": 42,
+      "node_id": "item_7a",
+      "summary": "3M's 2022 Value at Risk analysis using Monte Carlo simulation at 95% confidence revealed potential adverse impacts to after-tax earnings of $315 million from foreign exchange exposure, $18 million from interest rates, and $5 million from commodity prices, while commodity procurement sensitivity shows a 1% price change would impact costs by $85 million annually. The company's global energy exposure indicates a 10% price fluctuation would result in approximately $45 million annual cost variance, highlighting significant exposure to currency, interest rate, and commodity market volatility."
+    },
+    {
+      "title": "Item 8: Financial Statements and Supplementary Data",
+      "children": [
+        {
+          "title": "Index to Financial Statements",
+          "children": [],
+          "start_page": 43,
+          "end_page": 43,
+          "node_id": "financial_state_index_to_financial_statements",
+          "summary": "3M Company's management affirms responsibility for financial statement integrity and has established effective internal controls over financial reporting as of December 31, 2022, with an unqualified opinion from PricewaterhouseCoopers LLP confirming the system's effectiveness under the COSO framework."
+        },
+        {
+          "title": "Management's Responsibility for Financial Reporting",
+          "children": [],
+          "start_page": 44,
+          "end_page": 44,
+          "node_id": "financial_state_management_s_responsibility_fo",
+          "summary": "An independent registered public accounting firm audited 3M Company's consolidated financial statements for the three years ended December 31, 2022, and internal control over financial reporting as of December 31, 2022, providing unqualified opinions that the financial statements fairly present the company's financial position in accordance with U.S. GAAP and that effective internal controls were maintained. The auditors conducted their work in accordance with PCAOB standards to obtain reasonable assurance that the consolidated financial statements were free of material misstatements and that internal control over financial reporting was maintained in all material respects."
+        },
+        {
+          "title": "Management's Report on Internal Control Over Financial Reporting",
+          "children": [],
+          "start_page": 44,
+          "end_page": 44,
+          "node_id": "financial_state_management_s_report_on_interna",
+          "summary": "The independent auditors issued unqualified opinions that 3M Company's consolidated financial statements for December 31, 2022 and 2021 present fairly in all material respects and that the Company maintained effective internal control over financial reporting as of December 31, 2022, based on COSO criteria. The audits were conducted in accordance with PCAOB standards and included comprehensive procedures to assess risks of material misstatement and evaluate the design and operating effectiveness of internal controls."
+        },
+        {
+          "title": "Report of Independent Registered Public Accounting Firm",
+          "children": [],
+          "start_page": 45,
+          "end_page": 47,
+          "node_id": "financial_state_report_of_independent_register",
+          "summary": "The auditors identified two critical audit matters requiring significant judgment: (1) Legal Proceedings, where management must estimate probable losses and determine appropriate accrual amounts with considerable subjectivity, and (2) the Tax-free Determination of the Food Safety Division Split-Off, where the company applied complex U.S. federal tax law and obtained IRS approval to structure a Reverse Morris Trust transaction as tax-free, with material implications for the company's financial reporting and tax obligations."
+        },
+        {
+          "title": "Consolidated Statement of Income for years ended December 31, 2022, 2021 and 2020",
+          "children": [],
+          "start_page": 48,
+          "end_page": 48,
+          "node_id": "financial_state_consolidated_statement_of_inco",
+          "summary": "3M's net income was $5.8 billion in 2022, down 2.3% from $5.9 billion in 2021, with comprehensive income of $5.9 billion after accounting for other comprehensive items including currency translation adjustments and pension plan gains. The year-over-year decline reflects reduced profitability and lower other comprehensive income ($69 million in 2022 vs. $970 million in 2021), primarily driven by unfavorable currency headwinds and lower pension adjustments."
+        },
+        {
+          "title": "Consolidated Statement of Comprehensive Income for the years ended December 31, 2022, 2021 and 2020",
+          "children": [],
+          "start_page": 49,
+          "end_page": 49,
+          "node_id": "financial_state_consolidated_statement_of_comp",
+          "summary": "3M Company's total assets decreased slightly from $47.1 billion in 2021 to $46.5 billion in 2022, with current assets declining from $15.4 billion to $14.7 billion, while the company reduced debt from $17.4 billion to $15.9 billion and maintained relatively stable total equity of approximately $14.8 billion, reflecting improved leverage ratios and financial positioning."
+        },
+        {
+          "title": "Consolidated Balance Sheet at December 31, 2022 and 2021",
+          "children": [],
+          "start_page": 50,
+          "end_page": 50,
+          "node_id": "financial_state_consolidated_balance_sheet_at_",
+          "summary": "3M Company's total shareholders' equity grew from $12.9 billion (December 31, 2020) to $14.8 billion (December 31, 2022), driven by net income of $5.8 billion in 2022, offset by $3.4 billion in dividend payments ($5.96 per share), $1.5 billion in stock repurchases, and a $2.0 billion reduction from the Food Safety business split-off. The company maintained treasury stock of 394.8 million shares at year-end 2022."
+        },
+        {
+          "title": "Consolidated Statement of Changes in Equity for the years ended December 31, 2022, 2021 and 2020",
+          "children": [],
+          "start_page": 51,
+          "end_page": 51,
+          "node_id": "financial_state_consolidated_statement_of_chan",
+          "summary": "3M Company generated $5.6 billion in operating cash flow in 2022, down from $7.5 billion in 2021, primarily due to increased working capital needs ($629 million inventory investment) and lower gains on divestitures. The company returned $4.8 billion to shareholders through dividends ($3.4 billion) and share buybacks ($1.5 billion) while investing $1.7 billion in capital expenditures, resulting in a $909 million decrease in cash reserves to $3.7 billion."
+        },
+        {
+          "title": "Consolidated Statement of Cash Flows for the years ended December 31, 2022, 2021 and 2020",
+          "children": [],
+          "start_page": 52,
+          "end_page": 52,
+          "node_id": "financial_state_consolidated_statement_of_cash",
+          "summary": "3M Company deconsolidated the Aearo Entities in Q3 2022 and updated its segment reporting methodology effective Q1 2022, impacting how segment operating income and disaggregated revenue are measured and reported. The company applies functional currency translation adjustments for foreign operations, records available-for-sale marketable securities at fair value, and considers COVID-19 impacts and economic uncertainties when making accounting estimates per U.S. GAAP requirements."
+        },
+        {
+          "title": "Notes to Consolidated Financial Statements",
+          "children": [
+            {
+              "title": "Item 1: Significant Accounting Policies",
+              "children": [],
+              "start_page": 53,
+              "end_page": 58,
+              "node_id": "notes_to_consol_item_1",
+              "summary": "3M's accounting policies cover key asset categories including other assets (deferred taxes, life insurance with cash surrender values), inventories (valued at lower of cost or net realizable value using FIFO), and property, plant & equipment (depreciated over 3-40 years using straight-line method, with $177 million in conditional asset retirement obligations as of December 2022). Goodwill is not amortized but tested annually for impairment, while asset impairment is assessed when carrying amounts may not be recoverable using discounted cash flow analysis."
+            },
+            {
+              "title": "Item 2: Revenue",
+              "children": [],
+              "start_page": 59,
+              "end_page": 60,
+              "node_id": "notes_to_consol_item_2",
+              "summary": "3M's total net sales declined from $35.4 billion in 2021 to $34.2 billion in 2022, driven primarily by declines in Personal Safety ($4.5B to $3.9B), Asia Pacific ($10.6B to $9.9B), and Electronics ($3.7B to $3.4B) segments. The company announced plans to spin off its Health Care business (representing $8.4B in 2022 revenue) as a separate public company by year-end 2023 while retaining an initial 9.9% stake."
+            },
+            {
+              "title": "Item 3: Acquisitions and Divestitures",
+              "children": [],
+              "start_page": 61,
+              "end_page": 62,
+              "node_id": "notes_to_consol_item_3",
+              "summary": "In 2020, 3M completed three divestitures totaling approximately $1.1 billion in consideration: the sale of its advanced ballistic-protection business to Avon Rubber for $86 million, its Drug Delivery Division to Altaris Capital Partners for $617 million (generating a $387 million pre-tax gain), and a small dermatology business for immaterial proceeds. The company also secured IRS approval and private letter rulings confirming the tax-free status of its Reverse Morris Trust split-off structure, though future IRS audits could challenge this treatment and create material adverse impacts on 3M's financial position."
+            },
+            {
+              "title": "Item 4: Goodwill and Intangible Assets",
+              "children": [],
+              "start_page": 63,
+              "end_page": 63,
+              "node_id": "notes_to_consol_item_4",
+              "summary": "3M maintains indefinite-lived tradenames that have been in existence for over 60 years with leading market positions and expected perpetual cash generation, with amortization expense declining from $537M (2020) to $498M (2022) and projected to further decrease to $390M by 2027. In December 2022, 3M recorded impairment charges related to its exit from PFAS manufacturing, and completed a restructuring initiative (2020-2022) that affected approximately 3,100 positions worldwide with a $280M pre-tax charge."
+            },
+            {
+              "title": "Item 5: Restructuring Actions",
+              "children": [],
+              "start_page": 64,
+              "end_page": 66,
+              "node_id": "notes_to_consol_item_5",
+              "summary": "3M undertook significant restructuring actions spanning 2020-2022, including a 2020 drug delivery divestiture restructuring (1,300 positions, $55M charge) and COVID-19 related restructuring (400 positions, $58M charge), followed by a 2022 divestiture-related restructuring after the Food Safety Division split-off (850 positions, $41M charge), with most activities completed or expected to complete by mid-2023."
+            },
+            {
+              "title": "Item 6: Supplemental Income Statement Information",
+              "children": [],
+              "start_page": 67,
+              "end_page": 67,
+              "node_id": "notes_to_consol_item_6",
+              "summary": "The company's supplemental balance sheet information for 2022 shows net property, plant and equipment of $9.2 billion (down from $9.4 billion in 2021) with accumulated depreciation of $16.8 billion, while total other liabilities increased significantly to $5.6 billion from $3.4 billion, largely driven by a $1.3 billion increase in contingent liability claims. Notable items associated with deconsolidated Aearo Entities totaling approximately $2.1 billion in net liabilities are reflected within these figures, impacting year-over-year comparability."
+            },
+            {
+              "title": "Item 7: Supplemental Balance Sheet Information",
+              "children": [],
+              "start_page": 68,
+              "end_page": 68,
+              "node_id": "notes_to_consol_item_7",
+              "summary": "3M declared annual dividends of $5.96, $5.92, and $5.88 per share in 2022, 2021, and 2020 respectively, with 944,033,056 common shares outstanding. The company's accumulated other comprehensive loss narrowed from $8,134 million at year-end 2019 to $6,673 million at year-end 2022, primarily driven by favorable pension and postretirement plan adjustments totaling $915 million net of tax in 2022."
+            },
+            {
+              "title": "Item 8: Supplemental Equity and Comprehensive Income Information",
+              "children": [],
+              "start_page": 69,
+              "end_page": 69,
+              "node_id": "notes_to_consol_item_8",
+              "summary": "3M reclassified $275 million (net of tax) out of Accumulated Other Comprehensive Income in 2022, primarily driven by $350 million net-of-tax charges from defined benefit pension plan actuarial losses and adjustments, partially offset by $75 million gains from cash flow hedging instruments. The company's cash income tax payments and cash interest payments decreased year-over-year to $1.32 billion and $440 million respectively in 2022, reflecting reduced financial obligations."
+            },
+            {
+              "title": "Item 9: Supplemental Cash Flow Information",
+              "children": [],
+              "start_page": 70,
+              "end_page": 70,
+              "node_id": "notes_to_consol_item_9",
+              "summary": "The company reported total income before taxes of $6.4 billion in 2022 (down from $7.2 billion in 2021), with a total tax provision of $612 million, significantly reduced by $673 million in deferred federal tax benefits. International operations contributed $2.5 billion of pretax income in 2022, down from $3.5 billion in 2021, reflecting a notable decline in overseas earnings."
+            },
+            {
+              "title": "Item 10: Income Taxes",
+              "children": [],
+              "start_page": 71,
+              "end_page": 73,
+              "node_id": "notes_to_consol_item_10",
+              "summary": "The company increased net deferred tax assets from $124 million to $400 million year-over-year, driven primarily by a $418 million deferred tax asset related to research and experimentation capitalization and decreased intangible asset liabilities. The effective tax rate significantly declined to 9.6% in 2022 from 17.8% in 2021, primarily due to tax-efficient structuring associated with the Food Safety business split-off, though the company carries $231 million in transition tax obligations from the 2017 Tax Cuts and Jobs Act and faces ongoing IRS and state/foreign tax examinations."
+            },
+            {
+              "title": "Item 11: Marketable Securities",
+              "children": [],
+              "start_page": 74,
+              "end_page": 74,
+              "node_id": "notes_to_consol_item_11",
+              "summary": "As of December 31, 2022, the company held $15.9 billion in total long-term debt consisting primarily of fixed-rate USD-denominated medium-term notes and registered notes (ranging from 1.86% to 6.44% effective interest rates) with maturities spanning 2023-2050, along with EUR-denominated debt and select floating-rate instruments. Long-term debt decreased from $17.3 billion in 2021, with $1.9 billion classified as current portion due within one year."
+            },
+            {
+              "title": "Item 12: Long-Term Debt and Short-Term Borrowings",
+              "children": [],
+              "start_page": 75,
+              "end_page": 76,
+              "node_id": "notes_to_consol_item_12",
+              "summary": "3M's total long-term debt decreased from $17.3 billion in 2021 to $15.9 billion in 2022, with fixed-rate debt comprising the majority at $14.7 billion at an effective rate of 2.93%. The company maintains substantial liquidity through a $3.0 billion revolving credit facility (with up to $1.0 billion additional capacity) and a $1.25 billion 364-day facility, both undrawn, with a strong EBITDA-to-Interest ratio of 19:1, providing significant financial flexibility."
+            },
+            {
+              "title": "Item 13: Pension and Postretirement Benefit Plans",
+              "children": [],
+              "start_page": 77,
+              "end_page": 86,
+              "node_id": "notes_to_consol_item_13",
+              "summary": "3M sponsors 401(k) and defined contribution retirement plans with employer contributions of $241 million (U.S.) and $108 million (international) in 2022, while pension obligations declined to $13.5 billion (U.S.) and $5.1 billion (international) due to actuarial gains and market losses, resulting in an unfunded U.S. pension liability of $857 million as of year-end 2022."
+            },
+            {
+              "title": "Item 14: Derivatives",
+              "children": [],
+              "start_page": 87,
+              "end_page": 91,
+              "node_id": "notes_to_consol_item_14",
+              "summary": "3M manages debt and interest rate risk through derivative instruments including forward starting interest rate swaps and fair value hedges, with a remaining accumulated other comprehensive income balance of $7 million after-tax as of December 31, 2022, and expected reclassification of approximately $68 million after-tax gains over the next 12 months. The company realized a net loss of $143 million on terminated swaps in 2019 and recognized $159 million in pretax gains on foreign currency and interest rate derivative hedges in 2022."
+            },
+            {
+              "title": "Item 15: Fair Value Measurements",
+              "children": [],
+              "start_page": 92,
+              "end_page": 93,
+              "node_id": "notes_to_consol_item_15",
+              "summary": "As of December 31, 2022, 3M held $27 million in Level 3 U.S. municipal securities and $217 million in Level 2 foreign currency derivative assets, with derivative instruments valued using observable market inputs including exchange rates and interest rates. The company's municipal securities balance declined from $30 million in 2021 to $27 million in 2022 due to $3 million in sales, with no realized or unrealized gains/losses recorded during the period."
+            },
+            {
+              "title": "Item 16: Commitments and Contingencies",
+              "children": [],
+              "start_page": 94,
+              "end_page": 115,
+              "node_id": "notes_to_consol_item_16",
+              "summary": "The Company faces numerous ongoing legal proceedings across multiple jurisdictions and subject matters (products liability, intellectual property, antitrust, healthcare compliance, securities, environmental), with complex assessment methodologies based on ASC 450 guidelines where liabilities are recorded only when losses are probable and reasonably estimable. Material adverse effects on results of operations or cash flows could occur from unfavorable rulings or settlement developments, as many matters involve inherent uncertainties and are at preliminary stages with indeterminate damages."
+            },
+            {
+              "title": "Item 17: Leases",
+              "children": [],
+              "start_page": 116,
+              "end_page": 117,
+              "node_id": "notes_to_consol_item_17",
+              "summary": "3M's total lease liabilities decreased slightly from $954 million in 2021 to $927 million in 2022, comprising $841 million in operating leases (5.5-year weighted average term) and $86 million in finance leases (6.3-year term), with annual operating cash payments of $295 million in 2022. The company also has $14 million in future operating lease commitments not yet commenced and 32 million shares remaining available for grant under its stock-based compensation plan."
+            },
+            {
+              "title": "Item 18: Stock-Based Compensation",
+              "children": [],
+              "start_page": 118,
+              "end_page": 120,
+              "node_id": "notes_to_consol_item_18",
+              "summary": "As of December 31, 2022, the company had 35.5 million stock options outstanding with a weighted-average exercise price of $166.97 and $45 million in unrecognized compensation expense expected to be recognized over 21 months; additionally, restricted stock unit activity showed 2.4 million nonvested shares with a weighted-average grant date fair value of $164.07, with $116 million in intrinsic value realized from options exercised in 2022 and $205 million in cash received from those exercises."
+            },
+            {
+              "title": "Item 19: Business Segments and Geographic Information",
+              "children": [],
+              "start_page": 121,
+              "end_page": 124,
+              "node_id": "notes_to_consol_item_19",
+              "summary": "3M restructured its accounting of litigation-related costs by moving respirator mask/asbestos litigation expenses from Corporate to the Safety and Industrial segment's operating performance, though Aearo bankruptcy-related costs remain in Corporate. The company generated $34.2 billion in total net sales across four segments in 2022 (down from $35.4 billion in 2021), with Safety and Industrial as the largest segment at $11.6 billion, while overall operating income declined to $6.5 billion from $7.4 billion due to increased litigation costs ($877 million in 2022 versus $214 million in 2021)."
+            }
+          ],
+          "start_page": 53,
+          "end_page": 58,
+          "node_id": "financial_state_notes_to_consolidated_financia",
+          "summary": "3M's accounting policies cover key asset categories including property, plant and equipment depreciated over 3-40 years using the straight-line method, inventories valued at lower of cost or net realizable value, and conditional asset retirement obligations of $177 million as of December 31, 2022. These policies establish the valuation and depreciation frameworks for significant balance sheet items, with impairment reviews triggered by changes in circumstances to ensure asset carrying values remain recoverable."
+        }
+      ],
+      "start_page": 43,
+      "end_page": 43,
+      "node_id": "item_8",
+      "summary": "3M Company's management affirms responsibility for financial integrity and maintains an effective system of internal controls over financial reporting as of December 31, 2022, which was assessed using the COSO Integrated Framework and received an unqualified audit opinion from PricewaterhouseCoopers LLP. The company emphasizes its commitment to safeguarding assets, accurate record-keeping, and ethical business conduct through qualified personnel and continuous internal auditor review."
+    },
+    {
+      "title": "Item 9: Changes in and Disagreements with Accountants on Accounting and Financial Disclosure",
+      "children": [],
+      "start_page": 125,
+      "end_page": 125,
+      "node_id": "item_9",
+      "summary": "3M incorporated disclosure requirements for directors, executive officers, corporate governance, and executive compensation from its proxy statement filed for the May 9, 2023 annual meeting by reference in this Form 10-K. The company maintains a code of ethics applicable to all employees including executive officers, with the policy publicly available on their website and accessible upon request."
+    },
+    {
+      "title": "Item 9A: Controls and Procedures",
+      "children": [],
+      "start_page": 125,
+      "end_page": 125,
+      "node_id": "item_9a",
+      "summary": "3M incorporates by reference sections of its proxy statement filed for the May 9, 2023 annual meeting to address Items 10-14 of the Form 10-K, covering directors, executive officers, corporate governance, compensation, and ethics compliance; the company maintains a code of ethics posted on its website that all employees, including executives, are required to follow."
+    },
+    {
+      "title": "Item 9B: Other Information",
+      "children": [],
+      "start_page": 125,
+      "end_page": 125,
+      "node_id": "item_9b",
+      "summary": "3M incorporates by reference portions of its proxy statement (to be filed within 120 days of fiscal year-end December 31, 2022, with annual meeting scheduled for May 9, 2023) for Items 10-14 of the Form 10-K, including information on directors, executive officers, corporate governance, executive compensation, and director compensation. The company maintains a code of ethics applicable to all employees including the CEO, CFO, and Chief Accounting Officer, available on its website at https://www.3M.com/3M/en_US/ethics-compliance."
+    },
+    {
+      "title": "Item 9C: Disclosure Regarding Foreign Jurisdictions that Prevent Inspections",
+      "children": [],
+      "start_page": 125,
+      "end_page": 125,
+      "node_id": "item_9c",
+      "summary": "3M incorporates by reference portions of its proxy statement for the May 9, 2023 annual meeting regarding directors, executive officers, corporate governance, and executive compensation, with all employees required to comply with 3M's code of ethics posted on its website. The disclosure includes board membership criteria, shareholder nomination procedures, and compensation details, with the code of ethics available upon request."
+    },
+    {
+      "title": "Item 10: Directors, Executive Officers and Corporate Governance",
+      "children": [],
+      "start_page": 126,
+      "end_page": 126,
+      "node_id": "item_10",
+      "summary": "As of December 31, 2022, 3M had 38.5 million securities outstanding under equity compensation plans with a weighted-average exercise price of $166.97 for stock options, and 52.6 million securities remaining available for future issuance. The company's equity compensation framework includes stock options, restricted stock units, performance shares, and non-employee director deferred stock units, with no material related-party transactions requiring disclosure."
+    },
+    {
+      "title": "Item 11: Executive Compensation",
+      "children": [],
+      "start_page": 126,
+      "end_page": 126,
+      "node_id": "item_11",
+      "summary": "As of December 31, 2022, 3M had 38.5 million securities authorized for issuance under equity compensation plans, including 35.5 million stock options (weighted-average exercise price of $166.97), 2.4 million restricted stock units, and 391,000 performance shares, with 52.6 million securities remaining available for future issuance. The company maintains no material related-party transactions and delegates governance matters including director independence and audit pre-approval policies to its proxy statement."
+    },
+    {
+      "title": "Item 12: Security Ownership of Certain Beneficial Owners and Management and Related Stockholder Matters",
+      "children": [],
+      "start_page": 127,
+      "end_page": 127,
+      "node_id": "item_12",
+      "summary": "3M's Item 15 discloses exhibits and schedules, including articles of incorporation (amended December 2017), indentures governing senior debt securities dating to November 2000, and the 3M Company 2016 Long-Term Incentive Plan with various equity award agreements for employees and directors. The financial statement schedules are omitted as required information is included in consolidated statements, and unconsolidated subsidiary financials are not material."
+    },
+    {
+      "title": "Item 13: Certain Relationships and Related Transactions, and Director Independence",
+      "children": [],
+      "start_page": 127,
+      "end_page": 127,
+      "node_id": "item_13",
+      "summary": "This section describes 3M's exhibits filed with the report, including corporate governance documents (Certificate of Incorporation amended December 4, 2017 and Bylaws amended February 7, 2023), debt instruments (senior debt securities indentures from 2000 and 2011), and management compensation plans including the 2016 Long-Term Incentive Plan and its various award agreements for employees and non-employee directors."
+    },
+    {
+      "title": "Item 14: Principal Accounting Fees and Services",
+      "children": [],
+      "start_page": 127,
+      "end_page": 127,
+      "node_id": "item_14",
+      "summary": "This section describes 3M's financial statements, schedules, and exhibits filed with the report, including consolidated financial statements, corporate governance documents (Articles of Incorporation and Bylaws), debt instruments, and management compensation plans under the 2016 Long-Term Incentive Plan with various award types including stock options, restricted stock units, and performance shares."
+    },
+    {
+      "title": "Item 15: Exhibits, Financial Statement Schedules",
+      "children": [],
+      "start_page": 128,
+      "end_page": 129,
+      "node_id": "item_15",
+      "summary": "This section lists 3M Company's exhibits including equity incentive plans (stock options, performance awards), executive compensation arrangements (severance, deferred compensation, pension plans), non-employee director compensation plans, and credit agreements. The exhibits document compensation structures, credit facilities, and employment arrangements established and amended between 2004 and 2023, with most incorporated by reference from prior SEC filings."
+    },
+    {
+      "title": "Item 16: Form 10-K Summary",
+      "children": [],
+      "start_page": 130,
+      "end_page": 252,
+      "node_id": "item_16",
+      "summary": "3M Company's Form 10-K signatures section (dated February 8, 2023) confirms the document was authorized by CEO Michael F. Roman and CFO Monish Patolawala, along with board directors. The filing includes details on the 2016 Long-Term Incentive Plan Performance Share Award Agreement, establishing vesting conditions tied to performance metrics over specified periods, with implications for executive compensation structure and shareholder equity allocation."
+    }
+  ],
+  "node_id": "root",
+  "summary": "SEC Form 10-K annual report with detailed business, risk, financial, and governance disclosures."
+}

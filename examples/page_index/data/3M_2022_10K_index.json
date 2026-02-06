@@ -1,0 +1,192 @@
+{
+  "title": "10-K Annual Report",
+  "children": [
+    {
+      "title": "Business Overview",
+      "children": [
+        {
+          "title": "Item 1: Business.",
+          "children": [],
+          "start_page": 3,
+          "end_page": 8,
+          "node_id": "item_1",
+          "summary": "3M, incorporated in 1929, is a diversified technology company with a global presence across four business segments: Safety and Industrial, Transportation and Electronics, Health Care, and Consumer. The company announced its intention to spin off the Health Care business into a separate public entity in July 2022. As of December 31, 2022, 3M employed approximately 92,000 people globally."
+        }
+      ],
+      "node_id": "business_overview",
+      "summary": "3M, incorporated in 1929, is a diversified technology company with a global presence across four business segments: Safety and Industrial, Transportation and Electronics, Health Care, and Consumer. Th"
+    },
+    {
+      "title": "Risk Factors",
+      "children": [
+        {
+          "title": "Item 1A: Risk Factors.",
+          "children": [],
+          "start_page": 9,
+          "end_page": 14,
+          "node_id": "item_1a",
+          "summary": "The company operates globally, with 60% of its revenue from international markets, exposing it to significant economic, political, and regulatory risks, including trade tensions, geopolitical conflicts like the Russia-Ukraine war, and currency fluctuations. The company also faces substantial liabilities and regulatory scrutiny concerning per- and polyfluoroalkyl substances (PFAS), which could lead to increased costs for investigation, remediation, and potential litigation."
+        }
+      ],
+      "node_id": "risk_factors",
+      "summary": "The company operates globally, with 60% of its revenue from international markets, exposing it to significant economic, political, and regulatory risks, including trade tensions, geopolitical conflict"
+    },
+    {
+      "title": "Business Operations",
+      "children": [
+        {
+          "title": "Item 2: Properties.",
+          "children": [],
+          "start_page": 16,
+          "end_page": 16,
+          "node_id": "item_2",
+          "summary": "This section briefly states that legal proceedings are discussed in Part II, Item 8, Note 16, and that mine safety disclosures are required by Section 1503 of the Dodd-Frank Act. It does not provide any specific facts, metrics, or business implications of these items within the provided content."
+        },
+        {
+          "title": "Item 4: Mine Safety Disclosures.",
+          "children": [],
+          "start_page": 17,
+          "end_page": 17,
+          "node_id": "item_4",
+          "summary": "At January 31, 2023, 3M had 62,488 shareholders of record. Its stock (MMM) is listed on the NYSE, Chicago Stock Exchange, and SIX Swiss Exchange. Cash dividends declared and paid totaled $1.49 and $1.48 per share."
+        }
+      ],
+      "node_id": "business_operations",
+      "summary": "This section briefly states that legal proceedings are discussed in Part II, Item 8, Note 16, and that mine safety disclosures are required by Section 1503 of the Dodd-Frank Act. It does not provide a"
+    },
+    {
+      "title": "Market & Stock Information",
+      "children": [
+        {
+          "title": "Item 5: Market for Registrant’s Common Equity, Related Stockholder Matters and Issuer Purchases of Equity Se",
+          "children": [],
+          "start_page": 17,
+          "end_page": 17,
+          "node_id": "item_5",
+          "summary": "3M repurchased 10,652,831 shares of its common stock in 2022 at an average price of $134.31 per share, primarily to support employee stock-based compensation and for other corporate needs. The company has an ongoing repurchase program authorized in November 2018 for up to $10 billion, with approximately $4.16 billion remaining as of December 31, 2022."
+        }
+      ],
+      "node_id": "market_stock_information",
+      "summary": "3M repurchased 10,652,831 shares of its common stock in 2022 at an average price of $134.31 per share, primarily to support employee stock-based compensation and for other corporate needs. The company"
+    },
+    {
+      "title": "Management Discussion & Analysis",
+      "children": [
+        {
+          "title": "Item 7: Management’s Discussion and Analysis of Financial Condition and Results of Operations.",
+          "children": [],
+          "start_page": 18,
+          "end_page": 40,
+          "node_id": "item_7",
+          "summary": "3M, a diversified global manufacturer, experienced significant impacts in 2022 from litigation costs of $2.3 billion, a $2.7 billion pre-tax gain from divesting its Food Safety Division, and a $0.8 billion charge for exiting PFAS manufacturing. The company also adjusted its segment reporting and non-GAAP measures, while navigating ongoing challenges from the COVID-19 pandemic and the Russia-Ukraine conflict."
+        },
+        {
+          "title": "Item 7A: Quantitative and Qualitative Disclosures About Market Risk.",
+          "children": [],
+          "start_page": 41,
+          "end_page": 42,
+          "node_id": "item_7a",
+          "summary": "3M manages market risks related to foreign exchange rates, interest rates, and commodity prices. As of December 31, 2022, 3M had $3.2 billion in foreign exchange forward and option contracts designated as hedges, and an additional $2.8 billion not designated as hedges. The company also had €2.4 billion in foreign currency debt and $800 million in interest rate swaps for hedging purposes. A Monte Carlo simulation indicated potential adverse impacts on after-tax earnings of $315 million from foreign exchange, $18 million from interest rates, and $5 million from commodity prices in 2022."
+        }
+      ],
+      "node_id": "management_discussion_analysis",
+      "summary": "3M, a diversified global manufacturer, experienced significant impacts in 2022 from litigation costs of $2.3 billion, a $2.7 billion pre-tax gain from divesting its Food Safety Division, and a $0.8 bi"
+    },
+    {
+      "title": "Financial Statements & Controls",
+      "children": [
+        {
+          "title": "Item 8: Financial Statements and Supplementary Data.",
+          "children": [],
+          "start_page": 43,
+          "end_page": 123,
+          "node_id": "item_8",
+          "summary": "3M Company’s management affirmed the effectiveness of its internal control over financial reporting as of December 31, 2022, based on the COSO framework. This assessment was independently audited by PricewaterhouseCoopers LLP, which issued an unqualified opinion on both the consolidated financial statements for the past three years and the effectiveness of the internal controls as of the same date, assuring reliability in financial reporting."
+        },
+        {
+          "title": "Item 9A: Controls and Procedures.",
+          "children": [],
+          "start_page": 124,
+          "end_page": 124,
+          "node_id": "item_9a",
+          "summary": "3M maintains intellectual property rights in Iran by paying renewal fees to the Iran Intellectual Property Office, an entity associated with Bank Melli, which is designated under U.S. counter-terrorism authority. 3M obtained a specific license from OFAC in January 2022 to continue these activities, and in the quarter ending December 31, 2022, paid $354 for IP protection in Iran."
+        },
+        {
+          "title": "Item 9B: Other Information.",
+          "children": [],
+          "start_page": 125,
+          "end_page": 125,
+          "node_id": "item_9b",
+          "summary": "3M provides its code of ethics online and by mail. Executive compensation details, including information required by Regulation S-K, are incorporated by reference from 3M's Proxy Statement, with the Compensation Committee Report being specifically excluded from being \"filed.\""
+        }
+      ],
+      "node_id": "financial_statements_controls",
+      "summary": "3M Company’s management affirmed the effectiveness of its internal control over financial reporting as of December 31, 2022, based on the COSO framework. This assessment was independently audited by P"
+    },
+    {
+      "title": "Other Disclosures",
+      "children": [
+        {
+          "title": "Item 10: Directors, Executive Officers and Corporate Governance.",
+          "children": [],
+          "start_page": 126,
+          "end_page": 126,
+          "node_id": "item_10",
+          "summary": "The company has 38,507 thousand securities to be issued under equity compensation plans with a weighted-average exercise price of $166.97 for stock options. Additionally, 52,635 thousand securities remain available for future issuance under these plans."
+        },
+        {
+          "title": "Item 11: Executive Compensation.",
+          "children": [],
+          "start_page": 126,
+          "end_page": 126,
+          "node_id": "item_11",
+          "summary": "This section from the 10-K filing references the 3M Proxy Statement for details on executive compensation, specifically regarding the Audit Committee Policy on pre-approval for audit and permissible non-audit services, and the fees of the independent accounting firm. It also indicates that consolidated financial statements are included within the report, while financial statement schedules are omitted due to lack of necessity or inclusion within the consolidated financials."
+        },
+        {
+          "title": "Item 12: Security Ownership of Certain Beneficial Owners and Management and Related Stockholder Matters.",
+          "children": [],
+          "start_page": 127,
+          "end_page": 127,
+          "node_id": "item_12",
+          "summary": "This section lists the exhibits included in the 10-K filing, primarily consisting of the company's Certificate of Incorporation, Amended and Restated Bylaws, and instruments defining the rights of security holders, such as the Indenture and First Supplemental Indenture relating to 3M’s senior debt securities. These documents are incorporated by reference from previous Form 8-K and 10-Q filings, with the most recent amendment to the Bylaws on February 7, 2023."
+        },
+        {
+          "title": "Item 13: Certain Relationships and Related Transactions, and Director Independence.",
+          "children": [],
+          "start_page": 127,
+          "end_page": 127,
+          "node_id": "item_13",
+          "summary": "This section from 3M Company's 10-K filing, specifically Item 13, details the various long-term incentive plans and associated award agreements, including the 2016 Long-Term Incentive Plan, stock option, and stock appreciation right award agreements, all incorporated by reference from past 8-K filings."
+        },
+        {
+          "title": "Item 14: Principal Accounting Fees and Services.",
+          "children": [],
+          "start_page": 127,
+          "end_page": 127,
+          "node_id": "item_14",
+          "summary": "This section (Item 14) on pages 127-127 primarily references various forms related to the 3M Company 2016 Long-Term Incentive Plan, including an Employee Stock Purchase Plan (Form 8-K, May 12, 2016) and Performance Share Award Agreements (Form 10-K, December 31, 2017, and an agreement from February 1, 2021). It outlines the incorporation by reference of these key documents pertaining to employee incentives and stock awards."
+        },
+        {
+          "title": "Item 15: Exhibits, Financial Statement Schedules.",
+          "children": [],
+          "start_page": 127,
+          "end_page": 130,
+          "node_id": "item_15",
+          "summary": "This section outlines the various exhibits filed by 3M, primarily focusing on agreements related to executive and non-employee director compensation plans, including stock issuance, deferred stock units, stock options, and long-term incentive plans. It also references credit agreements, employment offer letters, and certifications required by the Sarbanes-Oxley Act, with many of these documents incorporated by reference from previous 10-K, 10-Q, and 8-K filings."
+        },
+        {
+          "title": "Item 16: Form 10-K Summary.",
+          "children": [],
+          "start_page": 131,
+          "end_page": 251,
+          "node_id": "item_16",
+          "summary": "This section details the terms and conditions for Performance Shares granted to employees, outlining the vesting schedule, forfeiture conditions, and dividend equivalent rights. It emphasizes that vesting is generally contingent on continued service, with specific provisions for accelerated vesting or continued eligibility in cases of termination due to qualifying events like a \"Qualifying Termination\" or \"Retirement,\" subject to certain adjustments and a release of claims."
+        }
+      ],
+      "node_id": "other_disclosures",
+      "summary": "The company has 38,507 thousand securities to be issued under equity compensation plans with a weighted-average exercise price of $166.97 for stock options. Additionally, 52,635 thousand securities re"
+    }
+  ],
+  "node_id": "root",
+  "summary": "SEC Form 10-K annual report containing business overview, risk factors, financial statements, and management discussion."
+}
