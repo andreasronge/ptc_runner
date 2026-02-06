@@ -39,9 +39,9 @@ call_count = Agent.start_link(fn -> 0 end) |> elem(1)
 mock_llm = fn input ->
   count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
   system = Map.get(input, :system, "")
-  output_mode = Map.get(input, :output)
+  is_json_mode = Map.get(input, :output) == :json
   tool_names = Map.get(input, :tool_names, [])
-  has_tools = tool_names != []
+  has_tools = length(tool_names) > 0
 
   cond do
     # MetaPlanner - return JSON plan
@@ -57,18 +57,18 @@ mock_llm = fn input ->
       }|}
 
     # PTC-Lisp with tools - first call executes tool, second returns result
-    output_mode == :ptc_lisp and has_tools and count == 1 ->
+    has_tools and count == 1 ->
       {:ok, ~s|```clojure\n(tool/search_catalog {:query "electronics"})\n```|}
 
-    output_mode == :ptc_lisp and has_tools ->
+    has_tools ->
       {:ok, ~s|```clojure\n(return {:items (tool/search_catalog {:query "electronics"})})\n```|}
 
-    # PTC-Lisp mode without tools (must-return mode)
-    output_mode == :ptc_lisp ->
+    # Must-return mode (tool_names=[] but still PTC-Lisp task)
+    not is_json_mode and tool_names == [] ->
       {:ok, ~s|```clojure\n(return {:items [{:name "Phone" :price 699.0} {:name "Laptop" :price 1299.0}]})\n```|}
 
     # JSON mode (synthesis gate)
-    output_mode == :json ->
+    is_json_mode ->
       {:ok, ~S|{"summary": "Top items: Phone ($699) and Laptop ($1299)"}|}
 
     true ->
