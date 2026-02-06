@@ -53,6 +53,11 @@ defmodule PtcRunner.PlanRunner do
     execution to avoid re-running successful tasks.
   - `on_event` - Optional callback for task lifecycle events. Receives tuples like
     `{:task_started, %{task_id: id, attempt: n}}`, `{:task_succeeded, %{...}}`, etc.
+  - `quality_gate` - Enable pre-flight data sufficiency check before tasks with dependencies
+    (default: `false`). When enabled, a lightweight SubAgent validates upstream results before
+    each dependent task. On failure, triggers `{:replan_required, context}`.
+  - `quality_gate_llm` - Optional separate LLM callback for quality gate checks.
+    Falls back to the main `llm` if not provided.
 
   ## Human Review Tasks
 
@@ -165,7 +170,10 @@ defmodule PtcRunner.PlanRunner do
       max_turns: max_turns,
       max_concurrency: max_concurrency,
       reviews: reviews,
-      on_event: on_event
+      on_event: on_event,
+      quality_gate: Keyword.get(opts, :quality_gate, false),
+      quality_gate_llm: Keyword.get(opts, :quality_gate_llm),
+      mission: Keyword.get(opts, :mission)
     }
 
     # Execute phases sequentially, tasks within each phase in parallel
@@ -245,6 +253,7 @@ defmodule PtcRunner.PlanRunner do
         Map.merge(
           %{
             task_id: task.id,
+            span_id: task.id,
             task: task_to_map(task),
             agent: task.agent,
             input: task.input,
@@ -298,7 +307,13 @@ defmodule PtcRunner.PlanRunner do
         [:ptc_runner, :plan_executor, :task, :stop],
         %{duration: duration_ms * 1_000_000},
         Map.merge(
-          %{task_id: task.id, status: status, result: result_value, duration_ms: duration_ms},
+          %{
+            task_id: task.id,
+            span_id: task.id,
+            status: status,
+            result: result_value,
+            duration_ms: duration_ms
+          },
           extra_meta
         )
       )
@@ -439,6 +454,22 @@ defmodule PtcRunner.PlanRunner do
   end
 
   defp execute_with_attempts(task, agents, results, opts, max_attempts, attempt) do
+    # Run quality gate check on first attempt only (upstream data hasn't changed on retries)
+    gate_result =
+      if attempt == 1,
+        do: maybe_run_quality_gate(task, results, opts),
+        else: :proceed
+
+    case gate_result do
+      :proceed ->
+        do_execute_with_attempts(task, agents, results, opts, max_attempts, attempt)
+
+      {:replan_required, context} ->
+        {:replan_required, context}
+    end
+  end
+
+  defp do_execute_with_attempts(task, agents, results, opts, max_attempts, attempt) do
     case execute_task(task, agents, results, opts) do
       {:ok, value} ->
         # Run verification if predicate is specified
@@ -479,6 +510,133 @@ defmodule PtcRunner.PlanRunner do
         {:error, reason}
     end
   end
+
+  # --- Quality Gate ---
+
+  # Skip gate if disabled or task has no dependencies
+  defp maybe_run_quality_gate(_task, _results, %{quality_gate: false}), do: :proceed
+  defp maybe_run_quality_gate(%{depends_on: []}, _results, _opts), do: :proceed
+
+  defp maybe_run_quality_gate(task, results, opts) do
+    emit_event(opts, {:quality_gate_started, %{task_id: task.id}})
+    run_quality_gate(task, results, opts)
+  end
+
+  defp run_quality_gate(task, results, opts) do
+    dep_results = Map.take(results, task.depends_on)
+    expanded_input = expand_input(task.input, results)
+    prompt = build_quality_gate_prompt(task, expanded_input, dep_results, opts.mission)
+
+    gate_llm = opts.quality_gate_llm || opts.llm
+
+    agent =
+      SubAgent.new(
+        prompt: prompt,
+        output: :json,
+        signature: "{sufficient :bool, missing [:string]}",
+        max_turns: 1,
+        timeout: opts.timeout
+      )
+
+    case SubAgent.run(agent, llm: gate_llm) do
+      {:ok, step} ->
+        case step.return do
+          %{"sufficient" => true} ->
+            emit_event(opts, {:quality_gate_passed, %{task_id: task.id}})
+            :proceed
+
+          %{"sufficient" => false, "missing" => missing} ->
+            diagnosis =
+              "Quality gate: upstream data insufficient for task '#{task.id}'. " <>
+                "Missing: #{Enum.join(missing, ", ")}"
+
+            Logger.info(diagnosis)
+            emit_event(opts, {:quality_gate_failed, %{task_id: task.id, missing: missing}})
+
+            {:replan_required,
+             %{
+               task_id: task.id,
+               task_output: nil,
+               diagnosis: diagnosis
+             }}
+
+          _ ->
+            Logger.warning(
+              "Quality gate returned unexpected format for task '#{task.id}', proceeding"
+            )
+
+            emit_event(
+              opts,
+              {:quality_gate_error, %{task_id: task.id, reason: :unexpected_format}}
+            )
+
+            :proceed
+        end
+
+      {:error, step} ->
+        Logger.warning(
+          "Quality gate SubAgent error for task '#{task.id}': #{inspect(step.fail)}, proceeding"
+        )
+
+        emit_event(opts, {:quality_gate_error, %{task_id: task.id, reason: step.fail}})
+        :proceed
+    end
+  end
+
+  defp build_quality_gate_prompt(task, expanded_input, dep_results, mission) do
+    dep_summaries =
+      Enum.map_join(dep_results, "\n\n", fn {task_id, value} ->
+        formatted =
+          case value do
+            v when is_binary(v) -> truncate(v, 2000)
+            v -> v |> Jason.encode!(pretty: true) |> truncate(2000)
+          end
+
+        "### #{task_id}\n#{formatted}"
+      end)
+
+    signature_info =
+      case Map.get(task, :signature) do
+        nil -> ""
+        sig -> "\n- Expected output signature: `#{sig}`"
+      end
+
+    mission_info =
+      if mission do
+        "\n\n## Original Mission\n#{truncate(mission, 1000)}"
+      else
+        ""
+      end
+
+    """
+    You are a data sufficiency checker. Determine whether the available upstream data \
+    is sufficient for a downstream task to succeed.
+    #{mission_info}
+
+    ## Downstream Task
+    - Task ID: #{task.id}
+    - Task description: #{format_input(expanded_input)}#{signature_info}
+
+    ## Available Upstream Data
+    #{dep_summaries}
+
+    ## Instructions
+    Evaluate whether the upstream data contains the information needed for the \
+    downstream task to produce a correct result. Consider the original mission \
+    to understand what data points are essential.
+
+    Be pragmatic: only flag CLEAR material gaps where essential data is entirely \
+    missing. Minor formatting issues or extra data are fine.
+
+    Return `{"sufficient": true, "missing": []}` if the data is adequate, or \
+    `{"sufficient": false, "missing": ["description of missing data"]}` if not.
+    """
+  end
+
+  defp truncate(str, max_len) when byte_size(str) <= max_len, do: str
+  defp truncate(str, max_len), do: String.slice(str, 0, max_len - 3) <> "..."
+
+  # --- Task Execution ---
 
   defp execute_task(task, agents, results, opts) do
     case task.type do
@@ -528,8 +686,8 @@ defmodule PtcRunner.PlanRunner do
     # This prevents context bloat when gates synthesize specific branches
     relevant_results = Map.take(results, task.depends_on)
 
-    # Format relevant results for the gate to process
-    results_summary = format_results_for_gate(relevant_results)
+    # Format relevant results for the gate to process (no truncation — gates compress)
+    results_summary = format_upstream_results(relevant_results)
 
     # Build gate prompt with compression instructions
     gate_prompt = build_gate_prompt(agent_spec, task.input, results_summary)
@@ -628,6 +786,15 @@ defmodule PtcRunner.PlanRunner do
 
     # Build prompt from agent spec and task (with optional feedback)
     prompt = build_prompt(agent_spec, expanded_input, system_feedback)
+
+    # Inject dependency results for tasks with depends_on
+    prompt =
+      if task.depends_on != [] do
+        dep_results = Map.take(results, task.depends_on)
+        inject_dependency_results(prompt, dep_results)
+      else
+        prompt
+      end
 
     # Resolve tools (and skills if registry is available)
     {tools, skill_prompt} = resolve_tools_and_skills(agent_spec.tools, opts)
@@ -797,9 +964,13 @@ defmodule PtcRunner.PlanRunner do
     Map.put(task, :system_feedback, diagnosis)
   end
 
-  # Format all accumulated results for the synthesis gate
-  defp format_results_for_gate(results) do
+  # Format upstream results for injection into prompts (synthesis gates, regular tasks, etc.)
+  # Sorts by task_id for reproducible prompts and truncates large values.
+  defp format_upstream_results(results, opts \\ []) do
+    max_len = Keyword.get(opts, :max_len, :infinity)
+
     results
+    |> Enum.sort_by(fn {task_id, _} -> task_id end)
     |> Enum.map_join("\n\n", fn {task_id, value} ->
       formatted_value =
         case value do
@@ -807,8 +978,25 @@ defmodule PtcRunner.PlanRunner do
           v -> Jason.encode!(v, pretty: true)
         end
 
-      "## #{task_id}\n#{formatted_value}"
+      formatted_value =
+        if max_len != :infinity, do: truncate(formatted_value, max_len), else: formatted_value
+
+      "### #{task_id}\n#{formatted_value}"
     end)
+  end
+
+  # Inject upstream dependency results into a regular task's prompt
+  defp inject_dependency_results(prompt, dep_results) when map_size(dep_results) == 0, do: prompt
+
+  defp inject_dependency_results(prompt, dep_results) do
+    formatted = format_upstream_results(dep_results, max_len: 5000)
+
+    """
+    #{prompt}
+
+    ## Upstream Results
+    #{formatted}
+    """
   end
 
   # Build prompt for synthesis gate with compression instructions
