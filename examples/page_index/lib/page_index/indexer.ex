@@ -19,6 +19,7 @@ defmodule PageIndex.Indexer do
   - `:llm` - Required. The LLM client function
   - `:max_concurrency` - Max parallel summarization calls (default: 5)
   - `:max_content_chars` - Max chars to send to LLM per section (default: 8000)
+  - `:doc_title` - Document title for the root node (default: filename without extension)
 
   ## Example
 
@@ -29,10 +30,11 @@ defmodule PageIndex.Indexer do
     llm = Keyword.fetch!(opts, :llm)
     max_concurrency = Keyword.get(opts, :max_concurrency, 5)
     max_content_chars = Keyword.get(opts, :max_content_chars, 8000)
+    doc_title = Keyword.get(opts, :doc_title, Path.basename(pdf_path, ".pdf"))
 
     with {:ok, sections} <- Parser.parse(pdf_path),
          {:ok, summaries} <- generate_summaries(sections, llm, max_concurrency, max_content_chars),
-         tree <- build_tree(sections, summaries) do
+         tree <- build_tree(sections, summaries, doc_title) do
       {:ok, tree}
     end
   end
@@ -70,7 +72,7 @@ defmodule PageIndex.Indexer do
       end
 
     prompt = """
-    Summarize this section from a 10-K filing in 1-2 sentences.
+    Summarize this document section in 1-2 sentences.
     Focus on key facts, metrics, and business implications.
 
     Section: Item #{section.item_num} - #{section.title}
@@ -97,7 +99,7 @@ defmodule PageIndex.Indexer do
   @doc """
   Builds the final tree structure with summaries attached.
   """
-  def build_tree(sections, summaries) do
+  def build_tree(sections, summaries, doc_title \\ "Document") do
     # Group sections by category
     grouped =
       sections
@@ -133,11 +135,13 @@ defmodule PageIndex.Indexer do
         }
       end)
 
+    # Build root summary from category names
+    category_names = Enum.map(grouped, & &1.title) |> Enum.join(", ")
+
     %{
       node_id: "root",
-      title: "10-K Annual Report",
-      summary:
-        "SEC Form 10-K annual report containing business overview, risk factors, financial statements, and management discussion.",
+      title: doc_title,
+      summary: "#{doc_title} containing: #{category_names}.",
       children: grouped
     }
   end
