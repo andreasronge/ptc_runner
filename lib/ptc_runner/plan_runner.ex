@@ -1011,7 +1011,7 @@ defmodule PtcRunner.PlanRunner do
       id: task.id,
       agent: task.agent,
       input: task.input,
-      signature: task.signature,
+      signature: Map.get(task, :signature),
       depends_on: task.depends_on,
       type: task.type,
       verification: task.verification,
