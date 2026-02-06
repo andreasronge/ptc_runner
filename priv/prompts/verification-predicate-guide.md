@@ -38,6 +38,7 @@ They use a minimal Lisp syntax with a **very limited** set of functions.
 (map? x)     ; Is x a map/object? (NOT object?, hash?, dict?)
 (number? x)  ; Is x a number?
 (string? x)  ; Is x a string?
+(boolean? x) ; Is x a boolean? (NOT bool?)
 (coll? x)    ; Is x a collection?
 (nil? x)     ; Is x nil/null?
 
