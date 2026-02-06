@@ -1,0 +1,27 @@
+defmodule PageIndex.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :page_index,
+      version: "0.1.0",
+      elixir: "~> 1.17",
+      start_permanent: false,
+      deps: deps()
+    ]
+  end
+
+  def application do
+    [
+      extra_applications: [:logger, :inets, :ssl]
+    ]
+  end
+
+  defp deps do
+    [
+      {:ptc_runner, path: "../.."},
+      {:llm_client, path: "../../llm_client"},
+      {:pdf_extractor, "~> 0.5.0"}
+    ]
+  end
+end
