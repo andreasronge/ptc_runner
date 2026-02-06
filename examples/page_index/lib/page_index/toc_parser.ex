@@ -16,9 +16,10 @@ defmodule PageIndex.TocParser do
   """
   def parse_toc(pdf_path, opts \\ []) do
     llm = Keyword.fetch!(opts, :llm)
+    toc_hints = Keyword.get(opts, :toc_hints)
 
     with {:ok, toc_text} <- extract_toc_pages(pdf_path),
-         {:ok, structure} <- parse_with_llm(toc_text, llm) do
+         {:ok, structure} <- parse_with_llm(toc_text, llm, toc_hints) do
       {:ok, structure}
     end
   end
@@ -36,9 +37,17 @@ defmodule PageIndex.TocParser do
           |> Enum.sort_by(fn {num, _} -> num end)
           |> Enum.take(5)
           |> Enum.filter(fn {_num, text} ->
-            # Check if page looks like TOC (has "ITEM" and page numbers)
-            String.contains?(text, "ITEM") and
-            Regex.match?(~r/\d+\s*$/, text)
+            # Check if page looks like TOC (has section references with page numbers)
+            has_toc_markers =
+              String.contains?(String.upcase(text), "TABLE OF CONTENTS") or
+                String.contains?(String.upcase(text), "CONTENTS")
+
+            has_page_refs =
+              Regex.match?(~r/\.\s*\d+\s*$/, text) or
+                Regex.match?(~r/\d+\s*$/, text)
+
+            has_toc_markers or
+              (has_page_refs and Regex.match?(~r/(ITEM|PART|SECTION|CHAPTER)\s/i, text))
           end)
           |> Enum.map(fn {num, text} -> "=== PAGE #{num} ===\n#{text}" end)
           |> Enum.join("\n\n")
@@ -57,7 +66,14 @@ defmodule PageIndex.TocParser do
   @doc """
   Uses LLM to parse TOC text into hierarchical JSON structure.
   """
-  def parse_with_llm(toc_text, llm) do
+  def parse_with_llm(toc_text, llm, toc_hints \\ nil) do
+    hints_text =
+      if toc_hints do
+        "\nAdditional guidance:\n#{toc_hints}"
+      else
+        ""
+      end
+
     prompt = """
     Parse this Table of Contents into a hierarchical JSON structure.
 
@@ -68,35 +84,35 @@ defmodule PageIndex.TocParser do
     #{toc_text}
 
     Return a JSON array of sections. Each section has:
-    - title: The section title (e.g., "Business" not "ITEM 1 Business")
-    - item_num: The item number if applicable (e.g., "1", "1A", "7") or null for subsections
+    - title: The section title
+    - item_num: The item/section number if applicable, or null for subsections
     - start_page: The page number where this section starts
     - children: Array of subsections (same structure, recursive)
 
     Example structure:
     [
       {
-        "title": "Business",
+        "title": "Introduction",
         "item_num": "1",
         "start_page": 4,
         "children": []
       },
       {
-        "title": "Management's Discussion and Analysis",
+        "title": "Analysis",
         "item_num": "7",
         "start_page": 19,
         "children": [
           {"title": "Overview", "item_num": null, "start_page": 19, "children": []},
-          {"title": "Results of Operations", "item_num": null, "start_page": 27, "children": []}
+          {"title": "Results", "item_num": null, "start_page": 27, "children": []}
         ]
       }
     ]
 
     Important:
-    - Include ALL items from PART I, II, III, IV
-    - Include subsections for Item 7 (MD&A sections)
-    - Include subsections for Item 8 (Financial Statements, Notes 1-19)
+    - Include ALL sections found in the table of contents
+    - Preserve subsection hierarchy where present
     - Page numbers should be integers
+    #{hints_text}
     """
 
     case SubAgent.run(prompt,
@@ -143,12 +159,15 @@ defmodule PageIndex.TocParser do
     |> Enum.with_index()
     |> Enum.map(fn {{section, path}, idx} ->
       next_section = Enum.at(sorted_sections, idx + 1)
-      end_page = if next_section do
-        {next, _} = next_section
-        max(section["start_page"], next["start_page"] - 1)
-      else
-        total_pages
-      end
+
+      end_page =
+        if next_section do
+          {next, _} = next_section
+          max(section["start_page"], next["start_page"] - 1)
+        else
+          total_pages
+        end
+
       {section["title"], %{start_page: section["start_page"], end_page: end_page, path: path}}
     end)
     |> Map.new()

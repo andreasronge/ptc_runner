@@ -33,27 +33,15 @@ defmodule PageIndex.PlannerRetriever do
     IO.puts("PDF cache ready.")
 
     nodes = flatten_tree(tree)
-
-    # Only include key financial sections in the mission to keep it concise
-    key_nodes =
-      nodes
-      |> Enum.filter(fn n ->
-        String.contains?(String.downcase(n.title), "income") or
-          String.contains?(String.downcase(n.title), "revenue") or
-          String.contains?(String.downcase(n.title), "balance") or
-          String.contains?(String.downcase(n.title), "cash") or
-          String.contains?(String.downcase(n.title), "segment") or
-          String.contains?(String.downcase(n.title), "overview")
-      end)
-
-    sections_summary = format_sections_for_planner(key_nodes)
+    sections_summary = format_sections_for_planner(nodes)
+    doc_title = tree.title || "Document"
 
     mission = """
-    Answer this question about a 3M financial document:
+    Answer this question about "#{doc_title}":
 
     QUESTION: #{query}
 
-    KEY DOCUMENT SECTIONS (use fetch_section tool to get content):
+    DOCUMENT SECTIONS (use fetch_section tool to get content):
     #{sections_summary}
 
     IMPORTANT: Use ONLY these pre-defined agents:
@@ -61,9 +49,10 @@ defmodule PageIndex.PlannerRetriever do
     - "analyzer" - for synthesizing final answer (no tools)
 
     INSTRUCTIONS:
-    1. Create a task with agent="fetcher" to fetch the relevant section
-    2. Create a synthesis_gate task with agent="analyzer" that extracts the answer
-    3. Include verification predicates to ensure data was found
+    1. Read the section summaries to identify which sections are relevant
+    2. Create tasks with agent="fetcher" to fetch the relevant sections
+    3. Create a synthesis_gate task with agent="analyzer" that extracts the answer
+    4. Include verification predicates to ensure data was found
     """
 
     # Pre-define agents so the LLM only needs to generate tasks
@@ -88,16 +77,9 @@ defmodule PageIndex.PlannerRetriever do
     DO NOT return a plan with an empty tasks array or missing tasks key.
     """
 
-    # Tool descriptions for the planner
-    # Include key sections to help the LLM find financial data
-    key_sections =
+    # Tool description lists all available section IDs for the planner
+    all_section_ids =
       nodes
-      |> Enum.filter(fn n ->
-        String.contains?(n.node_id, "income") or
-          String.contains?(n.node_id, "revenue") or
-          String.contains?(n.node_id, "balance") or
-          String.contains?(n.node_id, "cash")
-      end)
       |> Enum.map(& &1.node_id)
       |> Enum.join(", ")
 
@@ -107,13 +89,10 @@ defmodule PageIndex.PlannerRetriever do
       Input: {node_id: string} - The section ID or search term
       Output: {node_id: string, title: string, pages: string, content: string}
 
-      KEY FINANCIAL SECTIONS:
-      - financial_state_consolidated_statement_of_inco - Income Statement (has Net Sales/Revenue)
-      - financial_state_consolidated_balance_sheet_at_ - Balance Sheet (Assets, Liabilities)
-      - notes_to_consol_item_2 - Revenue details
-      - financial_state_consolidated_statement_of_cash - Cash Flow Statement
+      Available sections: #{all_section_ids}
 
-      All sections: #{key_sections}
+      Use the section summaries in the mission to choose which section(s) to fetch.
+      The tool also supports fuzzy matching on titles if an exact ID isn't known.
       """
     }
 

@@ -19,11 +19,13 @@ defmodule PageIndex.FineIndexer do
   - `:llm` - Required. The LLM client function
   - `:max_concurrency` - Max parallel summarization calls (default: 5)
   - `:max_content_chars` - Max chars to send to LLM per section (default: 4000)
+  - `:doc_title` - Document title for the root node (default: filename without extension)
   """
   def index(pdf_path, opts \\ []) do
     llm = Keyword.fetch!(opts, :llm)
     max_concurrency = Keyword.get(opts, :max_concurrency, 5)
     max_content_chars = Keyword.get(opts, :max_content_chars, 4000)
+    doc_title = Keyword.get(opts, :doc_title, Path.basename(pdf_path, ".pdf"))
 
     IO.puts("Phase 1: Parsing Table of Contents...")
 
@@ -34,7 +36,7 @@ defmodule PageIndex.FineIndexer do
          sections_with_content = attach_content(flat_sections, pages),
          {:ok, summaries} <-
            generate_summaries(sections_with_content, llm, max_concurrency, max_content_chars),
-         tree <- build_tree(toc_sections, summaries, length(pages)) do
+         tree <- build_tree(toc_sections, summaries, length(pages), doc_title) do
       {:ok, tree}
     end
   end
@@ -166,18 +168,20 @@ defmodule PageIndex.FineIndexer do
     end
   end
 
-  defp build_tree(toc_sections, summaries, total_pages) do
+  defp build_tree(toc_sections, summaries, total_pages, doc_title) do
     # Build global page boundaries from flattened sections
     all_start_pages = collect_start_pages(toc_sections) |> Enum.sort()
     page_boundaries = build_page_boundaries(all_start_pages, total_pages)
 
     children = build_children(toc_sections, summaries, page_boundaries)
 
+    # Build root summary from top-level section titles
+    section_titles = Enum.map(toc_sections, & &1["title"]) |> Enum.join(", ")
+
     %{
       node_id: "root",
-      title: "10-K Annual Report",
-      summary:
-        "SEC Form 10-K annual report with detailed business, risk, financial, and governance disclosures.",
+      title: doc_title,
+      summary: "#{doc_title} containing: #{section_titles}.",
       children: children
     }
   end
