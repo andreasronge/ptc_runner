@@ -70,8 +70,8 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
       content = File.read!(path)
       lines = String.split(content, "\n", trim: true)
-      # First line is metadata, second is our test event
-      assert length(lines) == 2
+      # First line is trace.start, second is our test event, third is trace.stop
+      assert length(lines) == 3
       assert Enum.at(lines, 1) == ~s({"event":"test"})
     end
 
@@ -87,8 +87,8 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
       content = File.read!(path)
       lines = String.split(content, "\n", trim: true)
-      # First line is metadata
-      assert length(lines) == 4
+      # First line is trace.start, last is trace.stop
+      assert length(lines) == 5
       assert Jason.decode!(Enum.at(lines, 1))["n"] == 1
       assert Jason.decode!(Enum.at(lines, 2))["n"] == 2
       assert Jason.decode!(Enum.at(lines, 3))["n"] == 3
