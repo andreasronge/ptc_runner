@@ -575,6 +575,73 @@ defmodule PtcRunner.PlanRunnerTest do
     end
   end
 
+  describe "dependency result injection" do
+    test "regular task with depends_on receives upstream results in prompt" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch_data", "input" => "Get the data"},
+          %{
+            "id" => "compute",
+            "input" => "Compute metrics from the data",
+            "depends_on" => ["fetch_data"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+      prompts_received = Agent.start_link(fn -> [] end) |> elem(1)
+
+      mock_llm = fn %{messages: [%{content: prompt}]} ->
+        Agent.update(prompts_received, fn ps -> ps ++ [prompt] end)
+
+        cond do
+          String.contains?(prompt, "Get the data") ->
+            {:ok, ~s({"value": 42, "label": "answer"})}
+
+          String.contains?(prompt, "Compute metrics") ->
+            {:ok, ~s({"result": "computed"})}
+
+          true ->
+            {:ok, ~s({"error": "unexpected"})}
+        end
+      end
+
+      {:ok, _results} = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
+
+      prompts = Agent.get(prompts_received, & &1)
+      Agent.stop(prompts_received)
+
+      compute_prompt = Enum.find(prompts, &String.contains?(&1, "Compute metrics"))
+      assert compute_prompt != nil
+      assert String.contains?(compute_prompt, "fetch_data"), "Should see upstream task ID"
+      assert String.contains?(compute_prompt, "42"), "Should see upstream result value"
+    end
+
+    test "task without depends_on does not get upstream results section" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "standalone", "input" => "Do something standalone"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+      prompt_received = Agent.start_link(fn -> nil end) |> elem(1)
+
+      mock_llm = fn %{messages: [%{content: prompt}]} ->
+        Agent.update(prompt_received, fn _ -> prompt end)
+        {:ok, ~s({"result": "done"})}
+      end
+
+      {:ok, _results} = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
+
+      prompt = Agent.get(prompt_received, & &1)
+      Agent.stop(prompt_received)
+
+      refute String.contains?(prompt, "Upstream Results"),
+             "Standalone task should not have upstream results section"
+    end
+  end
+
   describe "human review" do
     test "pauses at human review task" do
       raw = %{
@@ -1020,6 +1087,199 @@ defmodule PtcRunner.PlanRunnerTest do
 
       # Should auto-detect JSON mode (no tools, no explicit output)
       assert mode == :json
+    end
+  end
+
+  describe "quality gate" do
+    test "gate passes — task with deps succeeds when gate says sufficient" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze {{results.fetch}}",
+            "depends_on" => ["fetch"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn input ->
+        count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
+
+        # The quality gate call uses :json output mode with the sufficiency signature
+        output_mode = Map.get(input, :output)
+
+        if output_mode == :json and count == 1 do
+          # Quality gate check (JSON mode, triggered for "analyze" task)
+          {:ok, ~s|{"sufficient": true, "missing": []}|}
+        else
+          # Regular task calls
+          {:ok, ~s({"result": "done"})}
+        end
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan, llm: mock_llm, max_turns: 1, quality_gate: true)
+
+      total_calls = Agent.get(call_count, & &1)
+      Agent.stop(call_count)
+
+      # Should have 3 calls: fetch task, quality gate, analyze task
+      assert total_calls == 3
+      assert Map.has_key?(results, "fetch")
+      assert Map.has_key?(results, "analyze")
+    end
+
+    test "gate fails → replan_required" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch balance sheet"},
+          %{
+            "id" => "synthesize",
+            "input" => "Analyze financial data",
+            "depends_on" => ["fetch"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      mock_llm = fn input ->
+        output_mode = Map.get(input, :output)
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        if output_mode == :json and String.contains?(prompt, "data sufficiency") do
+          # Quality gate check — says data is insufficient
+          {:ok, ~s|{"sufficient": false, "missing": ["income statement data"]}|}
+        else
+          # Regular task
+          {:ok, ~s({"result": "done"})}
+        end
+      end
+
+      result = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1, quality_gate: true)
+
+      assert {:replan_required, context} = result
+      assert context.task_id == "synthesize"
+      assert context.task_output == nil
+      assert context.diagnosis =~ "income statement data"
+      assert Map.has_key?(context, :completed_results)
+      # fetch should be in completed_results since it ran in phase 0
+      assert Map.has_key?(context.completed_results, "fetch")
+    end
+
+    test "gate skipped for phase 0 tasks (no dependencies)" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "a", "input" => "Task A"},
+          %{"id" => "b", "input" => "Task B"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn _input ->
+        Agent.update(call_count, &(&1 + 1))
+        {:ok, ~s({"result": "done"})}
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan, llm: mock_llm, max_turns: 1, quality_gate: true)
+
+      total_calls = Agent.get(call_count, & &1)
+      Agent.stop(call_count)
+
+      # Only 2 calls (one per task), no gate calls since neither has dependencies
+      assert total_calls == 2
+      assert Map.has_key?(results, "a")
+      assert Map.has_key?(results, "b")
+    end
+
+    test "gate disabled by default — no extra LLM calls" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze {{results.fetch}}",
+            "depends_on" => ["fetch"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn _input ->
+        Agent.update(call_count, &(&1 + 1))
+        {:ok, ~s({"result": "done"})}
+      end
+
+      # Without quality_gate: true, no gate calls
+      {:ok, _results} = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
+
+      total_calls = Agent.get(call_count, & &1)
+      Agent.stop(call_count)
+
+      # Exactly 2 calls: one per task, no quality gate
+      assert total_calls == 2
+    end
+
+    test "gate uses separate quality_gate_llm when provided" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze {{results.fetch}}",
+            "depends_on" => ["fetch"]
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      gate_llm_called = Agent.start_link(fn -> false end) |> elem(1)
+      main_llm_called_for_gate = Agent.start_link(fn -> false end) |> elem(1)
+
+      main_llm = fn input ->
+        output_mode = Map.get(input, :output)
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        if output_mode == :json and String.contains?(prompt, "data sufficiency") do
+          Agent.update(main_llm_called_for_gate, fn _ -> true end)
+        end
+
+        {:ok, ~s({"result": "done"})}
+      end
+
+      gate_llm = fn _input ->
+        Agent.update(gate_llm_called, fn _ -> true end)
+        {:ok, ~s|{"sufficient": true, "missing": []}|}
+      end
+
+      {:ok, _results} =
+        PlanRunner.execute(plan,
+          llm: main_llm,
+          max_turns: 1,
+          quality_gate: true,
+          quality_gate_llm: gate_llm
+        )
+
+      assert Agent.get(gate_llm_called, & &1) == true
+      assert Agent.get(main_llm_called_for_gate, & &1) == false
+
+      Agent.stop(gate_llm_called)
+      Agent.stop(main_llm_called_for_gate)
     end
   end
 end
