@@ -204,8 +204,11 @@ defmodule PtcRunner.SubAgent.Loop do
 
       stop_meta =
         case result do
-          {:ok, step} -> %{agent: agent, step: step, status: :ok}
-          {:error, step} -> %{agent: agent, step: step, status: :error}
+          {:ok, step} ->
+            %{agent: slim_agent(agent), step: step, status: :ok, return: step.return}
+
+          {:error, step} ->
+            %{agent: slim_agent(agent), step: step, status: :error, fail: step.fail}
         end
 
       {result, stop_meta}
@@ -433,7 +436,7 @@ defmodule PtcRunner.SubAgent.Loop do
             # Use turn_tokens from next_state for correct measurements
             Metrics.emit_turn_stop_immediate(
               turn,
-              agent,
+              slim_agent(agent),
               state,
               turn_start,
               next_state.turn_tokens
@@ -445,7 +448,14 @@ defmodule PtcRunner.SubAgent.Loop do
           {:stop, result, turn, turn_tokens} ->
             # Emit turn stop for final turn
             # turn_tokens may be nil for budget exceeded or LLM error cases
-            Metrics.emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens)
+            Metrics.emit_turn_stop_immediate(
+              turn,
+              slim_agent(agent),
+              state,
+              turn_start,
+              turn_tokens
+            )
+
             result
         end
     end
@@ -466,7 +476,7 @@ defmodule PtcRunner.SubAgent.Loop do
     state = Map.put(state, :current_turn_type, turn_type)
 
     telemetry_metadata = %{
-      agent: agent,
+      agent: slim_agent(agent),
       turn: state.turn,
       type: turn_type,
       tools_count: if(must_return_mode, do: 0, else: map_size(agent.tools))
@@ -604,7 +614,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Call LLM with telemetry wrapper
   defp call_llm_with_telemetry(llm, input, state, agent) do
-    start_meta = %{agent: agent, turn: state.turn, messages: input.messages}
+    slim = slim_agent(agent)
+    start_meta = %{agent: slim, turn: state.turn, messages: input.messages, model: agent.llm}
 
     Telemetry.span([:llm], start_meta, fn ->
       result = LLMRetry.call_with_retry(llm, input, state.llm_registry, state.llm_retry)
@@ -615,11 +626,11 @@ defmodule PtcRunner.SubAgent.Loop do
         case result do
           {:ok, %{content: content, tokens: tokens}} ->
             measurements = Metrics.build_token_measurements(tokens)
-            meta = %{agent: agent, turn: state.turn, response: content}
+            meta = %{agent: slim, turn: state.turn, response: content}
             {measurements, meta}
 
           {:error, _} ->
-            meta = %{agent: agent, turn: state.turn, response: nil}
+            meta = %{agent: slim, turn: state.turn, response: nil}
             {%{}, meta}
         end
 
@@ -1446,7 +1457,7 @@ defmodule PtcRunner.SubAgent.Loop do
       }
 
       metadata = %{
-        agent: agent,
+        agent: slim_agent(agent),
         count: pmap_call.count,
         child_trace_ids: pmap_call.child_trace_ids,
         success_count: pmap_call.success_count,
@@ -1472,13 +1483,23 @@ defmodule PtcRunner.SubAgent.Loop do
   defp emit_tool_telemetry(_agent, %{tool_calls: []}), do: :ok
 
   defp emit_tool_telemetry(agent, %{tool_calls: tool_calls}) do
+    slim = slim_agent(agent)
+
     Enum.each(tool_calls, fn tool_call ->
+      # Emit tool.start (re-emission from sandbox)
+      Telemetry.emit([:tool, :start], %{}, %{
+        agent: slim,
+        tool_name: tool_call.name,
+        args: tool_call.args
+      })
+
+      # Emit tool.stop (re-emission from sandbox)
       measurements = %{
         duration: System.convert_time_unit(tool_call.duration_ms, :millisecond, :native)
       }
 
       metadata = %{
-        agent: agent,
+        agent: slim,
         tool_name: tool_call.name,
         args: tool_call.args,
         result: tool_call.result
@@ -1494,5 +1515,20 @@ defmodule PtcRunner.SubAgent.Loop do
 
       Telemetry.emit([:tool, :stop], measurements, metadata)
     end)
+  end
+
+  # ============================================================
+  # Telemetry Helpers
+  # ============================================================
+
+  # Slim agent struct for telemetry metadata to avoid serializing the full SubAgent.
+  # The full agent is still available in run.start context.
+  defp slim_agent(agent) do
+    %{
+      description: agent.description,
+      output: agent.output,
+      max_turns: agent.max_turns,
+      tool_names: Map.keys(agent.tools)
+    }
   end
 end

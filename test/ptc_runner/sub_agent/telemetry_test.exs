@@ -84,9 +84,13 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       # Stop event has duration in native time units
       assert is_integer(stop_measurements.duration)
       assert stop_measurements.duration > 0
-      assert stop_meta.agent == agent
+      # run.stop uses slim_agent (not the full struct)
+      assert stop_meta.agent.output == agent.output
+      assert stop_meta.agent.max_turns == agent.max_turns
       assert stop_meta.status == :ok
       assert stop_meta.step.return == %{"value" => 42}
+      # run.stop surfaces return value at top level
+      assert stop_meta.return == %{"value" => 42}
     end
 
     test "emits :run :stop with error status on failure", %{table: table} do
@@ -140,7 +144,9 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       {_, start_measurements, start_meta, _} = first_start
       assert start_measurements == %{}
-      assert start_meta.agent == agent
+      # turn.start uses slim_agent
+      assert start_meta.agent.output == agent.output
+      assert start_meta.agent.max_turns == agent.max_turns
       assert start_meta.turn == 1
 
       # Check turn stop has duration (all stop events should have duration)
@@ -172,13 +178,16 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       # Start event includes system_time and monotonic_time from telemetry.span
       assert is_integer(start_measurements.system_time)
-      assert start_meta.agent == agent
+      # llm.start uses slim_agent and includes model info
+      assert start_meta.agent.output == agent.output
+      assert start_meta.agent.max_turns == agent.max_turns
       assert start_meta.turn == 1
       assert is_list(start_meta.messages)
+      assert Map.has_key?(start_meta, :model)
 
       # Stop event
       assert is_integer(stop_measurements.duration)
-      assert stop_meta.agent == agent
+      assert stop_meta.agent.output == agent.output
       assert stop_meta.turn == 1
       assert stop_meta.response =~ "return"
     end
@@ -327,24 +336,23 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
 
-      assert length(tool_starts) == 1
+      # 2 start events: one from wrap_with_telemetry (in-sandbox), one from
+      # emit_tool_telemetry (post-sandbox, for trace log reliability)
+      assert length(tool_starts) == 2
       # 2 stop events: one from wrap_with_telemetry (in-sandbox), one from
       # emit_tool_telemetry (post-sandbox, for trace log reliability)
       assert length(tool_stops) == 2
 
-      [{_, start_measurements, start_meta, _}] = tool_starts
-
-      # Start event includes system_time and monotonic_time from telemetry.span
-      assert is_integer(start_measurements.system_time)
-      assert start_meta.agent == agent
-      assert start_meta.tool_name == "helper"
-      # Args have string keys at the boundary
-      assert start_meta.args == %{"x" => 5}
+      # All start events should have valid metadata
+      Enum.each(tool_starts, fn {_, _measurements, start_meta, _} ->
+        assert start_meta.tool_name == "helper"
+        # Args have string keys at the boundary
+        assert start_meta.args == %{"x" => 5}
+      end)
 
       # Both stop events should have valid metadata
       Enum.each(tool_stops, fn {_, stop_measurements, stop_meta, _} ->
         assert is_integer(stop_measurements.duration)
-        assert stop_meta.agent == agent
         assert stop_meta.tool_name == "helper"
       end)
     end
@@ -456,7 +464,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       [{_, measurements, meta, _}] = tool_exceptions
 
       assert is_integer(measurements.duration)
-      assert meta.agent == agent
+      # tool.exception comes from in-sandbox span, still has full agent
       assert meta.tool_name == "crasher"
       assert meta.kind == :error
       assert meta.reason.__struct__ == RuntimeError
@@ -494,7 +502,11 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
 
-      [{_, _, start_meta, _}] = tool_starts
+      # 2 start events: in-sandbox span + post-sandbox re-emission
+      assert length(tool_starts) == 2
+
+      # The in-sandbox span event has summarized args; check the first one
+      [{_, _, start_meta, _} | _] = tool_starts
 
       assert start_meta.tool_name == "helper"
       # Args have string keys at the boundary
@@ -573,7 +585,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
-      assert length(tool_starts) == 1
+      # 2 start events: in-sandbox span + post-sandbox re-emission for trace log
+      assert length(tool_starts) == 2
       # 2 stop events: in-sandbox span + post-sandbox re-emission for trace log
       assert length(tool_stops) == 2
     end
