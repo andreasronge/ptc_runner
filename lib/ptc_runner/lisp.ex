@@ -211,6 +211,36 @@ defmodule PtcRunner.Lisp do
     end
   end
 
+  @doc """
+  Validate PTC-Lisp source code without executing it.
+
+  Parses and analyzes the source, then checks for undefined variables.
+  Returns `:ok` if valid, or `{:error, messages}` with a list of error strings.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.validate("(and (map? data/result) (> (count data/result) 0))")
+      :ok
+
+      iex> PtcRunner.Lisp.validate("(and (map? foo) true)")
+      {:error, ["foo"]}
+
+      iex> PtcRunner.Lisp.validate("(let [x 1] (> x 0))")
+      :ok
+  """
+  @spec validate(String.t()) :: :ok | {:error, [String.t()]}
+  def validate(source) when is_binary(source) do
+    with {:ok, raw_ast} <- Parser.parse(source),
+         {:ok, core_ast} <- Analyze.analyze(raw_ast) do
+      case collect_undefined_vars(core_ast, MapSet.new()) do
+        [] -> :ok
+        undefined -> {:error, Enum.uniq(undefined)}
+      end
+    else
+      {:error, reason} -> {:error, [format_validate_error(reason)]}
+    end
+  end
+
   defp execute_program(source, opts) do
     %{
       ctx: ctx,
@@ -600,4 +630,232 @@ defmodule PtcRunner.Lisp do
 
   defp format_path([]), do: "return"
   defp format_path(path), do: "return." <> Enum.join(path, ".")
+
+  # ============================================================
+  # validate/1 helpers — walk CoreAST collecting undefined vars
+  # ============================================================
+
+  # Variable reference — check builtins and local scope
+  defp collect_undefined_vars({:var, name}, scope) do
+    if Env.builtin?(name) or MapSet.member?(scope, name) do
+      []
+    else
+      [to_string(name)]
+    end
+  end
+
+  # Data access — always valid
+  defp collect_undefined_vars({:data, _key}, _scope), do: []
+
+  # Literals
+  defp collect_undefined_vars(nil, _scope), do: []
+  defp collect_undefined_vars(n, _scope) when is_number(n), do: []
+  defp collect_undefined_vars(b, _scope) when is_boolean(b), do: []
+  defp collect_undefined_vars({:string, _}, _scope), do: []
+  defp collect_undefined_vars({:keyword, _}, _scope), do: []
+  defp collect_undefined_vars({:literal, _}, _scope), do: []
+  defp collect_undefined_vars(a, _scope) when a in [:infinity, :negative_infinity, :nan], do: []
+
+  # Let bindings — extend scope with bound vars
+  defp collect_undefined_vars({:let, bindings, body}, scope) do
+    {binding_errors, extended_scope} =
+      Enum.reduce(bindings, {[], scope}, fn {:binding, pattern, value}, {errs, sc} ->
+        value_errs = collect_undefined_vars(value, sc)
+        new_scope = Enum.reduce(pattern_vars(pattern), sc, &MapSet.put(&2, &1))
+        {errs ++ value_errs, new_scope}
+      end)
+
+    binding_errors ++ collect_undefined_vars(body, extended_scope)
+  end
+
+  # fn — extend scope with param vars
+  defp collect_undefined_vars({:fn, params, body}, scope) do
+    param_names = fn_param_vars(params)
+    extended_scope = Enum.reduce(param_names, scope, &MapSet.put(&2, &1))
+    collect_undefined_vars(body, extended_scope)
+  end
+
+  # loop — extend scope with binding vars
+  defp collect_undefined_vars({:loop, bindings, body}, scope) do
+    {binding_errors, extended_scope} =
+      Enum.reduce(bindings, {[], scope}, fn {:binding, pattern, value}, {errs, sc} ->
+        value_errs = collect_undefined_vars(value, sc)
+        new_scope = Enum.reduce(pattern_vars(pattern), sc, &MapSet.put(&2, &1))
+        {errs ++ value_errs, new_scope}
+      end)
+
+    binding_errors ++ collect_undefined_vars(body, extended_scope)
+  end
+
+  # Function call
+  defp collect_undefined_vars({:call, target, args}, scope) do
+    collect_undefined_vars(target, scope) ++
+      Enum.flat_map(args, &collect_undefined_vars(&1, scope))
+  end
+
+  # Tool call
+  defp collect_undefined_vars({:tool_call, _name, args}, scope) do
+    Enum.flat_map(args, &collect_undefined_vars(&1, scope))
+  end
+
+  # def — add name to scope before recursing (enables recursive defn)
+  defp collect_undefined_vars({:def, name, value, _meta}, scope) do
+    collect_undefined_vars(value, MapSet.put(scope, name))
+  end
+
+  # Control flow
+  defp collect_undefined_vars({:if, c, t, e}, scope) do
+    collect_undefined_vars(c, scope) ++
+      collect_undefined_vars(t, scope) ++ collect_undefined_vars(e, scope)
+  end
+
+  defp collect_undefined_vars({:do, exprs}, scope) do
+    {errors, _final_scope} =
+      Enum.reduce(exprs, {[], scope}, fn expr, {errs, sc} ->
+        new_errs = collect_undefined_vars(expr, sc)
+
+        new_sc =
+          case expr do
+            {:def, name, _value, _meta} -> MapSet.put(sc, name)
+            _ -> sc
+          end
+
+        {errs ++ new_errs, new_sc}
+      end)
+
+    errors
+  end
+
+  defp collect_undefined_vars({:and, exprs}, scope) do
+    Enum.flat_map(exprs, &collect_undefined_vars(&1, scope))
+  end
+
+  defp collect_undefined_vars({:or, exprs}, scope) do
+    Enum.flat_map(exprs, &collect_undefined_vars(&1, scope))
+  end
+
+  defp collect_undefined_vars({:return, value}, scope) do
+    collect_undefined_vars(value, scope)
+  end
+
+  defp collect_undefined_vars({:fail, value}, scope) do
+    collect_undefined_vars(value, scope)
+  end
+
+  defp collect_undefined_vars({:recur, args}, scope) do
+    Enum.flat_map(args, &collect_undefined_vars(&1, scope))
+  end
+
+  # Collections
+  defp collect_undefined_vars({:vector, elems}, scope) do
+    Enum.flat_map(elems, &collect_undefined_vars(&1, scope))
+  end
+
+  defp collect_undefined_vars({:map, pairs}, scope) do
+    Enum.flat_map(pairs, fn {k, v} ->
+      collect_undefined_vars(k, scope) ++ collect_undefined_vars(v, scope)
+    end)
+  end
+
+  defp collect_undefined_vars({:set, elems}, scope) do
+    Enum.flat_map(elems, &collect_undefined_vars(&1, scope))
+  end
+
+  # Predicates
+  defp collect_undefined_vars({:where, _field, _op, value}, scope) when not is_nil(value) do
+    collect_undefined_vars(value, scope)
+  end
+
+  defp collect_undefined_vars({:where, _field, _op, nil}, _scope), do: []
+
+  defp collect_undefined_vars({:pred_combinator, _kind, predicates}, scope) do
+    Enum.flat_map(predicates, &collect_undefined_vars(&1, scope))
+  end
+
+  # Juxt
+  defp collect_undefined_vars({:juxt, fns}, scope) do
+    Enum.flat_map(fns, &collect_undefined_vars(&1, scope))
+  end
+
+  # Parallel operations
+  defp collect_undefined_vars({:pmap, fn_expr, coll_expr}, scope) do
+    collect_undefined_vars(fn_expr, scope) ++ collect_undefined_vars(coll_expr, scope)
+  end
+
+  defp collect_undefined_vars({:pcalls, fn_exprs}, scope) do
+    Enum.flat_map(fn_exprs, &collect_undefined_vars(&1, scope))
+  end
+
+  # Task/step operations
+  defp collect_undefined_vars({:task, _id, body}, scope) do
+    collect_undefined_vars(body, scope)
+  end
+
+  defp collect_undefined_vars({:task_dynamic, id_expr, body}, scope) do
+    collect_undefined_vars(id_expr, scope) ++ collect_undefined_vars(body, scope)
+  end
+
+  defp collect_undefined_vars({:step_done, id, summary}, scope) do
+    collect_undefined_vars(id, scope) ++ collect_undefined_vars(summary, scope)
+  end
+
+  defp collect_undefined_vars({:task_reset, id}, scope) do
+    collect_undefined_vars(id, scope)
+  end
+
+  # Budget/turn history
+  defp collect_undefined_vars({:budget_remaining}, _scope), do: []
+  defp collect_undefined_vars({:turn_history, _n}, _scope), do: []
+
+  # Catch-all for unhandled nodes
+  defp collect_undefined_vars(_other, _scope), do: []
+
+  # Extract variable names from fn params
+  defp fn_param_vars(params) when is_list(params) do
+    Enum.flat_map(params, &pattern_vars/1)
+  end
+
+  defp fn_param_vars({:variadic, leading, rest_pattern}) do
+    Enum.flat_map(leading, &pattern_vars/1) ++ pattern_vars(rest_pattern)
+  end
+
+  # Extract all variable names from a destructuring pattern
+  defp pattern_vars({:var, name}), do: [name]
+
+  defp pattern_vars({:destructure, {:keys, keys, _defaults}}) do
+    keys
+  end
+
+  defp pattern_vars({:destructure, {:map, keys, renames, _defaults}}) do
+    keys ++
+      Enum.flat_map(renames, fn {target_pattern, _source_key} -> pattern_vars(target_pattern) end)
+  end
+
+  defp pattern_vars({:destructure, {:as, name, inner}}) do
+    [name | pattern_vars(inner)]
+  end
+
+  defp pattern_vars({:destructure, {:seq, patterns}}) do
+    Enum.flat_map(patterns, &pattern_vars/1)
+  end
+
+  defp pattern_vars({:destructure, {:seq_rest, leading, rest}}) do
+    Enum.flat_map(leading, &pattern_vars/1) ++ pattern_vars(rest)
+  end
+
+  defp pattern_vars(_other), do: []
+
+  # Format errors from parse/analyze for validate/1
+  defp format_validate_error({:parse_error, msg}), do: "Parse error: #{msg}"
+
+  defp format_validate_error({:invalid_arity, _form, msg}), do: "Analysis error: #{msg}"
+
+  defp format_validate_error({:invalid_placeholder, name}),
+    do:
+      "Analysis error: placeholder '#{name}' can only be used inside #() anonymous function syntax"
+
+  defp format_validate_error({type, msg}) when is_atom(type) and is_binary(msg),
+    do: "#{type}: #{msg}"
+
+  defp format_validate_error(other), do: "Error: #{inspect(other)}"
 end

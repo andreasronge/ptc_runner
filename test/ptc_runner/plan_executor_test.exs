@@ -44,6 +44,32 @@ defmodule PtcRunner.PlanExecutorTest do
     end
   end
 
+  describe "execute/3 - sanitization" do
+    test "strips illegal verification predicate and executes without verification" do
+      # Predicate uses "result" instead of "data/result" — Lisp.validate will flag it
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "fetch",
+            "input" => "Fetch data",
+            "verification" => "(map? result)",
+            "on_verification_failure" => "stop"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      mock_llm = fn _input ->
+        {:ok, ~s({"items": []})}
+      end
+
+      # Succeeds because the illegal predicate is stripped, not enforced
+      {:ok, metadata} = PlanExecutor.execute(plan, "Test mission", llm: mock_llm, max_turns: 1)
+      assert Map.has_key?(metadata.results, "fetch")
+    end
+  end
+
   describe "execute/3 - replanning" do
     test "triggers replan on verification failure with :replan strategy" do
       # First plan: task fails verification

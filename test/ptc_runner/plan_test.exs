@@ -660,6 +660,83 @@ defmodule PtcRunner.PlanTest do
       assert warnings == []
     end
 
+    test "keeps valid verification predicate" do
+      plan = %Plan{
+        tasks: [
+          %{
+            id: "t1",
+            input: "test",
+            signature: nil,
+            agent: "default",
+            depends_on: [],
+            on_failure: :stop,
+            max_retries: 1,
+            critical: true,
+            type: :task,
+            verification: "(and (map? data/result) (> (count data/result) 0))",
+            on_verification_failure: :stop
+          }
+        ]
+      }
+
+      {sanitized, warnings} = Plan.sanitize(plan)
+
+      assert hd(sanitized.tasks).verification ==
+               "(and (map? data/result) (> (count data/result) 0))"
+
+      assert warnings == []
+    end
+
+    test "removes verification with undefined variables and adds warning" do
+      plan = %Plan{
+        tasks: [
+          %{
+            id: "t1",
+            input: "test",
+            signature: nil,
+            agent: "default",
+            depends_on: [],
+            on_failure: :stop,
+            max_retries: 1,
+            critical: true,
+            type: :task,
+            verification: "(map? result)",
+            on_verification_failure: :stop
+          }
+        ]
+      }
+
+      {sanitized, warnings} = Plan.sanitize(plan)
+      assert hd(sanitized.tasks).verification == nil
+      assert length(warnings) == 1
+      assert hd(warnings).category == :invalid_verification
+      assert hd(warnings).message =~ "result"
+    end
+
+    test "verification with boolean? passes (builtin regression)" do
+      plan = %Plan{
+        tasks: [
+          %{
+            id: "t1",
+            input: "test",
+            signature: nil,
+            agent: "default",
+            depends_on: [],
+            on_failure: :stop,
+            max_retries: 1,
+            critical: true,
+            type: :task,
+            verification: "(boolean? data/result)",
+            on_verification_failure: :stop
+          }
+        ]
+      }
+
+      {sanitized, warnings} = Plan.sanitize(plan)
+      assert hd(sanitized.tasks).verification == "(boolean? data/result)"
+      assert warnings == []
+    end
+
     test "removes invalid signatures and adds warning" do
       plan = %Plan{
         tasks: [
