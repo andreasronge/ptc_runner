@@ -272,8 +272,8 @@ defmodule PtcRunner.SubAgent.LoopCompressionTest do
       llm = fn %{turn: turn, messages: messages} ->
         case turn do
           1 ->
-            # Return integer instead of float - should fail validation
-            {:ok, "```clojure\n(return {:value 0})\n```"}
+            # Return string instead of float - should fail validation
+            {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
 
           2 ->
             # Check that the error message is in the compressed user message

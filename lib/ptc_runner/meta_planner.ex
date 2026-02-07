@@ -245,6 +245,10 @@ defmodule PtcRunner.MetaPlanner do
       Do NOT include `:string` fields for analysis — leave interpretation to the synthesis gate.
       Their prompt should instruct them to use `let` bindings and arithmetic expressions for calculations
     - Use `on_verification_failure: "replan"` for critical tasks that may need strategy changes
+    - Set `"on_failure": "replan"` on tasks where the agent examines fetched data and might
+      determine it's insufficient. Include this instruction in the agent's prompt:
+      "If the data you received does not contain the specific information needed for your task,
+      call (fail \"reason\") explaining what is missing and where it might be found instead."
 
     Generate the execution plan now:
     """
@@ -307,6 +311,12 @@ defmodule PtcRunner.MetaPlanner do
                 "type" => "string",
                 "enum" => ["retry", "replan", "fail"],
                 "description" => "Action on verification failure"
+              },
+              "on_failure" => %{
+                "type" => "string",
+                "enum" => ["stop", "skip", "replan"],
+                "description" =>
+                  "Action when the agent itself reports failure via (fail reason). Use replan for tasks where the agent examines data and might determine it is insufficient."
               },
               "type" => %{
                 "type" => "string",
@@ -474,9 +484,9 @@ defmodule PtcRunner.MetaPlanner do
     #{completed_summary}
 
     ## What Failed
-    Task ID: #{failure_context.task_id}
+    Task "#{failure_context.task_id}" reports: "#{failure_context.diagnosis}"
     Task Output: #{format_value(failure_context.task_output)}
-    Failure Diagnosis: "#{failure_context.diagnosis}"
+    Adjust the plan to address this specific blocker.
     #{original_plan_section}#{trial_history_section}#{validation_section}
     ## Your Task
 
@@ -488,6 +498,9 @@ defmodule PtcRunner.MetaPlanner do
     2. **Fixes the failed task**: The task "#{failure_context.task_id}" failed because:
        "#{failure_context.diagnosis}"
        Redesign this task or replace it with a different approach.
+       If a task reports it could not find data in a specific section, do NOT simply assign
+       the same section to a different agent. Look for alternative sources mentioned in the
+       diagnosis (e.g., "See Note 12" hints to fetch that note instead).
 
     3. **Completes the mission**: Ensure downstream tasks can still accomplish the original goal.
 

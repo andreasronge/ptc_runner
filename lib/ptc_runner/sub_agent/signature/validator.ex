@@ -47,7 +47,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   end
 
   defp validate_type(data, :float, path) do
-    if is_float(data) do
+    if is_float(data) or is_integer(data) do
       []
     else
       [error_at(path, "expected float, got #{type_name(data)}")]
