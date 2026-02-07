@@ -12,15 +12,20 @@ Instead of chunk-embed-search, PageIndex parses a document's Table of Contents i
 Document PDF → TocParser (LLM) → Section tree → Parallel summarization → Index JSON
 ```
 
-**Retrieval** — Three modes, from simple to autonomous:
+**Retrieval** — Four modes, from simple to autonomous:
 
 | Mode | How it works | Best for |
 |------|-------------|----------|
 | `--simple` | Score all nodes, fetch top-k, synthesize | Predictable, single-hop lookups |
-| (default) | Single SubAgent with `get-content` tool | Most questions |
+| (default) | Single SubAgent with `get-content`/`grep-content` tools | Most questions |
 | `--planner` | MetaPlanner decomposes into fetch/compute/synthesize tasks | Multi-hop, computation-heavy |
+| `--iterative` | Two-agent extraction/synthesis loop with structured findings | Adaptive multi-step retrieval |
 
-The default agent mode runs a single LLM conversation that iteratively fetches sections and synthesizes an answer — simple but can't decompose complex reasoning. The planner mode generates a structured plan with separate fetch, compute, and synthesize tasks executed in dependency order, with optional quality gates and replanning. Fetches run in parallel without LLM calls (direct PTC-Lisp), while analysis and synthesis use dedicated SubAgents.
+**Default agent mode** runs a single multi-turn LLM conversation that iteratively fetches sections and synthesizes an answer.
+
+**Planner mode** generates a structured plan with separate fetch, compute, and synthesize tasks executed in dependency order, with optional quality gates and replanning. Fetches run in parallel without LLM calls (direct PTC-Lisp), while analysis and synthesis use dedicated SubAgents.
+
+**Iterative mode** separates data extraction from reasoning. An extraction agent fetches sections and returns structured findings with provenance (page, section, context). A synthesis agent evaluates whether the findings are sufficient to answer, or requests one more "shopping item" to search for. The loop continues until an answer is produced or max iterations are reached. See `iterative_retrieval_design.md` for the full design rationale.
 
 ## Setup
 
@@ -39,37 +44,126 @@ mix run run.exs --index data/3M_2022_10K.pdf
 # Query with default agent mode
 mix run run.exs --query "What are 3M's business segments?" --pdf data/3M_2022_10K.pdf
 
+# Query with simple scoring
+mix run run.exs --query "What drove operating margin change?" --pdf data/3M_2022_10K.pdf --simple
+
 # Query with MetaPlanner (for complex multi-hop questions)
 mix run run.exs --query "Is 3M a capital intensive business?" --pdf data/3M_2022_10K.pdf --planner --trace
+
+# Query with iterative extraction/synthesis loop
+mix run run.exs --query "Which segment dragged down growth?" --pdf data/3M_2022_10K.pdf --iterative --trace
 
 # Show an existing index
 mix run run.exs --show data/3M_2022_10K_index.json
 ```
 
-Options: `--model <name>` (default: `bedrock:haiku`), `--trace` (writes to `traces/`), `--simple`, `--planner`.
+Options: `--model <name>` (default: `bedrock:haiku`), `--trace` (writes to `traces/`), `--simple`, `--planner`, `--iterative`.
 
-## Example: Planner Execution
+Short aliases: `-m`, `-q`, `-s`, `-p`, `-i`, `-t`.
 
-For the query *"Is 3M a capital intensive business based on FY2022 data?"* with `--planner`, MetaPlanner generates:
+## Benchmarking
 
+```bash
+# Run benchmark (default: haiku+sonnet, agent+planner modes, 3M_2022_10K questions)
+mix run bench.exs --runs 1
+
+# Specific models and modes
+mix run bench.exs --runs 3 --models bedrock:haiku --modes agent,iterative
+
+# Full test set
+mix run bench.exs --test-set full --runs 1
+
+# Analyze latest benchmark with LLM-as-judge
+mix run analyze.exs --judge --model bedrock:sonnet
 ```
-Agents:
-  fetcher     (tools: fetch_section)  — retrieves document sections
-  analyst     (no tools)              — computes derived metrics via PTC-Lisp
-  synthesizer (no tools)              — produces final verdict
 
-Tasks:
-  fetch_balance_sheet      → fetcher                                         parallel ┐
-  fetch_cash_flow          → fetcher                                         parallel ┤
-  fetch_business_overview  → fetcher                                         parallel ┤
-  fetch_ppe_note           → fetcher                                         parallel ┘
-  compute_capital_intensity → analyst    depends_on: [balance_sheet, cash_flow, ppe_note]
-  final_answer             → synthesizer depends_on: [compute, business_overview]  (synthesis_gate)
+Benchmark options: `--runs N`, `--test-set NAME`, `--question ID`, `--models LIST`, `--modes LIST`, `--self-failure`.
+
+Results are written to `bench_runs/<timestamp>/` with a manifest and per-run traces.
+
+## Tools
+
+All retrieval modes provide these tools to their agents:
+
+**`get-content` / `fetch_section`** — Fetch document content by section node_id with offset-based pagination. Returns content (5000-6000 chars per call), truncation status, and continuation hints. Supports fuzzy matching on node_id.
+
+**`grep-content` / `grep_section`** — Search section content for keywords/patterns before fetching. Returns up to 5 matches with surrounding context and offset hints. Enables a grep-then-fetch pattern to avoid reading entire large sections.
+
+## Example: PTC-Lisp Programs Generated by Agents
+
+All agent programs are written in PTC-Lisp by the LLM. Below are real examples from benchmark traces.
+
+**Grep-then-fetch** — The agent searches for keywords before fetching full content:
+
+```clojure
+(def grep_result (tool/grep_section {:node_id "management_s_di_performance_by_business_segmen"
+                                     :pattern "organic"}))
+(println "Matches:" (count (:matches grep_result)))
+(doseq [m (:matches grep_result)]
+  (println "Offset:" (:offset m) "Context:" (:context m)))
 ```
 
-Execution: 4 fetches run in parallel (~3s), then the analyst computes PP&E/assets, CapEx/revenue, and CapEx/OCF ratios, then the synthesizer produces the final answer with rationale. Total: ~53s, 0 replans.
+**Fetch with pagination** — When content is truncated, the agent continues at the next offset:
 
-Use `--trace` and open `priv/trace_viewer.html` to visualize the full execution timeline.
+```clojure
+(def section (tool/fetch_section {:node_id "management_s_di_results_of_operations" :offset 0}))
+(println "Truncated:" (get section "truncated") "Total:" (get section "total_chars"))
+
+;; Continue reading from where we left off
+(def section2 (tool/fetch_section {:node_id "management_s_di_results_of_operations"
+                                   :offset 5000}))
+```
+
+**Extraction agent return** — Structured findings with provenance (iterative mode):
+
+```clojure
+(return {:findings [
+  {:label "operating_margin_2022" :value 19.1 :unit "percent"
+   :page 27 :section "Results of Operations"
+   :context "Operating income margin for FY2022"}
+  {:label "operating_margin_2021" :value 20.8 :unit "percent"
+   :page 27 :section "Results of Operations"
+   :context "Operating income margin for FY2021"}
+  {:label "cost_of_sales_change" :value 3.0 :unit "percent"
+   :page 27 :section "Results of Operations"
+   :context "Increase in cost of sales, driven by PFAS litigation and manufacturing exit costs"}
+  {:label "combat_arms_litigation_charge" :value 1200 :unit "millions_usd"
+   :page 27 :section "Results of Operations"
+   :context "Q2 2022 pre-tax charge for Combat Arms Earplugs litigation"}]
+ :sections_searched ["management_s_di_results_of_operations"
+                     "management_s_di_overview"]})
+```
+
+**Computation task** — Planner mode generates ratio calculations from fetched data (Q3: "Is 3M capital-intensive?"):
+
+```clojure
+(let [capex_2022 1749.0
+      revenue_2022 34229.0
+      ppe_net_2022 9178.0
+      total_assets_2022 46455.0
+      depreciation_2022 1831.0
+      capex_to_revenue_pct (* 100.0 (/ capex_2022 revenue_2022))
+      ppe_to_assets_pct (* 100.0 (/ ppe_net_2022 total_assets_2022))
+      depreciation_to_revenue_pct (* 100.0 (/ depreciation_2022 revenue_2022))]
+  (return {:capex_to_revenue_pct capex_to_revenue_pct
+           :ppe_to_assets_pct ppe_to_assets_pct
+           :depreciation_to_revenue_pct depreciation_to_revenue_pct}))
+```
+
+**Cross-task data access** — Planner agents read results from earlier tasks via `data/results`:
+
+```clojure
+(let [segments (get-in data/results ["fetch_segment_growth_data" "segments"])
+      overall  (get-in data/results ["fetch_overall_growth" "overall_organic_growth_pct"])]
+  (return {:overall_organic_pct overall
+           :segments (map (fn [seg]
+                            {:name (get seg "name")
+                             :organic_growth_pct (get seg "organic_growth_pct")
+                             :delta (- (get seg "organic_growth_pct") overall)})
+                          segments)}))
+```
+
+Note: The current benchmark questions are mostly retrieval-heavy — the LLM needs to find the right sections and extract data, but rarely needs complex computation. Only Q3 ("Is 3M capital-intensive?") triggers ratio calculations. Most programs are tool calls, pagination, and structured returns. More computation-heavy questions (e.g., multi-year trend analysis, cross-document comparisons) would exercise the PTC-Lisp arithmetic more heavily.
 
 ## Architecture
 
@@ -79,22 +173,32 @@ lib/page_index/
 ├── toc_parser.ex          # LLM-based TOC parsing
 ├── fine_indexer.ex         # Index builder (TOC → summaries → tree)
 ├── retriever.ex           # Agent-based and simple retrieval
-└── planner_retriever.ex   # MetaPlanner-based multi-hop retrieval
+├── planner_retriever.ex   # MetaPlanner-based multi-hop retrieval
+├── iterative_retriever.ex # Two-agent iterative extraction/synthesis loop
+└── plan_trace.ex          # File-based JSONL tracing for PlanExecutor events
 ```
+
+## Iterative Retriever Design
+
+The iterative mode addresses limitations of the other modes:
+
+- **Agent mode** conflates fetching, extraction, reasoning, and synthesis in one agent. Raw PDF text accumulates in context across turns (~80k tokens).
+- **Planner mode** predicts which sections to fetch upfront before seeing any data, leading to brittle plans and harmful quality gate rejections.
+
+The iterative approach separates concerns:
+
+1. **Extraction agent** (multi-turn, has tools): fetches sections guided by a "shopping item" and returns structured findings with provenance `{label, value, unit, page, section, context}`.
+2. **Synthesis agent** (single-turn, no tools): evaluates findings, performs computations, and either returns an answer, requests one more item, or declares failure.
+
+Each extraction starts with a fresh context (no accumulated raw text). Only structured findings survive between iterations. Failed searches are tracked to prevent loops.
 
 ## Known Limitation: Planner Interpretation Instability
 
-The planner mode reliably extracts consistent numbers (e.g., PPE=9178, CapEx=1749, revenue=34229) but the synthesis step is unstable for subjective questions like "Is 3M capital-intensive?" — different runs pick different metrics and thresholds (CapEx/Revenue ~5% vs PPE/Assets ~20%), leading to contradictory conclusions from identical data. Root cause: the planner prompt has no canonical definition of analytical concepts, so each generated plan embeds different interpretation criteria.
-
-## Alternative Approaches to Consider
-
-**Vector RAG baseline** — Chunk, embed, cosine-search. Simpler, faster, but loses document structure and can't reason about which sections to explore. Good baseline to compare against.
-
-**Explicit tree navigation tools** — Instead of giving the agent all summaries upfront, provide `get-children`, `get-summary`, `get-content` tools and let it walk the tree step by step. More control over token usage for very large documents, but requires more tool calls.
-
-**Hybrid** — Use vector search to pre-filter candidate sections, then tree navigation to verify and gather context. Combines speed of embeddings with interpretability of reasoning.
+The planner mode reliably extracts consistent numbers but the synthesis step is unstable for subjective questions like "Is 3M capital-intensive?" — different runs pick different metrics and thresholds, leading to contradictory conclusions from identical data.
 
 ## References
 
 - [VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex) — Original Python implementation
 - [FinanceBench](https://github.com/patronus-ai/financebench) — Source of test questions (`data/questions.json`, MIT license)
+- `iterative_retrieval_design.md` — Full design document for the iterative retriever
+- `bench_results.md` — Latest benchmark results
