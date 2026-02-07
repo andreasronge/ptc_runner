@@ -384,5 +384,70 @@ defmodule PtcRunner.LispTest do
 
       assert msg =~ "Tool calls require named arguments"
     end
+
+    test "undefined vars rejected before tool side effects execute" do
+      call_count = :counters.new(1, [:atomics])
+
+      tools = %{
+        "send-sms" => fn _args ->
+          :counters.add(call_count, 1, 1)
+          {:ok, "sent"}
+        end
+      }
+
+      # Program has a tool call followed by an undefined variable
+      source = ~S|(do (tool/send-sms {:to "+1234" :msg "hello"}) undefined-var)|
+
+      assert {:error, %{fail: %{reason: :unbound_var}}} = Lisp.run(source, tools: tools)
+      # Tool must NOT have been called — the program was rejected before execution
+      assert :counters.get(call_count, 1) == 0
+    end
+
+    test "memory vars from previous turns are allowed" do
+      # In multi-turn SubAgent, def'd vars from turn 1 are in memory for turn 2
+      assert {:ok, %{return: 11}} =
+               Lisp.run("(+ counter 1)", memory: %{counter: 10})
+    end
+
+    test "unknown tool rejected before side effects execute" do
+      call_count = :counters.new(1, [:atomics])
+
+      tools = %{
+        "send-sms" => fn _args ->
+          :counters.add(call_count, 1, 1)
+          {:ok, "sent"}
+        end
+      }
+
+      # Program calls a valid tool then a non-existent tool
+      source = ~S|(do (tool/send-sms {:to "+1234" :msg "hi"}) (tool/non-existent {}))|
+
+      assert {:error, %{fail: %{reason: :unknown_tool, message: msg}}} =
+               Lisp.run(source, tools: tools)
+
+      assert msg =~ "non-existent"
+      assert msg =~ "Available tools: send-sms"
+      # Valid tool must NOT have been called
+      assert :counters.get(call_count, 1) == 0
+    end
+
+    test "unknown tool with no tools available" do
+      source = ~S|(tool/query {:q "hello"})|
+
+      assert {:error, %{fail: %{reason: :unknown_tool, message: msg}}} =
+               Lisp.run(source, tools: %{})
+
+      assert msg =~ "No tools available"
+    end
+
+    test "all tools valid allows execution" do
+      tools = %{
+        "greet" => fn _args -> "hello" end,
+        "farewell" => fn _args -> "bye" end
+      }
+
+      source = ~S|(do (tool/greet {}) (tool/farewell {}))|
+      assert {:ok, %{return: "bye"}} = Lisp.run(source, tools: tools)
+    end
   end
 end

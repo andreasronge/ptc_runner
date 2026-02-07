@@ -699,7 +699,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
   "no")                           ; => "no"
 
 (when-let [x false]
-  (do-something))                 ; => nil
+  (+ x 1))                       ; => nil (x is falsy, body not evaluated)
 ```
 
 **Implicit `do` (Clojure Extension):** `when-let` supports multiple body expressions:
