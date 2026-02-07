@@ -7,6 +7,7 @@ defmodule PageIndex.Retriever do
   - `retrieve_simple/3` - Score all nodes, fetch top matches
   """
 
+  alias PageIndex.DocumentTools
   alias PtcRunner.SubAgent
 
   @doc """
@@ -26,7 +27,7 @@ defmodule PageIndex.Retriever do
     IO.puts("PDF cache ready.")
 
     # Flatten tree to get all nodes with page ranges
-    nodes = flatten_tree(tree)
+    nodes = DocumentTools.flatten_tree(tree)
 
     # Format sections as a readable list
     sections_text =
@@ -37,57 +38,8 @@ defmodule PageIndex.Retriever do
       end)
       |> Enum.join("\n\n")
 
-    # Tool to fetch content by node_id with offset pagination
-    get_content = fn args ->
-      node_id = args["node_id"] || args[:node_id]
-      offset = args["offset"] || args[:offset] || 0
-
-      offset =
-        if is_binary(offset),
-          do: offset |> String.replace(",", "") |> String.to_integer(),
-          else: offset
-
-      node = Enum.find(nodes, fn n -> n.node_id == node_id end)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, full_content} ->
-            total_chars = String.length(full_content)
-            sliced = String.slice(full_content, offset, 6000)
-            returned_chars = String.length(sliced)
-            end_offset = offset + returned_chars
-            truncated = end_offset < total_chars
-
-            result = %{
-              node_id: node_id,
-              title: node.title,
-              pages: "#{node.start_page}-#{node.end_page}",
-              content: sliced,
-              total_chars: total_chars,
-              offset: offset,
-              truncated: truncated
-            }
-
-            if truncated do
-              Map.put(
-                result,
-                :hint,
-                "Content truncated. Call get-content with offset: #{end_offset} to get more."
-              )
-            else
-              result
-            end
-
-          {:error, reason} ->
-            %{error: "Failed to fetch: #{inspect(reason)}"}
-        end
-      else
-        %{error: "Node not found: #{node_id}"}
-      end
-    end
-
-    # Tool to search section content for keywords
-    grep_content = make_grep_tool(nodes, pdf_path)
+    get_content = DocumentTools.make_fetch_tool(nodes, pdf_path, chunk_size: 6000)
+    grep_content = DocumentTools.make_grep_tool(nodes, pdf_path)
 
     prompt = """
     Answer the question using the document sections listed below.
@@ -137,7 +89,7 @@ defmodule PageIndex.Retriever do
     pdf_path = Keyword.fetch!(opts, :pdf_path)
     top_k = Keyword.get(opts, :top_k, 3)
 
-    nodes = flatten_tree(tree)
+    nodes = DocumentTools.flatten_tree(tree)
 
     IO.puts("Scoring #{length(nodes)} nodes...")
 
@@ -178,123 +130,6 @@ defmodule PageIndex.Retriever do
 
     IO.puts("Generating answer...")
     generate_answer(query, contents, llm)
-  end
-
-  defp make_grep_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      pattern = args["pattern"] || args[:pattern] || ""
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-
-      node =
-        node ||
-          Enum.max_by(
-            nodes,
-            fn n ->
-              query_lower = String.downcase(query)
-              words = String.split(query_lower, ~r/[\s_]+/)
-
-              Enum.count(words, fn w ->
-                String.contains?(String.downcase(n.node_id), w) or
-                  String.contains?(String.downcase(n.title), w)
-              end)
-            end,
-            fn -> nil end
-          )
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, content} ->
-            matches = find_pattern_matches(content, pattern)
-
-            %{
-              node_id: node.node_id,
-              total_chars: String.length(content),
-              pattern: pattern,
-              matches: Enum.take(matches, 5)
-            }
-
-          {:error, reason} ->
-            %{error: inspect(reason)}
-        end
-      else
-        %{error: "No match for '#{query}'."}
-      end
-    end
-  end
-
-  defp find_pattern_matches(content, pattern) do
-    content_lower = String.downcase(content)
-
-    if String.contains?(pattern, "|") or String.contains?(pattern, ".*") do
-      find_regex_matches(content, content_lower, pattern)
-    else
-      pattern_lower = String.downcase(pattern)
-      find_all_positions(content, content_lower, pattern_lower, 0, [])
-    end
-  end
-
-  defp find_regex_matches(content, content_lower, pattern) do
-    case Regex.compile(String.downcase(pattern), "i") do
-      {:ok, regex} ->
-        Regex.scan(regex, content_lower, return: :index)
-        |> Enum.map(fn [{pos, _len} | _] ->
-          ctx_start = max(0, pos - 40)
-          ctx = String.slice(content, ctx_start, 120)
-
-          %{
-            offset: pos,
-            context: ctx,
-            hint: "Use get-content with offset: #{max(0, pos - 200)} to read around this match."
-          }
-        end)
-
-      {:error, _} ->
-        find_all_positions(content, content_lower, String.downcase(pattern), 0, [])
-    end
-  end
-
-  defp find_all_positions(_content, content_lower, _pattern, start, acc)
-       when start >= byte_size(content_lower) do
-    Enum.reverse(acc)
-  end
-
-  defp find_all_positions(content, content_lower, pattern, start, acc) do
-    case :binary.match(content_lower, pattern, scope: {start, byte_size(content_lower) - start}) do
-      {pos, _len} ->
-        ctx_start = max(0, pos - 40)
-        ctx = String.slice(content, ctx_start, 120)
-
-        match = %{
-          offset: pos,
-          context: ctx,
-          hint: "Use get-content with offset: #{max(0, pos - 200)} to read around this match."
-        }
-
-        find_all_positions(content, content_lower, pattern, pos + 1, [match | acc])
-
-      :nomatch ->
-        Enum.reverse(acc)
-    end
-  end
-
-  defp flatten_tree(tree, acc \\ []) do
-    children = Map.get(tree, :children, [])
-
-    node = %{
-      node_id: tree.node_id,
-      title: tree.title,
-      summary: tree.summary,
-      start_page: Map.get(tree, :start_page),
-      end_page: Map.get(tree, :end_page)
-    }
-
-    acc = if node.start_page, do: [node | acc], else: acc
-
-    Enum.reduce(children, acc, fn child, acc ->
-      flatten_tree(child, acc)
-    end)
   end
 
   defp score_relevance(node, query, llm) do

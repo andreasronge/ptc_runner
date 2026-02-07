@@ -22,6 +22,7 @@ defmodule CLI do
           simple: :boolean,
           planner: :boolean,
           iterative: :boolean,
+          hybrid: :boolean,
           trace: :boolean,
           model: :string,
           help: :boolean
@@ -33,6 +34,7 @@ defmodule CLI do
           s: :simple,
           p: :planner,
           i: :iterative,
+          y: :hybrid,
           t: :trace
         ]
       )
@@ -70,6 +72,7 @@ defmodule CLI do
       -s, --simple          Use simple retrieval (score all nodes, no recursion)
       -p, --planner         Use MetaPlanner for complex multi-hop questions
       -i, --iterative       Use iterative extraction/synthesis loop
+      -y, --hybrid          Use hybrid routing (classifier + best strategy)
       -t, --trace           Enable tracing (writes to traces/ directory)
       -h, --help            Show this help
 
@@ -116,6 +119,7 @@ defmodule CLI do
     simple = opts[:simple] || false
     planner = opts[:planner] || false
     iterative = opts[:iterative] || false
+    hybrid = opts[:hybrid] || false
     trace = opts[:trace] || false
 
     pdf_path = opts[:pdf]
@@ -131,6 +135,7 @@ defmodule CLI do
       cond do
         iterative -> "iterative (extraction loop)"
         planner -> "planner (MetaPlanner with verification)"
+        hybrid -> "hybrid (complexity routing)"
         simple -> "simple (score all nodes)"
         true -> "agent (single-pass)"
       end
@@ -149,6 +154,9 @@ defmodule CLI do
         cond do
           iterative ->
             run_iterative_query(tree, query, llm, pdf_path, trace: trace)
+
+          hybrid ->
+            run_hybrid_query(tree, query, llm, pdf_path, trace: trace)
 
           planner ->
             run_planner_query(tree, query, llm, pdf_path, trace: trace)
@@ -210,6 +218,39 @@ defmodule CLI do
         IO.puts("Error: #{inspect(reason)}")
     end
   end
+
+  defp run_hybrid_query(tree, query, llm, pdf_path, opts) do
+    retriever_opts = [llm: llm, pdf_path: pdf_path]
+
+    result =
+      with_optional_trace(opts[:trace], "hybrid", query, fn ->
+        PageIndex.HybridRetriever.retrieve(tree, query, retriever_opts)
+      end)
+
+    case result do
+      {:ok, result} ->
+        IO.puts("\n" <> String.duplicate("=", 60))
+        IO.puts("ANSWER:")
+        IO.puts(String.duplicate("=", 60))
+        IO.puts(inspect_answer(result.answer))
+
+        IO.puts("\nSources: #{inspect_sources(result.sources)}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{inspect(reason)}")
+    end
+  end
+
+  defp inspect_sources(sources) when is_list(sources) do
+    sources
+    |> Enum.map(fn
+      s when is_map(s) -> s.node_id || s["node_id"]
+      s -> to_string(s)
+    end)
+    |> Enum.join(", ")
+  end
+
+  defp inspect_sources(sources), do: inspect(sources)
 
   defp run_planner_query(tree, query, llm, pdf_path, opts) do
     retriever_opts = [llm: llm, pdf_path: pdf_path, quality_gate: true]

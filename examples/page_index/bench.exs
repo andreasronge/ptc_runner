@@ -303,6 +303,12 @@ defmodule Bench do
                     llm: llm,
                     pdf_path: pdf_path
                   )
+
+                "hybrid" ->
+                  PageIndex.HybridRetriever.retrieve(tree, question["question"],
+                    llm: llm,
+                    pdf_path: pdf_path
+                  )
               end
             end,
             path: trace_path,
@@ -366,6 +372,11 @@ defmodule Bench do
   defp extract_result("iterative", result) do
     answer = extract_answer(result.answer)
     {answer, result.iterations, result.findings_count}
+  end
+
+  defp extract_result("hybrid", result) do
+    answer = extract_answer(result.answer)
+    {answer, result[:replans], result[:tasks_executed]}
   end
 
   defp extract_answer(answer) when is_binary(answer), do: answer

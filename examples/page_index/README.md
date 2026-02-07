@@ -12,15 +12,23 @@ Instead of chunk-embed-search, PageIndex parses a document's Table of Contents i
 Document PDF → TocParser (LLM) → Section tree → Parallel summarization → Index JSON
 ```
 
-**Retrieval** — Three modes, from simple to autonomous:
+**Retrieval** — Multiple strategies tailored to query complexity:
 
 | Mode | How it works | Best for |
 |------|-------------|----------|
-| `--simple` | Score all nodes, fetch top-k, synthesize | Predictable, single-hop lookups |
-| (default) | Single SubAgent with `get-content` tool | Most questions |
-| `--planner` | MetaPlanner decomposes into fetch/compute/synthesize tasks | Multi-hop, computation-heavy |
+| `--simple` | Score all nodes, fetch top-k, then synthesize | Predictable, single-hop lookups |
+| (default) | Single SubAgent with `get-content` tool | Most standard questions |
+| `--iterative` | Multi-round "Seeker-Extractor" loop | Fuzzy, scattered, or deep information |
+| `--planner` | MetaPlanner decomposes into parallel fetch/compute tasks | Multi-hop reasoning and PCE |
+| `--hybrid` | Classified query → routes to best strategy | Production default; balances cost/latency |
 
-The default agent mode runs a single LLM conversation that iteratively fetches sections and synthesizes an answer — simple but can't decompose complex reasoning. The planner mode generates a structured plan with separate fetch, compute, and synthesize tasks executed in dependency order, with optional quality gates and replanning. Fetches run in parallel without LLM calls (direct PTC-Lisp), while analysis and synthesis use dedicated SubAgents.
+### Plan-Code-Execute (PCE)
+
+When using `--planner` (or routed via `--hybrid` for math-heavy queries), PageIndex implements the **Plan-Code-Execute** pattern. Instead of asking an LLM to perform arithmetic in its head, the planner generates deterministic code to operate on structured findings retrieved by sub-agents.
+
+This eliminates calculation hallucinations and "lossy synthesis" by shifting logic from natural language to a deterministic execution environment.
+
+Learn more about this pattern here: [Plan-Code-Execute: Designing Agents That Create Their Own Tools](https://towardsdatascience.com/plan-code-execute-designing-agents-that-create-their-own-tools/).
 
 ## Setup
 
@@ -46,7 +54,7 @@ mix run run.exs --query "Is 3M a capital intensive business?" --pdf data/3M_2022
 mix run run.exs --show data/3M_2022_10K_index.json
 ```
 
-Options: `--model <name>` (default: `bedrock:haiku`), `--trace` (writes to `traces/`), `--simple`, `--planner`.
+Options: `--model <name>` (default: `bedrock:haiku`), `--trace` (writes to `traces/`), `--simple`, `--iterative`, `--planner`, `--hybrid`.
 
 ## Example: Planner Execution
 
@@ -72,15 +80,18 @@ Execution: 4 fetches run in parallel (~3s), then the analyst computes PP&E/asset
 Use `--trace` and open `priv/trace_viewer.html` to visualize the full execution timeline.
 
 ## Architecture
-
-```
-lib/page_index/
+ 
+ ```
+ lib/page_index/
 ├── parser.ex              # PDF text extraction (via pdfplumber)
 ├── toc_parser.ex          # LLM-based TOC parsing
-├── fine_indexer.ex         # Index builder (TOC → summaries → tree)
+├── fine_indexer.ex        # Index builder (TOC → summaries → tree)
+├── document_tools.ex      # Shared search, fetch, and formatting tools
 ├── retriever.ex           # Agent-based and simple retrieval
-└── planner_retriever.ex   # MetaPlanner-based multi-hop retrieval
-```
+├── iterative_retriever.ex # Multi-round seeker-extractor loop
+├── planner_retriever.ex   # MetaPlanner-based multi-hop retrieval
+└── hybrid_retriever.ex    # Complexity classifier and strategy router
+ ```
 
 ## Known Limitation: Planner Interpretation Instability
 

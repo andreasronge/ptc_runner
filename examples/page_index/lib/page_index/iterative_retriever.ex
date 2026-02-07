@@ -11,6 +11,7 @@ defmodule PageIndex.IterativeRetriever do
   synthesis agent can cite sources and perform computations on collected data.
   """
 
+  alias PageIndex.DocumentTools
   alias PtcRunner.SubAgent
 
   @doc """
@@ -37,15 +38,10 @@ defmodule PageIndex.IterativeRetriever do
     {:ok, _} = PageIndex.get_content(pdf_path, 1, 1)
     IO.puts("PDF cache ready.")
 
-    # Pre-warm the PDF cache before agent execution
-    IO.puts("Pre-loading PDF pages...")
-    {:ok, _} = PageIndex.get_content(pdf_path, 1, 1)
-    IO.puts("PDF cache ready.")
-
-    nodes = flatten_tree(tree)
-    sections_summary = format_sections(nodes)
-    fetch_tool = make_smart_fetch_tool(nodes, pdf_path)
-    grep_tool = make_grep_tool(nodes, pdf_path)
+    nodes = DocumentTools.flatten_tree(tree)
+    sections_summary = DocumentTools.format_sections(nodes)
+    fetch_tool = DocumentTools.make_fetch_tool(nodes, pdf_path)
+    grep_tool = DocumentTools.make_grep_tool(nodes, pdf_path)
 
     initial_state = %{findings: [], failed_searches: []}
 
@@ -129,7 +125,7 @@ defmodule PageIndex.IterativeRetriever do
     agent =
       SubAgent.new(
         prompt: """
-        Extract structured data from a financial document to help answer a question.
+        Extract structured data from a document to help answer a question.
 
         QUESTION: {{question}}
         SHOPPING ITEM: {{shopping_item}}
@@ -199,7 +195,7 @@ defmodule PageIndex.IterativeRetriever do
       INSTRUCTIONS:
       - If you can answer the question from the findings: return status "answer" with the answer, citing page numbers from findings
       - If you need more data: return status "needs" with ONE specific thing to search for next, and why
-        - Be as specific as possible (e.g., "Consumer segment operating income for 2022" not "segment data")
+        - Be as specific as possible (e.g., "operating income for 2022" not "more data")
         - Do NOT request something that already appears in failed_searches
         - If a direct data point failed, suggest an alternative path (e.g., compute from components)
       - If the data is genuinely insufficient and no alternative paths exist: return status "fail" with explanation
@@ -212,189 +208,6 @@ defmodule PageIndex.IterativeRetriever do
         "{status :string, answer :string, sources [:string], confidence :string, needs :string, reason :string}",
       llm: llm
     )
-  end
-
-  # --- Fetch tool with fuzzy matching (adapted from PlannerRetriever) ---
-
-  defp make_smart_fetch_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      offset = args["offset"] || args[:offset] || 0
-
-      offset =
-        if is_binary(offset),
-          do: offset |> String.replace(",", "") |> String.to_integer(),
-          else: offset
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-      node = node || find_best_match(nodes, query)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, full_content} ->
-            total_chars = String.length(full_content)
-            sliced = String.slice(full_content, offset, 5000)
-            returned_chars = String.length(sliced)
-            end_offset = offset + returned_chars
-            truncated = end_offset < total_chars
-
-            result = %{
-              "node_id" => node.node_id,
-              "title" => node.title,
-              "pages" => "#{node.start_page}-#{node.end_page}",
-              "content" => sliced,
-              "total_chars" => total_chars,
-              "offset" => offset,
-              "truncated" => truncated
-            }
-
-            if truncated do
-              Map.put(
-                result,
-                "hint",
-                "Content truncated. Use fetch_section with offset: #{end_offset} to get more."
-              )
-            else
-              result
-            end
-
-          {:error, reason} ->
-            %{"error" => inspect(reason)}
-        end
-      else
-        suggestions = suggest_sections(nodes, query)
-        %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
-      end
-    end
-  end
-
-  defp make_grep_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      pattern = args["pattern"] || args[:pattern] || ""
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-      node = node || find_best_match(nodes, query)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, content} ->
-            matches = find_pattern_matches(content, pattern)
-
-            %{
-              "node_id" => node.node_id,
-              "total_chars" => String.length(content),
-              "pattern" => pattern,
-              "matches" => Enum.take(matches, 5)
-            }
-
-          {:error, reason} ->
-            %{"error" => inspect(reason)}
-        end
-      else
-        suggestions = suggest_sections(nodes, query)
-        %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
-      end
-    end
-  end
-
-  defp find_pattern_matches(content, pattern) do
-    content_lower = String.downcase(content)
-
-    if String.contains?(pattern, "|") or String.contains?(pattern, ".*") do
-      find_regex_matches(content, content_lower, pattern)
-    else
-      pattern_lower = String.downcase(pattern)
-      find_all_positions(content, content_lower, pattern_lower, 0, [])
-    end
-  end
-
-  defp find_regex_matches(content, content_lower, pattern) do
-    case Regex.compile(String.downcase(pattern), "i") do
-      {:ok, regex} ->
-        Regex.scan(regex, content_lower, return: :index)
-        |> Enum.map(fn [{pos, _len} | _] ->
-          ctx_start = max(0, pos - 40)
-          ctx = String.slice(content, ctx_start, 120)
-
-          %{
-            "offset" => pos,
-            "context" => ctx,
-            "hint" =>
-              "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-          }
-        end)
-
-      {:error, _} ->
-        find_all_positions(content, content_lower, String.downcase(pattern), 0, [])
-    end
-  end
-
-  defp find_all_positions(_content, content_lower, _pattern, start, acc)
-       when start >= byte_size(content_lower) do
-    Enum.reverse(acc)
-  end
-
-  defp find_all_positions(content, content_lower, pattern, start, acc) do
-    case :binary.match(content_lower, pattern, scope: {start, byte_size(content_lower) - start}) do
-      {pos, _len} ->
-        ctx_start = max(0, pos - 40)
-        ctx = String.slice(content, ctx_start, 120)
-
-        match = %{
-          "offset" => pos,
-          "context" => ctx,
-          "hint" =>
-            "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-        }
-
-        find_all_positions(content, content_lower, pattern, pos + 1, [match | acc])
-
-      :nomatch ->
-        Enum.reverse(acc)
-    end
-  end
-
-  defp find_best_match(nodes, query) do
-    query_lower = String.downcase(query)
-    query_words = String.split(query_lower, ~r/[\s_]+/)
-
-    nodes
-    |> Enum.map(fn node ->
-      title_lower = String.downcase(node.title)
-      id_lower = String.downcase(node.node_id)
-
-      score =
-        Enum.count(query_words, fn word ->
-          String.contains?(title_lower, word) or String.contains?(id_lower, word)
-        end)
-
-      {node, score}
-    end)
-    |> Enum.filter(fn {_, score} -> score > 0 end)
-    |> Enum.sort_by(fn {_, score} -> -score end)
-    |> List.first()
-    |> case do
-      {node, _score} -> node
-      nil -> nil
-    end
-  end
-
-  defp suggest_sections(nodes, query) do
-    query_lower = String.downcase(query)
-
-    nodes
-    |> Enum.filter(fn n ->
-      String.contains?(String.downcase(n.title), query_lower) or
-        String.contains?(String.downcase(n.node_id), query_lower)
-    end)
-    |> Enum.take(3)
-    |> Enum.map(& &1.node_id)
-    |> Enum.join(", ")
-    |> case do
-      "" -> nodes |> Enum.take(5) |> Enum.map(& &1.node_id) |> Enum.join(", ")
-      suggestions -> suggestions
-    end
   end
 
   # --- Formatting helpers ---
@@ -421,35 +234,6 @@ defmodule PageIndex.IterativeRetriever do
     failed
     |> Enum.map(fn f ->
       "- Searched for: #{f["item"]} → #{f["reason"]}"
-    end)
-    |> Enum.join("\n")
-  end
-
-  # --- Tree helpers ---
-
-  defp flatten_tree(tree, acc \\ []) do
-    children = Map.get(tree, :children, [])
-
-    node = %{
-      node_id: tree.node_id,
-      title: tree.title,
-      summary: tree.summary,
-      start_page: Map.get(tree, :start_page),
-      end_page: Map.get(tree, :end_page)
-    }
-
-    acc = if node.start_page, do: [node | acc], else: acc
-
-    Enum.reduce(children, acc, fn child, acc ->
-      flatten_tree(child, acc)
-    end)
-  end
-
-  defp format_sections(nodes) do
-    nodes
-    |> Enum.map(fn n ->
-      summary = String.slice(n.summary || "", 0, 80)
-      "#{n.node_id}: #{n.title} (p.#{n.start_page}-#{n.end_page}) - #{summary}"
     end)
     |> Enum.join("\n")
   end

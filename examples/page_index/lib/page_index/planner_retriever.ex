@@ -9,6 +9,7 @@ defmodule PageIndex.PlannerRetriever do
   4. Synthesize final answer from collected data
   """
 
+  alias PageIndex.DocumentTools
   alias PtcRunner.PlanExecutor
 
   @doc """
@@ -39,6 +40,7 @@ defmodule PageIndex.PlannerRetriever do
     quality_gate = Keyword.get(opts, :quality_gate, false)
     quality_gate_llm = Keyword.get(opts, :quality_gate_llm)
     self_failure = Keyword.get(opts, :self_failure, false)
+    strategy = Keyword.get(opts, :strategy)
 
     # Pre-warm the PDF cache before starting planner execution
     # This avoids timeout issues when the sandbox tries to extract pages
@@ -46,8 +48,8 @@ defmodule PageIndex.PlannerRetriever do
     {:ok, _} = PageIndex.get_content(pdf_path, 1, 1)
     IO.puts("PDF cache ready.")
 
-    nodes = flatten_tree(tree)
-    sections_summary = format_sections_for_planner(nodes)
+    nodes = DocumentTools.flatten_tree(tree)
+    sections_summary = DocumentTools.format_sections(nodes)
     doc_title = tree.title || "Document"
 
     self_failure_instruction =
@@ -64,6 +66,23 @@ defmodule PageIndex.PlannerRetriever do
         "5. Include verification predicates to ensure data was found\n"
       end
 
+    computational_instructions =
+      if strategy == :computational do
+        """
+
+        PCE (Plan-Code-Execute) MODE:
+        For all computation, comparison, or data transformation tasks:
+        - Use `agent: "direct"`
+        - Write valid PTC-Lisp code directly in the `input` field.
+        - Upstream results are available via `data/results` in the Lisp environment
+          (e.g., `(get data/results "task_id")` to get a task's output map).
+        - Use standard Lisp functions: `+`, `-`, `*`, `/`, `get`, `map`, `filter`, `reduce`.
+        - Do not guess; perform calculations on the exact numbers extracted by upstream tasks.
+        """
+      else
+        ""
+      end
+
     mission = """
     Answer this question about "#{doc_title}":
 
@@ -78,9 +97,9 @@ defmodule PageIndex.PlannerRetriever do
     2. Create document_analyst tasks to retrieve AND EXTRACT structured data from sections.
        Each task specifies what data to extract and a signature for its output.
     3. If the answer requires computation (ratios, comparisons, derived values), create a dedicated
-       computation task (agent with no tools) between the fetches and the final synthesis.
-       Give it a precise signature with the computed values.
+       computation task between the fetches and the final synthesis.
     4. Create a synthesis_gate task that produces the final answer from upstream results
+    #{computational_instructions}
     #{self_failure_instruction}\
     """
 
@@ -100,9 +119,25 @@ defmodule PageIndex.PlannerRetriever do
             "synthesizer": {"prompt": "You produce clear answers from structured data provided by upstream tasks."}
           },
           "tasks": [
-            {"id": "fetch_segment_data", "agent": "document_analyst", "input": "Fetch section 'section_id' and extract: metric names and values", "signature": "{metrics [{name :string, value :float}]}", "on_failure": "replan"},
-            {"id": "final_answer", "agent": "synthesizer", "input": "Answer the question using the extracted data", "depends_on": ["fetch_segment_data"], "type": "synthesis_gate"}
+            {"id": "fetch_data", "agent": "document_analyst", "input": "Fetch section 'section_id' and extract: metric names and values", "signature": "{metrics [{name :string, value :float}]}", "on_failure": "replan"},
+            {"id": "final_answer", "agent": "synthesizer", "input": "Answer the question using the extracted data", "depends_on": ["fetch_data"], "type": "synthesis_gate"}
           ]
+        }
+        """
+      else
+        ""
+      end
+
+    pce_example =
+      if strategy == :computational do
+        """
+        Example of a computational task using agent: "direct":
+        {
+          "id": "calc_change",
+          "agent": "direct",
+          "input": "(let [d (get data/results \\"fetch_data\\") val_current (get d \\"value_current\\") val_previous (get d \\"value_previous\\")] (* (/ (- val_current val_previous) val_previous) 100))",
+          "depends_on": ["fetch_data"],
+          "signature": "{change_pct :float}"
         }
         """
       else
@@ -113,6 +148,7 @@ defmodule PageIndex.PlannerRetriever do
     CRITICAL: You MUST generate a plan with BOTH "agents" AND "tasks" keys.
 
     CRITICAL: The final synthesis task MUST have the id "final_answer".
+    #{pce_example}
 
     For fetching and extracting data from document sections, define a single "document_analyst"
     agent with tools: ["fetch_section", "grep_section"]. Reuse this agent for all data-gathering tasks.
@@ -135,7 +171,7 @@ defmodule PageIndex.PlannerRetriever do
     {
       "agents": {
         "document_analyst": {
-          "prompt": "You are a data extraction agent. Focus on the section specified in your task input. For large sections, use grep_section first to locate keywords, then fetch_section at the returned offset. If your first grep pattern returns no matches, try a broader keyword (e.g., if 'Organic Growth %' fails, try 'Organic'). When a fetch result has truncated: true, call fetch_section again with the offset from the hint. Do not guess data from partial tables — paginate until you find what you need. If the specified section does not contain the requested data after thorough search, call (fail) with details rather than searching other sections — the planner will redirect you. Return a consolidated set of findings with page numbers for provenance.",
+          "prompt": "You are a data extraction agent. Focus on the section specified in your task input. For large sections, use grep_section first to locate keywords, then fetch_section at the returned offset. If your first grep pattern returns no matches, try a broader keyword (e.g., if a specific term fails, try a shorter keyword). When a fetch result has truncated: true, call fetch_section again with the offset from the hint. Do not guess data from partial tables — paginate until you find what you need. If the specified section does not contain the requested data after thorough search, call (fail) with details rather than searching other sections — the planner will redirect you. Return a consolidated set of findings with page numbers for provenance.",
           "tools": ["fetch_section", "grep_section"]
         },
         "synthesizer": {
@@ -143,8 +179,8 @@ defmodule PageIndex.PlannerRetriever do
         }
       },
       "tasks": [
-        {"id": "fetch_segment_data", "agent": "document_analyst", "input": "Fetch section 'management_s_di_performance_by_business_segmen' and extract: segment names, 2022 and 2021 revenue, organic growth rates excluding M&A, and FX impact for each segment. Include page numbers.", "signature": "{segments [{name :string, revenue_2022 :float, revenue_2021 :float, organic_growth_pct :float, fx_impact_pct :float, page :int}]}"},
-        {"id": "final_answer", "agent": "synthesizer", "input": "Answer the question using the extracted data", "depends_on": ["fetch_segment_data"], "type": "synthesis_gate"}
+        {"id": "fetch_data", "agent": "document_analyst", "input": "Fetch section 'target_section_id' and extract: metric names, current and prior period values, and growth rates. Include page numbers.", "signature": "{items [{name :string, value_current :float, value_previous :float, growth_pct :float, page :int}]}"},
+        {"id": "final_answer", "agent": "synthesizer", "input": "Answer the question using the extracted data", "depends_on": ["fetch_data"], "type": "synthesis_gate"}
       ]
     }
 
@@ -182,8 +218,8 @@ defmodule PageIndex.PlannerRetriever do
 
     # Actual tool implementation with fuzzy matching
     base_tools = %{
-      "fetch_section" => make_smart_fetch_tool(nodes, pdf_path),
-      "grep_section" => make_grep_tool(nodes, pdf_path)
+      "fetch_section" => DocumentTools.make_fetch_tool(nodes, pdf_path),
+      "grep_section" => DocumentTools.make_grep_tool(nodes, pdf_path)
     }
 
     executor_opts =
@@ -230,200 +266,7 @@ defmodule PageIndex.PlannerRetriever do
     end
   end
 
-  defp make_smart_fetch_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      offset = args["offset"] || args[:offset] || 0
-
-      offset =
-        if is_binary(offset),
-          do: offset |> String.replace(",", "") |> String.to_integer(),
-          else: offset
-
-      # First try exact match
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-
-      # If no exact match, try fuzzy matching on title and node_id
-      node = node || find_best_match(nodes, query)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, full_content} ->
-            total_chars = String.length(full_content)
-            sliced = String.slice(full_content, offset, 5000)
-            returned_chars = String.length(sliced)
-            end_offset = offset + returned_chars
-            truncated = end_offset < total_chars
-
-            result = %{
-              "node_id" => node.node_id,
-              "title" => node.title,
-              "pages" => "#{node.start_page}-#{node.end_page}",
-              "content" => sliced,
-              "total_chars" => total_chars,
-              "offset" => offset,
-              "truncated" => truncated
-            }
-
-            if truncated do
-              Map.put(
-                result,
-                "hint",
-                "Content truncated. Use fetch_section with offset: #{end_offset} to get more."
-              )
-            else
-              result
-            end
-
-          {:error, reason} ->
-            %{"error" => inspect(reason)}
-        end
-      else
-        # Return suggestions
-        suggestions = suggest_sections(nodes, query)
-        %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
-      end
-    end
-  end
-
-  defp make_grep_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      pattern = args["pattern"] || args[:pattern] || ""
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-      node = node || find_best_match(nodes, query)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, content} ->
-            matches = find_pattern_matches(content, pattern)
-
-            %{
-              "node_id" => node.node_id,
-              "total_chars" => String.length(content),
-              "pattern" => pattern,
-              "matches" => Enum.take(matches, 5)
-            }
-
-          {:error, reason} ->
-            %{"error" => inspect(reason)}
-        end
-      else
-        suggestions = suggest_sections(nodes, query)
-        %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
-      end
-    end
-  end
-
-  defp find_pattern_matches(content, pattern) do
-    content_lower = String.downcase(content)
-
-    # Support pipe-delimited OR patterns (e.g., "Revenue|Sales")
-    # and regex patterns (containing .* or other regex metacharacters)
-    if String.contains?(pattern, "|") or String.contains?(pattern, ".*") do
-      find_regex_matches(content, content_lower, pattern)
-    else
-      pattern_lower = String.downcase(pattern)
-      find_all_positions(content, content_lower, pattern_lower, 0, [])
-    end
-  end
-
-  defp find_regex_matches(content, content_lower, pattern) do
-    case Regex.compile(String.downcase(pattern), "i") do
-      {:ok, regex} ->
-        Regex.scan(regex, content_lower, return: :index)
-        |> Enum.map(fn [{pos, _len} | _] ->
-          ctx_start = max(0, pos - 40)
-          ctx = String.slice(content, ctx_start, 120)
-
-          %{
-            "offset" => pos,
-            "context" => ctx,
-            "hint" =>
-              "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-          }
-        end)
-
-      {:error, _} ->
-        # Fall back to literal match if regex is invalid
-        find_all_positions(content, content_lower, String.downcase(pattern), 0, [])
-    end
-  end
-
-  defp find_all_positions(_content, content_lower, _pattern, start, acc)
-       when start >= byte_size(content_lower) do
-    Enum.reverse(acc)
-  end
-
-  defp find_all_positions(content, content_lower, pattern, start, acc) do
-    case :binary.match(content_lower, pattern, scope: {start, byte_size(content_lower) - start}) do
-      {pos, _len} ->
-        ctx_start = max(0, pos - 40)
-        ctx = String.slice(content, ctx_start, 120)
-
-        match = %{
-          "offset" => pos,
-          "context" => ctx,
-          "hint" =>
-            "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-        }
-
-        find_all_positions(content, content_lower, pattern, pos + 1, [match | acc])
-
-      :nomatch ->
-        Enum.reverse(acc)
-    end
-  end
-
-  defp find_best_match(nodes, query) do
-    query_lower = String.downcase(query)
-    query_words = String.split(query_lower, ~r/[\s_]+/)
-
-    # Score each node based on word matches in title and node_id
-    nodes
-    |> Enum.map(fn node ->
-      title_lower = String.downcase(node.title)
-      id_lower = String.downcase(node.node_id)
-
-      score =
-        Enum.count(query_words, fn word ->
-          String.contains?(title_lower, word) or String.contains?(id_lower, word)
-        end)
-
-      {node, score}
-    end)
-    |> Enum.filter(fn {_, score} -> score > 0 end)
-    |> Enum.sort_by(fn {_, score} -> -score end)
-    |> List.first()
-    |> case do
-      {node, _score} -> node
-      nil -> nil
-    end
-  end
-
-  defp suggest_sections(nodes, query) do
-    query_lower = String.downcase(query)
-
-    nodes
-    |> Enum.filter(fn n ->
-      String.contains?(String.downcase(n.title), query_lower) or
-        String.contains?(String.downcase(n.node_id), query_lower)
-    end)
-    |> Enum.take(3)
-    |> Enum.map(& &1.node_id)
-    |> Enum.join(", ")
-    |> case do
-      "" -> nodes |> Enum.take(5) |> Enum.map(& &1.node_id) |> Enum.join(", ")
-      suggestions -> suggestions
-    end
-  end
-
   defp find_synthesis_result(results) do
-    # Primary: use the designated target task ID from the prompt constraints
-    # Fallback: pick the result that is NOT a raw fetch (no "content"+"node_id" keys),
-    # since fetch results always have that shape and synthesis results don't.
-    # Last resort: return something rather than nil
     Map.get(results, "final_answer") ||
       Enum.find_value(results, fn {_task_id, r} ->
         if is_map(r) and not (Map.has_key?(r, "content") and Map.has_key?(r, "node_id")) do
@@ -442,32 +285,5 @@ defmodule PageIndex.PlannerRetriever do
       end
     end)
     |> Enum.uniq_by(& &1.node_id)
-  end
-
-  defp flatten_tree(tree, acc \\ []) do
-    children = Map.get(tree, :children, [])
-
-    node = %{
-      node_id: tree.node_id,
-      title: tree.title,
-      summary: tree.summary,
-      start_page: Map.get(tree, :start_page),
-      end_page: Map.get(tree, :end_page)
-    }
-
-    acc = if node.start_page, do: [node | acc], else: acc
-
-    Enum.reduce(children, acc, fn child, acc ->
-      flatten_tree(child, acc)
-    end)
-  end
-
-  defp format_sections_for_planner(nodes) do
-    nodes
-    |> Enum.map(fn n ->
-      summary = String.slice(n.summary || "", 0, 80)
-      "#{n.node_id}: #{n.title} (p.#{n.start_page}-#{n.end_page}) - #{summary}"
-    end)
-    |> Enum.join("\n")
   end
 end
