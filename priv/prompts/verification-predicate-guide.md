@@ -1,27 +1,31 @@
-# Verification Predicate Syntax (PTC-Lisp Subset)
+# Verification Predicate Syntax (PTC-Lisp)
 
-Verification predicates are **simple boolean expressions** that validate task outputs.
-They use a minimal Lisp syntax with a **very limited** set of functions.
+Verification predicates are boolean expressions that validate task outputs.
+They use PTC-Lisp syntax. Keep predicates simple — prefer `get`, type checks, and comparisons.
 
-## CRITICAL: Available Bindings
+## Available Bindings
 
-**You can ONLY use these pre-defined variables:**
+Use these pre-defined variables to access task data:
 - `data/result` - The task's output (this is what you're validating)
 - `data/input` - The task's input
 - `data/depends` - Map of upstream task results (keyed by task ID)
 
-**DO NOT use:** `output`, `result`, `response`, `input`, `symbol`, `price`, or any other variable name.
+**DO NOT use bare variable names** like `output`, `result`, `response`, `symbol`, or `price`.
+Always access values through `data/result`.
 
-## CRITICAL: Available Functions
+## Recommended Functions
 
-**ONLY these functions exist.** Any other function name will cause an error:
+These cover most verification needs:
 
 ```lisp
-;; Map/Object access (ONLY way to get values)
+;; Map/Object access
 (get map "key")                    ; Returns value or nil
 (get-in map ["key1" "key2"])       ; Nested access
+(keys map)                         ; Get all keys
+(vals map)                         ; Get all values
+(contains? map "key")              ; Check if key exists
 
-;; Comparisons (ONLY these operators)
+;; Comparisons
 (= a b)                            ; Equality (NOT eq, equal, equals)
 (> a b)  (< a b)  (>= a b)  (<= a b)
 
@@ -34,19 +38,14 @@ They use a minimal Lisp syntax with a **very limited** set of functions.
 (if condition then-expr else-expr)
 (when condition body)
 
-;; Type checks (ONLY these)
-(map? x)     ; Is x a map/object? (NOT object?, hash?, dict?)
-(number? x)  ; Is x a number?
-(string? x)  ; Is x a string?
-(boolean? x) ; Is x a boolean? (NOT bool?)
-(coll? x)    ; Is x a collection?
-(nil? x)     ; Is x nil/null?
+;; Type checks
+(map? x)      (number? x)   (string? x)
+(boolean? x)  (coll? x)     (nil? x)
+(some? x)     (keyword? x)  (sequential? x)
 
-;; Collections (ONLY these)
-(count coll)    ; Number of items
-(empty? coll)   ; Is collection empty?
-(first coll)    ; First item
-(rest coll)     ; All items except first
+;; Collections
+(count coll)    (empty? coll)   (first coll)
+(rest coll)     (every? pred coll)  (some pred coll)
 
 ;; Local binding
 (let [name value] body)
@@ -54,6 +53,10 @@ They use a minimal Lisp syntax with a **very limited** set of functions.
 ;; String concatenation
 (str a b ...)
 ```
+
+Additional functions are available: `filter`, `map`, `reduce`, `sort-by`,
+`keys`, `vals`, `distinct`, `frequencies`, `every?`, `some`, `concat`, and more.
+Keep predicates simple for reliability.
 
 ## Return Values
 
@@ -64,14 +67,15 @@ They use a minimal Lisp syntax with a **very limited** set of functions.
 
 ```lisp
 ;; Check that result is a map with a "price" key
-(if (and (map? data/result) (not (nil? (get data/result "price"))))
+(if (and (map? data/result) (contains? data/result "price"))
     true
     "Result must have a price field")
 
-;; Check price is a number
-(if (number? (get data/result "price"))
-    true
-    "Price must be a number")
+;; Check price is a positive number
+(let [price (get data/result "price")]
+  (if (and (number? price) (> price 0))
+      true
+      "Price must be a positive number"))
 
 ;; Check result has items
 (let [items (get data/result "items")]
@@ -79,19 +83,20 @@ They use a minimal Lisp syntax with a **very limited** set of functions.
       true
       (str "Expected items, got " (count items))))
 
-;; Simple check with diagnostic message
-(if (= (get data/result "symbol") "AAPL")
+;; Check multiple required keys
+(if (and (contains? data/result "symbol")
+         (contains? data/result "price")
+         (contains? data/result "currency"))
     true
-    "Expected AAPL symbol")
+    "Missing required fields")
 
-;; Using let for clarity
-(let [price (get data/result "price")]
-  (if (and (number? price) (> price 0))
-      true
-      "Price must be positive number"))
+;; Validate all items have a required field
+(if (every? #(contains? % "name") (get data/result "items"))
+    true
+    "All items must have a name")
 ```
 
-## DO NOT Use (These Will Fail)
+## Common Mistakes (These Will Fail)
 
 ```lisp
 ;; WRONG - undefined variables (must use data/result)
@@ -100,38 +105,16 @@ They use a minimal Lisp syntax with a **very limited** set of functions.
 (= symbol "AAPL")
 (number? price)
 
-;; WRONG - these functions DO NOT EXIST
-(has-key? data/result "price")    ; Use: (not (nil? (get data/result "price")))
-(contains-key? data/result "x")   ; Use: (not (nil? (get data/result "x")))
+;; WRONG - these functions do not exist in PTC-Lisp
+(has-key? data/result "price")    ; Use: (contains? data/result "price")
+(contains-key? data/result "x")   ; Use: (contains? data/result "x")
 (object? data/result)             ; Use: (map? data/result)
 (eq a b)                          ; Use: (= a b)
-(equal a b)                       ; Use: (= a b)
-(gt a b)                          ; Use: (> a b)
-(gte a b)                         ; Use: (>= a b)
-(lt a b)                          ; Use: (< a b)
-(lte a b)                         ; Use: (<= a b)
 (length coll)                     ; Use: (count coll)
 (size coll)                       ; Use: (count coll)
 (is-nil x)                        ; Use: (nil? x)
 (is-number x)                     ; Use: (number? x)
-(type x)                          ; NOT AVAILABLE
-(keys map)                        ; NOT AVAILABLE
-(vals map)                        ; NOT AVAILABLE
 
 ;; WRONG - quote syntax not supported
 '(1 2 3)                          ; Use: [1 2 3]
-```
-
-## Pattern: Check if Key Exists
-
-Since `has-key?` doesn't exist, use this pattern:
-
-```lisp
-;; Check if "price" key exists
-(not (nil? (get data/result "price")))
-
-;; Check multiple required keys
-(and (not (nil? (get data/result "symbol")))
-     (not (nil? (get data/result "price")))
-     (not (nil? (get data/result "currency"))))
 ```

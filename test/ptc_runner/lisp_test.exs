@@ -305,6 +305,63 @@ defmodule PtcRunner.LispTest do
     end
   end
 
+  describe "validate/1" do
+    test "valid predicate with builtins" do
+      assert :ok = Lisp.validate("(and (map? data/result) (> (count data/result) 0))")
+    end
+
+    test "predicate builtins are recognized" do
+      for builtin <-
+            ~w(boolean? number? string? nil? coll? empty? map? count first rest get get-in) do
+        assert :ok = Lisp.validate("(#{builtin} data/result)"),
+               "expected #{builtin} to be recognized as a builtin"
+      end
+    end
+
+    test "undefined variable returns error" do
+      assert {:error, ["foo"]} = Lisp.validate("(and (map? foo) true)")
+    end
+
+    test "parse error returns formatted message" do
+      assert {:error, [msg]} = Lisp.validate("(unclosed paren")
+      assert msg =~ "Parse error"
+    end
+
+    test "let-bound variables are not flagged" do
+      assert :ok = Lisp.validate("(let [x 1] (> x 0))")
+    end
+
+    test "invalid arity caught by Analyze" do
+      assert {:error, [msg]} = Lisp.validate("(if a b c d)")
+      assert msg =~ "Analysis error"
+    end
+
+    test "data/ references are always valid" do
+      assert :ok = Lisp.validate("(get data/result :key)")
+    end
+
+    test "fn params are scoped correctly" do
+      assert :ok = Lisp.validate("(fn [x y] (+ x y))")
+    end
+
+    test "loop bindings are scoped correctly" do
+      assert :ok = Lisp.validate("(loop [i 0] (if (>= i 10) i (recur (inc i))))")
+    end
+
+    test "map destructuring renames are scoped correctly" do
+      assert :ok = Lisp.validate("(let [{x :id} data/result] (> x 0))")
+    end
+
+    test "def in do block scopes subsequent expressions" do
+      assert :ok = Lisp.validate("(do (def x 1) x)")
+    end
+
+    test "recursive defn is not flagged as undefined" do
+      assert :ok =
+               Lisp.validate("(defn factorial [n] (if (= n 0) 1 (* n (factorial (dec n)))))")
+    end
+  end
+
   describe "error propagation" do
     test "parser error is propagated" do
       assert {:error, %{fail: %{reason: :parse_error}}} = Lisp.run("(missing closing paren")
