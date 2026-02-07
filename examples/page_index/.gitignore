@@ -7,3 +7,6 @@
 
 # Downloaded PDFs (use mix download to get them)
 /data/*.pdf
+
+# Benchmark run data (traces and manifests)
+/bench_runs/
