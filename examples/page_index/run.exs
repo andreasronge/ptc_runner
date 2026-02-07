@@ -21,11 +21,20 @@ defmodule CLI do
           pdf: :string,
           simple: :boolean,
           planner: :boolean,
+          iterative: :boolean,
           trace: :boolean,
           model: :string,
           help: :boolean
         ],
-        aliases: [h: :help, m: :model, q: :query, s: :simple, p: :planner, t: :trace]
+        aliases: [
+          h: :help,
+          m: :model,
+          q: :query,
+          s: :simple,
+          p: :planner,
+          i: :iterative,
+          t: :trace
+        ]
       )
 
     cond do
@@ -60,6 +69,7 @@ defmodule CLI do
       --pdf <path>          PDF path for queries (required with --query)
       -s, --simple          Use simple retrieval (score all nodes, no recursion)
       -p, --planner         Use MetaPlanner for complex multi-hop questions
+      -i, --iterative       Use iterative extraction/synthesis loop
       -t, --trace           Enable tracing (writes to traces/ directory)
       -h, --help            Show this help
 
@@ -105,6 +115,7 @@ defmodule CLI do
     model = opts[:model] || "bedrock:haiku"
     simple = opts[:simple] || false
     planner = opts[:planner] || false
+    iterative = opts[:iterative] || false
     trace = opts[:trace] || false
 
     pdf_path = opts[:pdf]
@@ -118,6 +129,7 @@ defmodule CLI do
 
     mode =
       cond do
+        iterative -> "iterative (extraction loop)"
         planner -> "planner (MetaPlanner with verification)"
         simple -> "simple (score all nodes)"
         true -> "agent (single-pass)"
@@ -135,6 +147,9 @@ defmodule CLI do
     case PageIndex.load_index(index_path) do
       {:ok, tree} ->
         cond do
+          iterative ->
+            run_iterative_query(tree, query, llm, pdf_path, trace: trace)
+
           planner ->
             run_planner_query(tree, query, llm, pdf_path, trace: trace)
 
@@ -171,6 +186,28 @@ defmodule CLI do
       result
     else
       func.()
+    end
+  end
+
+  defp run_iterative_query(tree, query, llm, pdf_path, opts) do
+    retriever_opts = [llm: llm, pdf_path: pdf_path]
+
+    result =
+      with_optional_trace(opts[:trace], "iterative", query, fn ->
+        PageIndex.IterativeRetriever.retrieve(tree, query, retriever_opts)
+      end)
+
+    case result do
+      {:ok, result} ->
+        IO.puts("\n" <> String.duplicate("=", 60))
+        IO.puts("ANSWER (#{result.iterations} iterations, #{result.findings_count} findings):")
+        IO.puts(String.duplicate("=", 60))
+        IO.puts(inspect_answer(result.answer))
+
+        IO.puts("\nSources: #{Enum.join(result.sources || [], ", ")}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{inspect(reason)}")
     end
   end
 
