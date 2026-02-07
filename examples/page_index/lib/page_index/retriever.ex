@@ -18,7 +18,7 @@ defmodule PageIndex.Retriever do
   def retrieve(tree, query, opts \\ []) do
     llm = Keyword.fetch!(opts, :llm)
     pdf_path = Keyword.fetch!(opts, :pdf_path)
-    max_turns = Keyword.get(opts, :max_turns, 10)
+    max_turns = Keyword.get(opts, :max_turns, 15)
 
     # Pre-warm the PDF cache before agent execution
     IO.puts("Pre-loading PDF pages...")
