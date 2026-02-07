@@ -28,6 +28,8 @@ defmodule PtcRunner.Lisp do
   - Should not raise (return `{:error, reason}` for errors)
   """
 
+  require Logger
+
   alias PtcRunner.Lisp.{Analyze, DataKeys, Env, Eval, ExecutionError, Parser, SymbolCounter}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
@@ -266,7 +268,9 @@ defmodule PtcRunner.Lisp do
 
     with {:ok, raw_ast} <- Parser.parse(source),
          :ok <- check_symbol_limit(raw_ast, max_symbols, memory, journal),
-         {:ok, core_ast} <- Analyze.analyze(raw_ast) do
+         {:ok, core_ast} <- Analyze.analyze(raw_ast),
+         :ok <- check_undefined_vars(core_ast, memory, journal),
+         :ok <- check_undefined_tools(core_ast, normalized_tools, memory, journal) do
       # Filter context to only include data keys accessed by the program
       # This reduces memory pressure by not loading unused datasets
       filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
@@ -580,6 +584,158 @@ defmodule PtcRunner.Lisp do
     end
   end
 
+  # Pre-execution check: reject programs with undefined variables before any
+  # side effects (tool calls) can execute. Memory keys are included in scope
+  # to support multi-turn SubAgent execution where previous turns def'd variables.
+  defp check_undefined_vars(core_ast, memory, journal) do
+    initial_scope = memory |> Map.keys() |> MapSet.new()
+
+    case collect_undefined_vars(core_ast, initial_scope) do
+      [] ->
+        :ok
+
+      undefined ->
+        vars = Enum.uniq(undefined)
+
+        label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
+
+        {:error,
+         Step.error(
+           :unbound_var,
+           "#{label}: #{Enum.join(vars, ", ")}",
+           memory,
+           %{},
+           journal: journal
+         )}
+    end
+  end
+
+  # Pre-execution check: reject programs that reference tools not in the provided
+  # toolset, preventing partial execution where early tool calls succeed before
+  # a later unknown tool call crashes.
+  defp check_undefined_tools(_core_ast, normalized_tools, _memory, _journal)
+       when map_size(normalized_tools) == 0,
+       do: :ok
+
+  defp check_undefined_tools(core_ast, normalized_tools, memory, journal) do
+    # CoreAST tool names are atoms, normalized_tools keys are strings — convert to strings
+    referenced =
+      core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
+
+    available = MapSet.new(Map.keys(normalized_tools))
+    undefined = MapSet.difference(referenced, available)
+
+    if MapSet.size(undefined) == 0 do
+      :ok
+    else
+      names = undefined |> MapSet.to_list() |> Enum.sort()
+      label = if length(names) == 1, do: "Unknown tool", else: "Unknown tools"
+
+      hint =
+        case MapSet.to_list(available) |> Enum.sort() do
+          [] -> "No tools available."
+          tools -> "Available tools: #{Enum.join(tools, ", ")}"
+        end
+
+      {:error,
+       Step.error(
+         :unknown_tool,
+         "#{label}: #{Enum.join(names, ", ")}. #{hint}",
+         memory,
+         %{},
+         journal: journal
+       )}
+    end
+  end
+
+  # Collect all tool names referenced in the CoreAST
+  defp collect_tool_names(ast), do: collect_tool_names(ast, MapSet.new())
+
+  defp collect_tool_names({:tool_call, name, args}, acc) do
+    Enum.reduce(args, MapSet.put(acc, name), &collect_tool_names/2)
+  end
+
+  defp collect_tool_names({:do, exprs}, acc) do
+    Enum.reduce(exprs, acc, &collect_tool_names/2)
+  end
+
+  defp collect_tool_names({:let, bindings, body}, acc) do
+    acc =
+      Enum.reduce(bindings, acc, fn {:binding, _pat, val}, a -> collect_tool_names(val, a) end)
+
+    collect_tool_names(body, acc)
+  end
+
+  defp collect_tool_names({:fn, _params, body}, acc), do: collect_tool_names(body, acc)
+
+  defp collect_tool_names({:loop, bindings, body}, acc) do
+    acc =
+      Enum.reduce(bindings, acc, fn {:binding, _pat, val}, a -> collect_tool_names(val, a) end)
+
+    collect_tool_names(body, acc)
+  end
+
+  defp collect_tool_names({:call, target, args}, acc) do
+    acc = collect_tool_names(target, acc)
+    Enum.reduce(args, acc, &collect_tool_names/2)
+  end
+
+  defp collect_tool_names({:if, c, t, e}, acc) do
+    acc = collect_tool_names(c, acc)
+    acc = collect_tool_names(t, acc)
+    collect_tool_names(e, acc)
+  end
+
+  defp collect_tool_names({:and, exprs}, acc), do: Enum.reduce(exprs, acc, &collect_tool_names/2)
+  defp collect_tool_names({:or, exprs}, acc), do: Enum.reduce(exprs, acc, &collect_tool_names/2)
+  defp collect_tool_names({:return, val}, acc), do: collect_tool_names(val, acc)
+  defp collect_tool_names({:fail, val}, acc), do: collect_tool_names(val, acc)
+  defp collect_tool_names({:recur, args}, acc), do: Enum.reduce(args, acc, &collect_tool_names/2)
+  defp collect_tool_names({:def, _name, val, _meta}, acc), do: collect_tool_names(val, acc)
+
+  defp collect_tool_names({:vector, elems}, acc),
+    do: Enum.reduce(elems, acc, &collect_tool_names/2)
+
+  defp collect_tool_names({:map, pairs}, acc) do
+    Enum.reduce(pairs, acc, fn {k, v}, a ->
+      a = collect_tool_names(k, a)
+      collect_tool_names(v, a)
+    end)
+  end
+
+  defp collect_tool_names({:set, elems}, acc), do: Enum.reduce(elems, acc, &collect_tool_names/2)
+
+  defp collect_tool_names({:pmap, fn_expr, coll}, acc) do
+    acc = collect_tool_names(fn_expr, acc)
+    collect_tool_names(coll, acc)
+  end
+
+  defp collect_tool_names({:pcalls, fns}, acc), do: Enum.reduce(fns, acc, &collect_tool_names/2)
+
+  defp collect_tool_names({:task, _id, body}, acc), do: collect_tool_names(body, acc)
+
+  defp collect_tool_names({:task_dynamic, id, body}, acc) do
+    acc = collect_tool_names(id, acc)
+    collect_tool_names(body, acc)
+  end
+
+  defp collect_tool_names({:step_done, id, summary}, acc) do
+    acc = collect_tool_names(id, acc)
+    collect_tool_names(summary, acc)
+  end
+
+  defp collect_tool_names({:task_reset, id}, acc), do: collect_tool_names(id, acc)
+
+  defp collect_tool_names({:juxt, fns}, acc), do: Enum.reduce(fns, acc, &collect_tool_names/2)
+
+  defp collect_tool_names({:where, _field, _op, val}, acc) when not is_nil(val),
+    do: collect_tool_names(val, acc)
+
+  defp collect_tool_names({:pred_combinator, _kind, preds}, acc),
+    do: Enum.reduce(preds, acc, &collect_tool_names/2)
+
+  defp collect_tool_names(_other, acc), do: acc
+
   # Normalize tools from various formats to Tool structs
   defp normalize_tools(raw_tools) do
     Enum.reduce_while(raw_tools, {:ok, %{}}, fn {name, format}, {:ok, acc} ->
@@ -637,10 +793,13 @@ defmodule PtcRunner.Lisp do
 
   # Variable reference — check builtins and local scope
   defp collect_undefined_vars({:var, name}, scope) do
-    if Env.builtin?(name) or MapSet.member?(scope, name) do
+    name_str = to_string(name)
+
+    # Skip interop method names (e.g., .toString) — validity checked at runtime
+    if String.starts_with?(name_str, ".") or Env.builtin?(name) or MapSet.member?(scope, name) do
       []
     else
-      [to_string(name)]
+      [name_str]
     end
   end
 
@@ -807,8 +966,12 @@ defmodule PtcRunner.Lisp do
   defp collect_undefined_vars({:budget_remaining}, _scope), do: []
   defp collect_undefined_vars({:turn_history, _n}, _scope), do: []
 
-  # Catch-all for unhandled nodes
-  defp collect_undefined_vars(_other, _scope), do: []
+  # Catch-all: safe to skip unknown nodes (runtime eval still catches real errors).
+  # Log in debug to surface missing clauses when CoreAST is extended.
+  defp collect_undefined_vars(other, _scope) do
+    Logger.debug("collect_undefined_vars: unhandled node #{inspect(other, limit: 3)}")
+    []
+  end
 
   # Extract variable names from fn params
   defp fn_param_vars(params) when is_list(params) do

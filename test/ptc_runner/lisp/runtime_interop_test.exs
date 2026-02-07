@@ -87,9 +87,9 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     end
 
     test "hint on unknown method call" do
-      assert {:error, step} = Lisp.run("(.toString date)")
+      assert {:error, step} = Lisp.run("(.toString data/date)", context: %{date: "2024-01-01"})
       msg = step.fail.message
-      assert msg =~ "Unknown method '.toString'"
+      assert msg =~ "Unknown method"
       assert msg =~ "Supported interop methods:"
       assert msg =~ ".getTime"
       assert msg =~ ".indexOf"
