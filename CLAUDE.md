@@ -98,6 +98,7 @@ See [Testing Guidelines](docs/guidelines/testing-guidelines.md) for full details
 - **No low-value unit tests**: Do not write unit tests for trivial pure functions or tests that just mirror the implementation. If a test is as simple as the code it tests, delete it. Prefer integration tests that exercise real behavior.
 - No `Process.sleep` - use monitors or async helpers
 - Examples, benchmarks, and test prompts should be generic and domain-independent. Do not overlap with existing test/benchmark domains unless explicitly asked.
+- **Domain-blind prompts**: System prompts, planner prompts, and agent configurations must not contain hints about test data, benchmark domains, or expected answer patterns. The orchestration layer (planners, classifiers, synthesis prompts) must work across unrelated domains without prompt changes. Tool descriptions may reference their specific domain.
 
 ### Documentation
 
