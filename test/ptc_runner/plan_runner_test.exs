@@ -1287,6 +1287,69 @@ defmodule PtcRunner.PlanRunnerTest do
     end
   end
 
+  describe "on_failure replan" do
+    test "replans on deliberate agent failure when on_failure is replan" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze the data",
+            "depends_on" => ["fetch"],
+            "on_failure" => "replan",
+            "output" => "ptc_lisp"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      mock_llm = fn %{messages: [%{content: prompt}]} ->
+        if String.contains?(prompt, "Analyze") do
+          # Agent calls (fail ...) to report insufficient data
+          {:ok,
+           ~s|```clojure\n(fail "Section 3 has only aggregate revenue, segment breakdown is in Note 5")\n```|}
+        else
+          {:ok, ~s({"result": "fetched data"})}
+        end
+      end
+
+      result = PlanRunner.execute(plan, llm: mock_llm, max_turns: 2)
+
+      assert {:replan_required, context} = result
+      assert context.task_id == "analyze"
+      assert context.task_output == nil
+      assert context.diagnosis =~ "aggregate revenue"
+      assert Map.has_key?(context, :completed_results)
+      assert Map.has_key?(context.completed_results, "fetch")
+    end
+
+    test "does NOT replan on system error even when on_failure is replan" do
+      raw = %{
+        "tasks" => [
+          %{
+            "id" => "flaky",
+            "input" => "Do something",
+            "on_failure" => "replan"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      # Simulate a system error (LLM failure) - not a deliberate (fail ...)
+      mock_llm = fn _input ->
+        {:error, "LLM rate limited"}
+      end
+
+      result = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
+
+      # Should get {:error, ...} NOT {:replan_required, ...}
+      # because the error reason won't have reason: :failed
+      assert {:error, "flaky", _, _reason} = result
+    end
+  end
+
   describe "direct agent" do
     test "executes PTC-Lisp code without LLM call" do
       raw = %{

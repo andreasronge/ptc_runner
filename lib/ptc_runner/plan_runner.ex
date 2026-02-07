@@ -16,6 +16,7 @@ defmodule PtcRunner.PlanRunner do
   - `:stop` (default) - Stop execution on failure
   - `:skip` - Log and continue with other tasks
   - `:retry` - Retry up to `max_retries` times before failing
+  - `:replan` - On deliberate agent failure via `(fail "reason")`, trigger replanning
 
   ## Example
 
@@ -404,6 +405,11 @@ defmodule PtcRunner.PlanRunner do
       {:retry, false} ->
         Logger.warning("Task #{task.id} failed after retries (skipped): #{inspect(reason)}")
         {:cont, {:ok, results, [task.id | skipped]}}
+
+      {:replan, _} ->
+        # Deliberate replan already handled in do_execute_with_attempts;
+        # if we reach here it means a non-deliberate failure on a :replan task
+        {:halt, {:error, task.id, results, reason}}
     end
   end
 
@@ -497,17 +503,27 @@ defmodule PtcRunner.PlanRunner do
         # Human review - pass through
         {:waiting, pending}
 
-      {:error, reason} when attempt < max_attempts ->
-        Logger.debug(
-          "Task #{task.id} failed (attempt #{attempt}/#{max_attempts}): #{inspect(reason)}"
-        )
-
-        # Simple backoff
-        Process.sleep(100 * attempt)
-        execute_with_attempts(task, agents, results, opts, max_attempts, attempt + 1)
-
       {:error, reason} ->
-        {:error, reason}
+        cond do
+          # Deliberate failure — agent analyzed the data and says it's the wrong path.
+          # Skip retries entirely: retrying won't change the document contents.
+          task.on_failure == :replan and deliberate_fail?(reason) ->
+            diagnosis = format_fail_diagnosis(reason)
+            {:replan_required, %{task_id: task.id, task_output: nil, diagnosis: diagnosis}}
+
+          # System error with retries remaining — backoff and retry
+          attempt < max_attempts ->
+            Logger.debug(
+              "Task #{task.id} failed (attempt #{attempt}/#{max_attempts}): #{inspect(reason)}"
+            )
+
+            Process.sleep(100 * attempt)
+            execute_with_attempts(task, agents, results, opts, max_attempts, attempt + 1)
+
+          # No retries left
+          true ->
+            {:error, reason}
+        end
     end
   end
 
@@ -1014,6 +1030,14 @@ defmodule PtcRunner.PlanRunner do
          }}
     end
   end
+
+  # Only replan when the agent deliberately called (fail "reason"),
+  # not on system errors (timeouts, LLM failures, etc.)
+  defp deliberate_fail?(%{reason: :failed}), do: true
+  defp deliberate_fail?(_), do: false
+
+  defp format_fail_diagnosis(%{message: message}) when is_binary(message), do: message
+  defp format_fail_diagnosis(reason), do: inspect(reason)
 
   # Inject verification feedback into task for smart retry
   # Uses a separate system_feedback field that build_prompt renders

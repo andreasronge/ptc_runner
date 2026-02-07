@@ -48,9 +48,9 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
 
           # Turn 2: must-return turn (last work turn)
           2 ->
-            {:ok, "```clojure\n(return {:value 0})\n```"}
+            {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
 
-          # Turn 3: retry turn (validation failed, integer instead of float)
+          # Turn 3: retry turn (validation failed, string instead of float)
           3 ->
             # Should have error feedback about validation
             last_msg = List.last(messages)
@@ -122,7 +122,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
           # Turn 1: must-return (only 1 work turn) - tools stripped
           1 ->
             assert tool_names == []
-            {:ok, "```clojure\n(return {:value 0})\n```"}
+            {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
 
           # Turn 2: retry - still no tools
           2 ->
@@ -176,7 +176,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
 
       llm = fn _ ->
         # Always return wrong type to exhaust budget
-        {:ok, "```clojure\n(return {:value 0})\n```"}
+        {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
       end
 
       {:error, step} = Loop.run(agent, llm: llm, context: %{})
@@ -198,7 +198,7 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       llm = fn %{turn: turn} ->
         case turn do
           1 -> {:ok, "```clojure\n(+ 1 2)\n```"}
-          2 -> {:ok, "```clojure\n(return {:value 0})\n```"}
+          2 -> {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
           3 -> {:ok, "```clojure\n(return {:value 1.0})\n```"}
           _ -> {:ok, "```clojure\n(return {:value 0.0})\n```"}
         end
@@ -298,10 +298,10 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
         send(self(), {:messages, turn, length(messages)})
 
         case turn do
-          # Turn 1 (must-return): returns integer (fails validation)
-          1 -> {:ok, "```clojure\n(return {:value 0})\n```"}
-          # Turn 2 (retry 1): returns string (fails validation)
-          2 -> {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
+          # Turn 1 (must-return): returns string (fails validation)
+          1 -> {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
+          # Turn 2 (retry 1): returns boolean (fails validation)
+          2 -> {:ok, "```clojure\n(return {:value true})\n```"}
           # Turn 3 (retry 2): returns float (succeeds)
           3 -> {:ok, "```clojure\n(return {:value 1.0})\n```"}
           _ -> {:ok, "```clojure\n(return {:value 0.0})\n```"}

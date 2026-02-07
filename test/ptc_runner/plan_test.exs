@@ -180,7 +180,8 @@ defmodule PtcRunner.PlanTest do
         "tasks" => [
           %{"id" => "t1", "input" => "risky", "on_failure" => "skip"},
           %{"id" => "t2", "input" => "retry", "on_failure" => "retry", "max_retries" => 3},
-          %{"id" => "t3", "input" => "default"}
+          %{"id" => "t3", "input" => "default"},
+          %{"id" => "t4", "input" => "replan", "on_failure" => "replan"}
         ]
       }
 
@@ -189,11 +190,13 @@ defmodule PtcRunner.PlanTest do
       t1 = Enum.find(plan.tasks, &(&1.id == "t1"))
       t2 = Enum.find(plan.tasks, &(&1.id == "t2"))
       t3 = Enum.find(plan.tasks, &(&1.id == "t3"))
+      t4 = Enum.find(plan.tasks, &(&1.id == "t4"))
 
       assert t1.on_failure == :skip
       assert t2.on_failure == :retry
       assert t2.max_retries == 3
       assert t3.on_failure == :stop
+      assert t4.on_failure == :replan
     end
 
     test "parses critical field" do

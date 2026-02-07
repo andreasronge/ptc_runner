@@ -31,9 +31,8 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
       assert :ok = Validator.validate(3.14, :float)
     end
 
-    test "rejects int as float" do
-      assert {:error, [%{path: [], message: "expected float, got " <> _}]} =
-               Validator.validate(42, :float)
+    test "accepts int as float (coercion)" do
+      assert :ok = Validator.validate(42, :float)
     end
 
     test "validates boolean" do
