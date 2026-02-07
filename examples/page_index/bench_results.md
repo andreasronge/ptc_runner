@@ -83,12 +83,49 @@ Haiku agent went 1/5 on Q1 (capital-intensive). It tends to conclude 3M *is* cap
 The planner creates specialized agents per run. Observed agent types across all runs:
 analyst, analyzer, calculator, capital_intensity_analyzer, computation_engine, financial_analyst, growth_analyzer, growth_calculator, margin_analyzer, segment_analyst, segment_calculator, synthesizer.
 
+## Quality Gate Analysis
+
+A follow-up benchmark was run with `--no-quality-gate` to isolate the impact of the planner's quality gate (pre-flight data sufficiency check). Config: planner-only, 3 runs per cell, both models.
+
+### Quality Gate ON vs OFF
+
+| | Gate ON (30 runs) | Gate OFF (18 runs) |
+|---|---|---|
+| **Success rate** | 27% (8/30) | 89% (16/18) |
+| **Correct (of judged)** | 100% (8/8) | 50% (8/16) |
+| **Correct / total** | 27% (8/30) | 44% (8/18) |
+
+### Per Question (Gate OFF)
+
+| Question | Correct / Judged | Notes |
+|----------|-----------------|-------|
+| Q1 (capital-intensive, M) | 3/6 | Same hit rate as with gate, no wasted runs |
+| Q2 (operating margin, H) | 5/5 | Huge improvement -- gate was killing these runs |
+| Q3 (M&A segment, H) | 0/5 | Still hard, but produces answers instead of timing out |
+
+### Root Cause: False-Negative Verification
+
+Error analysis of the quality-gate-ON runs revealed three failure modes:
+
+1. **`:max_replans_exceeded`** (14 of 22 errors) -- The quality gate's verification predicates reject task outputs because they can't confirm specific numbers exist in raw table-format text. The gate diagnoses "upstream data insufficient" even when the fetched sections contain the right data. This triggers replanning, which fails the same way, until the replan limit (2) is hit.
+
+2. **PdfExtractor GenServer timeout** (2 errors) -- GenServer became unresponsive early in the benchmark before the ETS cache was populated.
+
+3. **Type validation failures** (2 errors) -- The calculator agent returns integers where the signature expects floats (e.g., `total_assets: expected float, got int`).
+
+### Conclusion
+
+The quality gate is actively harmful in its current form. It never saved a run by catching genuinely bad data -- every run that passed the gate on the first try would have succeeded without it. Meanwhile, it killed 14 runs that would have otherwise produced answers (and based on the gate-OFF results, roughly half of those answers would have been correct).
+
+The gate should either be removed or made much more lenient -- only rejecting truly empty or malformed responses rather than trying to validate whether the right data was fetched from document sections.
+
 ## Recommendations
 
-1. **Use sonnet for accuracy-critical tasks** -- haiku is cheaper but significantly less accurate
-2. **Planner mode needs reliability improvements** before it can replace agent mode, despite its token efficiency
-3. **Q3-style questions need better retrieval** -- consider adding segment-level organic growth data to the index summaries so the retriever can locate the right sections
-4. **Add retry/timeout handling in planner** -- the 300s timeouts on haiku planner suggest the plan executor needs better circuit-breaking
+1. **Disable quality gate** -- it reduces overall accuracy from 44% to 27% by killing runs with false-negative verification
+2. **Use sonnet for accuracy-critical tasks** -- haiku is cheaper but significantly less accurate
+3. **Planner without gate is the best cost/accuracy tradeoff** -- 44% accuracy at 11k tokens vs agent's 30% at 80k tokens
+4. **Q3-style questions need better retrieval** -- consider adding segment-level organic growth data to the index summaries so the retriever can locate the right sections
+5. **Fix int/float type validation** -- the planner's signature validation should coerce integers to floats rather than rejecting them
 
 ## Reproducing
 
@@ -97,6 +134,9 @@ cd examples/page_index
 
 # Run benchmarks
 mix run bench.exs --runs 5 --models bedrock:haiku,bedrock:sonnet --modes agent,planner
+
+# Run without quality gate
+mix run bench.exs --runs 3 --modes planner --no-quality-gate
 
 # Analyze results
 mix run analyze.exs bench_runs/<timestamp>

@@ -19,11 +19,14 @@ defmodule Bench do
         switches: [
           runs: :integer,
           test_set: :string,
+          question: :string,
           models: :string,
           modes: :string,
+          no_quality_gate: :boolean,
+          self_failure: :boolean,
           help: :boolean
         ],
-        aliases: [h: :help, r: :runs, s: :test_set]
+        aliases: [h: :help, r: :runs, s: :test_set, q: :question]
       )
 
     if opts[:help] do
@@ -43,8 +46,10 @@ defmodule Bench do
     Options:
       -r, --runs N          Runs per cell (default: 1)
       -s, --test-set NAME   Filter: "full", "tree_rag_showcase", or doc prefix like "3M_2022_10K" (default: "3M_2022_10K")
+      -q, --question ID     Filter to a single question by ID substring (e.g., "01865" for Q3)
       --models LIST         Comma-separated models (default: "bedrock:haiku,bedrock:sonnet")
       --modes LIST          Comma-separated modes (default: "agent,planner")
+      --self-failure        Enable rich self-failure via (fail) + on_failure: replan (planner mode)
       -h, --help            Show this help
 
     Examples:
@@ -59,9 +64,18 @@ defmodule Bench do
     test_set = opts[:test_set] || "3M_2022_10K"
     models = parse_list(opts[:models] || "bedrock:haiku,bedrock:sonnet")
     modes = parse_list(opts[:modes] || "agent,planner")
+    quality_gate = not (opts[:no_quality_gate] || false)
+    self_failure = opts[:self_failure] || false
 
     # Load questions and filter
     questions = load_questions(test_set)
+
+    # Optional: filter to a single question by ID substring
+    questions =
+      case opts[:question] do
+        nil -> questions
+        q_filter -> Enum.filter(questions, &String.contains?(&1["id"], q_filter))
+      end
 
     if questions == [] do
       IO.puts("No questions found for test set: #{test_set}")
@@ -90,6 +104,8 @@ defmodule Bench do
     IO.puts("PageIndex Benchmark — #{timestamp}")
     IO.puts("Models: #{Enum.join(models, ", ")}")
     IO.puts("Modes: #{Enum.join(modes, ", ")}")
+    IO.puts("Quality gate: #{quality_gate}")
+    IO.puts("Self-failure: #{self_failure}")
     IO.puts("Questions: #{length(questions)}")
     IO.puts("Runs per cell: #{runs_per_cell}")
     IO.puts("Total runs: #{total_runs}")
@@ -117,7 +133,8 @@ defmodule Bench do
         trace_path = Path.join(traces_dir, "run_#{run_id}_#{model_short}_#{mode}.jsonl")
         tree = Map.fetch!(indices, q["doc_name"])
 
-        entry = run_one(q, model, mode, run_num, run_id, tree, trace_path)
+        entry =
+          run_one(q, model, mode, run_num, run_id, tree, trace_path, quality_gate, self_failure)
 
         duration_str = format_duration(entry.duration_ms)
         IO.puts("#{entry.status} (#{duration_str})")
@@ -133,7 +150,9 @@ defmodule Bench do
         models: models,
         modes: modes,
         runs_per_cell: runs_per_cell,
-        test_set: test_set
+        test_set: test_set,
+        quality_gate: quality_gate,
+        self_failure: self_failure
       },
       runs: results
     }
@@ -149,9 +168,112 @@ defmodule Bench do
     IO.puts("Results: #{ok_count} OK, #{error_count} errors")
     IO.puts("Manifest: #{manifest_path}")
     IO.puts("========================================")
+
+    scan_traces(traces_dir)
   end
 
-  defp run_one(question, model, mode, run_number, run_id, tree, trace_path) do
+  defp scan_traces(traces_dir) do
+    trace_files = Path.wildcard(Path.join(traces_dir, "*.jsonl"))
+
+    if trace_files == [] do
+      :ok
+    else
+      # Parse all trace events from all files
+      all_events =
+        Enum.flat_map(trace_files, fn path ->
+          path
+          |> File.read!()
+          |> String.split("\n", trim: true)
+          |> Enum.flat_map(fn line ->
+            case Jason.decode(line) do
+              {:ok, event} -> [event]
+              _ -> []
+            end
+          end)
+        end)
+
+      # Fetch results: task.stop events with node_id + total_chars in result
+      fetch_results =
+        Enum.flat_map(all_events, fn
+          %{"event" => "task.stop", "metadata" => %{"result" => result}} when is_map(result) ->
+            if Map.has_key?(result, "node_id") and Map.has_key?(result, "total_chars") do
+              [result]
+            else
+              []
+            end
+
+          _ ->
+            []
+        end)
+
+      # Grep results: task.stop events with "matches" + "pattern" in result
+      grep_results =
+        Enum.flat_map(all_events, fn
+          %{"event" => "task.stop", "metadata" => %{"result" => result}} when is_map(result) ->
+            if Map.has_key?(result, "pattern") and Map.has_key?(result, "matches") do
+              [result]
+            else
+              []
+            end
+
+          _ ->
+            []
+        end)
+
+      total_fetches = length(fetch_results)
+
+      if total_fetches > 0 do
+        with_offset = Enum.count(fetch_results, fn r -> (r["offset"] || 0) > 0 end)
+        truncated = Enum.count(fetch_results, fn r -> r["truncated"] == true end)
+        continuations = Enum.count(fetch_results, fn r -> r["hint"] != nil end)
+
+        IO.puts("\nFetch pagination stats:")
+        IO.puts("  fetch_section calls:     #{total_fetches}")
+        IO.puts("  with offset > 0:         #{with_offset}")
+        IO.puts("  results truncated:       #{truncated}")
+        IO.puts("  continuation hints sent: #{continuations}")
+
+        if with_offset > 0 do
+          IO.puts("  -> Offset pagination was used!")
+        else
+          if truncated > 0 do
+            IO.puts("  -> Truncation occurred but no continuation fetches were made")
+          end
+        end
+      end
+
+      total_greps = length(grep_results)
+
+      if total_greps > 0 do
+        greps_with_matches =
+          Enum.count(grep_results, fn r ->
+            matches = r["matches"] || []
+            length(matches) > 0
+          end)
+
+        IO.puts("\nGrep search stats:")
+        IO.puts("  grep_section calls:      #{total_greps}")
+        IO.puts("  with matches found:      #{greps_with_matches}")
+        IO.puts("  with no matches:         #{total_greps - greps_with_matches}")
+
+        if total_greps > 0 and total_fetches > 0 do
+          IO.puts("  -> Grep-then-fetch pattern detected!")
+        end
+      end
+    end
+  end
+
+  defp run_one(
+         question,
+         model,
+         mode,
+         run_number,
+         run_id,
+         tree,
+         trace_path,
+         quality_gate,
+         self_failure
+       ) do
     llm = LLMClient.callback(model)
     pdf_path = "data/#{question["doc_name"]}"
     start_time = System.monotonic_time(:millisecond)
@@ -172,7 +294,14 @@ defmodule Bench do
                   PageIndex.PlannerRetriever.retrieve(tree, question["question"],
                     llm: llm,
                     pdf_path: pdf_path,
-                    quality_gate: true
+                    quality_gate: quality_gate,
+                    self_failure: self_failure
+                  )
+
+                "iterative" ->
+                  PageIndex.IterativeRetriever.retrieve(tree, question["question"],
+                    llm: llm,
+                    pdf_path: pdf_path
                   )
               end
             end,
@@ -234,6 +363,11 @@ defmodule Bench do
     {answer, result.replans, result.tasks_executed}
   end
 
+  defp extract_result("iterative", result) do
+    answer = extract_answer(result.answer)
+    {answer, result.iterations, result.findings_count}
+  end
+
   defp extract_answer(answer) when is_binary(answer), do: answer
 
   defp extract_answer(answer) when is_map(answer) do
@@ -244,6 +378,7 @@ defmodule Bench do
 
   defp extract_error("agent", step), do: inspect(step.fail)
   defp extract_error("planner", result), do: inspect(result.reason)
+  defp extract_error("iterative", reason), do: inspect(reason)
   defp extract_error(_, other), do: inspect(other)
 
   defp load_questions(test_set) do
