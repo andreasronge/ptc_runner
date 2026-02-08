@@ -40,14 +40,13 @@ defmodule PageIndex.IterativeRetriever do
     nodes = flatten_tree(tree)
     sections_summary = format_sections(nodes)
     fetch_tool = make_smart_fetch_tool(nodes, pdf_path)
-    grep_tool = make_grep_tool(nodes, pdf_path)
 
     initial_state = %{findings: [], failed_searches: []}
 
     Enum.reduce_while(1..max_iterations, {query, initial_state}, fn i, {shopping_item, state} ->
       # 1. Run extraction agent
       state =
-        case run_extraction(shopping_item, query, sections_summary, fetch_tool, grep_tool, llm) do
+        case run_extraction(shopping_item, query, sections_summary, fetch_tool, llm) do
           {:ok, step} ->
             new_findings =
               (step.return["findings"] || [])
@@ -120,11 +119,11 @@ defmodule PageIndex.IterativeRetriever do
     end
   end
 
-  defp run_extraction(shopping_item, question, sections_summary, fetch_tool, grep_tool, llm) do
+  defp run_extraction(shopping_item, question, sections_summary, fetch_tool, llm) do
     agent =
       SubAgent.new(
         prompt: """
-        Extract structured data from a financial document to help answer a question.
+        Extract structured data from a document to help answer a question.
 
         QUESTION: {{question}}
         SHOPPING ITEM: {{shopping_item}}
@@ -138,8 +137,12 @@ defmodule PageIndex.IterativeRetriever do
         2b. PAGINATION: If a fetch result has `truncated: true`, call fetch_section again with
             the offset from the hint to get remaining content. Do not extract partial data from
             truncated tables — paginate until you find what you need or truncated is false.
-            For large sections, use grep_section first to locate keywords, then fetch at the
-            returned offset.
+        2c. SEARCHING: Use built-in `grep` / `grep-n` to search within fetched content:
+            ```
+            (def section (tool/fetch_section {:node_id "some_section"}))
+            (grep "revenue|sales" (:content section))    ; => ["Net sales 34,229 35,355" ...]
+            (grep-n "revenue" (:content section))        ; => [{:line 5 :text "Net sales ..."}]
+            ```
         3. Extract ALL relevant data points as structured findings with:
            - label: descriptive snake_case identifier
            - value: the number or text found (use raw numeric value, e.g., 34500 not "34,500")
@@ -158,13 +161,7 @@ defmodule PageIndex.IterativeRetriever do
              signature:
                "(node_id :string, offset :int) -> {node_id :string, title :string, pages :string, content :string, total_chars :int, offset :int, truncated :bool, hint :string}",
              description:
-               "Fetch content from a document section by ID. Use offset for pagination when truncated is true."},
-          "grep_section" =>
-            {grep_tool,
-             signature:
-               "(node_id :string, pattern :string) -> {node_id :string, total_chars :int, pattern :string, matches [{offset :int, context :string, hint :string}]}",
-             description:
-               "Search a section for a keyword or phrase. Returns up to 5 matches with context."}
+               "Fetch content from a document section by ID. Use offset for pagination when truncated is true."}
         },
         max_turns: 10,
         timeout: 30_000
@@ -273,93 +270,6 @@ defmodule PageIndex.IterativeRetriever do
         suggestions = suggest_sections(nodes, query)
         %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
       end
-    end
-  end
-
-  defp make_grep_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      pattern = args["pattern"] || args[:pattern] || ""
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-      node = node || find_best_match(nodes, query)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, content} ->
-            matches = find_pattern_matches(content, pattern)
-
-            %{
-              "node_id" => node.node_id,
-              "total_chars" => String.length(content),
-              "pattern" => pattern,
-              "matches" => Enum.take(matches, 5)
-            }
-
-          {:error, reason} ->
-            %{"error" => inspect(reason)}
-        end
-      else
-        suggestions = suggest_sections(nodes, query)
-        %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
-      end
-    end
-  end
-
-  defp find_pattern_matches(content, pattern) do
-    content_lower = String.downcase(content)
-
-    if String.contains?(pattern, "|") or String.contains?(pattern, ".*") do
-      find_regex_matches(content, content_lower, pattern)
-    else
-      pattern_lower = String.downcase(pattern)
-      find_all_positions(content, content_lower, pattern_lower, 0, [])
-    end
-  end
-
-  defp find_regex_matches(content, content_lower, pattern) do
-    case Regex.compile(String.downcase(pattern), "i") do
-      {:ok, regex} ->
-        Regex.scan(regex, content_lower, return: :index)
-        |> Enum.map(fn [{pos, _len} | _] ->
-          ctx_start = max(0, pos - 40)
-          ctx = String.slice(content, ctx_start, 120)
-
-          %{
-            "offset" => pos,
-            "context" => ctx,
-            "hint" =>
-              "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-          }
-        end)
-
-      {:error, _} ->
-        find_all_positions(content, content_lower, String.downcase(pattern), 0, [])
-    end
-  end
-
-  defp find_all_positions(_content, content_lower, _pattern, start, acc)
-       when start >= byte_size(content_lower) do
-    Enum.reverse(acc)
-  end
-
-  defp find_all_positions(content, content_lower, pattern, start, acc) do
-    case :binary.match(content_lower, pattern, scope: {start, byte_size(content_lower) - start}) do
-      {pos, _len} ->
-        ctx_start = max(0, pos - 40)
-        ctx = String.slice(content, ctx_start, 120)
-
-        match = %{
-          "offset" => pos,
-          "context" => ctx,
-          "hint" =>
-            "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-        }
-
-        find_all_positions(content, content_lower, pattern, pos + 1, [match | acc])
-
-      :nomatch ->
-        Enum.reverse(acc)
     end
   end
 

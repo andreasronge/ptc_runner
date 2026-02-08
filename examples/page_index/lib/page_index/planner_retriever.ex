@@ -94,8 +94,8 @@ defmodule PageIndex.PlannerRetriever do
         {
           "agents": {
             "document_analyst": {
-              "prompt": "You are a data extraction agent. For large sections, use grep_section first to locate keywords, then fetch_section at the returned offset. If your first grep pattern returns no matches, try a broader keyword. When a fetch result has truncated: true, call fetch_section again with the offset from the hint. If the fetched sections do not contain the specific data you need, call (fail \\"reason\\") with a detailed explanation — describe what you found, what is missing, and any hints about where to find it.",
-              "tools": ["fetch_section", "grep_section"]
+              "prompt": "You are a data extraction agent. Fetch sections and use built-in grep/grep-n to search within fetched content. When a fetch result has truncated: true, call fetch_section again with the offset from the hint. If the fetched sections do not contain the specific data you need, call (fail \\"reason\\") with a detailed explanation — describe what you found, what is missing, and any hints about where to find it.",
+              "tools": ["fetch_section"]
             },
             "synthesizer": {"prompt": "You produce clear answers from structured data provided by upstream tasks."}
           },
@@ -115,7 +115,8 @@ defmodule PageIndex.PlannerRetriever do
     CRITICAL: The final synthesis task MUST have the id "final_answer".
 
     For fetching and extracting data from document sections, define a single "document_analyst"
-    agent with tools: ["fetch_section", "grep_section"]. Reuse this agent for all data-gathering tasks.
+    agent with tools: ["fetch_section"]. Reuse this agent for all data-gathering tasks.
+    The agent can use built-in `grep`/`grep-n` to search within fetched content.
 
     Each fetch task must:
     - Specify WHAT DATA to extract in its input (not just which section to fetch)
@@ -135,8 +136,8 @@ defmodule PageIndex.PlannerRetriever do
     {
       "agents": {
         "document_analyst": {
-          "prompt": "You are a data extraction agent. Focus on the section specified in your task input. For large sections, use grep_section first to locate keywords, then fetch_section at the returned offset. If your first grep pattern returns no matches, try a broader keyword (e.g., if 'Organic Growth %' fails, try 'Organic'). When a fetch result has truncated: true, call fetch_section again with the offset from the hint. Do not guess data from partial tables — paginate until you find what you need. If the specified section does not contain the requested data after thorough search, call (fail) with details rather than searching other sections — the planner will redirect you. Return a consolidated set of findings with page numbers for provenance.",
-          "tools": ["fetch_section", "grep_section"]
+          "prompt": "You are a data extraction agent. Focus on the section specified in your task input. Use built-in grep/grep-n to search within fetched content (e.g., (grep \\"revenue\\" (:content section))). When a fetch result has truncated: true, call fetch_section again with the offset from the hint. Do not guess data from partial tables — paginate until you find what you need. If the specified section does not contain the requested data after thorough search, call (fail) with details rather than searching other sections — the planner will redirect you. Return a consolidated set of findings with page numbers for provenance.",
+          "tools": ["fetch_section"]
         },
         "synthesizer": {
           "prompt": "You produce clear answers from structured data provided by upstream tasks."
@@ -166,30 +167,18 @@ defmodule PageIndex.PlannerRetriever do
 
       Content is returned in 5000-char chunks. When truncated is true, the hint field
       contains the exact call with offset to get the next chunk.
-
-      Available sections: #{all_section_ids}
-      """,
-      "grep_section" => """
-      Search a section's full content for a keyword or phrase. Returns up to 5 matches
-      with offsets and surrounding context. Use BEFORE fetch_section on large sections
-      to jump to the right location.
-      Input: {node_id: string, pattern: string}
-      Output: {node_id, total_chars, pattern, matches: [{offset, context, hint}]}
+      Use built-in grep/grep-n to search within fetched content.
 
       Available sections: #{all_section_ids}
       """
     }
 
-    # Actual tool implementation with fuzzy matching and explicit signatures
+    # Actual tool implementation with fuzzy matching and explicit signature
     fetch_sig =
       "(node_id :string, offset :int) -> {node_id :string, title :string, pages :string, content :string, total_chars :int, offset :int, truncated :bool, hint :string}"
 
-    grep_sig =
-      "(node_id :string, pattern :string) -> {node_id :string, total_chars :int, pattern :string, matches [{offset :int, context :string, hint :string}]}"
-
     base_tools = %{
-      "fetch_section" => {make_smart_fetch_tool(nodes, pdf_path), fetch_sig},
-      "grep_section" => {make_grep_tool(nodes, pdf_path), grep_sig}
+      "fetch_section" => {make_smart_fetch_tool(nodes, pdf_path), fetch_sig}
     }
 
     executor_opts =
@@ -289,96 +278,6 @@ defmodule PageIndex.PlannerRetriever do
         suggestions = suggest_sections(nodes, query)
         %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
       end
-    end
-  end
-
-  defp make_grep_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      pattern = args["pattern"] || args[:pattern] || ""
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-      node = node || find_best_match(nodes, query)
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, content} ->
-            matches = find_pattern_matches(content, pattern)
-
-            %{
-              "node_id" => node.node_id,
-              "total_chars" => String.length(content),
-              "pattern" => pattern,
-              "matches" => Enum.take(matches, 5)
-            }
-
-          {:error, reason} ->
-            %{"error" => inspect(reason)}
-        end
-      else
-        suggestions = suggest_sections(nodes, query)
-        %{"error" => "No match for '#{query}'. Try: #{suggestions}"}
-      end
-    end
-  end
-
-  defp find_pattern_matches(content, pattern) do
-    content_lower = String.downcase(content)
-
-    # Support pipe-delimited OR patterns (e.g., "Revenue|Sales")
-    # and regex patterns (containing .* or other regex metacharacters)
-    if String.contains?(pattern, "|") or String.contains?(pattern, ".*") do
-      find_regex_matches(content, content_lower, pattern)
-    else
-      pattern_lower = String.downcase(pattern)
-      find_all_positions(content, content_lower, pattern_lower, 0, [])
-    end
-  end
-
-  defp find_regex_matches(content, content_lower, pattern) do
-    case Regex.compile(String.downcase(pattern), "i") do
-      {:ok, regex} ->
-        Regex.scan(regex, content_lower, return: :index)
-        |> Enum.map(fn [{pos, _len} | _] ->
-          ctx_start = max(0, pos - 40)
-          ctx = String.slice(content, ctx_start, 120)
-
-          %{
-            "offset" => pos,
-            "context" => ctx,
-            "hint" =>
-              "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-          }
-        end)
-
-      {:error, _} ->
-        # Fall back to literal match if regex is invalid
-        find_all_positions(content, content_lower, String.downcase(pattern), 0, [])
-    end
-  end
-
-  defp find_all_positions(_content, content_lower, _pattern, start, acc)
-       when start >= byte_size(content_lower) do
-    Enum.reverse(acc)
-  end
-
-  defp find_all_positions(content, content_lower, pattern, start, acc) do
-    case :binary.match(content_lower, pattern, scope: {start, byte_size(content_lower) - start}) do
-      {pos, _len} ->
-        ctx_start = max(0, pos - 40)
-        ctx = String.slice(content, ctx_start, 120)
-
-        match = %{
-          "offset" => pos,
-          "context" => ctx,
-          "hint" =>
-            "Use fetch_section with offset: #{max(0, pos - 200)} to read around this match."
-        }
-
-        find_all_positions(content, content_lower, pattern, pos + 1, [match | acc])
-
-      :nomatch ->
-        Enum.reverse(acc)
     end
   end
 
