@@ -53,6 +53,30 @@ SubAgent.run(agent,
 )
 ```
 
+## Prompt Templates (Mustache)
+
+Prompts use Mustache-style templates expanded against the context.
+
+**PTC-Lisp mode** — placeholders become data inventory references:
+
+```elixir
+SubAgent.new(prompt: "Find items for {{user}} about {{topic}}", ...)
+# LLM sees: "Find items for ~{data/user} about ~{data/topic}"
+# The LLM accesses values via (data/user), (data/topic)
+```
+
+**JSON mode** — placeholders are replaced with actual values, and sections are supported:
+
+```elixir
+SubAgent.new(
+  prompt: "Summarize: {{title}}. {{#items}}Item: {{name}}. {{/items}}",
+  output: :json, ...
+)
+# Sections iterate over lists; {{^items}}...{{/items}} renders when empty/missing
+```
+
+Dot notation works for nested access: `{{user.name}}`. Missing keys raise an error by default.
+
 ## Signatures — Type Contracts
 
 Format: `(inputs) -> output` or just `output` for output-only.
@@ -86,6 +110,18 @@ signature: "{summary :string, _raw_ids [:int]}"
 | `:array` | `[:type]` |
 | `:object` | `{field :type}` or `:map` |
 | `:tuple` | `{field :type}` (named fields) |
+
+### Return Validation
+
+When a signature is present, `(return value)` results are validated against the declared output type. On mismatch the LLM receives path-based error feedback and retries within its remaining turns:
+
+```
+Errors:
+- [count]: expected int, got string
+- [items.0.name]: expected string, got nil
+```
+
+Validation is skipped when: no signature, return type is `:any`, or `max_turns: 1` (can't retry). Use `retry_turns` to grant extra budget specifically for validation retries.
 
 ## Tools — Callable Functions
 
@@ -240,6 +276,62 @@ Single-shot mode (`max_turns: 1`, no tools): expression result is the answer, no
 6. **JSON mode with tools** — `output: :json` cannot have tools
 7. **Forgetting system prompt** — LLM callback must include the `system` field in its request
 
+## Recursive SubAgent
+
+An agent can call itself recursively using the `:self` sentinel as a tool value. Useful for divide-and-conquer patterns on large inputs.
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Analyze {{chunk}}. If too large, subdivide and call 'worker' recursively.",
+  signature: "(chunk :string) -> {findings [:string]}",
+  description: "Analyze logs for incidents",
+  tools: %{"worker" => :self},
+  max_depth: 3
+)
+```
+
+- **Requires `signature`** — raises `ArgumentError` without it
+- **`max_depth`** controls recursion depth (default: 3)
+- **`turn_budget`** is shared across all recursive calls
+
+## Compiled SubAgent
+
+`SubAgent.compile/2` runs the LLM once to derive PTC-Lisp code, then returns a `CompiledAgent` that executes without further LLM calls. Useful for batch processing.
+
+```elixir
+scorer = SubAgent.new(
+  prompt: "Extract anomaly score from {{report}}",
+  signature: "(report :map) -> {score :float}",
+  max_turns: 1
+)
+
+{:ok, compiled} = SubAgent.compile(scorer, llm: llm, sample: %{report: sample})
+
+# Execute many times — no LLM calls
+results = Enum.map(reports, fn r -> compiled.execute.(%{report: r}, []) end)
+```
+
+- **Requires `max_turns: 1`** and `output: :ptc_lisp`
+- `sample:` option provides example data for the LLM during compilation
+- If the compiled code uses `LLMTool` or `SubAgentTool`, pass `llm:` at runtime
+
+## Automatic Signature Extraction from @spec
+
+Bare function references auto-extract `@spec` and `@doc` into PTC-Lisp signatures via `TypeExtractor`:
+
+```elixir
+defmodule MyTools do
+  @doc "Search items by query"
+  @spec search(query :: String.t()) :: {:ok, [map()]}
+  def search(query), do: ...
+end
+
+# Signature and description extracted automatically
+tools = %{"search" => &MyTools.search/1}
+```
+
+Type mappings: `String.t()` -> `:string`, `integer()` -> `:int`, `float()` -> `:float`, `boolean()` -> `:bool`, `atom()` -> `:keyword`, `map()` -> `:map`, `[type]` -> `[:type]`, `t | nil` -> `:t?`, `{:ok, t} | {:error, e}` -> `{result :t, error :e?}`. Unsupported types fall back to `:any`.
+
 ## Debugging
 
 ```elixir
@@ -253,6 +345,24 @@ SubAgent.Debug.print_trace(step)
 SubAgent.Debug.print_trace(step, raw: true)       # Include LLM reasoning
 SubAgent.Debug.print_trace(step, messages: true)   # Full conversation
 ```
+
+## TraceLog — JSONL Execution Traces
+
+`TraceLog` captures SubAgent execution events to JSONL files for offline debugging and analysis. Opt-in and process-isolated.
+
+```elixir
+# Recommended — auto-cleanup on exceptions
+{:ok, step, trace_path} = TraceLog.with_trace(fn ->
+  SubAgent.run(agent, llm: llm)
+end, path: "/tmp/debug.jsonl")
+
+# Analyze offline
+events = TraceLog.Analyzer.load(trace_path)
+TraceLog.Analyzer.summary(events)
+#=> %{duration_ms: 1234, turns: 3, llm_calls: 3, ...}
+```
+
+Events captured: `run.start/stop`, `turn.start/stop`, `llm.start/stop`, `tool.start/stop`. Supports nesting, cross-process propagation via `TraceLog.join/2`, and custom metadata via `meta:` option.
 
 ## Sandbox Limits
 
