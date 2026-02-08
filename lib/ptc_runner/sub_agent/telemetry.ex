@@ -16,9 +16,9 @@ defmodule PtcRunner.SubAgent.Telemetry do
   | `[:run, :stop]` | `%{duration: native_time}` | agent, step, status, span_id, parent_span_id |
   | `[:run, :exception]` | `%{duration: native_time}` | agent, kind, reason, stacktrace, span_id, parent_span_id |
   | `[:turn, :start]` | `%{}` | agent, turn, span_id, parent_span_id |
-  | `[:turn, :stop]` | `%{duration: native_time, tokens: n}` | agent, turn, program, result_preview, type, span_id, parent_span_id |
+  | `[:turn, :stop]` | `%{duration: native_time, tokens: n, input_tokens: n, output_tokens: n}` | agent, turn, program, result_preview, prints, type, span_id, parent_span_id |
   | `[:llm, :start]` | `%{}` | agent, turn, messages, span_id, parent_span_id |
-  | `[:llm, :stop]` | `%{duration: native_time, tokens: n}` | agent, turn, response, span_id, parent_span_id |
+  | `[:llm, :stop]` | `%{duration: native_time, tokens: n, input_tokens: n, output_tokens: n}` | agent, turn, response, span_id, parent_span_id |
   | `[:tool, :start]` | `%{}` | agent, tool_name, args, span_id, parent_span_id |
   | `[:tool, :stop]` | `%{duration: native_time}` | agent, tool_name, result, span_id, parent_span_id |
   | `[:tool, :exception]` | `%{duration: native_time}` | agent, tool_name, kind, reason, stacktrace, span_id, parent_span_id |

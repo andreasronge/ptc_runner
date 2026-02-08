@@ -166,11 +166,11 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     measurements = build_turn_measurements(turn_duration, tokens)
     turn_type = Map.get(state, :current_turn_type, :normal)
 
-    # Extract program and result preview from turn (nil-safe)
-    {program, result_preview} =
+    # Extract program, result preview, and prints from turn (nil-safe)
+    {program, result_preview, prints} =
       case turn do
-        nil -> {nil, "nil"}
-        %Turn{} -> {turn.program, build_result_preview(turn.result)}
+        nil -> {nil, "nil", []}
+        %Turn{} -> {turn.program, build_result_preview(turn.result), turn.prints || []}
       end
 
     Telemetry.emit([:turn, :stop], measurements, %{
@@ -178,6 +178,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       turn: state.turn,
       program: program,
       result_preview: result_preview,
+      prints: prints,
       type: turn_type
     })
 
@@ -209,7 +210,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def build_turn_measurements(duration, nil), do: %{duration: duration}
 
   def build_turn_measurements(duration, tokens) when is_map(tokens) do
-    %{duration: duration, tokens: LLMResolver.total_tokens(tokens)}
+    %{duration: duration} |> Map.merge(token_breakdown(tokens))
   end
 
   @doc """
@@ -219,7 +220,29 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def build_token_measurements(nil), do: %{}
 
   def build_token_measurements(tokens) when is_map(tokens) do
-    %{tokens: LLMResolver.total_tokens(tokens)}
+    token_breakdown(tokens)
+  end
+
+  defp token_breakdown(tokens) do
+    base = %{tokens: LLMResolver.total_tokens(tokens)}
+
+    tokens
+    |> Enum.reduce(base, fn
+      {:input, v}, acc when is_integer(v) and v > 0 ->
+        Map.put(acc, :input_tokens, v)
+
+      {:output, v}, acc when is_integer(v) and v > 0 ->
+        Map.put(acc, :output_tokens, v)
+
+      {:cache_creation, v}, acc when is_integer(v) and v > 0 ->
+        Map.put(acc, :cache_creation_tokens, v)
+
+      {:cache_read, v}, acc when is_integer(v) and v > 0 ->
+        Map.put(acc, :cache_read_tokens, v)
+
+      _, acc ->
+        acc
+    end)
   end
 
   @doc """

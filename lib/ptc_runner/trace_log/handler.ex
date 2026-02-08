@@ -115,6 +115,10 @@ defmodule PtcRunner.TraceLog.Handler do
   # Private helpers
 
   defp do_handle_event(event, measurements, metadata, config) do
+    # Strip telemetry_span_context — it's an Erlang reference from :telemetry.span
+    # that serializes as "#Reference<...>" noise in trace files
+    metadata = Map.delete(metadata, :telemetry_span_context)
+
     event_map =
       Event.from_telemetry(event, measurements, metadata, config.trace_id)
       |> add_duration_ms(measurements)
