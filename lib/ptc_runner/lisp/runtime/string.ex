@@ -159,11 +159,12 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
-  Return lines matching the pattern (regex).
+  Return lines matching the pattern (case-insensitive regex).
   String patterns are compiled as regex with BRE-to-PCRE translation
   (e.g. `\\|` becomes `|` for alternation).
-  - (grep "error" text) returns lines containing "error"
-  - (grep "error\\|warn" text) returns lines matching error or warn
+  Matching is case-insensitive by default.
+  - (grep "error" text) returns lines containing "error", "Error", "ERROR", etc.
+  - (grep "error\\|warn" text) returns lines matching error or warn (any case)
   - (grep "" "a\\nb") returns ["a", "b"] (empty pattern matches all)
   """
   def grep("", text) when is_binary(text) do
@@ -184,7 +185,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
 
   @doc """
   Return lines matching the pattern with 1-based line numbers.
-  String patterns are compiled as regex with BRE-to-PCRE translation.
+  String patterns are compiled as case-insensitive regex with BRE-to-PCRE translation.
   - (grep-n "error" text) returns [{:line 1 :text "error here"} ...]
   """
   def grep_n("", text) when is_binary(text) do
@@ -208,14 +209,19 @@ defmodule PtcRunner.Lisp.Runtime.String do
     |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
   end
 
-  # Translate BRE escapes to PCRE and compile as regex.
+  # Translate BRE escapes to PCRE and compile as case-insensitive regex.
   # LLMs often write \| for alternation (BRE style) but PCRE treats \| as literal pipe.
+  # Case-insensitive by default since grep is used for document search where case shouldn't matter.
   defp compile_grep_pattern(pattern) do
-    alias PtcRunner.Lisp.Runtime.Regex, as: RuntimeRegex
+    pcre = bre_to_pcre(pattern)
 
-    pattern
-    |> bre_to_pcre()
-    |> RuntimeRegex.re_pattern()
+    case :re.compile(pcre, [:unicode, :ucp, :caseless]) do
+      {:ok, mp} ->
+        {:re_mp, mp, nil, pcre}
+
+      {:error, {reason, pos}} ->
+        raise ArgumentError, "Invalid regex at position #{pos}: #{List.to_string(reason)}"
+    end
   end
 
   # Convert common BRE escape sequences to PCRE equivalents.

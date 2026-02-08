@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 28 -->
-<!-- date: 2026-01-31 -->
-<!-- changes: grep now always uses regex with BRE-to-PCRE auto-translation -->
+<!-- version: 29 -->
+<!-- date: 2026-02-08 -->
+<!-- changes: grep is now case-insensitive by default; added "Not Available" section -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -97,10 +97,10 @@ data/products                      ; read-only input data
 ### Regex Line Search (grep)
 
 ```clojure
-;; grep treats string patterns as regex (like unix grep)
-(grep "error" text)              ; => ["error: first" "error: second"]
-(grep "error\|warn" text)        ; alternation (BRE \| is auto-converted)
-(grep "error|warn" text)         ; alternation (PCRE style also works)
+;; grep treats string patterns as case-insensitive regex (like unix grep -i)
+(grep "error" text)              ; matches "error", "Error", "ERROR"
+(grep "error|warn" text)         ; alternation (PCRE style)
+(grep "error\|warn" text)        ; alternation (BRE \| also works)
 (grep "v\\d+\\.\\d+" changelog)  ; regex patterns work directly
 (grep-n "agent_42" corpus)       ; => [{:line 4523 :text "agent_42 code: XYZ"}]
 
@@ -111,6 +111,21 @@ data/products                      ; read-only input data
 ```
 
 **For literal substring search**, use `filter` with `includes?`.
+
+### Not Available from Clojure
+
+These Clojure/Java functions do NOT exist — use the alternatives:
+
+```clojure
+;; ✗ format        → use str and arithmetic: (str (* 100.0 (/ a b)) "%")
+;; ✗ subvec        → (take n (drop m coll))
+;; ✗ keep-indexed  → (filter pred (map-indexed vector coll))
+;; ✗ frequencies   → (reduce (fn [acc x] (update acc x (fnil inc 0))) {} coll)
+;; ✗ group-by      → (reduce (fn [acc x] (update acc (f x) (fnil conj []) x)) {} coll)
+;; ✗ zipmap        → (into {} (map vector keys vals))
+;; ✗ Integer/parseInt → parse-int or parse-long
+;; ✗ clojure.string/* → split, join, trim, upper-case, lower-case (top-level)
+```
 
 ### Aggregators
 
