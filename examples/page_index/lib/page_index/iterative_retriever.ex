@@ -37,11 +37,6 @@ defmodule PageIndex.IterativeRetriever do
     {:ok, _} = PageIndex.get_content(pdf_path, 1, 1)
     IO.puts("PDF cache ready.")
 
-    # Pre-warm the PDF cache before agent execution
-    IO.puts("Pre-loading PDF pages...")
-    {:ok, _} = PageIndex.get_content(pdf_path, 1, 1)
-    IO.puts("PDF cache ready.")
-
     nodes = flatten_tree(tree)
     sections_summary = format_sections(nodes)
     fetch_tool = make_smart_fetch_tool(nodes, pdf_path)
@@ -157,7 +152,20 @@ defmodule PageIndex.IterativeRetriever do
         """,
         signature:
           "(shopping_item :string, question :string) -> {findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}",
-        tools: %{"fetch_section" => fetch_tool, "grep_section" => grep_tool},
+        tools: %{
+          "fetch_section" =>
+            {fetch_tool,
+             signature:
+               "(node_id :string, offset :int) -> {node_id :string, title :string, pages :string, content :string, total_chars :int, offset :int, truncated :bool, hint :string}",
+             description:
+               "Fetch content from a document section by ID. Use offset for pagination when truncated is true."},
+          "grep_section" =>
+            {grep_tool,
+             signature:
+               "(node_id :string, pattern :string) -> {node_id :string, total_chars :int, pattern :string, matches [{offset :int, context :string, hint :string}]}",
+             description:
+               "Search a section for a keyword or phrase. Returns up to 5 matches with context."}
+        },
         max_turns: 10,
         timeout: 30_000
       )

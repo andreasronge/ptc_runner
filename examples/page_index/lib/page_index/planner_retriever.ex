@@ -180,10 +180,16 @@ defmodule PageIndex.PlannerRetriever do
       """
     }
 
-    # Actual tool implementation with fuzzy matching
+    # Actual tool implementation with fuzzy matching and explicit signatures
+    fetch_sig =
+      "(node_id :string, offset :int) -> {node_id :string, title :string, pages :string, content :string, total_chars :int, offset :int, truncated :bool, hint :string}"
+
+    grep_sig =
+      "(node_id :string, pattern :string) -> {node_id :string, total_chars :int, pattern :string, matches [{offset :int, context :string, hint :string}]}"
+
     base_tools = %{
-      "fetch_section" => make_smart_fetch_tool(nodes, pdf_path),
-      "grep_section" => make_grep_tool(nodes, pdf_path)
+      "fetch_section" => {make_smart_fetch_tool(nodes, pdf_path), fetch_sig},
+      "grep_section" => {make_grep_tool(nodes, pdf_path), grep_sig}
     }
 
     executor_opts =
