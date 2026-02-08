@@ -354,6 +354,46 @@ defmodule PtcRunner.SubAgent do
   end
 
   @doc """
+  Returns the agent's tools with builtin tools injected.
+
+  Merges `llm_query` and `grep_tools` builtins into the tools map.
+  User-defined tools are never overwritten by builtins.
+
+  ## Examples
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "test", grep_tools: true)
+      iex> tools = PtcRunner.SubAgent.effective_tools(agent)
+      iex> Map.has_key?(tools, "grep")
+      true
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "test", grep_tools: true, tools: %{"grep" => fn _ -> :custom end})
+      iex> tools = PtcRunner.SubAgent.effective_tools(agent)
+      iex> is_function(tools["grep"])
+      true
+  """
+  @spec effective_tools(t()) :: map()
+  def effective_tools(%__MODULE__{} = agent) do
+    tools = agent.tools
+
+    # Use Map.put_new to avoid overwriting user-defined tools
+    tools =
+      if agent.llm_query,
+        do: Map.put_new(tools, "llm-query", :builtin_llm_query),
+        else: tools
+
+    tools =
+      if agent.grep_tools do
+        tools
+        |> Map.put_new("grep", :builtin_grep)
+        |> Map.put_new("grep-n", :builtin_grep_n)
+      else
+        tools
+      end
+
+    tools
+  end
+
+  @doc """
   Executes a SubAgent with the given options.
 
   Returns a `Step` struct containing the result, metrics, and execution trace.

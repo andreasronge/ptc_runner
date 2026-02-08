@@ -195,18 +195,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     all_field_descriptions =
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
-    # Inject builtin tools when enabled
-    tools = agent.tools
-
-    tools =
-      if agent.llm_query,
-        do: Map.put(tools, "llm-query", :builtin_llm_query),
-        else: tools
-
-    tools =
-      if agent.grep_tools,
-        do: tools |> Map.put("grep", :builtin_grep) |> Map.put("grep-n", :builtin_grep_n),
-        else: tools
+    tools = SubAgent.effective_tools(agent)
 
     # Use compact Namespace format (same as Turn 2+)
     namespace_content =
@@ -383,15 +372,12 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
     # Inject builtin llm-query tool if enabled
-    base_tools =
-      if agent.llm_query,
-        do: Map.put(agent.tools, "llm-query", :builtin_llm_query),
-        else: agent.tools
+    tools = SubAgent.effective_tools(agent)
 
     # Use compact Namespace format (same as Turn 2+)
     namespace_content =
       Namespace.render(%{
-        tools: base_tools,
+        tools: tools,
         data: context,
         field_descriptions: all_field_descriptions,
         context_signature: context_signature,

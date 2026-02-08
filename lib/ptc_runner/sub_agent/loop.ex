@@ -534,25 +534,11 @@ defmodule PtcRunner.SubAgent.Loop do
         else: state
 
     # Strip tools in must-return mode
-    base_tool_names = Map.keys(agent.tools)
-
     tool_names =
       if must_return_mode do
         []
       else
-        names = base_tool_names
-
-        names =
-          if agent.llm_query,
-            do: ["llm-query" | names],
-            else: names
-
-        names =
-          if agent.grep_tools,
-            do: ["grep", "grep-n" | names],
-            else: names
-
-        names
+        Map.keys(SubAgent.effective_tools(agent))
       end
 
     llm_input = %{
@@ -722,18 +708,7 @@ defmodule PtcRunner.SubAgent.Loop do
         state.context
       end
 
-    # Inject builtin tools when enabled
-    tools = agent.tools
-
-    tools =
-      if agent.llm_query,
-        do: Map.put(tools, "llm-query", :builtin_llm_query),
-        else: tools
-
-    tools =
-      if agent.grep_tools,
-        do: tools |> Map.put("grep", :builtin_grep) |> Map.put("grep-n", :builtin_grep_n),
-        else: tools
+    tools = SubAgent.effective_tools(agent)
 
     # Normalize SubAgentTool instances to functions with telemetry
     normalized_tools = ToolNormalizer.normalize(tools, state, agent)
