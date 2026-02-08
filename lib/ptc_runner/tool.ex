@@ -241,7 +241,8 @@ defmodule PtcRunner.Tool do
        name: name,
        function: &PtcRunner.Lisp.Runtime.String.grep/2,
        signature: "(pattern :string, text :string) -> [:string]",
-       description: "Return lines matching pattern (case-insensitive regex)",
+       description:
+         "Return lines matching pattern from text string, not a filename (case-insensitive regex)",
        type: :native
      }}
   end
@@ -252,7 +253,8 @@ defmodule PtcRunner.Tool do
        name: name,
        function: &PtcRunner.Lisp.Runtime.String.grep_n/2,
        signature: "(pattern :string, text :string) -> [{line :int, text :string}]",
-       description: "Return matching lines with 1-based line numbers (case-insensitive regex)",
+       description:
+         "Return matching lines with 1-based line numbers from text string, not a filename (case-insensitive regex)",
        type: :native
      }}
   end

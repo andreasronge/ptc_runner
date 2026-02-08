@@ -402,6 +402,27 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       assert step.return == ["error: bad"]
     end
+
+    test "user-defined tool with same name takes precedence over builtin", %{table: _table} do
+      custom_grep = fn args -> "custom:#{args["pattern"]}" end
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"grep" => custom_grep},
+          grep_tools: true,
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|(return (tool/grep {:pattern "test" :text "ignored"}))|}
+      end
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      # User's custom "grep" should win over the builtin
+      assert step.return == "custom:test"
+    end
   end
 
   describe "tool events" do
