@@ -73,7 +73,6 @@ defmodule PageIndex.FineIndexer do
         |> String.downcase()
         |> String.replace(~r/[^a-z0-9]+/, "_")
         |> String.trim("_")
-        |> String.slice(0, 30)
       end
 
     if parent_path == [] do
@@ -84,7 +83,6 @@ defmodule PageIndex.FineIndexer do
         |> List.last()
         |> String.downcase()
         |> String.replace(~r/[^a-z0-9]+/, "_")
-        |> String.slice(0, 15)
 
       "#{parent_id}_#{base}"
     end
