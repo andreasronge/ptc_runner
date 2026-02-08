@@ -120,7 +120,20 @@ defmodule PageIndex.Retriever do
         prompt: prompt,
         signature:
           "(query :string) -> {answer :string, sources [{node_id :string, pages :string}]}",
-        tools: %{"get-content" => get_content, "grep-content" => grep_content},
+        tools: %{
+          "get-content" =>
+            {get_content,
+             signature:
+               "(node_id :string, offset :int) -> {node_id :string, title :string, pages :string, content :string, total_chars :int, offset :int, truncated :bool, hint :string}",
+             description:
+               "Fetch content from a document section by ID. Use offset for pagination when truncated is true."},
+          "grep-content" =>
+            {grep_content,
+             signature:
+               "(node_id :string, pattern :string) -> {node_id :string, total_chars :int, pattern :string, matches [{offset :int, context :string, hint :string}]}",
+             description:
+               "Search a section for a keyword or phrase. Returns up to 5 matches with context."}
+        },
         max_turns: max_turns,
         timeout: 30_000
       )
