@@ -212,6 +212,38 @@ defmodule PtcRunner.TraceLog.HandlerTest do
     end
   end
 
+  describe "telemetry_span_context stripping" do
+    test "strips telemetry_span_context from metadata before writing", %{tmp_dir: dir} do
+      path = Path.join(dir, "test.jsonl")
+      {:ok, collector} = Collector.start_link(path: path, trace_id: "test-trace")
+
+      Process.put(:ptc_trace_collectors, [collector])
+
+      config = %{collector: collector, trace_id: "test-trace", meta: %{}}
+
+      # Include a telemetry_span_context (Erlang reference) in metadata
+      Handler.handle_event(
+        [:ptc_runner, :sub_agent, :llm, :stop],
+        %{duration: 1000},
+        %{agent: %{name: "test"}, telemetry_span_context: make_ref()},
+        config
+      )
+
+      Process.sleep(10)
+
+      {:ok, ^path, 0} = Collector.stop(collector)
+
+      content = File.read!(path)
+      lines = String.split(content, "\n", trim: true)
+      event = Jason.decode!(Enum.at(lines, 1))
+
+      # telemetry_span_context should not appear in the trace
+      refute Map.has_key?(event["metadata"], "telemetry_span_context")
+    after
+      Process.delete(:ptc_trace_collectors)
+    end
+  end
+
   describe "events/0" do
     test "returns list of telemetry events" do
       events = Handler.events()

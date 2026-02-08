@@ -235,6 +235,28 @@ defmodule PtcRunner.Tool do
      }}
   end
 
+  defp normalize_format(name, :builtin_grep) do
+    {:ok,
+     %__MODULE__{
+       name: name,
+       function: &PtcRunner.Lisp.Runtime.String.grep/2,
+       signature: "(pattern :string, text :string) -> [:string]",
+       description: "Return lines matching pattern (case-insensitive regex)",
+       type: :native
+     }}
+  end
+
+  defp normalize_format(name, :builtin_grep_n) do
+    {:ok,
+     %__MODULE__{
+       name: name,
+       function: &PtcRunner.Lisp.Runtime.String.grep_n/2,
+       signature: "(pattern :string, text :string) -> [{line :int, text :string}]",
+       description: "Return matching lines with 1-based line numbers (case-insensitive regex)",
+       type: :native
+     }}
+  end
+
   defp normalize_format(name, :builtin_llm_query) do
     {:ok,
      %__MODULE__{
