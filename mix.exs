@@ -54,7 +54,8 @@ defmodule PtcRunner.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:kino, "~> 0.14", optional: true},
-      {:llm_client, path: "llm_client", only: [:test, :dev]}
+      {:llm_client, path: "llm_client", only: [:test, :dev]},
+      {:usage_rules, "~> 0.1", only: :dev, runtime: false}
     ]
   end
 
@@ -151,7 +152,8 @@ defmodule PtcRunner.MixProject do
 
   defp package do
     [
-      files: ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/prompts),
+      files:
+        ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/prompts usage-rules.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

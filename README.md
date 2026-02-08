@@ -7,6 +7,7 @@
 [![License](https://img.shields.io/hexpm/l/ptc_runner.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue.svg)](https://github.com/andreasronge/ptc_runner)
 [![Run in Livebook](https://img.shields.io/badge/Run_in-Livebook-purple)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
+[![REUSE status](https://api.reuse.software/badge/github.com/ash-project/usage_rules)](https://api.reuse.software/info/github.com/ash-project/usage_rules)
 
 Build LLM agents that write and execute programs. SubAgents combine the reasoning power of LLMs with the computational precision of a sandboxed interpreter.
 

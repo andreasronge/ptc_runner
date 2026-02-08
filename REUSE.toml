@@ -1,0 +1,56 @@
+version = 1
+
+[[annotations]]
+path = ["**/*.ex", "**/*.exs", "**/*.erl"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.md", "**/*.livemd"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/.gitignore", "**/.credo.exs", "**/.formatter.exs", "**/.env*", "**/.gitkeep"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["LICENSE", "LICENSES/**"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["priv/**", "scripts/**"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["livebooks/**"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.lock", "mix.exs"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.sh", "**/*.txt", "**/*.log", "**/*.clj"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.hex", "**/hex_metadata.config", "**/NOTICE"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.hrl", "**/*.app.src", "**/rebar.config", "**/rebar.lock", "**/*.dag"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
