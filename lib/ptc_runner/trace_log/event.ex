@@ -117,13 +117,25 @@ defmodule PtcRunner.TraceLog.Event do
     end
   end
 
+  # Keys whose string values should never be truncated
+  @preserve_full_keys ~w(system_prompt)
+
   def sanitize(value) when is_map(value) do
     if is_struct(value) do
       value
       |> Map.from_struct()
       |> sanitize()
     else
-      Map.new(value, fn {k, v} -> {sanitize_key(k), sanitize(v)} end)
+      Map.new(value, fn {k, v} ->
+        sk = sanitize_key(k)
+
+        sv =
+          if is_binary(sk) and sk in @preserve_full_keys and is_binary(v),
+            do: v,
+            else: sanitize(v)
+
+        {sk, sv}
+      end)
     end
   end
 

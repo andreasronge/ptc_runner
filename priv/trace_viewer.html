@@ -146,7 +146,6 @@
     .event-card.tool { border-left-color: var(--warning); }
     .event-card.pmap { border-left-color: var(--keyword); }
     .event-card.task { border-left-color: var(--success); }
-    .event-card.turn { border-left-color: var(--success); }
     .event-card.error { border-left-color: var(--error); }
 
     .event-header {
@@ -182,7 +181,6 @@
     .event-icon.tool { background: rgba(220, 220, 170, 0.2); color: var(--warning); }
     .event-icon.pmap { background: rgba(197, 134, 192, 0.2); color: var(--keyword); }
     .event-icon.task { background: rgba(78, 201, 176, 0.2); color: var(--success); }
-    .event-icon.turn { background: rgba(78, 201, 176, 0.2); color: var(--success); }
 
     .event-title { flex: 1; font-weight: 500; }
     .event-meta { color: var(--muted); font-size: 12px; display: flex; gap: 16px; }
@@ -803,7 +801,6 @@
     <button class="tab" data-filter="tool">Tools</button>
     <button class="tab" data-filter="pmap">Parallel</button>
     <button class="tab" data-filter="task">Tasks</button>
-    <button class="tab" data-filter="turn">Turns</button>
   </div>
 
   <div class="events" id="events"></div>
@@ -1050,12 +1047,18 @@
     }
 
     function renderEvents(pairs) {
-      const displayableTypes = ['turn', 'llm', 'tool', 'pmap', 'pcalls', 'task'];
+      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls', 'task'];
+      // Build turn lookup: turn number -> turn pair (for merging into LLM cards)
+      const turnByNum = {};
+      pairs.filter(p => p.type === 'turn').forEach(p => {
+        const num = p.stop?.metadata?.turn || p.start?.metadata?.turn;
+        if (num) turnByNum[num] = p;
+      });
       let filtered = pairs.filter(p => displayableTypes.includes(p.type));
       if (currentFilter !== 'all') {
         filtered = filtered.filter(p => p.type === currentFilter);
       }
-      eventsContainer.innerHTML = filtered.map(pair => renderEventCard(pair)).join('');
+      eventsContainer.innerHTML = filtered.map(pair => renderEventCard(pair, turnByNum)).join('');
 
       // Add click handlers
       eventsContainer.querySelectorAll('.event-header').forEach(header => {
@@ -1072,7 +1075,7 @@
       });
     }
 
-    function renderEventCard(pair) {
+    function renderEventCard(pair, turnByNum) {
       const { type, start, stop } = pair;
       const duration = stop?.duration_ms || 0;
       const tokens = stop?.measurements?.tokens || stop?.metadata?.tokens || 0;
@@ -1088,15 +1091,6 @@
         icon = '🤖';
         meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
         meta.push(`<span>📊 ${formatTokenBreakdown(stop?.measurements)}</span>`);
-      } else if (type === 'turn') {
-        const turnNum = stop?.metadata?.turn || start?.metadata?.turn || '?';
-        const turnType = stop?.metadata?.type;
-        title = `Turn ${turnNum}`;
-        if (turnType && turnType !== 'normal') title += ` (${turnType})`;
-        icon = '🔄';
-        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
-        const turnTokenStr = formatTokenBreakdown(stop?.measurements);
-        if (turnTokenStr) meta.push(`<span>📊 ${turnTokenStr}</span>`);
       } else if (type === 'tool') {
         title = stop?.metadata?.tool_name || 'Tool';
         icon = '🔧';
@@ -1134,6 +1128,21 @@
         const thinking = extractThinking(response);
         const program = extractProgram(response);
         const prompt = getLastUserMessage(start?.metadata?.messages);
+        const systemPrompt = start?.metadata?.system_prompt;
+
+        if (systemPrompt) {
+          const previewLen = 120;
+          const preview = systemPrompt.length > previewLen
+            ? escapeHtml(systemPrompt.slice(0, previewLen)) + '...'
+            : escapeHtml(systemPrompt);
+          bodyContent += `
+            <div class="event-section">
+              <details class="system-prompt-details">
+                <summary class="event-section-title" style="cursor: pointer; list-style: none;">🔧 System Prompt <span style="color: var(--muted); font-size: 11px;">(${(systemPrompt.length / 1024).toFixed(1)}KB — click to expand)</span></summary>
+                <div class="code-block" style="max-height: 600px; overflow-y: auto; border-left: 2px solid var(--accent); white-space: pre-wrap;">${escapeHtml(systemPrompt)}</div>
+              </details>
+            </div>`;
+        }
 
         if (thinking) {
           bodyContent += `
@@ -1153,33 +1162,55 @@
 
         if (prompt) {
           const isStub = /^String\(\d+ bytes\)$/.test(prompt);
-          const promptLabel = isStub ? '📨 Prompt (not captured — re-run with updated tracer)' : '📨 Prompt';
-          bodyContent += `
-            <div class="event-section">
-              <div class="event-section-title">${promptLabel}</div>
-              <div class="code-block" style="max-height: 300px; overflow-y: auto;">${isStub ? `<span style="color: var(--muted)">${escapeHtml(prompt)}</span>` : escapeHtml(truncate(prompt, 2000))}</div>
-            </div>`;
+          if (isStub) {
+            bodyContent += `
+              <div class="event-section">
+                <div class="event-section-title">📨 Prompt <span style="color: var(--muted); font-size: 11px;">(not captured — re-run with updated tracer)</span></div>
+                <div class="code-block"><span style="color: var(--muted)">${escapeHtml(prompt)}</span></div>
+              </div>`;
+          } else if (turn > 1) {
+            // Turn 2+ prompts are error/result feedback — show collapsed
+            bodyContent += `
+              <div class="event-section">
+                <details>
+                  <summary class="event-section-title" style="cursor: pointer; list-style: none;">📨 Feedback from Turn ${turn - 1} <span style="color: var(--muted); font-size: 11px;">(click to expand)</span></summary>
+                  <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(prompt, 2000))}</div>
+                </details>
+              </div>`;
+          } else {
+            bodyContent += `
+              <div class="event-section">
+                <div class="event-section-title">📨 Prompt</div>
+                <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(prompt, 2000))}</div>
+              </div>`;
+          }
         }
-      }
 
-      // Turn specific content — result preview and prints
-      if (type === 'turn') {
-        const resultPreview = stop?.metadata?.result_preview;
-        if (resultPreview && resultPreview !== 'nil') {
-          bodyContent += `
-            <div class="event-section">
-              <div class="event-section-title">📤 Result</div>
-              <div class="code-block">${escapeHtml(resultPreview)}</div>
-            </div>`;
-        }
+        // Merge matching turn data (result, prints) into LLM card
+        const turnPair = turnByNum && turnByNum[turn];
+        if (turnPair) {
+          const turnStop = turnPair.stop?.metadata || {};
 
-        const prints = stop?.metadata?.prints;
-        if (Array.isArray(prints) && prints.length > 0) {
-          bodyContent += `
-            <div class="event-section">
-              <div class="event-section-title">🖨 Output (${prints.length})</div>
-              <div class="code-block" style="max-height: 300px; overflow-y: auto;">${prints.map(p => escapeHtml(p)).join('\n')}</div>
-            </div>`;
+          const resultPreview = turnStop.result_preview;
+          if (resultPreview && resultPreview !== 'nil') {
+            const isError = resultPreview.includes('Error:') || resultPreview.includes(':error');
+            const titleIcon = isError ? '❌' : '📤';
+            const titleText = isError ? 'Error' : 'Result';
+            bodyContent += `
+              <div class="event-section">
+                <div class="event-section-title">${titleIcon} ${titleText}</div>
+                <div class="code-block"${isError ? ' style="border-left: 2px solid var(--error);"' : ''}>${escapeHtml(resultPreview)}</div>
+              </div>`;
+          }
+
+          const prints = turnStop.prints;
+          if (Array.isArray(prints) && prints.length > 0) {
+            bodyContent += `
+              <div class="event-section">
+                <div class="event-section-title">🖨 Output (${prints.length})</div>
+                <div class="code-block" style="max-height: 300px; overflow-y: auto;">${prints.map(p => escapeHtml(p)).join('\n')}</div>
+              </div>`;
+          }
         }
       }
 
