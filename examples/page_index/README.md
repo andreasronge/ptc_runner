@@ -165,6 +165,92 @@ All agent programs are written in PTC-Lisp by the LLM. Below are real examples f
 
 Note: The current benchmark questions are mostly retrieval-heavy — the LLM needs to find the right sections and extract data, but rarely needs complex computation. Only Q3 ("Is 3M capital-intensive?") triggers ratio calculations. Most programs are tool calls, pagination, and structured returns. More computation-heavy questions (e.g., multi-year trend analysis, cross-document comparisons) would exercise the PTC-Lisp arithmetic more heavily.
 
+## Example: MetaPlanner Generated Plan
+
+In planner mode, `PlanExecutor.run/2` sends a **mission** (the question + a list of available document sections with summaries) and **constraints** (the required JSON structure with one example plan) to the LLM. The LLM generates the entire plan — agent definitions, prompts, task decomposition, signatures, dependencies, and verification expressions — from scratch each time. The only guidance is:
+
+- Use a `document_analyst` agent (with `fetch_section`/`grep_section` tools) for data extraction
+- Use `(fail "reason")` when data isn't found
+- Create computation agents (no tools) if ratios or derived values are needed
+- End with a `synthesis_gate` task with id `"final_answer"`
+
+The agent prompts (e.g., "You are a quantitative analyst...") are **invented by the planner LLM**, not hardcoded. This means different questions produce different agent configurations — Q3 below gets a `calculator` agent, while Q2 (segment growth) gets a `growth_calculator` with a different prompt.
+
+Below is a real plan generated for Q3: *"Is 3M a capital-intensive business based on FY2022 data?"* The four `fetch_*` tasks have no dependencies and run in parallel. The `calculator` waits for all fetches, then computes ratios. The `synthesizer` produces the final answer.
+
+```json
+{
+  "agents": {
+    "calculator": {
+      "prompt": "You are a quantitative analyst. Extract numeric values into let bindings and use arithmetic expressions (/, *, +, -) to compute ratios. Do NOT calculate values mentally — write the expressions and let the interpreter compute them.",
+      "tools": []
+    },
+    "document_analyst": {
+      "prompt": "You are a data extraction agent. Use grep_section first to locate keywords, then fetch_section at the returned offset. When truncated: true, paginate. If the data is not found, call (fail \"reason\").",
+      "tools": ["fetch_section", "grep_section"]
+    },
+    "synthesizer": {
+      "prompt": "You produce clear, evidence-based answers from structured data. For capital intensity questions, discuss the computed ratios and provide a definitive answer supported by the numbers.",
+      "tools": []
+    }
+  },
+  "tasks": [
+    {
+      "id": "fetch_balance_sheet",
+      "agent": "document_analyst",
+      "depends_on": [],
+      "input": "Fetch 'financial_state_consolidated_balance_sheet_at_' and extract: total PP&E (net) and total assets for FY2022.",
+      "signature": "{ppe_net_2022 :float, total_assets_2022 :float, page :int}"
+    },
+    {
+      "id": "fetch_cash_flow",
+      "agent": "document_analyst",
+      "depends_on": [],
+      "input": "Fetch 'financial_state_consolidated_statement_of_cash' and extract: capital expenditures for FY2022, FY2021, and FY2020.",
+      "signature": "{capex_2022 :float, capex_2021 :float, capex_2020 :float, page :int}"
+    },
+    {
+      "id": "fetch_income_statement",
+      "agent": "document_analyst",
+      "depends_on": [],
+      "input": "Fetch 'financial_state_consolidated_statement_of_inco' and extract: total net sales for FY2022, FY2021, and FY2020.",
+      "signature": "{revenue_2022 :float, revenue_2021 :float, revenue_2020 :float, page :int}"
+    },
+    {
+      "id": "fetch_depreciation",
+      "agent": "document_analyst",
+      "depends_on": [],
+      "input": "Fetch 'notes_to_consol_note_7_supplemental_balance_sh' and extract: depreciation expense for FY2022.",
+      "signature": "{depreciation_2022 :float, page :int}"
+    },
+    {
+      "id": "compute_capital_intensity_metrics",
+      "agent": "calculator",
+      "depends_on": ["fetch_balance_sheet", "fetch_cash_flow", "fetch_income_statement", "fetch_depreciation"],
+      "input": "Calculate: (1) capex/revenue %, (2) PP&E/assets %, (3) avg capex/revenue over 2020-2022, (4) depreciation/revenue %",
+      "output": "ptc_lisp",
+      "signature": "{capex_to_revenue_2022_pct :float, ppe_to_assets_2022_pct :float, avg_capex_to_revenue_pct :float}",
+      "verification": "(and (number? (get data/result \"capex_to_revenue_2022_pct\")) (number? (get data/result \"ppe_to_assets_2022_pct\")))"
+    },
+    {
+      "id": "final_answer",
+      "type": "synthesis_gate",
+      "agent": "synthesizer",
+      "depends_on": ["compute_capital_intensity_metrics", "fetch_balance_sheet", "fetch_cash_flow", "fetch_income_statement"],
+      "input": "Based on the computed metrics, determine whether 3M is a capital-intensive business. Provide a clear yes/no answer with supporting evidence.",
+      "signature": "{is_capital_intensive :bool, rationale :string, key_metrics {capex_to_revenue_pct :float, ppe_to_assets_pct :float}}"
+    }
+  ]
+}
+```
+
+Key plan features:
+- **Parallel fetches**: the four `fetch_*` tasks have `depends_on: []` and execute concurrently
+- **Typed signatures**: each task declares its output shape so downstream tasks know what to expect
+- **Verification expressions**: PTC-Lisp predicates that validate task results before passing them downstream
+- **`output: "ptc_lisp"`**: tells the calculator agent to write a PTC-Lisp program rather than free-text
+- **`synthesis_gate`**: marks `final_answer` as the terminal task — the plan succeeds when it returns
+
 ## Architecture
 
 ```
@@ -185,12 +271,73 @@ The iterative mode addresses limitations of the other modes:
 - **Agent mode** conflates fetching, extraction, reasoning, and synthesis in one agent. Raw PDF text accumulates in context across turns (~80k tokens).
 - **Planner mode** predicts which sections to fetch upfront before seeing any data, leading to brittle plans and harmful quality gate rejections.
 
-The iterative approach separates concerns:
+The iterative approach separates extraction from reasoning using two agents in a loop:
 
-1. **Extraction agent** (multi-turn, has tools): fetches sections guided by a "shopping item" and returns structured findings with provenance `{label, value, unit, page, section, context}`.
-2. **Synthesis agent** (single-turn, no tools): evaluates findings, performs computations, and either returns an answer, requests one more item, or declares failure.
+```
+Loop state: findings [] + failed_searches []
 
-Each extraction starts with a fresh context (no accumulated raw text). Only structured findings survive between iterations. Failed searches are tracked to prevent loops.
+         ┌───────────────────────--──────────────┐
+         │        Loop (max 4 iterations)        │
+         │                                       │
+         │  ┌──────────────┐   ┌─────────────┐   │
+ shopping │  │  Extraction │──→│  Synthesis  │   │
+   item ──│─→│    Agent    │   │    Agent    │   │
+         │  └──────────────┘   └─────────────┘   │
+         │   multi-turn,         single-turn,    │
+         │   has tools           no tools        │
+         │                         │             │
+         │              "answer" ──│──→ done     │
+         │              "needs"  ──│──→ next iter │
+         │              "fail"   ──│──→ done     │
+         └──────────────────────────────────────┘
+```
+
+**Extraction agent** (multi-turn SubAgent, up to 10 turns):
+- **Input**: a "shopping item" (what to search for) + the original question + section index
+- **Tools**: `fetch_section`, `grep_section` — same pagination and fuzzy matching as other modes
+- **Output**: structured findings list, each with `{label, value, unit, page, section, context}`
+- **On failure**: `(fail "reason")` — recorded in `failed_searches` so the synthesis agent knows what was already tried
+- **Context**: fresh each iteration — no conversation history from previous rounds
+
+Signature:
+
+```
+(shopping_item :string, question :string) ->
+  {findings    [{label :string, value :any, unit :string,
+                 page :any, section :string, context :string}],
+   sections_searched [:string]}
+```
+
+The prompt instructs the agent to extract ALL relevant data points (not just the shopping item target), use raw numeric values, always note the scale from table headers, and paginate truncated sections rather than guessing from partial data. The `context` field captures what each value represents so the synthesis agent can reason about it without seeing the raw PDF text.
+
+**Synthesis agent** (single-turn SubAgent, no tools):
+- **Input**: the question + all accumulated findings (formatted as a numbered list) + all failed searches
+- **Output**: one of three statuses:
+  - `"answer"` — sufficient data, returns the answer with cited page numbers
+  - `"needs"` — requests one specific next shopping item (e.g., "Consumer segment operating income for 2022")
+  - `"fail"` — data genuinely insufficient, no alternative paths
+- **Key property**: never sees raw PDF text — only the structured findings from extraction agents
+
+Signature:
+
+```
+{status :string, answer :string, sources [:string],
+ confidence :string, needs :string, reason :string}
+```
+
+The prompt tells the synthesis agent to perform computations itself using the findings values (checking unit consistency), to be specific in `needs` requests (not vague "segment data" but "Consumer segment operating income for 2022"), and to never repeat a failed search. On the final iteration, a `last_chance` flag instructs it to answer with whatever data is available rather than requesting more.
+
+Unlike the planner mode, both prompts are **hardcoded** — there is no planning LLM that invents agents or task structure. The loop logic is in Elixir code (`Enum.reduce_while`), not generated by an LLM.
+
+**Loop flow**:
+1. Initial shopping item is the question itself
+2. Extraction agent fetches sections, returns findings with provenance
+3. Synthesis agent evaluates: answer, request more data, or fail
+4. If "needs": the requested item becomes the next shopping item, loop continues
+5. Findings accumulate across iterations (append-only), failed searches are tracked
+6. On max iterations: one final "last chance" synthesis attempt with all collected data
+
+This design keeps token costs moderate (~15-25k vs ~80k for agent mode) because raw PDF text is discarded after each extraction — only the structured findings survive.
 
 ## Known Limitation: Planner Interpretation Instability
 
