@@ -134,6 +134,23 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
                    :not
                  ])
 
+  # Common Clojure/Java functions that don't exist in PTC-Lisp, with alternatives
+  @clojure_alternatives %{
+    "format" => "use str and arithmetic, e.g. (str (* 100.0 (/ a b)) \"%\")",
+    "subvec" => "use (take n (drop m coll))",
+    "keep-indexed" => "use (filter pred (map-indexed vector coll))",
+    "frequencies" => "use (reduce (fn [acc x] (update acc x (fnil inc 0))) {} coll)",
+    "group-by" => "use (reduce (fn [acc x] (update acc (f x) (fnil conj []) x)) {} coll)",
+    "zipmap" => "use (into {} (map vector keys vals))",
+    "re-find" => "use grep for line matching, or (re-pattern \"...\") with re-find",
+    "re-seq" => "use (re-seq (re-pattern \"...\") text) — requires compiled regex",
+    "printf" => "use println with str",
+    "spit" => "not available — no file I/O",
+    "slurp" => "not available — no file I/O",
+    "require" => "not available — no namespace loading",
+    "import" => "not available — no Java interop"
+  }
+
   @doc """
   Formats closure errors with helpful messages.
   """
@@ -145,6 +162,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       # Check if it's a special form used without parentheses
       MapSet.member?(@special_forms, name) ->
         "Undefined variable: #{var_str}. Hint: '#{var_str}' is a special form, use (#{var_str} ...) with parentheses"
+
+      # Check for common Clojure/Java functions not in PTC-Lisp
+      alt = Map.get(@clojure_alternatives, var_str) ->
+        "Undefined variable: #{var_str}. Not available in PTC-Lisp — #{alt}"
 
       # Check for common underscore/hyphen confusion
       String.contains?(var_str, "_") ->

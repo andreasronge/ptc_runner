@@ -37,10 +37,10 @@ defmodule PtcRunner.Lisp.Runtime.StringGrepTest do
       assert Runtime.grep("error", text) == ["error: win", "error: unix"]
     end
 
-    test "case sensitive matching" do
-      text = "Error: big\nerror: small"
-      assert Runtime.grep("error", text) == ["error: small"]
-      assert Runtime.grep("Error", text) == ["Error: big"]
+    test "case insensitive matching by default" do
+      text = "Error: big\nerror: small\nINFO: ok"
+      assert Runtime.grep("error", text) == ["Error: big", "error: small"]
+      assert Runtime.grep("info", text) == ["INFO: ok"]
     end
 
     test "string pattern is treated as regex" do
