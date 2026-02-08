@@ -86,9 +86,6 @@ defmodule PageIndex.Retriever do
       end
     end
 
-    # Tool to search section content for keywords
-    grep_content = make_grep_tool(nodes, pdf_path)
-
     prompt = """
     Answer the question using the document sections listed below.
 
@@ -101,11 +98,14 @@ defmodule PageIndex.Retriever do
     1. Read the summaries and identify 2-4 sections most likely to answer the question
     2. Fetch each relevant section using: (tool/get-content {:node_id "the_node_id"})
     3. Read the fetched content carefully
-    3b. PAGINATION: If you are looking for a table or specific data and a fetch result
-        shows `truncated: true`, you MUST call get-content again with the same node_id
-        and the offset from the hint. Do not guess data from partial tables.
-        For large sections, use grep-content first to find where specific data appears,
-        then use get-content with the offset.
+    3b. PAGINATION: If a fetch result has `truncated: true`, call get-content again with
+        the same node_id and the offset from the hint. Do not guess data from partial tables.
+    3c. SEARCHING: Use built-in `grep` / `grep-n` to search within fetched content:
+        ```
+        (def section (tool/get-content {:node_id "some_section"}))
+        (grep "revenue|sales" (:content section))    ; => ["Net sales 34,229 35,355" ...]
+        (grep-n "revenue" (:content section))        ; => [{:line 5 :text "Net sales ..."}]
+        ```
     4. Synthesize a comprehensive answer using facts from the content
     5. Return your answer with the sources used
 
@@ -126,13 +126,7 @@ defmodule PageIndex.Retriever do
              signature:
                "(node_id :string, offset :int) -> {node_id :string, title :string, pages :string, content :string, total_chars :int, offset :int, truncated :bool, hint :string}",
              description:
-               "Fetch content from a document section by ID. Use offset for pagination when truncated is true."},
-          "grep-content" =>
-            {grep_content,
-             signature:
-               "(node_id :string, pattern :string) -> {node_id :string, total_chars :int, pattern :string, matches [{offset :int, context :string, hint :string}]}",
-             description:
-               "Search a section for a keyword or phrase. Returns up to 5 matches with context."}
+               "Fetch content from a document section by ID. Use offset for pagination when truncated is true."}
         },
         max_turns: max_turns,
         timeout: 30_000
@@ -191,105 +185,6 @@ defmodule PageIndex.Retriever do
 
     IO.puts("Generating answer...")
     generate_answer(query, contents, llm)
-  end
-
-  defp make_grep_tool(nodes, pdf_path) do
-    fn args ->
-      query = args["node_id"] || args[:node_id] || ""
-      pattern = args["pattern"] || args[:pattern] || ""
-
-      node = Enum.find(nodes, fn n -> n.node_id == query end)
-
-      node =
-        node ||
-          Enum.max_by(
-            nodes,
-            fn n ->
-              query_lower = String.downcase(query)
-              words = String.split(query_lower, ~r/[\s_]+/)
-
-              Enum.count(words, fn w ->
-                String.contains?(String.downcase(n.node_id), w) or
-                  String.contains?(String.downcase(n.title), w)
-              end)
-            end,
-            fn -> nil end
-          )
-
-      if node do
-        case PageIndex.get_content(pdf_path, node.start_page, node.end_page) do
-          {:ok, content} ->
-            matches = find_pattern_matches(content, pattern)
-
-            %{
-              node_id: node.node_id,
-              total_chars: String.length(content),
-              pattern: pattern,
-              matches: Enum.take(matches, 5)
-            }
-
-          {:error, reason} ->
-            %{error: inspect(reason)}
-        end
-      else
-        %{error: "No match for '#{query}'."}
-      end
-    end
-  end
-
-  defp find_pattern_matches(content, pattern) do
-    content_lower = String.downcase(content)
-
-    if String.contains?(pattern, "|") or String.contains?(pattern, ".*") do
-      find_regex_matches(content, content_lower, pattern)
-    else
-      pattern_lower = String.downcase(pattern)
-      find_all_positions(content, content_lower, pattern_lower, 0, [])
-    end
-  end
-
-  defp find_regex_matches(content, content_lower, pattern) do
-    case Regex.compile(String.downcase(pattern), "i") do
-      {:ok, regex} ->
-        Regex.scan(regex, content_lower, return: :index)
-        |> Enum.map(fn [{pos, _len} | _] ->
-          ctx_start = max(0, pos - 40)
-          ctx = String.slice(content, ctx_start, 120)
-
-          %{
-            offset: pos,
-            context: ctx,
-            hint: "Use get-content with offset: #{max(0, pos - 200)} to read around this match."
-          }
-        end)
-
-      {:error, _} ->
-        find_all_positions(content, content_lower, String.downcase(pattern), 0, [])
-    end
-  end
-
-  defp find_all_positions(_content, content_lower, _pattern, start, acc)
-       when start >= byte_size(content_lower) do
-    Enum.reverse(acc)
-  end
-
-  defp find_all_positions(content, content_lower, pattern, start, acc) do
-    case :binary.match(content_lower, pattern, scope: {start, byte_size(content_lower) - start}) do
-      {pos, _len} ->
-        ctx_start = max(0, pos - 40)
-        ctx = String.slice(content, ctx_start, 120)
-
-        match = %{
-          offset: pos,
-          context: ctx,
-          hint: "Use get-content with offset: #{max(0, pos - 200)} to read around this match."
-        }
-
-        find_all_positions(content, content_lower, pattern, pos + 1, [match | acc])
-
-      :nomatch ->
-        Enum.reverse(acc)
-    end
   end
 
   defp flatten_tree(tree, acc \\ []) do
