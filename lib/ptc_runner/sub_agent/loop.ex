@@ -540,9 +540,19 @@ defmodule PtcRunner.SubAgent.Loop do
       if must_return_mode do
         []
       else
-        if agent.llm_query,
-          do: ["llm-query" | base_tool_names],
-          else: base_tool_names
+        names = base_tool_names
+
+        names =
+          if agent.llm_query,
+            do: ["llm-query" | names],
+            else: names
+
+        names =
+          if agent.grep_tools,
+            do: ["grep", "grep-n" | names],
+            else: names
+
+        names
       end
 
     llm_input = %{
@@ -615,7 +625,16 @@ defmodule PtcRunner.SubAgent.Loop do
   # Call LLM with telemetry wrapper
   defp call_llm_with_telemetry(llm, input, state, agent) do
     slim = slim_agent(agent)
+
     start_meta = %{agent: slim, turn: state.turn, messages: input.messages, model: agent.llm}
+
+    # Include system prompt only on first turn (avoids duplicating ~14K in every trace event)
+    start_meta =
+      if state.turn == 1 and input.system do
+        Map.put(start_meta, :system_prompt, input.system)
+      else
+        start_meta
+      end
 
     Telemetry.span([:llm], start_meta, fn ->
       result = LLMRetry.call_with_retry(llm, input, state.llm_registry, state.llm_retry)
@@ -703,11 +722,18 @@ defmodule PtcRunner.SubAgent.Loop do
         state.context
       end
 
-    # Inject builtin llm-query tool if enabled
+    # Inject builtin tools when enabled
+    tools = agent.tools
+
     tools =
       if agent.llm_query,
-        do: Map.put(agent.tools, "llm-query", :builtin_llm_query),
-        else: agent.tools
+        do: Map.put(tools, "llm-query", :builtin_llm_query),
+        else: tools
+
+    tools =
+      if agent.grep_tools,
+        do: tools |> Map.put("grep", :builtin_grep) |> Map.put("grep-n", :builtin_grep_n),
+        else: tools
 
     # Normalize SubAgentTool instances to functions with telemetry
     normalized_tools = ToolNormalizer.normalize(tools, state, agent)

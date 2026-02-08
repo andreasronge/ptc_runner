@@ -315,6 +315,93 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       assert is_integer(stop_measurements.duration)
       assert stop_measurements.tokens == 75
     end
+
+    test "includes per-turn token breakdown in :turn :stop measurements", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok,
+         %{
+           content: ~S|(return {:done true})|,
+           tokens: %{input: 100, output: 25, cache_creation: 50, cache_read: 30}
+         }}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      [{_, stop_measurements, _stop_meta, _}] =
+        get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+
+      assert stop_measurements.input_tokens == 100
+      assert stop_measurements.output_tokens == 25
+      assert stop_measurements.cache_creation_tokens == 50
+      assert stop_measurements.cache_read_tokens == 30
+      assert stop_measurements.tokens == 125
+    end
+
+    test "includes prints in :turn :stop metadata", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 2)
+
+      llm = fn _ ->
+        {:ok, ~S|(do (println "hello") (return {:done true}))|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      [{_, _measurements, stop_meta, _}] =
+        get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
+
+      assert stop_meta.prints == ["hello"]
+    end
+
+    test "includes system_prompt only in first llm.start event", %{table: table} do
+      agent = SubAgent.new(prompt: "Test", tools: %{}, max_turns: 3)
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, ~S|(+ 1 1)|}
+          _ -> {:ok, ~S|(return {:done true})|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      llm_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :llm, :start])
+      assert length(llm_starts) == 2
+
+      [{_, _, first_meta, _}, {_, _, second_meta, _}] =
+        Enum.sort_by(llm_starts, fn {_, _, meta, _} -> meta.turn end)
+
+      # First turn includes system_prompt
+      assert is_binary(first_meta.system_prompt)
+      assert String.length(first_meta.system_prompt) > 0
+
+      # Second turn does not
+      refute Map.has_key?(second_meta, :system_prompt)
+    end
+  end
+
+  describe "grep tools" do
+    test "grep_tools option makes grep and grep-n available as tools", %{table: _table} do
+      agent =
+        SubAgent.new(
+          prompt: "Search for errors in {{log}}",
+          grep_tools: true,
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|(return (tool/grep {:pattern "error" :text data/log}))|}
+      end
+
+      {:ok, step} =
+        SubAgent.run(agent,
+          llm: llm,
+          context: %{log: "line1\nerror: bad\nline3"}
+        )
+
+      assert step.return == ["error: bad"]
+    end
   end
 
   describe "tool events" do

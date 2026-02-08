@@ -49,6 +49,14 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   @spec normalize(map(), map(), SubAgent.t()) :: map()
   def normalize(tools, state, agent) when is_map(tools) do
     Map.new(tools, fn
+      {name, :builtin_grep} ->
+        wrapped = wrap_builtin_grep()
+        {name, wrap_with_telemetry(name, wrapped, agent)}
+
+      {name, :builtin_grep_n} ->
+        wrapped = wrap_builtin_grep_n()
+        {name, wrap_with_telemetry(name, wrapped, agent)}
+
       {name, :builtin_llm_query} ->
         wrapped = wrap_builtin_llm_query(name, state)
         {name, wrap_with_telemetry(name, wrapped, agent)}
@@ -468,6 +476,24 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   # Generate a 32-character hex trace ID
   defp generate_trace_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  # Wrap builtin grep tool — delegates to Runtime.String.grep/2
+  defp wrap_builtin_grep do
+    fn args ->
+      pattern = Map.get(args, "pattern", "")
+      text = Map.get(args, "text", "")
+      PtcRunner.Lisp.Runtime.String.grep(pattern, text)
+    end
+  end
+
+  # Wrap builtin grep-n tool — delegates to Runtime.String.grep_n/2
+  defp wrap_builtin_grep_n do
+    fn args ->
+      pattern = Map.get(args, "pattern", "")
+      text = Map.get(args, "text", "")
+      PtcRunner.Lisp.Runtime.String.grep_n(pattern, text)
+    end
   end
 
   # Prune large fields from child step to keep the tree lightweight

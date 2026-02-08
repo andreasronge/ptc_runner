@@ -729,6 +729,7 @@
       <div class="summary-item">
         <div class="summary-value" id="summaryTokens">-</div>
         <div class="summary-label">Tokens</div>
+        <div id="summaryTokenBreakdown" style="font-size: 10px; color: var(--muted); margin-top: 2px;"></div>
       </div>
       <div class="summary-item" style="display: none;">
         <div class="summary-value" id="summaryTasks">-</div>
@@ -802,6 +803,7 @@
     <button class="tab" data-filter="tool">Tools</button>
     <button class="tab" data-filter="pmap">Parallel</button>
     <button class="tab" data-filter="task">Tasks</button>
+    <button class="tab" data-filter="turn">Turns</button>
   </div>
 
   <div class="events" id="events"></div>
@@ -902,6 +904,9 @@
       const traceStop = events.find(e => e.event === 'trace.stop');
       const totalDuration = execStop?.duration_ms || runStop?.duration_ms || traceStop?.duration_ms || 0;
       const totalTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
+      const totalInputTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.input_tokens || 0), 0);
+      const totalOutputTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.output_tokens || 0), 0);
+      const totalCacheRead = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.cache_read_tokens || 0), 0);
       const childIds = extractChildTraceIds(events);
 
       document.getElementById('summaryDuration').textContent = formatDuration(totalDuration);
@@ -910,6 +915,15 @@
       document.getElementById('summaryTurns').textContent = maxTurn;
       document.getElementById('summaryLLM').textContent = llmEvents.length;
       document.getElementById('summaryTokens').textContent = totalTokens.toLocaleString();
+      // Token breakdown subtitle
+      const breakdownEl = document.getElementById('summaryTokenBreakdown');
+      if (totalInputTokens || totalOutputTokens) {
+        let bd = `${formatTokens(totalInputTokens)} in / ${formatTokens(totalOutputTokens)} out`;
+        if (totalCacheRead > 0) bd += ` (${formatTokens(totalCacheRead)} cached)`;
+        breakdownEl.textContent = bd;
+      } else {
+        breakdownEl.textContent = '';
+      }
       // Task count from paired task events
       const taskEvents = paired.filter(e => e.type === 'task');
       const taskCountEl = document.getElementById('summaryTasks');
@@ -1036,8 +1050,7 @@
     }
 
     function renderEvents(pairs) {
-      // Filter out low-value structural events (turn, run) - their info is shown elsewhere
-      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls', 'task'];
+      const displayableTypes = ['turn', 'llm', 'tool', 'pmap', 'pcalls', 'task'];
       let filtered = pairs.filter(p => displayableTypes.includes(p.type));
       if (currentFilter !== 'all') {
         filtered = filtered.filter(p => p.type === currentFilter);
@@ -1074,11 +1087,16 @@
         title = `LLM Call${turn ? ` (Turn ${turn})` : ''}`;
         icon = '🤖';
         meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
-        if (tokens) meta.push(`<span>📊 ${tokens} tokens</span>`);
+        meta.push(`<span>📊 ${formatTokenBreakdown(stop?.measurements)}</span>`);
       } else if (type === 'turn') {
-        title = `Turn ${stop?.metadata?.turn_number || '?'}`;
+        const turnNum = stop?.metadata?.turn || start?.metadata?.turn || '?';
+        const turnType = stop?.metadata?.type;
+        title = `Turn ${turnNum}`;
+        if (turnType && turnType !== 'normal') title += ` (${turnType})`;
         icon = '🔄';
         meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+        const turnTokenStr = formatTokenBreakdown(stop?.measurements);
+        if (turnTokenStr) meta.push(`<span>📊 ${turnTokenStr}</span>`);
       } else if (type === 'tool') {
         title = stop?.metadata?.tool_name || 'Tool';
         icon = '🔧';
@@ -1140,6 +1158,27 @@
             <div class="event-section">
               <div class="event-section-title">${promptLabel}</div>
               <div class="code-block" style="max-height: 300px; overflow-y: auto;">${isStub ? `<span style="color: var(--muted)">${escapeHtml(prompt)}</span>` : escapeHtml(truncate(prompt, 2000))}</div>
+            </div>`;
+        }
+      }
+
+      // Turn specific content — result preview and prints
+      if (type === 'turn') {
+        const resultPreview = stop?.metadata?.result_preview;
+        if (resultPreview && resultPreview !== 'nil') {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">📤 Result</div>
+              <div class="code-block">${escapeHtml(resultPreview)}</div>
+            </div>`;
+        }
+
+        const prints = stop?.metadata?.prints;
+        if (Array.isArray(prints) && prints.length > 0) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">🖨 Output (${prints.length})</div>
+              <div class="code-block" style="max-height: 300px; overflow-y: auto;">${prints.map(p => escapeHtml(p)).join('\n')}</div>
             </div>`;
         }
       }
@@ -1318,6 +1357,27 @@
         if (data.traceId === traceId) return name;
       }
       return null;
+    }
+
+    function formatTokens(n) {
+      if (!n) return '0';
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toString();
+    }
+
+    function formatTokenBreakdown(measurements) {
+      if (!measurements) return '';
+      const input = measurements.input_tokens;
+      const output = measurements.output_tokens;
+      const total = measurements.tokens || 0;
+      if (input || output) {
+        let s = `${formatTokens(input || 0)} in / ${formatTokens(output || 0)} out`;
+        const cache = measurements.cache_read_tokens;
+        if (cache > 0) s += ` (${formatTokens(cache)} cached)`;
+        return s;
+      }
+      return total ? `${total.toLocaleString()} tk` : '';
     }
 
     function formatDuration(ms) {

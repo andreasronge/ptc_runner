@@ -131,6 +131,7 @@ defmodule PtcRunner.SubAgent do
           parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
           llm_query: boolean(),
+          grep_tools: boolean(),
           max_turns: pos_integer(),
           retry_turns: non_neg_integer(),
           prompt_limit: map() | nil,
@@ -185,6 +186,7 @@ defmodule PtcRunner.SubAgent do
     :compression,
     tools: %{},
     llm_query: false,
+    grep_tools: false,
     max_turns: 5,
     retry_turns: 0,
     timeout: 5000,
@@ -242,6 +244,7 @@ defmodule PtcRunner.SubAgent do
   - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
   - `output` - Output mode: `:ptc_lisp` (default) or `:json`
   - `llm_query` - Boolean enabling LLM query mode (default: false)
+  - `grep_tools` - Boolean enabling tool/grep and tool/grep-n for text search (default: false)
   - `plan` - List of plan steps (strings, `{id, description}` tuples, or keyword list)
 
   ## Returns
@@ -433,6 +436,7 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :llm_query,
+        :grep_tools,
         :max_turns,
         :retry_turns,
         :timeout,
@@ -466,6 +470,7 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :llm_query,
+        :grep_tools,
         :max_turns,
         :retry_turns,
         :prompt_limit,
