@@ -8,7 +8,7 @@ The RLM paper found that **task complexity determines whether recursion is essen
 
 | Benchmark | Complexity | Recursion Needed? | Paper Finding |
 |-----------|------------|-------------------|---------------|
-| **S-NIAH** | O(1) | No | Direct probing (grep) works |
+| **S-NIAH** | O(1) | No | Direct probing works |
 | **OOLONG** | O(n) | No | REPL alone sufficient |
 | **OOLONG-Pairs** | O(n²) | **Yes** | Recursion essential (0% → 60% F1) |
 | **BrowseComp** | Multi-hop | **Yes** | Multi-doc reasoning needs recursion |
@@ -16,7 +16,7 @@ The RLM paper found that **task complexity determines whether recursion is essen
 > "The REPL environment alone was enough to handle long inputs, but **recursive self-calls were essential for tasks with high information density**."
 
 Our benchmarks reproduce this behavior:
-- **S-NIAH**: Solves in 1-2 turns via `grep` probing (no recursion needed)
+- **S-NIAH**: Solves in 1-2 turns via `tool/grep` probing (no recursion needed)
 - **Counting**: Solves in 1 turn via direct filtering (no recursion needed - this is correct!)
 
 This matches the paper's findings for O(1) and O(n) tasks.
@@ -45,10 +45,10 @@ This is fundamentally different from stuffing everything into the prompt.
 
 **Example**: Find "The access code for agent_7291 is XKQMTR" in 10,000 lines.
 
-**Behavior**: Uses `grep-n` to locate the needle instantly - O(1) LLM turns regardless of corpus size.
+**Behavior**: Uses `tool/grep-n` to locate the needle instantly - O(1) LLM turns regardless of corpus size.
 
 ```clojure
-(def matches (grep-n "agent_7291" data/corpus))
+(def matches (tool/grep-n {:pattern "agent_7291" :text data/corpus}))
 (return {:answer (extract-code (first matches)) :found true})
 ```
 
@@ -189,9 +189,9 @@ lib/
 
 ### Key Patterns
 
-**Grep-based probing** for search tasks:
+**Grep-based probing** for search tasks (grep available via `builtin_tools`):
 ```clojure
-(grep-n "search_term" data/corpus)
+(tool/grep-n {:pattern "search_term" :text data/corpus})
 ;; => [{:line 472 :text "The access code for agent_7291 is XKQMTR"}]
 ```
 

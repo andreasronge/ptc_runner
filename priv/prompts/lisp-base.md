@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 29 -->
-<!-- date: 2026-02-08 -->
-<!-- changes: grep is now case-insensitive by default; added "Not Available" section -->
+<!-- version: 30 -->
+<!-- date: 2026-02-09 -->
+<!-- changes: grep/grep-n moved from builtins to optional builtin_tools -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -76,8 +76,6 @@ data/products                      ; read-only input data
 
 **Functions:**
 - ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
-- ✗ `(grep text pattern)` → ✓ `(grep pattern text)` — pattern first
-- For literal substring search, use `filter` with `includes?` (grep is regex)
 
 **Regex & Parsing:**
 - ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
@@ -93,24 +91,6 @@ data/products                      ; read-only input data
 - ✗ `(-> coll (filter f))` → ✓ `(->> coll (filter f))` — use `->>` for collections
 - ✗ `(for [x xs :when (odd? x)] ...)` → ✓ `(for [x (filter odd? xs)] ...)` — no `:when` modifier
 - ✗ `(doseq [x xs] (swap! acc ...))` → ✓ `(reduce (fn [acc x] ...) {} xs)`
-
-### Regex Line Search (grep)
-
-```clojure
-;; grep treats string patterns as case-insensitive regex (like unix grep -i)
-(grep "error" text)              ; matches "error", "Error", "ERROR"
-(grep "error|warn" text)         ; alternation (PCRE style)
-(grep "error\|warn" text)        ; alternation (BRE \| also works)
-(grep "v\\d+\\.\\d+" changelog)  ; regex patterns work directly
-(grep-n "agent_42" corpus)       ; => [{:line 4523 :text "agent_42 code: XYZ"}]
-
-; Access line number from result
-(def matches (grep-n "error" log))
-(:line (first matches))          ; => 1
-(:text (first matches))          ; => "error: connection failed"
-```
-
-**For literal substring search**, use `filter` with `includes?`.
 
 ### Not Available from Clojure
 

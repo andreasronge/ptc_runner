@@ -381,12 +381,12 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
     end
   end
 
-  describe "grep tools" do
-    test "grep_tools option makes grep and grep-n available as tools", %{table: _table} do
+  describe "builtin tools" do
+    test "builtin_tools: [:grep] makes grep and grep-n available as tools", %{table: _table} do
       agent =
         SubAgent.new(
           prompt: "Search for errors in {{log}}",
-          grep_tools: true,
+          builtin_tools: [:grep],
           max_turns: 2
         )
 
@@ -410,7 +410,7 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
         SubAgent.new(
           prompt: "Test",
           tools: %{"grep" => custom_grep},
-          grep_tools: true,
+          builtin_tools: [:grep],
           max_turns: 2
         )
 
@@ -422,6 +422,30 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       # User's custom "grep" should win over the builtin
       assert step.return == "custom:test"
+    end
+
+    test "unknown builtin_tools atoms are silently ignored", %{table: _table} do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          builtin_tools: [:nonexistent, :grep],
+          max_turns: 2
+        )
+
+      tools = SubAgent.effective_tools(agent)
+      # :nonexistent is ignored, :grep still works
+      assert Map.has_key?(tools, "grep")
+      assert Map.has_key?(tools, "grep-n")
+    end
+
+    test "builtin_tools must be a list of atoms" do
+      assert_raise ArgumentError, "builtin_tools must be a list of atoms", fn ->
+        SubAgent.new(prompt: "Test", builtin_tools: :grep)
+      end
+
+      assert_raise ArgumentError, "builtin_tools must be a list of atoms", fn ->
+        SubAgent.new(prompt: "Test", builtin_tools: ["grep"])
+      end
     end
   end
 

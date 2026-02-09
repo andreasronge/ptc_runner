@@ -47,6 +47,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_field_descriptions!(opts)
     validate_context_descriptions!(opts)
     validate_format_options!(opts)
+    validate_builtin_tools!(opts)
     validate_output!(opts)
     validate_memory_strategy!(opts)
     validate_self_tool_requires_signature!(opts)
@@ -221,6 +222,21 @@ defmodule PtcRunner.SubAgent.Validator do
       {:ok, fo} when is_list(fo) -> :ok
       {:ok, _} -> raise ArgumentError, "format_options must be a keyword list"
       :error -> :ok
+    end
+  end
+
+  defp validate_builtin_tools!(opts) do
+    case Keyword.fetch(opts, :builtin_tools) do
+      {:ok, tools} when is_list(tools) ->
+        unless Enum.all?(tools, &is_atom/1) do
+          raise ArgumentError, "builtin_tools must be a list of atoms"
+        end
+
+      {:ok, _} ->
+        raise ArgumentError, "builtin_tools must be a list of atoms"
+
+      :error ->
+        :ok
     end
   end
 

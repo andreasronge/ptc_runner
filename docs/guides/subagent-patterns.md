@@ -360,6 +360,26 @@ All other keys are template arguments available as `{{key}}` in the prompt.
 
 Use `llm_query` when the agent itself decides what to ask the LLM. Use `LLMTool` when you define the prompt upfront in Elixir.
 
+## Builtin Utility Tools (`builtin_tools`)
+
+Enable utility tool families with `builtin_tools`:
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Find all error lines in the log",
+  builtin_tools: [:grep],
+  max_turns: 3
+)
+```
+
+Each atom expands to one or more tools:
+
+| Family | Tools added | Description |
+|--------|------------|-------------|
+| `:grep` | `tool/grep`, `tool/grep-n` | Regex line search (plain and line-numbered) |
+
+The agent calls these as named-arg tools: `(tool/grep {:pattern "error" :text data/log})`. User-defined tools with the same name take precedence over builtins.
+
 ## Orchestration Patterns
 
 ### Pattern 1: Dynamic Agent Creation (`spawn_agent`)

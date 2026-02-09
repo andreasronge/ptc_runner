@@ -100,11 +100,11 @@ defmodule PageIndex.Retriever do
     3. Read the fetched content carefully
     3b. PAGINATION: If a fetch result has `truncated: true`, call get-content again with
         the same node_id and the offset from the hint. Do not guess data from partial tables.
-    3c. SEARCHING: Use built-in `grep` / `grep-n` to search within fetched content:
+    3c. SEARCHING: Use `tool/grep` / `tool/grep-n` to search within fetched content:
         ```
         (def section (tool/get-content {:node_id "some_section"}))
-        (grep "revenue|sales" (:content section))    ; => ["Net sales 34,229 35,355" ...]
-        (grep-n "revenue" (:content section))        ; => [{:line 5 :text "Net sales ..."}]
+        (tool/grep {:pattern "revenue|sales" :text (:content section)})    ; => ["Net sales 34,229 35,355" ...]
+        (tool/grep-n {:pattern "revenue" :text (:content section)})        ; => [{:line 5 :text "Net sales ..."}]
         ```
     4. Synthesize a comprehensive answer using facts from the content
     5. Return your answer with the sources used
@@ -128,6 +128,7 @@ defmodule PageIndex.Retriever do
              description:
                "Fetch content from a document section by ID. Use offset for pagination when truncated is true."}
         },
+        builtin_tools: [:grep],
         max_turns: max_turns,
         timeout: 30_000
       )

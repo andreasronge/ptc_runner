@@ -19,7 +19,7 @@ v0.5.2: Bugfixes ✅
 v0.6: Language, Composition & Tracing ✅
   PTC-Lisp language:
   - `for` list comprehension
-  - String functions: grep, grep-n, .indexOf, .lastIndexOf
+  - String functions: .indexOf, .lastIndexOf
   - Collection functions: extract, extract-int, pairs, combinations,
     mapcat, butlast, take-last, drop-last, partition-all
   - Aggregators: sum, avg, quot

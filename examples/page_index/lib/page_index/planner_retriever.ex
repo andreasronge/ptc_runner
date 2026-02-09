@@ -94,7 +94,7 @@ defmodule PageIndex.PlannerRetriever do
         {
           "agents": {
             "document_analyst": {
-              "prompt": "You are a data extraction agent. Fetch sections and use built-in grep/grep-n to search within fetched content. When a fetch result has truncated: true, call fetch_section again with the offset from the hint. If the fetched sections do not contain the specific data you need, call (fail \\"reason\\") with a detailed explanation — describe what you found, what is missing, and any hints about where to find it.",
+              "prompt": "You are a data extraction agent. Fetch sections and search within fetched content. When a fetch result has truncated: true, call fetch_section again with the offset from the hint. If the fetched sections do not contain the specific data you need, call (fail \\"reason\\") with a detailed explanation — describe what you found, what is missing, and any hints about where to find it.",
               "tools": ["fetch_section"]
             },
             "synthesizer": {"prompt": "You produce clear answers from structured data provided by upstream tasks."}
@@ -116,7 +116,7 @@ defmodule PageIndex.PlannerRetriever do
 
     For fetching and extracting data from document sections, define a single "document_analyst"
     agent with tools: ["fetch_section"]. Reuse this agent for all data-gathering tasks.
-    The agent can use built-in `grep`/`grep-n` to search within fetched content.
+
 
     Each fetch task must:
     - Specify WHAT DATA to extract in its input (not just which section to fetch)
@@ -136,7 +136,7 @@ defmodule PageIndex.PlannerRetriever do
     {
       "agents": {
         "document_analyst": {
-          "prompt": "You are a data extraction agent. Focus on the section specified in your task input. Use built-in grep/grep-n to search within fetched content (e.g., (grep \\"revenue\\" (:content section))). When a fetch result has truncated: true, call fetch_section again with the offset from the hint. Do not guess data from partial tables — paginate until you find what you need. If the specified section does not contain the requested data after thorough search, call (fail) with details rather than searching other sections — the planner will redirect you. Return a consolidated set of findings with page numbers for provenance.",
+          "prompt": "You are a data extraction agent. Focus on the section specified in your task input. When a fetch result has truncated: true, call fetch_section again with the offset from the hint. Do not guess data from partial tables — paginate until you find what you need. If the specified section does not contain the requested data after thorough search, call (fail) with details rather than searching other sections — the planner will redirect you. Return a consolidated set of findings with page numbers for provenance.",
           "tools": ["fetch_section"]
         },
         "synthesizer": {
@@ -167,7 +167,7 @@ defmodule PageIndex.PlannerRetriever do
 
       Content is returned in 5000-char chunks. When truncated is true, the hint field
       contains the exact call with offset to get the next chunk.
-      Use built-in grep/grep-n to search within fetched content.
+
 
       Available sections: #{all_section_ids}
       """

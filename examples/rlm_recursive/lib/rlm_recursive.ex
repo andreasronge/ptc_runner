@@ -6,13 +6,13 @@ defmodule RlmRecursive do
   - Recursive self-calls via `:self` tool
   - LLM-decided chunking (not pre-chunked)
   - Budget-aware decisions using `(budget/remaining)`
-  - Grep-based probing using stdlib `grep` and `grep-n` functions
+  - Grep-based probing using `tool/grep` and `tool/grep-n` builtin tools
   - Reproducible benchmarks with ground truth validation
 
   ## Benchmarks
 
   ### S-NIAH (Single Needle in a Haystack)
-  Find one hidden fact in a large corpus. The LLM uses grep-based probing
+  Find one hidden fact in a large corpus. The LLM uses `tool/grep` probing
   to efficiently locate the needle without scanning the entire haystack.
 
   ### OOLONG-Counting
