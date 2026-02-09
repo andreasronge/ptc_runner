@@ -963,4 +963,111 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       assert Runtime.reduce(fn acc, _ -> acc + 1 end, 0, "café") == 4
     end
   end
+
+  describe "take - map support" do
+    test "take on map returns n [key, value] pairs" do
+      result = Runtime.take(2, %{a: 1, b: 2, c: 3})
+      assert length(result) == 2
+      assert Enum.all?(result, fn [_k, _v] -> true end)
+    end
+
+    test "take on empty map returns empty list" do
+      assert Runtime.take(2, %{}) == []
+    end
+
+    test "take more than map size returns all pairs" do
+      result = Runtime.take(5, %{a: 1, b: 2})
+      assert length(result) == 2
+    end
+  end
+
+  describe "drop - map support" do
+    test "drop on map drops n [key, value] pairs" do
+      result = Runtime.drop(1, %{a: 1, b: 2, c: 3})
+      assert length(result) == 2
+      assert Enum.all?(result, fn [_k, _v] -> true end)
+    end
+
+    test "drop on empty map returns empty list" do
+      assert Runtime.drop(1, %{}) == []
+    end
+
+    test "drop all from map returns empty list" do
+      assert Runtime.drop(3, %{a: 1, b: 2, c: 3}) == []
+    end
+  end
+
+  describe "take_last - map support" do
+    test "take_last on map returns last n pairs" do
+      result = Runtime.take_last(1, %{a: 1, b: 2})
+      assert length(result) == 1
+      assert match?([[_, _]], result)
+    end
+
+    test "take_last on empty map returns empty list" do
+      assert Runtime.take_last(1, %{}) == []
+    end
+  end
+
+  describe "drop_last - map support" do
+    test "drop_last/1 on map drops last pair" do
+      result = Runtime.drop_last(%{a: 1, b: 2, c: 3})
+      assert length(result) == 2
+      assert Enum.all?(result, fn [_k, _v] -> true end)
+    end
+
+    test "drop_last/2 on map drops last n pairs" do
+      result = Runtime.drop_last(2, %{a: 1, b: 2, c: 3})
+      assert length(result) == 1
+      assert match?([[_, _]], result)
+    end
+
+    test "drop_last/1 on empty map returns empty list" do
+      assert Runtime.drop_last(%{}) == []
+    end
+
+    test "drop_last/2 with n <= 0 returns all pairs" do
+      result = Runtime.drop_last(0, %{a: 1, b: 2})
+      assert length(result) == 2
+    end
+  end
+
+  describe "take_while - map support" do
+    test "take_while with predicate on map entries" do
+      # Map order is not guaranteed, so just verify shape
+      map = %{a: 1, b: 2, c: 3}
+      result = Runtime.take_while(fn [_k, v] -> v < 10 end, map)
+      assert Enum.all?(result, fn [_k, v] -> v < 10 end)
+    end
+
+    test "take_while on empty map returns empty list" do
+      assert Runtime.take_while(fn _ -> true end, %{}) == []
+    end
+  end
+
+  describe "drop_while - map support" do
+    test "drop_while with predicate on map entries" do
+      map = %{a: 1, b: 2, c: 3}
+      all_pairs = Runtime.take(3, map)
+      dropped = Runtime.drop_while(fn [_k, v] -> v < 10 end, map)
+      # All entries satisfy pred, so drop_while drops all
+      assert dropped == [] or length(dropped) < length(all_pairs)
+    end
+
+    test "drop_while on empty map returns empty list" do
+      assert Runtime.drop_while(fn _ -> true end, %{}) == []
+    end
+  end
+
+  describe "distinct - map support" do
+    test "distinct on map returns all [key, value] pairs" do
+      result = Runtime.distinct(%{a: 1, b: 2})
+      assert length(result) == 2
+      assert Enum.all?(result, fn [_k, _v] -> true end)
+    end
+
+    test "distinct on empty map returns empty list" do
+      assert Runtime.distinct(%{}) == []
+    end
+  end
 end

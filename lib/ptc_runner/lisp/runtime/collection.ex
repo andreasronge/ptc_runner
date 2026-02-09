@@ -381,16 +381,25 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def take_last(n, coll) when is_list(coll), do: Enum.take(coll, -n)
   def take_last(n, coll) when is_binary(coll), do: Enum.take(graphemes(coll), -n)
 
+  def take_last(n, coll) when is_map(coll) and not is_struct(coll),
+    do: take_last(n, to_seq_list(coll))
+
   # drop-last - removes last n items (default 1, n <= 0 returns full collection)
   def drop_last(nil), do: []
   def drop_last(coll) when is_list(coll), do: Enum.drop(coll, -1)
   def drop_last(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), -1)
+
+  def drop_last(coll) when is_map(coll) and not is_struct(coll),
+    do: drop_last(to_seq_list(coll))
 
   def drop_last(_n, nil), do: []
   def drop_last(n, coll) when n <= 0 and is_list(coll), do: coll
   def drop_last(n, coll) when n <= 0 and is_binary(coll), do: graphemes(coll)
   def drop_last(n, coll) when is_list(coll), do: Enum.drop(coll, -n)
   def drop_last(n, coll) when is_binary(coll), do: Enum.drop(graphemes(coll), -n)
+
+  def drop_last(n, coll) when is_map(coll) and not is_struct(coll),
+    do: drop_last(n, to_seq_list(coll))
 
   # next - returns nil for empty/single-element collections
   def next(nil), do: nil
@@ -418,8 +427,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
   def take(n, coll) when is_binary(coll), do: Enum.take(graphemes(coll), n)
 
+  def take(n, coll) when is_map(coll) and not is_struct(coll) do
+    coll |> Enum.take(n) |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
   def drop(n, coll) when is_binary(coll), do: Enum.drop(graphemes(coll), n)
+
+  def drop(n, coll) when is_map(coll) and not is_struct(coll) do
+    coll |> Enum.drop(n) |> Enum.map(fn {k, v} -> [k, v] end)
+  end
 
   def take_while(key, coll) when is_list(coll) and is_atom(key) do
     Enum.take_while(coll, truthy_key_pred(key))
@@ -437,6 +454,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def take_while(pred, coll) when is_binary(coll),
     do: Enum.take_while(graphemes(coll), &Callable.call(pred, [&1]))
 
+  def take_while(key, coll) when is_map(coll) and not is_struct(coll) and is_atom(key) do
+    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.take_while(truthy_key_pred(key))
+  end
+
+  def take_while(pred, coll) when is_map(coll) and not is_struct(coll) do
+    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.take_while(&Callable.call(pred, [&1]))
+  end
+
   def drop_while(key, coll) when is_list(coll) and is_atom(key) do
     Enum.drop_while(coll, truthy_key_pred(key))
   end
@@ -449,8 +474,17 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def drop_while(pred, coll) when is_binary(coll),
     do: Enum.drop_while(graphemes(coll), &Callable.call(pred, [&1]))
 
+  def drop_while(key, coll) when is_map(coll) and not is_struct(coll) and is_atom(key) do
+    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.drop_while(truthy_key_pred(key))
+  end
+
+  def drop_while(pred, coll) when is_map(coll) and not is_struct(coll) do
+    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.drop_while(&Callable.call(pred, [&1]))
+  end
+
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
   def distinct(coll) when is_binary(coll), do: Enum.uniq(graphemes(coll))
+  def distinct(coll) when is_map(coll) and not is_struct(coll), do: to_seq_list(coll)
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
 
