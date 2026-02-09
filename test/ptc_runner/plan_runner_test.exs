@@ -1350,6 +1350,64 @@ defmodule PtcRunner.PlanRunnerTest do
     end
   end
 
+  describe "builtin_tools" do
+    test "builtin_tools: [:grep] makes grep available to PTC-Lisp agents" do
+      raw = %{
+        "agents" => %{
+          "analyzer" => %{
+            "prompt" => "You analyze text",
+            "tools" => ["fetch"]
+          }
+        },
+        "tasks" => [
+          %{
+            "id" => "analyze",
+            "agent" => "analyzer",
+            "input" => "Fetch the document and grep for 'revenue'"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      fetch_tool = fn _args ->
+        %{"content" => "Line 1: expenses\nLine 2: revenue was $100M\nLine 3: costs"}
+      end
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn _input ->
+        count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
+
+        if count == 0 do
+          {:ok,
+           """
+           ```clojure
+           (def doc (tool/fetch {:id "doc1"}))
+           (def matches (tool/grep {:pattern "revenue" :text (:content doc)}))
+           (return {:matches matches})
+           ```
+           """}
+        else
+          {:ok, ~s|```clojure\n(return {:matches ["Line 2: revenue was $100M"]})\n```|}
+        end
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan,
+          llm: mock_llm,
+          base_tools: %{"fetch" => fetch_tool},
+          builtin_tools: [:grep],
+          max_turns: 3
+        )
+
+      Agent.stop(call_count)
+
+      assert Map.has_key?(results, "analyze")
+      assert results["analyze"]["matches"] == ["Line 2: revenue was $100M"]
+    end
+  end
+
   describe "direct agent" do
     test "executes PTC-Lisp code without LLM call" do
       raw = %{
