@@ -54,6 +54,9 @@ defmodule PtcRunner.PlanRunner do
     execution to avoid re-running successful tasks.
   - `on_event` - Optional callback for task lifecycle events. Receives tuples like
     `{:task_started, %{task_id: id, attempt: n}}`, `{:task_succeeded, %{...}}`, etc.
+  - `builtin_tools` - List of builtin tool families to enable for PTC-Lisp agents
+    (default: `[]`). Available: `:grep` (adds grep and grep-n tools).
+    Only injected for agents running in `:ptc_lisp` output mode.
   - `quality_gate` - Enable pre-flight data sufficiency check before tasks with dependencies
     (default: `false`). When enabled, a lightweight SubAgent validates upstream results before
     each dependent task. On failure, triggers `{:replan_required, context}`.
@@ -165,6 +168,7 @@ defmodule PtcRunner.PlanRunner do
       llm: llm,
       llm_registry: llm_registry,
       base_tools: enriched_tools,
+      builtin_tools: Keyword.get(opts, :builtin_tools, []),
       registry: registry,
       context_tags: context_tags,
       timeout: timeout,
@@ -855,6 +859,12 @@ defmodule PtcRunner.PlanRunner do
             max_turns: opts.max_turns,
             timeout: opts.timeout
           ]
+
+          # Inject builtin_tools for PTC-Lisp agents
+          base_opts =
+            if opts.builtin_tools != [],
+              do: Keyword.put(base_opts, :builtin_tools, opts.builtin_tools),
+              else: base_opts
 
           # Add signature if present in task
           base_opts =

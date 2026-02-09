@@ -165,6 +165,9 @@ defmodule PtcRunner.PlanExecutor do
   All `execute/3` options are supported, plus:
 
   - `available_tools` - Map of tool_name => description for planning
+  - `builtin_tools` - List of builtin tool families (e.g., `[:grep]`). Descriptions are
+    auto-injected into `available_tools` for the planner, and the tools are forwarded to
+    PlanRunner so agents can use them.
   - `constraints` - Optional planning constraints/guidelines
   - `quality_gate` - Enable pre-flight data sufficiency check (default: `false`)
   - `quality_gate_llm` - Optional separate LLM for quality gate checks
@@ -195,8 +198,12 @@ defmodule PtcRunner.PlanExecutor do
   def run(mission, opts) do
     llm = Keyword.fetch!(opts, :llm)
     available_tools = Keyword.get(opts, :available_tools, %{})
+    builtin_tools = Keyword.get(opts, :builtin_tools, [])
     constraints = Keyword.get(opts, :constraints)
     on_event = Keyword.get(opts, :on_event)
+
+    # Auto-inject builtin tool descriptions so the planner knows about them
+    available_tools = inject_builtin_descriptions(available_tools, builtin_tools)
 
     # Emit planning started event
     if on_event, do: on_event.({:planning_started, %{mission: mission}})
@@ -826,6 +833,37 @@ defmodule PtcRunner.PlanExecutor do
       success: success?,
       diagnosis: diagnosis
     })
+  end
+
+  # ============================================================================
+  # Builtin Tool Injection
+  # ============================================================================
+
+  # Inject builtin tool descriptions into available_tools for the planner.
+  # Uses SubAgent.expand_builtin_tools/1 to get {name, sentinel} pairs,
+  # then Tool.new/2 to get descriptions.
+  defp inject_builtin_descriptions(available_tools, []), do: available_tools
+
+  defp inject_builtin_descriptions(available_tools, builtin_families) do
+    alias PtcRunner.SubAgent
+    alias PtcRunner.Tool
+
+    builtin_entries = SubAgent.expand_builtin_tools(builtin_families)
+
+    builtin_descriptions =
+      for {name, sentinel} <- builtin_entries,
+          not Map.has_key?(available_tools, name),
+          {:ok, tool} = Tool.new(name, sentinel),
+          into: %{} do
+        desc =
+          [tool.description, tool.signature]
+          |> Enum.reject(&is_nil/1)
+          |> Enum.join(". Signature: ")
+
+        {name, desc}
+      end
+
+    Map.merge(available_tools, builtin_descriptions)
   end
 
   # ============================================================================

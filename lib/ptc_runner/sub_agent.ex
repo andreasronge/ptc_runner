@@ -358,6 +358,31 @@ defmodule PtcRunner.SubAgent do
   }
 
   @doc """
+  Expands a list of builtin tool family atoms to `[{name, sentinel}]` pairs.
+
+  Useful for external modules (e.g., PlanExecutor) that need to generate
+  tool descriptions for builtins without reaching into SubAgent internals.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.expand_builtin_tools([:grep])
+      [{"grep", :builtin_grep}, {"grep-n", :builtin_grep_n}]
+
+      iex> PtcRunner.SubAgent.expand_builtin_tools([])
+      []
+
+  """
+  @spec expand_builtin_tools([atom()]) :: [{String.t(), atom()}]
+  def expand_builtin_tools(families) when is_list(families) do
+    Enum.flat_map(families, fn family ->
+      case Map.fetch(@builtin_tool_families, family) do
+        {:ok, entries} -> entries
+        :error -> []
+      end
+    end)
+  end
+
+  @doc """
   Returns the agent's tools with builtin tools injected.
 
   Merges `llm_query` and `builtin_tools` families into the tools map.
