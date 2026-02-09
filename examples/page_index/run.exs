@@ -19,23 +19,14 @@ defmodule CLI do
           show: :string,
           query: :string,
           pdf: :string,
-          simple: :boolean,
-          planner: :boolean,
-          iterative: :boolean,
-          minimal: :boolean,
           trace: :boolean,
           model: :string,
-          search_model: :string,
           help: :boolean
         ],
         aliases: [
           h: :help,
           m: :model,
           q: :query,
-          s: :simple,
-          p: :planner,
-          i: :iterative,
-          M: :minimal,
           t: :trace
         ]
       )
@@ -69,19 +60,13 @@ defmodule CLI do
 
     Options:
       -m, --model <name>    LLM model (default: bedrock:haiku)
-      --search-model <name> Separate model for search SubAgent (minimal mode only)
       --pdf <path>          PDF path for queries (required with --query)
-      -s, --simple          Use simple retrieval (score all nodes, no recursion)
-      -p, --planner         Use MetaPlanner for complex multi-hop questions
-      -i, --iterative       Use iterative extraction/synthesis loop
-      -M, --minimal         Use MinimalPlannerRetriever (constraint-free MetaPlanner)
       -t, --trace           Enable tracing (writes to traces/ directory)
       -h, --help            Show this help
 
     Examples:
       mix run run.exs --index data/3M_2022_10K.pdf
-      mix run run.exs --query "What are 3M's business segments?" --pdf data/3M_2022_10K.pdf
-      mix run run.exs --query "What drove operating margin change?" --pdf data/3M_2022_10K.pdf --simple
+      mix run run.exs --query "What was 3M's total revenue in 2022?" --pdf data/3M_2022_10K.pdf
       mix run run.exs --show data/3M_2022_10K_index.json
     """)
   end
@@ -118,10 +103,6 @@ defmodule CLI do
 
   defp query_index(query, opts) do
     model = opts[:model] || "bedrock:haiku"
-    simple = opts[:simple] || false
-    planner = opts[:planner] || false
-    iterative = opts[:iterative] || false
-    minimal = opts[:minimal] || false
     trace = opts[:trace] || false
 
     pdf_path = opts[:pdf]
@@ -133,19 +114,9 @@ defmodule CLI do
 
     index_path = index_path_for(pdf_path)
 
-    mode =
-      cond do
-        minimal -> "minimal (constraint-free MetaPlanner)"
-        iterative -> "iterative (extraction loop)"
-        planner -> "planner (MetaPlanner with verification)"
-        simple -> "simple (score all nodes)"
-        true -> "agent (single-pass)"
-      end
-
     IO.puts("Query: #{query}")
     IO.puts("Model: #{model}")
     IO.puts("Index: #{index_path}")
-    IO.puts("Mode: #{mode}")
     if trace, do: IO.puts("Tracing: enabled")
     IO.puts("")
 
@@ -153,30 +124,7 @@ defmodule CLI do
 
     case PageIndex.load_index(index_path) do
       {:ok, tree} ->
-        cond do
-          minimal ->
-            search_llm =
-              if opts[:search_model],
-                do: LLMClient.callback(opts[:search_model]),
-                else: nil
-
-            run_minimal_planner_query(tree, query, llm, pdf_path,
-              trace: trace,
-              search_llm: search_llm
-            )
-
-          iterative ->
-            run_iterative_query(tree, query, llm, pdf_path, trace: trace)
-
-          planner ->
-            run_planner_query(tree, query, llm, pdf_path, trace: trace)
-
-          simple ->
-            run_simple_query(tree, query, llm, pdf_path, trace: trace)
-
-          true ->
-            run_agent_query(tree, query, llm, pdf_path, trace: trace)
-        end
+        run_query(tree, query, llm, pdf_path, trace: trace)
 
       {:error, reason} ->
         IO.puts("Error loading index: #{inspect(reason)}")
@@ -188,15 +136,15 @@ defmodule CLI do
     String.replace(pdf_path, ~r/\.pdf$/i, "_index.json")
   end
 
-  defp with_optional_trace(trace?, prefix, query, func) do
+  defp with_optional_trace(trace?, query, func) do
     if trace? do
       File.mkdir_p!("traces")
-      trace_file = "traces/#{prefix}_#{System.system_time(:second)}.jsonl"
+      trace_file = "traces/minimal_#{System.system_time(:second)}.jsonl"
 
       {:ok, result, path} =
         PtcRunner.TraceLog.with_trace(func,
           path: trace_file,
-          meta: %{query: query, mode: prefix}
+          meta: %{query: query, mode: "minimal"}
         )
 
       IO.puts("\nTrace written to: #{path}")
@@ -207,37 +155,11 @@ defmodule CLI do
     end
   end
 
-  defp run_iterative_query(tree, query, llm, pdf_path, opts) do
-    retriever_opts = [llm: llm, pdf_path: pdf_path]
+  defp run_query(tree, query, llm, pdf_path, opts) do
+    retriever_opts = [llm: llm, pdf_path: pdf_path, quality_gate: true]
 
     result =
-      with_optional_trace(opts[:trace], "iterative", query, fn ->
-        PageIndex.IterativeRetriever.retrieve(tree, query, retriever_opts)
-      end)
-
-    case result do
-      {:ok, result} ->
-        IO.puts("\n" <> String.duplicate("=", 60))
-        IO.puts("ANSWER (#{result.iterations} iterations, #{result.findings_count} findings):")
-        IO.puts(String.duplicate("=", 60))
-        IO.puts(inspect_answer(result.answer))
-
-        IO.puts("\nSources: #{Enum.join(result.sources || [], ", ")}")
-
-      {:error, reason} ->
-        IO.puts("Error: #{inspect(reason)}")
-    end
-  end
-
-  defp run_minimal_planner_query(tree, query, llm, pdf_path, opts) do
-    retriever_opts =
-      [llm: llm, pdf_path: pdf_path, quality_gate: true]
-      |> then(fn o ->
-        if opts[:search_llm], do: Keyword.put(o, :search_llm, opts[:search_llm]), else: o
-      end)
-
-    result =
-      with_optional_trace(opts[:trace], "minimal", query, fn ->
+      with_optional_trace(opts[:trace], query, fn ->
         PageIndex.MinimalPlannerRetriever.retrieve(tree, query, retriever_opts)
       end)
 
@@ -257,76 +179,6 @@ defmodule CLI do
       {:error, result} ->
         IO.puts("Error: #{inspect(result.reason)}")
         IO.puts("Replans attempted: #{result.replans}")
-    end
-  end
-
-  defp run_planner_query(tree, query, llm, pdf_path, opts) do
-    retriever_opts = [llm: llm, pdf_path: pdf_path, quality_gate: true]
-
-    result =
-      with_optional_trace(opts[:trace], "planner", query, fn ->
-        PageIndex.PlannerRetriever.retrieve(tree, query, retriever_opts)
-      end)
-
-    case result do
-      {:ok, result} ->
-        IO.puts("\n" <> String.duplicate("=", 60))
-        IO.puts("ANSWER (after #{result.replans} replans, #{result.tasks_executed} tasks):")
-        IO.puts(String.duplicate("=", 60))
-        IO.puts(inspect_answer(result.answer))
-
-        IO.puts("\nSources:")
-
-        for source <- result.sources || [] do
-          IO.puts("  - #{source.node_id} (pages #{source.pages})")
-        end
-
-      {:error, result} ->
-        IO.puts("Error: #{inspect(result.reason)}")
-        IO.puts("Replans attempted: #{result.replans}")
-    end
-  end
-
-  defp run_simple_query(tree, query, llm, pdf_path, opts) do
-    result =
-      with_optional_trace(opts[:trace], "simple", query, fn ->
-        PageIndex.Retriever.retrieve_simple(tree, query, llm: llm, pdf_path: pdf_path)
-      end)
-
-    case result do
-      {:ok, result} ->
-        IO.puts("\n" <> String.duplicate("=", 60))
-        IO.puts("ANSWER:")
-        IO.puts(String.duplicate("=", 60))
-        IO.puts(result["answer"])
-        IO.puts("\nSources: #{Enum.join(result["sources"] || [], ", ")}")
-
-      {:error, reason} ->
-        IO.puts("Error: #{inspect(reason)}")
-    end
-  end
-
-  defp run_agent_query(tree, query, llm, pdf_path, opts) do
-    result =
-      with_optional_trace(opts[:trace], "agent", query, fn ->
-        PageIndex.Retriever.retrieve(tree, query, llm: llm, pdf_path: pdf_path)
-      end)
-
-    case result do
-      {:ok, step} ->
-        IO.puts("\n" <> String.duplicate("=", 60))
-        IO.puts("ANSWER:")
-        IO.puts(String.duplicate("=", 60))
-        IO.puts(step.return["answer"])
-
-        IO.puts("\nSources:")
-
-        for source <- step.return["sources"] || [] do
-          IO.puts("  - #{source["node_id"]} (pages #{source["pages"]})")
-        end
-
-      {:error, step} ->
-        IO.puts("Error: #{inspect(step.fail)}")
     end
   end
 

@@ -2,9 +2,8 @@ defmodule PageIndex.RetrieverToolkit do
   @moduledoc """
   Shared helpers for document retrieval strategies.
 
-  Provides common utilities used by PlannerRetriever, MinimalPlannerRetriever,
-  and IterativeRetriever: tree flattening, smart fetch with fuzzy matching,
-  section formatting, and result extraction.
+  Provides common utilities used by MinimalPlannerRetriever: tree flattening,
+  smart fetch with fuzzy matching, section formatting, and result extraction.
   """
 
   alias PtcRunner.SubAgent
@@ -221,18 +220,6 @@ defmodule PageIndex.RetrieverToolkit do
         end
       end) ||
       results |> Enum.sort_by(fn {id, _} -> id end) |> List.last() |> elem(1)
-  end
-
-  @doc "Extract source references (node_id + pages) from plan execution results."
-  def extract_sources(results) do
-    results
-    |> Enum.flat_map(fn {_task_id, result} ->
-      case result do
-        %{"node_id" => id, "pages" => pages} -> [%{node_id: id, pages: pages}]
-        _ -> []
-      end
-    end)
-    |> Enum.uniq_by(& &1.node_id)
   end
 
   @doc "Extract source references from search tool findings in plan results."
