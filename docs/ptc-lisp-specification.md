@@ -2153,12 +2153,12 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `rest` | ✗ | ✓ | Strings: returns list of remaining characters |
 | `butlast` | ✗ | ✓ | Strings: returns list of all but last character |
 | `next` | ✗ | ✓ | Strings: returns list of remaining characters or nil |
-| `take` | ✗ | ✓ | Strings: returns list of first n characters |
-| `drop` | ✗ | ✓ | Strings: returns list of characters after dropping n |
-| `take-last` | ✗ | ✓ | Strings: returns list of last n characters |
-| `drop-last` | ✗ | ✓ | Strings: returns list of characters after dropping last n |
-| `take-while` | ✗ | ✓ | Strings: returns list of characters while predicate is true |
-| `drop-while` | ✗ | ✓ | Strings: returns list of characters after predicate becomes false |
+| `take` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of first n characters |
+| `drop` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters after dropping n |
+| `take-last` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of last n characters |
+| `drop-last` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters after dropping last n |
+| `take-while` | ✓ | ✓ | Maps: iterates `[key value]` pairs. Strings: returns list of characters while predicate is true |
+| `drop-while` | ✓ | ✓ | Maps: iterates `[key value]` pairs. Strings: returns list of characters after predicate becomes false |
 | `map` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |
 | `mapv` | ✓ | ✓ | Same as `map`, returns vector |
 | `filter` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
@@ -2167,7 +2167,7 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `sort` | ✗ | ✓ | Strings: returns sorted list of characters |
 | `sort-by` | ✓ | ✓ | Maps: returns sorted list of `[key value]` pairs. Strings: sorted list of characters |
 | `reverse` | ✗ | ✓ | Strings: returns reversed list of characters |
-| `distinct` | ✗ | ✓ | Strings: returns list of unique characters |
+| `distinct` | ✓ | ✓ | Maps: returns `[key value]` pairs (already unique). Strings: returns list of unique characters |
 | `some` | ✗ | ✓ | Strings: returns first truthy result of predicate |
 | `every?` | ✗ | ✓ | Strings: true if predicate is truthy for all characters |
 | `not-any?` | ✗ | ✓ | Strings: true if predicate is false for all characters |
