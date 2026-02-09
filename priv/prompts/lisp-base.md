@@ -77,6 +77,11 @@ data/products                      ; read-only input data
 **Functions:**
 - ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
 
+**String search:**
+- ✗ `(.indexOf s "x")` → ✓ `(index-of s "x")` — returns nil (not -1) when not found
+- ✗ `(.lastIndexOf s "x")` → ✓ `(last-index-of s "x")` — returns nil (not -1) when not found
+- `(index-of "hello" "l" 3)` — optional from-index parameter
+
 **Regex & Parsing:**
 - ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
 - ✗ `Integer/parseInt` → ✓ `parse-long` or `parse-int` — no Java interop
@@ -104,7 +109,7 @@ These Clojure/Java functions do NOT exist — use the alternatives:
 ;; ✗ group-by      → (reduce (fn [acc x] (update acc (f x) (fnil conj []) x)) {} coll)
 ;; ✗ zipmap        → (into {} (map vector keys vals))
 ;; ✗ Integer/parseInt → parse-int or parse-long
-;; ✗ clojure.string/* → split, join, trim, upper-case, lower-case (top-level)
+;; ✗ clojure.string/* → split, join, trim, upper-case, lower-case, index-of, last-index-of (top-level)
 ```
 
 ### Aggregators

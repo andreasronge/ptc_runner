@@ -146,7 +146,9 @@ defmodule PtcRunner.Lisp.Env do
       :"parse-int",
       :"parse-double",
       :extract,
-      :"extract-int"
+      :"extract-int",
+      :"index-of",
+      :"last-index-of"
     ]
   end
 
@@ -402,6 +404,9 @@ defmodule PtcRunner.Lisp.Env do
       {:"starts-with?", {:normal, &Runtime.starts_with?/2}},
       {:"ends-with?", {:normal, &Runtime.ends_with?/2}},
       {:includes?, {:normal, &Runtime.includes?/2}},
+      {:"index-of", {:multi_arity, :"index-of", {&Runtime.index_of/2, &Runtime.index_of/3}}},
+      {:"last-index-of",
+       {:multi_arity, :"last-index-of", {&Runtime.last_index_of/2, &Runtime.last_index_of/3}}},
 
       # ============================================================
       # String parsing

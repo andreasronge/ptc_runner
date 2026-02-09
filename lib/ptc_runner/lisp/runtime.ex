@@ -211,6 +211,10 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate includes?(s, substring), to: RuntimeString
   defdelegate grep(pattern, text), to: RuntimeString
   defdelegate grep_n(pattern, text), to: RuntimeString
+  defdelegate index_of(s, value), to: RuntimeString
+  defdelegate index_of(s, value, from_index), to: RuntimeString
+  defdelegate last_index_of(s, value), to: RuntimeString
+  defdelegate last_index_of(s, value, from_index), to: RuntimeString
 
   # ============================================================
   # String Parsing

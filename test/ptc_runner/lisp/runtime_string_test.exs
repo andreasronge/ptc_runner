@@ -157,4 +157,124 @@ defmodule PtcRunner.Lisp.RuntimeStringTest do
       assert Runtime.contains?(map, "age") == false
     end
   end
+
+  # ============================================================
+  # index_of
+  # ============================================================
+
+  describe "index_of/2" do
+    test "finds first occurrence" do
+      assert Runtime.index_of("hello", "ll") == 2
+    end
+
+    test "returns nil when not found" do
+      assert Runtime.index_of("hello", "x") == nil
+    end
+
+    test "empty substring returns 0" do
+      assert Runtime.index_of("hello", "") == 0
+    end
+
+    test "finds single character" do
+      assert Runtime.index_of("hello", "l") == 2
+    end
+
+    test "finds at beginning" do
+      assert Runtime.index_of("hello", "he") == 0
+    end
+
+    test "finds at end" do
+      assert Runtime.index_of("hello", "lo") == 3
+    end
+
+    test "unicode string" do
+      assert Runtime.index_of("héllo", "l") == 2
+    end
+  end
+
+  describe "index_of/3 (with from-index)" do
+    test "finds occurrence starting from index" do
+      assert Runtime.index_of("hello", "l", 3) == 3
+    end
+
+    test "skips earlier occurrences" do
+      assert Runtime.index_of("abcabc", "bc", 2) == 4
+    end
+
+    test "returns nil when from-index beyond string length" do
+      assert Runtime.index_of("hello", "l", 10) == nil
+    end
+
+    test "empty substring with from-index returns min(from, length)" do
+      assert Runtime.index_of("hello", "", 3) == 3
+      assert Runtime.index_of("hello", "", 10) == 5
+    end
+
+    test "from-index 0 behaves like 2-arity" do
+      assert Runtime.index_of("hello", "ll", 0) == 2
+    end
+
+    test "negative from-index is clamped to 0" do
+      assert Runtime.index_of("hello", "he", -5) == 0
+    end
+  end
+
+  # ============================================================
+  # last_index_of
+  # ============================================================
+
+  describe "last_index_of/2" do
+    test "finds last occurrence" do
+      assert Runtime.last_index_of("hello", "l") == 3
+    end
+
+    test "returns nil when not found" do
+      assert Runtime.last_index_of("hello", "x") == nil
+    end
+
+    test "empty substring returns string length" do
+      assert Runtime.last_index_of("hello", "") == 5
+    end
+
+    test "single occurrence" do
+      assert Runtime.last_index_of("hello", "he") == 0
+    end
+
+    test "multiple occurrences returns last" do
+      assert Runtime.last_index_of("abcabc", "abc") == 3
+    end
+
+    test "overlapping matches finds last start position" do
+      assert Runtime.last_index_of("aaa", "aa") == 1
+      assert Runtime.last_index_of("aaaa", "aa") == 2
+      assert Runtime.last_index_of("abab", "abab") == 0
+    end
+
+    test "overlapping matches with unicode" do
+      assert Runtime.last_index_of("ééé", "éé") == 1
+    end
+  end
+
+  describe "last_index_of/3 (with from-index)" do
+    test "searches backwards from from-index" do
+      assert Runtime.last_index_of("hello", "l", 2) == 2
+    end
+
+    test "returns nil when no match before from-index" do
+      assert Runtime.last_index_of("hello", "l", 1) == nil
+    end
+
+    test "empty substring with from-index returns min(from, length)" do
+      assert Runtime.last_index_of("hello", "", 3) == 3
+      assert Runtime.last_index_of("hello", "", 10) == 5
+    end
+
+    test "from-index at last occurrence" do
+      assert Runtime.last_index_of("hello", "l", 3) == 3
+    end
+
+    test "negative from-index is clamped to 0" do
+      assert Runtime.last_index_of("abcabc", "a", -1) == 0
+    end
+  end
 end
