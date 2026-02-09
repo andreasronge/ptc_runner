@@ -130,7 +130,7 @@ defmodule PtcRunner.TraceLog.Event do
         sk = sanitize_key(k)
 
         sv =
-          if is_binary(sk) and sk in @preserve_full_keys and is_binary(v),
+          if sk in @preserve_full_keys and is_binary(v),
             do: v,
             else: sanitize(v)
 
