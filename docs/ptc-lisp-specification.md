@@ -184,7 +184,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Not supported:** Multi-line strings, regex literals (use `re-pattern` instead).
 
-**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
 
 **String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
 
@@ -1928,6 +1928,10 @@ The `seq` function converts a collection to a sequence:
 | `starts-with?` | `(starts-with? s prefix)` | Check if string starts with prefix |
 | `ends-with?` | `(ends-with? s suffix)` | Check if string ends with suffix |
 | `includes?` | `(includes? s substring)` | Check if string contains substring |
+| `index-of` | `(index-of s value)` | Index of first occurrence, or `nil` if not found |
+| `index-of` | `(index-of s value from-index)` | Index of first occurrence from position |
+| `last-index-of` | `(last-index-of s value)` | Index of last occurrence, or `nil` if not found |
+| `last-index-of` | `(last-index-of s value from-index)` | Index of last occurrence up to position |
 
 **Type coercion:** `str` converts values to strings using these rules:
 - `nil` → `""`
@@ -1974,6 +1978,17 @@ The `seq` function converts a collection to a sequence:
 - `(includes? "hello" "ll")` → `true` (substring check)
 - `(includes? "hello" "x")` → `false` (does not contain)
 - `(includes? "hello" "")` → `true` (empty substring always matches)
+- `(index-of "hello" "l")` → `2` (first occurrence)
+- `(index-of "hello" "x")` → `nil` (not found returns nil)
+- `(index-of "hello" "l" 3)` → `3` (search from position)
+- `(index-of "hello" "")` → `0` (empty value returns 0)
+- `(last-index-of "hello" "l")` → `3` (last occurrence)
+- `(last-index-of "hello" "x")` → `nil` (not found returns nil)
+- `(last-index-of "hello" "l" 2)` → `2` (search up to position)
+- `(last-index-of "hello" "")` → `5` (empty value returns string length)
+- `(last-index-of "aaa" "aa")` → `1` (overlapping matches handled correctly)
+
+**Note:** All string indices are grapheme-based (not byte offsets or UTF-16 code units), consistent with `subs`, `count`, and other PTC-Lisp string functions.
 
 ### 8.4 Arithmetic
 
@@ -2525,7 +2540,7 @@ PTC-Lisp supports Java-style string methods for common operations.
 (.lastIndexOf "hello" "l")   ; => 3 (last 'l')
 ```
 
-**Return Value**: These methods return -1 when the substring is not found (Java semantics), unlike Clojure which returns nil.
+**Return Value**: These methods return -1 when the substring is not found (Java semantics). **Prefer `index-of` / `last-index-of`** (§8.3) which return `nil` when not found (Clojure semantics).
 
 **Errors**: Passing a non-string raises a descriptive error:
 ```clojure

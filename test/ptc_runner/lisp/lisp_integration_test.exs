@@ -697,4 +697,74 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert result == true
     end
   end
+
+  describe "index-of" do
+    test "basic substring search" do
+      {:ok, %{return: 2}} = Lisp.run(~S|(index-of "hello" "ll")|)
+    end
+
+    test "returns nil when not found" do
+      {:ok, %{return: nil}} = Lisp.run(~S|(index-of "hello" "x")|)
+    end
+
+    test "empty substring returns 0" do
+      {:ok, %{return: 0}} = Lisp.run(~S|(index-of "hello" "")|)
+    end
+
+    test "with from-index" do
+      {:ok, %{return: 3}} = Lisp.run(~S|(index-of "hello" "l" 3)|)
+    end
+
+    test "from-index beyond string length returns nil" do
+      {:ok, %{return: nil}} = Lisp.run(~S|(index-of "hello" "l" 10)|)
+    end
+
+    test "unicode string" do
+      {:ok, %{return: 2}} = Lisp.run(~S|(index-of "héllo" "l")|)
+    end
+
+    test "namespace resolution clojure.string/index-of" do
+      {:ok, %{return: 2}} = Lisp.run(~S|(clojure.string/index-of "hello" "ll")|)
+    end
+
+    test "namespace resolution str/index-of" do
+      {:ok, %{return: 2}} = Lisp.run(~S|(str/index-of "hello" "ll")|)
+    end
+
+    test "nil result is usable in conditionals" do
+      {:ok, %{return: "not found"}} =
+        Lisp.run(~S|(if (nil? (index-of "hello" "x")) "not found" "found")|)
+    end
+  end
+
+  describe "last-index-of" do
+    test "basic last occurrence" do
+      {:ok, %{return: 3}} = Lisp.run(~S|(last-index-of "hello" "l")|)
+    end
+
+    test "returns nil when not found" do
+      {:ok, %{return: nil}} = Lisp.run(~S|(last-index-of "hello" "x")|)
+    end
+
+    test "empty substring returns string length" do
+      {:ok, %{return: 5}} = Lisp.run(~S|(last-index-of "hello" "")|)
+    end
+
+    test "with from-index" do
+      {:ok, %{return: 2}} = Lisp.run(~S|(last-index-of "hello" "l" 2)|)
+    end
+
+    test "namespace resolution clojure.string/last-index-of" do
+      {:ok, %{return: 3}} = Lisp.run(~S|(clojure.string/last-index-of "hello" "l")|)
+    end
+
+    test "namespace resolution str/last-index-of" do
+      {:ok, %{return: 3}} = Lisp.run(~S|(str/last-index-of "hello" "l")|)
+    end
+
+    test "overlapping matches" do
+      {:ok, %{return: 1}} = Lisp.run(~S|(last-index-of "aaa" "aa")|)
+      {:ok, %{return: 2}} = Lisp.run(~S|(last-index-of "aaaa" "aa")|)
+    end
+  end
 end

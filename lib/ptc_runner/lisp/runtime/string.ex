@@ -234,6 +234,126 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   # ============================================================
+  # String Index
+  # ============================================================
+
+  @doc """
+  Return the index of the first occurrence of value in s, or nil if not found.
+  Optionally starts searching from a given index.
+
+  Uses grapheme indices (not byte offsets or UTF-16 code units) for consistency
+  with `subs`, `count`, and other PTC-Lisp string functions.
+
+  - (index-of "hello" "l") returns 2
+  - (index-of "hello" "x") returns nil
+  - (index-of "hello" "l" 3) returns 3
+  - (index-of "hello" "" ) returns 0
+  """
+  def index_of(s, value) when is_binary(s) and is_binary(value) do
+    if value == "" do
+      0
+    else
+      case :binary.match(s, value) do
+        {byte_offset, _len} -> byte_offset_to_grapheme_index(s, byte_offset)
+        :nomatch -> nil
+      end
+    end
+  end
+
+  def index_of(s, value, from_index)
+      when is_binary(s) and is_binary(value) and is_integer(from_index) do
+    from_index = max(0, from_index)
+    len = String.length(s)
+
+    if value == "" do
+      min(from_index, len)
+    else
+      if from_index >= len do
+        nil
+      else
+        byte_start = grapheme_index_to_byte_offset(s, from_index)
+        scope = {byte_start, byte_size(s) - byte_start}
+
+        case :binary.match(s, value, scope: scope) do
+          {byte_offset, _len} -> byte_offset_to_grapheme_index(s, byte_offset)
+          :nomatch -> nil
+        end
+      end
+    end
+  end
+
+  @doc """
+  Return the index of the last occurrence of value in s, or nil if not found.
+  Optionally searches backwards from a given index.
+
+  Correctly handles overlapping matches: `(last-index-of "aaa" "aa")` returns 1.
+
+  Uses grapheme indices (not byte offsets or UTF-16 code units) for consistency
+  with `subs`, `count`, and other PTC-Lisp string functions.
+
+  - (last-index-of "hello" "l") returns 3
+  - (last-index-of "hello" "x") returns nil
+  - (last-index-of "hello" "l" 2) returns 2
+  - (last-index-of "hello" "") returns 5
+  - (last-index-of "aaa" "aa") returns 1
+  """
+  def last_index_of(s, value) when is_binary(s) and is_binary(value) do
+    if value == "" do
+      String.length(s)
+    else
+      find_last_byte_offset(s, value, byte_size(s) - byte_size(value))
+      |> maybe_byte_offset_to_grapheme(s)
+    end
+  end
+
+  def last_index_of(s, value, from_index)
+      when is_binary(s) and is_binary(value) and is_integer(from_index) do
+    from_index = max(0, from_index)
+
+    if value == "" do
+      min(from_index, String.length(s))
+    else
+      # from_index is the last grapheme starting position to consider
+      max_byte = grapheme_index_to_byte_offset(s, min(from_index, String.length(s)))
+      start = min(max_byte, byte_size(s) - byte_size(value))
+
+      find_last_byte_offset(s, value, start)
+      |> maybe_byte_offset_to_grapheme(s)
+    end
+  end
+
+  # Scan backwards byte-by-byte to find the last occurrence of value in s.
+  # Handles overlapping matches correctly (unlike String.split).
+  defp find_last_byte_offset(_s, _value, pos) when pos < 0, do: nil
+
+  defp find_last_byte_offset(s, value, pos) do
+    v_bytes = byte_size(value)
+
+    if binary_part(s, pos, v_bytes) == value do
+      pos
+    else
+      find_last_byte_offset(s, value, pos - 1)
+    end
+  end
+
+  defp maybe_byte_offset_to_grapheme(nil, _s), do: nil
+
+  defp maybe_byte_offset_to_grapheme(byte_offset, s),
+    do: byte_offset_to_grapheme_index(s, byte_offset)
+
+  defp byte_offset_to_grapheme_index(_s, 0), do: 0
+
+  defp byte_offset_to_grapheme_index(s, byte_offset) do
+    String.length(binary_part(s, 0, byte_offset))
+  end
+
+  defp grapheme_index_to_byte_offset(_s, 0), do: 0
+
+  defp grapheme_index_to_byte_offset(s, grapheme_index) do
+    byte_size(String.slice(s, 0, grapheme_index))
+  end
+
+  # ============================================================
   # String Parsing
   # ============================================================
 

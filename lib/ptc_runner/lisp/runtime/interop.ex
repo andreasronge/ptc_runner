@@ -148,19 +148,12 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   Simulates .indexOf method on strings.
   Returns the grapheme index of the first occurrence of substring, or -1 if not found.
 
+  Delegates to `Runtime.String.index_of/2` and converts `nil` to `-1` for Java semantics.
   Uses grapheme indices (not byte offsets) for compatibility with `subs` and other
   PTC-Lisp string functions.
   """
   def dot_index_of(s, substring) when is_binary(s) and is_binary(substring) do
-    # Empty substring always found at position 0 (Java semantics)
-    if substring == "" do
-      0
-    else
-      case String.split(s, substring, parts: 2) do
-        [prefix, _rest] -> String.length(prefix)
-        [_no_match] -> -1
-      end
-    end
+    PtcRunner.Lisp.Runtime.String.index_of(s, substring) || -1
   end
 
   def dot_index_of(s, _substring) do
@@ -169,28 +162,11 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   @doc """
   Simulates .indexOf method on strings with a starting position.
-  Returns the grapheme index of the first occurrence starting from `from`.
+  Delegates to `Runtime.String.index_of/3` and converts `nil` to `-1`.
   """
   def dot_index_of(s, substring, from)
       when is_binary(s) and is_binary(substring) and is_integer(from) do
-    from = max(0, from)
-    len = String.length(s)
-
-    # Java semantics: empty substring returns min(from, length)
-    if substring == "" do
-      min(from, len)
-    else
-      if from >= len do
-        -1
-      else
-        suffix = String.slice(s, from..-1//1)
-
-        case String.split(suffix, substring, parts: 2) do
-          [prefix, _rest] -> from + String.length(prefix)
-          [_no_match] -> -1
-        end
-      end
-    end
+    PtcRunner.Lisp.Runtime.String.index_of(s, substring, from) || -1
   end
 
   def dot_index_of(s, _substring, _from) do
@@ -199,27 +175,10 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   @doc """
   Simulates .lastIndexOf method on strings.
-  Returns the grapheme index of the last occurrence of substring, or -1 if not found.
+  Delegates to `Runtime.String.last_index_of/2` and converts `nil` to `-1`.
   """
   def dot_last_index_of(s, substring) when is_binary(s) and is_binary(substring) do
-    # Java semantics: empty substring returns string length
-    if substring == "" do
-      String.length(s)
-    else
-      parts = String.split(s, substring)
-
-      case parts do
-        [_no_match] ->
-          -1
-
-        parts ->
-          # Sum lengths of all parts except the last, plus (n-1) * substring_length
-          # for the substrings between them
-          all_but_last = Enum.take(parts, length(parts) - 1)
-          prefix_lengths = Enum.map(all_but_last, &String.length/1)
-          Enum.sum(prefix_lengths) + (length(all_but_last) - 1) * String.length(substring)
-      end
-    end
+    PtcRunner.Lisp.Runtime.String.last_index_of(s, substring) || -1
   end
 
   def dot_last_index_of(s, _substring) do
