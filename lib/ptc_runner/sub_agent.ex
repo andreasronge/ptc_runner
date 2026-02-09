@@ -131,7 +131,7 @@ defmodule PtcRunner.SubAgent do
           parsed_signature: {:signature, list(), term()} | nil,
           tools: map(),
           llm_query: boolean(),
-          grep_tools: boolean(),
+          builtin_tools: [atom()],
           max_turns: pos_integer(),
           retry_turns: non_neg_integer(),
           prompt_limit: map() | nil,
@@ -186,7 +186,7 @@ defmodule PtcRunner.SubAgent do
     :compression,
     tools: %{},
     llm_query: false,
-    grep_tools: false,
+    builtin_tools: [],
     max_turns: 5,
     retry_turns: 0,
     timeout: 5000,
@@ -244,7 +244,7 @@ defmodule PtcRunner.SubAgent do
   - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
   - `output` - Output mode: `:ptc_lisp` (default) or `:json`
   - `llm_query` - Boolean enabling LLM query mode (default: false)
-  - `grep_tools` - Boolean enabling tool/grep and tool/grep-n for text search (default: false)
+  - `builtin_tools` - List of builtin tool families to enable (default: []). Available: `:grep` (adds grep and grep-n tools)
   - `plan` - List of plan steps (strings, `{id, description}` tuples, or keyword list)
 
   ## Returns
@@ -353,20 +353,24 @@ defmodule PtcRunner.SubAgent do
     normalized
   end
 
+  @builtin_tool_families %{
+    grep: [{"grep", :builtin_grep}, {"grep-n", :builtin_grep_n}]
+  }
+
   @doc """
   Returns the agent's tools with builtin tools injected.
 
-  Merges `llm_query` and `grep_tools` builtins into the tools map.
+  Merges `llm_query` and `builtin_tools` families into the tools map.
   User-defined tools are never overwritten by builtins.
 
   ## Examples
 
-      iex> agent = PtcRunner.SubAgent.new(prompt: "test", grep_tools: true)
+      iex> agent = PtcRunner.SubAgent.new(prompt: "test", builtin_tools: [:grep])
       iex> tools = PtcRunner.SubAgent.effective_tools(agent)
       iex> Map.has_key?(tools, "grep")
       true
 
-      iex> agent = PtcRunner.SubAgent.new(prompt: "test", grep_tools: true, tools: %{"grep" => fn _ -> :custom end})
+      iex> agent = PtcRunner.SubAgent.new(prompt: "test", builtin_tools: [:grep], tools: %{"grep" => fn _ -> :custom end})
       iex> tools = PtcRunner.SubAgent.effective_tools(agent)
       iex> is_function(tools["grep"])
       true
@@ -381,16 +385,18 @@ defmodule PtcRunner.SubAgent do
         do: Map.put_new(tools, "llm-query", :builtin_llm_query),
         else: tools
 
-    tools =
-      if agent.grep_tools do
-        tools
-        |> Map.put_new("grep", :builtin_grep)
-        |> Map.put_new("grep-n", :builtin_grep_n)
-      else
-        tools
-      end
+    # Expand builtin_tools families
+    Enum.reduce(agent.builtin_tools, tools, fn family, acc ->
+      case Map.fetch(@builtin_tool_families, family) do
+        {:ok, entries} ->
+          Enum.reduce(entries, acc, fn {name, sentinel}, inner_acc ->
+            Map.put_new(inner_acc, name, sentinel)
+          end)
 
-    tools
+        :error ->
+          acc
+      end
+    end)
   end
 
   @doc """
@@ -476,7 +482,7 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :llm_query,
-        :grep_tools,
+        :builtin_tools,
         :max_turns,
         :retry_turns,
         :timeout,
@@ -510,7 +516,7 @@ defmodule PtcRunner.SubAgent do
         :signature,
         :tools,
         :llm_query,
-        :grep_tools,
+        :builtin_tools,
         :max_turns,
         :retry_turns,
         :prompt_limit,

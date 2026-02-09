@@ -137,11 +137,11 @@ defmodule PageIndex.IterativeRetriever do
         2b. PAGINATION: If a fetch result has `truncated: true`, call fetch_section again with
             the offset from the hint to get remaining content. Do not extract partial data from
             truncated tables — paginate until you find what you need or truncated is false.
-        2c. SEARCHING: Use built-in `grep` / `grep-n` to search within fetched content:
+        2c. SEARCHING: Use `tool/grep` / `tool/grep-n` to search within fetched content:
             ```
             (def section (tool/fetch_section {:node_id "some_section"}))
-            (grep "revenue|sales" (:content section))    ; => ["Net sales 34,229 35,355" ...]
-            (grep-n "revenue" (:content section))        ; => [{:line 5 :text "Net sales ..."}]
+            (tool/grep {:pattern "revenue|sales" :text (:content section)})    ; => ["Net sales 34,229 35,355" ...]
+            (tool/grep-n {:pattern "revenue" :text (:content section)})        ; => [{:line 5 :text "Net sales ..."}]
             ```
         3. Extract ALL relevant data points as structured findings with:
            - label: descriptive snake_case identifier
@@ -163,6 +163,7 @@ defmodule PageIndex.IterativeRetriever do
              description:
                "Fetch content from a document section by ID. Use offset for pagination when truncated is true."}
         },
+        builtin_tools: [:grep],
         max_turns: 10,
         timeout: 30_000
       )

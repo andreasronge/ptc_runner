@@ -79,7 +79,7 @@ defmodule PtcRunner.SubAgent.PlannerWorkerE2ETest do
           Check `(:status result)` — `"ok"` means success, `"error"` means failure.
           On error, try an alternative URL instead of retrying the same one.
         - For GitHub files, use raw URLs: `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
-        - Use `(grep pattern text)` or `(grep-n pattern text)` to search text.
+        - Use `(tool/grep {:pattern "..." :text text})` or `(tool/grep-n {:pattern "..." :text text})` to search text.
         - Return a map with your findings as soon as you have useful data.
           Partial results are better than no results.
         """,
@@ -93,6 +93,7 @@ defmodule PtcRunner.SubAgent.PlannerWorkerE2ETest do
              description: "Fetch a web page and return its text content.",
              cache: true}
         },
+        builtin_tools: [:grep],
         max_turns: 3,
         retry_turns: 1,
         timeout: 30_000

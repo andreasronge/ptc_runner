@@ -91,7 +91,7 @@ Use `(task "id" expr)` to record idempotent steps. If the task ID was already co
 
 When a plan is provided, **each turn should complete one step**: fetch/compute, verify the result, then call `(step-done "id" "summary")`. The step-done call marks the step as done in the Progress checklist.
 
-**Verify before marking done.** If a page contains conflicting values (e.g., old examples vs. current text), use `grep` to find all candidates and reason through which is correct before calling `step-done`.
+**Verify before marking done.** If a page contains conflicting values (e.g., old examples vs. current text), search for all candidates and reason through which is correct before calling `step-done`.
 
 Use `(task-reset "id")` to clear a cached task result from the journal. Call `step-done` at top level in `do` blocks — it does not work inside `pmap`/`pcalls`/`map` closures.
 

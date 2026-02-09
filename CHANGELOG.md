@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Language**
 
 - `for` (minimal) list comprehension
-- String functions: `grep`, `grep-n`, `.indexOf`, `.lastIndexOf`
+- String functions: `.indexOf`, `.lastIndexOf`
+- `builtin_tools` option for injecting builtin tools (e.g., `grep`, `grep-n`) instead of hardcoded builtins
 - Collection functions: `extract`, `extract-int`, `pairs`, `combinations`, `mapcat`, `butlast`, `take-last`, `drop-last`, `partition-all`
 - Aggregators: `sum`, `avg`, `quot`
 - Reader literals: `##Inf`, `##-Inf`, `##NaN`

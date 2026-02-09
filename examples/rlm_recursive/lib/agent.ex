@@ -7,7 +7,7 @@ defmodule RlmRecursive.Agent do
 
   - Identify when data is too large for single-turn processing
   - Decompose problems using recursive self-calls
-  - Write efficient code (grep probing, city grouping, batching, etc.)
+  - Write efficient code (tool/grep probing, city grouping, batching, etc.)
 
   ## Example
 
@@ -51,7 +51,8 @@ defmodule RlmRecursive.Agent do
       prompt: sniah_prompt(),
       signature: "(corpus :string, query :string) -> {answer :string, found :bool}",
       description: "Search corpus for answer to query using recursive subdivision",
-      tools: %{"query" => :self},
+      tools: %{"search" => :self},
+      builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
       llm: llm
@@ -67,7 +68,8 @@ defmodule RlmRecursive.Agent do
       prompt: counting_prompt(),
       signature: "(corpus :string, min_age :int, hobby :string) -> {count :int}",
       description: "Count profiles matching criteria using recursive aggregation",
-      tools: %{"query" => :self},
+      tools: %{"search" => :self},
+      builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
       llm: llm
@@ -84,7 +86,8 @@ defmodule RlmRecursive.Agent do
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description:
         "Find pairs of profiles in same city with shared hobby - uses recursion for O(n^2) task",
-      tools: %{"query" => :self},
+      tools: %{"search" => :self},
+      builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
       llm: llm
@@ -105,6 +108,7 @@ defmodule RlmRecursive.Agent do
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
       description: "Find pairs with semantically compatible interests",
       tools: %{"evaluate_pairs" => :self},
+      builtin_tools: [:grep],
       llm_query: true,
       max_depth: max_depth,
       max_turns: max_turns,
@@ -128,7 +132,7 @@ defmodule RlmRecursive.Agent do
     Return `{:answer "THE_ANSWER" :found true}` if found, or `{:answer nil :found false}` if not found.
 
     ## Tool
-    - `tool/query`: Recursive self-call
+    - `tool/search`: Recursive self-call
     """
   end
 
@@ -145,7 +149,7 @@ defmodule RlmRecursive.Agent do
     Return `{:count N}` where N is the count of matching profiles.
 
     ## Tool
-    - `tool/query`: Recursive self-call
+    - `tool/search`: Recursive self-call
     """
   end
 
@@ -160,7 +164,7 @@ defmodule RlmRecursive.Agent do
     Return `{:count N :pairs ["id1-id2" ...]}` where pairs are "id1-id2" strings (id1 < id2).
 
     ## Tool
-    - `tool/query`: Recursive self-call
+    - `tool/search`: Recursive self-call
     """
   end
 

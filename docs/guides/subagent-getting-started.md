@@ -344,6 +344,21 @@ Enable `llm_query: true` to let the agent make ad-hoc LLM calls from PTC-Lisp wi
 
 The agent can call `tool/llm-query` with a prompt and optional signature for classification, judgment, or extraction tasks. See [Composition Patterns](subagent-patterns.md#builtin-ad-hoc-llm-queries-llm_query) for details.
 
+## Builtin Tools
+
+Use `builtin_tools` to enable utility tool families without defining them yourself:
+
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "Find lines mentioning 'error' in the log",
+  builtin_tools: [:grep],
+  llm: my_llm,
+  context: %{log: log_text}
+)
+```
+
+The `:grep` family adds `tool/grep` and `tool/grep-n` (line-numbered variant). Multiple families can be combined: `builtin_tools: [:grep]`. User-defined tools with the same name take precedence.
+
 ## Agent as Data
 
 For reusable agents, create the struct separately:

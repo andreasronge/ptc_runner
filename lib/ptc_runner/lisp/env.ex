@@ -142,8 +142,6 @@ defmodule PtcRunner.Lisp.Env do
       :"starts-with?",
       :"ends-with?",
       :includes?,
-      :grep,
-      :"grep-n",
       :"parse-long",
       :"parse-int",
       :"parse-double",
@@ -404,8 +402,6 @@ defmodule PtcRunner.Lisp.Env do
       {:"starts-with?", {:normal, &Runtime.starts_with?/2}},
       {:"ends-with?", {:normal, &Runtime.ends_with?/2}},
       {:includes?, {:normal, &Runtime.includes?/2}},
-      {:grep, {:normal, &Runtime.grep/2}},
-      {:"grep-n", {:normal, &Runtime.grep_n/2}},
 
       # ============================================================
       # String parsing
