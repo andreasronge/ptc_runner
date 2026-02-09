@@ -22,8 +22,10 @@ defmodule CLI do
           simple: :boolean,
           planner: :boolean,
           iterative: :boolean,
+          minimal: :boolean,
           trace: :boolean,
           model: :string,
+          search_model: :string,
           help: :boolean
         ],
         aliases: [
@@ -33,6 +35,7 @@ defmodule CLI do
           s: :simple,
           p: :planner,
           i: :iterative,
+          M: :minimal,
           t: :trace
         ]
       )
@@ -66,10 +69,12 @@ defmodule CLI do
 
     Options:
       -m, --model <name>    LLM model (default: bedrock:haiku)
+      --search-model <name> Separate model for search SubAgent (minimal mode only)
       --pdf <path>          PDF path for queries (required with --query)
       -s, --simple          Use simple retrieval (score all nodes, no recursion)
       -p, --planner         Use MetaPlanner for complex multi-hop questions
       -i, --iterative       Use iterative extraction/synthesis loop
+      -M, --minimal         Use MinimalPlannerRetriever (constraint-free MetaPlanner)
       -t, --trace           Enable tracing (writes to traces/ directory)
       -h, --help            Show this help
 
@@ -116,6 +121,7 @@ defmodule CLI do
     simple = opts[:simple] || false
     planner = opts[:planner] || false
     iterative = opts[:iterative] || false
+    minimal = opts[:minimal] || false
     trace = opts[:trace] || false
 
     pdf_path = opts[:pdf]
@@ -129,6 +135,7 @@ defmodule CLI do
 
     mode =
       cond do
+        minimal -> "minimal (constraint-free MetaPlanner)"
         iterative -> "iterative (extraction loop)"
         planner -> "planner (MetaPlanner with verification)"
         simple -> "simple (score all nodes)"
@@ -147,6 +154,17 @@ defmodule CLI do
     case PageIndex.load_index(index_path) do
       {:ok, tree} ->
         cond do
+          minimal ->
+            search_llm =
+              if opts[:search_model],
+                do: LLMClient.callback(opts[:search_model]),
+                else: nil
+
+            run_minimal_planner_query(tree, query, llm, pdf_path,
+              trace: trace,
+              search_llm: search_llm
+            )
+
           iterative ->
             run_iterative_query(tree, query, llm, pdf_path, trace: trace)
 
@@ -208,6 +226,37 @@ defmodule CLI do
 
       {:error, reason} ->
         IO.puts("Error: #{inspect(reason)}")
+    end
+  end
+
+  defp run_minimal_planner_query(tree, query, llm, pdf_path, opts) do
+    retriever_opts =
+      [llm: llm, pdf_path: pdf_path, quality_gate: true]
+      |> then(fn o ->
+        if opts[:search_llm], do: Keyword.put(o, :search_llm, opts[:search_llm]), else: o
+      end)
+
+    result =
+      with_optional_trace(opts[:trace], "minimal", query, fn ->
+        PageIndex.MinimalPlannerRetriever.retrieve(tree, query, retriever_opts)
+      end)
+
+    case result do
+      {:ok, result} ->
+        IO.puts("\n" <> String.duplicate("=", 60))
+        IO.puts("ANSWER (after #{result.replans} replans, #{result.tasks_executed} tasks):")
+        IO.puts(String.duplicate("=", 60))
+        IO.puts(inspect_answer(result.answer))
+
+        IO.puts("\nSources:")
+
+        for source <- result.sources || [] do
+          IO.puts("  - #{source.section} (page #{source.page})")
+        end
+
+      {:error, result} ->
+        IO.puts("Error: #{inspect(result.reason)}")
+        IO.puts("Replans attempted: #{result.replans}")
     end
   end
 

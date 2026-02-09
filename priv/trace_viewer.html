@@ -1275,25 +1275,96 @@
             </div>`;
         }
 
-        // Find PTC-Lisp programs from LLM events within this task's time range
-        const taskPrograms = findTaskPrograms(start, stop);
-        if (taskPrograms.length > 0) {
-          taskPrograms.forEach((prog, idx) => {
-            const turnLabel = taskPrograms.length > 1 ? ` (Turn ${idx + 1})` : '';
-            bodyContent += `
-              <div class="event-section">
-                <div class="event-section-title">📝 Program${turnLabel}</div>
-                <div class="code-block">${highlightLisp(prog)}</div>
-              </div>`;
+        // Find full turn data from LLM/turn events within this task's time range
+        const taskTurns = findTaskTurns(start, stop);
+        if (taskTurns.length > 0) {
+          taskTurns.forEach((t, idx) => {
+            const turnLabel = taskTurns.length > 1 ? ` (Turn ${t.turn || idx + 1})` : '';
+
+            // System prompt (first turn only, collapsible)
+            if (idx === 0 && t.systemPrompt) {
+              const spLen = (t.systemPrompt.length / 1024).toFixed(1);
+              bodyContent += `
+                <div class="event-section">
+                  <details>
+                    <summary class="event-section-title" style="cursor: pointer; list-style: none;">🔧 System Prompt <span style="color: var(--muted); font-size: 11px;">(${spLen}KB — click to expand)</span></summary>
+                    <div class="code-block" style="max-height: 600px; overflow-y: auto; border-left: 2px solid var(--accent); white-space: pre-wrap;">${escapeHtml(t.systemPrompt)}</div>
+                  </details>
+                </div>`;
+            }
+
+            // Prompt (turn 1: full, turn 2+: collapsed as feedback)
+            if (t.prompt) {
+              const isStub = /^String\(\d+ bytes\)$/.test(t.prompt);
+              if (isStub) {
+                // not captured
+              } else if (idx > 0) {
+                bodyContent += `
+                  <div class="event-section">
+                    <details>
+                      <summary class="event-section-title" style="cursor: pointer; list-style: none;">📨 Feedback${turnLabel} <span style="color: var(--muted); font-size: 11px;">(click to expand)</span></summary>
+                      <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(t.prompt, 2000))}</div>
+                    </details>
+                  </div>`;
+              } else {
+                bodyContent += `
+                  <div class="event-section">
+                    <details>
+                      <summary class="event-section-title" style="cursor: pointer; list-style: none;">📨 Prompt${turnLabel} <span style="color: var(--muted); font-size: 11px;">(click to expand)</span></summary>
+                      <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(t.prompt, 2000))}</div>
+                    </details>
+                  </div>`;
+              }
+            }
+
+            // Thinking
+            if (t.thinking) {
+              bodyContent += `
+                <div class="event-section">
+                  <div class="event-section-title">💭 Thinking${turnLabel}</div>
+                  <div class="thinking-block">${escapeHtml(t.thinking)}</div>
+                </div>`;
+            }
+
+            // Program
+            if (t.program) {
+              bodyContent += `
+                <div class="event-section">
+                  <div class="event-section-title">📝 Program${turnLabel}${t.tokens ? ` <span style="color: var(--muted); font-size: 11px;">${formatTokenBreakdown(t.tokens)}</span>` : ''}</div>
+                  <div class="code-block">${highlightLisp(t.program)}</div>
+                </div>`;
+            }
+
+            // Per-turn result
+            if (t.resultPreview && t.resultPreview !== 'nil') {
+              const isError = t.resultPreview.includes('Error:') || t.resultPreview.includes(':error');
+              const titleIcon = isError ? '❌' : '📤';
+              const titleText = isError ? 'Error' : 'Result';
+              bodyContent += `
+                <div class="event-section">
+                  <div class="event-section-title">${titleIcon} ${titleText}${turnLabel}</div>
+                  <div class="code-block"${isError ? ' style="border-left: 2px solid var(--error);"' : ''}>${escapeHtml(t.resultPreview)}</div>
+                </div>`;
+            }
+
+            // Prints
+            if (Array.isArray(t.prints) && t.prints.length > 0) {
+              bodyContent += `
+                <div class="event-section">
+                  <div class="event-section-title">🖨 Output${turnLabel} (${t.prints.length})</div>
+                  <div class="code-block" style="max-height: 300px; overflow-y: auto;">${t.prints.map(p => escapeHtml(p)).join('\n')}</div>
+                </div>`;
+            }
           });
         }
 
+        // Final task result (from task.stop metadata — the aggregated return value)
         const taskResult = stop?.metadata?.result;
         if (taskResult != null) {
           const resultStr = typeof taskResult === 'string' ? taskResult : JSON.stringify(taskResult, null, 2);
           bodyContent += `
             <div class="event-section">
-              <div class="event-section-title">📤 Result</div>
+              <div class="event-section-title">📤 Final Result</div>
               <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(resultStr, 2000))}</div>
             </div>`;
         }
@@ -1342,25 +1413,85 @@
       return match ? match[1].trim() : '';
     }
 
-    // Find PTC-Lisp programs from LLM events that occurred during a task's execution
-    function findTaskPrograms(taskStart, taskStop) {
+    // Find full turn data from LLM/turn events within a task's execution window
+    function findTaskTurns(taskStart, taskStop) {
       if (!taskStart || !taskStop || !currentFile) return [];
       const data = loadedFiles.get(currentFile);
       if (!data) return [];
 
       const taskStartTime = new Date(taskStart.timestamp).getTime();
       const taskStopTime = new Date(taskStop.timestamp).getTime();
-      const programs = [];
+
+      // Collect LLM start/stop and turn stop events within the window
+      const llmStarts = [];
+      const llmStops = [];
+      const turnStops = {};
 
       for (const event of data.events) {
-        if (event.event !== 'llm.stop') continue;
         const eventTime = new Date(event.timestamp).getTime();
-        if (eventTime >= taskStartTime && eventTime <= taskStopTime) {
-          const program = extractProgram(event.metadata?.response || '');
-          if (program) programs.push(program);
+        if (eventTime < taskStartTime || eventTime > taskStopTime) continue;
+
+        if (event.event === 'llm.start') llmStarts.push(event);
+        else if (event.event === 'llm.stop') llmStops.push(event);
+        else if (event.event === 'turn.stop') {
+          const turn = event.metadata?.turn;
+          if (turn) turnStops[turn] = event;
         }
       }
-      return programs;
+
+      // Pair llm.start with llm.stop by span_id, then by order
+      const turns = [];
+      const usedStops = new Set();
+
+      for (const start of llmStarts) {
+        let stop = null;
+        if (start.span_id) {
+          stop = llmStops.find(s => s.span_id === start.span_id);
+        }
+        if (!stop) {
+          stop = llmStops.find(s => !usedStops.has(s) &&
+            new Date(s.timestamp).getTime() >= new Date(start.timestamp).getTime());
+        }
+        if (stop) usedStops.add(stop);
+
+        const turn = stop?.metadata?.turn || start?.metadata?.turn;
+        const response = stop?.metadata?.response || '';
+        const turnStop = turn ? turnStops[turn] : null;
+
+        turns.push({
+          turn,
+          systemPrompt: start?.metadata?.system_prompt || null,
+          prompt: getLastUserMessage(start?.metadata?.messages),
+          thinking: extractThinking(response),
+          program: extractProgram(response),
+          tokens: stop?.measurements || null,
+          duration: stop?.duration_ms || 0,
+          resultPreview: turnStop?.metadata?.result_preview || null,
+          prints: turnStop?.metadata?.prints || null
+        });
+      }
+
+      // Handle orphan llm.stop events (no matching start)
+      for (const stop of llmStops) {
+        if (usedStops.has(stop)) continue;
+        const turn = stop?.metadata?.turn;
+        const response = stop?.metadata?.response || '';
+        const turnStop = turn ? turnStops[turn] : null;
+
+        turns.push({
+          turn,
+          systemPrompt: null,
+          prompt: null,
+          thinking: extractThinking(response),
+          program: extractProgram(response),
+          tokens: stop?.measurements || null,
+          duration: stop?.duration_ms || 0,
+          resultPreview: turnStop?.metadata?.result_preview || null,
+          prints: turnStop?.metadata?.prints || null
+        });
+      }
+
+      return turns;
     }
 
     function getLastUserMessage(messages) {
