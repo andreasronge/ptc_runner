@@ -10,6 +10,72 @@
 {:ok, _} = Application.ensure_all_started(:pdf_extractor)
 {:ok, _} = PdfExtractor.start_link([])
 
+defmodule TokenTracker do
+  @moduledoc false
+  # Tracks token usage across all LLM calls via telemetry.
+
+  def start do
+    if :ets.whereis(__MODULE__) == :undefined do
+      :ets.new(__MODULE__, [:named_table, :public, :set])
+    end
+
+    :ets.insert(__MODULE__, {:totals, 0, 0, 0, 0, 0})
+
+    :telemetry.attach(
+      "token-tracker",
+      [:ptc_runner, :sub_agent, :llm, :stop],
+      &__MODULE__.handle_event/4,
+      nil
+    )
+  end
+
+  def handle_event(_event, measurements, _meta, _config) do
+    input = Map.get(measurements, :input_tokens, 0)
+    output = Map.get(measurements, :output_tokens, 0)
+    cache_creation = Map.get(measurements, :cache_creation_tokens, 0)
+    cache_read = Map.get(measurements, :cache_read_tokens, 0)
+
+    :ets.update_counter(__MODULE__, :totals, [
+      {2, input},
+      {3, output},
+      {4, cache_creation},
+      {5, cache_read},
+      {6, 1}
+    ])
+  end
+
+  def summary do
+    [{:totals, input, output, cache_creation, cache_read, calls}] =
+      :ets.lookup(__MODULE__, :totals)
+
+    %{
+      llm_calls: calls,
+      input_tokens: input,
+      output_tokens: output,
+      cache_creation_tokens: cache_creation,
+      cache_read_tokens: cache_read,
+      total_tokens: input + output
+    }
+  end
+
+  def print_summary do
+    stats = summary()
+    IO.puts("\nToken usage (#{stats.llm_calls} LLM calls):")
+    IO.puts("  Input:  #{stats.input_tokens}")
+    IO.puts("  Output: #{stats.output_tokens}")
+
+    if stats.cache_creation_tokens > 0 or stats.cache_read_tokens > 0 do
+      IO.puts("  Cache write: #{stats.cache_creation_tokens}")
+      IO.puts("  Cache read:  #{stats.cache_read_tokens}")
+
+      if stats.input_tokens > 0 do
+        cache_pct = Float.round(stats.cache_read_tokens / stats.input_tokens * 100, 1)
+        IO.puts("  Cache hit:   #{cache_pct}% of input tokens")
+      end
+    end
+  end
+end
+
 defmodule CLI do
   def main(args) do
     {opts, _rest, _} =
@@ -21,13 +87,15 @@ defmodule CLI do
           pdf: :string,
           trace: :boolean,
           model: :string,
+          cache: :boolean,
           help: :boolean
         ],
         aliases: [
           h: :help,
           m: :model,
           q: :query,
-          t: :trace
+          t: :trace,
+          c: :cache
         ]
       )
 
@@ -61,12 +129,14 @@ defmodule CLI do
     Options:
       -m, --model <name>    LLM model (default: bedrock:haiku)
       --pdf <path>          PDF path for queries (required with --query)
+      -c, --cache           Enable prompt caching (reduces cost on repeated queries)
       -t, --trace           Enable tracing (writes to traces/ directory)
       -h, --help            Show this help
 
     Examples:
       mix run run.exs --index data/3M_2022_10K.pdf
       mix run run.exs --query "What was 3M's total revenue in 2022?" --pdf data/3M_2022_10K.pdf
+      mix run run.exs --query "Is 3M capital intensive?" --pdf data/3M_2022_10K.pdf --cache
       mix run run.exs --show data/3M_2022_10K_index.json
     """)
   end
@@ -104,6 +174,7 @@ defmodule CLI do
   defp query_index(query, opts) do
     model = opts[:model] || "bedrock:haiku"
     trace = opts[:trace] || false
+    cache = opts[:cache] || false
 
     pdf_path = opts[:pdf]
 
@@ -117,14 +188,19 @@ defmodule CLI do
     IO.puts("Query: #{query}")
     IO.puts("Model: #{model}")
     IO.puts("Index: #{index_path}")
+    if cache, do: IO.puts("Cache: enabled")
     if trace, do: IO.puts("Tracing: enabled")
     IO.puts("")
 
-    llm = LLMClient.callback(model)
+    TokenTracker.start()
+
+    llm_opts = if cache, do: [cache: true], else: []
+    llm = LLMClient.callback(model, llm_opts)
 
     case PageIndex.load_index(index_path) do
       {:ok, tree} ->
         run_query(tree, query, llm, pdf_path, trace: trace)
+        TokenTracker.print_summary()
 
       {:error, reason} ->
         IO.puts("Error loading index: #{inspect(reason)}")
@@ -173,7 +249,9 @@ defmodule CLI do
         IO.puts("\nSources:")
 
         for source <- result.sources || [] do
-          IO.puts("  - #{source.section} (page #{source.page})")
+          section = inspect_field(source.section)
+          page = inspect_field(source.page)
+          IO.puts("  - #{section} (page #{page})")
         end
 
       {:error, result} ->
@@ -189,6 +267,10 @@ defmodule CLI do
   end
 
   defp inspect_answer(answer), do: inspect(answer)
+
+  defp inspect_field(value) when is_binary(value), do: value
+  defp inspect_field(value) when is_number(value), do: to_string(value)
+  defp inspect_field(value), do: inspect(value)
 
   defp show_index(json_path) do
     case PageIndex.load_index(json_path) do

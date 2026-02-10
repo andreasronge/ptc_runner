@@ -62,6 +62,18 @@ Local aliases (Ollama only): `deepseek-local`, `qwen-local`, `llama-local`
 
 Use `LLMClient.presets/1` to get aliases for a specific provider.
 
+## Options
+
+```elixir
+# Prompt caching — reduces cost and latency for repeated context
+{:ok, response} = LLMClient.generate_text("bedrock:haiku", messages, cache: true)
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `cache` | `false` | Enable prompt caching (Anthropic, OpenRouter Anthropic, Bedrock Claude). Uses 5-min ephemeral cache. Cache hits charged at ~10% of normal input token rate. |
+| `receive_timeout` | `120_000` | Request timeout in milliseconds |
+
 ## Configuration
 
 ### Default Provider
