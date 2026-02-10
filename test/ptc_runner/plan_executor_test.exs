@@ -45,7 +45,7 @@ defmodule PtcRunner.PlanExecutorTest do
   end
 
   describe "execute/3 - sanitization" do
-    test "strips illegal verification predicate and executes without verification" do
+    test "rejects plan with invalid verification predicate" do
       # Predicate uses "result" instead of "data/result" — Lisp.validate will flag it
       raw = %{
         "tasks" => [
@@ -64,9 +64,11 @@ defmodule PtcRunner.PlanExecutorTest do
         {:ok, ~s({"items": []})}
       end
 
-      # Succeeds because the illegal predicate is stripped, not enforced
-      {:ok, metadata} = PlanExecutor.execute(plan, "Test mission", llm: mock_llm, max_turns: 1)
-      assert Map.has_key?(metadata.results, "fetch")
+      # Fails validation — invalid predicate is now an error, not silently stripped
+      {:error, {:invalid_plan, issues}, _metadata} =
+        PlanExecutor.execute(plan, "Test mission", llm: mock_llm, max_turns: 1)
+
+      assert Enum.any?(issues, &(&1.category == :invalid_verification))
     end
   end
 

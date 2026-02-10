@@ -670,6 +670,94 @@ defmodule PtcRunner.PlanTest do
 
       assert Plan.validate(plan) == :ok
     end
+
+    test "detects invalid PTC-Lisp in direct task input" do
+      {:ok, plan} =
+        Plan.parse(%{
+          "tasks" => [
+            %{"id" => "a", "input" => "search things"},
+            %{
+              "id" => "extract",
+              "agent" => "direct",
+              "input" => "(get-in results [\"a\" \"findings\"])",
+              "depends_on" => ["a"]
+            }
+          ]
+        })
+
+      assert {:error, issues} = Plan.validate(plan)
+      assert Enum.any?(issues, &(&1.category == :invalid_direct_input))
+      issue = Enum.find(issues, &(&1.category == :invalid_direct_input))
+      assert issue.task_id == "extract"
+      assert String.contains?(issue.message, "results")
+    end
+
+    test "accepts valid PTC-Lisp in direct task input" do
+      {:ok, plan} =
+        Plan.parse(%{
+          "tasks" => [
+            %{"id" => "a", "input" => "search things"},
+            %{
+              "id" => "extract",
+              "agent" => "direct",
+              "input" => "(get data/results \"a\")",
+              "depends_on" => ["a"]
+            }
+          ]
+        })
+
+      assert Plan.validate(plan) == :ok
+    end
+
+    test "detects invalid PTC-Lisp in verification predicate" do
+      {:ok, plan} =
+        Plan.parse(%{
+          "tasks" => [
+            %{
+              "id" => "a",
+              "input" => "do work",
+              "verification" => "(> (count result) 0)"
+            }
+          ]
+        })
+
+      assert {:error, issues} = Plan.validate(plan)
+      assert Enum.any?(issues, &(&1.category == :invalid_verification))
+      issue = Enum.find(issues, &(&1.category == :invalid_verification))
+      assert issue.task_id == "a"
+      assert String.contains?(issue.message, "result")
+    end
+
+    test "accepts valid verification predicate" do
+      {:ok, plan} =
+        Plan.parse(%{
+          "tasks" => [
+            %{
+              "id" => "a",
+              "input" => "do work",
+              "verification" => "(> (count data/result) 0)"
+            }
+          ]
+        })
+
+      assert Plan.validate(plan) == :ok
+    end
+
+    test "detects syntax error in direct task input" do
+      {:ok, plan} =
+        Plan.parse(%{
+          "tasks" => [
+            %{
+              "id" => "extract",
+              "agent" => "direct",
+              "input" => "(get data/results \"a\""
+            }
+          ]
+        })
+
+      assert {:error, issues} = Plan.validate(plan)
+      assert Enum.any?(issues, &(&1.category == :invalid_direct_input))
+    end
   end
 
   describe "sanitize/1" do
