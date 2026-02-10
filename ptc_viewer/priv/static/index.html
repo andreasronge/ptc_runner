@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PTC Trace Viewer</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="/js/vendor/d3.v7.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>PTC Trace Viewer</h1>
+    <nav id="breadcrumb" class="breadcrumb"></nav>
+  </header>
+
+  <div id="drop-zone" class="drop-zone">
+    <p>Drop .jsonl trace files here or click to select</p>
+    <p class="drop-hint">Select the main trace + child traces to view the full hierarchy</p>
+    <button class="btn" id="selectFilesBtn">Select Files</button>
+    <input type="file" id="fileInput" accept=".jsonl,.json" multiple>
+  </div>
+
+  <div id="file-picker" class="file-picker"></div>
+  <div id="view-container"></div>
+  <div id="tooltip" class="tooltip"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

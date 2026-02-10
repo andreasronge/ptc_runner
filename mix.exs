@@ -55,6 +55,7 @@ defmodule PtcRunner.MixProject do
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:kino, "~> 0.14", optional: true},
       {:llm_client, path: "llm_client", only: [:test, :dev]},
+      {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 0.1", only: :dev, runtime: false}
     ]
   end
@@ -70,7 +71,8 @@ defmodule PtcRunner.MixProject do
         "ptc.validate_spec",
         "test --warnings-as-errors",
         "cmd --cd llm_client mix test --color",
-        "cmd --cd demo mix test --color"
+        "cmd --cd demo mix test --color",
+        "cmd --cd ptc_viewer mix test --color"
       ],
       "schema.gen": [
         "run -e 'File.write!(\"priv/ptc_schema.json\", Jason.encode!(PtcRunner.Schema.to_json_schema(), pretty: true))'"
