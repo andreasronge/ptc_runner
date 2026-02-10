@@ -57,9 +57,11 @@ defmodule Mix.Tasks.Code.Scout do
         query_opts =
           [
             debug: opts[:trace] || false,
-            compression: opts[:compression] || false,
-            max_turns: opts[:max_turns] || 10
+            compression: opts[:compression] || false
           ]
+          |> then(fn o ->
+            if opts[:max_turns], do: Keyword.put(o, :max_turns, opts[:max_turns]), else: o
+          end)
           |> then(fn o -> if opts[:model], do: Keyword.put(o, :model, opts[:model]), else: o end)
 
         # Run with or without tracing

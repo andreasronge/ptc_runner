@@ -128,6 +128,10 @@ Corpus: 5001 lines -> 28 chunks of ~4000 tokens (200 overlap)
 
 Sequential processing of 28 Haiku calls at ~10-15s each would take **280-420 seconds**. The observed **~55 seconds** suggests a **5-8x speedup** from parallelism. However, without worker-level tracing, we can't confirm this rigorously.
 
+The PTC Trace Viewer renders a Gantt timeline showing the bounded concurrency — the first 20 workers start simultaneously (`schedulers_online() * 2`), with the remaining 8 starting as slots free up:
+
+![pmap Gantt timeline](images/pmap.png)
+
 ### Hierarchical Tracing
 
 Use the `--trace` flag to capture detailed execution traces for the planner and every worker:

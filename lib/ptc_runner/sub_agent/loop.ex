@@ -1456,17 +1456,24 @@ defmodule PtcRunner.SubAgent.Loop do
 
   defp emit_pmap_telemetry(agent, %{pmap_calls: pmap_calls}) do
     Enum.each(pmap_calls, fn pmap_call ->
-      event_suffix =
+      type_prefix =
         case pmap_call.type do
-          :pmap -> [:pmap, :stop]
-          :pcalls -> [:pcalls, :stop]
+          :pmap -> [:pmap]
+          :pcalls -> [:pcalls]
         end
+
+      start_metadata = %{
+        agent: slim_agent(agent),
+        count: pmap_call.count
+      }
+
+      Telemetry.emit(type_prefix ++ [:start], %{}, start_metadata)
 
       measurements = %{
         duration: System.convert_time_unit(pmap_call.duration_ms, :millisecond, :native)
       }
 
-      metadata = %{
+      stop_metadata = %{
         agent: slim_agent(agent),
         count: pmap_call.count,
         child_trace_ids: pmap_call.child_trace_ids,
@@ -1474,7 +1481,7 @@ defmodule PtcRunner.SubAgent.Loop do
         error_count: pmap_call.error_count
       }
 
-      Telemetry.emit(event_suffix, measurements, metadata)
+      Telemetry.emit(type_prefix ++ [:stop], measurements, stop_metadata)
     end)
   end
 
