@@ -127,10 +127,10 @@ defmodule PtcRunner.Lisp.Parser do
     |> ignore(string("\""))
     |> reduce({ParserHelpers, :build_string, []})
 
-  # Keywords (no / allowed)
+  # Keywords (no / allowed, but operator chars like > < + * = are allowed for Clojure conformance)
   keyword =
     ignore(string(":"))
-    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?-, ?_, ??, ?!], min: 1)
+    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?<, ?>, ?=, ??, ?!, ?_], min: 1)
     |> reduce({ParserHelpers, :build_keyword, []})
 
   # Symbols (/ allowed for namespacing, _ for ignored bindings, % for param placeholders in #())

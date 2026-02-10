@@ -38,6 +38,16 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:keyword, :valid!}} = Parser.parse(":valid!")
     end
 
+    test "keywords with operator characters (Clojure conformance)" do
+      # :-> and :->> are valid Clojure keywords
+      assert {:ok, {:keyword, :->}} = Parser.parse(":->")
+      assert {:ok, {:keyword, :"->>"}} = Parser.parse(":->>")
+      assert {:ok, {:keyword, :>=}} = Parser.parse(":>=")
+      assert {:ok, {:keyword, :<=}} = Parser.parse(":<=")
+      assert {:ok, {:keyword, :+}} = Parser.parse(":+")
+      assert {:ok, {:keyword, :*}} = Parser.parse(":*")
+    end
+
     test "characters" do
       assert {:ok, {:string, "r"}} = Parser.parse("\\r")
       assert {:ok, {:string, "\n"}} = Parser.parse("\\newline")
@@ -179,6 +189,18 @@ defmodule PtcRunner.Lisp.ParserTest do
 
       assert {:ok, {:list, [{:symbol, :+}, 1, 2]}} =
                Parser.parse("(+ 1 ; inline comment\n 2)")
+    end
+
+    test "semicolon after keyword starts a comment" do
+      # ; after :foo starts a comment, swallowing :bar on the same line
+      assert {:ok, {:keyword, :foo}} =
+               Parser.parse(":foo; :bar eaten by comment")
+    end
+
+    test "semicolon mid-vector eats rest of line" do
+      # :baz on next line is still parsed, but :bar is comment
+      assert {:ok, {:vector, [{:keyword, :foo}, {:keyword, :baz}]}} =
+               Parser.parse("[:foo; :bar comment\n:baz]")
     end
   end
 
