@@ -124,6 +124,38 @@ defmodule PtcRunner.PlanTracerTest do
       assert formatted =~ "Repair plan"
       assert formatted =~ "2 task"
     end
+
+    test "formats quality_gate_started event" do
+      event = {:quality_gate_started, %{task_id: "compute_ratio"}}
+      result = PlanTracer.format_event(event)
+      assert result =~ "[GATE]"
+      assert result =~ "compute_ratio"
+      assert result =~ "Checking data sufficiency"
+    end
+
+    test "formats quality_gate_passed event" do
+      event = {:quality_gate_passed, %{task_id: "compute_ratio"}}
+      result = PlanTracer.format_event(event)
+      assert result =~ "[GATE ✓]"
+      assert result =~ "compute_ratio"
+    end
+
+    test "formats quality_gate_failed event" do
+      event =
+        {:quality_gate_failed, %{task_id: "compute_ratio", missing: ["revenue", "expenses"]}}
+
+      result = PlanTracer.format_event(event)
+      assert result =~ "[GATE !]"
+      assert result =~ "compute_ratio"
+      assert result =~ "revenue, expenses"
+    end
+
+    test "formats quality_gate_error event" do
+      event = {:quality_gate_error, %{task_id: "compute_ratio", reason: :unexpected_format}}
+      result = PlanTracer.format_event(event)
+      assert result =~ "[GATE ✗]"
+      assert result =~ "compute_ratio"
+    end
   end
 
   describe "stateful tracer" do

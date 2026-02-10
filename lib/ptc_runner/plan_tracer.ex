@@ -238,6 +238,23 @@ defmodule PtcRunner.PlanTracer do
     "  Repair plan: #{count} task(s)"
   end
 
+  defp format_event_simple({:quality_gate_started, %{task_id: id}}) do
+    "[GATE] #{id} - Checking data sufficiency"
+  end
+
+  defp format_event_simple({:quality_gate_passed, %{task_id: id}}) do
+    "#{@green}[GATE ✓]#{@reset} #{id}"
+  end
+
+  defp format_event_simple({:quality_gate_failed, %{task_id: id, missing: missing}}) do
+    missing_str = Enum.join(missing, ", ")
+    "#{@yellow}[GATE !]#{@reset} #{id} - Missing: #{missing_str}"
+  end
+
+  defp format_event_simple({:quality_gate_error, %{task_id: id, reason: reason}}) do
+    "#{@red}[GATE ✗]#{@reset} #{id} - #{inspect(reason)}"
+  end
+
   defp format_event_simple(event) do
     "Unknown event: #{inspect(event)}"
   end
@@ -321,6 +338,27 @@ defmodule PtcRunner.PlanTracer do
 
   defp format_event_stateful({:replan_finished, %{new_tasks: count}}, state) do
     message = "#{indent(state)}Repair plan: #{count} task(s)"
+    {message, state}
+  end
+
+  defp format_event_stateful({:quality_gate_started, %{task_id: id}}, state) do
+    message = "#{indent(state)}[GATE] #{id} - Checking data sufficiency"
+    {message, state}
+  end
+
+  defp format_event_stateful({:quality_gate_passed, %{task_id: id}}, state) do
+    message = "#{indent(state)}#{@green}[GATE ✓]#{@reset} #{id}"
+    {message, state}
+  end
+
+  defp format_event_stateful({:quality_gate_failed, %{task_id: id, missing: missing}}, state) do
+    missing_str = Enum.join(missing, ", ")
+    message = "#{indent(state)}#{@yellow}[GATE !]#{@reset} #{id} - Missing: #{missing_str}"
+    {message, state}
+  end
+
+  defp format_event_stateful({:quality_gate_error, %{task_id: id, reason: reason}}, state) do
+    message = "#{indent(state)}#{@red}[GATE ✗]#{@reset} #{id} - #{inspect(reason)}"
     {message, state}
   end
 

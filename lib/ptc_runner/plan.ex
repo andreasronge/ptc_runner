@@ -96,7 +96,9 @@ defmodule PtcRunner.Plan do
           signature: String.t() | nil,
           # Verification (Phase 1)
           verification: String.t() | nil,
-          on_verification_failure: on_verification_failure()
+          on_verification_failure: on_verification_failure(),
+          # Per-task quality gate override (nil = use global setting)
+          quality_gate: boolean() | nil
         }
 
   @type t :: %__MODULE__{
@@ -260,7 +262,8 @@ defmodule PtcRunner.Plan do
       output: normalize_output_mode(task["output"]),
       signature: task["signature"] || task["output_signature"],
       verification: task["verification"],
-      on_verification_failure: normalize_on_verification_failure(task["on_verification_failure"])
+      on_verification_failure: normalize_on_verification_failure(task["on_verification_failure"]),
+      quality_gate: normalize_quality_gate(task["quality_gate"])
     }
   end
 
@@ -278,7 +281,8 @@ defmodule PtcRunner.Plan do
       output: nil,
       signature: nil,
       verification: nil,
-      on_verification_failure: :stop
+      on_verification_failure: :stop,
+      quality_gate: nil
     }
   end
 
@@ -341,6 +345,12 @@ defmodule PtcRunner.Plan do
   defp normalize_on_verification_failure("retry"), do: :retry
   defp normalize_on_verification_failure("replan"), do: :replan
   defp normalize_on_verification_failure(_), do: :stop
+
+  defp normalize_quality_gate(true), do: true
+  defp normalize_quality_gate(false), do: false
+  defp normalize_quality_gate("true"), do: true
+  defp normalize_quality_gate("false"), do: false
+  defp normalize_quality_gate(_), do: nil
 
   @type validation_issue :: %{
           severity: :error | :warning,

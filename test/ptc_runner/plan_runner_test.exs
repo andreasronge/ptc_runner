@@ -1235,6 +1235,108 @@ defmodule PtcRunner.PlanRunnerTest do
       assert total_calls == 2
     end
 
+    test "per-task quality_gate: true enables gate even when global is false" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze {{results.fetch}}",
+            "depends_on" => ["fetch"],
+            "quality_gate" => true
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn input ->
+        count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
+        output_mode = Map.get(input, :output)
+
+        if output_mode == :json and count == 1 do
+          {:ok,
+           ~s|{"sufficient": true, "missing": [], "evidence": [{"field": "data", "found": true, "source": "fetch"}]}|}
+        else
+          {:ok, ~s({"result": "done"})}
+        end
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan, llm: mock_llm, max_turns: 1, quality_gate: false)
+
+      total_calls = Agent.get(call_count, & &1)
+      Agent.stop(call_count)
+
+      # Should have 3 calls: fetch task, quality gate (per-task override), analyze task
+      assert total_calls == 3
+      assert Map.has_key?(results, "fetch")
+      assert Map.has_key?(results, "analyze")
+    end
+
+    test "per-task quality_gate: false disables gate even when global is true" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "fetch", "input" => "Fetch data"},
+          %{
+            "id" => "analyze",
+            "input" => "Analyze {{results.fetch}}",
+            "depends_on" => ["fetch"],
+            "quality_gate" => false
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn _input ->
+        Agent.update(call_count, &(&1 + 1))
+        {:ok, ~s({"result": "done"})}
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan, llm: mock_llm, max_turns: 1, quality_gate: true)
+
+      total_calls = Agent.get(call_count, & &1)
+      Agent.stop(call_count)
+
+      # Should have exactly 2 calls: fetch task, analyze task (no gate due to per-task override)
+      assert total_calls == 2
+      assert Map.has_key?(results, "fetch")
+      assert Map.has_key?(results, "analyze")
+    end
+
+    test "tasks with empty depends_on always skip gate regardless of settings" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "standalone", "input" => "Do something", "quality_gate" => true}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      call_count = Agent.start_link(fn -> 0 end) |> elem(1)
+
+      mock_llm = fn _input ->
+        Agent.update(call_count, &(&1 + 1))
+        {:ok, ~s({"result": "done"})}
+      end
+
+      {:ok, results} =
+        PlanRunner.execute(plan, llm: mock_llm, max_turns: 1, quality_gate: true)
+
+      total_calls = Agent.get(call_count, & &1)
+      Agent.stop(call_count)
+
+      # Only 1 call — no gate because no dependencies, despite quality_gate: true on task
+      assert total_calls == 1
+      assert Map.has_key?(results, "standalone")
+    end
+
     test "gate uses separate quality_gate_llm when provided" do
       raw = %{
         "tasks" => [

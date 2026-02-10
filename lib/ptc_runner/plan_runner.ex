@@ -467,7 +467,7 @@ defmodule PtcRunner.PlanRunner do
     # Run quality gate check on first attempt only (upstream data hasn't changed on retries)
     gate_result =
       if attempt == 1,
-        do: maybe_run_quality_gate(task, results, opts),
+        do: maybe_run_quality_gate(task, agents, results, opts),
         else: :proceed
 
     case gate_result do
@@ -533,16 +533,39 @@ defmodule PtcRunner.PlanRunner do
 
   # --- Quality Gate ---
 
-  # Skip gate if disabled or task has no dependencies
-  defp maybe_run_quality_gate(_task, _results, %{quality_gate: false}), do: :proceed
-  defp maybe_run_quality_gate(%{depends_on: []}, _results, _opts), do: :proceed
+  # Skip gate if task has no dependencies (nothing to check)
+  defp maybe_run_quality_gate(%{depends_on: []}, _agents, _results, _opts), do: :proceed
 
-  defp maybe_run_quality_gate(task, results, opts) do
-    emit_event(opts, {:quality_gate_started, %{task_id: task.id}})
-    run_quality_gate(task, results, opts)
+  defp maybe_run_quality_gate(task, agents, results, opts) do
+    agent_spec = Map.get(agents, task.agent, %{prompt: "", tools: []})
+    has_tools = agent_spec.tools != []
+
+    should_run =
+      case Map.get(task, :quality_gate) do
+        true -> true
+        false -> false
+        # Tasks with tools are data producers — skip gate unless explicitly enabled
+        nil when has_tools -> false
+        nil -> opts.quality_gate != false
+      end
+
+    if should_run do
+      emit_event(opts, {:quality_gate_started, %{task_id: task.id}})
+
+      :telemetry.execute(
+        [:ptc_runner, :plan_executor, :quality_gate, :start],
+        %{system_time: System.system_time(), monotonic_time: System.monotonic_time()},
+        %{task_id: task.id, span_id: task.id}
+      )
+
+      run_quality_gate(task, results, opts)
+    else
+      :proceed
+    end
   end
 
   defp run_quality_gate(task, results, opts) do
+    gate_start = System.monotonic_time()
     dep_results = Map.take(results, task.depends_on)
     expanded_input = expand_input(task.input, results)
     prompt = build_quality_gate_prompt(task, expanded_input, dep_results, opts.mission)
@@ -565,6 +588,12 @@ defmodule PtcRunner.PlanRunner do
           %{"sufficient" => true} = gate_result ->
             evidence = Map.get(gate_result, "evidence", [])
 
+            :telemetry.execute(
+              [:ptc_runner, :plan_executor, :quality_gate, :stop],
+              %{duration: System.monotonic_time() - gate_start},
+              %{task_id: task.id, span_id: task.id, status: :passed, evidence: evidence}
+            )
+
             emit_event(
               opts,
               {:quality_gate_passed, %{task_id: task.id, evidence: evidence}}
@@ -580,6 +609,18 @@ defmodule PtcRunner.PlanRunner do
                 "Missing: #{Enum.join(missing, ", ")}"
 
             Logger.info(diagnosis)
+
+            :telemetry.execute(
+              [:ptc_runner, :plan_executor, :quality_gate, :stop],
+              %{duration: System.monotonic_time() - gate_start},
+              %{
+                task_id: task.id,
+                span_id: task.id,
+                status: :failed,
+                missing: missing,
+                evidence: evidence
+              }
+            )
 
             emit_event(
               opts,
@@ -598,6 +639,12 @@ defmodule PtcRunner.PlanRunner do
               "Quality gate returned unexpected format for task '#{task.id}', proceeding"
             )
 
+            :telemetry.execute(
+              [:ptc_runner, :plan_executor, :quality_gate, :stop],
+              %{duration: System.monotonic_time() - gate_start},
+              %{task_id: task.id, span_id: task.id, status: :error, reason: :unexpected_format}
+            )
+
             emit_event(
               opts,
               {:quality_gate_error, %{task_id: task.id, reason: :unexpected_format}}
@@ -609,6 +656,12 @@ defmodule PtcRunner.PlanRunner do
       {:error, step} ->
         Logger.warning(
           "Quality gate SubAgent error for task '#{task.id}': #{inspect(step.fail)}, proceeding"
+        )
+
+        :telemetry.execute(
+          [:ptc_runner, :plan_executor, :quality_gate, :stop],
+          %{duration: System.monotonic_time() - gate_start},
+          %{task_id: task.id, span_id: task.id, status: :error, reason: step.fail}
         )
 
         emit_event(opts, {:quality_gate_error, %{task_id: task.id, reason: step.fail}})
@@ -1327,7 +1380,8 @@ defmodule PtcRunner.PlanRunner do
       depends_on: task.depends_on,
       type: task.type,
       verification: task.verification,
-      on_verification_failure: task.on_verification_failure
+      on_verification_failure: task.on_verification_failure,
+      quality_gate: Map.get(task, :quality_gate)
     }
   end
 end

@@ -146,6 +146,7 @@
     .event-card.tool { border-left-color: var(--warning); }
     .event-card.pmap { border-left-color: var(--keyword); }
     .event-card.task { border-left-color: var(--success); }
+    .event-card.quality_gate { border-left-color: var(--comment); }
     .event-card.error { border-left-color: var(--error); }
 
     .event-header {
@@ -181,6 +182,7 @@
     .event-icon.tool { background: rgba(220, 220, 170, 0.2); color: var(--warning); }
     .event-icon.pmap { background: rgba(197, 134, 192, 0.2); color: var(--keyword); }
     .event-icon.task { background: rgba(78, 201, 176, 0.2); color: var(--success); }
+    .event-icon.quality_gate { background: rgba(106, 153, 85, 0.2); color: var(--comment); }
 
     .event-title { flex: 1; font-weight: 500; }
     .event-meta { color: var(--muted); font-size: 12px; display: flex; gap: 16px; }
@@ -1047,7 +1049,7 @@
     }
 
     function renderEvents(pairs) {
-      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls', 'task'];
+      const displayableTypes = ['llm', 'tool', 'pmap', 'pcalls', 'task', 'quality_gate'];
       // Build turn lookup: turn number -> turn pair (for merging into LLM cards)
       const turnByNum = {};
       pairs.filter(p => p.type === 'turn').forEach(p => {
@@ -1117,6 +1119,16 @@
         if (taskOutput) {
           const label = taskOutput === 'ptc_lisp' ? 'PTC-Lisp' : 'JSON';
           meta.push(`<span style="color: var(--accent);">${label}</span>`);
+        }
+      } else if (type === 'quality_gate') {
+        const taskId = stop?.metadata?.task_id || start?.metadata?.task_id || '?';
+        const status = stop?.metadata?.status;
+        title = `Quality Gate: ${taskId}`;
+        icon = '🔍';
+        meta.push(`<span>⏱ ${formatDuration(duration)}</span>`);
+        if (status) {
+          const statusColor = status === 'passed' ? 'var(--success)' : (status === 'failed' ? 'var(--error)' : 'var(--warning)');
+          meta.push(`<span style="color: ${statusColor}">${status}</span>`);
         }
       }
 
@@ -1252,6 +1264,42 @@
             <div class="event-section-title">📤 Result</div>
             <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(truncate(resultStr, 2000))}</div>
           </div>`;
+      }
+
+      // Quality gate content
+      if (type === 'quality_gate') {
+        const gateStatus = stop?.metadata?.status;
+        if (gateStatus) {
+          const statusColor = gateStatus === 'passed' ? 'var(--success)' : (gateStatus === 'failed' ? 'var(--error)' : 'var(--warning)');
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">Status: <span style="color: ${statusColor}; font-weight: 600;">${gateStatus}</span></div>
+            </div>`;
+        }
+        const gateMissing = stop?.metadata?.missing;
+        if (Array.isArray(gateMissing) && gateMissing.length > 0) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">Missing Fields</div>
+              <div class="code-block">${gateMissing.map(m => `• ${escapeHtml(m)}`).join('\n')}</div>
+            </div>`;
+        }
+        const gateEvidence = stop?.metadata?.evidence;
+        if (Array.isArray(gateEvidence) && gateEvidence.length > 0) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">Evidence</div>
+              <div class="code-block" style="max-height: 300px; overflow-y: auto;">${escapeHtml(JSON.stringify(gateEvidence, null, 2))}</div>
+            </div>`;
+        }
+        const gateReason = stop?.metadata?.reason;
+        if (gateReason) {
+          bodyContent += `
+            <div class="event-section">
+              <div class="event-section-title">Error Reason</div>
+              <div class="code-block" style="border-left: 2px solid var(--error);">${escapeHtml(typeof gateReason === 'string' ? gateReason : JSON.stringify(gateReason, null, 2))}</div>
+            </div>`;
+        }
       }
 
       // Task-specific content
@@ -1993,7 +2041,8 @@
           durationMs: stopEvt?.duration_ms || stopEvt?.metadata?.duration_ms || 0,
           dependsOn: t.depends_on || [],
           input: t.input || '',
-          signature: t.signature || ''
+          signature: t.signature || '',
+          qualityGate: t.quality_gate ?? null
         };
       });
 
@@ -2115,7 +2164,8 @@
             type: taskDef.type || 'task',
             output: taskDef.output || null,
             input: e.metadata?.input || taskDef.input || '',
-            signature: taskDef.signature || ''
+            signature: taskDef.signature || '',
+            quality_gate: taskDef.quality_gate ?? null
           };
         });
 
@@ -2205,6 +2255,13 @@
         return;
       }
 
+      // Collect task IDs that had quality gate events (for global fallback detection)
+      const gateTaskIds = new Set(
+        events.filter(e => e.event === 'quality_gate.start')
+          .map(e => e.metadata?.task_id)
+          .filter(Boolean)
+      );
+
       panel.classList.add('visible');
       panel.classList.add('expanded');
 
@@ -2233,7 +2290,7 @@
       const replanInfo = document.getElementById('dagReplanInfo');
 
       // Render first attempt
-      renderDAGForModel(attempts[0], svgContainer, tooltip, replanInfo);
+      renderDAGForModel(attempts[0], svgContainer, tooltip, replanInfo, gateTaskIds);
 
       // Tab click handlers
       if (attempts.length > 1) {
@@ -2242,13 +2299,13 @@
             container.querySelectorAll('.dag-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             const idx = parseInt(tab.dataset.attempt);
-            renderDAGForModel(attempts[idx], svgContainer, tooltip, replanInfo);
+            renderDAGForModel(attempts[idx], svgContainer, tooltip, replanInfo, gateTaskIds);
           });
         });
       }
     }
 
-    function renderDAGForModel(attempt, svgContainer, tooltip, replanInfoEl) {
+    function renderDAGForModel(attempt, svgContainer, tooltip, replanInfoEl, gateTaskIds) {
       const model = attempt.model;
 
       // Show replan info banner if applicable
@@ -2311,9 +2368,17 @@
           badgeSvg = `<rect x="${pos.x + nodeW - 46}" y="${pos.y + 4}" width="40" height="16" rx="3" fill="#808080" opacity="0.6"/><text x="${pos.x + nodeW - 26}" y="${pos.y + 15}" text-anchor="middle" class="node-badge" fill="#fff">JSON</text>`;
         }
 
+        // Quality gate badge (bottom-right) — shown if per-task enabled OR gate ran via global fallback
+        const hasGate = task.qualityGate === true || (gateTaskIds && gateTaskIds.has(task.id));
+        let gateBadgeSvg = '';
+        if (hasGate) {
+          gateBadgeSvg = `<rect x="${pos.x + nodeW - 48}" y="${pos.y + nodeH - 20}" width="42" height="16" rx="3" fill="#6a9955" opacity="0.8"/><text x="${pos.x + nodeW - 27}" y="${pos.y + nodeH - 9}" text-anchor="middle" class="node-badge" fill="#fff">GATE</text>`;
+        }
+
         svg += `<g class="dag-node" data-taskid="${task.id}">`;
         svg += `<rect x="${pos.x}" y="${pos.y}" width="${nodeW}" height="${nodeH}" fill="${fill}" stroke="${stroke}"/>`;
         svg += badgeSvg;
+        svg += gateBadgeSvg;
         svg += `<text x="${pos.x + 10}" y="${pos.y + 26}" class="node-id" fill="${stroke}">${statusIcon} ${escapeHtml(displayId)}</text>`;
         svg += `<text x="${pos.x + 10}" y="${pos.y + 42}" class="node-agent" fill="#808080">\u2192 ${escapeHtml(task.agent)}</text>`;
         if (task.durationMs > 0) {
@@ -2354,6 +2419,13 @@
             html += `<div class="tt-label">Status</div><div class="tt-value" style="color:${getNodeStroke(task)}">${task.status}</div>`;
             if (task.durationMs > 0) html += `<div class="tt-label">Duration</div><div class="tt-value">${formatDuration(task.durationMs)}</div>`;
             if (task.input) html += `<div class="tt-label">Input</div><div class="tt-value" style="font-size:11px;">${escapeHtml(truncate(task.input, 120))}</div>`;
+            if (task.dependsOn && task.dependsOn.length > 0) html += `<div class="tt-label">Depends on</div><div class="tt-value">${task.dependsOn.map(d => escapeHtml(d)).join(', ')}</div>`;
+            if (task.signature) html += `<div class="tt-label">Signature</div><div class="tt-value" style="font-family: monospace; font-size: 11px;">${escapeHtml(task.signature)}</div>`;
+            const taskHasGate = task.qualityGate === true || (gateTaskIds && gateTaskIds.has(task.id));
+            if (taskHasGate) {
+              const gateSource = task.qualityGate === true ? 'per-task' : 'global';
+              html += `<div class="tt-label">Quality Gate</div><div class="tt-value" style="color:#6a9955;">enabled (${gateSource})</div>`;
+            }
             tooltip.innerHTML = html;
             tooltip.style.display = 'block';
             const rect = node.getBoundingClientRect();
