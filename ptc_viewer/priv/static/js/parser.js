@@ -74,6 +74,7 @@ export function extractChildTraceIds(events) {
     (e.child_trace_ids || []).forEach(id => ids.add(id));
     if (e.child_trace_id) ids.add(e.child_trace_id);
     (e.metadata?.child_trace_ids || []).forEach(id => ids.add(id));
+    if (e.metadata?.child_trace_id) ids.add(e.metadata.child_trace_id);
   }
   return [...ids];
 }

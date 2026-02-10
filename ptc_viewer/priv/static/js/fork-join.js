@@ -40,7 +40,8 @@ export function renderForkJoin(container, parallelEvent, state, data) {
         stopTime: toolStop.timestamp ? new Date(toolStop.timestamp).getTime() : 0,
         args: toolStart?.metadata?.args,
         result: toolStop.metadata?.result,
-        childTraceId: toolStop.metadata?.child_trace_id
+        childTraceId: toolStop.metadata?.child_trace_id,
+        toolSpanId: toolStop.span_id
       });
     }
   }
@@ -77,17 +78,17 @@ export function renderForkJoin(container, parallelEvent, state, data) {
   const compact = branches.length > 8;
 
   if (compact && hasTimestamps) {
-    renderGanttTimeline(container, branches, parallelEvent, state, {
+    renderGanttTimeline(container, branches, parallelEvent, state, data, {
       count, totalDuration, maxDuration, minDuration, medianDuration
     });
   } else {
-    renderForkJoinD3(container, branches, parallelEvent, state, {
+    renderForkJoinD3(container, branches, parallelEvent, state, data, {
       count, totalDuration, maxDuration, maxBranchDuration, compact
     });
   }
 }
 
-function renderGanttTimeline(container, branches, parallelEvent, state, stats) {
+function renderGanttTimeline(container, branches, parallelEvent, state, data, stats) {
   const { count, totalDuration, maxDuration, minDuration, medianDuration } = stats;
 
   // Sort by start time to show real execution order
@@ -167,9 +168,9 @@ function renderGanttTimeline(container, branches, parallelEvent, state, stats) {
       })
       .on('mouseleave', () => hideTooltip());
 
-    if (branch.childTraceId) {
+    if (branch.childTraceId || branch.toolSpanId) {
       barGroup.attr('cursor', 'pointer')
-        .on('click', () => drillIntoChild(state, branch));
+        .on('click', () => drillIntoChild(state, branch, data));
     }
   });
 
@@ -186,7 +187,7 @@ function renderGanttTimeline(container, branches, parallelEvent, state, stats) {
     .text(`min ${formatDuration(minDuration)} / median ${formatDuration(medianDuration)} / max ${formatDuration(maxDuration)} (bottleneck)`);
 }
 
-function renderForkJoinD3(container, branches, parallelEvent, state, opts) {
+function renderForkJoinD3(container, branches, parallelEvent, state, data, opts) {
   const { count, totalDuration, maxDuration, maxBranchDuration, compact } = opts;
 
   // Sort by duration for cleaner visualization
@@ -263,17 +264,17 @@ function renderForkJoinD3(container, branches, parallelEvent, state, opts) {
           const resultStr = typeof branch.result === 'string' ? branch.result : JSON.stringify(branch.result);
           tooltipHtml += `<div class="tt-label">Result</div><div class="tt-value" style="font-size:11px;">${escapeHtml(truncate(resultStr, 120))}</div>`;
         }
-        if (branch.childTraceId) tooltipHtml += `<div class="tt-value" style="color:#569cd6;">Click to drill in</div>`;
+        if (branch.childTraceId || branch.toolSpanId) tooltipHtml += `<div class="tt-value" style="color:#569cd6;">Click to drill in</div>`;
         showTooltip(tooltipHtml, event);
       })
       .on('mouseleave', () => hideTooltip());
 
-    if (branch.childTraceId) {
+    if (branch.childTraceId || branch.toolSpanId) {
       barGroup.append('text')
         .attr('x', barX + barW + 4).attr('y', y + barHeight / 2 + 4)
         .attr('fill', '#569cd6').attr('font-size', '10px').attr('cursor', 'pointer')
         .text('[Drill In]')
-        .on('click', () => drillIntoChild(state, branch));
+        .on('click', () => drillIntoChild(state, branch, data));
     }
   });
 
@@ -284,13 +285,36 @@ function renderForkJoinD3(container, branches, parallelEvent, state, opts) {
     .text(`${parallelEvent.type} \u2014 ${count} branches, ${formatDuration(totalDuration)} total`);
 }
 
-function drillIntoChild(state, branch) {
+function drillIntoChild(state, branch, data) {
   const file = findFileByTraceId(state, branch.childTraceId);
   if (file) {
     import('./app.js').then(app => {
       const childData = app.getState().files.get(file);
       if (childData) {
         app.navigateTo({ type: 'agent', label: branch.name, data: childData });
+      }
+    });
+    return;
+  }
+
+  // Fallback: extract child run events from the current trace (embedded child traces)
+  if (data?.events && branch.toolSpanId) {
+    import('./parser.js').then(parser => {
+      // Find the run.start whose parent_span_id is the tool's span_id
+      const childRun = data.events.find(e =>
+        e.event === 'run.start' && e.metadata?.parent_span_id === branch.toolSpanId
+      );
+      if (childRun) {
+        const childEvents = parser.extractRunEvents(data.events, childRun.span_id);
+        if (childEvents.length > 0) {
+          import('./app.js').then(app => {
+            app.navigateTo({
+              type: 'agent',
+              label: branch.name,
+              data: { events: childEvents, filename: branch.name }
+            });
+          });
+        }
       }
     });
   }
