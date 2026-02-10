@@ -70,7 +70,7 @@ defmodule LLMClient do
   end
 
   # SubAgent callback functions
-  defdelegate callback(model_or_alias), to: LLMClient.Providers
+  defdelegate callback(model_or_alias, opts \\ []), to: LLMClient.Providers
   defdelegate call(model, request), to: LLMClient.Providers
 
   # Registry functions

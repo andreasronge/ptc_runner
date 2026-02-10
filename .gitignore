@@ -50,3 +50,4 @@ examples/parallel_workers/traces/*
 !examples/parallel_workers/traces/.gitkeep
 examples/page_index/traces/*
 !examples/page_index/traces/.gitkeep
+examples/page_index/bench_runs/

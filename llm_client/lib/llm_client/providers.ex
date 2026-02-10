@@ -58,8 +58,9 @@ defmodule LLMClient.Providers do
     - `:receive_timeout` - Request timeout in ms (default: #{@default_timeout})
     - `:ollama_base_url` - Override Ollama server URL (default: #{@ollama_base_url})
     - `:cache` - Enable prompt caching for supported providers (default: false).
-      Works with direct Anthropic API (`anthropic:`) and OpenRouter Anthropic models
-      (`openrouter:anthropic/...`). Uses 5-minute ephemeral cache.
+      Works with direct Anthropic API (`anthropic:`), OpenRouter Anthropic models
+      (`openrouter:anthropic/...`), and Bedrock Claude models (`bedrock:`).
+      Uses 5-minute ephemeral cache.
 
   ## AWS Bedrock Region
 
@@ -193,16 +194,29 @@ defmodule LLMClient.Providers do
 
   The callback handles both :json and :ptc_lisp modes automatically.
 
-  ## Example
+  ## Options
+
+  - `:cache` - Enable prompt caching (default: false). When true, the callback
+    always sets `cache: true` on requests, regardless of what the caller passes.
+    This bakes caching into the transport layer so orchestration code doesn't
+    need to thread the option through every layer.
+
+  ## Examples
 
       llm = LLMClient.callback("sonnet")
+      llm = LLMClient.callback("bedrock:haiku", cache: true)
 
       {:ok, step} = SubAgent.run(agent, llm: llm, context: %{...})
   """
-  @spec callback(String.t()) :: (map() -> {:ok, map()} | {:error, term()})
-  def callback(model_or_alias) do
+  @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
+  def callback(model_or_alias, opts \\ []) do
     model = LLMClient.Registry.resolve!(model_or_alias)
-    &call(model, &1)
+
+    if opts == [] do
+      &call(model, &1)
+    else
+      fn req -> call(model, Map.merge(req, Map.new(opts))) end
+    end
   end
 
   @doc """
@@ -393,6 +407,19 @@ defmodule LLMClient.Providers do
 
         {add_cache_control_to_messages(messages), extra_opts}
 
+      # Bedrock with Claude model - use same caching options as direct Anthropic
+      # req_llm's Bedrock provider auto-switches from Converse to InvokeModel API
+      # when caching + tools are present for full cache control
+      bedrock_model?(model) ->
+        extra_opts = [
+          provider_options: [
+            anthropic_prompt_cache: true,
+            anthropic_prompt_cache_ttl: "5m"
+          ]
+        ]
+
+        {messages, extra_opts}
+
       # Other providers - no caching support
       true ->
         {messages, []}
@@ -401,9 +428,11 @@ defmodule LLMClient.Providers do
 
   defp apply_caching(_model, messages, false), do: {messages, []}
 
-  # Ensure AWS_REGION is set for Bedrock models
-  # AWS SDK reads region from environment, so we set it if not already present
-  # Priority: AWS_REGION env var > config > default
+  # Ensure AWS_REGION is set for Bedrock models.
+  # AWS SDK reads region from environment, so we set it if not already present.
+  # Priority: AWS_REGION env var > config > default.
+  # NOTE: Uses System.put_env/2 which is a global side effect. Acceptable for CLI
+  # usage but may surprise callers in a multi-tenant library context.
   defp apply_bedrock_region(model, opts) do
     if bedrock_model?(model) and System.get_env("AWS_REGION") == nil do
       region =
@@ -424,27 +453,44 @@ defmodule LLMClient.Providers do
     String.contains?(model, "anthropic") or String.contains?(model, "claude")
   end
 
-  # Add cache_control to system message content for OpenRouter
-  # OpenRouter requires cache_control embedded in content blocks, not as provider options
-  # Must use ReqLLM.Message structs (not loose maps) for structured content
+  # Add cache_control to the last system message content for OpenRouter.
+  # OpenRouter requires cache_control embedded in content blocks, not as provider options.
+  # Must use ReqLLM.Message structs (not loose maps) for structured content.
+  # Only the last system message gets cache_control to stay within Anthropic's 4-breakpoint limit.
   defp add_cache_control_to_messages(messages) do
-    Enum.map(messages, fn
-      %{role: :system, content: content} when is_binary(content) ->
-        # Use ReqLLM.Message struct with ContentPart containing cache_control
+    # Find the index of the last system message
+    last_system_idx =
+      messages
+      |> Enum.with_index()
+      |> Enum.reverse()
+      |> Enum.find_value(fn
+        {%{role: :system}, idx} -> idx
+        _ -> nil
+      end)
+
+    messages
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {%{role: :system, content: content}, idx}
+      when is_binary(content) and idx == last_system_idx ->
+        # Only add cache_control to the last system message
         content_part =
           ReqLLM.Message.ContentPart.text(content, %{cache_control: %{type: "ephemeral"}})
 
         %ReqLLM.Message{role: :system, content: [content_part]}
 
+      {%{role: :system, content: content}, _idx} when is_binary(content) ->
+        %ReqLLM.Message{role: :system, content: [ReqLLM.Message.ContentPart.text(content)]}
+
       # Convert other loose maps to Message structs for consistency
-      %{role: role, content: content} when is_atom(role) and is_binary(content) ->
+      {%{role: role, content: content}, _idx} when is_atom(role) and is_binary(content) ->
         %ReqLLM.Message{role: role, content: [ReqLLM.Message.ContentPart.text(content)]}
 
       # Already a Message struct - pass through
-      %ReqLLM.Message{} = message ->
+      {%ReqLLM.Message{} = message, _idx} ->
         message
 
-      message ->
+      {message, _idx} ->
         message
     end)
   end
@@ -492,14 +538,25 @@ defmodule LLMClient.Providers do
 
   # Build normalized token map from ReqLLM response
   defp build_tokens_from_req_llm_response(usage, provider_meta) do
-    cached_tokens = usage[:cached_tokens] || usage["cached_tokens"] || 0
-    cache_write = extract_cache_write_tokens(provider_meta)
+    cache_write_from_meta = extract_cache_write_tokens(provider_meta)
+
+    # Check all known cache field names across providers:
+    # - :cached_tokens / :cache_read_input_tokens (Anthropic/Bedrock)
+    # - :cache_creation_input_tokens / :cache_creation_tokens (Anthropic/Bedrock)
+    cache_read =
+      usage[:cache_read_input_tokens] || usage[:cached_tokens] ||
+        usage["cache_read_input_tokens"] || usage["cached_tokens"] || 0
+
+    cache_creation =
+      usage[:cache_creation_input_tokens] || usage[:cache_creation_tokens] ||
+        usage["cache_creation_input_tokens"] || usage["cache_creation_tokens"] ||
+        cache_write_from_meta
 
     %{
       input: usage[:input_tokens] || usage["input_tokens"] || 0,
       output: usage[:output_tokens] || usage["output_tokens"] || 0,
-      cache_creation: cache_write,
-      cache_read: cached_tokens
+      cache_creation: cache_creation,
+      cache_read: cache_read
     }
   end
 
