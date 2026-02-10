@@ -1,9 +1,8 @@
-defmodule PageIndex.MinimalPlannerRetriever do
+defmodule PageIndex.PlanRetriever do
   @moduledoc """
-  Constraint-free MetaPlanner retrieval that relies on a high-level search SubAgentTool.
+  Plan-based document retrieval using PlanExecutor with a high-level search SubAgentTool.
 
-  Unlike `PlannerRetriever`, this module does NOT prescribe agent names, prompts,
-  topology, or domain-specific examples. Instead, it provides:
+  Provides:
   - A `search` SubAgentTool that wraps the extraction agent (navigates sections, fetches,
     paginates, greps, and returns structured findings)
   - A single constraint: the final synthesis task must have id "final_answer"

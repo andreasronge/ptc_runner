@@ -140,7 +140,7 @@ lib/page_index/
 ├── parser.ex                  # PDF text extraction (via pdfplumber)
 ├── toc_parser.ex              # LLM-based TOC parsing
 ├── fine_indexer.ex             # Index builder (TOC → summaries → tree)
-├── minimal_planner_retriever.ex # PlanExecutor + search SubAgentTool retrieval
+├── plan_retriever.ex             # PlanExecutor + search SubAgentTool retrieval
 ├── retriever_toolkit.ex       # Shared helpers (fuzzy fetch, tree ops, search tool)
 └── page_index.ex              # Public API
 ```
