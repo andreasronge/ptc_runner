@@ -226,9 +226,13 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:error, {:parse_error, _}} = Parser.parse("'(1 2 3)")
     end
 
-    test "multiline strings are rejected" do
-      # Single-line strings only
-      assert {:error, {:parse_error, _}} = Parser.parse("\"hello\nworld\"")
+    test "multiline strings are supported" do
+      assert {:ok, {:string, "hello\nworld"}} = Parser.parse("\"hello\nworld\"")
+    end
+
+    test "multiline strings with markdown content" do
+      code = ~s("Line 1\n**bold** and `code`\nLine 3")
+      assert {:ok, {:string, "Line 1\n**bold** and `code`\nLine 3"}} = Parser.parse(code)
     end
 
     test "unclosed set returns error" do

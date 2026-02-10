@@ -211,7 +211,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
   defp extract_error_message(error), do: inspect(error)
 
   defp build_turns_indicator(0) do
-    "FINAL TURN - you must call (return result) or (fail reason) now."
+    "FINAL WORK TURN - tools stripped, you must call (return result) or (fail reason) now."
   end
 
   defp build_turns_indicator(n) when is_integer(n) and n > 0 do

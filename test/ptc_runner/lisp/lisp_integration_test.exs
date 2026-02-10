@@ -767,4 +767,20 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, %{return: 2}} = Lisp.run(~S|(last-index-of "aaaa" "aa")|)
     end
   end
+
+  describe "multi-line strings" do
+    test "string with literal newlines" do
+      {:ok, %{return: "hello\nworld"}} = Lisp.run("\"hello\nworld\"")
+    end
+
+    test "multi-line string in def" do
+      code = "(def s \"line 1\nline 2\nline 3\")\n(count (split s \"\\n\"))"
+      {:ok, %{return: 3}} = Lisp.run(code)
+    end
+
+    test "multi-line string with markdown" do
+      code = "(def s \"# Title\n\n**bold** and `code`\")\n(str/includes? s \"**bold**\")"
+      {:ok, %{return: true}} = Lisp.run(code)
+    end
+  end
 end

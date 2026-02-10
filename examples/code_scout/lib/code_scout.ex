@@ -27,25 +27,12 @@ defmodule CodeScout do
         agent
       end
 
-    # Use LLMClient as the default generator
     model = opts[:model] || LLMClient.default_model()
-
-    llm_fn = fn input ->
-      # SubAgent.Loop passes a map with :system and :messages
-      messages = [%{role: :system, content: input.system} | input.messages]
-
-      case LLMClient.generate_text(model, messages) do
-        {:ok, response} ->
-          {:ok, %{content: response.content, tokens: response.tokens}}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end
+    llm = LLMClient.callback(model, cache: true)
 
     # Merge query into context
     context = Map.put(opts[:context] || %{}, "query", query_string)
 
-    SubAgent.run(agent, ([llm: llm_fn] ++ opts) |> Keyword.put(:context, context))
+    SubAgent.run(agent, ([llm: llm] ++ opts) |> Keyword.put(:context, context))
   end
 end

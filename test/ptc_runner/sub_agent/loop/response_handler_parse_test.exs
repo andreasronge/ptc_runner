@@ -31,7 +31,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandlerParseTest do
       assert {:ok, "(count items)"} = ResponseHandler.parse("(count items)")
     end
 
-    test "handles multiple code blocks by using the last one" do
+    test "rejects multiple clojure code blocks" do
       response = """
       ```clojure
       (def x 1)
@@ -44,8 +44,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandlerParseTest do
       ```
       """
 
-      {:ok, code} = ResponseHandler.parse(response)
-      assert code == "(def y 2)"
+      assert {:error, {:multiple_code_blocks, 2}} = ResponseHandler.parse(response)
     end
 
     test "extracts code from plain code block without language tag" do
@@ -80,7 +79,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandlerParseTest do
       assert {:ok, "(def y 2)"} = ResponseHandler.parse(response)
     end
 
-    test "handles multiple plain code blocks by using the last one" do
+    test "rejects multiple plain code blocks" do
       response = """
       ```
       (def a 1)
@@ -91,8 +90,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandlerParseTest do
       ```
       """
 
-      {:ok, code} = ResponseHandler.parse(response)
-      assert code == "(def b 2)"
+      assert {:error, {:multiple_code_blocks, 2}} = ResponseHandler.parse(response)
     end
 
     test "ignores plain code blocks that don't contain Lisp" do

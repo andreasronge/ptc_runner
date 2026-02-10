@@ -100,11 +100,11 @@ defmodule PtcRunner.Lisp.Parser do
       |> map({ParserHelpers, :passthrough_escape, []})
     ])
 
-  # Single-line strings only - exclude literal newlines
+  # Multi-line strings supported (like Clojure)
   string_char =
     choice([
       escape_sequence,
-      utf8_char(not: ?\\, not: ?", not: ?\n, not: ?\r)
+      utf8_char(not: ?\\, not: ?")
     ])
 
   # Characters

@@ -27,7 +27,8 @@ defmodule Mix.Tasks.Code.Scout do
           raw: :boolean,
           system_prompt: :boolean,
           compression: :boolean,
-          max_turns: :integer
+          max_turns: :integer,
+          model: :string
         ],
         aliases: [
           t: :trace,
@@ -45,7 +46,7 @@ defmodule Mix.Tasks.Code.Scout do
       Mix.shell().error("Error: Please provide a query.")
 
       Mix.shell().info(
-        "Usage: mix code.scout \"query\" [--trace] [--verbose] [--raw] [--compression] [--max-turns N] [--system-prompt]"
+        "Usage: mix code.scout \"query\" [--model MODEL] [--trace] [--verbose] [--raw] [--compression] [--max-turns N] [--system-prompt]"
       )
     else
       if opts[:system_prompt] do
@@ -53,11 +54,13 @@ defmodule Mix.Tasks.Code.Scout do
       else
         Mix.shell().info("Code Scout is investigating: \"#{query_string}\"...")
 
-        query_opts = [
-          debug: opts[:trace] || false,
-          compression: opts[:compression] || false,
-          max_turns: opts[:max_turns] || 10
-        ]
+        query_opts =
+          [
+            debug: opts[:trace] || false,
+            compression: opts[:compression] || false,
+            max_turns: opts[:max_turns] || 10
+          ]
+          |> then(fn o -> if opts[:model], do: Keyword.put(o, :model, opts[:model]), else: o end)
 
         # Run with or without tracing
         {result, trace_path} =
