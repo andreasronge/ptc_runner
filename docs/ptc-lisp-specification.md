@@ -180,9 +180,9 @@ Double-quoted, with escape sequences:
 
 Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
-**Single-line only:** Strings must not contain literal newline characters (`\n`, `\r`). Use escape sequences (`\n`, `\r`) for newlines within string content.
+**Multi-line strings:** Strings may contain literal newline characters (like Clojure). Escape sequences (`\n`, `\r`) also work.
 
-**Not supported:** Multi-line strings, regex literals (use `re-pattern` instead).
+**Not supported:** Regex literals (use `re-pattern` instead).
 
 **String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
 

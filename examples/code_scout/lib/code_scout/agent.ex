@@ -22,9 +22,9 @@ defmodule CodeScout.Agent do
 
       Strategy:
       1. Search for relevant keywords using grep.
-      2. Analyze results with PTC-Lisp (filter, map, count, take).
+      2. Analyze results with PTC-Lisp (println, filter, map, count, take, ...).
       3. Read promising files with read_file.
-      4. Return a structured result matching the signature.
+      4. Return a structured result matching the signature when you have enough information to answer the query.
       """,
       signature:
         "(query :string) -> {answer :string, relevant_files [:string], confidence :float}",
@@ -32,7 +32,7 @@ defmodule CodeScout.Agent do
         "grep" => &Tools.grep/1,
         "read_file" => &Tools.read_file/1
       },
-      max_turns: 10,
+      max_turns: 6,
       format_options: [
         feedback_limit: 20,
         feedback_max_chars: 2048

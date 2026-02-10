@@ -5,7 +5,7 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
   alias PtcRunner.SubAgent.Loop
 
   describe "turn feedback format" do
-    test "shows correct turn number and remaining count" do
+    test "shows correct turn number, remaining count, and advance warning" do
       agent =
         SubAgent.new(
           prompt: "Multi-turn task",
@@ -28,6 +28,18 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
             # After turn 2, feedback should say "Turn 3 of 5 (3 remaining)"
             last_message = List.last(messages)
             assert last_message.content =~ "Turn 3 of 5 (3 remaining)"
+            {:ok, "```clojure\n(+ 5 6)\n```"}
+
+          4 ->
+            # After turn 3, should show advance warning about last turn
+            last_message = List.last(messages)
+            assert last_message.content =~ "next turn is your LAST"
+            {:ok, "```clojure\n(+ 7 8)\n```"}
+
+          5 ->
+            # After turn 4, should show FINAL WORK TURN
+            last_message = List.last(messages)
+            assert last_message.content =~ "FINAL WORK TURN"
             {:ok, "```clojure\n(return 42)\n```"}
 
           _ ->
@@ -37,7 +49,7 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
       assert step.return == 42
-      assert step.usage.turns == 3
+      assert step.usage.turns == 5
     end
 
     test "shows FINAL TURN warning on last turn" do
@@ -57,9 +69,9 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
             {:ok, "```clojure\n(+ 3 4)\n```"}
 
           3 ->
-            # After turn 2 with max_turns=3, should show FINAL TURN warning
+            # After turn 2 with max_turns=3, should show FINAL WORK TURN warning
             last_message = List.last(messages)
-            assert last_message.content =~ "FINAL TURN"
+            assert last_message.content =~ "FINAL WORK TURN"
             {:ok, "```clojure\n(return 42)\n```"}
 
           _ ->
@@ -146,6 +158,75 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
       assert step.return == :done
+    end
+
+    test "shows FINAL WORK TURN warning with retry info when retry_turns configured" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 2,
+          retry_turns: 1
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            {:ok, "```clojure\n(+ 1 2)\n```"}
+
+          2 ->
+            # After turn 1 with max_turns=2, should show FINAL WORK TURN with retry info
+            last_message = List.last(messages)
+            assert last_message.content =~ "FINAL WORK TURN"
+            assert last_message.content =~ "1 correction attempt"
+            {:ok, "```clojure\n(return 42)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return 99)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == 42
+    end
+
+    test "multiple code blocks returns error feedback" do
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 3
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            # Return multiple code blocks - should be rejected
+            {:ok,
+             """
+             ```clojure
+             (def x 1)
+             ```
+
+             ```clojure
+             (def y 2)
+             ```
+             """}
+
+          2 ->
+            # Should see error about multiple code blocks
+            last_message = List.last(messages)
+            assert last_message.content =~ "exactly ONE is required"
+            assert last_message.content =~ "2 code blocks"
+            {:ok, "```clojure\n(return 42)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return 99)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == 42
     end
   end
 end

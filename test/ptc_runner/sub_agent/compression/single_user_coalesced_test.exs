@@ -274,7 +274,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalescedTest do
 
       assert String.contains?(
                user.content,
-               "FINAL TURN - you must call (return result) or (fail reason) now."
+               "FINAL WORK TURN - tools stripped, you must call (return result) or (fail reason) now."
              )
     end
 

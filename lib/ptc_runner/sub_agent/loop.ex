@@ -652,6 +652,15 @@ defmodule PtcRunner.SubAgent.Loop do
       {:ok, code} ->
         execute_code(code, response, agent, state)
 
+      {:error, {:multiple_code_blocks, count}} ->
+        handle_error_with_budget(
+          response,
+          "Error: Found #{count} code blocks in your response, but exactly ONE is required. Combine all your code into a single ```clojure block. Variables defined in separate blocks are NOT shared.",
+          nil,
+          state,
+          agent
+        )
+
       {:error, :no_code_in_response} ->
         # Log the response in debug mode so user can see what LLM returned
         if state.debug and System.get_env("PTC_DEBUG_PARSER") do

@@ -23,17 +23,18 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
   @spec append_turn_info(String.t(), SubAgent.t(), map()) :: String.t()
   def append_turn_info(message, agent, state) do
-    # Use unified budget model if retry_turns is configured
-    if agent.retry_turns > 0 do
-      append_unified_budget_info(message, state, agent)
+    if agent.max_turns <= 1 do
+      message
     else
-      append_legacy_turn_info(message, agent, state)
+      append_budget_info(message, state, agent)
     end
   end
 
-  # Unified budget info with work/retry counters
-  defp append_unified_budget_info(message, state, agent) do
+  # work_turns_remaining is decremented AFTER feedback is built,
+  # so we subtract 1 to show turns remaining after this turn.
+  defp append_budget_info(message, state, agent) do
     work_left = state.work_turns_remaining
+    turns_after_this = work_left - 1
     retry_left = state.retry_turns_remaining
     next_turn = state.turn + 1
     in_retry_phase = work_left <= 0
@@ -57,8 +58,8 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
           emoji_prefix = if is_final_retry, do: "⚠️ ", else: ""
           "\n\n" <> emoji_prefix <> rendered
 
-        # Last work turn - use must_return_warning template
-        work_left == 1 ->
+        # Next turn is the last work turn - warn LLM
+        turns_after_this == 1 ->
           context = %{
             has_retries: retry_left > 0,
             retry_count: retry_left
@@ -67,31 +68,19 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
           {:ok, rendered} = Mustache.render(Prompts.must_return_warning(), context)
           "\n\n⚠️ " <> rendered
 
-        # Normal work turns - simple string (no template needed)
+        # Normal work turns with retries
+        retry_left > 0 ->
+          "\n\nTurn #{next_turn} (#{turns_after_this} work turns + #{retry_left} retry turns remaining)"
+
+        # Two turns left (no retries) - give advance warning to start wrapping up
+        turns_after_this == 2 ->
+          "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_after_this} remaining) — next turn is your LAST, start preparing your (return ...) now."
+
         true ->
-          "\n\nTurn #{next_turn} (#{work_left} work turns + #{retry_left} retry turns remaining)"
+          "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_after_this} remaining)"
       end
 
     message <> turn_info
-  end
-
-  # Legacy turn info (no retry_turns)
-  defp append_legacy_turn_info(message, agent, state) do
-    if agent.max_turns > 1 do
-      next_turn = state.turn + 1
-      turns_remaining = agent.max_turns - state.turn
-
-      turn_info =
-        if turns_remaining == 1 do
-          "\n\n⚠️ FINAL TURN - you must call (return result) or (fail response) next."
-        else
-          "\n\nTurn #{next_turn} of #{agent.max_turns} (#{turns_remaining} remaining)"
-        end
-
-      message <> turn_info
-    else
-      message
-    end
   end
 
   @doc """

@@ -9,7 +9,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
   1. Try extracting from ```clojure or ```lisp code blocks
   2. Fall back to raw s-expression starting with '('
-  3. Multiple code blocks are wrapped in a (do ...) form
+  3. Multiple code blocks return an error (LLM must provide exactly one)
   """
 
   alias PtcRunner.Lisp.Format
@@ -53,8 +53,12 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
   - `{:ok, code}` - Successfully extracted code string
   - `{:error, :no_code_in_response}` - No valid PTC-Lisp found
+  - `{:error, {:multiple_code_blocks, count}}` - More than one code block found
   """
-  @spec parse(String.t()) :: {:ok, String.t()} | {:error, :no_code_in_response}
+  @spec parse(String.t()) ::
+          {:ok, String.t()}
+          | {:error, :no_code_in_response}
+          | {:error, {:multiple_code_blocks, pos_integer()}}
   def parse(response) do
     # Normalize line endings (CRLF -> LF, CR -> LF)
     response = String.replace(response, ~r/\r\n?/, "\n")
@@ -99,17 +103,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
         {:ok, result}
 
       blocks ->
-        # Multiple blocks - use the last one (LLM self-corrected)
-        code = blocks |> List.last() |> List.last() |> String.trim()
-        result = sanitize_code(code)
-
-        if System.get_env("DEBUG_PARSE"),
-          do:
-            IO.puts(
-              "=== DEBUG: Using last of #{length(blocks)} clojure/lisp blocks ===\n#{result}\n=== END EXTRACTED ===\n"
-            )
-
-        {:ok, result}
+        {:error, {:multiple_code_blocks, length(blocks)}}
     end
   end
 
@@ -123,8 +117,7 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   end
 
   defp process_lisp_blocks(multiple, _response) do
-    # Multiple blocks - use the last one (LLM self-corrected)
-    {:ok, sanitize_code(List.last(multiple))}
+    {:error, {:multiple_code_blocks, length(multiple)}}
   end
 
   # Try fully XML-style blocks: <clojure>...</clojure> or <lisp>...</lisp>
