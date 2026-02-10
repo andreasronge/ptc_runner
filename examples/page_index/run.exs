@@ -88,6 +88,8 @@ defmodule CLI do
           trace: :boolean,
           model: :string,
           cache: :boolean,
+          plan_only: :boolean,
+          plan: :string,
           help: :boolean
         ],
         aliases: [
@@ -95,7 +97,8 @@ defmodule CLI do
           m: :model,
           q: :query,
           t: :trace,
-          c: :cache
+          c: :cache,
+          p: :plan_only
         ]
       )
 
@@ -131,12 +134,16 @@ defmodule CLI do
       --pdf <path>          PDF path for queries (required with --query)
       -c, --cache           Enable prompt caching (reduces cost on repeated queries)
       -t, --trace           Enable tracing (writes to traces/ directory)
+      -p, --plan-only       Show generated plan without executing (saves to plans/)
+      --plan <path>         Execute a saved plan (skip plan generation)
       -h, --help            Show this help
 
     Examples:
       mix run run.exs --index data/3M_2022_10K.pdf
       mix run run.exs --query "What was 3M's total revenue in 2022?" --pdf data/3M_2022_10K.pdf
       mix run run.exs --query "Is 3M capital intensive?" --pdf data/3M_2022_10K.pdf --cache
+      mix run run.exs --query "Is 3M capital intensive?" --pdf data/3M_2022_10K.pdf -p -m bedrock:sonnet
+      mix run run.exs --query "Is 3M capital intensive?" --pdf data/3M_2022_10K.pdf --plan plans/plan_123.json
       mix run run.exs --show data/3M_2022_10K_index.json
     """)
   end
@@ -175,6 +182,8 @@ defmodule CLI do
     model = opts[:model] || "bedrock:haiku"
     trace = opts[:trace] || false
     cache = opts[:cache] || false
+    plan_only = opts[:plan_only] || false
+    plan_path = opts[:plan]
 
     pdf_path = opts[:pdf]
 
@@ -190,6 +199,8 @@ defmodule CLI do
     IO.puts("Index: #{index_path}")
     if cache, do: IO.puts("Cache: enabled")
     if trace, do: IO.puts("Tracing: enabled")
+    if plan_only, do: IO.puts("Plan only: yes")
+    if plan_path, do: IO.puts("Plan: #{plan_path}")
     IO.puts("")
 
     TokenTracker.start()
@@ -199,7 +210,17 @@ defmodule CLI do
 
     case PageIndex.load_index(index_path) do
       {:ok, tree} ->
-        run_query(tree, query, llm, pdf_path, trace: trace)
+        cond do
+          plan_only ->
+            generate_plan_only(tree, query, llm)
+
+          plan_path ->
+            run_saved_plan(tree, query, llm, pdf_path, plan_path, trace: trace)
+
+          true ->
+            run_query(tree, query, llm, pdf_path, trace: trace)
+        end
+
         TokenTracker.print_summary()
 
       {:error, reason} ->
@@ -228,6 +249,228 @@ defmodule CLI do
       result
     else
       func.()
+    end
+  end
+
+  defp generate_plan_only(tree, query, llm) do
+    doc_title = tree.title || "Document"
+
+    mission = """
+    Answer this question about "#{doc_title}":
+
+    QUESTION: #{query}
+
+    Use the search tool to find relevant data from the document.
+    """
+
+    available_tools = %{
+      "search" => """
+      Search the document for specific data. Returns structured findings.
+      Signature: (query :string) -> {findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}
+
+      Call with a specific data need, e.g.: (tool/search {:query "total revenue for 2022"})
+      Use multiple search calls for different data points rather than one broad query.
+      """
+    }
+
+    constraints = "The final synthesis task MUST have the id \"final_answer\"."
+
+    IO.puts("Generating plan...")
+
+    case PtcRunner.MetaPlanner.plan(mission,
+           llm: llm,
+           available_tools: available_tools,
+           constraints: constraints
+         ) do
+      {:ok, plan} ->
+        IO.puts("\n" <> String.duplicate("=", 60))
+        IO.puts("GENERATED PLAN (#{length(plan.tasks)} tasks, #{map_size(plan.agents)} agents)")
+        IO.puts(String.duplicate("=", 60))
+
+        IO.puts("\nAgents:")
+
+        for {name, spec} <- plan.agents do
+          tools = if spec.tools == [], do: "(no tools)", else: Enum.join(spec.tools, ", ")
+          IO.puts("  #{name}: #{tools}")
+          IO.puts("    prompt: #{String.slice(spec.prompt, 0, 100)}...")
+        end
+
+        IO.puts("\nTasks:")
+
+        for task <- plan.tasks do
+          deps = if task.depends_on == [], do: "", else: " <- #{Enum.join(task.depends_on, ", ")}"
+          gate = if task.quality_gate, do: " [GATE]", else: ""
+          type = if task.type && task.type != "", do: " (#{task.type})", else: ""
+          sig = if task.signature && task.signature != "", do: " -> #{task.signature}", else: ""
+
+          IO.puts("\n  #{task.id}#{type}#{gate}#{deps}")
+          IO.puts("    agent: #{task.agent}")
+          IO.puts("    input: #{String.slice(task.input, 0, 200)}")
+          if sig != "", do: IO.puts("    signature: #{sig}")
+
+          if task.verification && task.verification != "" do
+            IO.puts("    verification: #{task.verification}")
+          end
+        end
+
+        IO.puts("\n" <> String.duplicate("=", 60))
+
+        raw = plan_to_raw_json(plan)
+        json = Jason.encode!(raw, pretty: true)
+
+        # Save to plans/ directory
+        File.mkdir_p!("plans")
+        plan_file = "plans/plan_#{System.system_time(:second)}.json"
+        File.write!(plan_file, json)
+        IO.puts("\nPlan saved to: #{plan_file}")
+
+        IO.puts("\nRaw JSON:")
+        IO.puts(json)
+
+      {:error, reason} ->
+        IO.puts("Error generating plan: #{inspect(reason)}")
+    end
+  end
+
+  defp plan_to_raw_json(plan) do
+    %{
+      "agents" =>
+        Map.new(plan.agents, fn {name, spec} ->
+          {name, %{"prompt" => spec.prompt, "tools" => spec.tools}}
+        end),
+      "tasks" =>
+        Enum.map(plan.tasks, fn task ->
+          base = %{
+            "id" => task.id,
+            "agent" => task.agent,
+            "input" => task.input,
+            "depends_on" => task.depends_on
+          }
+
+          optional = [
+            {"quality_gate", task.quality_gate, &(&1 == true)},
+            {"type", task.type, &(&1 && &1 != "")},
+            {"signature", task.signature, &(&1 && &1 != "")},
+            {"verification", task.verification, &(&1 && &1 != "")},
+            {"output", to_string_or_nil(task.output), &(&1 && &1 != "")},
+            {"on_verification_failure", atom_to_string(task.on_verification_failure),
+             &(&1 && &1 != "stop")},
+            {"on_failure", atom_to_string(task.on_failure), &(&1 && &1 != "stop")},
+            {"max_retries", task.max_retries, &(&1 && &1 > 1)}
+          ]
+
+          Enum.reduce(optional, base, fn {key, value, include?}, acc ->
+            if include?.(value), do: Map.put(acc, key, value), else: acc
+          end)
+        end)
+    }
+  end
+
+  defp to_string_or_nil(nil), do: nil
+  defp to_string_or_nil(atom) when is_atom(atom), do: Atom.to_string(atom)
+  defp to_string_or_nil(val), do: val
+
+  defp atom_to_string(nil), do: nil
+  defp atom_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
+  defp atom_to_string(val), do: val
+
+  defp run_saved_plan(tree, query, llm, pdf_path, plan_path, opts) do
+    case File.read(plan_path) do
+      {:ok, json} ->
+        case Jason.decode(json) do
+          {:ok, raw_plan} ->
+            case PtcRunner.Plan.parse(raw_plan) do
+              {:ok, plan} ->
+                IO.puts(
+                  "Loaded plan: #{length(plan.tasks)} tasks, #{map_size(plan.agents)} agents"
+                )
+
+                execute_plan(tree, query, plan, llm, pdf_path, opts)
+
+              {:error, reason} ->
+                IO.puts("Error parsing plan: #{inspect(reason)}")
+            end
+
+          {:error, reason} ->
+            IO.puts("Error decoding JSON: #{inspect(reason)}")
+        end
+
+      {:error, reason} ->
+        IO.puts("Error reading #{plan_path}: #{inspect(reason)}")
+    end
+  end
+
+  defp execute_plan(tree, query, plan, llm, pdf_path, opts) do
+    nodes = PageIndex.RetrieverToolkit.flatten_tree(tree)
+
+    # Pre-warm the PDF cache
+    IO.puts("Pre-loading PDF pages...")
+    {:ok, _} = PageIndex.get_content(pdf_path, 1, 1)
+    IO.puts("PDF cache ready.")
+
+    doc_title = tree.title || "Document"
+
+    mission = """
+    Answer this question about "#{doc_title}":
+
+    QUESTION: #{query}
+
+    Use the search tool to find relevant data from the document.
+    """
+
+    base_tools = %{
+      "search" => PageIndex.RetrieverToolkit.make_search_tool(nodes, pdf_path, [])
+    }
+
+    executor_opts = [
+      llm: llm,
+      base_tools: base_tools,
+      max_total_replans: 2,
+      max_turns: 20,
+      timeout: 60_000,
+      quality_gate: true
+    ]
+
+    result =
+      with_optional_trace(opts[:trace], query, fn ->
+        case PtcRunner.PlanExecutor.execute(plan, mission, executor_opts) do
+          {:ok, metadata} ->
+            results = metadata.results
+            final_result = PageIndex.RetrieverToolkit.find_synthesis_result(results)
+
+            {:ok,
+             %{
+               answer:
+                 final_result["answer"] || final_result["assessment"] ||
+                   final_result["analysis"] || final_result,
+               sources: PageIndex.RetrieverToolkit.extract_search_sources(results),
+               replans: metadata.replan_count,
+               tasks_executed: map_size(results)
+             }}
+
+          {:error, reason, metadata} ->
+            {:error, %{reason: reason, replans: metadata.replan_count, partial_results: metadata}}
+        end
+      end)
+
+    case result do
+      {:ok, result} ->
+        IO.puts("\n" <> String.duplicate("=", 60))
+        IO.puts("ANSWER (after #{result.replans} replans, #{result.tasks_executed} tasks):")
+        IO.puts(String.duplicate("=", 60))
+        IO.puts(inspect_answer(result.answer))
+
+        IO.puts("\nSources:")
+
+        for source <- result.sources || [] do
+          section = inspect_field(source.section)
+          page = inspect_field(source.page)
+          IO.puts("  - #{section} (page #{page})")
+        end
+
+      {:error, result} ->
+        IO.puts("Error: #{inspect(result.reason)}")
+        IO.puts("Replans attempted: #{result.replans}")
     end
   end
 

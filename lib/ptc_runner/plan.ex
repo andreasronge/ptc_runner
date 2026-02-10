@@ -393,6 +393,7 @@ defmodule PtcRunner.Plan do
       |> check_missing_dependencies(plan)
       |> check_missing_agents(plan)
       |> check_cycles(plan)
+      |> check_lisp_syntax(plan)
 
     case Enum.filter(issues, &(&1.severity == :error)) do
       [] -> :ok
@@ -620,6 +621,50 @@ defmodule PtcRunner.Plan do
 
         {visited, in_progress, issues}
     end
+  end
+
+  # Check PTC-Lisp syntax in direct task inputs and verification predicates
+  defp check_lisp_syntax(issues, plan) do
+    Enum.reduce(plan.tasks, issues, fn task, acc ->
+      acc
+      |> check_direct_input(task)
+      |> check_verification_predicate(task)
+    end)
+  end
+
+  defp check_direct_input(issues, %{agent: "direct", input: input, id: id})
+       when is_binary(input) and input != "" do
+    case Lisp.validate(input) do
+      :ok -> issues
+      {:error, messages} -> [lisp_issue(id, :invalid_direct_input, messages) | issues]
+    end
+  end
+
+  defp check_direct_input(issues, _task), do: issues
+
+  defp check_verification_predicate(issues, %{verification: pred, id: id})
+       when is_binary(pred) and pred != "" do
+    case Lisp.validate(pred) do
+      :ok -> issues
+      {:error, messages} -> [lisp_issue(id, :invalid_verification, messages) | issues]
+    end
+  end
+
+  defp check_verification_predicate(issues, _task), do: issues
+
+  defp lisp_issue(task_id, category, messages) do
+    label =
+      case category do
+        :invalid_direct_input -> "direct task input"
+        :invalid_verification -> "verification predicate"
+      end
+
+    %{
+      severity: :error,
+      category: category,
+      message: "Task '#{task_id}' has invalid #{label}: #{Enum.join(messages, "; ")}",
+      task_id: task_id
+    }
   end
 
   @doc """

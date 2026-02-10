@@ -196,6 +196,13 @@ defmodule PtcRunner.MetaPlanner do
     7. **Quality gates** - Set `"quality_gate": true` on computation/analysis tasks that need exact upstream
        values (e.g., financial calculations, ratio computations). Skip on synthesis tasks that just
        narrate upstream results — they don't need precise data validation.
+    8. **Extract and type-check between tasks** - When a tool-using task returns a flexible schema
+       (e.g., generic findings with `value: any`), you MUST insert a `direct` task to extract each specific
+       typed value needed downstream. Without this step, computation tasks receive raw findings arrays and
+       fail to locate the correct values. Each direct-extract task should filter findings by label, extract
+       the value, and declare a typed signature (e.g., `:float`). This costs zero LLM calls, gives
+       computation tasks clean typed inputs, and catches missing data early via signature validation.
+       REQUIRED pattern: search → direct extract (one per value) → compute.
 
     ## Task Types
 
@@ -204,8 +211,16 @@ defmodule PtcRunner.MetaPlanner do
       write PTC-Lisp code in the `input` field. This executes instantly without an LLM call. All base tools
       are available. Upstream results are accessible via `data/results`. Use this whenever the plan can
       determine the precise tool arguments upfront — it eliminates unnecessary LLM round-trips.
-      Example: `{"id": "get_data", "agent": "direct", "input": "(tool/search {:query \"quarterly revenue\"})"}`
+      Example: `{"id": "get_data", "agent": "direct", "input": "(tool/search {:query \"average temperature\"})"}`
       With upstream data: `{"id": "transform", "agent": "direct", "input": "(map :name (get data/results \"lookup\"))", "depends_on": ["lookup"]}`
+      **Data extraction pattern** — use `direct` tasks to extract typed values from flexible tool output:
+      ```
+      {"id": "search_population", "agent": "researcher", "input": "Find city population"},
+      {"id": "extract_population", "agent": "direct",
+       "input": "(let [findings (get data/results \"search_population\" \"findings\")] (-> findings (filter (fn [f] (str/includes? (get f \"label\") \"population\"))) (first) (get \"value\")))",
+       "depends_on": ["search_population"], "signature": ":float"}
+      ```
+      This gives downstream tasks a clean `:float` instead of a generic findings array.
     - **Synthesis gates**: Compress/summarize results from multiple upstream tasks (type: "synthesis_gate")
       When designing a synthesis_gate, you MUST specify a `signature` that defines the exact output structure
       (e.g., `"{stocks [{symbol :string, price :float, currency :string}]}"`). This ensures machine-readable results.
@@ -216,26 +231,26 @@ defmodule PtcRunner.MetaPlanner do
     ```json
     {
       "tasks": [
-        {
-          "id": "unique_task_id",
-          "agent": "agent_name",
-          "input": "What this task should accomplish",
-          "depends_on": ["ids_of_upstream_tasks"],
-          "output": "ptc_lisp or json (optional, auto-detects if omitted)",
-          "signature": "{field :type}",
-          "verification": "(optional PTC-Lisp predicate)",
-          "on_verification_failure": "retry",
-          "quality_gate": true
-        }
+        {"id": "search_data", "agent": "researcher", "input": "Find the population of Berlin"},
+        {"id": "extract_population", "agent": "direct",
+         "input": "(let [findings (get data/results \"search_data\" \"findings\")] (-> findings (filter (fn [f] (str/includes? (get f \"label\") \"population\"))) (first) (get \"value\")))",
+         "depends_on": ["search_data"], "signature": ":float"},
+        {"id": "compute_density", "agent": "calculator",
+         "input": "Compute population density from upstream values",
+         "depends_on": ["extract_population"], "output": "ptc_lisp",
+         "signature": "{density :float}", "quality_gate": true},
+        {"id": "final_answer", "agent": "default",
+         "input": "Summarize the result",
+         "depends_on": ["compute_density"], "type": "synthesis_gate",
+         "signature": "{answer :string, density :float}"}
       ],
       "agents": {
-        "agent_name": {
-          "prompt": "You are an agent that...",
-          "tools": ["tool_names_from_available_list"]
-        }
+        "researcher": {"prompt": "You search for data.", "tools": ["search"]},
+        "calculator": {"prompt": "You compute values using PTC-Lisp let bindings and arithmetic.", "tools": []}
       }
     }
     ```
+    Note the `direct` extract task between search and compute — this is REQUIRED when tools return flexible schemas.
 
     ## Important Rules
 
@@ -522,6 +537,10 @@ defmodule PtcRunner.MetaPlanner do
     - Include verification predicates to prevent the same failure (see system prompt for syntax)
     - Set `"quality_gate": true` on computation/analysis tasks that need exact upstream values
       (e.g., financial calculations). Skip on synthesis tasks that just narrate upstream results.
+    - You MUST use `"agent": "direct"` tasks to extract and type-check individual values from
+      flexible tool output (e.g., findings with `value: any`) before passing to computation tasks.
+      Pattern: search → direct extract (one per value, with typed signature like `:float`) → compute.
+      This costs zero LLM calls and catches missing data early.
 
     ## Impossible Missions
 
@@ -589,6 +608,8 @@ defmodule PtcRunner.MetaPlanner do
     - Missing dependencies (referencing task IDs that don't exist)
     - Missing agents (using agent names not defined in the agents section)
     - Duplicate task IDs
+    - PTC-Lisp syntax in `direct` task inputs and verification predicates
+      (use `data/result` not `result`, `data/results` not `results`; ensure balanced parens)
 
     """
   end
