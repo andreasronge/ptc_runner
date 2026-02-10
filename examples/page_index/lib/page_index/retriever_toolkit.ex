@@ -2,7 +2,7 @@ defmodule PageIndex.RetrieverToolkit do
   @moduledoc """
   Shared helpers for document retrieval strategies.
 
-  Provides common utilities used by MinimalPlannerRetriever: tree flattening,
+  Provides common utilities used by PlanRetriever: tree flattening,
   smart fetch with fuzzy matching, section formatting, and result extraction.
   """
 

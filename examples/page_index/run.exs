@@ -236,7 +236,7 @@ defmodule CLI do
 
     result =
       with_optional_trace(opts[:trace], query, fn ->
-        PageIndex.MinimalPlannerRetriever.retrieve(tree, query, retriever_opts)
+        PageIndex.PlanRetriever.retrieve(tree, query, retriever_opts)
       end)
 
     case result do
