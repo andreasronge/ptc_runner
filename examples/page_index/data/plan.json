@@ -1,0 +1,123 @@
+{
+    "agents": {
+        "analyzer": {
+            "prompt": "You analyze capital intensity by examining the relationship between capital expenditures, asset base, depreciation, and operational characteristics. Use PTC-Lisp let bindings and arithmetic to compute key ratios. Do NOT calculate values mentally — write expressions and let the interpreter compute them.",
+            "tools": []
+        },
+        "extract_values": {
+            "prompt": "You extract typed values from search findings using PTC-Lisp filter and map operations.",
+            "tools": []
+        },
+        "researcher": {
+            "prompt": "You search the document for specific financial and operational data. Return structured findings with clear labels and context. If the search results do not contain the specific information needed, call (fail \"reason\") explaining what is missing.",
+            "tools": [
+                "search"
+            ]
+        },
+        "synthesizer": {
+            "prompt": "You synthesize analysis results into clear, evidence-based answers. Be concise and support conclusions with specific numbers.",
+            "tools": []
+        }
+    },
+    "tasks": [
+        {
+            "agent": "researcher",
+            "depends_on": [],
+            "id": "search_capex",
+            "input": "Search for 3M's capital expenditures (capex) for 2022 and 2021",
+            "signature": "{findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}",
+            "type": "task"
+        },
+        {
+            "agent": "researcher",
+            "depends_on": [],
+            "id": "search_total_assets",
+            "input": "Search for 3M's total assets for 2022 and 2021",
+            "signature": "{findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}",
+            "type": "task"
+        },
+        {
+            "agent": "researcher",
+            "depends_on": [],
+            "id": "search_revenue",
+            "input": "Search for 3M's total revenue or net sales for 2022 and 2021",
+            "signature": "{findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}",
+            "type": "task"
+        },
+        {
+            "agent": "researcher",
+            "depends_on": [],
+            "id": "search_ppe",
+            "input": "Search for 3M's property, plant and equipment (PP&E) or net property plant and equipment for 2022",
+            "signature": "{findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}",
+            "type": "task"
+        },
+        {
+            "agent": "researcher",
+            "depends_on": [],
+            "id": "search_depreciation",
+            "input": "Search for 3M's depreciation and amortization expense for 2022",
+            "signature": "{findings [{label :string, value :any, unit :string, page :any, section :string, context :string}], sections_searched [:string]}",
+            "type": "task"
+        },
+        {
+            "agent": "direct",
+            "depends_on": [
+                "search_capex"
+            ],
+            "id": "extract_capex_2022",
+            "input": "(let [findings (get-in data/results [\"search_capex\" \"findings\"])] (-> (filter (fn [f] (and (str/includes? (str/lower-case (get f \"label\")) \"capital\") (or (str/includes? (str/lower-case (get f \"label\")) \"2022\") (str/includes? (get f \"context\" \"\") \"2022\")))) findings) (first) (get \"value\")))",
+            "signature": ":float",
+            "type": "task",
+            "verification": "(if (number? data/result) true \"Capex 2022 must be a number\")"
+        },
+        {
+            "agent": "direct",
+            "depends_on": [
+                "search_revenue"
+            ],
+            "id": "extract_revenue_2022",
+            "input": "(let [findings (get-in data/results [\"search_revenue\" \"findings\"])] (-> (filter (fn [f] (and (or (str/includes? (str/lower-case (get f \"label\")) \"revenue\") (str/includes? (str/lower-case (get f \"label\")) \"sales\")) (or (str/includes? (str/lower-case (get f \"label\")) \"2022\") (str/includes? (get f \"context\" \"\") \"2022\")))) findings) (first) (get \"value\")))",
+            "signature": ":float",
+            "type": "task",
+            "verification": "(if (number? data/result) true \"Revenue 2022 must be a number\")"
+        },
+        {
+            "agent": "direct",
+            "depends_on": [
+                "search_total_assets"
+            ],
+            "id": "extract_total_assets_2022",
+            "input": "(let [findings (get-in data/results [\"search_total_assets\" \"findings\"])] (-> (filter (fn [f] (and (str/includes? (str/lower-case (get f \"label\")) \"total assets\") (or (str/includes? (str/lower-case (get f \"label\")) \"2022\") (str/includes? (get f \"context\" \"\") \"2022\")))) findings) (first) (get \"value\")))",
+            "signature": ":float",
+            "type": "task",
+            "verification": "(if (number? data/result) true \"Total assets 2022 must be a number\")"
+        },
+        {
+            "agent": "analyzer",
+            "depends_on": [
+                "extract_capex_2022",
+                "extract_revenue_2022",
+                "extract_total_assets_2022"
+            ],
+            "id": "compute_capital_intensity_metrics",
+            "input": "Compute capital intensity metrics: (1) capex_to_revenue_ratio = (capex_2022 / revenue_2022) * 100, (2) capex_to_assets_ratio = (capex_2022 / total_assets_2022) * 100. Extract values from upstream results and use arithmetic expressions.",
+            "quality_gate": true,
+            "signature": "{capex_2022 :float, revenue_2022 :float, total_assets_2022 :float, capex_to_revenue_pct :float, capex_to_assets_pct :float}",
+            "type": "task",
+            "verification": "(if (and (number? (get data/result \"capex_to_revenue_pct\")) (number? (get data/result \"capex_to_assets_pct\"))) true \"Ratios must be numbers\")"
+        },
+        {
+            "agent": "synthesizer",
+            "depends_on": [
+                "compute_capital_intensity_metrics",
+                "search_ppe",
+                "search_depreciation"
+            ],
+            "id": "final_answer",
+            "input": "Based on the computed capital intensity metrics (capex-to-revenue and capex-to-assets ratios), determine whether 3M is capital intensive. Consider: ratios above 5% capex/revenue or 3% capex/assets typically indicate capital intensity. Provide a clear yes/no answer with supporting evidence from the computed ratios.",
+            "signature": "{is_capital_intensive :bool, capex_to_revenue_pct :float, capex_to_assets_pct :float, explanation :string, supporting_data [:string]}",
+            "type": "synthesis_gate"
+        }
+    ]
+}
