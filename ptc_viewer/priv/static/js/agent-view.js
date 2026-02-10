@@ -18,12 +18,11 @@ export function renderAgentView(container, state, data) {
   const agentName = traceStart?.metadata?.agent_name || traceStart?.metadata?.tool_name || data.filename;
   const outputMode = runStart?.metadata?.agent?.output || 'unknown';
   const totalDuration = execStop?.duration_ms || runStop?.duration_ms || traceStop?.duration_ms || 0;
-  const llmEvents = paired.filter(e => e.type === 'llm');
-  const totalTokens = llmEvents.reduce((sum, e) => sum + (e.stop?.measurements?.tokens || 0), 0);
-  const maxTurn = llmEvents.reduce((max, e) => Math.max(max, e.stop?.metadata?.turn || 0), 0);
-
-  // Build turns array
+  // Build turns array (filtered to root agent only)
   const turns = buildTurnsFromEvents(events, paired);
+
+  // Compute header stats from root agent turns only
+  const totalTokens = turns.reduce((sum, t) => sum + (t.tokens?.tokens || 0), 0);
 
   let html = '';
 
@@ -34,7 +33,7 @@ export function renderAgentView(container, state, data) {
       <span class="badge">${outputMode === 'ptc_lisp' ? 'PTC-Lisp' : outputMode === 'json' ? 'JSON' : escapeHtml(outputMode)}</span>
       <span>${formatDuration(totalDuration)}</span>
       <span>${formatTokens(totalTokens)} tokens</span>
-      <span>${maxTurn} turns</span>
+      <span>${turns.length} turns</span>
     </div>
   </div>`;
 
@@ -96,8 +95,16 @@ export function renderAgentView(container, state, data) {
 }
 
 function buildTurnsFromEvents(events, paired) {
-  const llmPairs = paired.filter(p => p.type === 'llm');
-  const toolPairs = paired.filter(p => p.type === 'tool');
+  // Find root agent span - the run.start with no parent
+  const rootRun = events.find(e => e.event === 'run.start' && !e.metadata?.parent_span_id);
+  const rootSpanId = rootRun?.span_id;
+
+  // Filter to only root agent's LLM calls (parent_span_id matches root span)
+  const llmPairs = paired.filter(p => p.type === 'llm' &&
+    (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
+  // Filter to only root agent's direct tool calls
+  const toolPairs = paired.filter(p => p.type === 'tool' &&
+    (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
   const pmapPairs = paired.filter(p => p.type === 'pmap' || p.type === 'pcalls');
   const turnPairs = paired.filter(p => p.type === 'turn');
 
@@ -126,9 +133,16 @@ function buildTurnsFromEvents(events, paired) {
       return toolStart >= llmStopTime && toolStart < nextLlmStartTime;
     });
 
+    // pmap events are emitted post-hoc (after sandbox returns), so their
+    // timestamps cluster at the end of execution. Use the pmap's duration_ms
+    // to compute its real execution window and match against this turn.
     const turnPmaps = pmapPairs.filter(p => {
-      const pmapStart = p.start?.timestamp ? new Date(p.start.timestamp).getTime() : 0;
-      return pmapStart >= llmStopTime && pmapStart < nextLlmStartTime;
+      const pmapStopTime = p.stop?.timestamp ? new Date(p.stop.timestamp).getTime() : 0;
+      const pmapDuration = p.stop?.duration_ms || 0;
+      const pmapRealStart = pmapDuration > 0 ? pmapStopTime - pmapDuration : pmapStopTime;
+      // The pmap's real execution started after this LLM response
+      // and its post-hoc timestamp is before the next LLM starts (use <= for same-ms edge case)
+      return pmapRealStart >= llmStopTime && pmapStopTime <= nextLlmStartTime;
     });
 
     const resultPreview = turnPair?.stop?.metadata?.result_preview;
@@ -210,8 +224,8 @@ function renderTurnDetail(container, turn, state, data) {
     </div>`;
   }
 
-  // Tool calls
-  if (turn.tools.length > 0) {
+  // Tool calls (skip when pmaps present - fork-join viz renders those)
+  if (turn.tools.length > 0 && turn.pmaps.length === 0) {
     html += '<div class="turn-section"><div class="section-title">Tool Calls</div>';
     for (const tool of turn.tools) {
       const toolName = tool.stop?.metadata?.tool_name || tool.start?.metadata?.tool_name || 'unknown';
