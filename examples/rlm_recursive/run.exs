@@ -160,7 +160,7 @@ defmodule RlmRecursive.Runner do
 
     if result.trace_path do
       IO.puts("Trace: #{result.trace_path}")
-      IO.puts("View: Open trace_viewer.html in browser and load the trace file")
+      IO.puts("View: mix ptc.viewer --trace-dir traces")
     end
   end
 
@@ -226,8 +226,8 @@ defmodule RlmRecursive.Runner do
       OPENROUTER_API_KEY     Use OpenRouter instead of AWS Bedrock
 
     Trace Viewer:
-      After running with --trace, open trace_viewer.html in your browser
-      and load the generated trace file from traces/
+      After running with --trace, view results with:
+      mix ptc.viewer --trace-dir traces
 
     """)
   end

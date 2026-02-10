@@ -245,7 +245,7 @@ defmodule CLI do
         )
 
       IO.puts("\nTrace written to: #{path}")
-      IO.puts("View with: open priv/trace_viewer.html (then drop the .jsonl file)")
+      IO.puts("View with: mix ptc.viewer --trace-dir traces")
       result
     else
       func.()
