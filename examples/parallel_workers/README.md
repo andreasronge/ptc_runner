@@ -183,13 +183,11 @@ Then open in Chrome:
 2. Click **Load profile...** and select the `.json` file
 3. Or navigate to `chrome://tracing` and load the file
 
-**Option 2: Simple Browser Viewer**
-
-Open `trace_viewer.html` in Chrome and drag & drop the `.jsonl` files:
+**Option 2: PTC Trace Viewer**
 
 ```bash
-open examples/parallel_workers/trace_viewer.html
-# Then drag parallel_workers_trace.jsonl and all trace_*.jsonl files into the browser
+mix ptc.viewer --trace-dir examples/parallel_workers/traces
+# Open http://localhost:4123 and click the trace file
 ```
 
 **Option 3: IEx with Analyzer**
