@@ -249,6 +249,61 @@ PlanExecutor.run(mission,
 )
 ```
 
+## Quality Gates
+
+Quality gates validate that upstream task results contain sufficient data before a
+downstream task executes. This prevents wasted LLM calls on tasks that would fail
+due to missing upstream data.
+
+### Per-Task Quality Gates
+
+Add `"quality_gate": true` to tasks that need exact upstream values:
+
+```json
+{
+  "id": "compute_ratios",
+  "agent": "calculator",
+  "input": "Calculate financial ratios from upstream data",
+  "depends_on": ["fetch_financials"],
+  "quality_gate": true,
+  "output": "ptc_lisp",
+  "signature": "{profit_margin :float, debt_ratio :float}"
+}
+```
+
+### Resolution Order
+
+Quality gate checks follow this priority:
+
+1. **No dependencies** — Always skipped (nothing to check)
+2. **Per-task `quality_gate: true`** — Gate runs regardless of global setting
+3. **Per-task `quality_gate: false`** — Gate skipped regardless of global setting
+4. **Agent has tools** — Skipped (tool-using tasks fetch their own data)
+5. **Global `quality_gate` option** — Fallback when per-task not set
+
+### Global Fallback
+
+Set the global option in `PlanRunner.execute/2` or `PlanExecutor.execute/3`:
+
+```elixir
+PlanRunner.execute(plan, llm: llm, quality_gate: true)
+```
+
+### When to Use
+
+- **Enable** on computation/analysis tasks needing exact upstream values
+  (financial calculations, ratio computations, data transformations)
+- **Skip** on synthesis tasks that just narrate or summarize upstream results
+
+### Telemetry Events
+
+Quality gates emit telemetry events for observability:
+
+- `[:ptc_runner, :plan_executor, :quality_gate, :start]` — Gate check begins
+- `[:ptc_runner, :plan_executor, :quality_gate, :stop]` — Gate check complete
+  - Metadata includes `status` (`:passed`, `:failed`, `:error`)
+  - Failed gates include `missing` fields list
+
 ## Using a Predefined Plan
 
 For more control, parse a plan and execute directly:

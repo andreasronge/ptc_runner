@@ -287,6 +287,40 @@ defmodule PtcRunner.PlanTest do
       end
     end
 
+    test "parses quality_gate field" do
+      raw = %{
+        "tasks" => [
+          %{"id" => "t1", "input" => "x", "quality_gate" => true},
+          %{"id" => "t2", "input" => "x", "quality_gate" => false},
+          %{"id" => "t3", "input" => "x", "quality_gate" => "true"},
+          %{"id" => "t4", "input" => "x", "quality_gate" => "false"},
+          %{"id" => "t5", "input" => "x"}
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      t1 = Enum.find(plan.tasks, &(&1.id == "t1"))
+      t2 = Enum.find(plan.tasks, &(&1.id == "t2"))
+      t3 = Enum.find(plan.tasks, &(&1.id == "t3"))
+      t4 = Enum.find(plan.tasks, &(&1.id == "t4"))
+      t5 = Enum.find(plan.tasks, &(&1.id == "t5"))
+
+      assert t1.quality_gate == true
+      assert t2.quality_gate == false
+      assert t3.quality_gate == true
+      assert t4.quality_gate == false
+      assert t5.quality_gate == nil
+    end
+
+    test "string task gets quality_gate nil" do
+      raw = %{"tasks" => ["do this"]}
+
+      {:ok, plan} = Plan.parse(raw)
+
+      assert hd(plan.tasks).quality_gate == nil
+    end
+
     test "parses output field for explicit mode selection" do
       raw = %{
         "tasks" => [

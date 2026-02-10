@@ -892,7 +892,8 @@ defmodule PtcRunner.PlanExecutor do
             depends_on: task.depends_on,
             type: task.type,
             verification: task.verification,
-            on_verification_failure: task.on_verification_failure
+            on_verification_failure: task.on_verification_failure,
+            quality_gate: task.quality_gate
           }
         end)
     }

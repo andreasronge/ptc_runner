@@ -193,6 +193,9 @@ defmodule PtcRunner.MetaPlanner do
        for analysis or interpretation. Prose belongs in the downstream synthesis gate, which can read
        the computed numbers and write accurate narrative. String fields in computation signatures tempt
        the LLM to hardcode numbers in text before the interpreter verifies them.
+    7. **Quality gates** - Set `"quality_gate": true` on computation/analysis tasks that need exact upstream
+       values (e.g., financial calculations, ratio computations). Skip on synthesis tasks that just
+       narrate upstream results — they don't need precise data validation.
 
     ## Task Types
 
@@ -221,7 +224,8 @@ defmodule PtcRunner.MetaPlanner do
           "output": "ptc_lisp or json (optional, auto-detects if omitted)",
           "signature": "{field :type}",
           "verification": "(optional PTC-Lisp predicate)",
-          "on_verification_failure": "retry"
+          "on_verification_failure": "retry",
+          "quality_gate": true
         }
       ],
       "agents": {
@@ -331,6 +335,11 @@ defmodule PtcRunner.MetaPlanner do
               "signature" => %{
                 "type" => "string",
                 "description" => "Output signature for JSON mode (REQUIRED for synthesis_gate)"
+              },
+              "quality_gate" => %{
+                "type" => "boolean",
+                "description" =>
+                  "Enable data sufficiency check before this task. Use on computation/analysis tasks needing exact upstream values."
               }
             },
             "required" => ["id", "input"]
@@ -511,6 +520,8 @@ defmodule PtcRunner.MetaPlanner do
     - You MAY add new tasks if a different strategy is needed
     - You MAY remove or restructure downstream tasks if they depend on the failed approach
     - Include verification predicates to prevent the same failure (see system prompt for syntax)
+    - Set `"quality_gate": true` on computation/analysis tasks that need exact upstream values
+      (e.g., financial calculations). Skip on synthesis tasks that just narrate upstream results.
 
     ## Impossible Missions
 
@@ -537,6 +548,7 @@ defmodule PtcRunner.MetaPlanner do
           "depends_on": ["dependency_ids"],
           "output": "ptc_lisp or json (optional, for computation tasks use ptc_lisp)",
           "signature": "{field :type}",
+          "quality_gate": true,
           "verification": "(optional Lisp predicate)",
           "on_verification_failure": "retry"
         }
