@@ -105,8 +105,9 @@ function buildCompactTurns(events) {
       return toolStart >= llmStopTime && toolStart < nextLlmStartTime;
     });
 
-    // Find turn pair for result preview
-    const turnPairs = paired.filter(p => p.type === 'turn');
+    // Find turn pair for result preview (filter to root agent to avoid cross-agent collisions)
+    const turnPairs = paired.filter(p => p.type === 'turn' &&
+      (!rootSpanId || p.start?.span_id === rootSpanId || p.stop?.span_id === rootSpanId));
     const turnPair = turnPairs.find(p => (p.stop?.metadata?.turn || p.start?.metadata?.turn) === turnNumber);
     const resultPreview = turnPair?.stop?.metadata?.result_preview;
     const hasError = resultPreview && (
