@@ -50,11 +50,14 @@ defmodule RlmRecursive.Agent do
     SubAgent.new(
       prompt: sniah_prompt(),
       signature: "(corpus :string, query :string) -> {answer :string, found :bool}",
-      description: "Search corpus for answer to query using recursive subdivision",
+      description: "Search corpus for answer to query",
       tools: %{"search" => :self},
       builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
+      timeout: 60_000,
+      pmap_timeout: 60_000,
+      mission_timeout: 120_000,
       llm: llm
     )
   end
@@ -67,11 +70,14 @@ defmodule RlmRecursive.Agent do
     SubAgent.new(
       prompt: counting_prompt(),
       signature: "(corpus :string, min_age :int, hobby :string) -> {count :int}",
-      description: "Count profiles matching criteria using recursive aggregation",
+      description: "Count profiles matching criteria",
       tools: %{"search" => :self},
       builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
+      timeout: 60_000,
+      pmap_timeout: 60_000,
+      mission_timeout: 120_000,
       llm: llm
     )
   end
@@ -84,12 +90,14 @@ defmodule RlmRecursive.Agent do
     SubAgent.new(
       prompt: pairs_prompt(),
       signature: "(corpus :string) -> {count :int, pairs [:string]}",
-      description:
-        "Find pairs of profiles in same city with shared hobby - uses recursion for O(n^2) task",
+      description: "Find pairs of profiles in same city with shared hobby",
       tools: %{"search" => :self},
       builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
+      timeout: 60_000,
+      pmap_timeout: 60_000,
+      mission_timeout: 300_000,
       llm: llm
     )
   end
@@ -114,8 +122,9 @@ defmodule RlmRecursive.Agent do
       max_turns: max_turns,
       turn_budget: turn_budget,
       llm: llm,
-      timeout: 600_000,
-      pmap_timeout: 600_000,
+      timeout: 60_000,
+      pmap_timeout: 120_000,
+      mission_timeout: 600_000,
       memory_strategy: :rollback
     )
   end
@@ -131,8 +140,9 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:answer "THE_ANSWER" :found true}` if found, or `{:answer nil :found false}` if not found.
 
-    ## Tool
-    - `tool/search`: Recursive self-call
+    ## Tools
+    - `tool/grep` / `tool/grep-n`: Search the corpus directly — prefer this for simple lookups
+    - `tool/search`: Recursive self-call for subdividing very large corpora
     """
   end
 
@@ -148,8 +158,9 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:count N}` where N is the count of matching profiles.
 
-    ## Tool
-    - `tool/search`: Recursive self-call
+    ## Tools
+    - `tool/grep` / `tool/grep-n`: Filter the corpus directly — prefer this for O(n) filtering
+    - `tool/search`: Recursive self-call for subdividing very large corpora
     """
   end
 
@@ -163,8 +174,14 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:count N :pairs ["id1-id2" ...]}` where pairs are "id1-id2" strings (id1 < id2).
 
+    ## Strategy
+    This is an O(n²) problem. Use divide-and-conquer:
+    1. Group profiles by city (only same-city profiles can be pairs)
+    2. For each city group: if ≤ 5 profiles, compute pairs directly; if more, split and recurse with `tool/search`
+    3. Merge all pairs from all city groups
+
     ## Tool
-    - `tool/search`: Recursive self-call
+    - `tool/search`: Recursive self-call — pass a SUBSET of the corpus, never the full corpus unchanged
     """
   end
 
