@@ -1661,19 +1661,16 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `pairs` | `(pairs coll)` | Generate all 2-combinations (unique pairs) |
 | `combinations` | `(combinations coll n)` | Generate all n-combinations |
 
 ```clojure
-(pairs [1 2 3])            ; => [[1 2] [1 3] [2 3]]
-(pairs "abc")              ; => [["a" "b"] ["a" "c"] ["b" "c"]]
-(pairs [1])                ; => [] (need at least 2 elements)
+(combinations [1 2 3] 2)   ; => [[1 2] [1 3] [2 3]]
 (combinations [1 2 3 4] 3) ; => [[1 2 3] [1 2 4] [1 3 4] [2 3 4]]
 (combinations [1 2 3] 0)   ; => [[]] (empty subset)
 (combinations [1 2] 3)     ; => [] (n > length)
 
 ;; Practical: find pairs that sum to target
-(->> (pairs [1 2 3 4 5])
+(->> (combinations [1 2 3 4 5] 2)
      (filter (fn [[a b]] (= (+ a b) 6))))
 ;; => [[1 5] [2 4]]
 ```

@@ -3,51 +3,19 @@ defmodule PtcRunner.Lisp.CombinationsTest do
 
   alias PtcRunner.Lisp
 
-  describe "pairs" do
-    test "generates all pairs from a list" do
-      source = ~S|(pairs [1 2 3])|
+  describe "combinations" do
+    test "generates 2-combinations from a list" do
+      source = ~S|(combinations [1 2 3] 2)|
       {:ok, %{return: result}} = Lisp.run(source)
       assert result == [[1, 2], [1, 3], [2, 3]]
     end
 
-    test "generates pairs from a string" do
-      source = ~S|(pairs "abc")|
+    test "generates 2-combinations from a string" do
+      source = ~S|(combinations "abc" 2)|
       {:ok, %{return: result}} = Lisp.run(source)
       assert result == [["a", "b"], ["a", "c"], ["b", "c"]]
     end
 
-    test "returns empty list for single element" do
-      source = ~S|(pairs [1])|
-      {:ok, %{return: result}} = Lisp.run(source)
-      assert result == []
-    end
-
-    test "returns empty list for empty collection" do
-      source = ~S|(pairs [])|
-      {:ok, %{return: result}} = Lisp.run(source)
-      assert result == []
-    end
-
-    test "works with mixed types" do
-      source = ~S|(pairs [:a :b :c])|
-      {:ok, %{return: result}} = Lisp.run(source)
-      assert result == [[:a, :b], [:a, :c], [:b, :c]]
-    end
-
-    test "works with two elements" do
-      source = ~S|(pairs [1 2])|
-      {:ok, %{return: result}} = Lisp.run(source)
-      assert result == [[1, 2]]
-    end
-
-    test "works with four elements" do
-      source = ~S|(pairs [1 2 3 4])|
-      {:ok, %{return: result}} = Lisp.run(source)
-      assert result == [[1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4]]
-    end
-  end
-
-  describe "combinations" do
     test "generates 3-combinations from a list" do
       source = ~S|(combinations [1 2 3 4] 3)|
       {:ok, %{return: result}} = Lisp.run(source)
@@ -102,7 +70,7 @@ defmodule PtcRunner.Lisp.CombinationsTest do
       source = ~S|
         (let [nums [1 2 3 4 5]
               target 6]
-          (->> (pairs nums)
+          (->> (combinations nums 2)
                (filter (fn [[a b]] (= (+ a b) target)))))
       |
       {:ok, %{return: result}} = Lisp.run(source)
