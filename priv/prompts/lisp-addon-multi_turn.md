@@ -2,15 +2,15 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 8 -->
-<!-- date: 2026-01-26 -->
-<!-- changes: Added budget/remaining for adaptive strategies -->
+<!-- version: 9 -->
+<!-- date: 2026-02-11 -->
+<!-- changes: Moved reasoning into code comments to prevent thinking text in output -->
 
 <!-- PTC_PROMPT_START -->
 
 ### Multi-Turn Execution
 
-Respond with EXACTLY ONE ```clojure code block per turn. Use `(println ...)` to inspect, `(return answer)` when done.
+Respond with EXACTLY ONE ```clojure code block per turn — no text before or after the block. Use `(println ...)` to inspect, `(return answer)` when done. Put reasoning in `;; comments` inside the code block.
 
 **Explore first, return last.** Never `return` on your first turn. Always inspect results with `println` before returning. Only `return` after you've verified the data is correct.
 
@@ -27,13 +27,12 @@ Respond with EXACTLY ONE ```clojure code block per turn. Use `(println ...)` to 
 (println "users:" (count users) "logs:" (count logs))
 ```
 
-For complex tasks, think through each step:
+For complex tasks, use comments for reasoning:
 
 **Turn 1:**
 
-Reason: I need to find active items, but I don't know the response structure yet. Let me fetch and inspect.
-
 ```clojure
+;; Fetch and inspect — don't know the response structure yet
 (def data (tool/get-items {:status "active"}))
 (println "keys:" (keys data))
 (println "first:" (first (:items data)))
@@ -41,18 +40,16 @@ Reason: I need to find active items, but I don't know the response structure yet
 
 **Turn 2:**
 
-Reason: I now see the data, it has an :items key with maps containing :id. Let me extract and inspect the IDs before returning.
-
 ```clojure
+;; Data has :items key with maps containing :id — extract and verify
 (def ids (map :id (:items data)))
 (println "Found" (count ids) "items:" ids)
 ```
 
 **Turn 3:**
 
-Reason: I have 5 item IDs. The user asked for active items, and I've verified the structure. Now I can return.
-
 ```clojure
+;; Verified 5 item IDs — return
 (return ids)
 ```
 

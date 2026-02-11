@@ -58,6 +58,18 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   @output_format """
   # Output Format
 
+  Respond with EXACTLY ONE ```clojure code block — no text before or after the block. Put reasoning in `;; comments` inside the code.
+
+  ```clojure
+  (your-program-here)
+  ```
+
+  Do NOT include multiple code blocks or text outside the ```clojure block.
+  """
+
+  @output_format_thinking """
+  # Output Format
+
   For complex tasks, think through the problem first, then respond with EXACTLY ONE ```clojure code block:
 
   thinking:
@@ -79,7 +91,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Process data")
       iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: %{user: "Alice"})
-      iex> prompt =~ "## Role" and prompt =~ "thinking:"
+      iex> prompt =~ "## Role" and prompt =~ "# Output Format"
       true
 
   """
@@ -446,6 +458,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   defp resolve_static_sections(%SubAgent{} = agent, resolution_context) do
     # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
     default_spec = if agent.max_turns > 1, do: :multi_turn, else: :single_shot
+    default_output = if agent.thinking, do: @output_format_thinking, else: @output_format
 
     case agent.system_prompt do
       opts when is_map(opts) ->
@@ -455,11 +468,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
         {
           resolved_spec,
-          Map.get(opts, :output_format, @output_format)
+          Map.get(opts, :output_format, default_output)
         }
 
       _ ->
-        {LanguageSpec.get(default_spec), @output_format}
+        {LanguageSpec.get(default_spec), default_output}
     end
   end
 

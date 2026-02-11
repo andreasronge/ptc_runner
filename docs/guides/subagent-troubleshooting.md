@@ -169,6 +169,28 @@ Common issues and solutions when working with SubAgents.
 
 4. **Try a different model** - some models follow PTC-Lisp instructions better than others. See [Benchmark Evaluation](../benchmark-eval.md) for model comparisons.
 
+## LLM Produces "thinking:" Text Before Code
+
+**Symptom:** Traces show `thinking:` or reasoning prose before the code block, wasting tokens.
+
+**Cause:** Some models emit reasoning text even when `thinking: false` (the default). The multi-turn prompt examples and output format instructions discourage this, and `strip_thinking/1` removes any prose before the code block from message history to prevent reinforcement. The raw response is preserved in traces for debugging.
+
+**Diagnosis:** Check the `llm.start` events in trace JSONL files — they contain the full system prompt sent to the LLM. Verify the prompt includes "no text before or after the block":
+```elixir
+{:ok, step} = SubAgent.run(prompt, llm: llm)
+# Inspect the system prompt from the first turn
+[first_turn | _] = step.turns
+first_turn.system_prompt  # Full prompt sent to LLM
+```
+
+**Solutions:**
+
+1. **Verify prompt is up to date** — prompts in `priv/prompts/` are compiled in. After editing, run `mix compile --force`.
+
+2. **Use `thinking: true`** if you *want* reasoning visible in traces for debugging. The thinking text will appear in raw responses but is still stripped from message history.
+
+3. **Try a different model** — some models are more prone to emitting unsolicited reasoning text.
+
 ## Viewing Token Usage
 
 To see token consumption for debugging or optimization:
