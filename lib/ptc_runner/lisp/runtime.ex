@@ -111,7 +111,6 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate range(end_val), to: Collection
   defdelegate range(start, end_val), to: Collection
   defdelegate range(start, end_val, step), to: Collection
-  defdelegate pairs(coll), to: Collection
   defdelegate combinations(coll, n), to: Collection
 
   # Tree Traversal

@@ -1038,24 +1038,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # ============================================================
 
   @doc """
-  Generate all unique pairs (2-combinations) from a collection.
-
-  Works with any seqable: lists, strings, maps.
-
-  ## Examples
-
-      iex> PtcRunner.Lisp.Runtime.Collection.pairs([1, 2, 3])
-      [[1, 2], [1, 3], [2, 3]]
-
-      iex> PtcRunner.Lisp.Runtime.Collection.pairs("abc")
-      [["a", "b"], ["a", "c"], ["b", "c"]]
-
-      iex> PtcRunner.Lisp.Runtime.Collection.pairs([1])
-      []
-  """
-  def pairs(coll), do: combinations(coll, 2)
-
-  @doc """
   Generate all n-combinations from a collection.
 
   Works with any seqable: lists, strings, maps.

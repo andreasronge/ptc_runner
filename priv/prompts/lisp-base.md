@@ -137,8 +137,8 @@ These Clojure/Java functions do NOT exist — use the alternatives:
 (extract-int "x=(\\d+) y=(\\d+)" s 2)     ; => group 2, nil on failure
 (extract-int "age=(\\d+)" "no match" 1 0) ; => 0 (group 1, default 0)
 
-;; Generate pairs/combinations
-(pairs [1 2 3])                           ; => [[1 2] [1 3] [2 3]]
+;; Generate combinations
+(combinations [1 2 3] 2)                  ; => [[1 2] [1 3] [2 3]]
 (combinations [:a :b :c :d] 3)            ; => [[:a :b :c] [:a :b :d] ...]
 ```
 
