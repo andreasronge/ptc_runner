@@ -119,7 +119,7 @@ defmodule PtcRunner.MixProject do
         Reference: ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
       ],
-      assets: %{"docs/images" => "images"},
+      assets: %{"images" => "images"},
       before_closing_body_tag: &before_closing_body_tag/1
     ]
   end
