@@ -30,7 +30,6 @@ defmodule PtcViewer.Api do
       {:ok, files} ->
         files
         |> Enum.filter(&String.ends_with?(&1, extension))
-        |> Enum.sort()
         |> Enum.map(fn filename ->
           path = Path.join(dir, filename)
           stat = File.stat!(path)
@@ -41,6 +40,7 @@ defmodule PtcViewer.Api do
             modified: stat.mtime |> NaiveDateTime.from_erl!() |> NaiveDateTime.to_iso8601()
           }
         end)
+        |> Enum.sort_by(& &1.modified, :desc)
 
       {:error, _} ->
         []

@@ -1094,5 +1094,77 @@ defmodule PtcRunner.PlanExecutorTest do
       assert Map.has_key?(metadata.results, "analyze")
       assert Map.has_key?(metadata.results, "fetch_balance")
     end
+
+    test "direct task type_error + on_failure replan → corrected plan succeeds" do
+      # Plan: search returns data, direct task extracts with wrong Lisp → type_error → replan
+      raw = %{
+        "tasks" => [
+          %{"id" => "search", "input" => "Find revenue data"},
+          %{
+            "id" => "extract",
+            "agent" => "direct",
+            # Wrong: assumes findings list, but search returns a map with "revenue" key
+            "input" =>
+              ~s|(filter (fn [f] (get f "label")) (get data/results "search" "findings"))|,
+            "depends_on" => ["search"],
+            "signature" => ":float",
+            "on_failure" => "replan"
+          },
+          %{
+            "id" => "final",
+            "input" => "Summarize",
+            "depends_on" => ["extract"],
+            "type" => "synthesis_gate",
+            "signature" => "{answer :string}"
+          }
+        ]
+      }
+
+      {:ok, plan} = Plan.parse(raw)
+
+      mock_llm = fn input ->
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        cond do
+          # Replan call — return corrected plan with fixed Lisp
+          String.contains?(prompt, "repair specialist") ->
+            repair_plan = """
+            {
+              "tasks": [
+                {"id": "search", "input": "Find revenue data"},
+                {"id": "extract", "agent": "direct",
+                 "input": "(get-in data/results [\\"search\\" \\"revenue\\"])",
+                 "depends_on": ["search"], "signature": ":float", "on_failure": "replan"},
+                {"id": "final", "input": "Summarize",
+                 "depends_on": ["extract"], "type": "synthesis_gate",
+                 "signature": "{answer :string}"}
+              ]
+            }
+            """
+
+            {:ok, repair_plan}
+
+          # Synthesis gate
+          String.contains?(prompt, "Summarize") ->
+            {:ok, ~s({"answer": "Revenue is 34229"})}
+
+          # Search task — returns a map (not a findings list)
+          true ->
+            {:ok, ~s({"revenue": 34229.0, "net_income": 5777.0})}
+        end
+      end
+
+      {:ok, metadata} =
+        PlanExecutor.execute(plan, "What is the revenue?",
+          llm: mock_llm,
+          max_turns: 1,
+          replan_cooldown_ms: 0
+        )
+
+      assert metadata.replan_count == 1
+      assert metadata.results["extract"] == 34_229
+      assert metadata.results["final"]["answer"] =~ "34229"
+    end
   end
 end

@@ -135,6 +135,8 @@ input[type="file"] { display: none; }
 .file-picker-item.loading { opacity: 0.6; pointer-events: none; }
 .file-picker-item.loading .filename::after { content: ' Loading...'; color: var(--muted); font-style: italic; }
 .file-picker-item .filename { font-family: monospace; color: var(--accent); }
+.file-picker-item .file-meta { display: flex; gap: 12px; align-items: center; flex-shrink: 0; }
+.file-picker-item .modified { font-size: 11px; color: var(--muted); }
 .file-picker-item .size { font-size: 11px; color: var(--muted); }
 
 /* === Summary Stats === */

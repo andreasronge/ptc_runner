@@ -134,7 +134,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     end
   end
 
-  @max_result_preview_length 200
+  @max_result_preview_length 65_536
 
   @doc """
   Emit turn stop event immediately after a turn completes.
@@ -194,7 +194,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def build_result_preview(nil), do: "nil"
 
   def build_result_preview(result) do
-    preview = inspect(result, limit: 10, printable_limit: @max_result_preview_length)
+    preview = inspect(result, limit: :infinity, printable_limit: @max_result_preview_length)
 
     if String.length(preview) > @max_result_preview_length do
       String.slice(preview, 0, @max_result_preview_length - 3) <> "..."
