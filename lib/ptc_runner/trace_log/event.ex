@@ -10,8 +10,8 @@ defmodule PtcRunner.TraceLog.Event do
   - Recursively sanitizing nested structures
   """
 
-  # Increased from 8192 to avoid truncating user prompts and large tool signatures
-  @max_string_size 32_768
+  # Increased from 8192→32KB→64KB to avoid truncating result previews and large tool signatures
+  @max_string_size 65_536
   @max_list_size 100
 
   @doc """

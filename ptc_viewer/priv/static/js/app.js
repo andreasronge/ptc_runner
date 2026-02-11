@@ -3,6 +3,12 @@ import { renderOverview } from './overview.js';
 import { renderAgentView } from './agent-view.js';
 import { initTooltip } from './tooltip.js';
 
+function formatDate(isoString) {
+  const d = new Date(isoString);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // Global state
 const state = {
   files: new Map(),        // filename -> { events, traceId, filename }
@@ -173,7 +179,10 @@ function setupFilePicker(traces) {
       ${traces.map(t => `
         <div class="file-picker-item" data-filename="${t.filename}">
           <span class="filename">${t.filename}</span>
-          <span class="size">${(t.size / 1024).toFixed(1)} KB</span>
+          <span class="file-meta">
+            <span class="modified">${formatDate(t.modified)}</span>
+            <span class="size">${(t.size / 1024).toFixed(1)} KB</span>
+          </span>
         </div>
       `).join('')}
     </div>
