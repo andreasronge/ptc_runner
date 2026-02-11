@@ -129,12 +129,14 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec version(atom()) :: pos_integer()
-  def version(profile), do: LibLanguageSpec.version(profile)
+  def version(profile) do
+    LibLanguageSpec.version(profile)
+  end
 
   @doc """
   Get metadata for a prompt profile.
 
-  Delegates to library.
+  Delegates to library for standard profiles, returns empty map for custom ones.
 
   ## Examples
 
@@ -144,5 +146,7 @@ defmodule PtcDemo.Prompts do
 
   """
   @spec metadata(atom()) :: map()
-  def metadata(profile), do: LibLanguageSpec.metadata(profile)
+  def metadata(profile) do
+    LibLanguageSpec.metadata(profile)
+  end
 end

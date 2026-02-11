@@ -633,7 +633,7 @@ defmodule PtcRunner.PlanRunnerVerificationTest do
       assert task.on_verification_failure == :retry
     end
 
-    test "defaults on_verification_failure to :stop" do
+    test "defaults on_verification_failure to :replan" do
       raw = %{
         "tasks" => [
           %{
@@ -646,7 +646,7 @@ defmodule PtcRunner.PlanRunnerVerificationTest do
 
       assert {:ok, plan} = Plan.parse(raw)
       task = hd(plan.tasks)
-      assert task.on_verification_failure == :stop
+      assert task.on_verification_failure == :replan
     end
 
     test "parses replan as on_verification_failure" do

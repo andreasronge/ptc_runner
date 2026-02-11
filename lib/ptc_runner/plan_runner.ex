@@ -43,7 +43,8 @@ defmodule PtcRunner.PlanRunner do
   - `available_tools` - Tool descriptions (map of name -> description string). Used to
     enrich raw function tools with signatures so the LLM knows how to call them.
     Format: `"Description. Input: {param: type}. Output: {field: type}"`
-  - `timeout` - Per-task timeout in ms (default: 30_000)
+  - `timeout` - Per-task sandbox timeout in ms (default: 30_000)
+  - `pmap_timeout` - Per-pmap/pcalls task timeout in ms (default: same as `timeout`). Increase for LLM-backed tools.
   - `max_turns` - Max turns per agent (default: 5)
   - `max_concurrency` - Max parallel tasks per phase (default: 10)
   - `reviews` - Map of task_id => decision for human review tasks (default: %{})
@@ -146,6 +147,7 @@ defmodule PtcRunner.PlanRunner do
     base_tools = Keyword.get(opts, :base_tools, %{})
     available_tools = Keyword.get(opts, :available_tools, %{})
     timeout = Keyword.get(opts, :timeout, 30_000)
+    pmap_timeout = Keyword.get(opts, :pmap_timeout, timeout)
     max_turns = Keyword.get(opts, :max_turns, 5)
     llm_registry = Keyword.get(opts, :llm_registry, %{})
     max_concurrency = Keyword.get(opts, :max_concurrency, 10)
@@ -165,6 +167,7 @@ defmodule PtcRunner.PlanRunner do
       base_tools: enriched_tools,
       builtin_tools: Keyword.get(opts, :builtin_tools, []),
       timeout: timeout,
+      pmap_timeout: pmap_timeout,
       max_turns: max_turns,
       max_concurrency: max_concurrency,
       reviews: reviews,
@@ -404,8 +407,8 @@ defmodule PtcRunner.PlanRunner do
         {:cont, {:ok, results, [task.id | skipped]}}
 
       {:replan, _} ->
-        # Deliberate replan already handled in do_execute_with_attempts;
-        # if we reach here it means a non-deliberate failure on a :replan task
+        # Safety net: replan tasks are handled in execute_with_attempts
+        # (both deliberate fails and retries-exhausted trigger :replan_required there)
         {:halt, {:error, task.id, results, reason}}
     end
   end
@@ -516,6 +519,11 @@ defmodule PtcRunner.PlanRunner do
 
             Process.sleep(100 * attempt)
             execute_with_attempts(task, agents, results, opts, max_attempts, attempt + 1)
+
+          # Retries exhausted on a :replan task — trigger replan with error diagnosis
+          task.on_failure == :replan ->
+            diagnosis = format_fail_diagnosis(reason)
+            {:replan_required, %{task_id: task.id, task_output: nil, diagnosis: diagnosis}}
 
           # No retries left
           true ->
@@ -903,7 +911,8 @@ defmodule PtcRunner.PlanRunner do
             tools: tools,
             output: :ptc_lisp,
             max_turns: opts.max_turns,
-            timeout: opts.timeout
+            timeout: opts.timeout,
+            pmap_timeout: opts.pmap_timeout
           ]
 
           # Inject builtin_tools for PTC-Lisp agents
@@ -966,7 +975,7 @@ defmodule PtcRunner.PlanRunner do
       tools: opts.base_tools,
       context: %{"results" => dep_results},
       timeout: opts.timeout,
-      max_heap: Map.get(opts, :max_heap, 1_250_000)
+      max_heap: Map.get(opts, :max_heap, 2_500_000)
     ]
 
     lisp_opts =
@@ -1008,15 +1017,44 @@ defmodule PtcRunner.PlanRunner do
     case Lisp.run(predicate, context: bindings, timeout: 1000) do
       {:ok, step} ->
         case step.return do
-          true -> :passed
-          false -> {:failed, "Verification failed"}
-          diagnosis when is_binary(diagnosis) -> {:failed, diagnosis}
-          other -> {:failed, "Verification returned unexpected value: #{inspect(other)}"}
+          true ->
+            :passed
+
+          false ->
+            {:failed, build_verification_diagnosis(predicate, output, task)}
+
+          diagnosis when is_binary(diagnosis) ->
+            {:failed, diagnosis}
+
+          other ->
+            {:failed, "Verification returned unexpected value: #{inspect(other)}"}
         end
 
       {:error, step} ->
         {:error, step.fail}
     end
+  end
+
+  # Build a rich diagnosis when a verification predicate returns false.
+  # Includes the predicate, actual output, and task input so the replanner
+  # understands why verification failed and can fix the root cause.
+  defp build_verification_diagnosis(predicate, output, task) do
+    output_preview =
+      case output do
+        nil -> "nil"
+        v when is_binary(v) -> "\"#{String.slice(v, 0, 200)}\""
+        v -> v |> inspect(limit: 10, printable_limit: 200) |> String.slice(0, 200)
+      end
+
+    input_preview =
+      case task.input do
+        input when is_binary(input) -> String.slice(input, 0, 300)
+        input -> inspect(input, limit: 5, printable_limit: 200) |> String.slice(0, 300)
+      end
+
+    "Verification predicate `#{predicate}` returned false. " <>
+      "Task output was: #{output_preview}. " <>
+      "Task input (PTC-Lisp): #{input_preview}"
   end
 
   # Handle verification failure based on on_verification_failure setting
@@ -1240,6 +1278,7 @@ defmodule PtcRunner.PlanRunner do
     #{agent_prompt}
 
     Task: #{format_input(input)}
+    Only return when you have verified that your result actually answers the task.
     """
   end
 
@@ -1248,6 +1287,7 @@ defmodule PtcRunner.PlanRunner do
     #{agent_prompt}
 
     Task: #{format_input(input)}
+    Only return when you have verified that your result actually answers the task.
 
     ## System Feedback
     IMPORTANT: Your previous attempt failed verification.

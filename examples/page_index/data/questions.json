@@ -1,0 +1,115 @@
+{
+  "source": "FinanceBench (https://github.com/patronus-ai/financebench)",
+  "license": "MIT",
+  "description": "3M questions from FinanceBench for testing PageIndex tree-based RAG",
+  "questions": [
+    {
+      "id": "financebench_id_01226",
+      "question": "What drove operating margin change as of FY2022 for 3M?",
+      "answer": "Operating margin decreased by approximately 1.7 percentage points primarily due to gross margin decline from higher raw material and logistics costs, increased SG&A from litigation-related charges, and restructuring costs.",
+      "doc_name": "3M_2022_10K.pdf",
+      "question_type": "domain-relevant",
+      "difficulty": "hard",
+      "tree_rag_advantage": "high",
+      "expected_sections": ["MD&A", "Income Statement", "Notes to Financial Statements"],
+      "rationale": "Requires synthesizing information from multiple sections: gross margin trends in MD&A, cost breakdowns in income statement, and one-off charges in notes"
+    },
+    {
+      "id": "financebench_id_01865",
+      "question": "If we exclude the impact of M&A, which segment has dragged down 3M's overall growth in 2022?",
+      "answer": "The Consumer segment, which experienced organic sales decline of approximately 0.9%.",
+      "doc_name": "3M_2022_10K.pdf",
+      "question_type": "novel-generated",
+      "difficulty": "hard",
+      "tree_rag_advantage": "high",
+      "expected_sections": ["Business Segments", "MD&A - Segment Performance"],
+      "rationale": "Must navigate to segment reporting, find organic growth rates for each segment, and identify the underperformer"
+    },
+    {
+      "id": "financebench_id_00499",
+      "question": "Is 3M a capital-intensive business based on FY2022 data?",
+      "answer": "No. 3M has a CAPEX to Revenue ratio of approximately 5.1%, which indicates efficient capital management rather than capital intensity.",
+      "doc_name": "3M_2022_10K.pdf",
+      "question_type": "domain-relevant",
+      "difficulty": "medium",
+      "tree_rag_advantage": "medium",
+      "expected_sections": ["Cash Flow Statement", "Income Statement"],
+      "rationale": "Requires finding CAPEX from cash flow and revenue from income statement, then calculating ratio"
+    },
+    {
+      "id": "financebench_id_03029",
+      "question": "What is the FY2018 capital expenditure amount (in USD millions) for 3M?",
+      "answer": "$1,577 million",
+      "doc_name": "3M_2018_10K.pdf",
+      "question_type": "metrics-generated",
+      "difficulty": "easy",
+      "tree_rag_advantage": "low",
+      "expected_sections": ["Cash Flow Statement"],
+      "rationale": "Single number lookup - baseline test where vector search should perform well"
+    },
+    {
+      "id": "financebench_id_04672",
+      "question": "What is the year end FY2018 net PP&E for 3M? Answer in USD billions.",
+      "answer": "$8.7 billion",
+      "doc_name": "3M_2018_10K.pdf",
+      "question_type": "metrics-generated",
+      "difficulty": "easy",
+      "tree_rag_advantage": "low",
+      "expected_sections": ["Balance Sheet"],
+      "rationale": "Single number lookup - baseline test"
+    },
+    {
+      "id": "financebench_id_00807",
+      "question": "Does 3M have a reasonably healthy liquidity profile based on its quick ratio for Q2 of FY2023?",
+      "answer": "No. The quick ratio is approximately 0.96, which is below the 1.0 threshold typically considered healthy, indicating 3M may need to improve its short-term liquidity position.",
+      "doc_name": "3M_2023Q2_10Q.pdf",
+      "question_type": "domain-relevant",
+      "difficulty": "medium",
+      "tree_rag_advantage": "medium",
+      "expected_sections": ["Balance Sheet", "Liquidity Discussion"],
+      "rationale": "Requires calculating quick ratio from balance sheet components and interpreting against standards"
+    },
+    {
+      "id": "financebench_id_00941",
+      "question": "Which debt securities are registered to trade on a national securities exchange under 3M's name as of Q2 2023?",
+      "answer": "Three debt securities: 1.500% Notes due 2026 (trading symbol MMM26), 1.750% Notes due 2030 (MMM30), and 1.500% Notes due 2031 (MMM31), all trading on the New York Stock Exchange.",
+      "doc_name": "3M_2023Q2_10Q.pdf",
+      "question_type": "domain-relevant",
+      "difficulty": "medium",
+      "tree_rag_advantage": "medium",
+      "expected_sections": ["Cover Page", "Exhibits"],
+      "rationale": "Requires navigating to specific regulatory disclosure section"
+    },
+    {
+      "id": "financebench_id_01858",
+      "question": "Does 3M maintain a stable trend of dividend distribution?",
+      "answer": "Yes. 3M has increased its dividend for 65 consecutive years, demonstrating exceptional stability and commitment to shareholder returns.",
+      "doc_name": "3M_2023Q2_10Q.pdf",
+      "question_type": "novel-generated",
+      "difficulty": "medium",
+      "tree_rag_advantage": "medium",
+      "expected_sections": ["Dividends", "Shareholder Returns"],
+      "rationale": "Requires finding dividend history and trend information"
+    }
+  ],
+  "test_sets": {
+    "tree_rag_showcase": [
+      "financebench_id_01226",
+      "financebench_id_01865"
+    ],
+    "baseline_comparison": [
+      "financebench_id_03029",
+      "financebench_id_04672"
+    ],
+    "full": [
+      "financebench_id_01226",
+      "financebench_id_01865",
+      "financebench_id_00499",
+      "financebench_id_03029",
+      "financebench_id_04672",
+      "financebench_id_00807",
+      "financebench_id_00941",
+      "financebench_id_01858"
+    ]
+  }
+}

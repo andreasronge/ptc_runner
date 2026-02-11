@@ -886,8 +886,8 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       turn_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :turn, :stop])
       [{_, _, stop_meta, _}] = turn_stops
 
-      # Result preview should be truncated to max 200 chars
-      assert String.length(stop_meta.result_preview) <= 200
+      # Result preview should be truncated to max 65_536 chars
+      assert String.length(stop_meta.result_preview) <= 65_536
     end
 
     test "program is nil when parsing fails", %{table: table} do

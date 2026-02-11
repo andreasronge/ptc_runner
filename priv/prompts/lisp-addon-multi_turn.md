@@ -14,6 +14,20 @@ Respond with EXACTLY ONE ```clojure code block per turn — no text before or af
 
 **Explore first, return last.** If you can answer without calling tools, you may `return` immediately. Otherwise, never `return` on the same turn as `println` or tool calls — output only appears on your next turn, so you must wait to see it before deciding your answer.
 
+**Verify before returning.** Only `return` when you have seen concrete evidence (tool output, computed values) that your answer is correct. A guess is worse than another turn of exploration.
+
+```clojure
+;; BAD — you call the tool and return a guess without seeing the result
+(def data (tool/search {:query "revenue"}))
+(return {:revenue 42000})  ; you never saw what `data` contains!
+
+;; GOOD — inspect first, return next turn
+(def data (tool/search {:query "revenue"}))
+(println "data:" data)     ; wait to see this before deciding
+```
+
+Using println and return in the same turn does not make sense since you will return before seeing the printed value. 
+
 **Don't echo data in code from your context.** You already know the data, no need to print it again. No need to print the result before returning.
 
 **Keep programs very short.** Small programs are less likely to fail. You can always reuse and combine the programs in future turns.

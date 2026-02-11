@@ -46,7 +46,7 @@ defmodule PtcRunner.Plan do
   | `output` | string | `nil` | `"ptc_lisp"`, `"json"`, or nil (auto-detect) |
   | `signature` | string | `nil` | Output signature (e.g., `"{name :string}"`) |
   | `verification` | string | `nil` | PTC-Lisp predicate to validate output |
-  | `on_verification_failure` | string | `"stop"` | `"stop"`, `"skip"`, `"retry"`, or `"replan"` |
+  | `on_verification_failure` | string | `"replan"` | `"stop"`, `"skip"`, `"retry"`, or `"replan"` |
   | `on_failure` | string | `"stop"` | `"stop"`, `"skip"`, `"retry"`, or `"replan"` |
   | `max_retries` | integer | `1` | Max retry attempts |
   | `critical` | boolean | `true` | Whether failure stops the plan |
@@ -281,7 +281,7 @@ defmodule PtcRunner.Plan do
       output: nil,
       signature: nil,
       verification: nil,
-      on_verification_failure: :stop,
+      on_verification_failure: :replan,
       quality_gate: nil
     }
   end
@@ -339,7 +339,7 @@ defmodule PtcRunner.Plan do
   defp normalize_on_failure("continue"), do: :skip
   defp normalize_on_failure(_), do: :stop
 
-  defp normalize_on_verification_failure(nil), do: :stop
+  defp normalize_on_verification_failure(nil), do: :replan
   defp normalize_on_verification_failure("stop"), do: :stop
   defp normalize_on_verification_failure("skip"), do: :skip
   defp normalize_on_verification_failure("retry"), do: :retry

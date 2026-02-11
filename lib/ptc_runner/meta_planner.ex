@@ -213,14 +213,21 @@ defmodule PtcRunner.MetaPlanner do
       determine the precise tool arguments upfront — it eliminates unnecessary LLM round-trips.
       Example: `{"id": "get_data", "agent": "direct", "input": "(tool/search {:query \"average temperature\"})"}`
       With upstream data: `{"id": "transform", "agent": "direct", "input": "(map :name (get data/results \"lookup\"))", "depends_on": ["lookup"]}`
-      **Data extraction pattern** — use `direct` tasks to extract typed values from flexible tool output:
+      **Data extraction pattern** — use `direct` tasks to extract typed values from flexible tool output.
+      Always set `"on_failure": "replan"` on direct extraction tasks so data-shape mismatches trigger
+      replanning instead of halting:
       ```
       {"id": "search_population", "agent": "researcher", "input": "Find city population"},
       {"id": "extract_population", "agent": "direct",
-       "input": "(let [findings (get data/results \"search_population\" \"findings\")] (-> findings (filter (fn [f] (str/includes? (get f \"label\") \"population\"))) (first) (get \"value\")))",
-       "depends_on": ["search_population"], "signature": ":float"}
+       "input": "(let [findings (get-in data/results [\"search_population\" \"findings\"])] (let [entry (first (filter (fn [f] (str/includes? (get f \"label\") \"population\")) findings))] (if entry (get entry \"value\") nil)))",
+       "depends_on": ["search_population"], "signature": ":float", "on_failure": "replan"}
       ```
       This gives downstream tasks a clean `:float` instead of a generic findings array.
+      **CRITICAL threading rule**: `filter`, `map`, and `reduce` take the predicate/function FIRST and
+      collection LAST: `(filter pred coll)`. Do NOT use `(-> coll (filter pred))` — that puts the
+      collection in predicate position. Use nested calls instead: `(first (filter pred coll))`.
+      **PTC-Lisp restrictions**: No `try`/`catch`/`throw` — use `(if cond value nil)` for safe access.
+      No `read-string`, `resolve`, `eval` — only static expressions.
     - **Synthesis gates**: Compress/summarize results from multiple upstream tasks (type: "synthesis_gate")
       When designing a synthesis_gate, you MUST specify a `signature` that defines the exact output structure
       (e.g., `"{stocks [{symbol :string, price :float, currency :string}]}"`). This ensures machine-readable results.
@@ -233,8 +240,8 @@ defmodule PtcRunner.MetaPlanner do
       "tasks": [
         {"id": "search_data", "agent": "researcher", "input": "Find the population of Berlin"},
         {"id": "extract_population", "agent": "direct",
-         "input": "(let [findings (get data/results \"search_data\" \"findings\")] (-> findings (filter (fn [f] (str/includes? (get f \"label\") \"population\"))) (first) (get \"value\")))",
-         "depends_on": ["search_data"], "signature": ":float"},
+         "input": "(let [findings (get-in data/results [\"search_data\" \"findings\"])] (let [entry (first (filter (fn [f] (str/includes? (get f \"label\") \"population\")) findings))] (if entry (get entry \"value\") nil)))",
+         "depends_on": ["search_data"], "signature": ":float", "on_failure": "replan"},
         {"id": "compute_density", "agent": "calculator",
          "input": "Compute population density from upstream values",
          "depends_on": ["extract_population"], "output": "ptc_lisp",
@@ -540,7 +547,22 @@ defmodule PtcRunner.MetaPlanner do
     - You MUST use `"agent": "direct"` tasks to extract and type-check individual values from
       flexible tool output (e.g., findings with `value: any`) before passing to computation tasks.
       Pattern: search → direct extract (one per value, with typed signature like `:float`) → compute.
+      Always set `"on_failure": "replan"` on direct extraction tasks.
       This costs zero LLM calls and catches missing data early.
+    - **CRITICAL**: `"agent": "direct"` task inputs MUST be valid PTC-Lisp code, NOT natural language.
+      Upstream results are accessible via `data/results`. Example:
+      ```
+      {"id": "extract_value", "agent": "direct",
+       "input": "(let [findings (get-in data/results [\"search_task\" \"findings\"])] (let [entry (first (filter (fn [f] (str/includes? (get f \"label\") \"revenue\")) findings))] (if entry (get entry \"value\") nil)))",
+       "depends_on": ["search_task"], "signature": ":float", "on_failure": "replan"}
+      ```
+      If the upstream data shape is unknown, inspect the actual completed results above and
+      write Lisp that matches the real structure.
+    - **PTC-Lisp restrictions for direct tasks**:
+      - No `try`/`catch`/`throw` — use `(if cond value nil)` for safe access
+      - No `read-string`, `resolve`, `eval` — only static expressions
+      - `filter`/`map`/`reduce` take function FIRST, collection LAST: `(filter pred coll)`.
+        Do NOT use `(-> coll (filter pred))` — use nested calls: `(first (filter pred coll))`
 
     ## Impossible Missions
 
@@ -635,7 +657,8 @@ defmodule PtcRunner.MetaPlanner do
             do: "",
             else: " (depends: #{Enum.join(task.depends_on, ", ")})"
 
-        "  - #{task.id}: #{String.slice(to_string(task.input), 0, 50)}#{deps}"
+        input = task.input |> to_string() |> String.slice(0, 200) |> escape_placeholders()
+        "  - #{task.id}: #{input}#{deps}"
       end)
 
     """
@@ -646,6 +669,9 @@ defmodule PtcRunner.MetaPlanner do
   end
 
   defp format_original_plan(_), do: ""
+
+  # Escape {{placeholder}} syntax so it doesn't trigger SubAgent prompt validation
+  defp escape_placeholders(text), do: String.replace(text, "{{", "{ {")
 
   defp format_value(value) when is_binary(value), do: value
 
