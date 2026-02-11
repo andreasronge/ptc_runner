@@ -118,7 +118,9 @@ function buildTurnsFromEvents(events, paired) {
   const toolPairs = paired.filter(p => p.type === 'tool' &&
     (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
   const pmapPairs = paired.filter(p => p.type === 'pmap' || p.type === 'pcalls');
-  const turnPairs = paired.filter(p => p.type === 'turn');
+  // Filter to root agent's turns to avoid cross-agent turn number collisions
+  const turnPairs = paired.filter(p => p.type === 'turn' &&
+    (!rootSpanId || p.start?.span_id === rootSpanId || p.stop?.span_id === rootSpanId));
 
   // Build turn lookup
   const turnByNum = {};
