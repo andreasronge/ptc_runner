@@ -95,8 +95,12 @@ export function renderAgentView(container, state, data) {
 }
 
 function buildTurnsFromEvents(events, paired) {
-  // Find root agent span - the run.start with no parent
-  const rootRun = events.find(e => e.event === 'run.start' && !e.metadata?.parent_span_id);
+  // Find root agent span - the run.start whose parent_span_id is external
+  // (not present in this file). For top-level traces it has no parent;
+  // for child trace files, the parent points to the parent trace's tool span.
+  const allSpanIds = new Set(events.filter(e => e.span_id).map(e => e.span_id));
+  const rootRun = events.find(e => e.event === 'run.start' &&
+    (!e.metadata?.parent_span_id || !allSpanIds.has(e.metadata.parent_span_id)));
   const rootSpanId = rootRun?.span_id;
 
   // Filter to only root agent's LLM calls (parent_span_id matches root span)
