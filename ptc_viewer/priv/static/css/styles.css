@@ -887,6 +887,49 @@ input[type="file"] { display: none; }
 .turn-pill.returned.active { border-color: var(--accent); background: rgba(86, 156, 214, 0.25); box-shadow: 0 0 0 1px var(--accent); }
 .turn-num { font-weight: 600; }
 .turn-icon { font-size: 10px; }
+.turn-pill .turn-badge {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+}
+.turn-pill .turn-badge.sub-agent {
+  color: var(--warning);
+}
+
+/* === Turn Timeline Overview === */
+.turn-timeline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.turn-timeline-item {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.15s, color 0.15s;
+}
+.turn-timeline-item:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.turn-timeline-item.active {
+  background: rgba(86, 156, 214, 0.2);
+  color: var(--accent);
+}
+.turn-timeline-item.sub-agent {
+  color: var(--warning);
+}
+.turn-timeline-sep {
+  color: var(--border);
+  font-size: 10px;
+}
 
 /* === Turn Detail === */
 .turn-detail {

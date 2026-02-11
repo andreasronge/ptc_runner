@@ -52,8 +52,23 @@ export function renderAgentView(container, state, data) {
     const statusClass = turn.hasError ? 'error' : turn.hasReturn ? 'returned' : 'normal';
     html += `<div class="turn-pill ${statusClass}${isActive ? ' active' : ''}" data-turn-idx="${idx}">
       <span class="turn-num">${turn.turnNumber || idx + 1}</span>
+      ${turn.subAgentTools.length > 0 ? turn.subAgentTools.map(name => `<span class="turn-badge sub-agent">\u{1F33F}${escapeHtml(name)}</span>`).join('') : ''}
+      ${turn.toolCount > 0 ? `<span class="turn-badge">\u{1F527}${turn.toolCount}</span>` : ''}
       ${turn.hasError ? '<span class="turn-icon">&#10007;</span>' : turn.hasReturn ? '<span class="turn-icon">&#10003;</span>' : ''}
     </div>`;
+  });
+  html += '</div>';
+
+  // Timeline overview row
+  html += '<div class="turn-timeline">';
+  turns.forEach((turn, idx) => {
+    const label = getTimelineLabel(turn);
+    const isActive = idx === initialTurnIdx;
+    const isSubAgent = turn.subAgentTools.length > 0;
+    html += `<span class="turn-timeline-item${isSubAgent ? ' sub-agent' : ''}${isActive ? ' active' : ''}" data-turn-idx="${idx}">T${turn.turnNumber}:\u00a0${escapeHtml(label)}</span>`;
+    if (idx < turns.length - 1) {
+      html += '<span class="turn-timeline-sep">\u2192</span>';
+    }
   });
   html += '</div>';
 
@@ -68,13 +83,28 @@ export function renderAgentView(container, state, data) {
     renderTurnDetail(detailContainer, turns[initialTurnIdx], state, data);
   }
 
+  // Shared function to activate a turn by index
+  function activateTurn(idx) {
+    container.querySelectorAll('.turn-pill').forEach(p => p.classList.remove('active'));
+    container.querySelectorAll('.turn-timeline-item').forEach(t => t.classList.remove('active'));
+    const pill = container.querySelector(`.turn-pill[data-turn-idx="${idx}"]`);
+    const timelineItem = container.querySelector(`.turn-timeline-item[data-turn-idx="${idx}"]`);
+    if (pill) pill.classList.add('active');
+    if (timelineItem) timelineItem.classList.add('active');
+    renderTurnDetail(detailContainer, turns[idx], state, data);
+  }
+
   // Turn pill click handlers
   container.querySelectorAll('.turn-pill').forEach(pill => {
     pill.addEventListener('click', () => {
-      container.querySelectorAll('.turn-pill').forEach(p => p.classList.remove('active'));
-      pill.classList.add('active');
-      const idx = parseInt(pill.dataset.turnIdx);
-      renderTurnDetail(detailContainer, turns[idx], state, data);
+      activateTurn(parseInt(pill.dataset.turnIdx));
+    });
+  });
+
+  // Timeline item click handlers
+  container.querySelectorAll('.turn-timeline-item').forEach(item => {
+    item.addEventListener('click', () => {
+      activateTurn(parseInt(item.dataset.turnIdx));
     });
   });
 
@@ -92,9 +122,7 @@ export function renderAgentView(container, state, data) {
       if (e.key === 'ArrowLeft' && activeIdx > 0) newIdx = activeIdx - 1;
       if (e.key === 'ArrowRight' && activeIdx < pills.length - 1) newIdx = activeIdx + 1;
       if (newIdx !== activeIdx) {
-        pills[activeIdx].classList.remove('active');
-        pills[newIdx].classList.add('active');
-        renderTurnDetail(detailContainer, turns[newIdx], state, data);
+        activateTurn(newIdx);
       }
     }
   };
@@ -159,6 +187,26 @@ function buildTurnsFromEvents(events, paired) {
       return pmapRealStart >= llmStopTime && pmapStopTime <= nextLlmStartTime;
     });
 
+    // Classify tools as sub-agent vs regular
+    const subAgentToolNames = [];
+    let regularToolCount = 0;
+    let firstRegularToolName = null;
+    for (const t of turnTools) {
+      const tName = t.stop?.metadata?.tool_name || t.start?.metadata?.tool_name || 'unknown';
+      const childIds = t.stop?.metadata?.child_trace_ids ||
+        (t.stop?.metadata?.child_trace_id ? [t.stop.metadata.child_trace_id] : []);
+      const spanId = t.stop?.span_id || t.start?.span_id;
+      const hasEmbedded = spanId && events.some(e =>
+        e.event === 'run.start' && e.metadata?.parent_span_id === spanId
+      );
+      if (childIds.length > 0 || hasEmbedded) {
+        subAgentToolNames.push(tName);
+      } else {
+        regularToolCount++;
+        if (!firstRegularToolName) firstRegularToolName = tName;
+      }
+    }
+
     const resultPreview = turnPair?.stop?.metadata?.result_preview;
     const hasError = resultPreview && (
       resultPreview.includes('Error:') ||
@@ -184,9 +232,27 @@ function buildTurnsFromEvents(events, paired) {
       tools: turnTools,
       pmaps: turnPmaps,
       hasError,
-      hasReturn
+      hasReturn,
+      toolCount: regularToolCount,
+      subAgentTools: subAgentToolNames,
+      firstToolName: firstRegularToolName
     };
   });
+}
+
+function getTimelineLabel(turn) {
+  if (turn.hasError) return 'error';
+  if (turn.hasReturn) return 'return';
+  if (turn.subAgentTools.length > 0) {
+    return '\u{1F33F}' + turn.subAgentTools[0];
+  }
+  if (turn.toolCount > 0) {
+    return '\u{1F527}' + (turn.firstToolName || 'tool');
+  }
+  if (turn.program) {
+    return turn.program.replace(/\n/g, ' ').trim().slice(0, 20);
+  }
+  return '...';
 }
 
 function renderTurnDetail(container, turn, state, data) {
