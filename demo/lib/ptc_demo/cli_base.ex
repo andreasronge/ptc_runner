@@ -101,10 +101,11 @@ defmodule PtcDemo.CLIBase do
     - --show-prompt: show system prompt and exit
     - --validate-clojure: validate generated programs against Babashka
     - --no-validate-clojure: skip Clojure validation
+    - --thinking: enable thinking section in output format
     - --compression: enable message history compression
     - --no-compression: disable message history compression (default)
 
-  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure, :compression
+  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure, :thinking, :compression
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -199,6 +200,9 @@ defmodule PtcDemo.CLIBase do
               IO.puts("Error: --runs must be a positive integer (e.g., --runs=3)")
               System.halt(1)
           end
+
+        arg == "--thinking" ->
+          Map.put(acc, :thinking, true)
 
         arg == "--compression" ->
           Map.put(acc, :compression, true)
@@ -319,6 +323,7 @@ defmodule PtcDemo.CLIBase do
       --prompt=NAME           Use specific prompt profile (e.g., --prompt=single_shot)
       --prompt=A,B            Compare multiple prompts (e.g., --prompt=single_shot,multi_turn)
       --explore               Start in explore mode (LLM discovers schema)
+      --thinking              Enable thinking section in output format
 
     Info:
       --list-models           Show available models and exit

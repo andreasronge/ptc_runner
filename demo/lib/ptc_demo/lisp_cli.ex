@@ -35,6 +35,7 @@ defmodule PtcDemo.LispCLI do
     runs = opts[:runs]
     validate_clojure = opts[:validate_clojure]
     compression = Map.get(opts, :compression, false)
+    thinking = Map.get(opts, :thinking, false)
     filter = Map.get(opts, :filter, :all)
     retry_turns = Map.get(opts, :retry_turns, 0)
 
@@ -58,6 +59,7 @@ defmodule PtcDemo.LispCLI do
         data_mode: data_mode,
         prompt: initial_prompt,
         compression: compression,
+        thinking: thinking,
         retry_turns: retry_turns
       )
 
@@ -86,6 +88,7 @@ defmodule PtcDemo.LispCLI do
         test_index: test_index,
         prompt: prompt_profile,
         compression: compression,
+        thinking: thinking,
         filter: filter,
         retry_turns: retry_turns
       )
@@ -508,6 +511,7 @@ defmodule PtcDemo.LispCLI do
       mix lisp --list-models       Show available models and exit
       mix lisp --list-prompts      Show available prompt profiles and exit
       mix lisp --show-prompt       Show system prompt and exit
+      mix lisp --thinking           Start with thinking section enabled
       mix lisp --compression       Start with compression enabled
       mix lisp --no-compression    Start with compression disabled (default)
       mix lisp --debug             Start with debug mode enabled (show raw LLM responses)

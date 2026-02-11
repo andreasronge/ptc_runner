@@ -151,6 +151,12 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt =~ "## Role"
+      refute prompt =~ "thinking:"
+    end
+
+    test "thinking: true includes thinking section" do
+      agent = SubAgent.new(prompt: "Test", thinking: true)
+      prompt = SystemPrompt.generate(agent, context: %{})
       assert prompt =~ "thinking:"
     end
   end
