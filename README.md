@@ -105,7 +105,7 @@ See the [Joke Workflow Livebook](livebooks/joke_workflow.livemd) for a complete 
 
 The meta planner decomposes a mission into a dependency graph of tasks, assigns each to a specialized SubAgent, and executes them in parallel phases. The Trace Viewer provides interactive visualization of the full execution — from the high-level DAG down to individual agent turns with thinking, programs, and tool output.
 
-![Planner overview showing task execution DAG with phases and status](docs/images/planner_view.png)
+![Planner overview showing task execution DAG with phases and status](images/planner_view.png)
 
 ```bash
 mix ptc.viewer --trace-dir path/to/traces
