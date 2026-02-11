@@ -52,7 +52,7 @@ export function renderAgentView(container, state, data) {
     const statusClass = turn.hasError ? 'error' : turn.hasReturn ? 'returned' : 'normal';
     html += `<div class="turn-pill ${statusClass}${isActive ? ' active' : ''}" data-turn-idx="${idx}">
       <span class="turn-num">${turn.turnNumber || idx + 1}</span>
-      ${turn.subAgentTools.length > 0 ? turn.subAgentTools.map(name => `<span class="turn-badge sub-agent">\u{1F33F}${escapeHtml(name)}</span>`).join('') : ''}
+      ${turn.subAgentTools.length > 0 ? groupByName(turn.subAgentTools).map(({name, count}) => `<span class="turn-badge sub-agent">\u{1F33F}${escapeHtml(name)}${count > 1 ? '\u00d7' + count : ''}</span>`).join('') : ''}
       ${turn.toolCount > 0 ? `<span class="turn-badge">\u{1F527}${turn.toolCount}</span>` : ''}
       ${turn.hasError ? '<span class="turn-icon">&#10007;</span>' : turn.hasReturn ? '<span class="turn-icon">&#10003;</span>' : ''}
     </div>`;
@@ -240,11 +240,19 @@ function buildTurnsFromEvents(events, paired) {
   });
 }
 
+function groupByName(names) {
+  const counts = {};
+  for (const n of names) counts[n] = (counts[n] || 0) + 1;
+  return Object.entries(counts).map(([name, count]) => ({ name, count }));
+}
+
 function getTimelineLabel(turn) {
   if (turn.hasError) return 'error';
   if (turn.hasReturn) return 'return';
   if (turn.subAgentTools.length > 0) {
-    return '\u{1F33F}' + turn.subAgentTools[0];
+    const grouped = groupByName(turn.subAgentTools);
+    const first = grouped[0];
+    return '\u{1F33F}' + first.name + (first.count > 1 ? '\u00d7' + first.count : '');
   }
   if (turn.toolCount > 0) {
     return '\u{1F527}' + (turn.firstToolName || 'tool');

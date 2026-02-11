@@ -106,7 +106,7 @@ defmodule RlmRecursive.Agent do
     # RLM + llm_query: recursive decomposition for data, ad-hoc LLM judgment for semantics
     # - tool/evaluate_pairs: recursive self-call for data decomposition
     # - tool/llm-query: builtin for batch semantic compatibility judgment
-    max_depth = Keyword.get(opts, :max_depth, 4)
+    max_depth = Keyword.get(opts, :max_depth, 2)
     max_turns = Keyword.get(opts, :max_turns, 100)
     turn_budget = Keyword.get(opts, :turn_budget, 200)
     llm = Keyword.get(opts, :llm)
@@ -122,7 +122,7 @@ defmodule RlmRecursive.Agent do
       max_turns: max_turns,
       turn_budget: turn_budget,
       llm: llm,
-      timeout: 60_000,
+      timeout: 120_000,
       pmap_timeout: 120_000,
       mission_timeout: 600_000,
       memory_strategy: :rollback
@@ -200,20 +200,20 @@ defmodule RlmRecursive.Agent do
     Return `{:count N :pairs ["id1-id2" ...]}` where pairs are "id1-id2" strings (id1 < id2).
 
     ## Strategy
-    The corpus may be very large. Do NOT generate all pairs in memory — this will exceed memory limits.
-    Instead, use a chunking strategy:
-    1. Split the corpus by city (each city is independent).
-    2. For each city, if the group has more than 50 profiles, split it further and use
-       `tool/evaluate_pairs` to process each sub-chunk recursively.
-    3. For manageable chunks (≤50 profiles), generate pairs and use `tool/llm-query` to judge them.
-    4. Merge results from all chunks.
+    1. Split the corpus by city using `tool/grep` (each city is independent).
+    2. For each city group, generate ALL candidate pairs directly in code.
+    3. Use `tool/llm-query` to judge semantic compatibility in ONE batch per city.
+    4. Merge results from all cities.
+
+    IMPORTANT: Do NOT use `tool/evaluate_pairs` unless a single city has more than 50 profiles.
+    For small datasets, process everything directly — recursion adds unnecessary overhead.
 
     ## Tool Usage
-    - `tool/evaluate_pairs`: Pass a subset of the corpus as `{:corpus chunk}`.
-      Use this to divide large city groups into smaller pieces.
     - `tool/llm-query`: Use for ALL semantic judgment — do NOT judge compatibility in code.
       Use signature `"[{id :string, compatible :bool}]"` for batch judgment.
-      Pass pairs in batches of ≤50 to get accurate results.
+      Pass ALL pairs for a city in a single batch call.
+    - `tool/evaluate_pairs`: ONLY for very large city groups (>50 profiles).
+      Pass a subset of the corpus as `{:corpus chunk}`.
     """
   end
 end

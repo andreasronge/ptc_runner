@@ -24,7 +24,7 @@ defmodule RlmRecursive.Generators.SemanticPairs do
   whether two people would enjoy activities together.
   """
 
-  @default_profiles 40
+  @default_profiles 8
   @default_seed 42
 
   # Only 2 cities to maximize pairs per group (forces recursion)

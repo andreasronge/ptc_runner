@@ -117,7 +117,7 @@ The agent uses `tool/llm-query` with a judgment prompt and structured signature 
 - **Main bottleneck**: Judge calibration — the ground truth uses specific category relationships (outdoor↔fitness, creative↔social, tech↔creative, fitness↔social) that the judge must infer
 
 ```bash
-mix run run.exs --benchmark semantic_pairs --profiles 40 --trace --progress
+mix run run.exs --benchmark semantic_pairs --profiles 8 --trace --progress
 ```
 
 ## When Would Recursion Be Used?
