@@ -1,4 +1,4 @@
-import { formatDuration, formatTokens, formatTokenBreakdown, escapeHtml, truncate, truncatePlan } from './utils.js';
+import { formatDuration, formatTokens, formatTokenBreakdown, escapeHtml, truncate, truncatePlan, findFileByTraceId } from './utils.js';
 import { pairEvents, extractPlanData, extractChildTraceIds, buildExecutionAttempts, getEarliestTimestamp, findRunForTask, extractRunEvents } from './parser.js';
 import { renderDAG } from './dag.js';
 import { renderTimeline } from './timeline.js';
@@ -103,13 +103,6 @@ export function renderOverview(container, state, data) {
       planHeader.closest('.plan-card').classList.toggle('expanded');
     });
   }
-}
-
-function findFileByTraceId(state, traceId) {
-  for (const [name, data] of state.files) {
-    if (data.traceId === traceId) return name;
-  }
-  return null;
 }
 
 function renderPlanCard(plan, mission, agents) {

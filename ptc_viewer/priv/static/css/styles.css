@@ -976,3 +976,128 @@ input[type="file"] { display: none; }
 }
 .fork-join-fallback-bar.bottleneck { background: rgba(244, 71, 71, 0.3); }
 .fork-join-fallback-dur { font-size: 11px; color: var(--muted); min-width: 50px; text-align: right; }
+
+/* === Execution Tree === */
+.exec-tree {
+  padding: 4px 0;
+}
+
+.exec-tree-controls {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.exec-tree-btn {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+}
+.exec-tree-btn:hover { color: var(--fg); background: var(--bg-hover); }
+
+.exec-tree-node {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+.exec-tree-node > .exec-tree-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+  user-select: none;
+}
+.exec-tree-node > .exec-tree-summary::-webkit-details-marker { display: none; }
+.exec-tree-node > .exec-tree-summary::before {
+  content: '\25B6';
+  font-size: 8px;
+  color: var(--muted);
+  transition: transform 0.15s;
+  display: inline-block;
+  width: 10px;
+}
+.exec-tree-node[open] > .exec-tree-summary::before {
+  transform: rotate(90deg);
+}
+.exec-tree-node > .exec-tree-summary:hover { background: var(--bg-hover); }
+
+.exec-tree-name {
+  font-weight: 600;
+  color: var(--warning);
+  font-family: monospace;
+}
+.exec-tree-args {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 11px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exec-tree-duration {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.exec-tree-status { font-size: 10px; }
+.exec-tree-status.success { color: var(--success); }
+.exec-tree-status.error { color: var(--error); }
+
+.exec-tree-body {
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+  margin-left: 12px;
+}
+
+.exec-tree-turn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.exec-tree-turn:hover {
+  background: var(--bg-hover);
+}
+.exec-tree-turn-num {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  min-width: 24px;
+}
+.exec-tree-turn-program {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--fg);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-tree-loading {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+  font-style: italic;
+}
+.exec-tree-loading.error { color: var(--error); font-style: normal; }
+
+.exec-tree-max-depth {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+  font-style: italic;
+}
