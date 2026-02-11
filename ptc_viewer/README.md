@@ -4,9 +4,9 @@ A web-based trace viewer for [PtcRunner](https://github.com/andreasronge/ptc_run
 
 The meta planner decomposes a mission into parallel tasks, assigns each to a specialized agent, and orchestrates execution across phases. The viewer lets you inspect the full execution — from the high-level DAG down to individual agent turns.
 
-![Planner overview showing task execution DAG with phases, status, and dependency edges](../docs/images/planner_view.png)
+![Planner overview showing task execution DAG with phases, status, and dependency edges](../images/planner_view.png)
 
-![Agent view showing turn-by-turn LLM interaction with thinking, PTC-Lisp program, and tool output](../docs/images/agent_view.png)
+![Agent view showing turn-by-turn LLM interaction with thinking, PTC-Lisp program, and tool output](../images/agent_view.png)
 
 ## Quick Start
 
