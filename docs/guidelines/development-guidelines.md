@@ -2,7 +2,7 @@
 
 This is an Elixir library for Programmatic Tool Calling (PTC).
 
-See **[Documentation](../README.md)** for system design and API reference. See **[PTC-JSON Specification](../reference/ptc-json-specification.md)** and **[PTC-Lisp Specification](../ptc-lisp-specification.md)** for DSL details.
+See **[Documentation](../README.md)** for system design and API reference. See **[PTC-Lisp Specification](../ptc-lisp-specification.md)** for DSL details.
 
 ## Project Guidelines
 
@@ -160,11 +160,11 @@ See [Documentation - Module Structure](../README.md#module-structure) for the cu
 lib/
 ├── ptc_runner.ex           # Main public API: run/2, run!/2
 ├── ptc_runner/
-│   ├── parser.ex           # JSON parsing
-│   ├── validator.ex        # Schema validation
-│   ├── interpreter.ex      # AST evaluation
-│   ├── operations.ex       # Built-in operations
+│   ├── lisp/               # PTC-Lisp runtime
+│   ├── sub_agent/          # SubAgent loop and logic
 │   ├── sandbox.ex          # Process isolation + resource limits
 │   ├── context.ex          # Variable bindings and tool results
-│   └── tools.ex            # Tool registry
+│   ├── step.ex             # Success/failure results
+│   ├── plan_runner.ex      # High-level mission execution
+│   └── schema.ex           # JSON schema utilities
 ```

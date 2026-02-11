@@ -16,7 +16,7 @@ defmodule PtcRunner.Sandbox do
 
   Limits can be set per-call:
 
-      PtcRunner.Json.run(program, timeout: 5000, max_heap: 5_000_000)
+      PtcRunner.Lisp.run(program, timeout: 5000, max_heap: 5_000_000)
 
   Or as application-level defaults in `config.exs`:
 
@@ -26,7 +26,6 @@ defmodule PtcRunner.Sandbox do
   """
 
   alias PtcRunner.Context
-  alias PtcRunner.Json.Interpreter
   alias PtcRunner.SubAgent.Telemetry
   alias PtcRunner.TraceLog
 
@@ -56,7 +55,7 @@ defmodule PtcRunner.Sandbox do
     - ast: The AST to execute
     - context: The execution context
     - opts: Options (timeout, max_heap, eval_fn)
-      - `:eval_fn` - Custom evaluator function (default: Interpreter.eval/2)
+      - `:eval_fn` - Evaluator function (required)
       - `:timeout` - Timeout in milliseconds (default: 1000, configurable via `:default_timeout`)
       - `:max_heap` - Max heap size in words (default: 1_250_000, configurable via `:default_max_heap`)
 
@@ -75,7 +74,7 @@ defmodule PtcRunner.Sandbox do
 
     timeout = Keyword.get(opts, :timeout, default_timeout)
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
-    eval_fn = Keyword.get(opts, :eval_fn, &Interpreter.eval/2)
+    eval_fn = Keyword.fetch!(opts, :eval_fn)
 
     # Capture trace context for propagation into sandbox process
     trace_collectors = TraceLog.active_collectors()

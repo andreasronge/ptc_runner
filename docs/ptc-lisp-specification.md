@@ -3642,30 +3642,7 @@ The LLM receives this error and can generate a corrected program.
 
 ---
 
-## Appendix A: JSON DSL to PTC-Lisp Migration
-
-| JSON DSL | PTC-Lisp |
-|----------|----------|
-| `{"op": "literal", "value": 42}` | `42` |
-| `{"op": "load", "name": "x"}` | `data/x` |
-| `{"op": "var", "name": "x"}` | `x` (let-bound) or `memory/x` (persistent) |
-| `{"op": "pipe", "steps": [...]}` | `(->> ...)` |
-| `{"op": "filter", "where": ...}` | `(filter pred coll)` |
-| `{"op": "eq", "field": "f", "value": v}` | `(where :f = v)` |
-| `{"op": "gt", "field": "f", "value": v}` | `(where :f > v)` |
-| `{"op": "sum", "field": "f"}` | `(sum-by :f coll)` |
-| `{"op": "count"}` | `(count coll)` |
-| `{"op": "first"}` | `(first coll)` |
-| `{"op": "get", "path": ["a", "b"]}` | `(get-in m [:a :b])` |
-| `{"op": "let", "name": "x", ...}` | `(let [x ...] ...)` |
-| `{"op": "if", ...}` | `(if cond then else)` |
-| `{"op": "call", "tool": "t"}` | `(tool/t)` |
-| `{"op": "and", "conditions": [...]}` | `(and ...)` |
-| `{"op": "merge", "objects": [...]}` | `(merge ...)` |
-
----
-
-## Appendix B: Symbol Resolution
+## Appendix A: Symbol Resolution
 
 ### Resolution Order
 
@@ -3709,7 +3686,7 @@ This restriction prevents accidental data leakage and simplifies reasoning about
 
 ---
 
-## Appendix C: Documentation Tests
+## Appendix B: Documentation Tests
 
 This specification contains executable examples that are automatically validated against the PTC-Lisp implementation using `PtcRunner.Lisp.SpecValidator`.
 

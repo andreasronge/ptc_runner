@@ -19,10 +19,10 @@ defmodule PtcRunner.TestSupport.LLMClient do
   ## Usage
 
       # Run e2e tests with default model
-      mix test test/ptc_runner/json/e2e_test.exs --include e2e
+      mix test --include e2e
 
       # Run with specific model
-      PTC_TEST_MODEL=haiku mix test test/ptc_runner/json/e2e_test.exs --include e2e
+      PTC_TEST_MODEL=haiku mix test --include e2e
   """
 
   alias PtcRunner.TestSupport.LLMSupport

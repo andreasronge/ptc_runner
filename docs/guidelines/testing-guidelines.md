@@ -15,14 +15,10 @@ mix test --trace               # Verbose output
 ```
 test/
 ├── ptc_runner/
-│   ├── json/               # JSON DSL tests
-│   │   ├── parser_test.exs
-│   │   ├── interpreter_test.exs
-│   │   └── operations/     # Operation-specific tests
-│   └── lisp/               # Lisp DSL tests
+│   └── lisp/               # PTC-Lisp runtime tests
 │       ├── parser_test.exs
 │       ├── eval_test.exs
-│       └── formatter_test.exs
+│       └── format_test.exs
 ├── support/                # Test helpers and generators
 └── test_helper.exs         # Test configuration
 ```
@@ -53,23 +49,15 @@ assert match?({:error, _}, error)
 
 ```elixir
 describe "parse/1" do
-  test "parses valid JSON DSL" do
-    input = ~s({"op": "filter", "field": "name"})
+  test "parses valid PTC-Lisp expression" do
+    input = "(filter :active data/items)"
 
-    assert {:ok, ast} = Parser.parse(input)
-    assert ast.operation == :filter
-    assert ast.field == "name"
+    assert {:ok, ast} = PtcRunner.Lisp.Parser.parse(input)
+    assert is_list(ast)
   end
 
-  test "returns error for invalid JSON" do
-    assert {:error, %ParseError{}} = Parser.parse("not json")
-  end
-
-  test "returns error for unknown operation" do
-    input = ~s({"op": "unknown"})
-
-    assert {:error, %ParseError{message: message}} = Parser.parse(input)
-    assert message =~ "unknown operation"
+  test "returns error for invalid syntax" do
+    assert {:error, _} = PtcRunner.Lisp.Parser.parse("(unclosed")
   end
 end
 ```
@@ -147,21 +135,16 @@ Always test:
 ```elixir
 describe "sandbox safety" do
   test "prevents infinite loops via timeout" do
-    program = %{op: "loop", body: %{op: "noop"}}
+    program = "(loop [] (recur))"
 
-    assert {:error, :timeout} = Sandbox.run(program, timeout: 100)
+    assert {:error, :timeout} = PtcRunner.Lisp.run(program, timeout: 100)
   end
 
   test "limits memory usage" do
-    program = %{op: "allocate", size: 1_000_000_000}
+    # Program that allocates a large list
+    program = "(range 1000000)"
 
-    assert {:error, :memory_limit} = Sandbox.run(program, max_memory: 1_000_000)
-  end
-
-  test "only allows whitelisted operations" do
-    program = %{op: "system_call", cmd: "rm -rf /"}
-
-    assert {:error, %{message: "operation not allowed"}} = Sandbox.run(program)
+    assert {:error, {:memory_exceeded, _}} = PtcRunner.Lisp.run(program, max_heap: 1000)
   end
 end
 ```
@@ -170,22 +153,18 @@ end
 
 ```elixir
 describe "tool calls" do
-  setup do
-    # Register a test tool
-    Tools.register(:echo, fn args -> {:ok, args} end)
-    :ok
-  end
-
   test "calls registered tool with arguments" do
-    program = %{op: "call", tool: "echo", args: %{message: "hello"}}
+    program = "(tool/echo {:message \"hello\"})"
+    tools = %{"echo" => fn %{"message" => m} -> {:ok, m} end}
 
-    assert {:ok, %{message: "hello"}} = Interpreter.run(program)
+    assert {:ok, step} = PtcRunner.Lisp.run(program, tools: tools)
+    assert step.return == "hello"
   end
 
   test "returns error for unregistered tool" do
-    program = %{op: "call", tool: "unknown", args: %{}}
+    program = "(tool/unknown {})"
 
-    assert {:error, %{message: "tool not found: unknown"}} = Interpreter.run(program)
+    assert {:ok, {:error_with_ctx, _}, _, _} = PtcRunner.Lisp.run(program)
   end
 end
 ```

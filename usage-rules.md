@@ -1,6 +1,6 @@
 # PtcRunner Usage Rules
 
-PtcRunner is a BEAM-native Elixir library for Programmatic Tool Calling (PTC). LLMs generate small programs (PTC-Lisp or JSON DSL) that orchestrate tools and transform data inside sandboxed BEAM processes.
+PtcRunner is a BEAM-native Elixir library for Programmatic Tool Calling (PTC). LLMs generate small programs (PTC-Lisp) that orchestrate tools and transform data inside sandboxed BEAM processes.
 
 ## SubAgent — Primary Interface
 

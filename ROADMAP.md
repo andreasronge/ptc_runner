@@ -76,7 +76,6 @@ v1.0: Production Ready
   Architecture: Evaluate user feedback on OTP adoption
 
 UNDER CONSIDERATION (not scheduled):
-  - :ptc_json mode for JSON DSL programs
   - :text mode for free-form responses
   - :chat mode for traditional tool-calling agents
   See: docs/plans/question-mode-plan.md
