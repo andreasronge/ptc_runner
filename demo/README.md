@@ -2,15 +2,6 @@
 
 Interactive chat demo showing how PtcRunner enables efficient LLM queries over large datasets.
 
-## Two DSL Options
-
-This demo includes two language implementations:
-
-| DSL | Module | Description |
-|-----|--------|-------------|
-| **PTC-JSON** | `PtcDemo.JsonCLI` | JSON-based DSL (stable) |
-| **PTC-Lisp** | `PtcDemo.LispCLI` | Clojure-like DSL (experimental, ~3-5x more token efficient) |
-
 ## The Problem with Traditional Function Calling
 
 ```
@@ -29,20 +20,6 @@ Answer: "$42,500"
 
 ## The PtcRunner Solution
 
-**JSON DSL:**
-```
-User: "Total travel expenses?"
-  ↓
-LLM generates: {"op":"pipe","steps":[
-  {"op":"load","name":"expenses"},
-  {"op":"filter","where":{"op":"eq","field":"category","value":"travel"}},
-  {"op":"sum","field":"amount"}
-]}
-  ↓
-PtcRunner executes in sandbox → Only "42500" back to LLM
-```
-
-**Lisp DSL (more compact):**
 ```
 User: "Total travel expenses?"
   ↓
@@ -73,11 +50,8 @@ eval $(aws configure export-credentials --profile sandbox --format env)
 # Install dependencies
 mix deps.get
 
-# Run the Lisp chat (recommended - most token efficient)
+# Run the interactive chat
 mix lisp
-
-# Or JSON chat
-mix json
 ```
 
 ## Model Selection
@@ -175,9 +149,7 @@ What is the total expense amount for employees in the engineering department?
 How many employees have submitted expenses?
 ```
 
-## Example Lisp Programs
-
-The Lisp DSL generates more compact, readable programs:
+## Example PTC-Lisp Programs
 
 ```clojure
 ;; Count products in a category
@@ -212,39 +184,7 @@ The Lisp DSL generates more compact, readable programs:
   (pmap (fn [id] (ctx/fetch {:id id})) ids))
 ```
 
-## JSON CLI Options
-
-```bash
-mix json [options]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--model=<name>` | Set model (alias or full model ID) |
-| `--list-models` | Show available models and exit |
-| `--explore` | Start in explore mode (LLM discovers schema) |
-| `--test` | Run all automated tests and exit |
-| `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
-| `--verbose`, `-v` | Verbose output (for test mode) |
-| `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
-| `--compression` | Enable message compression (coalesces history into single message) |
-| `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
-| `--runs=<n>` | Run tests multiple times for reliability testing |
-| `--retry-turns=<n>` | Extra retry turns after must-return phase (default: 0) |
-| `--export-traces` | Export all traces to Chrome DevTools format |
-| `--clean-traces` | Delete all trace files |
-
-Model aliases: `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt` (use `provider:alias` syntax)
-
-Examples:
-```bash
-mix json                                  # Interactive with default model (haiku)
-mix json --list-models                    # Show available models
-mix json --model=gemini                   # Use Gemini via OpenRouter
-mix json --test --model=deepseek -v       # Test with DeepSeek
-```
-
-## Lisp CLI Options
+## CLI Options
 
 ```bash
 mix lisp [options]
@@ -271,8 +211,6 @@ mix lisp --help        # Show all available options
 | `--runs=<n>` | Run tests multiple times for reliability testing |
 | `--retry-turns=<n>` | Extra retry turns after must-return phase (default: 0) |
 | `--validate-clojure` | Validate generated programs against Babashka |
-| `--export-traces` | Export all traces to Chrome DevTools format |
-| `--clean-traces` | Delete all trace files |
 
 Model aliases: `haiku`, `sonnet`, `gemini`, `deepseek`, `devstral`, `kimi`, `gpt` (use `provider:alias` syntax)
 
@@ -526,59 +464,16 @@ mix ptc.install_babashka --version 1.4.192 # Specific version
 
 This downloads the appropriate binary for your platform (macOS/Linux) and installs it to `_build/tools/bb`.
 
-### JSON DSL Tests
-
-Run the JSON test suite from the command line:
-
-```bash
-# Run all tests (dots for progress)
-mix json --test
-
-# Run with verbose output
-mix json --test --verbose
-
-# Run with specific model
-mix json --test --model=haiku
-mix json --test --model=gemini --verbose
-
-# Generate a markdown report
-mix json --test --report=report.md
-mix json --test --model=haiku --verbose --report=haiku_report.md
-```
-
-Or programmatically in IEx:
-
-```elixir
-# Run all tests
-PtcDemo.JsonTestRunner.run_all()
-
-# With options
-PtcDemo.JsonTestRunner.run_all(model: "anthropic:claude-3-5-haiku-latest", verbose: true)
-
-# Generate a report
-PtcDemo.JsonTestRunner.run_all(model: "google:gemini-2.0-flash", report: "json_report.md")
-
-# List available tests
-PtcDemo.JsonTestRunner.list()
-
-# Run a single test
-PtcDemo.JsonTestRunner.run_one(3)
-```
-
 ### Test Suite Structure
 
-Both runners share a common test suite, with Lisp having additional tests for Lisp-only features:
-
-| Level | JSON | Lisp | Description |
-|-------|------|------|-------------|
-| **Level 1: Basic** | 4 | 4 | Simple count, filtered count, sum, average |
-| **Level 2: Intermediate** | 4 | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
-| **Level 3: Advanced** | 5 | 5 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset join |
-| **Lisp-only** | - | 1 | group-by + map with destructuring, multiple aggregations |
-| **Multi-turn** | 2 | 2 | Memory persistence between queries |
-| **Total** | **15** | **16** | |
-
-The common tests enable direct comparison. The Lisp-only test exercises advanced features (like `fn [[key items]]` destructuring) not expressible in JSON.
+| Level | Tests | Description |
+|-------|-------|-------------|
+| **Level 1: Basic** | 4 | Simple count, filtered count, sum, average |
+| **Level 2: Intermediate** | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
+| **Level 3: Advanced** | 5 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset join |
+| **Lisp-only** | 1 | group-by + map with destructuring, multiple aggregations |
+| **Multi-turn** | 2 | Memory persistence between queries |
+| **Total** | **16** | |
 
 ### Test Runner Internals
 
@@ -629,9 +524,7 @@ Tests use **constraint-based assertions** since data is randomly generated:
 
 1. **Startup**: Datasets loaded into BEAM memory (GenServer state)
 2. **Query**: You ask a natural language question
-3. **Generate**: LLM creates a compact PTC program
-   - JSON DSL: ~200 bytes, structured or text mode
-   - Lisp DSL: ~50-100 bytes, more compact syntax
+3. **Generate**: LLM creates a compact PTC-Lisp program (~50-100 bytes)
 4. **Execute**: PtcRunner runs program in sandbox against in-memory data
 5. **Respond**: Only small result returns to LLM for natural language answer
 
@@ -647,11 +540,11 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 ┌─────────────────────────────────────────────────────────────┐
 │                    LLM (via ReqLLM)                          │
 │  • Receives question + schema (not data!)                   │
-│  • Generates PTC program (JSON or Lisp)                     │
+│  • Generates PTC-Lisp program                                │
 └─────────────────────────┬───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              PtcRunner.Json or PtcRunner.Lisp                │
+│                      PtcRunner.Lisp                          │
 │  • Executes program in sandboxed BEAM process               │
 │  • Processes 2500 records in memory                         │
 │  • Returns small result (number, filtered list, etc.)       │
@@ -665,79 +558,14 @@ The key insight: **2500 records stay in BEAM memory, never touching LLM context.
 
 ## Tracing & Performance Analysis
 
-Trace files are created automatically for every query, capturing execution timing for LLM calls, turns, and the overall run. These can be visualized in Chrome DevTools for performance analysis.
-
-### Trace Files
-
-Traces are saved to the `traces/` directory (git-ignored):
-- `traces/agent_trace_<timestamp>_<id>.jsonl` - One file per agent run
-
-### Exporting to Chrome DevTools
-
-Export all traces to Chrome Trace Event format:
+Trace files are created automatically for every query, saved to the `traces/` directory (git-ignored) as `.jsonl` files. View traces with the interactive viewer:
 
 ```bash
-# Export all .jsonl traces to .json (Chrome format)
-mix lisp --export-traces
-
-# Delete all trace files
-mix lisp --clean-traces
+# From the ptc_runner root
+mix ptc.viewer
 ```
 
-Example output:
-```
-Found 21 trace file(s) in traces/
-
-  ✓ agent_trace_1769587985862_258.jsonl → agent_trace_1769587985862_258.json
-  ✓ agent_trace_1769587989558_322.jsonl → agent_trace_1769587989558_322.json
-  ...
-
-Exported 21/21 traces to Chrome format.
-
-To view:
-  1. Open Chrome DevTools (F12) → Performance → Load profile
-  2. Or navigate to chrome://tracing and load the .json file
-```
-
-### Viewing in Chrome
-
-**Option 1: Chrome DevTools Performance Panel**
-1. Open Chrome DevTools (F12)
-2. Go to **Performance** tab
-3. Click **Load profile...** (or drag & drop the `.json` file)
-4. Explore the flame chart - wider bars = longer duration
-5. Click any span to see details (arguments, results, token counts)
-
-**Option 2: chrome://tracing**
-1. Navigate to `chrome://tracing` in Chrome
-2. Click **Load** and select the `.json` file
-3. Use WASD keys to navigate, mouse to zoom
-
-### Programmatic Export
-
-You can also export traces programmatically:
-
-```elixir
-alias PtcRunner.TraceLog.Analyzer
-
-# Load a trace tree from JSONL
-{:ok, tree} = Analyzer.load_tree("traces/agent_trace_123.jsonl")
-
-# Export to Chrome format
-Analyzer.export_chrome_trace(tree, "traces/agent_trace_123.json")
-```
-
-### What's Captured
-
-Each trace includes:
-- **run.start/stop** - Total agent execution time
-- **turn.start/stop** - Per-turn timing and token counts
-- **llm.start/stop** - LLM API call latency
-
-This helps identify:
-- Slow LLM responses
-- Excessive turn counts
-- Token usage patterns
+Each trace captures run timing, per-turn timing with token counts, and LLM API call latency.
 
 ## Troubleshooting
 

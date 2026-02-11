@@ -1,6 +1,6 @@
 defmodule PtcDemo.CLIBase do
   @moduledoc """
-  Shared CLI utilities for JSON and Lisp entry points.
+  Shared CLI utilities for the Lisp entry point.
 
   Provides common functionality for argument parsing, environment setup, and output formatting.
   """
@@ -206,12 +206,6 @@ defmodule PtcDemo.CLIBase do
         arg == "--no-compression" ->
           Map.put(acc, :compression, false)
 
-        arg == "--export-traces" ->
-          Map.put(acc, :export_traces, true)
-
-        arg == "--clean-traces" ->
-          Map.put(acc, :clean_traces, true)
-
         String.starts_with?(arg, "--filter=") ->
           filter_str = String.replace_prefix(arg, "--filter=", "")
 
@@ -301,92 +295,6 @@ defmodule PtcDemo.CLIBase do
     end
   end
 
-  @trace_dir "traces"
-
-  @doc """
-  Handle --export-traces flag. Exports all JSONL trace files to Chrome format.
-  """
-  def handle_export_traces(opts) do
-    if opts[:export_traces] do
-      export_all_traces()
-      System.halt(0)
-    end
-  end
-
-  @doc """
-  Handle --clean-traces flag. Deletes all trace files.
-  """
-  def handle_clean_traces(opts) do
-    if opts[:clean_traces] do
-      clean_traces()
-      System.halt(0)
-    end
-  end
-
-  defp export_all_traces do
-    alias PtcRunner.TraceLog.Analyzer
-
-    trace_files = Path.wildcard(Path.join(@trace_dir, "*.jsonl"))
-
-    case trace_files do
-      [] ->
-        IO.puts("No trace files found in #{@trace_dir}/")
-
-      files ->
-        IO.puts("Found #{length(files)} trace file(s) in #{@trace_dir}/\n")
-
-        # Export each trace file
-        exported =
-          Enum.map(files, fn jsonl_path ->
-            json_path = String.replace_suffix(jsonl_path, ".jsonl", ".json")
-            basename = Path.basename(jsonl_path)
-
-            case Analyzer.load_tree(jsonl_path) do
-              {:ok, tree} ->
-                case Analyzer.export_chrome_trace(tree, json_path) do
-                  :ok ->
-                    IO.puts("  ✓ #{basename} → #{Path.basename(json_path)}")
-                    {:ok, json_path}
-
-                  {:error, reason} ->
-                    IO.puts("  ✗ #{basename}: export failed - #{inspect(reason)}")
-                    {:error, reason}
-                end
-
-              {:error, reason} ->
-                IO.puts("  ✗ #{basename}: load failed - #{inspect(reason)}")
-                {:error, reason}
-            end
-          end)
-
-        successful = Enum.filter(exported, &match?({:ok, _}, &1))
-
-        IO.puts("\nExported #{length(successful)}/#{length(files)} traces to Chrome format.")
-        IO.puts("\nTo view:")
-        IO.puts("  1. Open Chrome DevTools (F12) → Performance → Load profile")
-        IO.puts("  2. Or navigate to chrome://tracing and load the .json file")
-    end
-  end
-
-  defp clean_traces do
-    jsonl_files = Path.wildcard(Path.join(@trace_dir, "*.jsonl"))
-    json_files = Path.wildcard(Path.join(@trace_dir, "*.json"))
-    all_files = jsonl_files ++ json_files
-
-    case all_files do
-      [] ->
-        IO.puts("No trace files found in #{@trace_dir}/")
-
-      files ->
-        Enum.each(files, fn path ->
-          File.rm(path)
-          IO.puts("Deleted #{Path.basename(path)}")
-        end)
-
-        IO.puts("\nDeleted #{length(files)} trace file(s).")
-    end
-  end
-
   defp cli_help_text(task_name) do
     """
 
@@ -417,10 +325,6 @@ defmodule PtcDemo.CLIBase do
       --list-prompts          Show available prompt profiles and exit
       --show-prompt           Show the system prompt and exit
 
-    Traces:
-      --export-traces         Export all traces to Chrome DevTools format
-      --clean-traces          Delete all trace files
-
     Examples:
       mix #{task_name}                           Start interactive REPL
       mix #{task_name} --test                    Run all tests
@@ -433,7 +337,7 @@ defmodule PtcDemo.CLIBase do
   @doc """
   Handle --show-prompt flag. Starts the agent, prints the system prompt, and exits.
 
-  Takes opts map and the agent module (PtcDemo.Agent or PtcDemo.LispAgent).
+  Takes opts map and the agent module (e.g., PtcDemo.Agent).
   The data_mode is determined from opts[:explore].
   The prompt profile is determined from opts[:prompt] or opts[:prompts] (first one).
   """
@@ -470,28 +374,6 @@ defmodule PtcDemo.CLIBase do
       {:error, reason} ->
         IO.puts("\nError: #{reason}")
         System.halt(1)
-    end
-  end
-
-  @doc """
-  Resolve a model name using a presets map (legacy, for backwards compatibility).
-
-  If the name is found in presets, returns the preset value.
-  Otherwise returns the name as-is.
-
-  ## Examples
-
-      iex> presets = %{"haiku" => "anthropic/claude-haiku"}
-      iex> resolve_model("haiku", presets)
-      "anthropic/claude-haiku"
-
-      iex> resolve_model("custom-model", presets)
-      "custom-model"
-  """
-  def resolve_model(name, presets) do
-    case Map.get(presets, name) do
-      nil -> name
-      preset -> preset
     end
   end
 
