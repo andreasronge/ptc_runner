@@ -129,40 +129,6 @@ PlanExecutor.run(mission,
 
 This separation allows the MetaPlanner to generate plans knowing what capabilities exist, while the actual implementations are provided separately for execution.
 
-### Capability Registry Integration
-
-For dynamic tool resolution and skill injection, use the Capability Registry instead of `base_tools`:
-
-```elixir
-alias PtcRunner.CapabilityRegistry.{Registry, Skill}
-
-registry =
-  Registry.new()
-  |> Registry.register_base_tool("fetch_price", &MyApp.StockAPI.fetch/1,
-    signature: "(symbol :string) -> {symbol :string, price :float}",
-    tags: ["stocks", "finance"]
-  )
-  |> Registry.register_skill(
-    Skill.new("european_format", "European Formatting",
-      "Use comma for decimals, period for thousands.",
-      applies_to: [],
-      tags: ["european"]
-    )
-  )
-
-PlanExecutor.run(mission,
-  llm: llm_callback,
-  registry: registry,
-  context_tags: ["european"]  # Matches skills with "european" tag
-)
-```
-
-When a registry is provided:
-- Tools are resolved via `PtcRunner.CapabilityRegistry.Linker.link/3`
-- Skills matching `context_tags` are injected into SubAgent system prompts
-- Trial outcomes are recorded for learning (success/failure tracking)
-- Falls back to `base_tools` if registry linking fails
-
 ### Failure Strategies
 
 The `on_verification_failure` field controls behavior:
@@ -225,10 +191,6 @@ PlanExecutor.run(mission,
   # Tool configuration (see explanation below)
   available_tools: %{"tool_name" => "description for planning"},
   base_tools: %{"tool_name" => &Module.function/1},
-
-  # Capability Registry (optional, replaces base_tools filtering)
-  registry: my_registry,       # CapabilityRegistry struct
-  context_tags: ["european"],  # Tags for skill matching
 
   # Replanning limits
   max_total_replans: 3,        # Total replans across all tasks
@@ -430,4 +392,4 @@ result = PlanExecutor.run(mission,
 - `PtcRunner.MetaPlanner` — Plan generation API
 - `PtcRunner.PlanExecutor` — Execution with replanning
 - `PtcRunner.Plan` — Plan struct and parsing
-- `PtcRunner.CapabilityRegistry.Linker.link/3` — Registry-based capability resolution
+

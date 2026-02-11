@@ -49,28 +49,11 @@ v0.6: Language, Composition & Tracing ✅
   Utilities:
   - PtcRunner.Chunker for text chunking
 
-v0.7: Meta Planner & Capability Registry
+v0.7: Meta Planner
   Journaled Task System:
   - (task id expr) - idempotent journaled execution
   - Journal: pure map passed via context, returned in Step.journal
   - Implicit re-planning: LLM re-navigates from journal state each turn
-
-  Capability Registry:
-  - Two capability types: Tools (executable) and Skills (prompt expertise)
-  - Context-aware resolution (selects best impl based on mission context)
-  - Health tracking (GREEN/RED/FLAKY states)
-  - Regression-proof registration (tools must pass historical tests)
-  - Trial history / immune memory
-
-  Meta Planner as Linker:
-  - Planning-time capability resolution (solves MCP context bloat)
-  - Injects only mission-relevant tools + skills (~90% token reduction)
-  - Transitive dependency resolution
-
-  Self-expanding capabilities:
-  - Tool smithing (agents create new composed tools)
-  - Skill learning (crystallize expertise from successful patterns)
-  - Promotion workflow (Candidate → Review → Tool or Skill)
 
   Architecture: Pure library, developer owns persistence
 
@@ -103,9 +86,7 @@ UNDER CONSIDERATION (not scheduled):
 
 ## Design Notes
 
-### Meta Planner & Capability Registry (v0.7)
-
-Two major subsystems working together:
+### Meta Planner (v0.7)
 
 **Journaled Task System** — Stateless re-navigation via journal. See `docs/plans/v0.7-journaled-tasks.md`.
 
@@ -113,18 +94,6 @@ Two major subsystems working together:
 |---------|-------------|
 | `(task id expr)` | Idempotent execution — checks journal, skips if already done |
 | Journal | Pure map of task ID → result, passed in via context |
-
-**Capability Registry** — Verified capability store with dynamic tool smithing. See `docs/plans/tool-registry-architecture.md`.
-
-| Concept | Description |
-|---------|-------------|
-| Tool | Executable code (base Elixir or composed PTC-Lisp) |
-| Skill | Reusable expertise as prompt fragment (guides LLM reasoning) |
-| Linker | Meta Planner component that resolves capabilities at planning time |
-| Smithing | Agents create new tools via workflow |
-| Learning | Extract skills from successful execution patterns |
-
-The Meta Planner acts as a **Linker** — instead of flooding agents with all tools (MCP anti-pattern), it resolves only the capabilities needed for each mission, achieving ~90% context reduction.
 
 ### State Serialization (v0.8)
 
@@ -177,7 +146,6 @@ Recommended integration: use ptc_runner as a pure library within your own GenSer
 ## References
 
 - Architecture: `lib/ptc_runner/sub_agent/` (Loop, Telemetry, ToolNormalizer)
-- Capability Registry: `lib/ptc_runner/capability_registry/`
 - Step struct: `lib/ptc_runner/step.ex`
 - Sandbox: `lib/ptc_runner/sandbox.ex`
-- Plans: `docs/plans/tool-registry-architecture.md`, `docs/plans/v0.7-journaled-tasks.md`
+- Plans: `docs/plans/v0.7-journaled-tasks.md`

@@ -43,8 +43,6 @@ defmodule PtcRunner.PlanRunner do
   - `available_tools` - Tool descriptions (map of name -> description string). Used to
     enrich raw function tools with signatures so the LLM knows how to call them.
     Format: `"Description. Input: {param: type}. Output: {field: type}"`
-  - `registry` - Optional Capability Registry for tool/skill resolution
-  - `context_tags` - Tags for context-aware skill matching (default: [])
   - `timeout` - Per-task timeout in ms (default: 30_000)
   - `max_turns` - Max turns per agent (default: 5)
   - `max_concurrency` - Max parallel tasks per phase (default: 10)
@@ -87,7 +85,6 @@ defmodule PtcRunner.PlanRunner do
       )
   """
 
-  alias PtcRunner.CapabilityRegistry.Linker
   alias PtcRunner.Lisp
   alias PtcRunner.Plan
   alias PtcRunner.SubAgent
@@ -148,8 +145,6 @@ defmodule PtcRunner.PlanRunner do
     llm = Keyword.fetch!(opts, :llm)
     base_tools = Keyword.get(opts, :base_tools, %{})
     available_tools = Keyword.get(opts, :available_tools, %{})
-    registry = Keyword.get(opts, :registry)
-    context_tags = Keyword.get(opts, :context_tags, [])
     timeout = Keyword.get(opts, :timeout, 30_000)
     max_turns = Keyword.get(opts, :max_turns, 5)
     llm_registry = Keyword.get(opts, :llm_registry, %{})
@@ -169,8 +164,6 @@ defmodule PtcRunner.PlanRunner do
       llm_registry: llm_registry,
       base_tools: enriched_tools,
       builtin_tools: Keyword.get(opts, :builtin_tools, []),
-      registry: registry,
-      context_tags: context_tags,
       timeout: timeout,
       max_turns: max_turns,
       max_concurrency: max_concurrency,
@@ -889,8 +882,8 @@ defmodule PtcRunner.PlanRunner do
         prompt
       end
 
-    # Resolve tools (and skills if registry is available)
-    {tools, skill_prompt} = resolve_tools_and_skills(agent_spec.tools, opts)
+    # Resolve tools from base_tools
+    tools = select_tools(agent_spec.tools, opts.base_tools)
 
     # Determine output mode:
     # 1. Use task.output if explicitly specified
@@ -925,10 +918,7 @@ defmodule PtcRunner.PlanRunner do
               do: Keyword.put(base_opts, :signature, sig),
               else: base_opts
 
-          # Add skill prompt as system_prompt prefix if available
-          if skill_prompt && skill_prompt != "",
-            do: Keyword.put(base_opts, :system_prompt, %{prefix: skill_prompt}),
-            else: base_opts
+          base_opts
 
         :json ->
           # JSON mode (simpler, no code generation needed)
@@ -1340,27 +1330,6 @@ defmodule PtcRunner.PlanRunner do
     tool_names
     |> Enum.filter(&Map.has_key?(base_tools, &1))
     |> Map.new(fn name -> {name, Map.fetch!(base_tools, name)} end)
-  end
-
-  # Resolve tools and skills using registry or fallback to base_tools
-  defp resolve_tools_and_skills(tool_names, opts) do
-    case opts.registry do
-      nil ->
-        # Existing behavior: filter from base_tools
-        tools = select_tools(tool_names, opts.base_tools)
-        {tools, nil}
-
-      registry ->
-        # Registry-based resolution
-        case Linker.link(registry, tool_names, context_tags: opts.context_tags) do
-          {:ok, result} ->
-            {result.base_tools, result.skill_prompt}
-
-          {:error, reason} ->
-            Logger.warning("Registry link failed: #{inspect(reason)}, falling back to base_tools")
-            {select_tools(tool_names, opts.base_tools), nil}
-        end
-    end
   end
 
   # Emit event if callback is provided
