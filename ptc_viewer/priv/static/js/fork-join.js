@@ -1,4 +1,4 @@
-import { formatDuration, escapeHtml, truncate } from './utils.js';
+import { formatDuration, escapeHtml, truncate, findFileByTraceId } from './utils.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 
 export function renderForkJoin(container, parallelEvent, state, data) {
@@ -342,9 +342,3 @@ function renderForkJoinFallback(container, branches, parallelEvent, maxDuration,
   container.innerHTML = html;
 }
 
-function findFileByTraceId(state, traceId) {
-  for (const [name, data] of state.files) {
-    if (data.traceId === traceId) return name;
-  }
-  return null;
-}

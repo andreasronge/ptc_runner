@@ -48,3 +48,10 @@ export function truncatePlan(str, len) {
   }
   return str.length > len ? str.slice(0, len) + '...' : str;
 }
+
+export function findFileByTraceId(state, traceId) {
+  for (const [name, data] of state.files) {
+    if (data.traceId === traceId) return name;
+  }
+  return null;
+}

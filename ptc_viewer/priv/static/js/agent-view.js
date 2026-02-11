@@ -1,8 +1,9 @@
-import { formatDuration, formatTokens, formatTokenBreakdown, truncate, escapeHtml } from './utils.js';
+import { formatDuration, formatTokens, formatTokenBreakdown, truncate, escapeHtml, findFileByTraceId } from './utils.js';
 import { pairEvents, extractThinking, extractProgram, getLastUserMessage } from './parser.js';
 import { highlightLisp } from './highlight.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 import { renderForkJoin } from './fork-join.js';
+import { renderExecutionTree } from './execution-tree.js';
 
 export function renderAgentView(container, state, data) {
   const events = data.events;
@@ -24,6 +25,13 @@ export function renderAgentView(container, state, data) {
   // Compute header stats from root agent turns only
   const totalTokens = turns.reduce((sum, t) => sum + (t.tokens?.tokens || 0), 0);
 
+  // Support pre-selecting a turn (e.g. from execution tree click)
+  let initialTurnIdx = 0;
+  if (typeof data.selectedTurn === 'number') {
+    const found = turns.findIndex(t => t.turnNumber === data.selectedTurn);
+    if (found >= 0) initialTurnIdx = found;
+  }
+
   let html = '';
 
   // Agent header
@@ -40,7 +48,7 @@ export function renderAgentView(container, state, data) {
   // Turn lane - horizontal row of turn pills
   html += '<div class="turn-lane">';
   turns.forEach((turn, idx) => {
-    const isActive = idx === 0;
+    const isActive = idx === initialTurnIdx;
     const statusClass = turn.hasError ? 'error' : turn.hasReturn ? 'returned' : 'normal';
     html += `<div class="turn-pill ${statusClass}${isActive ? ' active' : ''}" data-turn-idx="${idx}">
       <span class="turn-num">${turn.turnNumber || idx + 1}</span>
@@ -54,10 +62,10 @@ export function renderAgentView(container, state, data) {
 
   container.innerHTML = html;
 
-  // Render first turn detail
+  // Render initial turn detail
   const detailContainer = container.querySelector('#turn-detail');
   if (turns.length > 0) {
-    renderTurnDetail(detailContainer, turns[0], state, data);
+    renderTurnDetail(detailContainer, turns[initialTurnIdx], state, data);
   }
 
   // Turn pill click handlers
@@ -229,6 +237,18 @@ function renderTurnDetail(container, turn, state, data) {
   }
 
   // Tool calls (skip when pmaps present - fork-join viz renders those)
+  const toolsWithChildren = (turn.tools.length > 0 && turn.pmaps.length === 0)
+    ? turn.tools.filter(t => {
+        const ids = t.stop?.metadata?.child_trace_ids ||
+          (t.stop?.metadata?.child_trace_id ? [t.stop.metadata.child_trace_id] : []);
+        const spanId = t.stop?.span_id || t.start?.span_id;
+        const hasEmbedded = spanId && data?.events?.some(e =>
+          e.event === 'run.start' && e.metadata?.parent_span_id === spanId
+        );
+        return ids.length > 0 || hasEmbedded;
+      })
+    : [];
+
   if (turn.tools.length > 0 && turn.pmaps.length === 0) {
     html += '<div class="turn-section"><div class="section-title">Tool Calls</div>';
     for (const tool of turn.tools) {
@@ -277,6 +297,12 @@ function renderTurnDetail(container, turn, state, data) {
       html += '</div>';
     }
     html += '</div>';
+
+    if (toolsWithChildren.length > 0) {
+      html += '<div class="turn-section"><div class="section-title">Execution Tree</div>';
+      html += '<div id="exec-tree-container"></div>';
+      html += '</div>';
+    }
   }
 
   // Fork-join visualization for pmap/pcalls
@@ -344,11 +370,10 @@ function renderTurnDetail(container, turn, state, data) {
       if (childItem) childItem.click();
     });
   });
-}
 
-function findFileByTraceId(state, traceId) {
-  for (const [name, data] of state.files) {
-    if (data.traceId === traceId) return name;
+  // Wire up execution tree
+  const execTreeEl = container.querySelector('#exec-tree-container');
+  if (execTreeEl && toolsWithChildren.length > 0) {
+    renderExecutionTree(execTreeEl, toolsWithChildren, state, data);
   }
-  return null;
 }
