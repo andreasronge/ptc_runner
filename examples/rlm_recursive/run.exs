@@ -95,7 +95,6 @@ defmodule RlmRecursive.Runner do
       opts
       |> Keyword.put(:benchmark, benchmark)
       |> Keyword.put_new(:lines, 1000)
-      |> Keyword.put_new(:profiles, 500)
       |> Keyword.put_new(:seed, 42)
       |> Keyword.put_new(:trace, false)
       |> Keyword.put_new(:min_age, 30)
@@ -116,18 +115,21 @@ defmodule RlmRecursive.Runner do
         IO.puts("Lines: #{run_opts[:lines]}, Seed: #{run_opts[:seed]}")
 
       :counting ->
+        profiles = run_opts[:profiles] || 500
         IO.puts(
-          "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]}, Age > #{run_opts[:min_age]}, Hobby: #{run_opts[:hobby]}"
+          "Profiles: #{profiles}, Seed: #{run_opts[:seed]}, Age > #{run_opts[:min_age]}, Hobby: #{run_opts[:hobby]}"
         )
 
       :pairs ->
+        profiles = run_opts[:profiles] || 100
         IO.puts(
-          "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]} (O(n^2) task - recursion essential!)"
+          "Profiles: #{profiles}, Seed: #{run_opts[:seed]} (O(n^2) task - recursion essential!)"
         )
 
       :semantic_pairs ->
+        profiles = run_opts[:profiles] || 8
         IO.puts(
-          "Profiles: #{run_opts[:profiles]}, Seed: #{run_opts[:seed]} (SEMANTIC judgment per pair - forces recursion!)"
+          "Profiles: #{profiles}, Seed: #{run_opts[:seed]} (SEMANTIC judgment per pair - forces recursion!)"
         )
     end
 
@@ -216,7 +218,7 @@ defmodule RlmRecursive.Runner do
       mix run run.exs --benchmark pairs --profiles 100 --trace
 
       # Run semantic pairs (LLM judgment per pair - truly forces recursion)
-      mix run run.exs --benchmark semantic_pairs --profiles 40 --trace
+      mix run run.exs --benchmark semantic_pairs --profiles 8 --trace
 
       # Run S-NIAH with larger corpus
       mix run run.exs --lines 10000 --seed 123

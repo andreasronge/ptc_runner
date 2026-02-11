@@ -231,7 +231,7 @@ defmodule RlmRecursive do
   end
 
   def run_benchmark(:semantic_pairs, opts) do
-    profiles = Keyword.get(opts, :profiles, 40)
+    profiles = Keyword.get(opts, :profiles, 8)
     seed = Keyword.get(opts, :seed, 42)
     trace? = Keyword.get(opts, :trace, false)
     verbose? = Keyword.get(opts, :verbose, true)
