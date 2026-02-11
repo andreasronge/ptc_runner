@@ -24,7 +24,7 @@ defmodule PtcDemo.MixProject do
   end
 
   defp escript do
-    [main_module: PtcDemo.JsonCLI]
+    [main_module: PtcDemo.LispCLI]
   end
 
   defp deps do
@@ -37,7 +37,6 @@ defmodule PtcDemo.MixProject do
 
   defp aliases do
     [
-      json: "run --no-halt -e \"PtcDemo.JsonCLI.main(System.argv())\" --",
       lisp: "run --no-halt -e \"PtcDemo.LispCLI.main(System.argv())\" --"
     ]
   end

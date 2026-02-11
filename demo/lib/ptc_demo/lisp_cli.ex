@@ -21,12 +21,8 @@ defmodule PtcDemo.LispCLI do
     CLIBase.handle_list_models(opts)
     CLIBase.handle_list_prompts(opts)
 
-    # Handle trace management (no API key or agent needed)
-    CLIBase.handle_export_traces(opts)
-    CLIBase.handle_clean_traces(opts)
-
     # Handle --show-prompt (needs agent but not API key)
-    CLIBase.handle_show_prompt(opts, PtcDemo.LispAgent)
+    CLIBase.handle_show_prompt(opts, PtcDemo.Agent)
 
     data_mode = if opts[:explore], do: :explore, else: :schema
     prompt_profile = opts[:prompt] || :auto
@@ -58,7 +54,7 @@ defmodule PtcDemo.LispCLI do
       end
 
     {:ok, _pid} =
-      PtcDemo.LispAgent.start_link(
+      PtcDemo.Agent.start_link(
         data_mode: data_mode,
         prompt: initial_prompt,
         compression: compression,
@@ -67,7 +63,7 @@ defmodule PtcDemo.LispCLI do
 
     # Set model if specified
     if resolved_model do
-      PtcDemo.LispAgent.set_model(resolved_model)
+      PtcDemo.Agent.set_model(resolved_model)
     end
 
     # Handle comparison mode (multiple prompts)
@@ -96,10 +92,10 @@ defmodule PtcDemo.LispCLI do
     else
       IO.puts(
         banner(
-          PtcDemo.LispAgent.model(),
-          PtcDemo.LispAgent.data_mode(),
-          PtcDemo.LispAgent.prompt_profile(),
-          PtcDemo.LispAgent.compression()
+          PtcDemo.Agent.model(),
+          PtcDemo.Agent.data_mode(),
+          PtcDemo.Agent.prompt_profile(),
+          PtcDemo.Agent.compression()
         )
       )
 
@@ -157,25 +153,25 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/reset", opts) do
-    PtcDemo.LispAgent.reset()
+    PtcDemo.Agent.reset()
     IO.puts("   [Context cleared, data mode reset to schema]\n")
     loop(opts)
   end
 
   defp handle_input("/mode", opts) do
-    mode = PtcDemo.LispAgent.data_mode()
+    mode = PtcDemo.Agent.data_mode()
     IO.puts("   [Data mode: #{mode}]\n")
     loop(opts)
   end
 
   defp handle_input("/mode schema", opts) do
-    PtcDemo.LispAgent.set_data_mode(:schema)
+    PtcDemo.Agent.set_data_mode(:schema)
     IO.puts("   [Switched to schema mode - LLM receives full schema]\n")
     loop(opts)
   end
 
   defp handle_input("/mode explore", opts) do
-    PtcDemo.LispAgent.set_data_mode(:explore)
+    PtcDemo.Agent.set_data_mode(:explore)
     IO.puts("   [Switched to explore mode - LLM must discover schema]\n")
     loop(opts)
   end
@@ -186,7 +182,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/prompt", opts) do
-    profile = PtcDemo.LispAgent.prompt_profile()
+    profile = PtcDemo.Agent.prompt_profile()
     profiles = PtcDemo.Prompts.list()
 
     IO.puts("\nCurrent prompt: #{profile}")
@@ -205,7 +201,7 @@ defmodule PtcDemo.LispCLI do
   defp handle_input("/prompt " <> name, opts) do
     case PtcDemo.Prompts.validate_profile(String.trim(name)) do
       {:ok, profile_atom} ->
-        PtcDemo.LispAgent.set_prompt_profile(profile_atom)
+        PtcDemo.Agent.set_prompt_profile(profile_atom)
         IO.puts("   [Switched to prompt profile: #{profile_atom}]\n")
 
       {:error, message} ->
@@ -216,7 +212,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/model", opts) do
-    model = PtcDemo.LispAgent.model()
+    model = PtcDemo.Agent.model()
     provider = LLMClient.provider_from_model(model)
     presets = LLMClient.presets(provider)
 
@@ -240,7 +236,7 @@ defmodule PtcDemo.LispCLI do
       if String.contains?(name, ":") do
         name
       else
-        current_model = PtcDemo.LispAgent.model()
+        current_model = PtcDemo.Agent.model()
         provider = LLMClient.provider_from_model(current_model)
         # Normalize amazon_bedrock -> bedrock for resolution
         provider = if provider == :amazon_bedrock, do: :bedrock, else: provider
@@ -249,7 +245,7 @@ defmodule PtcDemo.LispCLI do
 
     case LLMClient.resolve(model_spec) do
       {:ok, model} ->
-        PtcDemo.LispAgent.set_model(model)
+        PtcDemo.Agent.set_model(model)
         IO.puts("   [Switched to model: #{model}]\n")
 
       {:error, reason} ->
@@ -260,20 +256,20 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/compression", opts) do
-    compression = PtcDemo.LispAgent.compression()
+    compression = PtcDemo.Agent.compression()
     status = if compression, do: "enabled", else: "disabled"
     IO.puts("   [Compression: #{status}]\n")
     loop(opts)
   end
 
   defp handle_input("/compression on", opts) do
-    PtcDemo.LispAgent.set_compression(true)
+    PtcDemo.Agent.set_compression(true)
     IO.puts("   [Compression enabled - message history will be coalesced]\n")
     loop(opts)
   end
 
   defp handle_input("/compression off", opts) do
-    PtcDemo.LispAgent.set_compression(false)
+    PtcDemo.Agent.set_compression(false)
     IO.puts("   [Compression disabled - full message history preserved]\n")
     loop(opts)
   end
@@ -284,7 +280,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/turns", opts) do
-    turns = PtcDemo.LispAgent.max_turns()
+    turns = PtcDemo.Agent.max_turns()
     IO.puts("   [Max turns: #{turns}]\n")
     loop(opts)
   end
@@ -292,7 +288,7 @@ defmodule PtcDemo.LispCLI do
   defp handle_input("/turns " <> value, opts) do
     case Integer.parse(String.trim(value)) do
       {n, ""} when n > 0 ->
-        PtcDemo.LispAgent.set_max_turns(n)
+        PtcDemo.Agent.set_max_turns(n)
         IO.puts("   [Max turns set to #{n}]\n")
 
       _ ->
@@ -326,7 +322,7 @@ defmodule PtcDemo.LispCLI do
   defp handle_input("/datasets", opts) do
     IO.puts("\nAvailable datasets:")
 
-    for {name, desc} <- PtcDemo.LispAgent.list_datasets() do
+    for {name, desc} <- PtcDemo.Agent.list_datasets() do
       IO.puts("  - #{name}: #{desc}")
     end
 
@@ -335,7 +331,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/program", opts) do
-    case PtcDemo.LispAgent.last_program() do
+    case PtcDemo.Agent.last_program() do
       nil ->
         IO.puts("   No program generated yet.\n")
 
@@ -349,7 +345,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/programs", opts) do
-    case PtcDemo.LispAgent.programs() do
+    case PtcDemo.Agent.programs() do
       [] ->
         IO.puts("   No programs generated yet.\n")
 
@@ -369,7 +365,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/result", opts) do
-    case PtcDemo.LispAgent.last_result() do
+    case PtcDemo.Agent.last_result() do
       nil ->
         IO.puts("   No result yet.\n")
 
@@ -383,7 +379,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/context", opts) do
-    programs = PtcDemo.LispAgent.programs()
+    programs = PtcDemo.Agent.programs()
 
     if programs == [] do
       IO.puts("\n   No conversation yet (system prompt excluded, use /system to view).\n")
@@ -406,7 +402,7 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/system", opts) do
-    prompt = PtcDemo.LispAgent.system_prompt()
+    prompt = PtcDemo.Agent.system_prompt()
     IO.puts("\n[SYSTEM PROMPT]\n")
     IO.puts(prompt)
     IO.puts("")
@@ -419,13 +415,13 @@ defmodule PtcDemo.LispCLI do
   end
 
   defp handle_input("/stats", opts) do
-    stats = PtcDemo.LispAgent.stats()
+    stats = PtcDemo.Agent.stats()
     IO.puts(CLIBase.format_stats(stats))
     loop(opts)
   end
 
   defp handle_input(question, opts) do
-    case PtcDemo.LispAgent.ask(question, debug: opts[:debug], verbose: opts[:verbose]) do
+    case PtcDemo.Agent.ask(question, debug: opts[:debug], verbose: opts[:verbose]) do
       {:ok, answer} ->
         IO.puts("\nassistant> #{answer}\n")
 
