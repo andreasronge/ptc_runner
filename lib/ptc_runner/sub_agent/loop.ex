@@ -390,7 +390,7 @@ defmodule PtcRunner.SubAgent.Loop do
         messages:
           state.messages ++
             [
-              %{role: :assistant, content: response},
+              %{role: :assistant, content: ResponseHandler.strip_thinking(response)},
               %{role: :user, content: feedback}
             ],
         turns: [turn | state.turns],
@@ -860,8 +860,10 @@ defmodule PtcRunner.SubAgent.Loop do
 
         error_step = Step.error(:failed, inspect(fail_args), lisp_step.memory)
 
-        # Include the final assistant response in messages
-        final_messages = state.messages ++ [%{role: :assistant, content: response}]
+        # Include the final assistant response in messages (strip thinking for clean history)
+        final_messages =
+          state.messages ++
+            [%{role: :assistant, content: ResponseHandler.strip_thinking(response)}]
 
         final_step = %{
           error_step

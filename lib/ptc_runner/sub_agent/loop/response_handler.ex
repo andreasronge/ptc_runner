@@ -258,6 +258,36 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   end
 
   @doc """
+  Strip thinking/reasoning text that precedes a code block.
+
+  LLMs sometimes produce prose (e.g. `thinking:` blocks) before the code block,
+  even when not requested. This text wastes tokens in message history and
+  reinforces the pattern on subsequent turns. Stripping it keeps only the code
+  block for history while the raw response is preserved in traces.
+
+  Returns the response unchanged if no code block is found.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.strip_thinking("thinking:\\nSome reasoning\\n```clojure\\n(+ 1 2)\\n```")
+      "```clojure\\n(+ 1 2)\\n```"
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.strip_thinking("```clojure\\n(+ 1 2)\\n```")
+      "```clojure\\n(+ 1 2)\\n```"
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.strip_thinking("(+ 1 2)")
+      "(+ 1 2)"
+
+  """
+  @spec strip_thinking(String.t()) :: String.t()
+  def strip_thinking(response) do
+    case Regex.run(~r/(```(?:clojure|lisp).*```)/s, response) do
+      [_, code_block] -> code_block
+      nil -> response
+    end
+  end
+
+  @doc """
   Format error for LLM feedback.
   """
   @spec format_error_for_llm(map()) :: String.t()
