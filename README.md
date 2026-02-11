@@ -156,7 +156,7 @@ step.return  #=> 3
 
 Programs run in isolated BEAM processes with resource limits (1s timeout, 10MB heap).
 
-See `PtcRunner.Lisp` module docs for options. A JSON DSL (`PtcRunner.Json`) is also available for schema-enforced execution.
+See `PtcRunner.Lisp` module docs for options.
 
 ## License
 

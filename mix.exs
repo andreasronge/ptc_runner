@@ -12,7 +12,7 @@ defmodule PtcRunner.MixProject do
       aliases: aliases(),
       name: "PtcRunner",
       description:
-        "A BEAM-native Elixir library for Programmatic Tool Calling (PTC) with JSON and lispy DSLs (subset of Clojure). PTC lets LLMs generate small programs that orchestrate multiple tool calls and data transformations in code.",
+        "A BEAM-native Elixir library for Programmatic Tool Calling (PTC) with a lispy DSL (subset of Clojure). PTC lets LLMs generate small programs that orchestrate multiple tool calls and data transformations in code.",
       source_url: "https://github.com/andreasronge/ptc_runner",
       docs: docs(),
       package: package(),
@@ -106,8 +106,6 @@ defmodule PtcRunner.MixProject do
         "docs/benchmark-eval.md",
         # PTC-Lisp
         "docs/ptc-lisp-specification.md",
-        # Reference (low-level)
-        "docs/reference/ptc-json-specification.md",
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
         "livebooks/ptc_runner_llm_agent.livemd",

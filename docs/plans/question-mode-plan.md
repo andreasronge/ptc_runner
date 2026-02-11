@@ -7,7 +7,6 @@ Add an `output:` parameter to `SubAgent.new/1` that controls what format the LLM
 ```elixir
 # Program modes - LLM writes executable code
 SubAgent.new(prompt: "Orchestrate tools...", output: :ptc_lisp)  # default
-SubAgent.new(prompt: "Orchestrate tools...", output: :ptc_json)
 
 # Data modes - LLM returns data directly
 SubAgent.new(prompt: "Classify this review...", output: :json)
@@ -19,7 +18,6 @@ SubAgent.new(prompt: "Summarize this text...", output: :text)
 | Mode | Tools? | Signature? | Sandbox? | Schema to Callback? | Use Case |
 |------|--------|------------|----------|---------------------|----------|
 | `:ptc_lisp` | Yes | Yes | Yes | No | Orchestration, complex logic |
-| `:ptc_json` | Yes | Yes | Yes | Yes (full language) | Orchestration (JSON syntax) |
 | `:json` | No | Yes | No | Yes (output shape) | Structured data, reasoning |
 | `:text` | No | No | No | No | Free-form responses |
 
@@ -30,7 +28,6 @@ SubAgent.new(prompt: "Summarize this text...", output: :text)
 | Mode | Tools allowed? | Signature required? | Firewall fields (`_`)? | Compression? |
 |------|----------------|---------------------|------------------------|--------------|
 | `:ptc_lisp` | Yes | Optional | Yes | Yes |
-| `:ptc_json` | Yes | Optional | Yes | Yes |
 | `:json` | No (error) | Yes (required) | No (error) | No (error) |
 | `:text` | No (error) | No (ignored) | N/A | No (error) |
 
@@ -84,7 +81,7 @@ All modes return the same `Step` struct - piping works seamlessly:
 %{
   system: String.t(),
   messages: list(),
-  output: :ptc_lisp | :ptc_json | :json | :text,
+  output: :ptc_lisp | :json | :text,
   schema: json_schema_map() | nil
 }
 ```
@@ -94,7 +91,6 @@ All modes return the same `Step` struct - piping works seamlessly:
 | Output | Schema | Size | Content |
 |--------|--------|------|---------|
 | `:ptc_lisp` | `nil` | - | N/A |
-| `:ptc_json` | Map | Large | Full PTC-JSON language schema |
 | `:json` | Map | Small | Output shape from signature |
 | `:text` | `nil` | - | N/A |
 
@@ -108,7 +104,7 @@ def my_llm(%{output: output, schema: schema} = req) do
 
   # Optionally use schema for structured output
   opts = case {output, schema} do
-    {mode, schema} when mode in [:ptc_json, :json] and schema != nil ->
+    {mode, schema} when mode == :json and schema != nil ->
       if provider_supports_json_schema?() do
         # OpenAI: response_format with json_schema
         Keyword.put(opts, :response_format, %{
@@ -160,7 +156,6 @@ defstruct [
 defp validate_output_mode(agent) do
   case agent.output do
     :ptc_lisp -> :ok
-    :ptc_json -> :ok
     :json ->
       cond do
         map_size(agent.tools) > 0 ->
@@ -305,12 +300,7 @@ Simple addition after `:json` mode works.
 - [ ] Return raw text in `step.return`
 - [ ] `step.signature` = nil for text mode
 
-### Stage 3: Callback Schema for `:ptc_json`
-
-- [ ] Pass existing PTC-JSON schema to callback
-- [ ] Allows providers to use structured output for program generation
-
-### Stage 4: Documentation & Guides
+### Stage 3: Documentation & Guides
 
 - [ ] Update `docs/guides/subagent-getting-started.md` with output modes
 - [ ] Add `docs/guides/structured-output-callbacks.md` for LLM callback guide
@@ -395,7 +385,7 @@ end
 def my_llm(%{system: system, messages: messages, output: output, schema: schema} = req) do
   opts = [receive_timeout: 30_000]
 
-  opts = if output in [:ptc_json, :json] and schema do
+  opts = if output == :json and schema do
     Keyword.put(opts, :response_format, %{
       type: "json_schema",
       json_schema: %{name: "response", schema: schema, strict: true}
@@ -411,7 +401,7 @@ end
 ### Using Tool Calling with Anthropic
 
 ```elixir
-def my_llm(%{output: output, schema: schema} = req) when output in [:ptc_json, :json] and schema != nil do
+def my_llm(%{output: output, schema: schema} = req) when output == :json and schema != nil do
   # Convert schema to tool definition
   tool = %{
     name: "respond",
@@ -493,7 +483,7 @@ Most LLM providers support tool/function calling with variations:
 %{
   system: String.t(),
   messages: list(),
-  output: :ptc_lisp | :ptc_json | :json | :text,
+  output: :ptc_lisp | :json | :text,
 
   # Structured output (current plan)
   schema: json_schema_map() | nil,
@@ -543,7 +533,6 @@ This makes `:json` mode work across more providers than native JSON schema suppo
 | Mode | Uses tools? | Uses tool_choice? | Purpose |
 |------|-------------|-------------------|---------|
 | `:ptc_lisp` | No | No | LLM writes code |
-| `:ptc_json` | Optional | Optional | Schema-constrained code |
 | `:json` | Yes (schema as tool) | `{:tool, "respond"}` | Portable structured output |
 | `:text` | No | No | Raw text |
 
@@ -653,7 +642,7 @@ This is essentially the same mechanism as async tools:
 
 ### `max_turns` Semantic Difference
 
-- `:ptc_lisp`/`:ptc_json`: `max_turns` = orchestration iterations (tool calls + reasoning)
+- `:ptc_lisp`: `max_turns` = orchestration iterations (tool calls + reasoning)
 - `:json`: `max_turns` = validation retry budget (simpler)
 
 Don't assume they mean the same thing when switching modes.
