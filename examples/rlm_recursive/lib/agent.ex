@@ -140,9 +140,9 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:answer "THE_ANSWER" :found true}` if found, or `{:answer nil :found false}` if not found.
 
-    ## Tools
-    - `tool/grep` / `tool/grep-n`: Search the corpus directly — prefer this for simple lookups
-    - `tool/search`: Recursive self-call for subdividing very large corpora
+    ## Strategy
+    - For simple lookups, use `tool/grep` or `tool/grep-n` to search the corpus directly
+    - For very large corpora, subdivide and recurse with `tool/search`
     """
   end
 
@@ -158,9 +158,9 @@ defmodule RlmRecursive.Agent do
     ## Output
     Return `{:count N}` where N is the count of matching profiles.
 
-    ## Tools
-    - `tool/grep` / `tool/grep-n`: Filter the corpus directly — prefer this for O(n) filtering
-    - `tool/search`: Recursive self-call for subdividing very large corpora
+    ## Strategy
+    - For direct filtering, use `tool/grep` or `tool/grep-n` on the corpus
+    - For very large corpora, subdivide and recurse with `tool/search`
     """
   end
 
@@ -208,8 +208,8 @@ defmodule RlmRecursive.Agent do
     3. For manageable chunks (≤50 profiles), generate pairs and use `tool/llm-query` to judge them.
     4. Merge results from all chunks.
 
-    ## Tools
-    - `tool/evaluate_pairs`: Recursive self-call. Pass a subset of the corpus as `{:corpus chunk}`.
+    ## Tool Usage
+    - `tool/evaluate_pairs`: Pass a subset of the corpus as `{:corpus chunk}`.
       Use this to divide large city groups into smaller pieces.
     - `tool/llm-query`: Use for ALL semantic judgment — do NOT judge compatibility in code.
       Use signature `"[{id :string, compatible :bool}]"` for batch judgment.

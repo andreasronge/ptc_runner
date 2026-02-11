@@ -23,31 +23,54 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
 
       iex> tool = %PtcRunner.Tool{name: "get-inventory", signature: "-> :map"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"get-inventory" => tool})
-      ";; === tools ===\\ntool/get-inventory() -> map"
+      ";; === tools ===\\ntool/get-inventory() -> map\\n;; Call with named args: (tool/name {:key value})"
 
       iex> tool = %PtcRunner.Tool{name: "search", signature: "(query :string, limit :int) -> [:string]"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"search" => tool})
-      ";; === tools ===\\ntool/search(query string, limit int) -> [string]"
+      ";; === tools ===\\ntool/search(query string, limit int) -> [string]\\n;; Example: (tool/search {:query ... :limit ...})"
 
       iex> tool = %PtcRunner.Tool{name: "analyze", signature: "-> :map", description: "Analyze data"}
       iex> PtcRunner.SubAgent.Namespace.Tool.render(%{"analyze" => tool})
-      ";; === tools ===\\ntool/analyze() -> map  ; Analyze data"
+      ";; === tools ===\\ntool/analyze() -> map  ; Analyze data\\n;; Call with named args: (tool/name {:key value})"
   """
   @spec render(map()) :: String.t()
   def render(tools) when map_size(tools) == 0, do: ";; No tools available"
 
   def render(tools) do
-    lines =
+    sorted_tools =
       tools
       |> Enum.map(fn {name, format} -> {name, normalize_tool(name, format)} end)
       |> Enum.reject(fn {_name, tool} -> is_nil(tool) end)
       |> Enum.sort_by(fn {name, _} -> name end)
-      |> Enum.map(fn {_name, tool} -> format_tool(tool) end)
+
+    lines = Enum.map(sorted_tools, fn {_name, tool} -> format_tool(tool) end)
 
     case lines do
-      [] -> ";; No tools available"
-      _ -> [";; === tools ===" | lines] |> Enum.join("\n")
+      [] ->
+        ";; No tools available"
+
+      _ ->
+        example = usage_example(sorted_tools)
+        [";; === tools ===" | lines ++ [example]] |> Enum.join("\n")
     end
+  end
+
+  # Generate a usage example from the first tool that has parameters
+  defp usage_example(sorted_tools) do
+    sorted_tools
+    |> Enum.find_value(fn {_name, tool} ->
+      {params, _return} = parse_signature(tool.signature)
+
+      if params != [] do
+        args =
+          Enum.map_join(params, " ", fn {param_name, _type} ->
+            ":#{param_name} ..."
+          end)
+
+        ";; Example: (tool/#{tool.name} {#{args}})"
+      end
+    end)
+    |> Kernel.||(";; Call with named args: (tool/name {:key value})")
   end
 
   # Normalize tool format to %Tool{} struct
