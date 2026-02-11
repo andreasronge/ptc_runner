@@ -163,8 +163,6 @@ When a registry is provided:
 - Trial outcomes are recorded for learning (success/failure tracking)
 - Falls back to `base_tools` if registry linking fails
 
-See the [Capability Registry Architecture](../plans/tool-registry-architecture.md) for details.
-
 ### Failure Strategies
 
 The `on_verification_failure` field controls behavior:
@@ -429,7 +427,6 @@ result = PlanExecutor.run(mission,
 
 - [Navigator Pattern](subagent-navigator.md) — Journaled task execution
 - [Composition Patterns](subagent-patterns.md) — Chaining and orchestration
-- [Capability Registry Architecture](../plans/tool-registry-architecture.md) — Tool/skill resolution and learning
 - `PtcRunner.MetaPlanner` — Plan generation API
 - `PtcRunner.PlanExecutor` — Execution with replanning
 - `PtcRunner.Plan` — Plan struct and parsing
