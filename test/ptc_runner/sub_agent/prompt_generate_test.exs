@@ -15,7 +15,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       # Check all major sections are present
       assert prompt =~ "## Role"
-      assert prompt =~ "Write programs that accomplish the user's mission"
+      assert prompt =~ "Write one program that accomplish the user's mission"
       refute prompt =~ "thinking:"
       assert prompt =~ ";; === data/ ==="
       assert prompt =~ ";; === tools ==="

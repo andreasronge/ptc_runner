@@ -181,8 +181,8 @@ defmodule PageIndex.RetrieverToolkit do
            (def section (tool/fetch_section {:node_id "section_id"}))
            (tool/grep-n {:pattern "keyword" :text (:content section)})
         3. If truncated, paginate: (tool/fetch_section {:node_id "id" :offset N})
-        4. Return as soon as you find the answer. Do NOT search additional sections for
-           supplementary data — return the primary data point immediately.
+        4. Before returning, verify you have found a concrete value that answers the query.
+           If your search result is empty or ambiguous, try a different section or search pattern.
         5. Structure each finding as:
            {label value unit page section context}
            Use raw numeric values (34500 not "34,500"). Note scale from table headers.
@@ -200,7 +200,7 @@ defmodule PageIndex.RetrieverToolkit do
         },
         builtin_tools: [:grep],
         max_turns: 6,
-        timeout: 30_000,
+        timeout: 60_000,
         description:
           "Search the document for specific data. Returns structured findings with values, units, page numbers, and source sections."
       )

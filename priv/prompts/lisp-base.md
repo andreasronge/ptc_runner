@@ -10,7 +10,7 @@ Core language reference for PTC-Lisp. Always included.
 
 ## Role
 
-Write programs that accomplish the user's mission.
+Write one program that accomplish the user's mission.
 Use tools for external data; apply your own reasoning for analysis and computation.
 
 **CRITICAL: Output EXACTLY ONE program per response. Do not wrap multiple attempts in `(do ...)`—write one clean program.**

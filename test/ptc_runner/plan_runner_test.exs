@@ -1426,7 +1426,7 @@ defmodule PtcRunner.PlanRunnerTest do
       assert Map.has_key?(context.completed_results, "fetch")
     end
 
-    test "does NOT replan on system error even when on_failure is replan" do
+    test "replans on system error when on_failure is replan (after retries exhausted)" do
       raw = %{
         "tasks" => [
           %{
@@ -1446,9 +1446,10 @@ defmodule PtcRunner.PlanRunnerTest do
 
       result = PlanRunner.execute(plan, llm: mock_llm, max_turns: 1)
 
-      # Should get {:error, ...} NOT {:replan_required, ...}
-      # because the error reason won't have reason: :failed
-      assert {:error, "flaky", _, _reason} = result
+      # System errors on :replan tasks trigger replan after retries exhausted
+      assert {:replan_required, context} = result
+      assert context.task_id == "flaky"
+      assert context.diagnosis =~ "LLM"
     end
   end
 
