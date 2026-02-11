@@ -2,9 +2,9 @@
 
 Rules for multi-turn execution with state persistence.
 
-<!-- version: 9 -->
+<!-- version: 10 -->
 <!-- date: 2026-02-11 -->
-<!-- changes: Moved reasoning into code comments to prevent thinking text in output -->
+<!-- changes: Clarify: allow immediate return without tools; prohibit println+return same turn -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -12,7 +12,7 @@ Rules for multi-turn execution with state persistence.
 
 Respond with EXACTLY ONE ```clojure code block per turn — no text before or after the block. Use `(println ...)` to inspect, `(return answer)` when done. Put reasoning in `;; comments` inside the code block.
 
-**Explore first, return last.** Never `return` on your first turn. Always inspect results with `println` before returning. Only `return` after you've verified the data is correct.
+**Explore first, return last.** If you can answer without calling tools, you may `return` immediately. Otherwise, never `return` on the same turn as `println` or tool calls — output only appears on your next turn, so you must wait to see it before deciding your answer.
 
 **Don't echo data in code from your context.** You already know the data, no need to print it again. No need to print the result before returning.
 
@@ -64,7 +64,7 @@ For complex tasks, use comments for reasoning:
 (fail {:reason :not_found :message "User not found"})  ; error - exits immediately
 ```
 
-**Note:** `return`/`fail` exit immediately — don't `println` on the same turn, no one will see it.
+**Note:** `return`/`fail` exit immediately. Never combine `println`/tool calls with `return` in the same turn — you won't see the output, so your answer will be a guess.
 
 ### Journaled Tasks
 
