@@ -174,6 +174,7 @@ defmodule PtcDemo.LispTestRunner do
     runs = Keyword.get(opts, :runs, 1)
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
     compression = Keyword.get(opts, :compression, false)
+    thinking = Keyword.get(opts, :thinking, false)
     filter = Keyword.get(opts, :filter, :all)
     retry_turns = Keyword.get(opts, :retry_turns, 0)
 
@@ -181,7 +182,7 @@ defmodule PtcDemo.LispTestRunner do
     clojure_available = check_clojure_validation(validate_clojure)
 
     # Ensure agent is started
-    ensure_agent_started(data_mode, prompt_profile, compression, agent_mod)
+    ensure_agent_started(data_mode, prompt_profile, compression, thinking, agent_mod)
 
     # Set model if specified
     if model do
@@ -385,12 +386,13 @@ defmodule PtcDemo.LispTestRunner do
       report_path = Keyword.get(opts, :report)
       runs = Keyword.get(opts, :runs, 1)
       compression = Keyword.get(opts, :compression, false)
+      thinking = Keyword.get(opts, :thinking, false)
       retry_turns = Keyword.get(opts, :retry_turns, 0)
 
       test_case = Enum.at(cases, index - 1)
 
       # Use :single_shot as default for starting the agent (will be overridden)
-      ensure_agent_started(data_mode, :single_shot, compression, agent_mod)
+      ensure_agent_started(data_mode, :single_shot, compression, thinking, agent_mod)
 
       if model do
         agent_mod.set_model(model)
@@ -523,7 +525,7 @@ defmodule PtcDemo.LispTestRunner do
 
   defp prompt_for_test(_test_case, explicit_profile), do: explicit_profile
 
-  defp ensure_agent_started(data_mode, prompt_profile, compression, agent_mod) do
+  defp ensure_agent_started(data_mode, prompt_profile, compression, thinking, agent_mod) do
     # When :auto, use :single_shot as default for starting (will be overridden per-test)
     start_prompt = if prompt_profile == :auto, do: :single_shot, else: prompt_profile
 
@@ -536,7 +538,8 @@ defmodule PtcDemo.LispTestRunner do
             Agent.start_link(
               data_mode: data_mode,
               prompt: start_prompt,
-              compression: compression
+              compression: compression,
+              thinking: thinking
             )
 
           :ok
@@ -547,6 +550,7 @@ defmodule PtcDemo.LispTestRunner do
           Agent.set_data_mode(data_mode)
           Agent.set_prompt_profile(start_prompt)
           Agent.set_compression(compression)
+          Agent.set_thinking(thinking)
           :ok
       end
     else

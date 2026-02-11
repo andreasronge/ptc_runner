@@ -35,6 +35,7 @@ defmodule PtcDemo.Agent do
     :data_mode,
     :prompt_profile,
     :compression,
+    :thinking,
     :max_turns,
     :retry_turns,
     :datasets,
@@ -186,6 +187,20 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
+  Get the current thinking setting.
+  """
+  def thinking do
+    GenServer.call(__MODULE__, :thinking)
+  end
+
+  @doc """
+  Set the thinking flag.
+  """
+  def set_thinking(thinking) when is_boolean(thinking) do
+    GenServer.call(__MODULE__, {:set_thinking, thinking})
+  end
+
+  @doc """
   Get the current max_turns setting.
   """
   def max_turns do
@@ -234,6 +249,7 @@ defmodule PtcDemo.Agent do
     data_mode = Keyword.get(opts, :data_mode, :schema)
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
     compression = Keyword.get(opts, :compression, false)
+    thinking = Keyword.get(opts, :thinking, false)
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
     retry_turns = Keyword.get(opts, :retry_turns, 0)
 
@@ -251,6 +267,7 @@ defmodule PtcDemo.Agent do
        data_mode: data_mode,
        prompt_profile: prompt_profile,
        compression: compression,
+       thinking: thinking,
        max_turns: max_turns,
        retry_turns: retry_turns,
        datasets: datasets,
@@ -283,7 +300,8 @@ defmodule PtcDemo.Agent do
         max_turns,
         signature,
         retry_turns,
-        plan: plan
+        plan: plan,
+        thinking: state.thinking
       )
 
     # Build context with datasets (memory is handled internally by SubAgent)
@@ -444,6 +462,16 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
+  def handle_call(:thinking, _from, state) do
+    {:reply, state.thinking, state}
+  end
+
+  @impl true
+  def handle_call({:set_thinking, thinking}, _from, state) do
+    {:reply, :ok, %{state | thinking: thinking}}
+  end
+
+  @impl true
   def handle_call(:compression, _from, state) do
     {:reply, state.compression, state}
   end
@@ -489,7 +517,7 @@ defmodule PtcDemo.Agent do
   # --- Private Functions ---
 
   defp build_agent(data_mode, prompt_profile, compression) do
-    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0, plan: nil)
+    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0, plan: nil, thinking: false)
   end
 
   defp build_agent(
@@ -502,6 +530,7 @@ defmodule PtcDemo.Agent do
          extra_opts
        ) do
     plan = Keyword.get(extra_opts, :plan)
+    thinking = Keyword.get(extra_opts, :thinking, false)
 
     base_opts = [
       prompt: "{{question}}",
@@ -511,7 +540,8 @@ defmodule PtcDemo.Agent do
       tools: build_tools(),
       context_descriptions: context_descriptions_for(data_mode),
       system_prompt: build_system_prompt(prompt_profile, max_turns),
-      compression: compression
+      compression: compression,
+      thinking: thinking
     ]
 
     # Add plan only when present

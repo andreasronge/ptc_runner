@@ -23,7 +23,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       # Single-shot mode should now use full SystemPrompt.generate, which includes:
       assert system_prompt =~ "## Role"
       assert system_prompt =~ "Write programs that accomplish the user's mission"
-      assert system_prompt =~ "thinking:"
+      refute system_prompt =~ "thinking:"
       assert system_prompt =~ ";; === data/ ==="
       assert system_prompt =~ "data/x"
       assert system_prompt =~ "data/y"

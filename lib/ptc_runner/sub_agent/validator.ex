@@ -49,6 +49,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_format_options!(opts)
     validate_builtin_tools!(opts)
     validate_output!(opts)
+    validate_thinking!(opts)
     validate_memory_strategy!(opts)
     validate_self_tool_requires_signature!(opts)
   end
@@ -605,6 +606,14 @@ defmodule PtcRunner.SubAgent.Validator do
       end)
 
     Enum.join(messages, "; ")
+  end
+
+  defp validate_thinking!(opts) do
+    case Keyword.fetch(opts, :thinking) do
+      {:ok, val} when is_boolean(val) -> :ok
+      {:ok, _} -> raise ArgumentError, "thinking must be a boolean"
+      :error -> :ok
+    end
   end
 
   defp validate_memory_strategy!(opts) do
