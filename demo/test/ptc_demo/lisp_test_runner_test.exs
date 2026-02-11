@@ -14,9 +14,12 @@ defmodule PtcDemo.LispTestRunnerTest do
     {:ok, mock_agent: MockAgent}
   end
 
+  import ExUnit.CaptureIO
+
   describe "run_all/1 with mock agent" do
     test "passes when all constraints are met", %{mock_agent: mock_agent} do
-      result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> LispTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
       assert is_map(result)
       assert result.passed >= 1
@@ -26,7 +29,8 @@ defmodule PtcDemo.LispTestRunnerTest do
     test "skips API key check when mock agent is provided", %{mock_agent: mock_agent} do
       # This should not raise an error even without API key set
       without_api_keys(fn ->
-        result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
+        {result, _} =
+          with_io(fn -> LispTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
         assert is_map(result)
         assert result.passed >= 1
@@ -34,7 +38,8 @@ defmodule PtcDemo.LispTestRunnerTest do
     end
 
     test "returns results with correct structure", %{mock_agent: mock_agent} do
-      result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> LispTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
       assert Map.has_key?(result, :passed)
       assert Map.has_key?(result, :failed)
@@ -45,7 +50,8 @@ defmodule PtcDemo.LispTestRunnerTest do
     end
 
     test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
-      result = LispTestRunner.run_all(agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> LispTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
       # LispTestRunner: 25 test cases in common_test_cases
       assert result.total == 25
@@ -54,7 +60,8 @@ defmodule PtcDemo.LispTestRunnerTest do
 
   describe "run_one/2 with mock agent" do
     test "runs a single test successfully", %{mock_agent: mock_agent} do
-      result = LispTestRunner.run_one(1, agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> LispTestRunner.run_one(1, agent: mock_agent, verbose: false) end)
 
       assert is_map(result)
       assert Map.has_key?(result, :passed)
@@ -63,14 +70,16 @@ defmodule PtcDemo.LispTestRunnerTest do
     end
 
     test "returns nil for invalid index", %{mock_agent: mock_agent} do
-      result = LispTestRunner.run_one(999, agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> LispTestRunner.run_one(999, agent: mock_agent, verbose: false) end)
 
       assert is_nil(result)
     end
 
     test "skips API key check for mock agent in run_one", %{mock_agent: mock_agent} do
       without_api_keys(fn ->
-        result = LispTestRunner.run_one(1, agent: mock_agent, verbose: false)
+        {result, _} =
+          with_io(fn -> LispTestRunner.run_one(1, agent: mock_agent, verbose: false) end)
 
         assert is_map(result)
         assert result.index == 1
