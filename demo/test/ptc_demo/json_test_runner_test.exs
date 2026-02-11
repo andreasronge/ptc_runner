@@ -13,9 +13,12 @@ defmodule PtcDemo.JsonTestRunnerTest do
     {:ok, mock_agent: MockAgent}
   end
 
+  import ExUnit.CaptureIO
+
   describe "run_all/1 with mock agent" do
     test "passes when all constraints are met", %{mock_agent: mock_agent} do
-      result = JsonTestRunner.run_all(agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> JsonTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
       assert is_map(result)
       assert result.passed >= 1
@@ -25,7 +28,8 @@ defmodule PtcDemo.JsonTestRunnerTest do
     test "skips API key check when mock agent is provided", %{mock_agent: mock_agent} do
       # This should not raise an error even without API key set
       without_api_keys(fn ->
-        result = JsonTestRunner.run_all(agent: mock_agent, verbose: false)
+        {result, _} =
+          with_io(fn -> JsonTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
         assert is_map(result)
         assert result.passed >= 1
@@ -33,7 +37,8 @@ defmodule PtcDemo.JsonTestRunnerTest do
     end
 
     test "returns results with correct structure", %{mock_agent: mock_agent} do
-      result = JsonTestRunner.run_all(agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> JsonTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
       assert Map.has_key?(result, :passed)
       assert Map.has_key?(result, :failed)
@@ -44,7 +49,8 @@ defmodule PtcDemo.JsonTestRunnerTest do
     end
 
     test "runs all common and multi-turn tests", %{mock_agent: mock_agent} do
-      result = JsonTestRunner.run_all(agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> JsonTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
       # Should run all common + multi_turn test cases
       assert result.total >= 15
@@ -53,7 +59,8 @@ defmodule PtcDemo.JsonTestRunnerTest do
 
   describe "run_one/2 with mock agent" do
     test "runs a single test successfully", %{mock_agent: mock_agent} do
-      result = JsonTestRunner.run_one(1, agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> JsonTestRunner.run_one(1, agent: mock_agent, verbose: false) end)
 
       assert is_map(result)
       assert Map.has_key?(result, :passed)
@@ -62,14 +69,16 @@ defmodule PtcDemo.JsonTestRunnerTest do
     end
 
     test "returns nil for invalid index", %{mock_agent: mock_agent} do
-      result = JsonTestRunner.run_one(999, agent: mock_agent, verbose: false)
+      {result, _} =
+        with_io(fn -> JsonTestRunner.run_one(999, agent: mock_agent, verbose: false) end)
 
       assert is_nil(result)
     end
 
     test "skips API key check for mock agent in run_one", %{mock_agent: mock_agent} do
       without_api_keys(fn ->
-        result = JsonTestRunner.run_one(1, agent: mock_agent, verbose: false)
+        {result, _} =
+          with_io(fn -> JsonTestRunner.run_one(1, agent: mock_agent, verbose: false) end)
 
         assert is_map(result)
         assert result.index == 1

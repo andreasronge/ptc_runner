@@ -171,7 +171,11 @@ defmodule Mix.Tasks.AggregateTest do
         # Write invalid JSON
         File.write!(Path.join(temp_dir, "invalid.json"), "not valid json {{{")
 
-        {:ok, result} = Aggregate.aggregate_reports(temp_dir)
+        # Capture the warning output so it doesn't pollute test output
+        {result, _io} =
+          ExUnit.CaptureIO.with_io(fn -> Aggregate.aggregate_reports(temp_dir) end)
+
+        {:ok, result} = result
 
         # Should still produce a report from the valid files
         assert String.contains?(result, "# Benchmark Aggregate Report")
