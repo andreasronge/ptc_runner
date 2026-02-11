@@ -41,7 +41,7 @@ data/products                      ; read-only input data
 - No `if` without else — use `(if x y nil)` or `when`
 - No chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - No `some` — use `(first (filter pred coll))`
-- `for` — basic list comprehension only (no `:let`, `:when`, `:while` modifiers): `(for [x xs] (* x 2))`
+- `for` — list comprehension with `:when`, `:let`, `:while` modifiers: `(for [x xs :when (odd? x)] (* x 2))`
 - No regex literals (`#"..."`) — use `(re-pattern "...")` with `re-find`/`re-matches`/`re-split`
 - `loop/recur` limited to 1000 iterations
 - No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!`, `doseq` — use `reduce`:
@@ -94,7 +94,7 @@ data/products                      ; read-only input data
 
 **Threading & Iteration:**
 - ✗ `(-> coll (filter f))` → ✓ `(->> coll (filter f))` — use `->>` for collections
-- ✗ `(for [x xs :when (odd? x)] ...)` → ✓ `(for [x (filter odd? xs)] ...)` — no `:when` modifier
+- `(for [x xs :when (odd? x)] ...)` — `:when`, `:let`, `:while` modifiers supported
 - ✗ `(doseq [x xs] (swap! acc ...))` → ✓ `(reduce (fn [acc x] ...) {} xs)`
 
 ### Not Available from Clojure

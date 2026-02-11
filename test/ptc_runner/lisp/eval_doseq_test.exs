@@ -71,11 +71,68 @@ defmodule PtcRunner.Lisp.EvalDoseqTest do
     end
   end
 
+  describe "doseq - :when modifier" do
+    test "basic filtering" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2 3 4 5] :when (odd? x)] (println x))")
+
+      assert prints == ["1", "3", "5"]
+    end
+
+    test "all filtered out" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2] :when false] (println x))")
+
+      assert prints == []
+    end
+
+    test ":when on inner binding" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2] y [3 4 5] :when (even? y)] (println x y))")
+
+      assert prints == ["1 4", "2 4"]
+    end
+  end
+
+  describe "doseq - :let modifier" do
+    test "basic let" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2 3] :let [y (* x 10)]] (println y))")
+
+      assert prints == ["10", "20", "30"]
+    end
+  end
+
+  describe "doseq - :while modifier" do
+    test "basic while" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2 3 4 5] :while (< x 4)] (println x))")
+
+      assert prints == ["1", "2", "3"]
+    end
+
+    test "on inner binding only stops inner" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2] y [10 20 30] :while (< y 25)] (println x y))")
+
+      assert prints == ["1 10", "1 20", "2 10", "2 20"]
+    end
+  end
+
+  describe "doseq - combined modifiers" do
+    test ":when + :let" do
+      assert {:ok, %Step{prints: prints}} =
+               Lisp.run("(doseq [x [1 2 3 4] :when (odd? x) :let [y (* x 10)]] (println y))")
+
+      assert prints == ["10", "30"]
+    end
+  end
+
   describe "doseq error handling" do
     test "odd number of bindings" do
       assert {:error, %Step{fail: fail}} = Lisp.run("(doseq [x] (println x))")
-      assert fail.reason == :invalid_arity
-      assert fail.message =~ "requires pairs of [binding collection], got 1 element"
+      assert fail.reason == :invalid_form
+      assert fail.message =~ "trailing element"
     end
 
     test "non-vector bindings" do
@@ -84,10 +141,10 @@ defmodule PtcRunner.Lisp.EvalDoseqTest do
       assert fail.message =~ "expected (doseq [bindings] body ...)"
     end
 
-    test "unknown doseq modifier" do
-      assert {:error, %Step{fail: fail}} = Lisp.run("(doseq [x [1 2] :let [y 10]] (println x))")
-      assert fail.reason == :invalid_arity
-      assert fail.message =~ "doseq modifier :let is not supported"
+    test "unknown modifier keyword" do
+      assert {:error, %Step{fail: fail}} = Lisp.run("(doseq [x [1 2] :whend true] (println x))")
+      assert fail.reason == :invalid_form
+      assert fail.message =~ "unknown modifier :whend"
     end
 
     test "body missing" do

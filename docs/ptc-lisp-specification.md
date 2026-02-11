@@ -948,7 +948,35 @@ To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive call
 (for [x [1 2 3]] (inc x))  ; => [2 3 4]
 ```
 
-> **Note:** Modifiers (`:let`, `:when`, `:while`) are not supported in this version.
+**Modifiers:** `:when`, `:let`, and `:while` follow a binding pair and modify iteration:
+
+```clojure
+;; :when — filter elements (skip on false, continue iterating)
+(for [x [1 2 3 4 5] :when (odd? x)] x)
+; => [1 3 5]
+
+;; :let — introduce local bindings
+(for [x [1 2 3] :let [y (* x 10)]] y)
+; => [10 20 30]
+
+;; :while — stop iterating at this level when false
+(for [x [1 2 3 4 5] :while (< x 4)] x)
+; => [1 2 3]
+
+;; Combined: modifiers apply in declaration order
+(for [x [1 2 3 4] :when (odd? x) :let [y (* x 10)]] y)
+; => [10 30]
+
+;; :let visible to subsequent :when
+(for [x [1 2 3] :let [y (* x 2)] :when (> y 3)] y)
+; => [4 6]
+
+;; :while on inner binding only stops inner loop
+(for [x [1 2] y [10 20 30] :while (< y 25)] [x y])
+; => [[1 10] [1 20] [2 10] [2 20]]
+```
+
+Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuring.
 
 ### 5.13 `task` — Journaled Task Execution
 
