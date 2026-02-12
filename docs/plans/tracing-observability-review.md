@@ -318,7 +318,7 @@ All 5 items completed. Reviewed against documentation-guidelines.md.
 
 ### Phase 4: Architecture (HIGH effort, long-term)
 
-17. Formal context API — wrap process dictionary access behind a module
+17. ~~Formal context API~~ — `PtcRunner.TraceContext` module wraps all process dictionary access
 18. Evaluate if Tracer struct is still needed vs TraceLog
 19. ETS-backed bounded storage for high-throughput scenarios
 20. Trace file rotation — configurable max file size + count

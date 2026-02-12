@@ -52,8 +52,9 @@ defmodule PtcRunner.SubAgent.Telemetry do
   Convert to milliseconds with `System.convert_time_unit(duration, :native, :millisecond)`.
   """
 
+  alias PtcRunner.TraceContext
+
   @prefix [:ptc_runner, :sub_agent]
-  @span_stack_key :ptc_telemetry_span_stack
 
   @doc """
   Execute a function within a telemetry span.
@@ -77,7 +78,7 @@ defmodule PtcRunner.SubAgent.Telemetry do
   @spec span(list(atom()), map(), (-> {any(), map()} | {any(), map(), map()})) :: any()
   def span(event_suffix, start_meta, fun) when is_list(event_suffix) and is_function(fun, 0) do
     span_id = generate_span_id()
-    parent_span_id = push_span(span_id)
+    parent_span_id = TraceContext.push_span(span_id)
 
     span_meta = %{span_id: span_id, parent_span_id: parent_span_id}
     start_meta_with_span = Map.merge(start_meta, span_meta)
@@ -96,7 +97,7 @@ defmodule PtcRunner.SubAgent.Telemetry do
     try do
       :telemetry.span(@prefix ++ event_suffix, start_meta_with_span, wrapped_fun)
     after
-      pop_span()
+      TraceContext.pop_span()
     end
   end
 
@@ -114,7 +115,7 @@ defmodule PtcRunner.SubAgent.Telemetry do
   """
   @spec emit(list(atom()), map(), map()) :: :ok
   def emit(event_suffix, measurements \\ %{}, metadata) when is_list(event_suffix) do
-    metadata_with_span = Map.merge(metadata, current_span_context())
+    metadata_with_span = Map.merge(metadata, TraceContext.span_context())
     :telemetry.execute(@prefix ++ event_suffix, measurements, metadata_with_span)
   end
 
@@ -134,10 +135,7 @@ defmodule PtcRunner.SubAgent.Telemetry do
   """
   @spec current_span_id() :: String.t() | nil
   def current_span_id do
-    case Process.get(@span_stack_key, []) do
-      [current | _] -> current
-      [] -> nil
-    end
+    TraceContext.current_span_id()
   end
 
   @doc """
@@ -163,47 +161,12 @@ defmodule PtcRunner.SubAgent.Telemetry do
 
   """
   @spec set_parent_span(String.t() | nil) :: :ok
-  def set_parent_span(nil), do: :ok
-
-  def set_parent_span(parent_span_id) when is_binary(parent_span_id) do
-    # Only set if stack is empty (don't override existing context)
-    case Process.get(@span_stack_key, []) do
-      [] -> Process.put(@span_stack_key, [parent_span_id])
-      _ -> :ok
-    end
-
-    :ok
+  def set_parent_span(parent_span_id) do
+    TraceContext.set_parent_span(parent_span_id)
   end
 
   # Generate an 8-character hex span ID
   defp generate_span_id do
     :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
-  end
-
-  # Push a new span onto the stack, returning the parent span ID
-  defp push_span(span_id) do
-    stack = Process.get(@span_stack_key, [])
-    parent_span_id = List.first(stack)
-    Process.put(@span_stack_key, [span_id | stack])
-    parent_span_id
-  end
-
-  # Pop the current span from the stack
-  defp pop_span do
-    case Process.get(@span_stack_key, []) do
-      [_current | rest] -> Process.put(@span_stack_key, rest)
-      [] -> :ok
-    end
-  end
-
-  # Get the current span context for emit/3
-  defp current_span_context do
-    case Process.get(@span_stack_key, []) do
-      [current | rest] ->
-        %{span_id: current, parent_span_id: List.first(rest)}
-
-      [] ->
-        %{span_id: nil, parent_span_id: nil}
-    end
   end
 end

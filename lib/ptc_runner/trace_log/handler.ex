@@ -5,7 +5,7 @@ defmodule PtcRunner.TraceLog.Handler do
   This handler attaches to all SubAgent telemetry events and forwards them
   to the Collector for writing to a JSONL file. Events are filtered by
   process - only events from processes that have an active collector in
-  their collector stack (`:ptc_trace_collectors`) are captured.
+  their `TraceContext` collector stack are captured.
 
   Nested traces are supported - events are captured by all active collectors
   in the stack.
@@ -13,6 +13,7 @@ defmodule PtcRunner.TraceLog.Handler do
 
   require Logger
 
+  alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog.{Collector, Event}
 
   @events [
@@ -97,17 +98,16 @@ defmodule PtcRunner.TraceLog.Handler do
   Handles a telemetry event.
 
   Events are only captured if the calling process has the config's collector
-  in its active collector stack (`:ptc_trace_collectors`).
+  in its active `TraceContext` collector stack.
 
   This function never raises - errors are logged at debug level to avoid
   crashing the caller's execution.
   """
   @spec handle_event(list(atom()), map(), map(), map()) :: :ok
   def handle_event(event, measurements, metadata, config) do
-    collectors = Process.get(:ptc_trace_collectors, [])
     config_collector = config.collector
 
-    if config_collector in collectors do
+    if config_collector in TraceContext.collectors() do
       do_handle_event(event, measurements, metadata, config)
     else
       :ok
