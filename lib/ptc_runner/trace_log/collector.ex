@@ -15,7 +15,7 @@ defmodule PtcRunner.TraceLog.Collector do
 
   alias PtcRunner.TraceLog.Event
 
-  defstruct [:file, :path, :trace_id, :meta, :write_errors, :start_time]
+  defstruct [:file, :path, :trace_id, :meta, :write_errors, :start_time, :parent_ref]
 
   @type t :: %__MODULE__{
           file: File.io_device() | nil,
@@ -23,7 +23,8 @@ defmodule PtcRunner.TraceLog.Collector do
           trace_id: String.t(),
           meta: map(),
           write_errors: non_neg_integer(),
-          start_time: integer()
+          start_time: integer(),
+          parent_ref: reference() | nil
         }
 
   @doc """
@@ -42,7 +43,11 @@ defmodule PtcRunner.TraceLog.Collector do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts)
+    # Use start (not start_link) to decouple from the parent process.
+    # With start_link, OTP's gen_server terminates the Collector when the
+    # parent dies (e.g., Task.async_stream :kill_task), bypassing handle_info.
+    # Instead, we monitor the parent and auto-cleanup on parent death.
+    GenServer.start(__MODULE__, [{:parent, self()} | opts])
   end
 
   @doc """
@@ -106,6 +111,7 @@ defmodule PtcRunner.TraceLog.Collector do
     trace_id = Keyword.get(opts, :trace_id) || generate_trace_id()
     path = Keyword.get(opts, :path) || default_path(trace_id)
     meta = Keyword.get(opts, :meta, %{})
+    parent = Keyword.get(opts, :parent)
 
     # Ensure parent directory exists
     path |> Path.dirname() |> File.mkdir_p!()
@@ -113,6 +119,9 @@ defmodule PtcRunner.TraceLog.Collector do
     # Trap exits so terminate/2 is called on shutdown and
     # file device crashes become messages instead of killing us.
     Process.flag(:trap_exit, true)
+
+    # Monitor the parent so we auto-cleanup when it dies
+    parent_ref = if parent, do: Process.monitor(parent)
 
     case File.open(path, [:write, :utf8]) do
       {:ok, file} ->
@@ -122,7 +131,8 @@ defmodule PtcRunner.TraceLog.Collector do
           trace_id: trace_id,
           meta: meta,
           write_errors: 0,
-          start_time: System.monotonic_time(:millisecond)
+          start_time: System.monotonic_time(:millisecond),
+          parent_ref: parent_ref
         }
 
         # Write initial metadata event
@@ -158,16 +168,7 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   def handle_call(:stop, _from, state) do
-    # Write trace.stop event with total duration before closing
-    duration_ms = System.monotonic_time(:millisecond) - state.start_time
-
-    try do
-      write_stop_event(state, duration_ms)
-    rescue
-      _ -> :ok
-    end
-
-    File.close(state.file)
+    close_file(state)
     {:stop, :normal, {:ok, state.path, state.write_errors}, %{state | file: nil}}
   end
 
@@ -182,6 +183,15 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{parent_ref: ref} = state)
+      when ref != nil do
+    # Parent process died (e.g., killed by Task.async_stream timeout).
+    # Close the file gracefully so the trace data is preserved,
+    # then stop since nobody will call stop/1.
+    close_file(state)
+    {:stop, :normal, %{state | file: nil, parent_ref: nil}}
+  end
+
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
 
   @impl true
@@ -192,6 +202,20 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   # Private helpers
+
+  defp close_file(%{file: nil}), do: :ok
+
+  defp close_file(state) do
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+    try do
+      write_stop_event(state, duration_ms)
+    rescue
+      _ -> :ok
+    end
+
+    File.close(state.file)
+  end
 
   defp generate_trace_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
