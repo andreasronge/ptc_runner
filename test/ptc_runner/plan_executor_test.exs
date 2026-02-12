@@ -316,7 +316,11 @@ defmodule PtcRunner.PlanExecutorTest do
       end
 
       {:error, reason, metadata} =
-        PlanExecutor.execute(plan, "Broken mission", llm: mock_llm, max_turns: 1)
+        PlanExecutor.execute(plan, "Broken mission",
+          llm: mock_llm,
+          max_turns: 1,
+          max_total_replans: 0
+        )
 
       assert {:task_failed, "broken", _} = reason
       assert metadata.execution_attempts == 1
