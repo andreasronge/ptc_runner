@@ -49,11 +49,34 @@ v0.6: Language, Composition & Tracing ✅
   Utilities:
   - PtcRunner.Chunker for text chunking
 
-v0.7: Meta Planner
+v0.7: Plan & Execute, Tracing, Language ✅
+  Plan System & Multi-Agent Orchestration:
+  - MetaPlanner with trial & error replanning
+  - PlanRunner / PlanExecutor for multi-agent workflows
+  - Per-task quality gates with evidence-based verification
+  - Direct agent for LLM-free task execution
+
   Journaled Task System:
   - (task id expr) - idempotent journaled execution
   - Journal: pure map passed via context, returned in Step.journal
-  - Implicit re-planning: LLM re-navigates from journal state each turn
+  - step-done, task-reset forms and plan progress tracking
+
+  Tracing & Observability:
+  - ptc_viewer web UI (DAG graph, Gantt timeline, execution tree)
+  - Cross-process trace propagation (TraceContext)
+  - PlanTracer for plan-layer telemetry
+
+  PTC-Lisp:
+  - Tree traversal (walk, prewalk, postwalk, tree-seq)
+  - boolean, type builtins; :when/:let/:while for for/doseq
+  - Map support for take/drop/distinct family
+  - Removed PTC-JSON language
+
+  SubAgent:
+  - thinking option, prompt caching (Anthropic/OpenRouter/Bedrock)
+  - Configurable sandbox limits via application env
+  - Unified builtin_tools, tool result caching
+  - return_retries renamed to retry_turns
 
   Architecture: Pure library, developer owns persistence
 
