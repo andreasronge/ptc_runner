@@ -312,6 +312,51 @@ defmodule PtcRunner.TraceLog.CollectorTest do
     end
   end
 
+  describe "parent process killed (Task.async_stream :kill_task)" do
+    test "collector closes file cleanly when parent is killed", %{tmp_dir: dir} do
+      path = Path.join(dir, "test.jsonl")
+      test_pid = self()
+
+      # Simulate PlanRunner's Task.async_stream with on_timeout: :kill_task.
+      # The task spawns a Collector via start_link, then gets killed by the stream timeout.
+      # Before the fix, this caused:
+      #   GenServer #PID<...> terminating
+      #   ** (stop) killed
+      #   Last message: {:EXIT, #PID<...>, :killed}
+      results =
+        [1]
+        |> Task.async_stream(
+          fn _ ->
+            {:ok, collector} = Collector.start_link(path: path)
+            send(test_pid, {:collector, collector})
+
+            # Simulate long-running work that exceeds the timeout
+            Process.sleep(:infinity)
+          end,
+          timeout: 50,
+          on_timeout: :kill_task
+        )
+        |> Enum.to_list()
+
+      # Task was killed
+      assert [{:exit, :timeout}] = results
+
+      # Get the collector PID and wait for it to shut down cleanly
+      assert_receive {:collector, collector}
+      ref = Process.monitor(collector)
+      assert_receive {:DOWN, ^ref, :process, ^collector, :normal}, 1000
+
+      # Trace file should contain valid data (trace.start + trace.stop)
+      content = File.read!(path)
+      lines = String.split(content, "\n", trim: true)
+      assert length(lines) >= 2
+
+      event_types = Enum.map(lines, fn line -> Jason.decode!(line)["event"] end)
+      assert "trace.start" in event_types
+      assert "trace.stop" in event_types
+    end
+  end
+
   # Erlang :logger handler that forwards log events to a test process
   defmodule LogForwarder do
     @moduledoc false
