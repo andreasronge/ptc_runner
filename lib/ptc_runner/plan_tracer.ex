@@ -48,6 +48,9 @@ defmodule PtcRunner.PlanTracer do
   - Red (✗): Task failures
   - Cyan (-): Skipped tasks
   - Bold: Mission and replan headers
+
+  See the [Observability Guide](subagent-observability.md) for turn history, telemetry events,
+  and how PlanTracer relates to `PtcRunner.Tracer` and `PtcRunner.TraceLog`.
   """
 
   use Agent

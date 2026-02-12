@@ -68,6 +68,7 @@ defmodule PtcRunner.TraceLog do
   - `PtcRunner.TraceLog.Analyzer` - Load and analyze trace files
   - `PtcRunner.TraceLog.Collector` - Low-level file writing
   - `PtcRunner.TraceLog.Handler` - Telemetry handler
+  - [Observability Guide](subagent-observability.md) - How TraceLog relates to `PtcRunner.Tracer` and `PtcRunner.PlanTracer`
   """
 
   alias PtcRunner.SubAgent.Telemetry
