@@ -53,6 +53,18 @@ lib/ptc_runner/
 - **Problem**: Tool events are emitted both inside the sandbox process (via `wrap_with_telemetry` in tool_normalizer) AND re-emitted post-sandbox via `emit_tool_telemetry/2`. Every tool call generates 2x start + 2x stop events. Tests explicitly expect this duplication (`telemetry_test.exs:473`).
 - **Solution**: Now that sandbox trace propagation works (via `TraceLog.join` in `sandbox.ex:91-92`), remove the post-sandbox re-emission and rely solely on the in-sandbox span events. Update tests accordingly.
 
+#### F20: Missing `replan.stop` telemetry on error paths
+- **File**: `lib/ptc_runner/plan_executor.ex:589-614`
+- **Severity**: HIGH | **Effort**: LOW
+- **Problem**: `do_replan/5` emits `[:ptc_runner, :plan_executor, :replan, :start]` telemetry at line 541, but `[:ptc_runner, :plan_executor, :replan, :stop]` is only emitted on the success path (line 567-572). The two error branches (`{:error, {:repair_plan_invalid, ...}}` and `{:error, reason}`) skip the stop event entirely, leaving an unpaired `replan.start` in the trace. Confirmed in real trace: `examples/page_index/traces/minimal_1770885465.jsonl` line 123 has `replan.start` with no matching `replan.stop`.
+- **Solution**: Emit `[:ptc_runner, :plan_executor, :replan, :stop]` on all exit paths of `do_replan/5`, including error branches. Include `status: :error` and the error reason in metadata.
+
+#### F21: `execution.stop` metadata stale after replan failure
+- **File**: `lib/ptc_runner/plan_executor.ex:596`
+- **Severity**: HIGH | **Effort**: LOW
+- **Problem**: On the replan error paths, `build_metadata(state, state.completed_results)` is called with `state` before `replan_count` is incremented (increment only happens on success at line 582). This produces `replan_count: 0` in the `execution.stop` event even though a replan was attempted. The `results` and `task_ids` fields are also empty because the error path uses the pre-replan state. Confirmed in real trace: line 136 shows `execution.stop` with `replan_count: 0`, `results: {}`, `task_ids: []` despite a replan having occurred.
+- **Solution**: Update `replan_count` and merge `completed_results` in state before calling `build_metadata` on error paths, or pass adjusted values directly.
+
 ### MEDIUM Priority
 
 #### F6: `with_trace` double-stop masks errors
@@ -280,28 +292,35 @@ Additional fixes applied during review:
 - Updated `subagent-observability.md` Known Limitations (tool events are now captured)
 - Updated `trace_log.ex` moduledoc about sandbox trace propagation
 
-### Phase 2: Configuration (LOW-MEDIUM effort)
+### Phase 1b: Quick Wins from Trace Sanity Check (LOW effort, HIGH impact) — DONE
 
-6. Make sanitization limits runtime-configurable via Application env
-7. Make `preserve_full_keys` configurable
-8. Add configurable default trace directory
-9. Add `max_entries` option to Tracer with sensible default
+6. ~~Fix missing `replan.stop` telemetry on error paths (F20)~~ — Both error branches now emit `replan.stop` with `status: :error`
+7. ~~Fix stale `execution.stop` metadata after replan failure (F21)~~ — Error paths use merged `completed_results` and incremented `replan_count`
+
+### Phase 2: Configuration (LOW-MEDIUM effort) — DONE
+
+All 4 items completed. Changes verified: 3755 tests, 0 failures, credo clean, dialyzer clean.
+
+8. ~~Make sanitization limits runtime-configurable~~ — `:trace_max_string_size` and `:trace_max_list_size` via Application env
+9. ~~Make `preserve_full_keys` configurable~~ — `:trace_preserve_full_keys` via Application env
+10. ~~Add configurable default trace directory~~ — `:trace_dir` via Application env, falls back to CWD
+11. ~~Add `max_entries` option to Tracer~~ — `Tracer.new(max_entries: 1000)`, tracks count to avoid `length/1`
 
 ### Phase 3: Documentation (MEDIUM effort)
 
-10. Add PlanTracer section to observability guide
-11. Add `mix ptc.viewer` section to observability guide
-12. Document PlanExecutor telemetry events in guide
-13. Add architecture doc explaining Tracer vs TraceLog vs PlanTracer
-14. Fix TraceLog.Event doctests — add `doctest` line to test file
+12. Add PlanTracer section to observability guide
+13. Add `mix ptc.viewer` section to observability guide
+14. Document PlanExecutor telemetry events in guide
+15. Add architecture doc explaining Tracer vs TraceLog vs PlanTracer
+16. Fix TraceLog.Event doctests — add `doctest` line to test file
 
 ### Phase 4: Architecture (HIGH effort, long-term)
 
-15. Formal context API — wrap process dictionary access behind a module
-16. Evaluate if Tracer struct is still needed vs TraceLog
-17. ETS-backed bounded storage for high-throughput scenarios
-18. Trace file rotation — configurable max file size + count
-19. Optional `opentelemetry_ptc_runner` bridge package (when demand warrants)
+17. Formal context API — wrap process dictionary access behind a module
+18. Evaluate if Tracer struct is still needed vs TraceLog
+19. ETS-backed bounded storage for high-throughput scenarios
+20. Trace file rotation — configurable max file size + count
+21. Optional `opentelemetry_ptc_runner` bridge package (when demand warrants)
 
 ---
 
@@ -313,3 +332,5 @@ Additional fixes applied during review:
 - No tests for `TraceLog.join/2` cross-process propagation
 - No stress tests for high-volume event scenarios
 - No tests for `Analyzer.load_tree` cycle detection
+- ~~No test verifying `replan.stop` is emitted on replan error paths (F20)~~ — Added in Phase 1b (3 tests)
+- ~~No test verifying `execution.stop` metadata accuracy after replan failure (F21)~~ — Added in Phase 1b

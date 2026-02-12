@@ -646,4 +646,74 @@ defmodule PtcRunner.TracerTest do
       assert summary.total_duration_ms == 5000
     end
   end
+
+  describe "max_entries" do
+    test "nil max_entries allows unlimited entries" do
+      tracer = Tracer.new()
+
+      tracer =
+        Enum.reduce(1..100, tracer, fn i, acc ->
+          Tracer.add_entry(acc, %{type: :llm_call, data: %{turn: i}})
+        end)
+
+      assert tracer.entry_count == 100
+      assert length(tracer.entries) == 100
+    end
+
+    test "max_entries bounds the number of entries" do
+      tracer = Tracer.new(max_entries: 3)
+
+      tracer =
+        Enum.reduce(1..10, tracer, fn i, acc ->
+          Tracer.add_entry(acc, %{type: :llm_call, data: %{turn: i}})
+        end)
+
+      assert tracer.entry_count == 3
+      assert length(tracer.entries) == 3
+    end
+
+    test "max_entries keeps newest entries and drops oldest" do
+      tracer = Tracer.new(max_entries: 3)
+
+      tracer =
+        Enum.reduce(1..5, tracer, fn i, acc ->
+          Tracer.add_entry(acc, %{type: :llm_call, data: %{turn: i}})
+        end)
+
+      # Entries are stored newest-first (prepended), so after finalize they are chronological
+      result = Tracer.finalize(tracer)
+      turns = Enum.map(result.entries, & &1.data.turn)
+
+      # Newest 3 entries should be kept: turns 3, 4, 5
+      assert turns == [3, 4, 5]
+    end
+
+    test "max_entries of 1 keeps only the latest entry" do
+      tracer = Tracer.new(max_entries: 1)
+
+      tracer =
+        tracer
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 2}})
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 3}})
+
+      assert tracer.entry_count == 1
+      assert hd(tracer.entries).data.turn == 3
+    end
+
+    test "entries/1 returns correct order with max_entries" do
+      tracer = Tracer.new(max_entries: 2)
+
+      tracer =
+        tracer
+        |> Tracer.add_entry(%{type: :llm_call, data: %{turn: 1}})
+        |> Tracer.add_entry(%{type: :llm_response, data: %{turn: 2}})
+        |> Tracer.add_entry(%{type: :tool_call, data: %{turn: 3}})
+
+      entries = Tracer.entries(tracer)
+      turns = Enum.map(entries, & &1.data.turn)
+
+      assert turns == [2, 3]
+    end
+  end
 end

@@ -261,6 +261,57 @@ defmodule PtcRunner.TraceLog.CollectorTest do
     end
   end
 
+  describe "configurable trace directory" do
+    test "uses configured :trace_dir for default path", %{tmp_dir: dir} do
+      trace_dir = Path.join(dir, "custom_traces")
+      Application.put_env(:ptc_runner, :trace_dir, trace_dir)
+
+      try do
+        {:ok, collector} = Collector.start_link()
+        path = Collector.path(collector)
+
+        assert String.starts_with?(path, trace_dir)
+        assert String.ends_with?(path, ".jsonl")
+        assert File.exists?(path)
+
+        Collector.stop(collector)
+      after
+        Application.delete_env(:ptc_runner, :trace_dir)
+      end
+    end
+
+    test "uses CWD when :trace_dir is not configured", %{tmp_dir: _dir} do
+      Application.delete_env(:ptc_runner, :trace_dir)
+
+      {:ok, collector} = Collector.start_link()
+      path = Collector.path(collector)
+
+      # Default path is just a filename (relative to CWD, no directory prefix)
+      refute String.contains?(Path.basename(path), "/")
+      assert String.starts_with?(Path.basename(path), "trace_")
+
+      Collector.stop(collector)
+      File.rm(path)
+    end
+
+    test "creates trace_dir if it doesn't exist", %{tmp_dir: dir} do
+      trace_dir = Path.join([dir, "new", "nested", "dir"])
+      Application.put_env(:ptc_runner, :trace_dir, trace_dir)
+
+      try do
+        {:ok, collector} = Collector.start_link()
+        path = Collector.path(collector)
+
+        assert File.dir?(trace_dir)
+        assert File.exists?(path)
+
+        Collector.stop(collector)
+      after
+        Application.delete_env(:ptc_runner, :trace_dir)
+      end
+    end
+  end
+
   # Erlang :logger handler that forwards log events to a test process
   defmodule LogForwarder do
     @moduledoc false

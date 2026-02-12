@@ -31,7 +31,8 @@ defmodule PtcRunner.TraceLog.Collector do
 
   ## Options
 
-    * `:path` - File path for the JSONL output. Defaults to a timestamped file in the current directory.
+    * `:path` - File path for the JSONL output. Defaults to a timestamped file in the
+      directory configured by `Application.get_env(:ptc_runner, :trace_dir)`, or CWD if unset.
     * `:trace_id` - Unique identifier for this trace. Defaults to a random hex string.
     * `:meta` - Additional metadata to include with the trace. Defaults to `%{}`.
 
@@ -198,7 +199,12 @@ defmodule PtcRunner.TraceLog.Collector do
 
   defp default_path(trace_id) do
     timestamp = DateTime.utc_now() |> DateTime.to_iso8601(:basic)
-    "trace_#{timestamp}_#{String.slice(trace_id, 0, 8)}.jsonl"
+    filename = "trace_#{timestamp}_#{String.slice(trace_id, 0, 8)}.jsonl"
+
+    case Application.get_env(:ptc_runner, :trace_dir) do
+      nil -> filename
+      dir -> Path.join(dir, filename)
+    end
   end
 
   defp write_meta_event(state) do
