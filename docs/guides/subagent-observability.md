@@ -115,24 +115,6 @@ SubAgent.run(agent, llm: llm, trace: :on_error)
 SubAgent.run(agent, llm: llm, trace: false)
 ```
 
-## Message Compression
-
-By default, multi-turn agents send full conversation history to the LLM. Enable compression to reduce token usage:
-
-```elixir
-SubAgent.run(agent, llm: llm, compression: true)
-```
-
-To see what the LLM receives with compression:
-
-```elixir
-SubAgent.Debug.print_trace(step, view: :compressed)
-```
-
-Full turn history is always preserved in `step.turns` regardless of compression.
-
-> **Full guide:** See [Message Compression](subagent-compression.md) for details on how compression works and implementing custom strategies.
-
 ## TraceLog
 
 For detailed offline analysis, use `PtcRunner.TraceLog.with_trace/2` to capture execution events to JSONL files:
@@ -244,9 +226,24 @@ Limit in-memory Tracer entries with `PtcRunner.Tracer.new/1`:
 Tracer.new(max_entries: 100)
 ```
 
-### Known Limitations
+### Cross-Process Context
 
-Tool telemetry events (`tool.start`, `tool.stop`) are captured from inside the sandboxed process via trace collector propagation (`TraceLog.join/2`). All event types (`run`, `turn`, `llm`, `tool`) are captured correctly.
+Trace context (collectors and span hierarchy) is managed by `PtcRunner.TraceContext`.
+When execution spans multiple processes (sandbox, `pmap`, `pcalls`), use
+`PtcRunner.TraceContext.capture/0` and `PtcRunner.TraceContext.attach/1` to propagate
+context to child processes. The sandbox and parallel execution primitives do this
+automatically.
+
+For manual propagation in custom code:
+
+```elixir
+ctx = PtcRunner.TraceContext.capture()
+
+Task.async(fn ->
+  PtcRunner.TraceContext.attach(ctx)
+  # Events from this process are now captured and linked to the parent span
+end)
+```
 
 > **Full API:** See `PtcRunner.TraceLog.with_trace/2`, `PtcRunner.TraceLog.Analyzer.summary/1`, and `PtcRunner.TraceLog.Analyzer.export_chrome_trace/2`.
 

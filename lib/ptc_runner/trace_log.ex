@@ -72,6 +72,7 @@ defmodule PtcRunner.TraceLog do
   """
 
   alias PtcRunner.SubAgent.Telemetry
+  alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog.{Collector, Handler}
 
   @doc """
@@ -106,10 +107,7 @@ defmodule PtcRunner.TraceLog do
     Handler.attach(handler_id, collector, trace_id, meta)
 
     # Push collector onto stack (supports nested traces)
-    existing_collectors = Process.get(:ptc_trace_collectors, [])
-    existing_handlers = Process.get(:ptc_trace_handler_ids, [])
-    Process.put(:ptc_trace_collectors, [collector | existing_collectors])
-    Process.put(:ptc_trace_handler_ids, [handler_id | existing_handlers])
+    TraceContext.push_collector(collector, handler_id)
 
     {:ok, collector}
   end
@@ -127,42 +125,15 @@ defmodule PtcRunner.TraceLog do
   """
   @spec stop(pid()) :: {:ok, String.t(), non_neg_integer()}
   def stop(collector) do
-    # Pop collector from stack (supports nested traces)
-    collectors = Process.get(:ptc_trace_collectors, [])
-    handlers = Process.get(:ptc_trace_handler_ids, [])
+    # Remove collector from stack (supports nested traces and out-of-order stops)
+    case TraceContext.remove_collector(collector) do
+      {_collector, handler_id} ->
+        Handler.detach(handler_id)
+        Collector.stop(collector)
 
-    {handler_id, found} =
-      case {collectors, handlers} do
-        {[^collector | rest_collectors], [h | rest_handlers]} ->
-          Process.put(:ptc_trace_collectors, rest_collectors)
-          Process.put(:ptc_trace_handler_ids, rest_handlers)
-          {h, true}
-
-        _ ->
-          # Collector not at top of stack - find and remove it
-          idx = Enum.find_index(collectors, &(&1 == collector))
-
-          if idx do
-            {new_collectors, _} = List.pop_at(collectors, idx)
-            {handler, _new_handlers} = List.pop_at(handlers, idx)
-            Process.put(:ptc_trace_collectors, new_collectors)
-            Process.put(:ptc_trace_handler_ids, List.delete_at(handlers, idx))
-            {handler, true}
-          else
-            {nil, false}
-          end
-      end
-
-    if handler_id do
-      Handler.detach(handler_id)
-    end
-
-    # Only call Collector.stop if we found the collector (idempotent)
-    if found do
-      Collector.stop(collector)
-    else
-      # Collector already stopped, return a default result
-      {:ok, "unknown", 0}
+      nil ->
+        # Collector already stopped, return a default result
+        {:ok, "unknown", 0}
     end
   end
 
@@ -222,10 +193,7 @@ defmodule PtcRunner.TraceLog do
   """
   @spec current_collector() :: pid() | nil
   def current_collector do
-    case Process.get(:ptc_trace_collectors, []) do
-      [collector | _] -> collector
-      [] -> nil
-    end
+    TraceContext.current_collector()
   end
 
   @doc """
@@ -235,7 +203,7 @@ defmodule PtcRunner.TraceLog do
   """
   @spec active_collectors() :: [pid()]
   def active_collectors do
-    Process.get(:ptc_trace_collectors, [])
+    TraceContext.collectors()
   end
 
   @doc """
@@ -284,16 +252,7 @@ defmodule PtcRunner.TraceLog do
   end
 
   def join(collectors, parent_span_id) when is_list(collectors) do
-    # Filter to only alive collectors (in case parent stopped tracing)
-    alive_collectors = Enum.filter(collectors, &Process.alive?/1)
-
-    if alive_collectors != [] do
-      # Merge with any existing collectors in this process
-      existing = Process.get(:ptc_trace_collectors, [])
-      # Deduplicate while preserving order (existing first, then new)
-      merged = Enum.uniq(existing ++ alive_collectors)
-      Process.put(:ptc_trace_collectors, merged)
-    end
+    TraceContext.merge_collectors(collectors)
 
     # Set up span hierarchy for proper parent-child relationships
     Telemetry.set_parent_span(parent_span_id)

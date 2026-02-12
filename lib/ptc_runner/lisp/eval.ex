@@ -26,8 +26,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.SubAgent.KeyNormalizer
-  alias PtcRunner.SubAgent.Telemetry
-  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceContext
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -429,8 +428,7 @@ defmodule PtcRunner.Lisp.Eval do
         callable_fn = value_to_erlang_fn(fn_val, eval_ctx2)
 
         # Capture trace context for propagation into worker processes
-        trace_collectors = TraceLog.active_collectors()
-        parent_span_id = Telemetry.current_span_id()
+        trace_ctx = TraceContext.capture()
 
         # Execute in parallel using Task.async_stream
         # Limit concurrency to available schedulers to prevent resource exhaustion
@@ -441,15 +439,16 @@ defmodule PtcRunner.Lisp.Eval do
           |> Task.async_stream(
             fn elem ->
               # Re-attach trace context in worker process
-              TraceLog.join(trace_collectors, parent_span_id)
+              TraceContext.attach(trace_ctx)
 
               try do
-                Process.delete(:last_child_trace_id)
-                Process.delete(:last_child_step)
+                TraceContext.take_child_result()
                 value = Callable.call(callable_fn, [elem])
-                trace_id = Process.get(:last_child_trace_id)
-                child_step = Process.get(:last_child_step)
-                {:ok, value, trace_id, child_step}
+
+                case TraceContext.take_child_result() do
+                  {trace_id, child_step} -> {:ok, value, trace_id, child_step}
+                  nil -> {:ok, value, nil, nil}
+                end
               rescue
                 e in PtcRunner.ToolExecutionError ->
                   {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
@@ -525,8 +524,7 @@ defmodule PtcRunner.Lisp.Eval do
             end)
 
           # Capture trace context for propagation into worker processes
-          trace_collectors = TraceLog.active_collectors()
-          parent_span_id = Telemetry.current_span_id()
+          trace_ctx = TraceContext.capture()
 
           # Execute all thunks in parallel using Task.async_stream
           # Limit concurrency to prevent resource exhaustion
@@ -536,15 +534,16 @@ defmodule PtcRunner.Lisp.Eval do
             |> Task.async_stream(
               fn {erlang_fn, idx} ->
                 # Re-attach trace context in worker process
-                TraceLog.join(trace_collectors, parent_span_id)
+                TraceContext.attach(trace_ctx)
 
                 try do
-                  Process.delete(:last_child_trace_id)
-                  Process.delete(:last_child_step)
+                  TraceContext.take_child_result()
                   value = erlang_fn.()
-                  trace_id = Process.get(:last_child_trace_id)
-                  child_step = Process.get(:last_child_step)
-                  {:ok, value, trace_id, idx, child_step}
+
+                  case TraceContext.take_child_result() do
+                    {trace_id, child_step} -> {:ok, value, trace_id, idx, child_step}
+                    nil -> {:ok, value, nil, idx, nil}
+                  end
                 rescue
                   e ->
                     {:error, {:pcalls_error, idx, Exception.message(e)}}
@@ -903,11 +902,10 @@ defmodule PtcRunner.Lisp.Eval do
           eval_ctx2
         end
 
-      # Metadata like child_trace_id is smuggled via Process.put to avoid polluting
+      # Metadata like child_trace_id is smuggled via TraceContext to avoid polluting
       # the Lisp value space with framework-internal wrappers.
       # This ensures tools always return data, not metadata, to the LLM.
-      if child_trace_id, do: Process.put(:last_child_trace_id, child_trace_id)
-      if child_step, do: Process.put(:last_child_step, child_step)
+      TraceContext.put_child_result(child_trace_id, child_step)
       {:ok, result, eval_ctx3}
     end
   end
