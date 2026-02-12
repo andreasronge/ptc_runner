@@ -115,7 +115,7 @@ mix ptc.viewer --trace-dir path/to/traces
 
 ```elixir
 def deps do
-  [{:ptc_runner, "~> 0.6.0"}]
+  [{:ptc_runner, "~> 0.7.0"}]
 end
 ```
 

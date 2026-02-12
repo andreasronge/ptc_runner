@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-02-12
+
+### Breaking Changes
+
+- Removed PTC-JSON language entirely (PTC-Lisp only)
+- Removed `CapabilityRegistry` module (no proven use case yet)
+- Removed redundant JSON CLI and `LispAgent` shim
+- Renamed `return_retries` to `retry_turns`
+
+### Added
+
+**Plan System & Multi-Agent Orchestration**
+
+- Plan system with `PlanRunner` and `PlanExecutor` for multi-agent workflows
+- `MetaPlanner` with trial & error replanning and replan-on-failure
+- Per-task quality gates with evidence-based verification and telemetry
+- Direct agent for LLM-free task execution
+- Upstream dependency result injection into task prompts
+- `--plan-only` / `--plan` CLI flags and Lisp syntax validation for plans
+
+**Journaled Task System**
+
+- `(task "id" expr)` — idempotent journaled execution with journal-based caching
+- Dynamic expressions as task IDs
+- `step-done` and `task-reset` forms with plan progress tracking
+- Journal preserved on error paths
+
+**PTC-Lisp Enhancements**
+
+- Tree traversal functions: `walk`, `prewalk`, `postwalk`, `tree-seq`
+- `boolean` and `type` built-in functions
+- `:when`, `:let`, `:while` modifiers for `for` and `doseq`
+- Map support for `take`, `drop`, and `distinct` family
+- Extended keyword chars for operator keywords (Clojure conformance)
+- `index-of` and `last-index-of` string builtins
+
+**Tracing & Observability**
+
+- `ptc_viewer` web UI with interactive DAG graph visualization
+- Gantt timeline for `pmap` parallel execution in trace viewer
+- Expandable execution tree for recursive traces
+- Turn pill badges and timeline overview
+- Cross-process trace propagation via `TraceContext` module
+- `PlanTracer` for plan-layer telemetry (phases, inputs, replan events)
+- Trace result preview increased to 64KB
+- `trace.stop` event with total duration on collector stop
+
+**SubAgent Improvements**
+
+- `thinking` option for SubAgent and demo CLI
+- Configurable sandbox timeout and heap limits via application env
+- Unified `builtin_tools` option (replaced `grep_tools`)
+- Tool result caching and `child_steps` accumulation
+- Pre-execution checks for undefined vars and unknown tools
+- Prompt caching support for Anthropic, OpenRouter, and Bedrock
+
+**Examples & Documentation**
+
+- `page_index` example for hierarchical document retrieval with benchmarks
+- `supply_watchdog` example project
+- Meta Planner guide, Navigator guide, observability guide
+- Plan-and-execute livebook and capability registry livebook
+
+### Changed
+
+- Centralized builtin tool injection into `SubAgent.effective_tools/1`
+- Replaced `find_undefined_vars` with `Lisp.validate/1`
+- Extracted `TraceContext` module for centralized trace propagation
+- Refactored to use `Prompts` module for SubAgent loop
+- Simplified `LanguageSpec` to use `Prompts` module
+- Explicitly set `output: :ptc_lisp` in `PlanRunner`
+- Bumped `req_llm` 1.2.0 → 1.5.1
+
+### Fixed
+
+- Prevented LLM thinking text from polluting message history
+- Fixed XML-style `</clojure>` closers in code block parsing
+- Made `grep` always-regex with BRE-to-PCRE auto-translation
+- Hardened tracing reliability and removed duplicate tool telemetry
+- Prevented `println`+`return` same turn conflict
+- Fixed `(str x)` to convert single non-string arg to string
+- Fixed false positive on `#"` check inside string literals
+- Routed task failures to replan when `max_total_replans > 0`
+- Prevented `TraceLog.Collector` crash when parent task is killed
+- Collected child Steps on parent Step for TraceTree hierarchy
+- Added named-arg usage example to tool signatures to prevent positional arg errors
+- Scoped turn lookup by `span_id` to prevent cross-agent collisions in viewer
+- Resolved dialyzer errors in linker and plan_executor
+
 ## [0.6.0] - 2026-01-30
 
 ### Added
@@ -416,6 +505,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.7.0]: https://github.com/andreasronge/ptc_runner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/andreasronge/ptc_runner/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/andreasronge/ptc_runner/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/andreasronge/ptc_runner/compare/v0.5.0...v0.5.1

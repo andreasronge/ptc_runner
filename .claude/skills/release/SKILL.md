@@ -59,6 +59,8 @@ Run each and fix issues before proceeding:
 
 1. Read current version from `mix.exs`
 2. If it differs from $ARGUMENTS, update the `version:` field in `mix.exs` to `"$ARGUMENTS"`
+3. Search for the old version string in docs and livebooks: `grep -r 'OLD_VERSION' README.md livebooks/ docs/`
+4. Update any `{:ptc_runner, "~> OLD_VERSION"}` references to `"~> $ARGUMENTS"` in README.md and livebooks
 
 ## Step 6: Commit, tag, and push
 
