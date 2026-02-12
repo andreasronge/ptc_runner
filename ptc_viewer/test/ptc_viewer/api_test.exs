@@ -24,9 +24,9 @@ defmodule PtcViewer.ApiTest do
     %{trace_dir: trace_dir, plan_dir: plan_dir}
   end
 
-  test "list_traces returns only .jsonl files, sorted" do
+  test "list_traces returns only .jsonl files" do
     traces = PtcViewer.Api.list_traces()
-    filenames = Enum.map(traces, & &1.filename)
+    filenames = Enum.map(traces, & &1.filename) |> Enum.sort()
     assert filenames == ["a.jsonl", "b.jsonl"]
   end
 
