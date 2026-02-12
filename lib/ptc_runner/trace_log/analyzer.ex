@@ -642,25 +642,30 @@ defmodule PtcRunner.TraceLog.Analyzer do
     end
   end
 
-  defp convert_events_to_chrome(events, base_time_us, depth) do
+  defp convert_events_to_chrome(events, base_time_us, tid) do
+    # Find the earliest timestamp to compute relative offsets
+    base_timestamp = find_base_timestamp(events)
+
     # Pair start/stop events and convert to Chrome "X" (complete) events
+    # Exclude trace.start/stop — already represented by the tree's main_span
     events
     |> pair_start_stop_events()
+    |> Enum.reject(fn {start_event, _} -> start_event["event"] == "trace.start" end)
     |> Enum.map(fn {start_event, stop_event} ->
       event_type = event_type_from_name(start_event["event"])
       duration_us = (stop_event["duration_ms"] || 0) * 1000
 
-      # Calculate relative timestamp from event order
-      start_offset = calculate_event_offset(events, start_event) * 1000
+      # Use real timestamps for accurate positioning
+      start_offset_us = timestamp_offset_us(start_event["timestamp"], base_timestamp)
 
       %{
         "name" => event_name(event_type, stop_event),
         "cat" => event_type,
         "ph" => "X",
-        "ts" => base_time_us + start_offset,
+        "ts" => base_time_us + start_offset_us,
         "dur" => duration_us,
         "pid" => 1,
-        "tid" => depth,
+        "tid" => tid,
         "args" => event_args(event_type, start_event, stop_event)
       }
     end)
@@ -696,7 +701,10 @@ defmodule PtcRunner.TraceLog.Analyzer do
 
   defp event_pairing_key(event_name, suffix, event) do
     base = String.replace_suffix(event_name, suffix, "")
-    {base, event["metadata"]["turn_number"] || event["metadata"]["tool_name"]}
+
+    {base,
+     event["metadata"]["turn"] || event["metadata"]["turn_number"] ||
+       event["metadata"]["tool_name"]}
   end
 
   defp match_stop_event(pairs, pending, key, stop_event) do
@@ -716,12 +724,23 @@ defmodule PtcRunner.TraceLog.Analyzer do
 
   defp event_name(type, stop_event) do
     case type do
-      "turn" -> "Turn #{stop_event["metadata"]["turn_number"] || "?"}"
-      "tool" -> stop_event["metadata"]["tool_name"] || "tool"
-      "pmap" -> "pmap (#{stop_event["metadata"]["count"] || "?"} tasks)"
-      "pcalls" -> "pcalls (#{stop_event["metadata"]["count"] || "?"} tasks)"
-      "llm" -> "LLM call"
-      _ -> type
+      "turn" ->
+        "Turn #{stop_event["metadata"]["turn"] || stop_event["metadata"]["turn_number"] || "?"}"
+
+      "tool" ->
+        stop_event["metadata"]["tool_name"] || "tool"
+
+      "pmap" ->
+        "pmap (#{stop_event["metadata"]["count"] || "?"} tasks)"
+
+      "pcalls" ->
+        "pcalls (#{stop_event["metadata"]["count"] || "?"} tasks)"
+
+      "llm" ->
+        "LLM call"
+
+      _ ->
+        type
     end
   end
 
@@ -733,7 +752,8 @@ defmodule PtcRunner.TraceLog.Analyzer do
     case type do
       "turn" ->
         Map.merge(base, %{
-          "turn_number" => stop_event["metadata"]["turn_number"],
+          "turn_number" =>
+            stop_event["metadata"]["turn"] || stop_event["metadata"]["turn_number"],
           "tokens" => stop_event["metadata"]["tokens"]
         })
 
@@ -813,13 +833,20 @@ defmodule PtcRunner.TraceLog.Analyzer do
   defp truncate_string(nil, _), do: ""
   defp truncate_string(other, _), do: inspect(other)
 
-  defp calculate_event_offset(events, target_event) do
-    # Sum durations of all stop events before this one to estimate offset
+  defp find_base_timestamp(events) do
     events
-    |> Enum.take_while(&(&1 != target_event))
-    |> Enum.filter(&String.ends_with?(&1["event"] || "", ".stop"))
-    |> Enum.map(&(&1["duration_ms"] || 0))
-    |> Enum.sum()
+    |> Enum.find(&(&1["event"] in ["trace.start", "run.start"]))
+    |> get_in(["timestamp"])
+    |> parse_timestamp()
+  end
+
+  defp timestamp_offset_us(_timestamp, nil), do: 0
+
+  defp timestamp_offset_us(timestamp, base_time) do
+    case parse_timestamp(timestamp) do
+      nil -> 0
+      dt -> DateTime.diff(dt, base_time, :microsecond)
+    end
   end
 
   # Private helpers for tree functions
