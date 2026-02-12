@@ -2,6 +2,28 @@
 
 Integrate SubAgent with logging, metrics, and debugging tools.
 
+## Tracing Overview
+
+PtcRunner provides three complementary tracing layers. Each serves a different workflow:
+
+| Mechanism | Use Case | Output |
+|-----------|----------|--------|
+| `PtcRunner.Tracer.new/1` | Aggregate usage stats, inspect traces in code | In-memory struct on `Step` |
+| `PtcRunner.TraceLog.with_trace/2` | Offline debugging, performance analysis, Chrome DevTools | JSONL files |
+| `PtcRunner.PlanTracer.log_event/1` | Watch PlanExecutor runs in the terminal | ANSI-colored terminal output |
+
+**Data flow:**
+
+```
+SubAgent.Loop
+  ├── emits :telemetry events ──► TraceLog.Handler ──► Collector ──► .jsonl file
+  ├── builds Tracer struct ────► entries stored on Step.tracer
+  └── (via PlanExecutor)
+        └── fires on_event callbacks ──► PlanTracer ──► terminal output
+```
+
+Tracer and TraceLog operate independently — you can use both, either, or neither.
+
 ## Turn History
 
 Every `Step` includes a `turns` field with immutable per-turn execution history:
@@ -182,11 +204,97 @@ Then view in Chrome:
 
 The flame chart shows execution timing with nested spans. Click any span to see details including arguments and results.
 
+### Interactive Trace Viewer
+
+Launch the web-based trace viewer to browse traces with DAG visualization and turn-by-turn drill-down:
+
+```bash
+mix ptc.viewer --trace-dir traces --plan-dir data
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--port` | 4123 | Port to listen on |
+| `--trace-dir` | `traces` | Directory containing `.jsonl` trace files |
+| `--plan-dir` | `data` | Directory containing `.json` plan files |
+| `--no-open` | false | Don't auto-open browser |
+
+The viewer is a separate package (`ptc_viewer`). See its README for architecture and drag-and-drop usage.
+
+### Configuration
+
+TraceLog sanitization limits are configurable via application config:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `:trace_max_string_size` | `65_536` | Max string size in bytes before truncation |
+| `:trace_max_list_size` | `100` | Max list length before summarizing |
+| `:trace_preserve_full_keys` | `["system_prompt"]` | Map keys whose strings are never truncated |
+| `:trace_dir` | CWD | Default directory for trace JSONL files |
+
+```elixir
+config :ptc_runner,
+  trace_max_string_size: 128_000,
+  trace_dir: "traces"
+```
+
+Limit in-memory Tracer entries with `PtcRunner.Tracer.new/1`:
+
+```elixir
+Tracer.new(max_entries: 100)
+```
+
 ### Known Limitations
 
 Tool telemetry events (`tool.start`, `tool.stop`) are captured from inside the sandboxed process via trace collector propagation (`TraceLog.join/2`). All event types (`run`, `turn`, `llm`, `tool`) are captured correctly.
 
 > **Full API:** See `PtcRunner.TraceLog.with_trace/2`, `PtcRunner.TraceLog.Analyzer.summary/1`, and `PtcRunner.TraceLog.Analyzer.export_chrome_trace/2`.
+
+## PlanTracer
+
+Real-time terminal visualization of `PtcRunner.PlanExecutor` runs. Use during development to see task progress with colored, hierarchical output.
+
+### Quick Usage
+
+For stateless logging via `Logger`:
+
+```elixir
+PlanExecutor.execute(plan, mission,
+  llm: my_llm,
+  on_event: &PlanTracer.log_event/1
+)
+```
+
+For a stateful tree view with indentation and replan tracking:
+
+```elixir
+{:ok, tracer} = PlanTracer.start(output: :io)
+
+PlanExecutor.execute(plan, mission,
+  llm: my_llm,
+  on_event: PlanTracer.handler(tracer)
+)
+
+PlanTracer.stop(tracer)
+```
+
+### Example Output
+
+```
+Mission: Research stock prices
+  [START] fetch_symbols
+  [✓] fetch_symbols (150ms)
+  [START] fetch_prices
+  [!] fetch_prices - Verification failed: "Count < 5"
+REPLAN #1 (fetch_prices: "Count < 5")
+  Repair plan: 2 tasks
+  [✓] fetch_prices (400ms)
+Execution finished: ok (1250ms)
+```
+
+Colors: green (success), yellow (verification failure/replan), red (error), cyan (skipped).
+
+> **Full API:** See `PtcRunner.PlanTracer.start/1`, `PtcRunner.PlanTracer.handler/1`, and `PtcRunner.PlanTracer.log_event/1`.
 
 ## Telemetry Events
 
@@ -207,6 +315,8 @@ SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetr
 
 ### Available Events
 
+**SubAgent events** (prefix: `[:ptc_runner, :sub_agent, ...]`):
+
 | Event | Measurements | Use Case |
 |-------|--------------|----------|
 | `run:start/stop` | duration | Total execution time |
@@ -214,12 +324,26 @@ SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetr
 | `llm:start/stop` | duration, tokens | LLM latency, cost tracking |
 | `tool:start/stop/exception` | duration | Tool performance |
 
+**PlanExecutor events** (prefix: `[:ptc_runner, :plan_executor, ...]`):
+
+| Event | Measurements | Metadata |
+|-------|--------------|----------|
+| `plan:generated` | system_time | plan, mission, task_count |
+| `execution:start` | system_time | plan, mission, task_count, phases, attempt |
+| `execution:stop` | duration | status, results, replan_count, total_tasks |
+| `task:start` | system_time | task_id, task, attempt |
+| `task:stop` | duration | task_id, status, result |
+| `replan:start` | system_time | task_id, diagnosis, attempt |
+| `replan:stop` | — | new_task_count (or status, reason on error) |
+| `quality_gate:start` | system_time | task_id |
+| `quality_gate:stop` | duration | task_id, status, evidence/missing/reason |
+
 Duration is in native time units. Convert with:
 ```elixir
 System.convert_time_unit(duration, :native, :millisecond)
 ```
 
-> **Full event table:** See `PtcRunner.SubAgent.Telemetry.span/3`.
+> **Full event tables:** See `PtcRunner.SubAgent.Telemetry.span/3` and the `PtcRunner.PlanExecutor` moduledoc.
 
 ## Production Tips
 
@@ -237,3 +361,5 @@ System.convert_time_unit(duration, :native, :millisecond)
 - `PtcRunner.TraceLog.Analyzer.summary/1` - Offline trace analysis
 - `PtcRunner.SubAgent.Telemetry.span/3` - Telemetry module with event reference
 - `PtcRunner.SubAgent.Debug.print_trace/2` - Trace inspection API
+- `PtcRunner.PlanTracer.start/1` - Real-time terminal visualization for PlanExecutor
+- `PtcRunner.PlanTracer.handler/1` - Create bound event handler for PlanTracer

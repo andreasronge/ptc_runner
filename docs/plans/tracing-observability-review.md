@@ -306,13 +306,15 @@ All 4 items completed. Changes verified: 3755 tests, 0 failures, credo clean, di
 10. ~~Add configurable default trace directory~~ — `:trace_dir` via Application env, falls back to CWD
 11. ~~Add `max_entries` option to Tracer~~ — `Tracer.new(max_entries: 1000)`, tracks count to avoid `length/1`
 
-### Phase 3: Documentation (MEDIUM effort)
+### Phase 3: Documentation (MEDIUM effort) — DONE
 
-12. Add PlanTracer section to observability guide
-13. Add `mix ptc.viewer` section to observability guide
-14. Document PlanExecutor telemetry events in guide
-15. Add architecture doc explaining Tracer vs TraceLog vs PlanTracer
-16. Fix TraceLog.Event doctests — add `doctest` line to test file
+All 5 items completed. Reviewed against documentation-guidelines.md.
+
+12. ~~Add PlanTracer section to observability guide~~ — Quick usage, stateful tree view, example output, color legend
+13. ~~Add `mix ptc.viewer` section to observability guide~~ — Command, options table, separate package note
+14. ~~Document PlanExecutor telemetry events in guide~~ — 9 events added to Available Events table
+15. ~~Add architecture doc~~ — `subagent-tracing-architecture.md`: decision table, data flow diagram, config reference
+16. ~~Fix TraceLog.Event doctests~~ — Already present; added cross-references between all tracing modules
 
 ### Phase 4: Architecture (HIGH effort, long-term)
 

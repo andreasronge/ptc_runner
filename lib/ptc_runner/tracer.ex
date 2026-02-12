@@ -45,6 +45,9 @@ defmodule PtcRunner.Tracer do
 
   Trace IDs are 32-character hex strings generated from cryptographically
   secure random bytes. No external dependencies required.
+
+  See the [Observability Guide](subagent-observability.md) for how Tracer relates to
+  `PtcRunner.TraceLog` and `PtcRunner.PlanTracer`.
   """
 
   defstruct [
