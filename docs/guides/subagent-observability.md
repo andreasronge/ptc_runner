@@ -184,7 +184,7 @@ The flame chart shows execution timing with nested spans. Click any span to see 
 
 ### Known Limitations
 
-Tool telemetry events (`tool.start`, `tool.stop`) are not captured because tool execution runs inside a sandboxed process. The main events (`run`, `turn`, `llm`) are captured correctly.
+Tool telemetry events (`tool.start`, `tool.stop`) are captured from inside the sandboxed process via trace collector propagation (`TraceLog.join/2`). All event types (`run`, `turn`, `llm`, `tool`) are captured correctly.
 
 > **Full API:** See `PtcRunner.TraceLog.with_trace/2`, `PtcRunner.TraceLog.Analyzer.summary/1`, and `PtcRunner.TraceLog.Analyzer.export_chrome_trace/2`.
 

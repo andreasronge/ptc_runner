@@ -104,9 +104,8 @@ defmodule PtcRunner.TraceLogIntegrationTest do
       assert "llm.stop" in event_types
     end
 
-    test "captures execution with tools (tool events not captured - sandbox process)", %{
-      tmp_dir: dir
-    } do
+    test "captures execution with tools (tool events captured via sandbox trace propagation)",
+         %{tmp_dir: dir} do
       path = Path.join(dir, "trace.jsonl")
 
       # Tools receive a map of arguments with string keys
@@ -132,13 +131,14 @@ defmodule PtcRunner.TraceLogIntegrationTest do
       events = TraceLog.Analyzer.load(trace_path)
       event_types = Enum.map(events, & &1["event"])
 
-      # Note: tool.start/tool.stop events are NOT captured because tool telemetry
-      # runs inside the sandbox process which doesn't have the trace collector
-      # in its process dictionary. The main events are captured correctly.
+      # Sandbox propagates trace collectors via TraceLog.join, so tool events
+      # emitted inside the sandbox are captured by the trace handler.
       assert "run.start" in event_types
       assert "run.stop" in event_types
       assert "turn.start" in event_types
       assert "llm.start" in event_types
+      assert "tool.start" in event_types
+      assert "tool.stop" in event_types
     end
 
     test "summary extracts correct metrics", %{tmp_dir: dir} do

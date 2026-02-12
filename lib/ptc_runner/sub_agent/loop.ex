@@ -760,14 +760,13 @@ defmodule PtcRunner.SubAgent.Loop do
     case Lisp.run(code, lisp_opts) do
       {:ok, lisp_step} ->
         # Emit pmap/pcalls telemetry events if any
+        # (pmap/pcalls record metadata in context; telemetry is only emitted post-sandbox)
         emit_pmap_telemetry(agent, lisp_step)
-        emit_tool_telemetry(agent, lisp_step)
         handle_successful_execution(code, response, lisp_step, state, agent)
 
       {:error, lisp_step} ->
         # Emit pmap/pcalls telemetry events even on error
         emit_pmap_telemetry(agent, lisp_step)
-        emit_tool_telemetry(agent, lisp_step)
         # Build error message for LLM
         error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
 
@@ -1484,55 +1483,6 @@ defmodule PtcRunner.SubAgent.Loop do
       }
 
       Telemetry.emit(type_prefix ++ [:stop], measurements, stop_metadata)
-    end)
-  end
-
-  # ============================================================
-  # Tool Call Telemetry
-  # ============================================================
-
-  # Emit telemetry events for tool calls recorded during Lisp evaluation.
-  # Re-emit tool.stop telemetry from the parent process.
-  #
-  # Note: As of the trace propagation update, Sandbox now joins trace collectors,
-  # so tool events (tool.start, tool.stop) are captured naturally inside the sandbox.
-  # This re-emission is kept as a fallback for edge cases where sandbox propagation
-  # might fail (e.g., collectors die mid-execution). This may result in duplicate
-  # tool.stop events in traces - consider removing once sandbox propagation is verified.
-  defp emit_tool_telemetry(_agent, %{tool_calls: []}), do: :ok
-
-  defp emit_tool_telemetry(agent, %{tool_calls: tool_calls}) do
-    slim = slim_agent(agent)
-
-    Enum.each(tool_calls, fn tool_call ->
-      # Emit tool.start (re-emission from sandbox)
-      Telemetry.emit([:tool, :start], %{}, %{
-        agent: slim,
-        tool_name: tool_call.name,
-        args: tool_call.args
-      })
-
-      # Emit tool.stop (re-emission from sandbox)
-      measurements = %{
-        duration: System.convert_time_unit(tool_call.duration_ms, :millisecond, :native)
-      }
-
-      metadata = %{
-        agent: slim,
-        tool_name: tool_call.name,
-        args: tool_call.args,
-        result: tool_call.result
-      }
-
-      # Include child_trace_id if present (SubAgentTool/LLMTool with tracing)
-      metadata =
-        if Map.has_key?(tool_call, :child_trace_id) and tool_call.child_trace_id do
-          Map.put(metadata, :child_trace_id, tool_call.child_trace_id)
-        else
-          metadata
-        end
-
-      Telemetry.emit([:tool, :stop], measurements, metadata)
     end)
   end
 
