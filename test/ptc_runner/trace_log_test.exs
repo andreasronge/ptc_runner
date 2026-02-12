@@ -73,6 +73,35 @@ defmodule PtcRunner.TraceLogTest do
       assert File.exists?(path)
     end
 
+    test "surfaces original exception when collector crashes during cleanup", %{tmp_dir: dir} do
+      path = Path.join(dir, "crash_test.jsonl")
+
+      # If the collector dies (e.g., crashes) and the fun also raises,
+      # the original exception must be surfaced, not masked by a :noproc exit.
+      {kind, value} =
+        try do
+          TraceLog.with_trace(
+            fn ->
+              collector = TraceLog.current_collector()
+              # Unlink so killing the collector doesn't take down the test process
+              Process.unlink(collector)
+              ref = Process.monitor(collector)
+              Process.exit(collector, :kill)
+              assert_receive {:DOWN, ^ref, :process, ^collector, _reason}
+
+              raise "original error"
+            end,
+            path: path
+          )
+        catch
+          kind, value -> {kind, value}
+        end
+
+      assert kind == :error
+      assert %RuntimeError{message: "original error"} = value
+      assert TraceLog.current_collector() == nil
+    end
+
     test "supports nested traces", %{tmp_dir: dir} do
       outer_path = Path.join(dir, "outer.jsonl")
       inner_path = Path.join(dir, "inner.jsonl")

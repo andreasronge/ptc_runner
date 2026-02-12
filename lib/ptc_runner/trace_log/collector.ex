@@ -3,10 +3,15 @@ defmodule PtcRunner.TraceLog.Collector do
   GenServer that collects trace events and writes them to a JSONL file.
 
   The Collector holds an open file handle and writes events as they arrive.
-  It tracks write errors and closes the file cleanly when stopped.
+  It tracks write errors and closes the file cleanly when stopped or terminated.
+
+  If the underlying file device process crashes, the collector logs a warning
+  on the first write error and stops attempting further writes.
   """
 
   use GenServer
+
+  require Logger
 
   alias PtcRunner.TraceLog.Event
 
@@ -104,6 +109,10 @@ defmodule PtcRunner.TraceLog.Collector do
     # Ensure parent directory exists
     path |> Path.dirname() |> File.mkdir_p!()
 
+    # Trap exits so terminate/2 is called on shutdown and
+    # file device crashes become messages instead of killing us.
+    Process.flag(:trap_exit, true)
+
     case File.open(path, [:write, :utf8]) do
       {:ok, file} ->
         state = %__MODULE__{
@@ -126,15 +135,27 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   @impl true
+  def handle_cast({:write, _json_line}, %{file: nil} = state) do
+    {:noreply, %{state | write_errors: state.write_errors + 1}}
+  end
+
   def handle_cast({:write, json_line}, state) do
     IO.puts(state.file, json_line)
     {:noreply, state}
   rescue
-    _ ->
-      {:noreply, %{state | write_errors: state.write_errors + 1}}
+    error ->
+      if state.write_errors == 0 do
+        Logger.warning("Trace collector write failed: #{inspect(error)}, path: #{state.path}")
+      end
+
+      {:noreply, %{state | write_errors: state.write_errors + 1, file: nil}}
   end
 
   @impl true
+  def handle_call(:stop, _from, %{file: nil} = state) do
+    {:stop, :normal, {:ok, state.path, state.write_errors}, state}
+  end
+
   def handle_call(:stop, _from, state) do
     # Write trace.stop event with total duration before closing
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -157,6 +178,16 @@ defmodule PtcRunner.TraceLog.Collector do
   @impl true
   def handle_call(:path, _from, state) do
     {:reply, state.path, state}
+  end
+
+  @impl true
+  def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, %{file: nil}), do: :ok
+
+  def terminate(_reason, %{file: file}) do
+    File.close(file)
   end
 
   # Private helpers

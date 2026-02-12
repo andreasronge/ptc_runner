@@ -468,25 +468,20 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
 
-      # 2 start events: one from wrap_with_telemetry (in-sandbox), one from
-      # emit_tool_telemetry (post-sandbox, for trace log reliability)
-      assert length(tool_starts) == 2
-      # 2 stop events: one from wrap_with_telemetry (in-sandbox), one from
-      # emit_tool_telemetry (post-sandbox, for trace log reliability)
-      assert length(tool_stops) == 2
+      # 1 start + 1 stop from wrap_with_telemetry (in-sandbox)
+      # Sandbox propagates trace collectors via TraceLog.join, so no post-sandbox
+      # re-emission is needed.
+      assert length(tool_starts) == 1
+      assert length(tool_stops) == 1
 
-      # All start events should have valid metadata
-      Enum.each(tool_starts, fn {_, _measurements, start_meta, _} ->
-        assert start_meta.tool_name == "helper"
-        # Args have string keys at the boundary
-        assert start_meta.args == %{"x" => 5}
-      end)
+      [{_, _measurements, start_meta, _}] = tool_starts
+      assert start_meta.tool_name == "helper"
+      # Args have string keys at the boundary
+      assert start_meta.args == %{"x" => 5}
 
-      # Both stop events should have valid metadata
-      Enum.each(tool_stops, fn {_, stop_measurements, stop_meta, _} ->
-        assert is_integer(stop_measurements.duration)
-        assert stop_meta.tool_name == "helper"
-      end)
+      [{_, stop_measurements, stop_meta, _}] = tool_stops
+      assert is_integer(stop_measurements.duration)
+      assert stop_meta.tool_name == "helper"
     end
 
     test "post-sandbox tool stop event includes tool_name and duration", %{table: table} do
@@ -505,14 +500,12 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
 
-      # Post-sandbox re-emission produces a second :stop event alongside the
-      # in-sandbox span :stop. Both carry tool_name and duration.
-      assert length(tool_stops) == 2
+      # Single stop event from in-sandbox span (no post-sandbox re-emission)
+      assert length(tool_stops) == 1
 
-      Enum.each(tool_stops, fn {_, measurements, meta, _} ->
-        assert meta.tool_name == "inc"
-        assert is_integer(measurements.duration)
-      end)
+      [{_, measurements, meta, _}] = tool_stops
+      assert meta.tool_name == "inc"
+      assert is_integer(measurements.duration)
     end
 
     test "llm-query with tracing propagates child_trace_id in tool stop metadata", %{
@@ -634,11 +627,10 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
 
-      # 2 start events: in-sandbox span + post-sandbox re-emission
-      assert length(tool_starts) == 2
+      # 1 start event from in-sandbox span (no post-sandbox re-emission)
+      assert length(tool_starts) == 1
 
-      # The in-sandbox span event has summarized args; check the first one
-      [{_, _, start_meta, _} | _] = tool_starts
+      [{_, _, start_meta, _}] = tool_starts
 
       assert start_meta.tool_name == "helper"
       # Args have string keys at the boundary
@@ -717,10 +709,9 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       tool_starts = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :start])
       tool_stops = get_events_by_name(table, [:ptc_runner, :sub_agent, :tool, :stop])
-      # 2 start events: in-sandbox span + post-sandbox re-emission for trace log
-      assert length(tool_starts) == 2
-      # 2 stop events: in-sandbox span + post-sandbox re-emission for trace log
-      assert length(tool_stops) == 2
+      # 1 start + 1 stop from in-sandbox span (sandbox propagates trace collectors)
+      assert length(tool_starts) == 1
+      assert length(tool_stops) == 1
     end
   end
 

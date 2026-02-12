@@ -59,9 +59,9 @@ defmodule PtcRunner.TraceLog do
 
   PlanRunner automatically propagates trace context to parallel task workers.
 
-  **Note:** Tool telemetry events (`tool.start`, `tool.stop`) are currently
-  re-emitted by SubAgent.Loop after sandbox execution returns, as the sandbox
-  process doesn't inherit trace collectors.
+  **Note:** The sandbox process inherits trace collectors via `join/2`, so tool
+  telemetry events (`tool.start`, `tool.stop`) emitted inside the sandbox are
+  captured directly by the trace handler.
 
   ## See Also
 
@@ -198,8 +198,15 @@ defmodule PtcRunner.TraceLog do
       result = fun.()
       {:ok, path, _errors} = stop(collector)
       {:ok, result, path}
-    after
-      stop(collector)
+    catch
+      kind, reason ->
+        try do
+          stop(collector)
+        catch
+          _, _ -> :ok
+        end
+
+        :erlang.raise(kind, reason, __STACKTRACE__)
     end
   end
 

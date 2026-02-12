@@ -11,6 +11,8 @@ defmodule PtcRunner.TraceLog.Handler do
   in the stack.
   """
 
+  require Logger
+
   alias PtcRunner.TraceLog.{Collector, Event}
 
   @events [
@@ -97,7 +99,7 @@ defmodule PtcRunner.TraceLog.Handler do
   Events are only captured if the calling process has the config's collector
   in its active collector stack (`:ptc_trace_collectors`).
 
-  This function never raises - errors are silently ignored to avoid
+  This function never raises - errors are logged at debug level to avoid
   crashing the caller's execution.
   """
   @spec handle_event(list(atom()), map(), map(), map()) :: :ok
@@ -111,7 +113,9 @@ defmodule PtcRunner.TraceLog.Handler do
       :ok
     end
   rescue
-    _ -> :ok
+    error ->
+      Logger.debug("TraceLog handler error: #{inspect(error)}")
+      :ok
   end
 
   # Private helpers
