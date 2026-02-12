@@ -51,8 +51,10 @@ defmodule PtcRunner.Tracer do
     :trace_id,
     :parent_id,
     :started_at,
-    :entries,
-    :finalized_at
+    :finalized_at,
+    :max_entries,
+    entries: [],
+    entry_count: 0
   ]
 
   @typedoc """
@@ -64,13 +66,17 @@ defmodule PtcRunner.Tracer do
   - `started_at`: When the tracer was created
   - `entries`: List of trace entries (prepended for efficiency, reversed on finalize)
   - `finalized_at`: When `finalize/1` was called (nil until finalized)
+  - `max_entries`: Maximum number of entries to keep (nil = unlimited)
+  - `entry_count`: Current number of entries (tracked to avoid `length/1` calls)
   """
   @type t :: %__MODULE__{
           trace_id: String.t(),
           parent_id: String.t() | nil,
           started_at: DateTime.t(),
           entries: [entry()],
-          finalized_at: DateTime.t() | nil
+          finalized_at: DateTime.t() | nil,
+          max_entries: non_neg_integer() | nil,
+          entry_count: non_neg_integer()
         }
 
   @typedoc """
@@ -136,6 +142,7 @@ defmodule PtcRunner.Tracer do
   ## Options
 
   - `:parent_id` - Parent trace ID for nested agent calls
+  - `:max_entries` - Maximum number of entries to keep (nil = unlimited, default)
 
   ## Examples
 
@@ -153,6 +160,10 @@ defmodule PtcRunner.Tracer do
       iex> tracer.parent_id
       "abc123"
 
+      iex> tracer = PtcRunner.Tracer.new(max_entries: 100)
+      iex> tracer.max_entries
+      100
+
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
@@ -161,7 +172,9 @@ defmodule PtcRunner.Tracer do
       parent_id: opts[:parent_id],
       started_at: DateTime.utc_now(),
       entries: [],
-      finalized_at: nil
+      finalized_at: nil,
+      max_entries: opts[:max_entries],
+      entry_count: 0
     }
   end
 
@@ -170,6 +183,9 @@ defmodule PtcRunner.Tracer do
 
   Entries are prepended for efficiency and reversed on `finalize/1`.
   A timestamp is added automatically if not provided.
+
+  When `max_entries` is set, the oldest entries (tail of the prepended list)
+  are dropped to keep the total within the limit.
 
   Raises `FunctionClauseError` if called on a finalized tracer.
 
@@ -186,7 +202,19 @@ defmodule PtcRunner.Tracer do
   @spec add_entry(t(), map()) :: t()
   def add_entry(%__MODULE__{finalized_at: nil} = tracer, entry) when is_map(entry) do
     timestamped = Map.put_new(entry, :timestamp, DateTime.utc_now())
-    %{tracer | entries: [timestamped | tracer.entries]}
+    new_entries = [timestamped | tracer.entries]
+    new_count = tracer.entry_count + 1
+
+    case tracer.max_entries do
+      nil ->
+        %{tracer | entries: new_entries, entry_count: new_count}
+
+      max when new_count > max ->
+        %{tracer | entries: Enum.take(new_entries, max), entry_count: max}
+
+      _ ->
+        %{tracer | entries: new_entries, entry_count: new_count}
+    end
   end
 
   @doc """

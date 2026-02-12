@@ -333,4 +333,144 @@ defmodule PtcRunner.PlanTelemetryTest do
       end
     end
   end
+
+  describe "replan.stop emitted on error paths (F20)" do
+    test "emits replan.stop with status :error when repair plan is invalid", %{table: table} do
+      plan =
+        parse_plan!(%{
+          "tasks" => [
+            %{
+              "id" => "task",
+              "input" => "Do something",
+              "verification" => "false",
+              "on_verification_failure" => "replan"
+            }
+          ]
+        })
+
+      llm = fn input ->
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        if String.contains?(prompt, "repair specialist") do
+          # Return invalid plan with cycle (both initial and retry fail validation)
+          {:ok,
+           ~s|{"tasks": [{"id": "a", "input": "do A", "depends_on": ["b"]}, {"id": "b", "input": "do B", "depends_on": ["a"]}]}|}
+        else
+          {:ok, ~s|{"result": "done"}|}
+        end
+      end
+
+      {:error, {:repair_plan_invalid, _}, _} =
+        PlanExecutor.execute(plan, "Mission", llm: llm, max_turns: 1, replan_cooldown_ms: 0)
+
+      replan_stops =
+        get_events_by_name(table, [:ptc_runner, :plan_executor, :replan, :stop])
+
+      assert replan_stops != []
+
+      [{_, _, meta, _} | _] = replan_stops
+      assert meta.status == :error
+      assert meta.task_id == "task"
+    end
+
+    test "emits replan.stop with status :error when replan generation fails", %{table: table} do
+      plan =
+        parse_plan!(%{
+          "tasks" => [
+            %{
+              "id" => "task",
+              "input" => "Do something",
+              "verification" => "false",
+              "on_verification_failure" => "replan"
+            }
+          ]
+        })
+
+      llm = fn input ->
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        if String.contains?(prompt, "repair specialist") do
+          {:error, "Cannot generate plan"}
+        else
+          {:ok, ~s|{"result": "done"}|}
+        end
+      end
+
+      {:error, {:replan_generation_failed, _}, _} =
+        PlanExecutor.execute(plan, "Mission", llm: llm, max_turns: 1, replan_cooldown_ms: 0)
+
+      replan_stops =
+        get_events_by_name(table, [:ptc_runner, :plan_executor, :replan, :stop])
+
+      assert length(replan_stops) == 1
+
+      [{_, _, meta, _}] = replan_stops
+      assert meta.status == :error
+      assert meta.task_id == "task"
+    end
+  end
+
+  describe "execution metadata correct after replan failure (F21)" do
+    test "metadata has incremented replan_count and merged results on replan error",
+         %{table: table} do
+      plan =
+        parse_plan!(%{
+          "agents" => %{
+            "worker" => %{"prompt" => "You are a worker"}
+          },
+          "tasks" => [
+            %{"id" => "step1", "agent" => "worker", "input" => "FIRST_STEP_INPUT"},
+            %{
+              "id" => "step2",
+              "agent" => "worker",
+              "input" => "Second step",
+              "depends_on" => ["step1"],
+              "verification" => "false",
+              "on_verification_failure" => "replan"
+            }
+          ]
+        })
+
+      llm = fn input ->
+        messages = Map.get(input, :messages, [])
+        prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
+
+        cond do
+          String.contains?(prompt, "repair specialist") ->
+            {:error, "Cannot generate plan"}
+
+          String.contains?(prompt, "Task: FIRST_STEP_INPUT") ->
+            {:ok, ~s|{"value": "step1_result"}|}
+
+          true ->
+            {:ok, ~s|{"value": "step2_result"}|}
+        end
+      end
+
+      {:error, _, metadata} =
+        PlanExecutor.execute(plan, "Two step mission",
+          llm: llm,
+          max_turns: 1,
+          replan_cooldown_ms: 0
+        )
+
+      # F21: replan_count should be 1 (replan was attempted even though it failed)
+      assert metadata.replan_count == 1
+
+      # F21: results should include completed step1 (merged from context)
+      assert metadata.results["step1"]["value"] == "step1_result"
+
+      # Verify execution.stop telemetry also has correct data
+      exec_stops =
+        get_events_by_name(table, [:ptc_runner, :plan_executor, :execution, :stop])
+
+      assert length(exec_stops) == 1
+
+      [{_, _, exec_meta, _}] = exec_stops
+      assert exec_meta.replan_count == 1
+      assert Map.has_key?(exec_meta.results, "step1")
+    end
+  end
 end

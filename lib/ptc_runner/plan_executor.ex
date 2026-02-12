@@ -593,7 +593,21 @@ defmodule PtcRunner.PlanExecutor do
           Logger.error("  [#{issue.category}] #{issue.message}")
         end
 
-        metadata = build_metadata(state, state.completed_results)
+        # F20: Emit replan.stop telemetry on error path
+        :telemetry.execute(
+          [:ptc_runner, :plan_executor, :replan, :stop],
+          %{},
+          %{status: :error, task_id: task_id, reason: {:repair_plan_invalid, validation_issues}}
+        )
+
+        # F21: Use merged completed_results and incremented replan_count
+        updated_state = %{
+          state
+          | completed_results: completed_results,
+            replan_count: state.replan_count + 1
+        }
+
+        metadata = build_metadata(updated_state, completed_results)
 
         emit_event(
           state,
@@ -604,7 +618,22 @@ defmodule PtcRunner.PlanExecutor do
 
       {:error, reason} ->
         Logger.error("PlanExecutor: Failed to generate repair plan: #{inspect(reason)}")
-        metadata = build_metadata(state, state.completed_results)
+
+        # F20: Emit replan.stop telemetry on error path
+        :telemetry.execute(
+          [:ptc_runner, :plan_executor, :replan, :stop],
+          %{},
+          %{status: :error, task_id: task_id, reason: reason}
+        )
+
+        # F21: Use merged completed_results and incremented replan_count
+        updated_state = %{
+          state
+          | completed_results: completed_results,
+            replan_count: state.replan_count + 1
+        }
+
+        metadata = build_metadata(updated_state, completed_results)
 
         emit_event(
           state,

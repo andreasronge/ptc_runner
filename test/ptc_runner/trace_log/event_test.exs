@@ -129,6 +129,76 @@ defmodule PtcRunner.TraceLog.EventTest do
     end
   end
 
+  describe "sanitize/1 with custom config" do
+    setup do
+      # Save original values
+      orig_string = Application.get_env(:ptc_runner, :trace_max_string_size)
+      orig_list = Application.get_env(:ptc_runner, :trace_max_list_size)
+      orig_keys = Application.get_env(:ptc_runner, :trace_preserve_full_keys)
+
+      on_exit(fn ->
+        if orig_string,
+          do: Application.put_env(:ptc_runner, :trace_max_string_size, orig_string),
+          else: Application.delete_env(:ptc_runner, :trace_max_string_size)
+
+        if orig_list,
+          do: Application.put_env(:ptc_runner, :trace_max_list_size, orig_list),
+          else: Application.delete_env(:ptc_runner, :trace_max_list_size)
+
+        if orig_keys,
+          do: Application.put_env(:ptc_runner, :trace_preserve_full_keys, orig_keys),
+          else: Application.delete_env(:ptc_runner, :trace_preserve_full_keys)
+      end)
+
+      :ok
+    end
+
+    test "respects custom trace_max_string_size" do
+      Application.put_env(:ptc_runner, :trace_max_string_size, 100)
+
+      short_string = String.duplicate("x", 50)
+      assert Event.sanitize(short_string) == short_string
+
+      long_string = String.duplicate("x", 150)
+      result = Event.sanitize(long_string)
+      assert result =~ "[String truncated — 150 bytes total]"
+    end
+
+    test "respects custom trace_max_list_size" do
+      Application.put_env(:ptc_runner, :trace_max_list_size, 10)
+
+      small_list = Enum.to_list(1..5)
+      assert Event.sanitize(small_list) == [1, 2, 3, 4, 5]
+
+      large_list = Enum.to_list(1..15)
+      assert Event.sanitize(large_list) == "List(15 items)"
+    end
+
+    test "respects custom trace_preserve_full_keys" do
+      Application.put_env(:ptc_runner, :trace_max_string_size, 100)
+      Application.put_env(:ptc_runner, :trace_preserve_full_keys, ["system_prompt", "custom_key"])
+
+      large_value = String.duplicate("a", 150)
+
+      result = Event.sanitize(%{custom_key: large_value, other_key: large_value})
+
+      # custom_key is preserved in full
+      assert result["custom_key"] == large_value
+      # other_key is truncated
+      assert result["other_key"] =~ "[String truncated"
+    end
+
+    test "system_prompt preserved by default with large values" do
+      Application.put_env(:ptc_runner, :trace_max_string_size, 100)
+
+      large_prompt = String.duplicate("p", 150)
+      result = Event.sanitize(%{system_prompt: large_prompt, description: large_prompt})
+
+      assert result["system_prompt"] == large_prompt
+      assert result["description"] =~ "[String truncated"
+    end
+  end
+
   describe "encode/1" do
     test "encodes valid event to JSON" do
       event = %{"event" => "test", "trace_id" => "123"}
