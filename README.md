@@ -40,7 +40,7 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 
 **LLMs as programmers, not computers.** Most agent frameworks treat LLMs as the runtime. PtcRunner inverts this: LLMs generate programs that execute deterministically in a sandbox. Tool results stay in memory — the LLM explores data through code, exposing only relevant findings. This scales to thousands of items without context limits and eliminates hallucinated counts.
 
-**Best suited for:** Email processing, log analysis, data aggregation, multi-source joins — any task where raw data volume would overwhelm an LLM's context window.
+**Best suited for:** Document analysis (agentic RAG), log analysis, data aggregation, multi-source joins — any task where raw data volume would overwhelm an LLM's context window.
 
 ### Key Features
 
@@ -51,7 +51,7 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 - **Composable SubAgents**: Nest agents as tools with isolated state and turn budgets
 - **[Recursive agents (RLM)](https://arxiv.org/pdf/2512.24601)**: Agents call themselves via `:self` tools to subdivide large inputs
 - **Ad-hoc LLM queries**: `llm-query` calls an LLM from within PTC-Lisp with signature-validated responses
-- **Observable**: [Telemetry spans](docs/guides/subagent-observability.md) for every turn, LLM call, and tool call with parent-child correlation. JSONL trace logs with Chrome DevTools flame chart export for debugging multi-agent flows
+- **Observable**: [Telemetry spans](docs/guides/subagent-observability.md) for every turn, LLM call, and tool call with parent-child correlation. JSONL trace logs with Chrome DevTools flame chart export for debugging multi-agent flows ([interactive Livebook](livebooks/observability_and_tracing.livemd))
 - **BEAM-native**: Parallel tool calling (`pmap`/`pcalls`), process isolation with timeout and heap limits, fault tolerance
 
 ### Examples
@@ -140,7 +140,7 @@ end
 - **`mix ptc.repl`** - Interactive REPL for testing PTC-Lisp expressions
 - **[Playground Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)** - Try PTC-Lisp interactively
 - **[LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd)** - Build an agent end-to-end
-- **[Examples](https://github.com/andreasronge/ptc_runner/tree/main/examples)** - Runnable example applications
+- **[Examples](https://github.com/andreasronge/ptc_runner/tree/main/examples)** - Runnable example applications including [PageIndex](https://github.com/andreasronge/ptc_runner/tree/main/examples/page_index) (agentic RAG over PDFs using MetaPlanner)
 
 ## Low-Level API
 
