@@ -91,8 +91,11 @@ defmodule PtcRunner.PlanTracer do
   """
   @spec log_event(PtcRunner.PlanExecutor.event()) :: :ok
   def log_event(event) do
-    message = format_event_simple(event)
-    Logger.info(message)
+    case format_event_simple(event) do
+      nil -> :ok
+      message -> Logger.info(message)
+    end
+
     :ok
   end
 
@@ -147,7 +150,7 @@ defmodule PtcRunner.PlanTracer do
   def handle_event(tracer, event) do
     Agent.update(tracer, fn state ->
       {message, new_state} = format_event_stateful(event, state)
-      output_message(new_state.output, message)
+      if message, do: output_message(new_state.output, message)
       new_state
     end)
   end
@@ -258,6 +261,9 @@ defmodule PtcRunner.PlanTracer do
     "#{@red}[GATE ✗]#{@reset} #{id} - #{inspect(reason)}"
   end
 
+  # Detail events — silently ignored in terminal output
+  defp format_event_simple({:task_step, _}), do: nil
+
   defp format_event_simple(event) do
     "Unknown event: #{inspect(event)}"
   end
@@ -364,6 +370,9 @@ defmodule PtcRunner.PlanTracer do
     message = "#{indent(state)}#{@red}[GATE ✗]#{@reset} #{id} - #{inspect(reason)}"
     {message, state}
   end
+
+  # Detail events — silently ignored in terminal output
+  defp format_event_stateful({:task_step, _}, state), do: {nil, state}
 
   defp format_event_stateful(event, state) do
     message = "#{indent(state)}Unknown event: #{inspect(event)}"

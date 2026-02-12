@@ -293,7 +293,7 @@ defmodule PtcRunner.PlanTracerTest do
       # Verify the formatted messages would contain expected text
       for event <- event_list do
         formatted = PlanTracer.format_event(event)
-        assert is_binary(formatted)
+        assert is_nil(formatted) or is_binary(formatted)
       end
     end
   end
