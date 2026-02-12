@@ -1,0 +1,465 @@
+# Observability & Tracing
+
+## Section
+
+Explore PtcRunner's three tracing layers interactively: in-memory `Tracer`, file-based `TraceLog`, and real-time `PlanTracer`.
+
+## Setup
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+  else
+    [{:ptc_runner, "~> 0.6.0"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+```elixir
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} = Req.get!("https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs")
+  Code.eval_string(code)
+end
+
+setup = LLMSetup.setup()
+```
+
+```elixir
+setup = LLMSetup.choose_provider(setup)
+```
+
+```elixir
+my_llm = LLMSetup.choose_model(setup)
+```
+
+## Introduction
+
+PtcRunner provides three complementary tracing layers:
+
+| Layer          | Purpose                                        | Output                       |
+| -------------- | ---------------------------------------------- | ---------------------------- |
+| **Tracer**     | Lightweight stats & inspection in code         | In-memory struct on `Step`   |
+| **TraceLog**   | Offline analysis, Chrome DevTools flame charts | JSONL files                  |
+| **PlanTracer** | Watch PlanExecutor runs unfold in real-time    | ANSI-colored terminal output |
+
+```
+SubAgent.Loop
+  ├── builds Tracer struct ────► entries stored on Step.tracer
+  ├── emits :telemetry events ──► TraceLog.Handler ──► Collector ──► .jsonl file
+  └── (via PlanExecutor)
+        └── fires on_event callbacks ──► PlanTracer ──► terminal output
+```
+
+Each layer is independent. Use all three, any combination, or none at all.
+
+## 1. In-Memory Tracing with Tracer
+
+The `Tracer` struct lives on every `Step`. No setup required — it's always there.
+
+```elixir
+alias PtcRunner.SubAgent
+
+agent = SubAgent.new(
+  prompt: "What are the three primary colors?",
+  signature: "() -> :string",
+  max_turns: 1
+)
+
+{:ok, step} = SubAgent.run(agent, llm: my_llm)
+
+IO.puts("=== Result ===")
+IO.puts(step.return)
+IO.puts("\n=== Usage ===")
+IO.inspect(step.usage, label: "usage")
+
+IO.puts("\n=== Turn History ===")
+for turn <- step.turns do
+  IO.puts("Turn #{turn.number}: #{String.slice(turn.program || "", 0, 80)}")
+  IO.puts("  Tools: #{inspect(Enum.map(turn.tool_calls, & &1.name))}")
+  IO.puts("  Success: #{turn.success?}")
+end
+
+step
+```
+
+### Debug Trace
+
+`SubAgent.Debug.print_trace/2` gives a quick visual overview:
+
+```elixir
+SubAgent.Debug.print_trace(step)
+```
+
+```elixir
+# Include token usage stats
+SubAgent.Debug.print_trace(step, usage: true)
+```
+
+### Trace Filtering
+
+In production, you may want to collect traces only on failure:
+
+```elixir
+# Only keep trace on failure (saves memory)
+# SubAgent.run(agent, llm: my_llm, trace: :on_error)
+
+# Disable tracing entirely
+# SubAgent.run(agent, llm: my_llm, trace: false)
+
+"See docs/guides/subagent-observability.md for details"
+```
+
+## 2. File-Based Tracing with TraceLog
+
+Wrap any execution in `TraceLog.with_trace/2` to capture a JSONL trace file.
+
+```elixir
+alias PtcRunner.TraceLog
+alias PtcRunner.TraceLog.Analyzer
+
+# A multi-turn agent with a tool, so we get richer traces
+calc_tool = fn %{"expression" => expr} ->
+  {result, _} = Code.eval_string(expr)
+  result
+end
+
+agent = SubAgent.new(
+  prompt: """
+  Calculate the following and return the final answer:
+  1. What is 17 * 23?
+  2. What is the result plus 100?
+  """,
+  signature: "{step1 :int, step2 :int}",
+  tools: %{
+    "calc" => {calc_tool,
+      signature: "(expression :string) -> :float",
+      description: "Evaluate a math expression. Example: (tool/calc {:expression \"2 + 3\"})"}
+  },
+  max_turns: 3,
+  timeout: 15_000
+)
+
+{:ok, {_result, trace_step}, trace_path} = TraceLog.with_trace(fn ->
+  {result, step} = SubAgent.run(agent, llm: my_llm, debug: true)
+  {result, step}
+end)
+
+IO.puts("Trace saved to: #{File.cwd!()}/#{trace_path}")
+trace_path
+```
+
+```elixir
+SubAgent.Debug.print_trace(trace_step, raw: false)
+```
+
+### Analyze the Trace
+
+```elixir
+events = Analyzer.load(trace_path)
+
+IO.puts("=== Summary ===")
+summary = Analyzer.summary(events)
+IO.inspect(summary, pretty: true)
+```
+
+```elixir
+IO.puts("\n=== Timeline ===")
+Analyzer.print_timeline(events)
+```
+
+```elixir
+IO.puts("\n=== Slowest Operations ===")
+for event <- Analyzer.slowest(events, 3) do
+  IO.puts("  #{event["event"]} - #{event["duration_ms"]}ms")
+end
+:ok
+```
+
+### Filter Events
+
+```elixir
+# Only LLM events
+llm_events = Analyzer.filter(events, type: "llm")
+IO.puts("LLM events: #{length(llm_events)}")
+
+# Only tool events
+tool_events = Analyzer.filter(events, type: "tool")
+IO.puts("Tool events: #{length(tool_events)}")
+
+# Events slower than 100ms
+slow = Analyzer.filter(events, min_duration_ms: 100)
+IO.puts("Slow events (>100ms): #{length(slow)}")
+:ok
+```
+
+### Chrome DevTools Export
+
+Export the trace to Chrome's flame chart format for visual analysis.
+
+```elixir
+{:ok, tree} = Analyzer.load_tree(trace_path)
+chrome_path = Path.rootname(trace_path) <> ".json"
+:ok = Analyzer.export_chrome_trace(tree, chrome_path)
+
+IO.puts("Chrome trace exported to: #{chrome_path}")
+IO.puts("")
+IO.puts("To view the flame chart:")
+IO.puts("  1. Open Chrome DevTools (F12) → Performance tab → Load profile...")
+IO.puts("  2. Or navigate to chrome://tracing and load the file")
+chrome_path
+```
+
+The flame chart shows nested spans — each turn contains its LLM call, and the `run` span wraps everything:
+
+```elixir
+Path.join([__DIR__, "..", "images", "chrome_tracing.png"])
+|> Path.expand()
+|> File.read!()
+|> Kino.Image.new("image/png")
+```
+
+### Interactive Trace Tree (Kino Widget)
+
+If you ran the agent above, the step struct can be visualized with `Kino.TraceTree`:
+
+```elixir
+PtcRunner.Kino.TraceTree.new(trace_step)
+```
+
+## 3. Real-Time Visualization with PlanTracer
+
+PlanTracer shows PlanExecutor progress as a colored tree in the terminal.
+
+First, define tools for a small research plan:
+
+```elixir
+lookup_tool = fn %{"topic" => topic} ->
+  facts = %{
+    "elixir" => "Elixir is a functional language built on the BEAM VM, created by Jose Valim in 2011.",
+    "erlang" => "Erlang was created at Ericsson in 1986 for telecom systems. It runs on the BEAM VM.",
+    "beam" => "The BEAM is the virtual machine for Erlang and Elixir, known for fault tolerance and concurrency."
+  }
+
+  case Map.get(facts, String.downcase(topic)) do
+    nil -> {:error, "No information found for: #{topic}"}
+    fact -> %{topic: topic, fact: fact}
+  end
+end
+
+tools = %{
+  "lookup" => {lookup_tool,
+    signature: "(topic :string) -> {topic :string, fact :string}",
+    description: "Look up a fact about a programming topic."}
+}
+```
+
+Now run `PlanExecutor.run/2` with `PlanTracer` for real-time output.
+
+> **Note:** This example uses a toy lookup tool that only matches exact lowercase topics
+> (`"elixir"`, `"erlang"`, `"beam"`). The LLM will likely try verbose queries first and
+> hit errors before discovering the right keys. This is intentional — it demonstrates
+> PlanExecutor's **self-healing replan mechanism**: the system diagnoses failures, generates
+> a repair plan, and recovers automatically. With Claude Haiku, expect 1-2 replans as the
+> planner's initial PTC-Lisp code may assume a data shape that doesn't match the actual
+> tool output.
+
+```elixir
+alias PtcRunner.{PlanExecutor, PlanTracer}
+
+{:ok, tracer} = PlanTracer.start(output: :io)
+plan_ref = make_ref()
+
+on_event = fn event ->
+  case event do
+    {:planning_finished, %{plan: plan}} -> Process.put(plan_ref, plan)
+    _ -> :ok
+  end
+
+  PlanTracer.handle_event(tracer, event)
+end
+
+result = PlanExecutor.run(
+  "Compare Elixir and Erlang: look up facts about each, then summarize the relationship.",
+  llm: my_llm,
+  available_tools: %{
+    "lookup" => "Look up a fact about a programming topic."
+  },
+  base_tools: tools,
+  on_event: on_event,
+  max_replan_attempts: 2,
+  max_total_replans: 3,
+  timeout: 30_000
+)
+
+PlanTracer.stop(tracer)
+
+case result do
+  {:ok, results, metadata} ->
+    IO.puts("\n=== Results ===")
+    IO.inspect(results, pretty: true, limit: 5)
+    IO.puts("\nReplans: #{metadata.replan_count}")
+
+  {:error, reason, _metadata} ->
+    IO.puts("\nExecution failed: #{inspect(reason)}")
+end
+
+:ok
+```
+
+Inspect the generated plan:
+
+````elixir
+plan = Process.get(plan_ref)
+
+if plan do
+  json = Jason.encode!(plan)
+  pretty = Jason.Formatter.pretty_print(json)
+  Kino.Markdown.new("```json\n#{pretty}\n```")
+else
+  "No plan captured (run the cell above first)"
+end
+````
+
+## 4. Cross-Process Tracing
+
+When PTC-Lisp runs `pmap` or `pcalls`, tools execute in parallel sandbox processes.
+`TraceContext.capture/0` and `TraceContext.attach/1` ensure all events are correlated
+back to the parent trace — this happens automatically.
+
+Here's a demonstration with parallel tool calls:
+
+```elixir
+alias PtcRunner.TraceLog
+alias PtcRunner.TraceLog.Analyzer
+
+# Tools that simulate parallel work
+fetch_tool = fn %{"city" => city} ->
+  # Simulate some work
+  Process.sleep(50)
+  temps = %{"Paris" => 18, "Tokyo" => 24, "NYC" => 15}
+  %{city: city, temp_c: Map.get(temps, city, 20)}
+end
+
+agent = SubAgent.new(
+  prompt: """
+  Fetch the temperature for Paris, Tokyo, and NYC in parallel using pmap.
+  Then return the warmest city.
+  """,
+  signature: "() -> :string",
+  tools: %{
+    "fetch_temp" => {fetch_tool,
+      signature: "(city :string) -> {city :string, temp_c :number}",
+      description: "Get current temperature for a city."}
+  },
+  max_turns: 2,
+  timeout: 15_000
+)
+
+{:ok, {_result, pmap_step}, pmap_trace_path} = TraceLog.with_trace(fn ->
+  {result, step} = SubAgent.run(agent, llm: my_llm, debug: true)
+  {result, step}
+end)
+
+IO.puts("Result: #{pmap_step.return}")
+IO.puts("Trace: #{pmap_trace_path}")
+pmap_trace_path
+```
+
+### Inspect the Parallel Trace
+
+Even though tools ran in separate sandbox processes, the events appear in a single
+trace file with proper span correlation:
+
+```elixir
+events = Analyzer.load(pmap_trace_path)
+
+IO.puts("=== Timeline (parallel tools visible) ===")
+Analyzer.print_timeline(events)
+```
+
+```elixir
+IO.puts("\n=== Tool Events ===")
+tool_events = Analyzer.filter(events, type: "tool")
+
+for event <- tool_events do
+  tool = get_in(event, ["metadata", "tool_name"]) || "?"
+  span = event["span_id"] || "none"
+  parent = event["parent_span_id"] || "root"
+  duration = event["duration_ms"]
+
+  IO.puts("  #{event["event"]} #{tool} (span=#{String.slice(span, 0, 8)}... parent=#{String.slice(parent, 0, 8)}...) #{if duration, do: "#{duration}ms", else: ""}")
+end
+
+:ok
+```
+
+### Manual Cross-Process Propagation
+
+For custom code that spawns tasks, use `TraceContext` directly:
+
+```elixir
+alias PtcRunner.TraceContext
+
+# This is what PtcRunner does internally for pmap/pcalls:
+#
+#   # In the parent process:
+#   ctx = TraceContext.capture()
+#
+#   Task.async(fn ->
+#     TraceContext.attach(ctx)
+#     # Events from here are now captured in the parent's trace
+#   end)
+#
+# The sandbox and parallel primitives handle this automatically,
+# so you only need manual propagation for custom Task spawning.
+
+"See TraceContext.capture/0 and TraceContext.attach/1"
+```
+
+## 5. Configuration
+
+Tune tracing behavior via application config or per-call options.
+
+### Tracer (In-Memory)
+
+```elixir
+# Limit in-memory entries to prevent unbounded growth
+alias PtcRunner.Tracer
+
+tracer = Tracer.new(max_entries: 50)
+IO.inspect(tracer.max_entries, label: "max_entries")
+```
+
+### TraceLog (JSONL)
+
+```elixir
+# These can be set in config/config.exs:
+#
+#   config :ptc_runner,
+#     trace_max_string_size: 128_000,   # Max string size before truncation (default: 65_536)
+#     trace_max_list_size: 200,          # Max list length before summarizing (default: 100)
+#     trace_preserve_full_keys: ["system_prompt"],  # Keys never truncated
+#     trace_dir: "traces"                # Default output directory
+
+# Current defaults:
+IO.puts("trace_max_string_size: #{Application.get_env(:ptc_runner, :trace_max_string_size, 65_536)}")
+IO.puts("trace_max_list_size:   #{Application.get_env(:ptc_runner, :trace_max_list_size, 100)}")
+IO.puts("trace_dir:             #{Application.get_env(:ptc_runner, :trace_dir, "(current directory)")}")
+:ok
+```
+
+## Learn More
+
+* [Observability Guide](https://hexdocs.pm/ptc_runner/subagent-observability.html) — full reference for all three layers
+* [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
+* [Composition Patterns](https://hexdocs.pm/ptc_runner/subagent-patterns.html)
+* `PtcRunner.TraceLog.Analyzer` — API docs for offline analysis
+* `PtcRunner.TraceContext` — cross-process propagation API

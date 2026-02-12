@@ -91,7 +91,7 @@ defmodule PtcRunner.PlanExecutor do
   # Planning events (run/2 only)
   @type event ::
           {:planning_started, %{mission: String.t()}}
-          | {:planning_finished, %{task_count: non_neg_integer()}}
+          | {:planning_finished, %{task_count: non_neg_integer(), plan: map()}}
           | {:planning_failed, %{reason: term()}}
           | {:planning_retry, %{validation_errors: non_neg_integer()}}
           # Execution events
@@ -110,6 +110,8 @@ defmodule PtcRunner.PlanExecutor do
           | {:replan_started,
              %{task_id: String.t(), diagnosis: String.t(), total_replans: non_neg_integer()}}
           | {:replan_finished, %{new_tasks: non_neg_integer()}}
+          # Detail events (carries full Step struct for programmatic consumers)
+          | {:task_step, %{task_id: String.t(), step: PtcRunner.Step.t()}}
 
   @type event_callback :: (event() -> any()) | nil
 
@@ -216,13 +218,16 @@ defmodule PtcRunner.PlanExecutor do
 
     case generate_valid_initial_plan(mission, plan_opts, on_event) do
       {:ok, plan} ->
-        if on_event, do: on_event.({:planning_finished, %{task_count: length(plan.tasks)}})
+        plan_map = plan_to_map(plan)
+
+        if on_event,
+          do: on_event.({:planning_finished, %{task_count: length(plan.tasks), plan: plan_map}})
 
         # Emit telemetry with full plan structure
         :telemetry.execute(
           [:ptc_runner, :plan_executor, :plan, :generated],
           %{system_time: System.system_time()},
-          %{plan: plan_to_map(plan), mission: mission, task_count: length(plan.tasks)}
+          %{plan: plan_map, mission: mission, task_count: length(plan.tasks)}
         )
 
         # Pass constraints through to execute for replanning
@@ -469,16 +474,24 @@ defmodule PtcRunner.PlanExecutor do
         handle_replan(state, context)
 
       {:error, task_id, partial_results, reason} ->
-        # Unrecoverable error
         merged_results = Map.merge(state.completed_results, partial_results)
-        metadata = build_metadata(state, merged_results)
 
-        emit_event(
-          state,
-          {:execution_finished, %{status: :error, duration_ms: metadata.total_duration_ms}}
-        )
+        if state.max_total_replans > 0 do
+          # When replans are configured, treat task failures as replan opportunities
+          diagnosis = format_task_failure_diagnosis(task_id, reason)
+          updated_state = %{state | completed_results: merged_results}
 
-        {:error, {:task_failed, task_id, reason}, metadata}
+          handle_replan(updated_state, %{task_id: task_id, task_output: nil, diagnosis: diagnosis})
+        else
+          metadata = build_metadata(state, merged_results)
+
+          emit_event(
+            state,
+            {:execution_finished, %{status: :error, duration_ms: metadata.total_duration_ms}}
+          )
+
+          {:error, {:task_failed, task_id, reason}, metadata}
+        end
     end
   end
 
@@ -550,7 +563,8 @@ defmodule PtcRunner.PlanExecutor do
     end
 
     # Merge any new completed results from this execution attempt
-    completed_results = Map.merge(state.completed_results, context.completed_results)
+    completed_results =
+      Map.merge(state.completed_results, Map.get(context, :completed_results, %{}))
 
     failure_context = %{
       task_id: task_id,
@@ -882,10 +896,22 @@ defmodule PtcRunner.PlanExecutor do
             depends_on: task.depends_on,
             type: task.type,
             verification: task.verification,
+            on_failure: task.on_failure,
             on_verification_failure: task.on_verification_failure,
             quality_gate: task.quality_gate
           }
         end)
     }
+  end
+
+  defp format_task_failure_diagnosis(task_id, reason) do
+    reason_str =
+      case reason do
+        %{message: msg} when is_binary(msg) -> msg
+        msg when is_binary(msg) -> msg
+        other -> inspect(other)
+      end
+
+    "Task '#{task_id}' failed: #{reason_str}"
   end
 end
