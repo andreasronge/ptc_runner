@@ -1,0 +1,5 @@
+title: ptc_runner blog
+description: Programmatic Tool Calling for Elixir
+baseurl: /ptc_runner
+url: https://andreasronge.github.io
+theme: jekyll-theme-cayman
