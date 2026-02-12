@@ -939,36 +939,23 @@ defmodule PtcRunner.Lisp.Analyze do
               :"->>" -> args ++ [acc]
             end
 
-          case f do
-            {:var, :recur} ->
-              if tail? do
-                {:ok, {:recur, new_args}}
-              else
-                {:error, {:invalid_form, "recur must be in tail position"}}
-              end
-
-            _ ->
-              {:ok, {:call, f, new_args}}
-          end
+          resolve_call_or_recur(f, new_args, tail?)
         end
     end
   end
 
   defp apply_thread_step(_kind, acc, step_ast, tail?) do
     with {:ok, f} <- do_analyze(step_ast, false) do
-      case f do
-        {:var, :recur} ->
-          if tail? do
-            {:ok, {:recur, [acc]}}
-          else
-            {:error, {:invalid_form, "recur must be in tail position"}}
-          end
-
-        _ ->
-          {:ok, {:call, f, [acc]}}
-      end
+      resolve_call_or_recur(f, [acc], tail?)
     end
   end
+
+  defp resolve_call_or_recur({:var, :recur}, args, true), do: {:ok, {:recur, args}}
+
+  defp resolve_call_or_recur({:var, :recur}, _args, false),
+    do: {:error, {:invalid_form, "recur must be in tail position"}}
+
+  defp resolve_call_or_recur(f, args, _tail?), do: {:ok, {:call, f, args}}
 
   # ============================================================
   # Predicates: where and combinators

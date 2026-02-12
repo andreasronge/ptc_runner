@@ -228,32 +228,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
     else
       results =
         for model <- models do
-          IO.puts("\n>>> Testing generator: #{model}")
-          IO.puts(String.duplicate("-", 50))
-
-          model_results =
-            for scenario <- scenarios do
-              scenario_results =
-                for i <- 1..iterations do
-                  run_single_test(model, judge, scenario, i)
-                end
-
-              %{
-                scenario_name: scenario.name,
-                level: scenario.level,
-                results: scenario_results,
-                valid_count: Enum.count(scenario_results, & &1.valid),
-                total_cost: sum_costs(scenario_results)
-              }
-            end
-
-          %{
-            model: model,
-            scenarios: model_results,
-            total_valid: Enum.sum(Enum.map(model_results, & &1.valid_count)),
-            total_tests: length(scenarios) * iterations,
-            total_cost: Enum.sum(Enum.map(model_results, & &1.total_cost))
-          }
+          run_model_benchmarks(model, judge, scenarios, iterations)
         end
 
       # Save all generated programs
@@ -264,6 +239,35 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
 
       results
     end
+  end
+
+  defp run_model_benchmarks(model, judge, scenarios, iterations) do
+    IO.puts("\n>>> Testing generator: #{model}")
+    IO.puts(String.duplicate("-", 50))
+
+    model_results =
+      for scenario <- scenarios do
+        scenario_results =
+          for i <- 1..iterations do
+            run_single_test(model, judge, scenario, i)
+          end
+
+        %{
+          scenario_name: scenario.name,
+          level: scenario.level,
+          results: scenario_results,
+          valid_count: Enum.count(scenario_results, & &1.valid),
+          total_cost: sum_costs(scenario_results)
+        }
+      end
+
+    %{
+      model: model,
+      scenarios: model_results,
+      total_valid: Enum.sum(Enum.map(model_results, & &1.valid_count)),
+      total_tests: length(scenarios) * iterations,
+      total_cost: Enum.sum(Enum.map(model_results, & &1.total_cost))
+    }
   end
 
   @level_descriptions %{
@@ -537,25 +541,29 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
       File.mkdir_p!(model_dir)
 
       for scenario_result <- model_result.scenarios do
-        for {result, i} <- Enum.with_index(scenario_result.results, 1) do
-          if result.generated_code do
-            filename = "#{scenario_result.scenario_name}_#{i}.clj"
-            filepath = Path.join(model_dir, filename)
+        save_scenario_programs(scenario_result, model_dir)
+      end
+    end
+  end
 
-            content = """
-            ;; Scenario: #{scenario_result.scenario_name}
-            ;; Level: #{scenario_result.level}
-            ;; Iteration: #{i}
-            ;; Valid: #{result.valid}
-            ;; Errors: #{inspect(result.errors)}
-            ;; Duration: #{result.duration_ms}ms
+  defp save_scenario_programs(scenario_result, model_dir) do
+    for {result, i} <- Enum.with_index(scenario_result.results, 1) do
+      if result.generated_code do
+        filename = "#{scenario_result.scenario_name}_#{i}.clj"
+        filepath = Path.join(model_dir, filename)
 
-            #{result.generated_code}
-            """
+        content = """
+        ;; Scenario: #{scenario_result.scenario_name}
+        ;; Level: #{scenario_result.level}
+        ;; Iteration: #{i}
+        ;; Valid: #{result.valid}
+        ;; Errors: #{inspect(result.errors)}
+        ;; Duration: #{result.duration_ms}ms
 
-            File.write!(filepath, content)
-          end
-        end
+        #{result.generated_code}
+        """
+
+        File.write!(filepath, content)
       end
     end
   end

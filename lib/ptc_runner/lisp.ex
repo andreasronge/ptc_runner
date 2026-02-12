@@ -154,23 +154,7 @@ defmodule PtcRunner.Lisp do
       # ExecutionError. This matches the behavior in SubAgent.Loop.ToolNormalizer,
       # which handles the SubAgent execution path.
       tool_executor = fn name, args ->
-        case Map.fetch(normalized_tools, name) do
-          {:ok, %Tool{function: fun}} ->
-            case fun.(args) do
-              {:ok, value} ->
-                value
-
-              {:error, reason} ->
-                raise ExecutionError, reason: :tool_error, message: name, data: reason
-
-              value ->
-                value
-            end
-
-          :error ->
-            available = Map.keys(normalized_tools) |> Enum.sort()
-            raise ExecutionError, reason: :unknown_tool, message: name, data: available
-        end
+        execute_tool(normalized_tools, name, args)
       end
 
       # Build tools_meta lookup: %{name => %{cache: bool}}
@@ -735,6 +719,26 @@ defmodule PtcRunner.Lisp do
     do: Enum.reduce(preds, acc, &collect_tool_names/2)
 
   defp collect_tool_names(_other, acc), do: acc
+
+  defp execute_tool(normalized_tools, name, args) do
+    case Map.fetch(normalized_tools, name) do
+      {:ok, %Tool{function: fun}} ->
+        case fun.(args) do
+          {:ok, value} ->
+            value
+
+          {:error, reason} ->
+            raise ExecutionError, reason: :tool_error, message: name, data: reason
+
+          value ->
+            value
+        end
+
+      :error ->
+        available = Map.keys(normalized_tools) |> Enum.sort()
+        raise ExecutionError, reason: :unknown_tool, message: name, data: available
+    end
+  end
 
   # Normalize tools from various formats to Tool structs
   defp normalize_tools(raw_tools) do
