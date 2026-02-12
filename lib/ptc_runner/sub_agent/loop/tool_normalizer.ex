@@ -73,6 +73,10 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
         wrapped = wrap_return(name, func)
         {name, wrap_with_telemetry(name, wrapped, agent)}
 
+      {name, {func, opts}} when is_function(func, 1) and is_list(opts) ->
+        wrapped = wrap_return(name, func)
+        {name, {wrap_with_telemetry(name, wrapped, agent), opts}}
+
       {name, other} ->
         {name, other}
     end)

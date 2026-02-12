@@ -141,6 +141,38 @@ defmodule PtcRunner.TraceLogIntegrationTest do
       assert "tool.stop" in event_types
     end
 
+    test "captures tool events when tools use {function, options} tuple format", %{tmp_dir: dir} do
+      path = Path.join(dir, "trace.jsonl")
+
+      # Tools defined as {function, keyword_options} — the format used in livebooks/guides
+      double_tool = fn args -> args["x"] * 2 end
+
+      agent =
+        SubAgent.new(
+          prompt: "Double 21 and return it",
+          max_turns: 3,
+          tools: %{
+            "double" =>
+              {double_tool, signature: "(x :int) -> :int", description: "Double a number"}
+          }
+        )
+
+      {:ok, {:ok, step}, trace_path} =
+        TraceLog.with_trace(
+          fn -> SubAgent.run(agent, llm: mock_llm([~S|(return (tool/double {:x 21}))|])) end,
+          path: path
+        )
+
+      assert step.return == 42
+
+      events = TraceLog.Analyzer.load(trace_path)
+      event_types = Enum.map(events, & &1["event"])
+
+      # Tool telemetry events must be captured regardless of how tools are defined
+      assert "tool.start" in event_types
+      assert "tool.stop" in event_types
+    end
+
     test "summary extracts correct metrics", %{tmp_dir: dir} do
       path = Path.join(dir, "trace.jsonl")
 
