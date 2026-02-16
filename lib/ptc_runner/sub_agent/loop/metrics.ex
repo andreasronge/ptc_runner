@@ -166,21 +166,35 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     measurements = build_turn_measurements(turn_duration, tokens)
     turn_type = Map.get(state, :current_turn_type, :normal)
 
-    # Extract program, result preview, and prints from turn (nil-safe)
-    {program, result_preview, prints} =
+    # Extract program, result preview, prints, and raw_response from turn (nil-safe)
+    {program, result_preview, prints, raw_response} =
       case turn do
-        nil -> {nil, "nil", []}
-        %Turn{} -> {turn.program, build_result_preview(turn.result), turn.prints || []}
+        nil ->
+          {nil, "nil", [], nil}
+
+        %Turn{} ->
+          {turn.program, build_result_preview(turn.result), turn.prints, turn.raw_response}
       end
 
-    Telemetry.emit([:turn, :stop], measurements, %{
+    metadata = %{
       agent: agent,
       turn: state.turn,
       program: program,
       result_preview: result_preview,
       prints: prints,
       type: turn_type
-    })
+    }
+
+    # Include raw_response when program is nil (e.g. parse errors, JSON mode)
+    # so trace viewers can show what the LLM actually generated
+    metadata =
+      if is_nil(program) and raw_response do
+        Map.put(metadata, :raw_response, raw_response)
+      else
+        metadata
+      end
+
+    Telemetry.emit([:turn, :stop], measurements, metadata)
 
     :ok
   end
