@@ -224,7 +224,8 @@ function buildTurnsFromEvents(events, paired) {
       systemPrompt: start?.metadata?.system_prompt || null,
       prompt: getLastUserMessage(start?.metadata?.messages),
       thinking: extractThinking(response),
-      program: extractProgram(response),
+      program: turnPair?.stop?.metadata?.program || extractProgram(response),
+      rawResponse: turnPair?.stop?.metadata?.raw_response || response || null,
       tokens: stop?.measurements || null,
       duration: stop?.duration_ms || 0,
       resultPreview,
@@ -309,6 +310,11 @@ function renderTurnDetail(container, turn, state, data) {
     html += `<div class="turn-section">
       <div class="section-title">Program ${turn.tokens ? `<span class="meta">${formatTokenBreakdown(turn.tokens)}</span>` : ''}</div>
       <div class="code-block">${highlightLisp(turn.program)}</div>
+    </div>`;
+  } else if (turn.rawResponse) {
+    html += `<div class="turn-section">
+      <div class="section-title">Raw LLM Response (parse failed)</div>
+      <div class="code-block error-result">${escapeHtml(turn.rawResponse)}</div>
     </div>`;
   }
 
