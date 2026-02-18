@@ -1037,14 +1037,24 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval_or([], %EvalContext{} = eval_ctx), do: {:ok, nil, eval_ctx}
 
   defp do_eval_or([e | rest], %EvalContext{} = eval_ctx) do
-    with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
-      if Where.truthy?(value) do
-        # Short-circuit: return truthy value
-        {:ok, value, eval_ctx2}
-      else
-        # Continue evaluating, tracking this value as last evaluated
-        do_eval_or_rest(rest, value, eval_ctx2)
-      end
+    case do_eval(e, eval_ctx) do
+      {:ok, value, eval_ctx2} ->
+        if Where.truthy?(value) do
+          # Short-circuit: return truthy value
+          {:ok, value, eval_ctx2}
+        else
+          # Continue evaluating, tracking this value as last evaluated
+          do_eval_or_rest(rest, value, eval_ctx2)
+        end
+
+      {:error, {:unbound_var, name}} ->
+        # Unbound memory variable treated as nil/falsy — try next clause.
+        # This makes `(or my-memory-var default)` safe even on the first call.
+        Logger.debug("[ptc-lisp] or: #{name} unbound, treating as nil")
+        do_eval_or_rest(rest, nil, eval_ctx)
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -1053,14 +1063,23 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp do_eval_or_rest([e | rest], _last_value, %EvalContext{} = eval_ctx) do
-    with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
-      if Where.truthy?(value) do
-        # Short-circuit: return truthy value
-        {:ok, value, eval_ctx2}
-      else
-        # Continue evaluating, tracking this value as last evaluated
-        do_eval_or_rest(rest, value, eval_ctx2)
-      end
+    case do_eval(e, eval_ctx) do
+      {:ok, value, eval_ctx2} ->
+        if Where.truthy?(value) do
+          # Short-circuit: return truthy value
+          {:ok, value, eval_ctx2}
+        else
+          # Continue evaluating, tracking this value as last evaluated
+          do_eval_or_rest(rest, value, eval_ctx2)
+        end
+
+      {:error, {:unbound_var, name}} ->
+        # Same treatment as the first clause: unbound memory var = nil/falsy.
+        Logger.debug("[ptc-lisp] or: #{name} unbound, treating as nil")
+        do_eval_or_rest(rest, nil, eval_ctx)
+
+      {:error, _} = err ->
+        err
     end
   end
 
