@@ -65,6 +65,40 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
       exprs = [nil, false]
       assert {:ok, false, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
     end
+
+    test "unbound memory variable falls through to default" do
+      # The canonical memory pattern: (or my-counter 0)
+      # When the variable has never been def'd, it should behave like nil
+      # and return the default — not crash with :unbound_var.
+      exprs = [{:var, :my_counter}, 0]
+      # ctx=%{}, memory=%{} (empty — variable never defined), env=%{}
+      assert {:ok, 0, _} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "truthy memory variable is returned without hitting default" do
+      exprs = [{:var, :my_counter}, 0]
+      # ctx=%{}, memory=%{my_counter: 42}, env=%{}
+      assert {:ok, 42, _} =
+               Eval.eval({:or, exprs}, %{}, %{my_counter: 42}, %{}, &dummy_tool/2)
+    end
+
+    test "unbound variable in non-first position falls through" do
+      # (or nil unbound-b) should return nil, not crash
+      exprs = [nil, {:var, :unbound_b}]
+      assert {:ok, nil, _} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "multiple unbound variables all fall through to nil" do
+      # (or unbound-a unbound-b) should return nil, not crash
+      exprs = [{:var, :unbound_a}, {:var, :unbound_b}]
+      assert {:ok, nil, _} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "non-unbound errors still propagate" do
+      # Only :unbound_var is suppressed; other errors (e.g. type errors) surface.
+      # Test via Lisp.run where error handling is clean.
+      assert {:error, _step} = PtcRunner.Lisp.run("(or (+ 1 \"bad\") 99)")
+    end
   end
 
   describe "sequential evaluation: do" do
