@@ -409,6 +409,47 @@ defmodule PtcRunner.LispTest do
                Lisp.run("(+ counter 1)", memory: %{counter: 10})
     end
 
+    test "undefined vars inside or are allowed (safe memory default pattern)" do
+      # (or my-var default) is the idiomatic pattern for safe memory access;
+      # runtime treats unbound vars as nil, so static analysis should not reject them.
+      assert {:ok, %{return: 42}} = Lisp.run("(or my-var 42)")
+
+      assert {:ok, %{return: %{}}} =
+               Lisp.run(~S|(do (defn f [] (or episodes {})) (f))|)
+    end
+
+    test "undefined var inside expression within or is still caught" do
+      # Only bare vars get the pass — an undefined var used inside a subexpression
+      # like (inc undefined-var) must still be rejected statically.
+      assert {:error, %{fail: %{reason: :unbound_var}}} =
+               Lisp.run("(or (inc undefined-var) 0)")
+    end
+
+    test "multi-turn defn + or memory default pattern (ALMA-style)" do
+      # Real-world pattern: multiple defns that def global vars via (or var default),
+      # then other defns read those same globals with the same (or var default) guard.
+      source = ~S"""
+      (do
+        (defn mem-update []
+          (let [episodes (or episodes {})
+                task-eps (or (get episodes "nav") [])
+                record {"success" true "actions" 3}]
+            (def episodes (assoc episodes "nav" (conj task-eps record)))
+            (def total-episodes (inc (or total-episodes 0)))))
+
+        (defn recall []
+          (let [total (or total-episodes 0)
+                eps (or episodes {})]
+            (str "episodes: " total ", types: " (count (keys eps)))))
+
+        (mem-update)
+        (mem-update)
+        (recall))
+      """
+
+      assert {:ok, %{return: "episodes: 2, types: 1"}} = Lisp.run(source)
+    end
+
     test "unknown tool rejected before side effects execute" do
       call_count = :counters.new(1, [:atomics])
 
