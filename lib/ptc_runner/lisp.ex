@@ -898,8 +898,14 @@ defmodule PtcRunner.Lisp do
     Enum.flat_map(exprs, &collect_undefined_vars(&1, scope))
   end
 
+  # `or` treats unbound vars as nil at runtime (see eval.ex), so bare variable
+  # references inside `or` are safe — skip them in the static check.  This
+  # supports the common `(or my-var default)` pattern for memory initialisation.
   defp collect_undefined_vars({:or, exprs}, scope) do
-    Enum.flat_map(exprs, &collect_undefined_vars(&1, scope))
+    Enum.flat_map(exprs, fn
+      {:var, _} -> []
+      expr -> collect_undefined_vars(expr, scope)
+    end)
   end
 
   defp collect_undefined_vars({:return, value}, scope) do
