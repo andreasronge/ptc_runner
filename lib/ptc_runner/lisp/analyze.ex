@@ -207,6 +207,10 @@ defmodule PtcRunner.Lisp.Analyze do
     do: analyze_task_reset(rest, tail?)
 
   defp dispatch_list_form({:symbol, :def}, rest, _list, tail?), do: analyze_def(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :defonce}, rest, _list, tail?),
+    do: analyze_defonce(rest, tail?)
+
   defp dispatch_list_form({:symbol, :defn}, rest, _list, tail?), do: analyze_defn(rest, tail?)
 
   # Tool invocation via tool/ namespace: (tool/name args...)
@@ -1136,6 +1140,41 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_def(_, _tail?) do
     {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
+  end
+
+  # ============================================================
+  # Idempotent definition: defonce
+  # ============================================================
+
+  defp analyze_defonce([{:symbol, name}, value_ast], _tail?) do
+    with {:ok, value} <- do_analyze(value_ast, false) do
+      {:ok, {:defonce, name, value, %{}}}
+    end
+  end
+
+  defp analyze_defonce([{:symbol, name}, {:string, docstring}, value_ast], _tail?) do
+    with {:ok, value} <- do_analyze(value_ast, false) do
+      {:ok, {:defonce, name, value, %{docstring: docstring}}}
+    end
+  end
+
+  defp analyze_defonce([{:symbol, _name}], _tail?) do
+    {:error,
+     {:invalid_arity, :defonce, "expected (defonce name value), got (defonce name) without value"}}
+  end
+
+  defp analyze_defonce([{:symbol, _name} | _], _tail?) do
+    {:error,
+     {:invalid_arity, :defonce, "expected (defonce name value) or (defonce name docstring value)"}}
+  end
+
+  defp analyze_defonce([non_symbol | _], _tail?) do
+    {:error, {:invalid_form, "defonce name must be a symbol, got: #{inspect(non_symbol)}"}}
+  end
+
+  defp analyze_defonce(_, _tail?) do
+    {:error,
+     {:invalid_arity, :defonce, "expected (defonce name value) or (defonce name docstring value)"}}
   end
 
   # ============================================================

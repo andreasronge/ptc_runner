@@ -271,6 +271,146 @@ defmodule PtcRunner.Lisp.DefTest do
   end
 
   # ============================================================
+  # defonce tests
+  # ============================================================
+
+  describe "analyzer: defonce" do
+    test "(defonce name value) analyzes to {:defonce, name, analyzed_value, opts}" do
+      raw = {:list, [{:symbol, :defonce}, {:symbol, :x}, 42]}
+      assert {:ok, {:defonce, :x, 42, %{}}} = Analyze.analyze(raw)
+    end
+
+    test "(defonce name docstring value) preserves docstring in opts" do
+      raw = {:list, [{:symbol, :defonce}, {:symbol, :x}, {:string, "doc"}, 42]}
+      assert {:ok, {:defonce, :x, 42, %{docstring: "doc"}}} = Analyze.analyze(raw)
+    end
+
+    test "defonce analyzes the value expression" do
+      raw = {:list, [{:symbol, :defonce}, {:symbol, :result}, {:symbol, :x}]}
+      assert {:ok, {:defonce, :result, {:var, :x}, %{}}} = Analyze.analyze(raw)
+    end
+
+    test "defonce requires a symbol for name" do
+      raw = {:list, [{:symbol, :defonce}, {:string, "not-a-symbol"}, 42]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "defonce name must be a symbol"
+    end
+
+    test "(defonce name) without value returns error" do
+      raw = {:list, [{:symbol, :defonce}, {:symbol, :x}]}
+      assert {:error, {:invalid_arity, :defonce, msg}} = Analyze.analyze(raw)
+      assert msg =~ "without value"
+    end
+
+    test "empty defonce returns error" do
+      raw = {:list, [{:symbol, :defonce}]}
+      assert {:error, {:invalid_arity, :defonce, _msg}} = Analyze.analyze(raw)
+    end
+  end
+
+  describe "evaluator: defonce" do
+    test "(defonce x 42) binds when not present" do
+      ast = {:defonce, :x, 42, %{}}
+      {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+
+      assert result == %Var{name: :x}
+      assert user_ns == %{x: 42}
+    end
+
+    test "(defonce x 99) is a no-op when x is already bound" do
+      ast = {:defonce, :x, 99, %{}}
+      {:ok, result, user_ns} = Eval.eval(ast, %{}, %{x: 42}, %{}, &dummy_tool/2)
+
+      assert result == %Var{name: :x}
+      assert user_ns == %{x: 42}
+    end
+
+    test "defonce does NOT evaluate value expression when already bound" do
+      # Use a tool call as the value — it must not be invoked
+      call_count = :counters.new(1, [])
+
+      tools = %{
+        "counter" => fn _args ->
+          :counters.add(call_count, 1, 1)
+          0
+        end
+      }
+
+      ast = {:defonce, :x, {:tool_call, :counter, []}, %{}}
+
+      {:ok, _result, user_ns} =
+        Eval.eval(ast, %{}, %{x: 99}, %{}, fn name, args ->
+          tools[Atom.to_string(name)].(args)
+        end)
+
+      assert user_ns == %{x: 99}
+      assert :counters.get(call_count, 1) == 0
+    end
+
+    test "defonce cannot shadow builtins" do
+      ast = {:defonce, :map, 42, %{}}
+
+      assert {:error, {:cannot_shadow_builtin, :map}} =
+               Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+    end
+  end
+
+  describe "defonce integration" do
+    test "(defonce x 0) initializes on turn 1" do
+      source = "(defonce x 0)"
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
+
+      assert result == %Var{name: :x}
+      assert user_ns == %{x: 0}
+    end
+
+    test "(defonce x 99) is a no-op when x already bound (multi-turn via memory)" do
+      # Turn 1: x = 0
+      {:ok, %{memory: user_ns1}} = Lisp.run("(defonce x 0)")
+
+      # Turn 2: defonce with different value — x stays 0
+      {:ok, %{return: result, memory: user_ns2}} = Lisp.run("(defonce x 99)", memory: user_ns1)
+
+      assert result == %Var{name: :x}
+      assert user_ns2[:x] == 0
+    end
+
+    test "defonce then def accumulates across turns" do
+      # Turn 1: initialize counter
+      {:ok, %{memory: mem1}} = Lisp.run("(defonce counter 0)")
+      assert mem1[:counter] == 0
+
+      # Turn 2: increment (defonce is no-op, def updates)
+      {:ok, %{memory: mem2}} =
+        Lisp.run("(do (defonce counter 0) (def counter (inc counter)))", memory: mem1)
+
+      assert mem2[:counter] == 1
+
+      # Turn 3: increment again
+      {:ok, %{memory: mem3}} =
+        Lisp.run("(do (defonce counter 0) (def counter (inc counter)))", memory: mem2)
+
+      assert mem3[:counter] == 2
+    end
+
+    test "defonce with docstring variant works" do
+      source = ~S|(defonce total "running total" 0)|
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
+
+      assert result == %Var{name: :total}
+      assert user_ns[:total] == 0
+    end
+
+    test "defonce cannot shadow builtin" do
+      source = "(defonce map {})"
+      {:error, step} = Lisp.run(source)
+
+      assert step.fail.reason == :cannot_shadow_builtin
+      assert step.fail.message =~ "map"
+    end
+  end
+
+  # ============================================================
   # Var formatting tests
   # ============================================================
 

@@ -744,7 +744,7 @@ Binds a name to a value in the user namespace, persisting across turns:
 
 ```clojure
 (def name value)
-(def name docstring value)  ; docstring is optional and ignored
+(def name docstring value)  ; docstring is optional; preserved in function metadata, otherwise ignored
 ```
 
 **Semantics:**
@@ -777,11 +777,33 @@ Binds a name to a value in the user namespace, persisting across turns:
 **Differences from Clojure:**
 - No `^:dynamic`, `^:private`, or other metadata
 - No destructuring in def (use `let` then `def`)
-- Docstrings allowed but ignored (for Clojure compatibility)
+- Docstrings allowed; preserved in function metadata (via `defn`), otherwise ignored
 
 ---
 
-### 5.10 `defn` — Named Function Definition
+### 5.10 `defonce` — Idempotent Initialization
+
+Binds a name to a value only if not already defined. Safe for multi-turn use:
+
+```clojure
+(defonce name value)
+(defonce name docstring value)
+```
+
+**Semantics:**
+- If name is already bound in user namespace: no-op, returns the var
+- If name is not bound: evaluates value and binds it (same as `def`)
+- Value expression is NOT evaluated if name is already bound
+- Cannot shadow builtin function names
+
+```clojure
+(defonce total-episodes 0)            ; turn 1 → binds 0, turn 2+ → no-op
+(def total-episodes (inc total-episodes))  ; safe to use after defonce
+```
+
+---
+
+### 5.11 `defn` — Named Function Definition
 
 Syntactic sugar for defining named functions in the user namespace:
 

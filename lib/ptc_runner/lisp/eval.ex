@@ -208,6 +208,26 @@ defmodule PtcRunner.Lisp.Eval do
     do_eval({:def, name, value_ast, %{}}, eval_ctx)
   end
 
+  # Idempotent define: (defonce name value opts)
+  # Binds name only if not already defined in user_ns.
+  # Value expression is NOT evaluated when name is already bound.
+  defp do_eval({:defonce, name, value_ast, opts}, %EvalContext{user_ns: user_ns} = eval_ctx) do
+    cond do
+      Env.builtin?(name) ->
+        {:error, {:cannot_shadow_builtin, name}}
+
+      Map.has_key?(user_ns, name) ->
+        {:ok, %Var{name: name}, eval_ctx}
+
+      true ->
+        with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+          value = merge_docstring_into_closure(value, opts)
+          new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+          {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
+        end
+    end
+  end
+
   # Sequential evaluation: do
   defp do_eval({:do, exprs}, %EvalContext{} = eval_ctx) do
     do_eval_do(exprs, eval_ctx)

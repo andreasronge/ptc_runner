@@ -60,6 +60,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:tool_call, atom(), [t()]}
           # Define binding in user namespace: (def name value) with optional metadata
           | {:def, atom(), t(), map()}
+          # Idempotent define: (defonce name value) — no-op if already bound
+          | {:defonce, atom(), t(), map()}
           # Tail recursion: loop and recur
           | {:loop, [binding()], t()}
           | {:recur, [t()]}
