@@ -861,8 +861,12 @@ defmodule PtcRunner.Lisp do
     Enum.flat_map(args, &collect_undefined_vars(&1, scope))
   end
 
-  # def — add name to scope before recursing (enables recursive defn)
+  # def / defonce — add name to scope before recursing (enables recursive defn)
   defp collect_undefined_vars({:def, name, value, _meta}, scope) do
+    collect_undefined_vars(value, MapSet.put(scope, name))
+  end
+
+  defp collect_undefined_vars({:defonce, name, value, _opts}, scope) do
     collect_undefined_vars(value, MapSet.put(scope, name))
   end
 
@@ -880,6 +884,7 @@ defmodule PtcRunner.Lisp do
         new_sc =
           case expr do
             {:def, name, _value, _meta} -> MapSet.put(sc, name)
+            {:defonce, name, _value, _opts} -> MapSet.put(sc, name)
             _ -> sc
           end
 
