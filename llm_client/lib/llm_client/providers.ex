@@ -210,6 +210,7 @@ defmodule LLMClient.Providers do
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
   def callback(model_or_alias, opts \\ []) do
+    LLMClient.load_dotenv()
     model = LLMClient.Registry.resolve!(model_or_alias)
 
     if opts == [] do
@@ -556,7 +557,8 @@ defmodule LLMClient.Providers do
       input: usage[:input_tokens] || usage["input_tokens"] || 0,
       output: usage[:output_tokens] || usage["output_tokens"] || 0,
       cache_creation: cache_creation,
-      cache_read: cache_read
+      cache_read: cache_read,
+      total_cost: usage[:total_cost] || 0.0
     }
   end
 
@@ -599,6 +601,9 @@ defmodule LLMClient.Providers do
 
       String.starts_with?(model, "google:") ->
         System.get_env("GOOGLE_API_KEY") != nil
+
+      String.starts_with?(model, "groq:") ->
+        System.get_env("GROQ_API_KEY") != nil
 
       String.starts_with?(model, "bedrock:") or String.starts_with?(model, "amazon_bedrock:") ->
         # Bedrock can use either IAM credentials or session tokens

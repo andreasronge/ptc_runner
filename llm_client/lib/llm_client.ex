@@ -32,6 +32,67 @@ defmodule LLMClient do
   Use `LLMClient.presets/0` to get all aliases.
   """
 
+  @dotenv_loaded_key {__MODULE__, :dotenv_loaded}
+
+  @doc """
+  Loads `.env` from the nearest ancestor directory containing one.
+
+  Walks up from the current working directory looking for a `.env` file.
+  Parses `KEY=VALUE` lines and sets them via `System.put_env/2` (only if
+  not already set, so explicit env vars take precedence).
+
+  Called automatically by `callback/1`. Safe to call multiple times —
+  only loads once per VM.
+  """
+  def load_dotenv do
+    unless :persistent_term.get(@dotenv_loaded_key, false) do
+      :persistent_term.put(@dotenv_loaded_key, true)
+
+      case find_dotenv(File.cwd!()) do
+        nil -> :ok
+        path -> apply_dotenv(path)
+      end
+    end
+
+    :ok
+  end
+
+  defp find_dotenv("/"), do: nil
+
+  defp find_dotenv(dir) do
+    candidate = Path.join(dir, ".env")
+
+    if File.regular?(candidate) do
+      candidate
+    else
+      find_dotenv(Path.dirname(dir))
+    end
+  end
+
+  defp apply_dotenv(path) do
+    path
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      line = String.trim(line)
+
+      unless line == "" or String.starts_with?(line, "#") do
+        case String.split(line, "=", parts: 2) do
+          [key, value] ->
+            key = String.trim(key)
+            value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
+
+            if System.get_env(key) == nil do
+              System.put_env(key, value)
+            end
+
+          _ ->
+            :ok
+        end
+      end
+    end)
+  end
+
   # Provider functions with auto-resolve
   def generate_text(model, messages, opts \\ []) do
     with {:ok, resolved} <- LLMClient.Registry.resolve(model) do
@@ -78,8 +139,6 @@ defmodule LLMClient do
   defdelegate resolve!(name), to: LLMClient.Registry
   defdelegate default_model(), to: LLMClient.Registry
   defdelegate validate(model_string), to: LLMClient.Registry
-
-  defdelegate calculate_cost(alias_or_model_id, tokens), to: LLMClient.Registry
 
   @doc """
   Get all model presets as a map of alias to model ID.

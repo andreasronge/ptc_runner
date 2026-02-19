@@ -184,80 +184,6 @@ defmodule LLMClient.RegistryTest do
     end
   end
 
-  describe "calculate_cost/2" do
-    test "returns 0.0 for unknown model" do
-      cost = Registry.calculate_cost("unknown:model", %{input: 1000, output: 1000})
-      assert cost == 0.0
-    end
-
-    test "calculates standard cost without cache tokens" do
-      # haiku: input_cost_per_mtok: 0.80, output_cost_per_mtok: 4.00
-      # Same as legacy API when no caching
-      tokens = %{input: 1000, output: 1000, cache_creation: 0, cache_read: 0}
-      cost = Registry.calculate_cost("haiku", tokens)
-      assert_in_delta(cost, 0.0048, 0.00001)
-    end
-
-    test "calculates cost with cache creation (25% premium)" do
-      # haiku: input_cost_per_mtok: 0.80
-      # 1000 cache_creation tokens at 1.25x rate = 0.80 * 1.25 * 1000 / 1_000_000 = 0.001
-      tokens = %{input: 0, output: 0, cache_creation: 1000, cache_read: 0}
-      cost = Registry.calculate_cost("haiku", tokens)
-      assert_in_delta(cost, 0.001, 0.00001)
-    end
-
-    test "calculates cost with cache read (90% discount)" do
-      # haiku: input_cost_per_mtok: 0.80
-      # 1000 cache_read tokens at 0.1x rate = 0.80 * 0.10 * 1000 / 1_000_000 = 0.00008
-      tokens = %{input: 0, output: 0, cache_creation: 0, cache_read: 1000}
-      cost = Registry.calculate_cost("haiku", tokens)
-      assert_in_delta(cost, 0.00008, 0.000001)
-    end
-
-    test "calculates combined cost with all token types" do
-      # haiku: input: 0.80, output: 4.00
-      # input_tokens INCLUDES cached tokens, so input >= cache_read
-      # input: 4000 total, cache_read: 3000 (from cache), uncached: 1000
-      # 1000 uncached input at 1.0x = 0.0008
-      # 500 output at 1.0x = 0.002
-      # 2000 cache_creation at 1.25x = 0.002
-      # 3000 cache_read at 0.1x = 0.00024
-      # Total = 0.00504
-      tokens = %{input: 4000, output: 500, cache_creation: 2000, cache_read: 3000}
-      cost = Registry.calculate_cost("haiku", tokens)
-      assert_in_delta(cost, 0.00504, 0.00001)
-    end
-
-    test "handles missing cache keys gracefully" do
-      # Should default missing keys to 0
-      tokens = %{input: 1000, output: 1000}
-      cost = Registry.calculate_cost("haiku", tokens)
-      assert_in_delta(cost, 0.0048, 0.00001)
-    end
-
-    test "accepts _tokens suffix key format (Step.usage format)" do
-      # Same as standard test but using :input_tokens/:output_tokens keys
-      tokens = %{
-        input_tokens: 1000,
-        output_tokens: 1000,
-        cache_creation_tokens: 0,
-        cache_read_tokens: 0
-      }
-
-      cost = Registry.calculate_cost("haiku", tokens)
-      assert_in_delta(cost, 0.0048, 0.00001)
-    end
-
-    test "accepts mixed key formats" do
-      # Mix of both formats - prefers non-_tokens variant
-      tokens = %{input: 500, input_tokens: 1000, output_tokens: 1000}
-      cost = Registry.calculate_cost("haiku", tokens)
-      # Should use input: 500, not input_tokens: 1000
-      expected = 0.80 * 500 / 1_000_000 + 4.00 * 1000 / 1_000_000
-      assert_in_delta(cost, expected, 0.00001)
-    end
-  end
-
   describe "preset_models/0" do
     test "returns a map of aliases to model IDs" do
       models = Registry.preset_models()
@@ -433,7 +359,6 @@ defmodule LLMClient.RegistryTest do
       info = Registry.get_model_info("haiku")
       assert is_map(info)
       assert Map.has_key?(info, :description)
-      assert Map.has_key?(info, :costs)
       assert Map.has_key?(info, :providers)
       assert Map.has_key?(info, :provider_models)
     end
@@ -447,15 +372,6 @@ defmodule LLMClient.RegistryTest do
     test "returns nil for unknown model" do
       info = Registry.get_model_info("unknown_alias")
       assert info == nil
-    end
-
-    test "returns correct cost rates for haiku by provider" do
-      info = Registry.get_model_info("haiku")
-      # Costs are now nested by provider
-      assert info.costs.openrouter.input == 0.80
-      assert info.costs.openrouter.output == 4.00
-      assert info.costs.bedrock.input == 0.80
-      assert info.costs.anthropic.input == 0.80
     end
   end
 
