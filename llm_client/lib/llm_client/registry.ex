@@ -44,11 +44,6 @@ defmodule LLMClient.Registry do
         openrouter: "anthropic/claude-haiku-4.5",
         bedrock: "anthropic.claude-haiku-4-5-20251001-v1:0",
         anthropic: "claude-haiku-4-5-20251001"
-      },
-      costs: %{
-        openrouter: %{input: 0.80, output: 4.00},
-        bedrock: %{input: 0.80, output: 4.00},
-        anthropic: %{input: 0.80, output: 4.00}
       }
     },
     "sonnet" => %{
@@ -57,29 +52,18 @@ defmodule LLMClient.Registry do
         openrouter: "anthropic/claude-sonnet-4.5",
         bedrock: "anthropic.claude-sonnet-4-5-20250929-v1:0",
         anthropic: "claude-sonnet-4-5-20250929"
-      },
-      costs: %{
-        openrouter: %{input: 3.00, output: 15.00},
-        bedrock: %{input: 3.00, output: 15.00},
-        anthropic: %{input: 3.00, output: 15.00}
       }
     },
     "qwen-coder" => %{
       description: "Qwen3 Coder 30B - Code generation via Bedrock",
       providers: %{
         bedrock: "qwen.qwen3-coder-30b-a3b-v1:0"
-      },
-      costs: %{
-        bedrock: %{input: 0.14, output: 0.14}
       }
     },
     "qwen-coder-480b" => %{
       description: "Qwen3 Coder 480B - Large code model via Bedrock",
       providers: %{
         bedrock: "qwen.qwen3-coder-480b-a35b-v1:0"
-      },
-      costs: %{
-        bedrock: %{input: 1.50, output: 7.50}
       }
     },
     "gemini" => %{
@@ -88,37 +72,24 @@ defmodule LLMClient.Registry do
         openrouter: "google/gemini-2.5-flash",
         google: "gemini-2.5-flash"
         # Not available on Bedrock
-      },
-      costs: %{
-        openrouter: %{input: 0.15, output: 0.60},
-        google: %{input: 0.15, output: 0.60}
       }
     },
     "deepseek" => %{
       description: "DeepSeek Chat V3 - Cost-effective reasoning",
       providers: %{
         openrouter: "deepseek/deepseek-chat-v3-0324"
-      },
-      costs: %{
-        openrouter: %{input: 0.14, output: 0.28}
       }
     },
     "devstral" => %{
       description: "Devstral 2512 - Mistral AI code model (free)",
       providers: %{
         openrouter: "mistralai/devstral-2512:free"
-      },
-      costs: %{
-        openrouter: %{input: 0.0, output: 0.0}
       }
     },
     "kimi" => %{
       description: "Kimi K2 - Moonshot AI's model",
       providers: %{
         openrouter: "moonshotai/kimi-k2"
-      },
-      costs: %{
-        openrouter: %{input: 0.60, output: 2.40}
       }
     },
     "gpt" => %{
@@ -126,10 +97,18 @@ defmodule LLMClient.Registry do
       providers: %{
         openrouter: "openai/gpt-4.1-mini",
         openai: "gpt-4.1-mini"
-      },
-      costs: %{
-        openrouter: %{input: 0.40, output: 1.60},
-        openai: %{input: 0.40, output: 1.60}
+      }
+    },
+    "gpt-oss" => %{
+      description: "GPT-OSS 20B - OpenAI's open-source model via Groq",
+      providers: %{
+        groq: "openai/gpt-oss-20b"
+      }
+    },
+    "gpt-oss-120b" => %{
+      description: "GPT-OSS 120B - OpenAI's large open-source model via Groq",
+      providers: %{
+        groq: "openai/gpt-oss-120b"
       }
     },
     # Local models (Ollama only)
@@ -137,22 +116,19 @@ defmodule LLMClient.Registry do
       description: "DeepSeek Coder 6.7B - Local via Ollama",
       providers: %{
         ollama: "deepseek-coder:6.7b"
-      },
-      costs: %{ollama: %{input: 0.0, output: 0.0}}
+      }
     },
     "qwen-local" => %{
       description: "Qwen 2.5 Coder 7B - Local via Ollama",
       providers: %{
         ollama: "qwen2.5-coder:7b"
-      },
-      costs: %{ollama: %{input: 0.0, output: 0.0}}
+      }
     },
     "llama-local" => %{
       description: "Llama 3.2 3B - Local via Ollama (fast)",
       providers: %{
         ollama: "llama3.2:3b"
-      },
-      costs: %{ollama: %{input: 0.0, output: 0.0}}
+      }
     }
   }
 
@@ -161,7 +137,7 @@ defmodule LLMClient.Registry do
 
   # Cloud providers that can be used with aliases
   # Note: :bedrock is user-facing alias, maps to :amazon_bedrock for ReqLLM
-  @cloud_providers [:openrouter, :bedrock, :amazon_bedrock, :anthropic, :openai, :google]
+  @cloud_providers [:openrouter, :bedrock, :amazon_bedrock, :anthropic, :openai, :google, :groq]
 
   @doc """
   Get the default provider.
@@ -342,6 +318,7 @@ defmodule LLMClient.Registry do
         {:openai, "OPENAI_API_KEY"},
         {:google, "GOOGLE_API_KEY"},
         {:openrouter, "OPENROUTER_API_KEY"},
+        {:groq, "GROQ_API_KEY"},
         {:bedrock, ["AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN"]}
       ]
       |> Enum.filter(fn
@@ -377,8 +354,7 @@ defmodule LLMClient.Registry do
       alias: alias_name,
       description: meta.description,
       providers: Map.keys(meta.providers),
-      provider_models: meta.providers,
-      costs: meta.costs
+      provider_models: meta.providers
     }
   end
 
@@ -392,7 +368,10 @@ defmodule LLMClient.Registry do
     {cloud_models, local_models} =
       list_models()
       |> Enum.split_with(fn m ->
-        Enum.any?([:openrouter, :anthropic, :openai, :google, :bedrock], &(&1 in m.providers))
+        Enum.any?(
+          [:openrouter, :anthropic, :openai, :google, :bedrock, :groq],
+          &(&1 in m.providers)
+        )
       end)
 
     header = """
@@ -517,68 +496,6 @@ defmodule LLMClient.Registry do
     end
   end
 
-  @doc """
-  Calculate cost from token counts.
-  """
-  @spec calculate_cost(String.t(), map()) :: float()
-  def calculate_cost(alias_or_model_id, tokens) when is_map(tokens) do
-    costs = find_costs(alias_or_model_id)
-
-    case costs do
-      nil ->
-        0.0
-
-      %{input: input_rate, output: output_rate} ->
-        total_input = get_token_count(tokens, [:input, :input_tokens])
-        output_tokens = get_token_count(tokens, [:output, :output_tokens])
-        cache_creation = get_token_count(tokens, [:cache_creation, :cache_creation_tokens])
-        cache_read = get_token_count(tokens, [:cache_read, :cache_read_tokens])
-
-        uncached_input = max(total_input - cache_read, 0)
-
-        uncached_input_cost = input_rate * uncached_input / 1_000_000
-        output_cost = output_rate * output_tokens / 1_000_000
-        cache_write_cost = input_rate * 1.25 * cache_creation / 1_000_000
-        cache_read_cost = input_rate * 0.10 * cache_read / 1_000_000
-
-        uncached_input_cost + output_cost + cache_write_cost + cache_read_cost
-    end
-  end
-
-  defp get_token_count(tokens, keys) do
-    Enum.find_value(keys, 0, fn key -> Map.get(tokens, key) end)
-  end
-
-  defp find_costs(alias_or_model_id) do
-    cond do
-      # Direct alias lookup
-      Map.has_key?(@models, alias_or_model_id) ->
-        # Use default provider costs
-        provider = default_provider()
-        get_in(@models, [alias_or_model_id, :costs, provider])
-
-      # Provider:alias format (e.g., "bedrock:haiku" or "amazon_bedrock:...")
-      String.contains?(alias_or_model_id, ":") ->
-        case String.split(alias_or_model_id, ":", parts: 2) do
-          [provider_str, alias_name] when is_map_key(@models, alias_name) ->
-            provider = String.to_existing_atom(provider_str)
-            # Normalize amazon_bedrock -> bedrock for cost lookup
-            lookup_provider =
-              if provider in [:amazon_bedrock, :bedrock], do: :bedrock, else: provider
-
-            get_in(@models, [alias_name, :costs, lookup_provider])
-
-          _ ->
-            nil
-        end
-
-      true ->
-        nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
-
   defp unknown_model_error(name) do
     aliases_str = aliases() |> Enum.join(", ")
 
@@ -599,7 +516,7 @@ defmodule LLMClient.Registry do
     """
     Unknown provider: '#{provider}'
 
-    Available providers: openrouter, bedrock, anthropic, openai, google, ollama
+    Available providers: openrouter, bedrock, anthropic, openai, google, groq, ollama
     """
   end
 end
