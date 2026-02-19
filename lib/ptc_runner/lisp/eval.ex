@@ -813,9 +813,19 @@ defmodule PtcRunner.Lisp.Eval do
   # Also handles SubAgentTool results that may be wrapped with child_trace_id metadata.
   # The wrapper is unwrapped here so the Lisp interpreter only sees the actual value.
   defp record_tool_call(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
+    case EvalContext.check_tool_call_limit(eval_ctx) do
+      {:error, :tool_call_limit_exceeded} ->
+        {:error, {:tool_call_limit_exceeded, eval_ctx.max_tool_calls}}
+
+      :ok ->
+        record_tool_call_inner(tool_name, args_map, tool_exec, eval_ctx, cacheable?)
+    end
+  end
+
+  defp record_tool_call_inner(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
     cache_key = {tool_name, args_map}
 
-    # Check cache for hit
+    # Check cache for hit (cached calls don't count against limit - already counted)
     if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do
       cached = Map.get(eval_ctx.tool_cache, cache_key)
 

@@ -144,6 +144,7 @@ defmodule PtcRunner.SubAgent do
           memory_limit: pos_integer() | nil,
           max_depth: pos_integer(),
           turn_budget: pos_integer(),
+          name: String.t() | nil,
           description: String.t() | nil,
           field_descriptions: map() | nil,
           context_descriptions: map() | nil,
@@ -152,6 +153,7 @@ defmodule PtcRunner.SubAgent do
           compression: compression_opts(),
           thinking: boolean(),
           output: output_mode(),
+          max_tool_calls: pos_integer() | nil,
           memory_strategy: :strict | :rollback,
           plan: [plan_step()]
         }
@@ -181,6 +183,7 @@ defmodule PtcRunner.SubAgent do
     :llm_retry,
     :llm,
     :system_prompt,
+    :name,
     :description,
     :field_descriptions,
     :context_descriptions,
@@ -198,6 +201,7 @@ defmodule PtcRunner.SubAgent do
     turn_budget: 20,
     format_options: @default_format_options,
     float_precision: 2,
+    max_tool_calls: nil,
     output: :ptc_lisp,
     memory_strategy: :strict,
     plan: []
@@ -235,6 +239,7 @@ defmodule PtcRunner.SubAgent do
   - `system_prompt` - System prompt customization (map, function, or string)
   - `memory_limit` - Positive integer for max bytes for memory map (default: 1MB = 1,048,576 bytes)
   - `memory_strategy` - How to handle memory limit exceeded: `:strict` (fatal, default) or `:rollback` (roll back memory, feed error to LLM)
+  - `name` - Short display name shown in traces and the ptc-viewer (e.g. `"meta_agent"`, `"task_agent"`)
   - `description` - String describing the agent's purpose (for external docs)
   - `field_descriptions` - Map of field names to descriptions for signature fields
   - `context_descriptions` - Map of context variable names to descriptions (shown in Data Inventory)
@@ -526,6 +531,7 @@ defmodule PtcRunner.SubAgent do
         :memory_limit,
         :max_depth,
         :turn_budget,
+        :name,
         :description,
         :field_descriptions,
         :context_descriptions,
@@ -533,6 +539,7 @@ defmodule PtcRunner.SubAgent do
         :float_precision,
         :output,
         :memory_strategy,
+        :max_tool_calls,
         :plan
       ])
       |> Keyword.put(:prompt, mission)
@@ -558,6 +565,7 @@ defmodule PtcRunner.SubAgent do
         :memory_limit,
         :max_depth,
         :turn_budget,
+        :name,
         :description,
         :field_descriptions,
         :context_descriptions,
@@ -565,6 +573,7 @@ defmodule PtcRunner.SubAgent do
         :float_precision,
         :output,
         :memory_strategy,
+        :max_tool_calls,
         :plan
       ])
 
@@ -1214,11 +1223,11 @@ defmodule PtcRunner.SubAgent do
       iex> preview = PtcRunner.SubAgent.preview_prompt(agent, context: %{user: "alice"})
       iex> preview.user =~ "Find emails for alice"
       true
-      iex> preview.user =~ "# Mission"
+      iex> preview.user =~ "<mission>"
       true
-      iex> preview.system =~ "PTC-Lisp"
+      iex> preview.system =~ "<language_reference>"
       true
-      iex> preview.system =~ "# Mission"
+      iex> preview.system =~ "<mission>"
       false
 
   """
@@ -1263,7 +1272,7 @@ defmodule PtcRunner.SubAgent do
 
     # Combine context with mission (matches what Loop sends as first user message)
     user_message =
-      [context_prompt, "# Mission\n\n#{expanded_mission}"]
+      [context_prompt, "<mission>\n#{expanded_mission}\n</mission>"]
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n\n")
 
