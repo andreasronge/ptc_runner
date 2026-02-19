@@ -26,6 +26,8 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
 
   """
   @spec normalize_keys(term()) :: term()
+  def normalize_keys(%_{} = value), do: value
+
   def normalize_keys(value) when is_map(value) do
     Map.new(value, fn {k, v} -> {normalize_key(k), normalize_keys(v)} end)
   end
