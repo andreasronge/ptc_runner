@@ -43,6 +43,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_max_depth!(opts)
     validate_turn_budget!(opts)
     validate_prompt_placeholders!(opts)
+    validate_name!(opts)
     validate_description!(opts)
     validate_field_descriptions!(opts)
     validate_context_descriptions!(opts)
@@ -51,6 +52,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_output!(opts)
     validate_thinking!(opts)
     validate_memory_strategy!(opts)
+    validate_max_tool_calls!(opts)
     validate_self_tool_requires_signature!(opts)
   end
 
@@ -187,6 +189,16 @@ defmodule PtcRunner.SubAgent.Validator do
       end
     else
       _ -> :ok
+    end
+  end
+
+  defp validate_name!(opts) do
+    case Keyword.fetch(opts, :name) do
+      {:ok, nil} -> :ok
+      {:ok, name} when is_binary(name) and name != "" -> :ok
+      {:ok, ""} -> raise ArgumentError, "name must be a non-empty string or nil"
+      {:ok, _} -> raise ArgumentError, "name must be a string"
+      :error -> :ok
     end
   end
 
@@ -626,6 +638,15 @@ defmodule PtcRunner.SubAgent.Validator do
 
       :error ->
         :ok
+    end
+  end
+
+  defp validate_max_tool_calls!(opts) do
+    case Keyword.fetch(opts, :max_tool_calls) do
+      {:ok, n} when is_integer(n) and n > 0 -> :ok
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "max_tool_calls must be a positive integer"
+      :error -> :ok
     end
   end
 

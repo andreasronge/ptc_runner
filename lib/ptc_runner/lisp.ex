@@ -146,6 +146,7 @@ defmodule PtcRunner.Lisp do
     trace_context = Keyword.get(opts, :trace_context)
     journal = Keyword.get(opts, :journal)
     tool_cache = Keyword.get(opts, :tool_cache, %{})
+    max_tool_calls = Keyword.get(opts, :max_tool_calls)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -180,7 +181,8 @@ defmodule PtcRunner.Lisp do
         trace_context: trace_context,
         journal: journal,
         tool_cache: tool_cache,
-        tools_meta: tools_meta
+        tools_meta: tools_meta,
+        max_tool_calls: max_tool_calls
       }
 
       execute_program(source, opts)
@@ -247,7 +249,8 @@ defmodule PtcRunner.Lisp do
       trace_context: trace_context,
       journal: journal,
       tool_cache: tool_cache,
-      tools_meta: tools_meta
+      tools_meta: tools_meta,
+      max_tool_calls: max_tool_calls
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
@@ -271,7 +274,8 @@ defmodule PtcRunner.Lisp do
           trace_context: trace_context,
           journal: journal,
           tool_cache: tool_cache,
-          tools_meta: tools_meta
+          tools_meta: tools_meta,
+          max_tool_calls: max_tool_calls
         ]
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 

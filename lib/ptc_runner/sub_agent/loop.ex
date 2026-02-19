@@ -756,6 +756,7 @@ defmodule PtcRunner.SubAgent.Loop do
         tool_cache: state.tool_cache
       ]
       |> maybe_add_max_heap(state.max_heap)
+      |> maybe_add_max_tool_calls(agent.max_tool_calls)
 
     case Lisp.run(code, lisp_opts) do
       {:ok, lisp_step} ->
@@ -1050,7 +1051,7 @@ defmodule PtcRunner.SubAgent.Loop do
     initial_progress = TurnFeedback.render_initial_progress(agent)
 
     # Combine context sections with mission
-    [context_prompt, "# Mission\n\n#{expanded_mission}", initial_progress]
+    [context_prompt, "<mission>\n#{expanded_mission}\n</mission>", initial_progress]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
@@ -1141,6 +1142,11 @@ defmodule PtcRunner.SubAgent.Loop do
   # Add max_heap to opts if provided (nil means use Lisp.run default)
   defp maybe_add_max_heap(opts, nil), do: opts
   defp maybe_add_max_heap(opts, max_heap), do: Keyword.put(opts, :max_heap, max_heap)
+
+  defp maybe_add_max_tool_calls(opts, nil), do: opts
+
+  defp maybe_add_max_tool_calls(opts, max_tool_calls),
+    do: Keyword.put(opts, :max_tool_calls, max_tool_calls)
 
   # Calculate mission deadline from timeout in milliseconds
   defp calculate_mission_deadline(nil), do: nil
@@ -1494,6 +1500,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # The full agent is still available in run.start context.
   defp slim_agent(agent) do
     %{
+      name: agent.name,
       description: agent.description,
       output: agent.output,
       max_turns: agent.max_turns,

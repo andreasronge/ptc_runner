@@ -399,7 +399,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn %{system: system} ->
         assert is_binary(system)
-        assert system =~ "PTC-Lisp"
+        assert system =~ "<language_reference>"
         {:ok, ~S|```clojure
 (return {:value 42})
 ```|}
@@ -581,6 +581,59 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert step.return == %{"value" => 42}
       # fallback_used should not be present when return was explicit
       assert step.usage[:fallback_used] != true
+    end
+  end
+
+  describe "max_tool_calls" do
+    test "limits tool invocations per turn" do
+      call_count = :counters.new(1, [:atomics])
+
+      agent =
+        SubAgent.new(
+          prompt: "Call search 3 times then return results",
+          tools: %{
+            "search" => fn _args ->
+              :counters.add(call_count, 1, 1)
+              ["result"]
+            end
+          },
+          max_tool_calls: 2,
+          max_turns: 3
+        )
+
+      llm = fn %{messages: messages} ->
+        last_msg = List.last(messages)
+
+        if is_binary(last_msg.content) and last_msg.content =~ "tool_call_limit" do
+          {:ok, ~S|```clojure
+(return "done")
+```|}
+        else
+          {:ok, ~S|```clojure
+(def a (tool/search {:q "1"}))
+(def b (tool/search {:q "2"}))
+(def c (tool/search {:q "3"}))
+(return [a b c])
+```|}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+      # Only 2 tool calls should have executed
+      assert :counters.get(call_count, 1) == 2
+      assert step.return == "done"
+    end
+
+    test "system prompt includes tool call limit when set" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          max_tool_calls: 5,
+          tools: %{"t" => fn _ -> nil end}
+        )
+
+      preview = SubAgent.preview_prompt(agent, context: %{})
+      assert preview.user =~ "maximum 5 tool calls"
     end
   end
 end

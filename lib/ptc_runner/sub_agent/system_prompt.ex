@@ -39,7 +39,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       iex> agent = PtcRunner.SubAgent.new(prompt: "Add {{x}} and {{y}}")
       iex> context = %{x: 5, y: 3}
       iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: context)
-      iex> prompt =~ "## Role"
+      iex> prompt =~ "<role>"
       true
       iex> prompt =~ "data/x"
       true
@@ -56,8 +56,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   alias PtcRunner.SubAgent.SystemPrompt.Output
 
   @output_format """
-  # Output Format
-
+  <output_format>
   Respond with EXACTLY ONE ```clojure code block — no text before or after the block. Put reasoning in `;; comments` inside the code.
 
   ```clojure
@@ -65,11 +64,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   ```
 
   Do NOT include multiple code blocks or text outside the ```clojure block.
+  </output_format>
   """
 
   @output_format_thinking """
-  # Output Format
-
+  <output_format>
   For complex tasks, think through the problem first, then respond with EXACTLY ONE ```clojure code block:
 
   thinking:
@@ -80,6 +79,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   ```
 
   Do NOT include multiple code blocks or code outside the ```clojure block.
+  </output_format>
   """
 
   @doc """
@@ -91,7 +91,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Process data")
       iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: %{user: "Alice"})
-      iex> prompt =~ "## Role" and prompt =~ "# Output Format"
+      iex> prompt =~ "<role>" and prompt =~ "<output_format>"
       true
 
   """
@@ -138,7 +138,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Test")
       iex> system = PtcRunner.SubAgent.SystemPrompt.generate_system(agent)
-      iex> system =~ "## Role" and system =~ "# Output Format"
+      iex> system =~ "<role>" and system =~ "<output_format>"
       true
       iex> system =~ "# Data Inventory"
       false
@@ -190,7 +190,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       iex> context_prompt = PtcRunner.SubAgent.SystemPrompt.generate_context(agent, context: %{x: 1})
       iex> context_prompt =~ ";; === data/ ===" and context_prompt =~ ";; === tools ==="
       true
-      iex> context_prompt =~ "# Mission"
+      iex> context_prompt =~ "<mission>"
       false
 
   """
@@ -225,7 +225,12 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     llm_query_instructions = if agent.llm_query, do: llm_query_reference(), else: nil
 
-    [namespace_content, expected_output, llm_query_instructions]
+    tool_call_limit_note =
+      if agent.max_tool_calls,
+        do: "Constraint: maximum #{agent.max_tool_calls} tool calls per turn. Plan efficiently.",
+        else: nil
+
+    [namespace_content, expected_output, llm_query_instructions, tool_call_limit_note]
     |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
   end
@@ -239,7 +244,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       "custom prompt"
 
       iex> spec = PtcRunner.SubAgent.SystemPrompt.resolve_language_spec(:single_shot, %{})
-      iex> is_binary(spec) and String.contains?(spec, "PTC-Lisp")
+      iex> is_binary(spec) and String.contains?(spec, "<role>")
       true
 
       iex> callback = fn ctx -> if ctx.turn > 1, do: "multi", else: "single" end
@@ -303,7 +308,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   ## Examples
 
       iex> error = %{type: :parse_error, message: "Unexpected token"}
-      iex> PtcRunner.SubAgent.SystemPrompt.generate_error_recovery_prompt(error) =~ "Previous Turn Error"
+      iex> PtcRunner.SubAgent.SystemPrompt.generate_error_recovery_prompt(error) =~ "<previous_error>"
       true
 
   """
@@ -313,11 +318,10 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     error_message = Map.get(error_context, :message, "Unknown error")
 
     """
-    # Previous Turn Error
-
+    <previous_error>
     Your previous program failed with:
-    - **Error**: #{error_type}
-    - **Message**: #{error_message}
+    - Error: #{error_type}
+    - Message: #{error_message}
 
     Please ensure your response:
     1. Contains a ```clojure code block
@@ -325,6 +329,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     3. Calls tools with (tool/tool-name args)
 
     Please fix the issue and try again.
+    </previous_error>
     """
   end
 
@@ -411,7 +416,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       expected_output,
       llm_query_instructions,
       output_fmt,
-      "# Mission\n\n#{mission}"
+      "<mission>\n#{mission}\n</mission>"
     ]
     |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
@@ -432,7 +437,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         "- [done] #{id}: #{truncated}"
       end)
 
-    "## Mission Log (Completed Tasks)\n\n#{entries}"
+    "<mission_log>\n#{entries}\n</mission_log>"
   end
 
   def render_mission_log(_), do: ""

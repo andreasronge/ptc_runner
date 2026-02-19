@@ -35,6 +35,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
+    max_tool_calls: nil,
     pmap_timeout: @default_pmap_timeout,
     prints: [],
     tool_calls: [],
@@ -118,6 +119,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           summaries: %{String.t() => String.t()},
           iteration_count: integer(),
           loop_limit: integer(),
+          max_tool_calls: pos_integer() | nil,
           max_print_length: pos_integer(),
           pmap_timeout: pos_integer(),
           prints: [String.t()],
@@ -164,6 +166,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       env: env,
       tool_exec: tool_exec,
       turn_history: turn_history,
+      max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
       budget: Keyword.get(opts, :budget),
@@ -228,6 +231,19 @@ defmodule PtcRunner.Lisp.Eval.Context do
     else
       {:ok, %{context | iteration_count: count + 1}}
     end
+  end
+
+  @doc """
+  Checks whether the tool call limit has been reached.
+
+  Returns `:ok` when unlimited (`nil`) or under the limit,
+  `{:error, :tool_call_limit_exceeded}` when at or over.
+  """
+  @spec check_tool_call_limit(t()) :: :ok | {:error, :tool_call_limit_exceeded}
+  def check_tool_call_limit(%{max_tool_calls: nil}), do: :ok
+
+  def check_tool_call_limit(%{max_tool_calls: limit, tool_calls: calls}) do
+    if length(calls) >= limit, do: {:error, :tool_call_limit_exceeded}, else: :ok
   end
 
   @doc """
