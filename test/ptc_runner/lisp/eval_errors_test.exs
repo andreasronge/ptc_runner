@@ -159,12 +159,11 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                Eval.eval(call_ast, %{}, %{}, %{}, &dummy_tool/2)
     end
 
-    test "invalid keyword call with non-map arg" do
-      # Keyword called with non-map, non-nil argument
+    test "keyword call with non-map arg returns nil (Clojure conformance)" do
+      # Clojure: (:key 42) → nil, (:key "string") → nil
       call_ast = {:call, {:keyword, :key}, [42]}
 
-      assert {:error, {:invalid_keyword_call, :key, [42]}} =
-               Eval.eval(call_ast, %{}, %{}, %{}, &dummy_tool/2)
+      assert {:ok, nil, %{}} = Eval.eval(call_ast, %{}, %{}, %{}, &dummy_tool/2)
     end
   end
 

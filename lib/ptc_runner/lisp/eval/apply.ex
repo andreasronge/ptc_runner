@@ -52,6 +52,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       [nil, default] ->
         {:ok, default, eval_ctx}
 
+      # Clojure returns nil for keyword lookup on non-map types: (:key "string") → nil
+      [_] ->
+        {:ok, nil, eval_ctx}
+
+      [_, default] ->
+        {:ok, default, eval_ctx}
+
       _ ->
         {:error, {:invalid_keyword_call, k, args}}
     end
