@@ -100,6 +100,9 @@ defmodule PtcRunner.Lisp.SymbolCounter do
     end
   end
 
+  # Variable references (e.g. % args in #(...) short fns) — already counted as symbols
+  defp collect_symbols({:var, _name}, acc), do: acc
+
   # Turn history symbols (*1, *2, *3) don't create new atoms
   defp collect_symbols({:turn_history, _n}, acc), do: acc
 
