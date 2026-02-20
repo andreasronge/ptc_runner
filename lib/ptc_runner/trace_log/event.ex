@@ -6,6 +6,7 @@ defmodule PtcRunner.TraceLog.Event do
   - Converting PIDs, refs, functions to string representation
   - Summarizing large strings (>64KB by default)
   - Summarizing large lists (>100 items by default)
+  - Summarizing large maps (>100 keys by default)
   - Handling binary data safely
   - Recursively sanitizing nested structures
 
@@ -15,6 +16,7 @@ defmodule PtcRunner.TraceLog.Event do
 
   - `:trace_max_string_size` - Maximum string size in bytes before truncation (default: `65_536`)
   - `:trace_max_list_size` - Maximum list length before summarizing (default: `100`)
+  - `:trace_max_map_size` - Maximum map size (keys) before summarizing (default: `100`)
   - `:trace_preserve_full_keys` - Map keys whose string values are never truncated (default: `["system_prompt"]`)
 
   Example:
@@ -27,6 +29,7 @@ defmodule PtcRunner.TraceLog.Event do
 
   @default_max_string_size 65_536
   @default_max_list_size 100
+  @default_max_map_size 100
   @default_preserve_full_keys ["system_prompt"]
 
   @doc """
@@ -108,6 +111,7 @@ defmodule PtcRunner.TraceLog.Event do
         Application.get_env(:ptc_runner, :trace_max_string_size, @default_max_string_size),
       max_list_size:
         Application.get_env(:ptc_runner, :trace_max_list_size, @default_max_list_size),
+      max_map_size: Application.get_env(:ptc_runner, :trace_max_map_size, @default_max_map_size),
       preserve_full_keys:
         Application.get_env(:ptc_runner, :trace_preserve_full_keys, @default_preserve_full_keys)
     }
@@ -145,22 +149,19 @@ defmodule PtcRunner.TraceLog.Event do
     end
   end
 
+  defp do_sanitize(%_{} = value, opts) do
+    value
+    |> Map.from_struct()
+    |> do_sanitize(opts)
+  end
+
   defp do_sanitize(value, opts) when is_map(value) do
-    if is_struct(value) do
-      value
-      |> Map.from_struct()
-      |> do_sanitize(opts)
+    size = map_size(value)
+
+    if size > opts.max_map_size do
+      "Map(#{size} keys)"
     else
-      Map.new(value, fn {k, v} ->
-        sk = sanitize_key(k)
-
-        sv =
-          if sk in opts.preserve_full_keys and is_binary(v),
-            do: v,
-            else: do_sanitize(v, opts)
-
-        {sk, sv}
-      end)
+      sanitize_map(value, opts)
     end
   end
 
@@ -173,6 +174,19 @@ defmodule PtcRunner.TraceLog.Event do
   defp do_sanitize(value, _opts) when is_atom(value), do: value
   defp do_sanitize(value, _opts) when is_number(value), do: value
   defp do_sanitize(value, _opts), do: inspect(value)
+
+  defp sanitize_map(value, opts) do
+    Map.new(value, fn {k, v} ->
+      sk = sanitize_key(k)
+
+      sv =
+        if sk in opts.preserve_full_keys and is_binary(v),
+          do: v,
+          else: do_sanitize(v, opts)
+
+      {sk, sv}
+    end)
+  end
 
   # Private helpers
 
