@@ -1,182 +1,69 @@
 # ALMA Findings
 
-Based on trace analysis of multiple benchmark runs (most recent: `alma_1771567110.jsonl`).
+## Run: 2026-02-20 (bedrock:haiku, 5 iterations, 8 rooms, seed 42)
 
-Config: bedrock:haiku (meta), groq:gpt-oss (task), 5 generations, 3 episodes, 8 rooms.
+Baseline (no memory): **0.59**
+Best design score: **0.0** (null baseline — no evolved design beat having no memory)
 
----
+All 5 generations scored negative:
 
-## Core Problem: Memory Adds No Value
+| Gen | Collection | Deployment | Normalized |
+|-----|-----------|-----------|------------|
+| 1   | 0.20      | 0.15      | -0.44      |
+| 2   | 0.43      | 0.34      | -0.24      |
+| 3   | 0.73      | 0.51      | -0.08      |
+| 4   | 0.66      | 0.44      | -0.14      |
+| 5   | 0.25      | 0.28      | -0.31      |
 
-Baseline score (no memory): **0.43**. Best design score: **0.07 normalized** (0.50 raw).
-The memory system barely outperforms random chance improvement. Most designs score
-at or below baseline.
+## Problems Found
 
-The fundamental issue: **recall never returns cross-episode knowledge**. Every recall
-output is either goal-restating text or a generic fallback. The `mem-update` function
-stores data that the `recall` function then fails to retrieve or format correctly.
+### 1. Hallucinated Object Locations (Primary)
 
----
+`find-similar` returns semantically similar but **wrong** entries, and recall treats them as truth.
 
-## Finding 1: All Designs Converge to the Same Pattern
+**Example (Gen 1, Episode 4):** Goal is "Bring key to room_E". Recall queries `find-similar` for "find key", gets back `[{item: "torch", location: "room_F", score: 0.18}]` — score is 0.18/1.0 but the code reads `metadata["location"]` and reports "key is in room_F". Agent navigates there, `pick_up key` → "key is not here". Episode wasted.
 
-Across all runs (9+ designs analyzed), every design follows this identical template:
+The recall code never checks whether the retrieved item name matches the target.
 
-**mem-update** (40-80 lines): Parse observations → build spatial map with `defonce` +
-`assoc` → track object locations → record search history.
+### 2. Stale Cross-Episode Data
 
-**recall** (10-20 lines): Deterministic cond/if chain:
+Objects are in **different rooms each episode** (randomized placement), but the vector store accumulates observations across ALL episodes. "Key found in room_F" from episode 2 gets recalled in episode 8 where key is actually in room_C.
+
+This is the fundamental design flaw: the evolutionary loop hasn't discovered that item-location memories are actively harmful across episodes, while graph topology (room connections) is the only reliably transferable knowledge.
+
+### 3. Task Agent Returns on Turn 1
+
+~18% of episodes end on turn 1. Haiku generates PTC-Lisp that calls `(return current-state)` after looking around — never actually attempting the goal.
+
+### 4. Vague/Empty Recall Fallbacks
+
+When `find-similar` returns `[]`, recall falls back to generic advice like "Search for potion. Then deliver to room_E" — no better than no memory, but wastes a tool call.
+
+### 5. Gen 4 Arity Error
+
 ```
-if has_object_in_inventory → "Deliver X to room_Y"
-else if know_object_location → "Get X from room_Z, deliver to room_Y"
-else if have_unexplored_rooms → "Search for X in room_W"
-else → "Explore to find X"
+"#Function<...> with arity 3 called with 2 arguments"
 ```
+Design tried to iterate over room data with wrong function arity. Recovered on retry but replacement still scored -0.14.
 
-No design uses `tool/find-similar`, `tool/graph-path`, or any injected tool.
-The meta-agent builds its own in-memory data structures (`defonce spatial-map {}`,
-`defonce object-locations {}`) rather than using the provided vector/graph stores.
+## Key Insight
 
----
+The task agent **does follow recall advice** — that's not the problem. The problem is the advice itself is **confidently wrong**. Low-similarity vector matches get reported as fact, and stale item locations from prior episodes actively mislead the agent.
 
-## Finding 2: Haiku Cannot Write Correct PTC-Lisp
+## What the Evolutionary Loop Needs to Discover
 
-Across runs, ~30% of design attempts fail the examine step:
+1. **Graph topology** (room connections) is the only cross-episode knowledge worth storing — stable across episodes in the same family
+2. **Object locations** change every episode and must NOT be recalled as cross-episode facts
+3. Recall should return **paths** from the graph store, not item locations from the vector store
+4. A confidence threshold on `find-similar` scores would prevent low-quality matches from being reported
 
-- **Type errors**: `filter: invalid argument types: function, nil`
-- **Trivial output**: recall returning `"look()"` (6 chars)
-- **Broken interpolation**: `"Explore to find ."` (missing object name),
-  `"Already completed -> before."` (missing variables)
-- **Wrong key access**: `(:task_type data/task)` when key doesn't exist → nil bucketing
+Gen 3 came closest (-0.08) likely because its design used the graph store more and relied less on stale item locations.
 
-Even "successful" designs have subtle bugs that only manifest at runtime. Haiku
-struggles with PTC-Lisp's Clojure-like syntax, particularly `defonce` state
-management and string interpolation.
+## Possible Fixes (Without Code Edits)
 
----
+These can be addressed through prompt engineering or model selection:
 
-## Finding 3: Recall Advice Is Not Actionable
-
-Analysis of 35+ recall outputs:
-
-| Category | % | Example |
-|---|---|---|
-| Generic/vague | 63% | "Search for X in unexplored rooms" |
-| Specific (names a room) | 20% | "Try moving to room_A to search for potion" |
-| Trivial (raw command) | 9% | "move_to(room_A)", "look()" |
-| Broken/empty | 8% | "", "Explore to find ." |
-
-The advice never contains actual learned spatial knowledge like "potion was found
-in room_B" or "room_A connects to room_E via room_H". It restates information the
-task agent already has from the goal description.
-
----
-
-## Finding 4: Task Agent Navigation Errors
-
-The task model (groq:gpt-oss) makes systematic errors:
-
-- **13 "not adjacent" errors** per run — agent tries to move to rooms not connected
-  to current location, wasting steps
-- **"Max steps exceeded"** — 18 occurrences where episodes exhaust the 15-turn budget
-- **move_to return misread** — agents do `(:location (tool/move_to ...))` expecting a
-  state map, get nil, waste turns recovering with extra `look` calls
-
----
-
-## Finding 5: No Evolutionary Diversity
-
-Despite analyst critiques correctly identifying weaknesses (stale data, no task
-progress tracking, generic fallbacks), the meta-model produces incremental variations
-rather than fundamentally different approaches. Every design is a variant of
-"track rooms + track objects + format advice string."
-
-The analyst feedback loop works (critiques are specific and accurate) but haiku
-cannot act on them to produce structurally different designs.
-
----
-
-## Finding 6: Timing Profile
-
-- **54% of time** in LLM calls (meta: ~11s/call, task: ~1.2s/call)
-- **Environment tools** are essentially free (<3ms each)
-- **690s total** for 5 generations (11.5 minutes)
-- Deployment runs in parallel (3 seeds concurrent)
-
----
-
-## Recommended Fixes
-
-### Priority 1: Templatize Recall
-
-Since recall always degenerates to the same 4-case cond, replace arbitrary Lisp with
-a structured template. The meta-agent populates fields, the system formats advice:
-
-```yaml
-recall:
-  priority_cases:
-    - when: object_in_inventory
-      advice: "Deliver {object} to {destination}"
-    - when: object_location_known
-      advice: "Get {object} from {location}, deliver to {destination}"
-    - when: unexplored_rooms_exist
-      advice: "Search for {object} in {next_unexplored}"
-    - fallback: "Explore to find {object}"
-```
-
-This eliminates recall bugs entirely and frees the meta-agent to focus on mem-update.
-
-### Priority 2: Require Tool Usage in mem-update
-
-Change from "tools available" to "designs MUST use `tool/store-obs` and
-`tool/graph-update`". This forces use of the vector/graph stores (which persist
-and support similarity search) rather than reinventing them with `defonce` maps.
-
-A structured contract:
-```
-mem-update must:
-  1. Call store-obs with extracted spatial/object facts
-  2. Call graph-update with room connectivity edges
-  3. Optionally call summarize/analyze for higher-level patterns
-```
-
-### Priority 3: Simplify the Design Space
-
-Instead of "write arbitrary Lisp for both mem-update and recall", constrain the
-meta-agent to choose **parameters**:
-- What observations to extract (object locations, room connections, action outcomes)
-- What to store (which collections, what metadata)
-- How to query at recall time (similarity threshold, which collections)
-
-This reduces the design space from "arbitrary code" to "configuration choices" and
-eliminates the PTC-Lisp correctness problem.
-
-### Priority 4: Upgrade Meta-Model (if keeping free-form Lisp)
-
-If the free-form Lisp approach is kept, upgrade from haiku to sonnet. Sonnet would
-likely:
-- Write correct PTC-Lisp more consistently
-- Discover that `find-similar` enables generalization across tasks with different
-  room names (which `defonce` maps cannot do)
-- Produce more structurally diverse designs
-
-But this is more expensive and may still converge to the same local optimum.
-
-### Priority 5: Improve Task Agent Robustness
-
-- Add verification: "call `look` after `put_down` to confirm success"
-- Handle `move_to` return format correctly in prompt examples
-- Consider increasing max_turns or adding navigation error recovery hints
-
----
-
-## What Works Well
-
-1. **Static analysis** catches bugs before side effects — `defonce` errors are caught
-   cleanly, the meta-agent can retry without partial state
-2. **Self-correction** — meta-agent recovers from errors in subsequent turns
-3. **Examine step** correctly rejects trivial/broken designs (e.g., "look()" advice)
-4. **Parallel deployment** — 3 seeds run concurrently, good resource utilization
-5. **Trace system** provides full visibility into every LLM call and tool execution
-6. **Sandbox isolation** works — no process crashes or heap overflows in task agents
-   (after the trace sanitizer fix)
+1. **Structured recall format** — nudge MetaAgent to have recall return action lists (`["move_to room_B", "move_to room_F", "pick_up feather"]`) instead of prose
+2. **Stronger task agent prompt** — "If recall returns a specific path, execute it step-by-step before exploring"
+3. **Better meta-model** — a stronger model for MetaAgent/DebugAgent may discover the "don't recall item locations" insight faster
+4. **DebugAgent constraints** — add mandatory constraints about confidence thresholds and graph-only cross-episode storage
