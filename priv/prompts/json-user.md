@@ -2,18 +2,17 @@
 
 User message template for JSON output mode.
 
-<!-- version: 2 -->
-<!-- date: 2026-01-22 -->
-<!-- changes: Removed Data section - data is embedded via mustache in task -->
+<!-- version: 3 -->
+<!-- date: 2026-02-18 -->
+<!-- changes: Wrap sections in XML tags -->
 
 <!-- PTC_PROMPT_START -->
 
-# Task
-
+<task>
 {{task}}
+</task>
 
-# Expected Output
-
+<expected_output>
 {{output_instruction}}
 {{field_descriptions}}
 
@@ -21,5 +20,6 @@ Example format:
 ```json
 {{example_output}}
 ```
+</expected_output>
 
 <!-- PTC_PROMPT_END -->

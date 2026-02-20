@@ -673,7 +673,7 @@ defmodule PtcRunner.SubAgent.Debug do
   # Private Helpers - System Prompt Sections
   # ============================================================
 
-  # Known header-to-key mappings
+  # Known header-to-key mappings (markdown headings and XML tags)
   @header_to_key %{
     "Role" => :role,
     "PTC-Lisp" => :ptc_lisp,
@@ -682,6 +682,23 @@ defmodule PtcRunner.SubAgent.Debug do
     "Mission Log (Completed Tasks)" => :mission_log,
     "Expected Output" => :expected_output,
     "Previous Turn Error" => :error
+  }
+
+  @xml_tag_to_key %{
+    "role" => :role,
+    "language_reference" => :ptc_lisp,
+    "output_format" => :output_format,
+    "mission" => :mission,
+    "mission_log" => :mission_log,
+    "previous_error" => :error,
+    "restrictions" => :restrictions,
+    "common_mistakes" => :common_mistakes,
+    "builtins" => :builtins,
+    "single_shot" => :single_shot,
+    "multi_turn_rules" => :multi_turn_rules,
+    "journaled_tasks" => :journaled_tasks,
+    "semantic_progress" => :semantic_progress,
+    "state" => :state
   }
 
   # Collect all text from system prompt + messages for a turn
@@ -783,14 +800,27 @@ defmodule PtcRunner.SubAgent.Debug do
     prompt
     |> String.split("\n")
     |> Enum.reduce({nil, [], %{}}, fn line, {current_key, current_lines, sections} ->
-      case Regex.run(~r/^(\#{1,2})\s+(.+)$/, line) do
-        [_, _hashes, title] ->
-          # Save previous section
+      cond do
+        # XML opening tag (e.g., <role>, <mission>)
+        match = Regex.run(~r/^<([a-z_]+)>\s*$/, line) ->
+          [_, tag_name] = match
+          sections = save_section(sections, current_key, current_lines)
+          key = xml_tag_to_key(tag_name)
+          {key, [], sections}
+
+        # XML closing tag — save section and reset
+        Regex.match?(~r/^<\/[a-z_]+>\s*$/, line) ->
+          sections = save_section(sections, current_key, current_lines)
+          {nil, [], sections}
+
+        # Markdown heading (legacy, still used by # Expected Output)
+        match = Regex.run(~r/^(\#{1,2})\s+(.+)$/, line) ->
+          [_, _hashes, title] = match
           sections = save_section(sections, current_key, current_lines)
           key = header_to_key(title)
           {key, [], sections}
 
-        _ ->
+        true ->
           {current_key, current_lines ++ [line], sections}
       end
     end)
@@ -818,5 +848,9 @@ defmodule PtcRunner.SubAgent.Debug do
       key ->
         key
     end
+  end
+
+  defp xml_tag_to_key(tag_name) do
+    Map.get(@xml_tag_to_key, tag_name, String.to_atom(tag_name))
   end
 end

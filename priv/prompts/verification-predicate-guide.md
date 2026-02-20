@@ -3,18 +3,17 @@
 Verification predicates are boolean expressions that validate task outputs.
 They use PTC-Lisp syntax. Keep predicates simple — prefer `get`, type checks, and comparisons.
 
-## Available Bindings
-
+<bindings>
 Use these pre-defined variables to access task data:
 - `data/result` - The task's output (this is what you're validating)
 - `data/input` - The task's input
 - `data/depends` - Map of upstream task results (keyed by task ID)
 
-**DO NOT use bare variable names** like `output`, `result`, `response`, `symbol`, or `price`.
+DO NOT use bare variable names like `output`, `result`, `response`, `symbol`, or `price`.
 Always access values through `data/result`.
+</bindings>
 
-## Recommended Functions
-
+<recommended_functions>
 These cover most verification needs:
 
 ```lisp
@@ -57,14 +56,14 @@ These cover most verification needs:
 Additional functions are available: `filter`, `map`, `reduce`, `sort-by`,
 `keys`, `vals`, `distinct`, `frequencies`, `every?`, `some`, `concat`, and more.
 Keep predicates simple for reliability.
+</recommended_functions>
 
-## Return Values
-
+<return_values>
 - Return `true` for validation success
-- Return a **string** for failure diagnosis (explains what went wrong)
+- Return a string for failure diagnosis (explains what went wrong)
+</return_values>
 
-## Correct Examples
-
+<correct_examples>
 ```lisp
 ;; Check that result is a map with a "price" key
 (if (and (map? data/result) (contains? data/result "price"))
@@ -95,9 +94,9 @@ Keep predicates simple for reliability.
     true
     "All items must have a name")
 ```
+</correct_examples>
 
-## Common Mistakes (These Will Fail)
-
+<common_mistakes>
 ```lisp
 ;; WRONG - undefined variables (must use data/result)
 (map? output)
@@ -118,3 +117,4 @@ Keep predicates simple for reliability.
 ;; WRONG - quote syntax not supported
 '(1 2 3)                          ; Use: [1 2 3]
 ```
+</common_mistakes>

@@ -2,14 +2,13 @@
 
 Rules for single-shot execution (one turn, no memory).
 
-<!-- version: 6 -->
-<!-- date: 2026-02-11 -->
-<!-- changes: Removed thinking example to prevent multi-block parsing failures -->
+<!-- version: 7 -->
+<!-- date: 2026-02-18 -->
+<!-- changes: Wrap in XML tag -->
 
 <!-- PTC_PROMPT_START -->
 
-### Single-Shot Execution
-
+<single_shot>
 Respond with EXACTLY ONE ```clojure code block. The last expression's value IS your answer.
 
 ```clojure
@@ -17,5 +16,6 @@ Respond with EXACTLY ONE ```clojure code block. The last expression's value IS y
      (filter #(= (:category %) "electronics"))
      (count))
 ```
+</single_shot>
 
 <!-- PTC_PROMPT_END -->

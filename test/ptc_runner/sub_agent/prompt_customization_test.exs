@@ -15,7 +15,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.starts_with?(prompt, "You are an expert analyst.")
-      assert prompt =~ "# Role"
+      assert prompt =~ "<role>"
       assert prompt =~ "data/data"
     end
 
@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.ends_with?(prompt, "Always explain your reasoning.")
-      assert prompt =~ "# Role"
+      assert prompt =~ "<role>"
       assert prompt =~ "data/data"
     end
 
@@ -73,8 +73,8 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
         )
 
       prompt = SystemPrompt.generate(agent, context: %{})
-      assert prompt =~ "PTC-Lisp"
-      assert prompt =~ "Common Mistakes"
+      assert prompt =~ "<language_reference>"
+      assert prompt =~ "<common_mistakes>"
       # single_shot should not have memory docs
       refute prompt =~ "Memory: Persisting Data Between Turns"
     end
@@ -112,7 +112,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       assert prompt =~ custom_output
       # Check the Output Format section was replaced (not in code examples elsewhere)
-      refute prompt =~ "# Output Format\n\nRespond with a single ```clojure"
+      refute prompt =~ "<output_format>\nRespond with a single ```clojure"
     end
 
     test "function transformer modifies prompt" do
@@ -127,7 +127,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt == String.upcase(prompt)
-      assert prompt =~ "# ROLE"
+      assert prompt =~ "<ROLE>"
     end
 
     test "string override bypasses generation entirely" do
@@ -142,7 +142,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{data: 123})
 
       assert prompt == override
-      refute prompt =~ "# Role"
+      refute prompt =~ "<role>"
     end
 
     test "nil system_prompt uses default generation" do
@@ -150,7 +150,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      assert prompt =~ "## Role"
+      assert prompt =~ "<role>"
       refute prompt =~ "thinking:"
     end
 

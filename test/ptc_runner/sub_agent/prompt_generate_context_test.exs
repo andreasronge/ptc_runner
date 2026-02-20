@@ -19,8 +19,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
       assert context_prompt =~ "tool/search"
 
       # Should NOT have static sections
-      refute context_prompt =~ "## Role"
-      refute context_prompt =~ "# Output Format"
+      refute context_prompt =~ "<role>"
+      refute context_prompt =~ "<output_format>"
       # Should NOT have old markdown format
       refute context_prompt =~ "# Data Inventory"
       refute context_prompt =~ "# Available Tools"
@@ -31,7 +31,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateContextTest do
 
       context_prompt = SystemPrompt.generate_context(agent, context: %{})
 
-      refute context_prompt =~ "# Mission"
+      refute context_prompt =~ "<mission>"
       refute context_prompt =~ "This is the mission"
     end
 

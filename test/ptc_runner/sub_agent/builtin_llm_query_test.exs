@@ -115,7 +115,7 @@ defmodule PtcRunner.SubAgent.BuiltinLlmQueryTest do
       mock_llm = fn %{messages: messages} ->
         first_msg = hd(messages)
 
-        if first_msg.content =~ "Mission" do
+        if first_msg.content =~ "<mission>" do
           # Outer loop call — return PTC-Lisp using map signature
           {:ok,
            ~s|```clojure\n(return (tool/llm-query {:prompt "Say hi" :signature "{greeting :string}"}))\n```|}
