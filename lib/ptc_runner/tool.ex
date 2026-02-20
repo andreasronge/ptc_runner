@@ -251,10 +251,11 @@ defmodule PtcRunner.Tool do
     {:ok,
      %__MODULE__{
        name: name,
-       function: &PtcRunner.Lisp.Runtime.String.grep_n/2,
-       signature: "(pattern :string, text :string) -> [{line :int, text :string}]",
+       function: &PtcRunner.Lisp.Runtime.String.grep_n/3,
+       signature:
+         "(pattern :string, text :string, context :int?) -> [{line :int, text :string, match :bool}]",
        description:
-         "Return matching lines with 1-based line numbers from text string, not a filename (case-insensitive regex)",
+         "Return matching lines with 1-based line numbers from text string, not a filename (case-insensitive regex). Optional context param includes N surrounding lines (like grep -C).",
        type: :native
      }}
   end

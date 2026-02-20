@@ -146,6 +146,9 @@ defmodule Alma.MetaAgent do
     Guard against empty data: `data/observation_log` may be `[]` if the agent
     failed immediately. Always guard:
     `(if-let [obs (first data/observation_log)] (:field obs) "unknown")`
+
+    Use `(println ...)` to emit debug output in your mem-update and recall functions.
+    This output is captured and analyzed after evaluation to identify issues.
     </ptc_lisp_reference>
 
     <available_tools>

@@ -491,12 +491,13 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
     end
   end
 
-  # Wrap builtin grep-n tool — delegates to Runtime.String.grep_n/2
+  # Wrap builtin grep-n tool — delegates to Runtime.String.grep_n/3
   defp wrap_builtin_grep_n do
     fn args ->
       pattern = Map.get(args, "pattern", "")
       text = Map.get(args, "text", "")
-      PtcRunner.Lisp.Runtime.String.grep_n(pattern, text)
+      context = Map.get(args, "context", 0)
+      PtcRunner.Lisp.Runtime.String.grep_n(pattern, text, context)
     end
   end
 

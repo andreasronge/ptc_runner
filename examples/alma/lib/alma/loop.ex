@@ -7,7 +7,7 @@ defmodule Alma.Loop do
   the SubAgent catches it during execution. No external debug/fix loop needed.
   """
 
-  alias Alma.{Analysis, Analyst, Archive, MetaAgent, MemoryHarness}
+  alias Alma.{Analysis, Archive, DebugAgent, MetaAgent, MemoryHarness}
   alias Alma.Environments.GraphWorld
   alias Alma.Environments.GraphWorld.Generator
 
@@ -51,7 +51,7 @@ defmodule Alma.Loop do
 
     # Harness needs :observe_fn but not :context_schema
     # MetaAgent needs :context_schema but not :observe_fn
-    # MetaAgent/Analyst use :meta_llm (falls back to :llm)
+    # MetaAgent/DebugAgent use :meta_llm (falls back to :llm)
     harness_opts = Keyword.drop(opts, [:context_schema, :meta_llm])
 
     meta_llm = Keyword.get(opts, :meta_llm) || Keyword.get(opts, :llm)
@@ -61,7 +61,7 @@ defmodule Alma.Loop do
       |> Keyword.drop([:observe_fn, :meta_llm])
       |> Keyword.put(:llm, meta_llm)
 
-    # 2. Analyst critiques parent designs, then MetaAgent generates
+    # 2. DebugAgent analyzes parent runtime logs, then MetaAgent generates
     if verbose, do: IO.write("Gen #{generation}: analyzing...")
 
     Alma.Trace.span(
@@ -70,10 +70,10 @@ defmodule Alma.Loop do
       fn ->
         meta_opts =
           Alma.Trace.span(
-            "alma:analyst",
+            "alma:debug_agent",
             %{"generation" => generation, "parent_count" => length(parents)},
             fn ->
-              case Analyst.analyze(parents, meta_opts) do
+              case DebugAgent.analyze(parents, meta_opts) do
                 {:ok, critique} when critique != "" ->
                   Keyword.put(meta_opts, :analyst_critique, critique)
 
@@ -186,7 +186,7 @@ defmodule Alma.Loop do
           recall_env = Map.put(env_config, :seed, Map.get(env_config, :seed, 42) + 6000)
           [recall_task] = Generator.generate_batch(1, recall_env)
 
-          {advice, recall_error} = MemoryHarness.retrieve(design, recall_task, memory, opts)
+          {advice, recall_error, _log} = MemoryHarness.retrieve(design, recall_task, memory, opts)
 
           cond do
             recall_error != nil ->
