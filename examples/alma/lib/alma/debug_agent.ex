@@ -28,23 +28,58 @@ defmodule Alma.DebugAgent do
     else
       debug_log = DebugLog.format_parents(parents, opts)
 
-      agent =
-        SubAgent.new(
-          name: "debug_agent",
-          prompt: mission_prompt(parents, debug_log),
-          system_prompt: %{prefix: system_prompt()},
-          builtin_tools: [:grep],
-          max_turns: 5,
-          timeout: 15_000,
-          max_heap: 6_250_000
-        )
+      # Skip analysis when debug log has no runtime data (e.g., seed designs
+      # that were never evaluated with runtime logging)
+      if String.length(debug_log) < 200 or
+           not String.contains?(debug_log, ["TOOL ", "PRINT:", "ERROR:", "RETURN:"]) do
+        {:ok, ""}
+      else
+        agent =
+          SubAgent.new(
+            name: "debug_agent",
+            prompt: mission_prompt(parents, debug_log),
+            system_prompt: %{prefix: system_prompt()},
+            builtin_tools: [:grep],
+            max_turns: 5,
+            timeout: 15_000,
+            max_heap: 6_250_000
+          )
 
-      case SubAgent.run(agent, llm: llm, context: %{"debug_log" => debug_log}) do
-        {:ok, step} ->
-          {:ok, ensure_string(step.return)}
+        case SubAgent.run(agent, llm: llm, context: %{"debug_log" => debug_log}) do
+          {:ok, step} ->
+            result = ensure_string(step.return)
 
-        {:error, reason} ->
-          {:error, reason}
+            # Fallback: LLMs sometimes write the `## Analysis` outside the (return ...) block.
+            # If the result is a placeholder, check if the raw response contains the analysis.
+            raw = Map.get(step, :raw_response) || ""
+            has_markdown? = String.contains?(raw, "## Analysis")
+
+            cond do
+              not placeholder?(result) ->
+                {:ok, result}
+
+              has_markdown? ->
+                # Extract everything from "## Analysis" onwards
+                {start, _len} = :binary.match(raw, "## Analysis")
+                {:ok, String.slice(raw, start..-1)}
+
+              step.prints != [] ->
+                {:ok, Enum.join(step.prints, "\n")}
+
+              true ->
+                {:ok, result}
+            end
+
+          {:error, reason} ->
+            # Even on error, the LLM might have written the analysis outside the code block before failing
+            raw = Map.get(reason, :raw_response) || ""
+            if String.contains?(raw, "## Analysis") do
+              {start, _len} = :binary.match(raw, "## Analysis")
+              {:ok, String.slice(raw, start..-1)}
+            else
+              {:error, reason}
+            end
+        end
       end
     end
   end
@@ -71,7 +106,12 @@ defmodule Alma.DebugAgent do
     - `"TOOL graph-update"` — what graph edges were added
     - `"TOOL graph-path.*nil"` — path queries that found no route
 
-    Structure your output in two sections:
+    CRITICAL: Your `(return ...)` call is the ONLY output that gets used. \
+    Do NOT print your analysis — put the ENTIRE analysis text inside \
+    `(return "...")`. Nothing printed via println reaches the meta-agent. \
+    Build the full analysis string and pass it to return.
+
+    Structure the returned string in two sections:
 
     ## Analysis
     Cite specific evidence from the logs. Quote relevant log lines you found \
@@ -87,7 +127,12 @@ defmodule Alma.DebugAgent do
     MUST satisfy. These are hard requirements, not suggestions. Address the \
     specific weaknesses you found in the logs.
 
-    Keep your analysis under 400 words. Use `(return "...")` to return your analysis.
+    Keep your analysis under 400 words.
+
+    Example return:
+    ```
+    (return "## Analysis\\nRecall returned empty advice in 3/4 episodes...\\n\\n## Mandatory Constraints\\n1. mem-update MUST call store-obs...")
+    ```
     """
   end
 
@@ -116,6 +161,18 @@ defmodule Alma.DebugAgent do
 
     Use grep to search the debug log, then return your analysis.
     """
+  end
+
+  # Detect placeholder returns where the LLM didn't put real content in (return ...)
+  defp placeholder?(text) do
+    text == "" or
+      String.contains?(String.downcase(text), [
+        "see output above",
+        "see above",
+        "analysis complete",
+        "see the analysis",
+        "analysis provided"
+      ])
   end
 
   defp ensure_string(value) when is_binary(value), do: value
