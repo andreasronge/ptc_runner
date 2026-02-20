@@ -1150,21 +1150,45 @@ input[type="file"] { display: none; }
 /* === Multi-Run Side-by-Side Layout === */
 .multi-run-layout {
   display: flex;
-  gap: 16px;
+  gap: 0;
   align-items: flex-start;
 }
 .multi-run-sidebar {
   width: 320px;
-  min-width: 280px;
+  min-width: 160px;
+  max-width: 60vw;
   flex-shrink: 0;
   position: sticky;
   top: 20px;
   max-height: calc(100vh - 120px);
   overflow-y: auto;
 }
+.multi-run-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  align-self: stretch;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
+}
+.multi-run-resizer:hover,
+.multi-run-resizer.dragging {
+  background: var(--accent);
+}
+.multi-run-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -3px;
+  right: -3px;
+  bottom: 0;
+}
 .multi-run-content {
   flex: 1;
   min-width: 0;
+  padding-left: 16px;
 }
 
 /* === Span Tree (Multi-Run) === */
