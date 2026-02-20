@@ -95,7 +95,7 @@ First, let's run without caching to establish a baseline:
 
 IO.puts("Without caching:")
 IO.inspect(step_no_cache.usage, label: "Usage")
-IO.inspect(LLMClient.calculate_cost(model, step_no_cache.usage), label: "Cost ($)")
+IO.inspect(step_no_cache.usage[:total_cost] || 0.0, label: "Cost ($)")
 step_no_cache.return
 ```
 
@@ -116,7 +116,7 @@ IO.puts("Using unique question: #{question}")
 IO.puts("\nWith caching (first call - should be cache WRITE):")
 IO.puts("  cache_creation_tokens: #{step_cache_write.usage[:cache_creation_tokens] || 0}")
 IO.puts("  cache_read_tokens: #{step_cache_write.usage[:cache_read_tokens] || 0}")
-IO.inspect(LLMClient.calculate_cost(model, step_cache_write.usage), label: "Cost ($)")
+IO.inspect(step_cache_write.usage[:total_cost] || 0.0, label: "Cost ($)")
 
 # Store question for next cell
 :persistent_term.put(:cache_test_question, question)
@@ -141,7 +141,7 @@ IO.puts("Using same question: #{question}")
 IO.puts("\nWith caching (second call - should be cache READ):")
 IO.puts("  cache_creation_tokens: #{step_cache_read.usage[:cache_creation_tokens] || 0}")
 IO.puts("  cache_read_tokens: #{step_cache_read.usage[:cache_read_tokens] || 0}")
-IO.inspect(LLMClient.calculate_cost(model, step_cache_read.usage), label: "Cost ($)")
+IO.inspect(step_cache_read.usage[:total_cost] || 0.0, label: "Cost ($)")
 step_cache_read.return
 ```
 
@@ -177,9 +177,9 @@ Key insight: input_tokens INCLUDES cached tokens. The cache_read_tokens are char
 ## Cost Comparison
 
 ```elixir
-cost_no_cache = LLMClient.calculate_cost(model, step_no_cache.usage)
-cost_cache_write = LLMClient.calculate_cost(model, step_cache_write.usage)
-cost_cache_read = LLMClient.calculate_cost(model, step_cache_read.usage)
+cost_no_cache = step_no_cache.usage[:total_cost] || 0.0
+cost_cache_write = step_cache_write.usage[:total_cost] || 0.0
+cost_cache_read = step_cache_read.usage[:total_cost] || 0.0
 
 # Check if we actually got a cache write vs read
 write_was_cache_read = (step_cache_write.usage[:cache_read_tokens] || 0) > 0 and

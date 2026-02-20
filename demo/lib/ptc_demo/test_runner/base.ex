@@ -464,22 +464,8 @@ defmodule PtcDemo.TestRunner.Base do
     }
   end
 
-  defp apply_cost_fallback(stats, model) do
-    case stats do
-      %{total_cost: cost} when cost == nil or cost == 0.0 ->
-        # Calculate cost from tokens if not provided by API
-        tokens = %{
-          input: Map.get(stats, :input_tokens, 0),
-          output: Map.get(stats, :output_tokens, 0),
-          cache_creation: Map.get(stats, :cache_creation_tokens, 0),
-          cache_read: Map.get(stats, :cache_read_tokens, 0)
-        }
-
-        %{stats | total_cost: LLMClient.calculate_cost(model, tokens)}
-
-      _ ->
-        stats
-    end
+  defp apply_cost_fallback(stats, _model) do
+    stats
   end
 
   @doc """
