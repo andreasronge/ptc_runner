@@ -76,6 +76,7 @@ export function renderAgentView(container, state, data) {
     html += '<div class="multi-run-sidebar">';
     html += renderSpanTree(events, selectedRunSpanId);
     html += '</div>';
+    html += '<div class="multi-run-resizer"></div>';
     html += '<div class="multi-run-content">';
   }
 
@@ -117,6 +118,17 @@ export function renderAgentView(container, state, data) {
 
   container.innerHTML = html;
 
+  // Restore sidebar scroll position and width after re-render
+  if (isMultiRun) {
+    const newSidebar = container.querySelector('.multi-run-sidebar');
+    if (newSidebar && data._sidebarScrollTop) {
+      newSidebar.scrollTop = data._sidebarScrollTop;
+    }
+    if (newSidebar && data._sidebarWidth) {
+      newSidebar.style.width = data._sidebarWidth;
+    }
+  }
+
   // Render initial turn detail
   const detailContainer = container.querySelector('#turn-detail');
   if (turns.length > 0) {
@@ -136,6 +148,11 @@ export function renderAgentView(container, state, data) {
 
   // Shared function to select a run and re-render
   function selectRun(spanId) {
+    // Preserve sidebar scroll position across re-render
+    const sidebar = container.querySelector('.multi-run-sidebar');
+    const sidebarWidth = sidebar?.style.width;
+    data._sidebarScrollTop = sidebar?.scrollTop || 0;
+    data._sidebarWidth = sidebarWidth || null;
     data.selectedRunSpanId = spanId;
     renderAgentView(container, state, data);
   }
@@ -147,6 +164,29 @@ export function renderAgentView(container, state, data) {
         selectRun(node.dataset.spanId);
       });
     });
+
+    // Draggable sidebar resizer
+    const resizer = container.querySelector('.multi-run-resizer');
+    const sidebar = container.querySelector('.multi-run-sidebar');
+    if (resizer && sidebar) {
+      resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        resizer.classList.add('dragging');
+        const startX = e.clientX;
+        const startWidth = sidebar.getBoundingClientRect().width;
+        const onMouseMove = (e) => {
+          const newWidth = Math.max(160, Math.min(startWidth + e.clientX - startX, window.innerWidth * 0.6));
+          sidebar.style.width = newWidth + 'px';
+        };
+        const onMouseUp = () => {
+          resizer.classList.remove('dragging');
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+        };
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+      });
+    }
   }
 
   // Turn pill click handlers
