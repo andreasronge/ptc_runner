@@ -100,12 +100,6 @@ defmodule LLMClient.Registry do
       }
     },
     "gpt-oss" => %{
-      description: "GPT-OSS 20B - OpenAI's open-source model via Groq",
-      providers: %{
-        groq: "openai/gpt-oss-20b"
-      }
-    },
-    "gpt-oss-120b" => %{
       description: "GPT-OSS 120B - OpenAI's large open-source model via Groq",
       providers: %{
         groq: "openai/gpt-oss-120b"
