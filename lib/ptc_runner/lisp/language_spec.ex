@@ -11,6 +11,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   |-----|-------------|
   | `:single_shot` | Base + single-shot rules |
   | `:multi_turn` | Base + multi-turn rules (return/fail, memory) |
+  | `:multi_turn_journal` | Base + multi-turn + journal (task/step-done) |
 
   ## Raw Snippets
 
@@ -19,6 +20,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   | `:base` | Core language reference |
   | `:addon_single_shot` | Single-shot mode rules |
   | `:addon_multi_turn` | Multi-turn mode rules |
+  | `:addon_journal` | Journal, task caching, semantic progress |
 
   ## Version Metadata
 
@@ -47,14 +49,16 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   # Compositions: predefined combinations of snippets
   @compositions %{
     single_shot: [:base, :addon_single_shot],
-    multi_turn: [:base, :addon_multi_turn]
+    multi_turn: [:base, :addon_multi_turn],
+    multi_turn_journal: [:base, :addon_multi_turn, :addon_journal]
   }
 
   # Snippet keys mapped to Prompts module functions
   @snippets %{
     base: :lisp_base,
     addon_single_shot: :lisp_addon_single_shot,
-    addon_multi_turn: :lisp_addon_multi_turn
+    addon_multi_turn: :lisp_addon_multi_turn,
+    addon_journal: :lisp_addon_journal
   }
 
   # Parse metadata from file header
@@ -93,7 +97,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       true
 
       iex> prompt = PtcRunner.Lisp.LanguageSpec.get(:multi_turn)
-      iex> String.contains?(prompt, "State Persistence")
+      iex> String.contains?(prompt, "<state>")
       true
 
   """
@@ -227,7 +231,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   def list_with_descriptions do
     composition_descriptions = [
       {:single_shot, "Base + single-shot rules"},
-      {:multi_turn, "Base + multi-turn rules (return/fail, memory)"}
+      {:multi_turn, "Base + multi-turn rules (return/fail, memory)"},
+      {:multi_turn_journal, "Base + multi-turn + journal (task/step-done)"}
     ]
 
     snippet_descriptions =

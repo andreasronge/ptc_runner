@@ -11,14 +11,14 @@ defmodule PtcRunner.SubAgent.PromptGenerateSystemTest do
       system = SystemPrompt.generate_system(agent)
 
       # Should have static sections
-      assert system =~ "## Role"
-      assert system =~ "# Output Format"
+      assert system =~ "<role>"
+      assert system =~ "<output_format>"
 
       # Should NOT have dynamic sections
       refute system =~ "# Data Inventory"
       refute system =~ "# Available Tools"
       refute system =~ "# Expected Output"
-      refute system =~ "# Mission"
+      refute system =~ "<mission>"
     end
 
     test "returns stable output for same agent config" do
@@ -45,7 +45,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateSystemTest do
       system = SystemPrompt.generate_system(agent)
 
       # Multi-turn should have state persistence docs
-      assert system =~ "### State Persistence"
+      assert system =~ "<state>"
     end
 
     test "applies customization prefix and suffix" do
@@ -76,6 +76,28 @@ defmodule PtcRunner.SubAgent.PromptGenerateSystemTest do
 
       assert String.starts_with?(system, "<<")
       assert String.ends_with?(system, ">>")
+    end
+
+    test "journal sections absent by default (journaling: false)" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 5)
+
+      system = SystemPrompt.generate_system(agent)
+
+      refute system =~ "<journaled_tasks>"
+      refute system =~ "<semantic_progress>"
+      refute system =~ "step-done"
+      refute system =~ "task-reset"
+    end
+
+    test "journal sections present when journaling: true" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 5, journaling: true)
+
+      system = SystemPrompt.generate_system(agent)
+
+      assert system =~ "<journaled_tasks>"
+      assert system =~ "<semantic_progress>"
+      assert system =~ "step-done"
+      assert system =~ "task-reset"
     end
   end
 

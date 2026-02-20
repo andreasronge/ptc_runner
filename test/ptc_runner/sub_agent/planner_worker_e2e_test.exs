@@ -185,7 +185,8 @@ defmodule PtcRunner.SubAgent.PlannerWorkerE2ETest do
         },
         max_turns: 8,
         max_depth: 2,
-        timeout: 180_000
+        timeout: 180_000,
+        journaling: true
       )
 
     # --- Run ---

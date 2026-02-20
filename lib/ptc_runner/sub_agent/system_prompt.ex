@@ -462,7 +462,14 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   # Resolve language_ref and output_fmt from agent config
   defp resolve_static_sections(%SubAgent{} = agent, resolution_context) do
     # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
-    default_spec = if agent.max_turns > 1, do: :multi_turn, else: :single_shot
+    # When journal is enabled, use :multi_turn_journal instead of :multi_turn
+    default_spec =
+      cond do
+        agent.max_turns <= 1 -> :single_shot
+        agent.journaling -> :multi_turn_journal
+        true -> :multi_turn
+      end
+
     default_output = if agent.thinking, do: @output_format_thinking, else: @output_format
 
     case agent.system_prompt do

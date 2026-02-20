@@ -9,15 +9,15 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     test "returns single_shot prompt (base + single_shot addon)" do
       prompt = LanguageSpec.get(:single_shot)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "PTC-Lisp")
-      assert String.contains?(prompt, "Single-Shot")
+      assert String.contains?(prompt, "<role>")
+      assert String.contains?(prompt, "<single_shot>")
     end
 
     test "returns multi_turn prompt (base + multi_turn addon)" do
       prompt = LanguageSpec.get(:multi_turn)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "PTC-Lisp")
-      assert String.contains?(prompt, "Multi-Turn")
+      assert String.contains?(prompt, "<role>")
+      assert String.contains?(prompt, "<multi_turn_rules>")
       # multi_turn is longer than single_shot
       assert String.length(prompt) > String.length(LanguageSpec.get(:single_shot))
     end
@@ -25,19 +25,19 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     test "returns base snippet" do
       prompt = LanguageSpec.get(:base)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "PTC-Lisp")
+      assert String.contains?(prompt, "<role>")
     end
 
     test "returns addon_single_shot snippet" do
       prompt = LanguageSpec.get(:addon_single_shot)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "Single-Shot")
+      assert String.contains?(prompt, "<single_shot>")
     end
 
     test "returns addon_multi_turn snippet" do
       prompt = LanguageSpec.get(:addon_multi_turn)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "State Persistence")
+      assert String.contains?(prompt, "<state>")
     end
 
     test "returns nil for unknown prompt" do
@@ -74,6 +74,27 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
 
       assert LanguageSpec.get(:multi_turn) == expected
     end
+
+    test "multi_turn_journal equals base + addon_multi_turn + addon_journal" do
+      base = LanguageSpec.get(:base)
+      addon_mt = LanguageSpec.get(:addon_multi_turn)
+      addon_j = LanguageSpec.get(:addon_journal)
+      expected = base <> "\n\n" <> addon_mt <> "\n\n" <> addon_j
+
+      assert LanguageSpec.get(:multi_turn_journal) == expected
+    end
+
+    test "multi_turn does not include journal sections" do
+      prompt = LanguageSpec.get(:multi_turn)
+      refute String.contains?(prompt, "<journaled_tasks>")
+      refute String.contains?(prompt, "<semantic_progress>")
+    end
+
+    test "multi_turn_journal includes journal sections" do
+      prompt = LanguageSpec.get(:multi_turn_journal)
+      assert String.contains?(prompt, "<journaled_tasks>")
+      assert String.contains?(prompt, "<semantic_progress>")
+    end
   end
 
   describe "list/0" do
@@ -84,6 +105,8 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       assert :base in keys
       assert :addon_single_shot in keys
       assert :addon_multi_turn in keys
+      assert :addon_journal in keys
+      assert :multi_turn_journal in keys
     end
   end
 

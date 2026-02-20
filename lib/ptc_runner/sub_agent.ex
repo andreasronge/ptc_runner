@@ -155,7 +155,8 @@ defmodule PtcRunner.SubAgent do
           output: output_mode(),
           max_tool_calls: pos_integer() | nil,
           memory_strategy: :strict | :rollback,
-          plan: [plan_step()]
+          plan: [plan_step()],
+          journaling: boolean()
         }
 
   alias PtcRunner.SubAgent.KeyNormalizer
@@ -204,7 +205,8 @@ defmodule PtcRunner.SubAgent do
     max_tool_calls: nil,
     output: :ptc_lisp,
     memory_strategy: :strict,
-    plan: []
+    plan: [],
+    journaling: false
   ]
 
   @doc "Returns the default format options."
@@ -540,7 +542,8 @@ defmodule PtcRunner.SubAgent do
         :output,
         :memory_strategy,
         :max_tool_calls,
-        :plan
+        :plan,
+        :journaling
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -574,7 +577,8 @@ defmodule PtcRunner.SubAgent do
         :output,
         :memory_strategy,
         :max_tool_calls,
-        :plan
+        :plan,
+        :journaling
       ])
 
     run(agent, runtime_opts)

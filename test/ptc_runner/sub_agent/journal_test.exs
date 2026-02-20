@@ -46,11 +46,11 @@ defmodule PtcRunner.SubAgent.JournalTest do
     end
 
     test "mission log is injected into system prompt when journal is non-empty" do
-      agent = test_agent(max_turns: 2)
+      agent = test_agent(max_turns: 2, journaling: true)
 
       llm = fn %{system: system, turn: 1} ->
         # Verify the mission log appears in the system prompt
-        assert system =~ "Mission Log (Completed Tasks)"
+        assert system =~ "<mission_log>"
         assert system =~ "order_1"
         assert system =~ "tx_123"
 
@@ -63,7 +63,7 @@ defmodule PtcRunner.SubAgent.JournalTest do
     end
 
     test "mission log is not injected when journal is empty" do
-      agent = test_agent(max_turns: 2)
+      agent = test_agent(max_turns: 2, journaling: true)
 
       llm = fn %{system: system, turn: 1} ->
         refute system =~ "Mission Log (Completed Tasks)"
@@ -78,7 +78,7 @@ defmodule PtcRunner.SubAgent.JournalTest do
 
     test "mission log shows completed task results on turn 2" do
       tools = %{"lookup" => fn %{"id" => id} -> "user_#{id}" end}
-      agent = test_agent(max_turns: 3, tools: tools)
+      agent = test_agent(max_turns: 3, tools: tools, journaling: true)
 
       llm = fn %{system: system, turn: turn} ->
         case turn do
@@ -101,7 +101,7 @@ defmodule PtcRunner.SubAgent.JournalTest do
     end
 
     test "mission log shows multiple completed tasks with correct values" do
-      agent = test_agent(max_turns: 3)
+      agent = test_agent(max_turns: 3, journaling: true)
 
       llm = fn %{system: system, turn: turn} ->
         case turn do
@@ -125,7 +125,7 @@ defmodule PtcRunner.SubAgent.JournalTest do
     end
 
     test "re-invocation: mission log shows tasks from previous run" do
-      agent = test_agent(max_turns: 2)
+      agent = test_agent(max_turns: 2, journaling: true)
 
       # The LLM sees pre-populated journal entries in the mission log
       # and can use the values in its program

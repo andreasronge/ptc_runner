@@ -53,6 +53,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_thinking!(opts)
     validate_memory_strategy!(opts)
     validate_max_tool_calls!(opts)
+    validate_journaling!(opts)
     validate_self_tool_requires_signature!(opts)
   end
 
@@ -646,6 +647,14 @@ defmodule PtcRunner.SubAgent.Validator do
       {:ok, n} when is_integer(n) and n > 0 -> :ok
       {:ok, nil} -> :ok
       {:ok, _} -> raise ArgumentError, "max_tool_calls must be a positive integer"
+      :error -> :ok
+    end
+  end
+
+  defp validate_journaling!(opts) do
+    case Keyword.fetch(opts, :journaling) do
+      {:ok, val} when is_boolean(val) -> :ok
+      {:ok, _} -> raise ArgumentError, "journaling must be a boolean"
       :error -> :ok
     end
   end
