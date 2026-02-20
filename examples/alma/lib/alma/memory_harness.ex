@@ -38,7 +38,7 @@ defmodule Alma.MemoryHarness do
   Accepts optional `:store_agents` tuple `{vs_agent, gs_agent}` to reuse
   shared store processes (e.g., during deployment with frozen memory).
 
-  Returns `{advice_string, error | nil}`.
+  Returns `{advice_string, error | nil, runtime_log}`.
   """
   def retrieve(design, task_info, memory, opts \\ []) do
     design_name = Map.get(design, :name, "unknown")
@@ -50,7 +50,7 @@ defmodule Alma.MemoryHarness do
       fn ->
         case design.recall do
           nil ->
-            {"", nil}
+            {"", nil, empty_log(:recall)}
 
           closure ->
             namespace = Map.get(design, :namespace, %{})
@@ -79,15 +79,21 @@ defmodule Alma.MemoryHarness do
                   opts
                 )
                 |> case do
-                  {:ok, step} -> {step.return || "", nil}
-                  {:error, reason} -> {"", "recall failed: #{format_error(reason)}"}
+                  {:ok, step} ->
+                    {step.return || "", nil, extract_log(step, :recall)}
+
+                  {:error, reason} ->
+                    {"", "recall failed: #{format_error(reason)}", error_log(reason, :recall)}
                 end
 
               nil ->
                 run_with_tools("(recall)", context, run_memory, memory, opts)
                 |> case do
-                  {:ok, step, _updated_vs, _updated_gs} -> {step.return || "", nil}
-                  {:error, reason} -> {"", "recall failed: #{format_error(reason)}"}
+                  {:ok, step, _updated_vs, _updated_gs} ->
+                    {step.return || "", nil, extract_log(step, :recall)}
+
+                  {:error, reason} ->
+                    {"", "recall failed: #{format_error(reason)}", error_log(reason, :recall)}
                 end
             end
         end
@@ -98,7 +104,7 @@ defmodule Alma.MemoryHarness do
   @doc """
   Calls the design's `mem_update` closure with episode data and memory.
 
-  Returns `{updated_memory, error | nil}`.
+  Returns `{updated_memory, error | nil, runtime_log}`.
   """
   def update(design, episode_data, memory, opts \\ []) do
     design_name = Map.get(design, :name, "unknown")
@@ -116,7 +122,7 @@ defmodule Alma.MemoryHarness do
       fn ->
         case design.mem_update do
           nil ->
-            {memory, nil}
+            {memory, nil, empty_log(:"mem-update")}
 
           closure ->
             namespace = Map.get(design, :namespace, %{})
@@ -135,10 +141,11 @@ defmodule Alma.MemoryHarness do
                   |> Map.put(@vector_store_key, updated_vs)
                   |> Map.put(@graph_store_key, updated_gs)
 
-                {updated, nil}
+                {updated, nil, extract_log(step, :"mem-update")}
 
               {:error, reason} ->
-                {memory, "mem-update failed: #{format_error(reason)}"}
+                {memory, "mem-update failed: #{format_error(reason)}",
+                 error_log(reason, :"mem-update")}
             end
         end
       end
@@ -162,7 +169,9 @@ defmodule Alma.MemoryHarness do
             do: Keyword.put(opts, :current_observation, observe_fn.(task_config)),
             else: opts
 
-        {knowledge, recall_error} = retrieve(design, task_config, memory, retrieve_opts)
+        {knowledge, recall_error, recall_log} =
+          retrieve(design, task_config, memory, retrieve_opts)
+
         knowledge = ensure_string(knowledge)
         result = Alma.TaskAgent.run(task_config, knowledge, opts)
         result = Map.put(result, :recall_advice, knowledge)
@@ -174,7 +183,8 @@ defmodule Alma.MemoryHarness do
           observation_log: result.observation_log
         }
 
-        {updated_memory, update_error} = update(design, episode_data, memory, opts)
+        {updated_memory, update_error, update_log} = update(design, episode_data, memory, opts)
+        result = Map.put(result, :runtime_logs, [recall_log, update_log])
         if on_task_done, do: on_task_done.(result)
 
         new_errors =
@@ -217,12 +227,13 @@ defmodule Alma.MemoryHarness do
 
             retrieve_opts = Keyword.put(retrieve_opts, :store_agents, {vs_agent, gs_agent})
 
-            {knowledge, recall_error} =
+            {knowledge, recall_error, recall_log} =
               retrieve(design, task_config, frozen_memory, retrieve_opts)
 
             knowledge = ensure_string(knowledge)
             result = Alma.TaskAgent.run(task_config, knowledge, opts)
             result = Map.put(result, :recall_advice, knowledge)
+            result = Map.put(result, :runtime_logs, [recall_log])
             {result, recall_error}
           end,
           max_concurrency: System.schedulers_online(),
@@ -343,27 +354,26 @@ defmodule Alma.MemoryHarness do
   defp build_read_only_tools(vs_agent, gs_agent, opts) do
     llm = Keyword.get(opts, :llm)
 
+    # Execute queries inside the Agent callback so only the small result
+    # (not the entire store) is copied across process boundaries.
     tools = %{
       "find-similar" =>
         {fn args ->
            query = Map.fetch!(args, "query")
            k = Map.get(args, "k", 3)
            collection = Map.get(args, "collection")
-           vs = Agent.get(vs_agent, & &1)
-           VectorStore.find_similar(vs, query, k, collection)
+           Agent.get(vs_agent, fn vs -> VectorStore.find_similar(vs, query, k, collection) end)
          end, "(query :string, k :int, collection :string) -> [:map]"},
       "graph-neighbors" =>
         {fn args ->
            node = Map.fetch!(args, "node")
-           gs = Agent.get(gs_agent, & &1)
-           GraphStore.neighbors(gs, node)
+           Agent.get(gs_agent, fn gs -> GraphStore.neighbors(gs, node) end)
          end, "(node :string) -> [:string]"},
       "graph-path" =>
         {fn args ->
            from = Map.fetch!(args, "from")
            to = Map.fetch!(args, "to")
-           gs = Agent.get(gs_agent, & &1)
-           GraphStore.shortest_path(gs, from, to)
+           Agent.get(gs_agent, fn gs -> GraphStore.shortest_path(gs, from, to) end)
          end, "(from :string, to :string) -> [:string]"}
     }
 
@@ -452,6 +462,31 @@ defmodule Alma.MemoryHarness do
   defp ensure_string(value) when is_map(value), do: Jason.encode!(value)
   defp ensure_string(value) when is_list(value), do: Jason.encode!(value)
   defp ensure_string(value), do: to_string(value)
+
+  defp extract_log(step, phase) do
+    error =
+      case step do
+        %{fail: %{message: msg}} when is_binary(msg) -> msg
+        _ -> nil
+      end
+
+    %{
+      phase: phase,
+      prints: step.prints || [],
+      tool_calls:
+        Enum.map(step.tool_calls || [], fn tc ->
+          %{name: tc.name, args: tc.args, result: tc.result}
+        end),
+      return: step.return,
+      error: error
+    }
+  end
+
+  defp empty_log(phase), do: %{phase: phase, prints: [], tool_calls: [], return: nil, error: nil}
+
+  # Extract partial log from a failed Step (preserves prints/tool_calls up to the crash)
+  defp error_log(%PtcRunner.Step{} = step, phase), do: extract_log(step, phase)
+  defp error_log(_reason, phase), do: empty_log(phase)
 
   defp format_error(%PtcRunner.Step{fail: %{message: message}}) when is_binary(message),
     do: message

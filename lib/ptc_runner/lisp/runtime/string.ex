@@ -186,28 +186,95 @@ defmodule PtcRunner.Lisp.Runtime.String do
   @doc """
   Return lines matching the pattern with 1-based line numbers.
   String patterns are compiled as case-insensitive regex with BRE-to-PCRE translation.
-  - (grep-n "error" text) returns [{:line 1 :text "error here"} ...]
+
+  An optional `context` parameter (like `grep -C`) includes surrounding lines.
+  Each result includes a `:match` boolean to distinguish matches from context.
+
+  - (grep-n "error" text) returns [{:line 1 :text "error here" :match true} ...]
+  - (grep-n "error" text 2) includes 2 lines of context around each match
   """
-  def grep_n("", text) when is_binary(text) do
-    text
-    |> split_lines()
-    |> Enum.with_index(1)
-    |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
+  def grep_n(pattern, text, context \\ 0)
+
+  def grep_n("", text, context) when is_binary(text) and is_integer(context) do
+    lines = split_lines(text)
+
+    results =
+      lines
+      |> Enum.with_index(1)
+      |> Enum.map(fn {line, idx} -> %{line: idx, text: line, match: true} end)
+
+    maybe_truncate(results, length(lines))
   end
 
-  def grep_n(pattern, text) when is_binary(pattern) and is_binary(text) do
-    grep_n(compile_grep_pattern(pattern), text)
+  def grep_n(pattern, text, context)
+      when is_binary(pattern) and is_binary(text) and is_integer(context) do
+    grep_n(compile_grep_pattern(pattern), text, context)
   end
 
-  def grep_n({:re_mp, _, _, _} = re, text) when is_binary(text) do
+  def grep_n({:re_mp, _, _, _} = re, text, context)
+      when is_binary(text) and is_integer(context) and context >= 0 do
     alias PtcRunner.Lisp.Runtime.Regex, as: RuntimeRegex
 
-    text
-    |> split_lines()
-    |> Enum.with_index(1)
-    |> Enum.filter(fn {line, _idx} -> RuntimeRegex.re_find(re, line) != nil end)
-    |> Enum.map(fn {line, idx} -> %{line: idx, text: line} end)
+    indexed_lines = text |> split_lines() |> Enum.with_index(1)
+    num_lines = length(indexed_lines)
+
+    match_indices =
+      indexed_lines
+      |> Enum.filter(fn {line, _idx} -> RuntimeRegex.re_find(re, line) != nil end)
+      |> Enum.map(fn {_line, idx} -> idx end)
+
+    if match_indices == [] do
+      []
+    else
+      match_set = MapSet.new(match_indices)
+      line_map = Map.new(indexed_lines, fn {line, idx} -> {idx, line} end)
+
+      intervals =
+        match_indices
+        |> Enum.map(fn idx -> {max(1, idx - context), min(num_lines, idx + context)} end)
+        |> merge_intervals()
+
+      results =
+        Enum.flat_map(intervals, fn {lo, hi} ->
+          Enum.map(lo..hi, fn idx ->
+            %{line: idx, text: Map.fetch!(line_map, idx), match: MapSet.member?(match_set, idx)}
+          end)
+        end)
+
+      maybe_truncate(results, length(match_indices))
+    end
   end
+
+  @max_context_lines 100
+
+  defp merge_intervals([]), do: []
+
+  defp merge_intervals([first | rest]) do
+    Enum.reduce(rest, [first], fn {lo, hi}, [{cur_lo, cur_hi} | acc] ->
+      if lo <= cur_hi + 1 do
+        [{cur_lo, max(cur_hi, hi)} | acc]
+      else
+        [{lo, hi}, {cur_lo, cur_hi} | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp maybe_truncate(results, total_matches) when length(results) > @max_context_lines do
+    remaining = total_matches - count_matches(Enum.take(results, @max_context_lines))
+
+    truncation_marker = %{
+      line: -1,
+      text: "... (truncated, #{remaining} more matches) ...",
+      match: false
+    }
+
+    Enum.take(results, @max_context_lines) ++ [truncation_marker]
+  end
+
+  defp maybe_truncate(results, _total_matches), do: results
+
+  defp count_matches(lines), do: Enum.count(lines, & &1.match)
 
   # Translate BRE escapes to PCRE and compile as case-insensitive regex.
   # LLMs often write \| for alternation (BRE style) but PCRE treats \| as literal pipe.
