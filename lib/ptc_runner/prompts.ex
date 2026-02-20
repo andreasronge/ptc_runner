@@ -70,10 +70,12 @@ defmodule PtcRunner.Prompts do
   @lisp_base_file Path.join(@prompts_dir, "lisp-base.md")
   @lisp_addon_single_shot_file Path.join(@prompts_dir, "lisp-addon-single_shot.md")
   @lisp_addon_multi_turn_file Path.join(@prompts_dir, "lisp-addon-multi_turn.md")
+  @lisp_addon_journal_file Path.join(@prompts_dir, "lisp-addon-journal.md")
 
   @external_resource @lisp_base_file
   @external_resource @lisp_addon_single_shot_file
   @external_resource @lisp_addon_multi_turn_file
+  @external_resource @lisp_addon_journal_file
 
   @lisp_base @lisp_base_file |> File.read!() |> PromptLoader.extract_with_header()
   @lisp_addon_single_shot @lisp_addon_single_shot_file
@@ -82,6 +84,9 @@ defmodule PtcRunner.Prompts do
   @lisp_addon_multi_turn @lisp_addon_multi_turn_file
                          |> File.read!()
                          |> PromptLoader.extract_with_header()
+  @lisp_addon_journal @lisp_addon_journal_file
+                      |> File.read!()
+                      |> PromptLoader.extract_with_header()
 
   @doc "Core PTC-Lisp language reference (always included)."
   @spec lisp_base() :: String.t()
@@ -95,6 +100,10 @@ defmodule PtcRunner.Prompts do
   @spec lisp_addon_multi_turn() :: String.t()
   def lisp_addon_multi_turn, do: elem(@lisp_addon_multi_turn, 1)
 
+  @doc "Journal addon (task caching, step-done, semantic progress)."
+  @spec lisp_addon_journal() :: String.t()
+  def lisp_addon_journal, do: elem(@lisp_addon_journal, 1)
+
   @doc "Raw header + content for lisp-base.md (for metadata parsing)."
   @spec lisp_base_with_header() :: {String.t(), String.t()}
   def lisp_base_with_header, do: @lisp_base
@@ -106,6 +115,10 @@ defmodule PtcRunner.Prompts do
   @doc "Raw header + content for lisp-addon-multi_turn.md."
   @spec lisp_addon_multi_turn_with_header() :: {String.t(), String.t()}
   def lisp_addon_multi_turn_with_header, do: @lisp_addon_multi_turn
+
+  @doc "Raw header + content for lisp-addon-journal.md."
+  @spec lisp_addon_journal_with_header() :: {String.t(), String.t()}
+  def lisp_addon_journal_with_header, do: @lisp_addon_journal
 
   # ============================================================================
   # JSON Mode Templates
@@ -224,6 +237,7 @@ defmodule PtcRunner.Prompts do
       :lisp_base,
       :lisp_addon_single_shot,
       :lisp_addon_multi_turn,
+      :lisp_addon_journal,
       :json_system,
       :json_user,
       :json_error,
@@ -242,7 +256,7 @@ defmodule PtcRunner.Prompts do
   ## Examples
 
       iex> prompt = PtcRunner.Prompts.get(:lisp_base)
-      iex> String.contains?(prompt, "PTC-Lisp")
+      iex> String.contains?(prompt, "<role>")
       true
 
       iex> PtcRunner.Prompts.get(:unknown)
@@ -253,6 +267,7 @@ defmodule PtcRunner.Prompts do
   def get(:lisp_base), do: lisp_base()
   def get(:lisp_addon_single_shot), do: lisp_addon_single_shot()
   def get(:lisp_addon_multi_turn), do: lisp_addon_multi_turn()
+  def get(:lisp_addon_journal), do: lisp_addon_journal()
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()

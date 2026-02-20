@@ -1028,14 +1028,18 @@ defmodule PtcRunner.SubAgent.Loop do
        ) do
     base = SystemPrompt.generate_system(agent, resolution_context: resolution_context)
 
-    # When agent has a plan, progress checklist in user messages supersedes Mission Log
-    case {agent.plan, journal} do
-      {[], %{} = j} when map_size(j) > 0 ->
-        mission_log = SystemPrompt.render_mission_log(journal)
-        base <> "\n\n" <> mission_log
+    # Only append mission log when journaling is enabled on the agent
+    if agent.journaling do
+      case journal do
+        %{} = j when map_size(j) > 0 ->
+          mission_log = SystemPrompt.render_mission_log(journal)
+          base <> "\n\n" <> mission_log
 
-      _ ->
-        base
+        _ ->
+          base
+      end
+    else
+      base
     end
   end
 

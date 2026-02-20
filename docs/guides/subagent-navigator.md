@@ -17,7 +17,7 @@ The Navigator is a stateless agent that "re-navigates" its mission by checking a
 # step.journal => %{"fetch-data" => [1, 2, 3]}
 
 # Turn 2: re-invoke with saved journal
-{:ok, step} = SubAgent.run(agent, llm: llm, context: %{journal: saved_journal})
+{:ok, step} = SubAgent.run(agent, llm: llm, journal: saved_journal)
 # "fetch-data" returns cached result — no duplicate API call
 ```
 
@@ -25,11 +25,12 @@ The app owns persistence. Save `step.journal` to your database between runs; pas
 
 ## How It Works
 
-1. The agent receives a journal (possibly empty) via the `journal:` option
-2. The engine injects a **Mission Log** into the system prompt showing completed tasks
-3. The LLM sees what's done and generates code for remaining work
-4. `(task "id" expr)` checks the journal: cache hit skips `expr`, cache miss evaluates and records
-5. The updated journal is returned in `step.journal`
+1. The agent is created with `journaling: true` — this includes `task`/`step-done`/`task-reset` documentation in the LLM's system prompt
+2. The agent receives a journal (possibly empty) via the `journal:` runtime option
+3. The engine injects a **Mission Log** into the system prompt showing completed tasks
+4. The LLM sees what's done and generates code for remaining work
+5. `(task "id" expr)` checks the journal: cache hit skips `expr`, cache miss evaluates and records
+6. The updated journal is returned in `step.journal`
 
 ## The Re-run Pattern
 
@@ -42,7 +43,8 @@ agent = SubAgent.new(
   prompt: "Process order {{order_id}}: charge card, then ship item",
   signature: "(order_id :int) -> {status :keyword}",
   tools: %{"charge_card" => &Billing.charge/1, "ship_item" => &Shipping.ship/1},
-  max_turns: 5
+  max_turns: 5,
+  journaling: true
 )
 
 {:ok, step} = SubAgent.run(agent, llm: llm, context: %{order_id: 42}, journal: %{})
@@ -150,7 +152,8 @@ agent = SubAgent.new(
   prompt: "Process order {{order_id}}",
   plan: ["Charge card", "Ship item", "Send confirmation"],
   tools: %{"charge_card" => &Billing.charge/1, "ship_item" => &Shipping.ship/1},
-  max_turns: 10
+  max_turns: 10,
+  journaling: true
 )
 ```
 

@@ -2,25 +2,23 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 31 -->
+<!-- version: 33 -->
 <!-- date: 2026-02-18 -->
-<!-- changes: add defonce usage and common mistake -->
+<!-- changes: XML tags for section boundaries; strip bold except tool named-args -->
 
 <!-- PTC_PROMPT_START -->
 
-## Role
-
+<role>
 Write one program that accomplish the user's mission.
 Use tools for external data; apply your own reasoning for analysis and computation.
 
-**CRITICAL: Output EXACTLY ONE program per response. Do not wrap multiple attempts in `(do ...)`—write one clean program.**
-**Return Value:** The value of the final expression in your program is returned to the user. Ensure it matches the requested return type (avoid ending with `println` or `doseq` which return `nil`).
+CRITICAL: Output EXACTLY ONE program per response. Do not wrap multiple attempts in `(do ...)`—write one clean program.
+Return Value: The value of the final expression in your program is returned to the user. Ensure it matches the requested return type (avoid ending with `println` or `doseq` which return `nil`).
+</role>
 
-## PTC-Lisp
-
+<language_reference>
 Safe Clojure subset.
 
-### Data & Tools
 ```clojure
 data/products                      ; read-only input data
 (tool/search {:query "budget"})    ; tool invocation — ALWAYS use named args
@@ -28,7 +26,7 @@ data/products                      ; read-only input data
 (count results)                    ; access variable (no data/)
 ```
 
-**Multi-turn state:** use `defonce` to initialize, `def` to update:
+Multi-turn state: use `defonce` to initialize, `def` to update:
 ```clojure
 (defonce counter 0)                ; turn 1 → binds 0; turn 2+ → no-op
 (def counter (inc counter))        ; safe increment every turn
@@ -36,12 +34,12 @@ data/products                      ; read-only input data
 
 **Tool calls require named arguments** — use `(tool/name {:key value})`, never `(tool/name value)`. Even single-parameter tools: `(tool/fetch {:url "..."})` not `(tool/fetch "...")`.
 
-**Tip:** `(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
+`(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
 
-**Membership check:** `(contains? coll elem)` works on lists, sets, and maps.
+`(contains? coll elem)` works on lists, sets, and maps.
+</language_reference>
 
-### Restrictions
-
+<restrictions>
 - No namespaced keywords (`:foo/bar`)
 - No `(range)` without args — use `(range 10)`
 - No `if` without else — use `(if x y nil)` or `when`
@@ -58,56 +56,56 @@ data/products                      ; read-only input data
 - No `partial` — use anonymous functions `#(...)`
 - No reader macros — no `#_` (discard), `#'` (var quote), `#""` (regex literal)
 - No `try/catch/throw` — use `fail` for errors
-- `(task "id" expr)` — journaled execution: if ID was already completed, returns cached result; otherwise evaluates expr and records it
-- `(step-done "id" "summary")` — report progress on a plan step; `(task-reset "id")` — clear a cached task
+</restrictions>
 
-### Common Mistakes
-
-**Collections:**
+<common_mistakes>
+Collections:
 - ✗ `(max [1 2 3])` → ✓ `(apply max [1 2 3])` — max takes args, not collection
 - ✗ `(take 100 str)` → ✓ `(subs str 0 100)` — take on strings returns char list
 - ✗ `(take (/ n 2) coll)` → ✓ `(take (quot n 2) coll)` — `/` returns float
 
-**Aggregators:**
+Aggregators:
 - ✗ `(apply max-key :price products)` → ✓ `(max-by :price products)` — use aggregators for collections
 - ✗ `(apply min-key :price products)` → ✓ `(min-by :price products)`
 
-**Missing from Clojure:**
+Missing from Clojure:
 - No `list` — use `[]` vector literals or `(vector ...)`
 - No `cons` — use `(conj coll x)` to add at end, or `(concat [x] coll)` to add at front
 
-**Predicates:**
+Nil-safe collection checks:
+- ✗ `(contains? (:inventory result) x)` — throws if key is absent (nil collection)
+- ✓ `(contains? (or (:inventory result) []) x)` — safe when tool result may lack a key
+
+Predicates:
 - ✗ `(includes s "x")` → ✓ `(includes? s "x")` — predicate needs `?`
 - ✗ `(includes? list elem)` → ✓ `(contains? list elem)` — `includes?` is for strings
 
-**Functions:**
+Functions:
 - ✗ `(sort-by :price coll >)` → ✓ `(sort-by :price > coll)`
 
-**String search:**
+String search:
 - ✗ `(.indexOf s "x")` → ✓ `(index-of s "x")` — returns nil (not -1) when not found
 - ✗ `(.lastIndexOf s "x")` → ✓ `(last-index-of s "x")` — returns nil (not -1) when not found
 - `(index-of "hello" "l" 3)` — optional from-index parameter
 
-**Regex & Parsing:**
+Regex & Parsing:
 - ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
 - ✗ `Integer/parseInt` → ✓ `parse-long` or `parse-int` — no Java interop
 - ✗ `(parse-long (second (re-find ...)))` → ✓ `(extract-int "pattern" str)` — simplified extraction
 - ✗ `clojure.string/split` → ✓ `(split s ",")` or `(re-split (re-pattern "\\s+") s)`
 
-**Tool calls:**
+Tool calls:
 - ✗ `(tool/fetch "https://...")` → ✓ `(tool/fetch {:url "https://..."})` — always use named args
 - ✗ `(tool/search "query" 10)` → ✓ `(tool/search {:query "query" :limit 10})`
 
-**Multi-turn state:**
+Multi-turn state:
 - ✗ `(def counter (inc (or counter 0)))` — `or` never runs; referencing an unbound var is an error
 - ✓ `(defonce counter 0)` then `(def counter (inc counter))` — initialize once, update every turn
 
-**Threading & Iteration:**
+Threading & Iteration:
 - ✗ `(-> coll (filter f))` → ✓ `(->> coll (filter f))` — use `->>` for collections
 - `(for [x xs :when (odd? x)] ...)` — `:when`, `:let`, `:while` modifiers supported
 - ✗ `(doseq [x xs] (swap! acc ...))` → ✓ `(reduce (fn [acc x] ...) {} xs)`
-
-### Not Available from Clojure
 
 These Clojure/Java functions do NOT exist — use the alternatives:
 
@@ -121,8 +119,10 @@ These Clojure/Java functions do NOT exist — use the alternatives:
 ;; ✗ Integer/parseInt → parse-int or parse-long
 ;; ✗ clojure.string/* → split, join, trim, upper-case, lower-case, index-of, last-index-of (top-level)
 ```
+</common_mistakes>
 
-### Aggregators
+<builtins>
+Aggregators:
 
 ```clojure
 (sum [1 2 3])                    ; => 6
@@ -135,7 +135,7 @@ These Clojure/Java functions do NOT exist — use the alternatives:
 (apply max-key val my-map)       ; find max entry in map by value
 ```
 
-### Extraction & Combinations
+Extraction & Combinations:
 
 ```clojure
 ;; Extract regex capture groups
@@ -151,5 +151,6 @@ These Clojure/Java functions do NOT exist — use the alternatives:
 (combinations [1 2 3] 2)                  ; => [[1 2] [1 3] [2 3]]
 (combinations [:a :b :c :d] 3)            ; => [[:a :b :c] [:a :b :d] ...]
 ```
+</builtins>
 
 <!-- PTC_PROMPT_END -->

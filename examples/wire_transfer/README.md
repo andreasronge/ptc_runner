@@ -33,8 +33,8 @@ The agent runs for the first time with an empty journal.
 
 **Elixir app code:**
 ```elixir
-{:ok, step} = SubAgent.run(agent, context: %{user_id: 1})
-# step.result => %{status: :waiting, msg: "Pending manager approval"}
+{:ok, step} = SubAgent.run(agent, context: %{user_id: 1}, journal: %{})
+# step.return => %{status: :waiting, msg: "Pending manager approval"}
 # step.journal => %{
 #   "prepare_wire_bob_5000" => "hold_abc",
 #   "request_approval_bob_5000" => %{request_id: "req_789"}
@@ -62,7 +62,7 @@ The app re-runs the agent with the updated journal.
 
 ```elixir
 journal = MyRepo.get_journal(workflow_id)
-{:ok, step} = SubAgent.run(agent, context: %{user_id: 1, journal: journal})
+{:ok, step} = SubAgent.run(agent, context: %{user_id: 1}, journal: journal)
 ```
 
 **Mission Log injected into the LLM's prompt:**

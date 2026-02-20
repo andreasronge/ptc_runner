@@ -37,7 +37,8 @@ defmodule WireTransfer.Agent do
         "execute_wire" => &Tools.execute_wire/1,
         "cancel_hold" => &Tools.cancel_hold/1
       },
-      max_turns: 5
+      max_turns: 5,
+      journaling: true
     )
   end
 end
