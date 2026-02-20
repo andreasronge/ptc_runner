@@ -265,6 +265,20 @@ To further explore recursive behavior, add:
 - **Multi-hop QA**: Questions requiring synthesis across documents
 - **BrowseComp**: Multi-document reasoning benchmark from the paper
 
+### LCM-Inspired Directions
+
+The [LCM paper](https://arxiv.org/abs/2502.XXXXX) (Ehrlich & Blackman, 2026) builds on RLM by moving control flow from the LLM to the engine. Where RLM gives the model full autonomy (GOTO-like power), LCM provides structured primitives (for/while-like operators). Several ideas are worth exploring in ptc_runner:
+
+- **Built-in `llm-map` operator**: We already have `pmap` + `llm_query`, but the model must wire up error handling and output validation itself. A first-class `(llm-map items prompt schema)` form would handle schema validation per item, automatic retries with error feedback, and concurrency — all deterministically in the engine. This is the single biggest gap between our current RLM approach and what LCM offers.
+
+- **`agentic-map` — parallel sub-agents with context isolation**: Distinct from `parallel_workers/` where chunks are pre-split in Elixir. Each item gets a full agent session with tool access for multi-turn reasoning (e.g., "for each module, analyze test coverage" where each analysis requires tool calls). A natural extension of the `:self` tool — spawn N independent sub-agents in parallel instead of recursive self-calls on subsets.
+
+- **Schema-validated batch output**: LCM validates every item in a batch against a JSON Schema and retries with the validation error injected into the conversation. We already have `PtcRunner.Schema` — wiring this into a map operator so every item is type-checked before aggregation would improve reliability for large-scale processing.
+
+- **Scope-reduction invariant for recursive delegation**: LCM replaces hard depth limits with a structural check: when a sub-agent spawns another sub-agent, it must declare `delegated_scope` (what it's handing off) and `kept_work` (what it retains). If it can't articulate what it's keeping, the call is rejected. This is a more principled termination guarantee than our current depth limit and could complement or replace it in SubAgent.
+
+**Why these matter**: The LCM paper demonstrates that deterministic operator-level recursion outperforms both raw models and Claude Code on long-context aggregation tasks (OOLONG benchmark). The key insight is that reliability comes from reducing the decisions the model must make — the engine handles iteration, retries, and validation while the model focuses on per-item reasoning. Our RLM implementation already proves the core insight (bulk data in memory, not context), and these additions would bring the reliability benefits of structured operators without giving up the flexibility of PTC-Lisp.
+
 ## References
 
 - [arXiv:2512.24601](https://arxiv.org/abs/2512.24601) - Recursive Language Models (Zhang, Kraska, Khattab)
