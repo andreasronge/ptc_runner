@@ -83,7 +83,12 @@ Parallel branches communicate via return values. Use `println` between turns for
 results                                     ; access in later turns
 ```
 
-Use `def` to store values you need to reference later.
+Use `def` to store values you need to reference later. Use `defonce` to initialize, `def` to update:
+```clojure
+(defonce counter 0)                ; turn 1 → binds 0; turn 2+ → no-op
+(def counter (inc counter))        ; safe increment every turn
+;; ✗ (def counter (inc (or counter 0))) — or never runs; unbound var is an error
+```
 
 `(budget/remaining)` returns turns, depth, and token usage for adaptive strategies.
 

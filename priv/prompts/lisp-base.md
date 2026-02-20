@@ -26,12 +26,6 @@ data/products                      ; read-only input data
 (count results)                    ; access variable (no data/)
 ```
 
-Multi-turn state: use `defonce` to initialize, `def` to update:
-```clojure
-(defonce counter 0)                ; turn 1 → binds 0; turn 2+ → no-op
-(def counter (inc counter))        ; safe increment every turn
-```
-
 **Tool calls require named arguments** — use `(tool/name {:key value})`, never `(tool/name value)`. Even single-parameter tools: `(tool/fetch {:url "..."})` not `(tool/fetch "...")`.
 
 `(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
@@ -97,10 +91,6 @@ Regex & Parsing:
 Tool calls:
 - ✗ `(tool/fetch "https://...")` → ✓ `(tool/fetch {:url "https://..."})` — always use named args
 - ✗ `(tool/search "query" 10)` → ✓ `(tool/search {:query "query" :limit 10})`
-
-Multi-turn state:
-- ✗ `(def counter (inc (or counter 0)))` — `or` never runs; referencing an unbound var is an error
-- ✓ `(defonce counter 0)` then `(def counter (inc counter))` — initialize once, update every turn
 
 Threading & Iteration:
 - ✗ `(-> coll (filter f))` → ✓ `(->> coll (filter f))` — use `->>` for collections
