@@ -17,11 +17,11 @@ defmodule PtcRunner.SubAgent.DebugTest do
       preview = SubAgent.preview_prompt(agent, context: %{user: "alice"})
 
       assert is_binary(preview.system)
-      assert preview.system =~ "PTC-Lisp"
+      assert preview.system =~ "<language_reference>"
       # System prompt is cacheable - does NOT include mission
-      refute preview.system =~ "# Mission"
+      refute preview.system =~ "<mission>"
       # User message includes context sections + mission
-      assert preview.user =~ "# Mission"
+      assert preview.user =~ "<mission>"
       assert preview.user =~ "Find emails for alice"
       assert length(preview.tool_schemas) == 1
       assert hd(preview.tool_schemas).name == "list_emails"
@@ -48,7 +48,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
 
       assert is_binary(preview.system)
       # User message includes context sections + mission
-      assert preview.user =~ "# Mission"
+      assert preview.user =~ "<mission>"
       assert preview.user =~ "Do something"
       assert preview.tool_schemas == []
     end

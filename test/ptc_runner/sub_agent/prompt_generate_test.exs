@@ -14,14 +14,14 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       prompt = SystemPrompt.generate(agent, context: context)
 
       # Check all major sections are present
-      assert prompt =~ "## Role"
+      assert prompt =~ "<role>"
       assert prompt =~ "Write one program that accomplish the user's mission"
       refute prompt =~ "thinking:"
       assert prompt =~ ";; === data/ ==="
       assert prompt =~ ";; === tools ==="
-      assert prompt =~ "## PTC-Lisp"
-      assert prompt =~ "# Output Format"
-      assert prompt =~ "# Mission"
+      assert prompt =~ "<language_reference>"
+      assert prompt =~ "<output_format>"
+      assert prompt =~ "<mission>"
     end
 
     test "includes context variables in data inventory" do
@@ -68,7 +68,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      assert prompt =~ "# Role"
+      assert prompt =~ "<role>"
       assert prompt =~ "Simple task"
     end
   end
@@ -79,7 +79,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       recovery = SystemPrompt.generate_error_recovery_prompt(error)
 
-      assert recovery =~ "# Previous Turn Error"
+      assert recovery =~ "<previous_error>"
       assert recovery =~ "parse_error"
       assert recovery =~ "Unexpected token at position 45"
       assert recovery =~ "```clojure code block"
@@ -90,7 +90,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       recovery = SystemPrompt.generate_error_recovery_prompt(error)
 
-      assert recovery =~ "# Previous Turn Error"
+      assert recovery =~ "<previous_error>"
       assert recovery =~ "unknown_error"
     end
 
@@ -100,8 +100,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{}, error_context: error)
 
-      assert prompt =~ "# Role"
-      assert prompt =~ "# Previous Turn Error"
+      assert prompt =~ "<role>"
+      assert prompt =~ "<previous_error>"
       assert prompt =~ "Bad syntax"
     end
   end
@@ -187,7 +187,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       prompt = SystemPrompt.generate(agent, context: context)
 
       # Role section
-      assert prompt =~ "## Role"
+      assert prompt =~ "<role>"
 
       # Data inventory
       assert prompt =~ "data/user"

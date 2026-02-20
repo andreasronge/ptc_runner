@@ -729,14 +729,14 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
 
       # System prompt should be JSON mode prompt
       assert preview.system =~ "structured JSON"
-      refute preview.system =~ "PTC-Lisp"
+      refute preview.system =~ "<language_reference>"
 
       # JSON mode embeds actual values directly in task (no separate Data section)
       assert preview.user =~ "Return IDs for test"
       refute preview.user =~ "# Data"
 
       # Should include expected output
-      assert preview.user =~ "Expected Output"
+      assert preview.user =~ "<expected_output>"
     end
 
     test "preview_prompt matches actual LLM input" do

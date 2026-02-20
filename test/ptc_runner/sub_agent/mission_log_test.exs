@@ -8,7 +8,7 @@ defmodule PtcRunner.SubAgent.MissionLogTest do
       journal = %{"fetch-user" => %{"id" => 1, "name" => "Alice"}, "check-auth" => true}
       result = SystemPrompt.render_mission_log(journal)
 
-      assert result =~ "## Mission Log (Completed Tasks)"
+      assert result =~ "<mission_log>"
       assert result =~ "[done] fetch-user:"
       assert result =~ "[done] check-auth: true"
     end
