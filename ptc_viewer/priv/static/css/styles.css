@@ -1146,3 +1146,237 @@ input[type="file"] { display: none; }
   padding: 4px 8px;
   font-style: italic;
 }
+
+/* === Multi-Run Side-by-Side Layout === */
+.multi-run-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.multi-run-sidebar {
+  width: 320px;
+  min-width: 280px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+.multi-run-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* === Span Tree (Multi-Run) === */
+.span-tree {
+  background: var(--bg-light);
+  border-radius: 8px;
+  padding: 0;
+  border: 1px solid var(--border);
+}
+.span-tree-header {
+  padding: 12px 16px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.span-tree-header::-webkit-details-marker { display: none; }
+.span-tree-header::before {
+  content: '\25BC';
+  font-size: 8px;
+  color: var(--muted);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.span-tree:not([open]) .span-tree-header::before {
+  transform: rotate(-90deg);
+}
+.span-tree-body {
+  padding: 0 8px 8px 8px;
+}
+.span-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.span-tree-node.run {
+  cursor: pointer;
+}
+.span-tree-node.run:hover {
+  background: var(--bg-hover);
+}
+.span-tree-node.run.active {
+  background: rgba(86, 156, 214, 0.2);
+  border-left: 2px solid var(--accent);
+}
+.span-tree-node.tool {
+  color: var(--muted);
+  font-size: 10px;
+}
+.span-tree-node.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--fg);
+}
+.span-tree-node.tool-group::-webkit-details-marker { display: none; }
+.span-tree-node.tool-group:hover { background: var(--bg-hover); }
+.span-tree-group {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+.span-tree-group[open] > .span-tree-node.tool-group .span-tree-toggle {
+  transform: rotate(90deg);
+}
+.span-tree-toggle {
+  font-size: 8px;
+  color: var(--muted);
+  transition: transform 0.15s;
+  display: inline-block;
+  width: 10px;
+}
+.span-tree-icon {
+  font-size: 8px;
+  color: var(--accent);
+  width: 10px;
+  text-align: center;
+}
+.span-tree-node.tool .span-tree-icon {
+  color: var(--muted);
+}
+.span-tree-label {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.span-tree-node.run .span-tree-label {
+  color: var(--accent);
+}
+.span-tree-meta {
+  color: var(--muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.span-tree-result {
+  color: var(--muted);
+  font-size: 10px;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.span-tree-status {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.span-tree-status.success { color: var(--success); }
+.span-tree-status.error { color: var(--error); }
+
+/* Expandable tool detail */
+.span-tree-tool-detail {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+.span-tree-tool-detail > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.span-tree-tool-detail > summary::-webkit-details-marker { display: none; }
+.span-tree-tool-detail > summary .span-tree-icon::before {
+  content: '\25B6';
+  font-size: 7px;
+  color: var(--muted);
+  position: absolute;
+  left: -2px;
+  top: 1px;
+}
+.span-tree-tool-detail > summary .span-tree-icon {
+  position: relative;
+}
+.span-tree-tool-detail[open] > summary .span-tree-icon::before {
+  transform: rotate(90deg);
+}
+.span-tree-tool-body {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.span-tree-tool-body .code-block {
+  font-size: 11px;
+  padding: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.span-tree-detail-section {
+  margin-bottom: 4px;
+}
+.span-tree-detail-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* === Agent Signature Tag (Span Tree run node) === */
+.span-tree-sig {
+  color: var(--keyword);
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 10px;
+  background: rgba(197, 134, 192, 0.15);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === Agent Info Card (Turn Detail, first turn) === */
+.agent-info-card {
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--keyword);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-info-sig {
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: var(--keyword);
+}
+
+.agent-info-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.agent-info-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
