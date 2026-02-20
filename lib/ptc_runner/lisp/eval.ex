@@ -335,8 +335,8 @@ defmodule PtcRunner.Lisp.Eval do
     # Evaluate arguments in current context
     case eval_all(arg_asts, eval_ctx) do
       {:ok, values, ctx} ->
-        # Include prints in signal so they're preserved across iterations
-        throw({:recur_signal, values, ctx.prints})
+        # Include accumulated state in signal so it's preserved across iterations
+        throw({:recur_signal, values, ctx.prints, ctx.tool_calls, ctx.tool_cache})
 
       {:error, _} = err ->
         err
@@ -1227,7 +1227,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp execute_loop(body, %EvalContext{} = ctx, bindings) do
     do_eval(body, ctx)
   catch
-    {:recur_signal, new_values, prints} ->
+    {:recur_signal, new_values, prints, tool_calls, tool_cache} ->
       patterns = Enum.map(bindings, fn {:binding, p, _} -> p end)
 
       if length(patterns) != length(new_values) do
@@ -1237,8 +1237,8 @@ defmodule PtcRunner.Lisp.Eval do
           {:ok, new_bindings} ->
             case EvalContext.increment_iteration(ctx) do
               {:ok, ctx2} ->
-                # Preserve prints from this iteration
-                ctx3 = %{ctx2 | prints: prints}
+                # Preserve prints, tool_calls, and tool_cache across iterations
+                ctx3 = %{ctx2 | prints: prints, tool_calls: tool_calls, tool_cache: tool_cache}
                 execute_loop(body, EvalContext.merge_env(ctx3, new_bindings), bindings)
 
               {:error, :loop_limit_exceeded} ->
