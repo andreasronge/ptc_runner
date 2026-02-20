@@ -98,6 +98,9 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
+  # Var reader syntax: #'name produces {:var, name} from the parser
+  defp do_analyze({:var, name}, _tail?) when is_atom(name), do: {:ok, {:var, name}}
+
   defp do_analyze({:ns_symbol, :data, key}, _tail?), do: {:ok, {:data, key}}
 
   # Budget introspection: (budget/remaining) returns budget info map

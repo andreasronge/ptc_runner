@@ -170,4 +170,24 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
                PtcRunner.Lisp.run(program, context: context)
     end
   end
+
+  describe "var reader syntax #'" do
+    test "var reader in when body analyzes and evaluates" do
+      program = ~S"""
+      (def pick "hello")
+      (when true #'pick)
+      """
+
+      assert {:ok, %Step{return: "hello"}} = PtcRunner.Lisp.run(program)
+    end
+
+    test "var reader as standalone expression" do
+      program = ~S"""
+      (def x 42)
+      #'x
+      """
+
+      assert {:ok, %Step{return: 42}} = PtcRunner.Lisp.run(program)
+    end
+  end
 end
