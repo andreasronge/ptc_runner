@@ -190,4 +190,32 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       assert {:ok, %Step{return: 42}} = PtcRunner.Lisp.run(program)
     end
   end
+
+  describe "max_tool_calls with loop/recur" do
+    test "tool calls accumulate across loop iterations" do
+      counter = :counters.new(1, [:atomics])
+
+      tools = %{
+        "inc" =>
+          {fn _args ->
+             :counters.add(counter, 1, 1)
+             :counters.get(counter, 1)
+           end, "(args :map) -> :int"}
+      }
+
+      # Loop calls tool/inc 10 times, but limit is 5
+      program = ~S"""
+      (loop [i 0]
+        (if (< i 10)
+          (do (tool/inc {}) (recur (inc i)))
+          i))
+      """
+
+      assert {:error, %Step{fail: %{reason: :tool_call_limit_exceeded}}} =
+               PtcRunner.Lisp.run(program, tools: tools, max_tool_calls: 5)
+
+      # Should have stopped at 5, not continued to 10
+      assert :counters.get(counter, 1) == 5
+    end
+  end
 end

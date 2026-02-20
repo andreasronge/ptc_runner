@@ -641,7 +641,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         err
     end
   catch
-    {:recur_signal, new_args, prints} ->
+    {:recur_signal, new_args, prints, tool_calls, tool_cache} ->
       # For recur, variadic functions behave like fixed-arity functions
       # where the & rest pattern is the last parameter.
       {:closure, closure_patterns, _, _, _, _} = closure
@@ -657,8 +657,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           # Check iteration limit
           case EvalContext.increment_iteration(caller_ctx) do
             {:ok, updated_caller_ctx} ->
-              # Preserve prints from this iteration and recurse
-              updated_caller_ctx = %{updated_caller_ctx | prints: prints}
+              # Preserve prints, tool_calls, and tool_cache across iterations
+              updated_caller_ctx = %{
+                updated_caller_ctx
+                | prints: prints,
+                  tool_calls: tool_calls,
+                  tool_cache: tool_cache
+              }
 
               do_execute_closure(
                 closure,
