@@ -29,9 +29,11 @@ defmodule Alma.TaskAgent do
           prompt: task_agent_prompt(),
           signature: "(goal :string) -> :any",
           tools: tools,
-          max_turns: 15,
+          max_turns: 10,
           max_tool_calls: 10,
-          timeout: 5000
+          timeout: 5000,
+          max_heap: 6_250_000,
+          format_options: [feedback_max_chars: 2048]
         )
 
       goal_text = "Place #{task_config.goal.object} in #{task_config.goal.destination}"
