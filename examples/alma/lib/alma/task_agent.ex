@@ -116,10 +116,26 @@ defmodule Alma.TaskAgent do
   end
 
   defp extract_actions(step) do
-    Enum.map(step.tool_calls || [], fn tc -> tc.name end)
+    # Collect from all turns for multi-turn agents
+    all_tool_calls =
+      (step.turns || [])
+      |> Enum.flat_map(fn turn -> turn.tool_calls || [] end)
+
+    tool_calls = if all_tool_calls == [], do: step.tool_calls || [], else: all_tool_calls
+    Enum.map(tool_calls, fn tc -> tc.name end)
   end
 
   defp extract_observations(step) do
-    Enum.map(step.tool_calls || [], fn tc -> %{action: tc.name, result: tc.result} end)
+    # Collect tool calls from ALL turns, not just the last one.
+    # step.tool_calls only has the last turn's calls, but step.turns
+    # contains the full multi-turn history.
+    all_tool_calls =
+      (step.turns || [])
+      |> Enum.flat_map(fn turn -> turn.tool_calls || [] end)
+
+    # Fall back to step.tool_calls if turns is empty (single-shot)
+    tool_calls = if all_tool_calls == [], do: step.tool_calls || [], else: all_tool_calls
+
+    Enum.map(tool_calls, fn tc -> %{action: tc.name, result: tc.result} end)
   end
 end
