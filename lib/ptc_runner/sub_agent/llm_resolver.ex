@@ -11,12 +11,13 @@ defmodule PtcRunner.SubAgent.LLMResolver do
   """
 
   @typedoc """
-  Normalized LLM response with content and optional token counts.
+  Normalized LLM response with content, optional token counts, and optional tool calls.
+
+  For tool calling mode, the response may include `tool_calls` instead of or in addition to `content`.
   """
-  @type normalized_response :: %{
-          content: String.t(),
-          tokens: %{input: pos_integer(), output: pos_integer()} | nil
-        }
+  @type normalized_response ::
+          %{content: String.t() | nil, tokens: map() | nil}
+          | %{content: String.t() | nil, tokens: map() | nil, tool_calls: [map()]}
 
   @doc """
   Resolve and invoke an LLM, handling both functions and atom references.
@@ -103,9 +104,21 @@ defmodule PtcRunner.SubAgent.LLMResolver do
     %{content: response, tokens: nil}
   end
 
+  def normalize_response(%{tool_calls: tool_calls} = response) when is_list(tool_calls) do
+    %{
+      content: Map.get(response, :content),
+      tokens: Map.get(response, :tokens),
+      tool_calls: tool_calls
+    }
+  end
+
   def normalize_response(%{content: content} = response) when is_binary(content) do
     tokens = Map.get(response, :tokens)
     %{content: content, tokens: tokens}
+  end
+
+  def normalize_response(%{} = response) do
+    %{content: Map.get(response, :content), tokens: Map.get(response, :tokens)}
   end
 
   @doc """

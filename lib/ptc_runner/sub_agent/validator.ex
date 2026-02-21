@@ -262,13 +262,30 @@ defmodule PtcRunner.SubAgent.Validator do
       {:ok, :json} ->
         validate_json_mode_constraints!(opts)
 
+      {:ok, :tool_calling} ->
+        validate_tool_calling_constraints!(opts)
+
       {:ok, other} ->
         raise ArgumentError,
-              "output must be :ptc_lisp or :json, got #{inspect(other)}"
+              "output must be :ptc_lisp, :json, or :tool_calling, got #{inspect(other)}"
 
       :error ->
         # Default is :ptc_lisp, no validation needed
         :ok
+    end
+  end
+
+  defp validate_tool_calling_constraints!(opts) do
+    # Must have tools
+    case Keyword.fetch(opts, :tools) do
+      {:ok, tools} when map_size(tools) > 0 -> :ok
+      _ -> raise ArgumentError, "output: :tool_calling requires at least one tool"
+    end
+
+    # Must have signature (final answer is JSON validated against it)
+    case Keyword.fetch(opts, :signature) do
+      {:ok, sig} when is_binary(sig) -> :ok
+      _ -> raise ArgumentError, "output: :tool_calling requires a signature"
     end
   end
 
