@@ -16,6 +16,8 @@ You don't write PTC-Lisp - the LLM does. You configure the agent with Elixir.
 
 **Alternative: JSON Mode.** For simple classification and extraction tasks, use `output: :json` to skip PTC-Lisp entirely. The LLM returns structured JSON directly. See [Getting Started](subagent-getting-started.md#json-mode-simpler-alternative).
 
+**Alternative: Tool Calling Mode.** For smaller LLMs that support native tool calling but can't generate PTC-Lisp, use `output: :tool_calling`. See [Tool Calling Guide](subagent-tool-calling.md).
+
 ## The Context Firewall
 
 SubAgents solve a fundamental problem: LLMs need information to make decisions, but context windows are expensive and limited. The **Context Firewall** lets agents work with large datasets while keeping the parent context lean.
@@ -198,11 +200,12 @@ For structured progress tracking, use the `plan:` option to define steps. The LL
 | `max_depth` | `3` | Maximum recursion depth for nested agents |
 | `turn_budget` | `20` | Total turn budget across retries |
 | `retry_turns` | `0` | Retry budget after return validation failures |
-| `output` | `:ptc_lisp` | Output mode (`:ptc_lisp` or `:json`) |
+| `output` | `:ptc_lisp` | Output mode (`:ptc_lisp`, `:json`, or `:tool_calling`) |
 
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
+- [Tool Calling Guide](subagent-tool-calling.md) - Native tool calling for smaller LLMs
 - [Observability](subagent-observability.md) - Debug mode, compression, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference

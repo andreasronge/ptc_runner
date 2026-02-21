@@ -11,9 +11,10 @@ Use JSON mode for tasks that need structured output but not computation or tool 
 | Classification | JSON | Direct structured response |
 | Entity extraction | JSON | No computation needed |
 | Summarization with structure | JSON | Simple output mapping |
-| Multi-step reasoning | PTC-Lisp | Needs tool calls |
+| Tools with small/fast LLMs | Tool Calling | Native tool calling, no PTC-Lisp needed |
+| Multi-step reasoning | PTC-Lisp | Needs tool calls + computation |
 | Data transformation | PTC-Lisp | Needs computation |
-| External API calls | PTC-Lisp | Needs tools |
+| External API calls | PTC-Lisp | Needs tools + orchestration |
 
 ## Basic Usage
 
@@ -205,6 +206,7 @@ process_agent = SubAgent.new(
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage
+- [Tool Calling Guide](subagent-tool-calling.md) - Native tool calling for smaller LLMs
 - [Core Concepts](subagent-concepts.md) - Context, memory, and data flow
 - [Patterns](subagent-patterns.md) - Chaining and composition patterns
 - [Signature Syntax](../signature-syntax.md) - Full type syntax reference

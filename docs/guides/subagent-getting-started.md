@@ -94,6 +94,32 @@ SubAgent.new(
 
 See [JSON Mode Guide](subagent-json-mode.md) for Mustache syntax, validation rules, and examples.
 
+### Tool Calling Mode (For Smaller LLMs)
+
+For smaller or faster LLMs that can use native tool calling but can't generate PTC-Lisp, use `output: :tool_calling`:
+
+```elixir
+{:ok, step} = PtcRunner.SubAgent.run(
+  "What is 17 + 25? Use the add tool.",
+  output: :tool_calling,
+  signature: "() -> {result :int}",
+  tools: %{
+    "add" => {fn args -> args["a"] + args["b"] end,
+              signature: "(a :int, b :int) -> :int",
+              description: "Add two numbers"}
+  },
+  llm: my_llm
+)
+
+step.return["result"]  #=> 42
+```
+
+Tool calling mode converts tool signatures to JSON Schema and uses the LLM provider's native tool calling API. The LLM calls tools, ptc_runner executes them, and the loop continues until the LLM returns a final JSON answer validated against the signature.
+
+**Constraints:** Requires both a signature and at least one tool. No memory persistence between turns.
+
+See [Tool Calling Guide](subagent-tool-calling.md) for multi-tool scenarios, limits, and error handling.
+
 ## Adding Tools
 
 Tools let the agent call functions to gather information:
@@ -117,9 +143,10 @@ With tools, the SubAgent enters an **agentic loop** - it calls tools and reasons
 | Mode | Condition | Behavior |
 |------|-----------|----------|
 | Single-shot | `max_turns: 1` and no tools | One LLM call, expression returned directly |
-| Loop | Otherwise | Multiple turns until `(return ...)` or `(fail ...)` |
+| Loop (PTC-Lisp) | Tools or `max_turns > 1` | Multiple turns until `(return ...)` or `(fail ...)` |
+| Loop (Tool Calling) | `output: :tool_calling` | LLM calls tools via native API, returns final JSON |
 
-In **single-shot mode**, the LLM's expression is evaluated and returned directly. In **loop mode**, the agent must explicitly call `return` or `fail` to complete.
+In **single-shot mode**, the LLM's expression is evaluated and returned directly. In **PTC-Lisp loop mode**, the agent must explicitly call `return` or `fail` to complete. In **tool calling mode**, the loop ends when the LLM returns content without tool calls.
 
 > **Common Pitfall:** If your agent produces correct results but keeps looping until
 > `max_turns_exceeded`, it's likely in loop mode without calling `return`. Either set
@@ -411,6 +438,7 @@ State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-
 ## See Also
 
 - [JSON Mode Guide](subagent-json-mode.md) - Mustache templates, validation, and structured output
+- [Tool Calling Guide](subagent-tool-calling.md) - Native tool calling for smaller LLMs
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition

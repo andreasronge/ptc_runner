@@ -90,6 +90,7 @@ defmodule PtcRunner.MixProject do
         # SubAgent Guides (learning path)
         "docs/guides/subagent-getting-started.md",
         "docs/guides/subagent-json-mode.md",
+        "docs/guides/subagent-tool-calling.md",
         "docs/guides/subagent-concepts.md",
         "docs/guides/subagent-patterns.md",
         "docs/guides/subagent-navigator.md",

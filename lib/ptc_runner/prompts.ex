@@ -15,6 +15,7 @@ defmodule PtcRunner.Prompts do
   | `json-system.md` | `json_system/0` | `JsonMode` |
   | `json-user.md` | `json_user/0` | `JsonMode` |
   | `json-error.md` | `json_error/0` | `JsonMode` |
+  | `tool-calling-system.md` | `tool_calling_system/0` | `ToolCallingMode` |
   | `must_return_warning.md` | `must_return_warning/0` | `TurnFeedback` |
   | `retry_feedback.md` | `retry_feedback/0` | `TurnFeedback` |
   | `planning-examples.md` | `planning_examples/0` | `MetaPlanner` |
@@ -149,6 +150,20 @@ defmodule PtcRunner.Prompts do
   def json_error, do: @json_error
 
   # ============================================================================
+  # Tool Calling Mode Templates
+  # ============================================================================
+
+  @tool_calling_system_file Path.join(@prompts_dir, "tool-calling-system.md")
+
+  @external_resource @tool_calling_system_file
+
+  @tool_calling_system @tool_calling_system_file |> File.read!() |> PromptLoader.extract_content()
+
+  @doc "Tool calling mode system prompt."
+  @spec tool_calling_system() :: String.t()
+  def tool_calling_system, do: @tool_calling_system
+
+  # ============================================================================
   # Turn Feedback Templates
   # ============================================================================
 
@@ -241,6 +256,7 @@ defmodule PtcRunner.Prompts do
       :json_system,
       :json_user,
       :json_error,
+      :tool_calling_system,
       :must_return_warning,
       :retry_feedback,
       :planning_examples,
@@ -271,6 +287,7 @@ defmodule PtcRunner.Prompts do
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()
+  def get(:tool_calling_system), do: tool_calling_system()
   def get(:must_return_warning), do: must_return_warning()
   def get(:retry_feedback), do: retry_feedback()
   def get(:planning_examples), do: planning_examples()

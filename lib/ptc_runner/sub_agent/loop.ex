@@ -70,6 +70,7 @@ defmodule PtcRunner.SubAgent.Loop do
     Metrics,
     ResponseHandler,
     ReturnValidation,
+    ToolCallingMode,
     ToolNormalizer,
     TurnFeedback
   }
@@ -299,6 +300,7 @@ defmodule PtcRunner.SubAgent.Loop do
     # Route to appropriate execution mode based on agent.output
     case agent.output do
       :json -> JsonMode.run(agent, run_opts.llm, initial_state)
+      :tool_calling -> ToolCallingMode.run(agent, run_opts.llm, initial_state)
       :ptc_lisp -> driver_loop(agent, run_opts.llm, initial_state)
     end
   end
@@ -998,8 +1000,8 @@ defmodule PtcRunner.SubAgent.Loop do
     alias PtcRunner.SubAgent.PromptExpander
 
     case output_mode do
-      :json ->
-        # JSON mode: embed actual data values in the task
+      mode when mode in [:json, :tool_calling] ->
+        # JSON/tool_calling mode: embed actual data values in the task
         {:ok, result} = PromptExpander.expand(prompt, context, on_missing: :keep)
         result
 

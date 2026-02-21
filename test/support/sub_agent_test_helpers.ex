@@ -126,4 +126,24 @@ defmodule PtcRunner.TestSupport.SubAgentTestHelpers do
 ```|}
     end
   end
+
+  @doc """
+  Creates an LLM function that returns responses in sequence for tool calling mode.
+
+  Each response can be a map with `:tool_calls` and/or `:content` keys.
+  When responses are exhausted, returns an empty JSON object.
+  """
+  def tool_calling_llm(responses) do
+    {:ok, agent} = Agent.start_link(fn -> responses end)
+
+    fn _input ->
+      resp =
+        Agent.get_and_update(agent, fn
+          [h | t] -> {h, t}
+          [] -> {%{content: "{}", tokens: nil}, []}
+        end)
+
+      {:ok, resp}
+    end
+  end
 end

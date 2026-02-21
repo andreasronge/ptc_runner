@@ -246,7 +246,7 @@ defmodule LLMClient.Providers do
   """
   @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def call(model, %{output: :json, schema: schema} = req) do
-    messages = [%{role: :system, content: req.system} | req.messages]
+    messages = build_messages(req)
 
     case generate_object(model, messages, schema, cache: req[:cache] || false) do
       {:ok, %{object: object, tokens: tokens}} ->
@@ -257,9 +257,77 @@ defmodule LLMClient.Providers do
     end
   end
 
+  def call(model, %{output: :tool_calling, tools: tools} = req) do
+    messages = build_messages(req)
+    generate_with_tools(model, messages, tools, cache: req[:cache] || false)
+  end
+
   def call(model, req) do
-    messages = [%{role: :system, content: req.system} | req.messages]
+    messages = build_messages(req)
     generate_text(model, messages, cache: req[:cache] || false)
+  end
+
+  # Build messages list from request, handling both regular and tool result messages
+  defp build_messages(req) do
+    system_msgs = [%{role: :system, content: req.system}]
+
+    user_msgs =
+      Enum.map(req.messages, fn
+        %{role: :tool} = msg ->
+          # Tool result messages: pass through with tool_call_id
+          %ReqLLM.Message{
+            role: :tool,
+            content: [ReqLLM.Message.ContentPart.text(msg.content)],
+            tool_call_id: msg[:tool_call_id]
+          }
+
+        %{role: role, content: content, tool_calls: tool_calls}
+        when is_list(tool_calls) ->
+          # Assistant message with tool calls — convert to ReqLLM.ToolCall structs
+          req_llm_tool_calls =
+            Enum.map(tool_calls, fn tc ->
+              %ReqLLM.ToolCall{
+                id: tc[:id] || tc["id"],
+                type: "function",
+                function: tc[:function] || tc["function"]
+              }
+            end)
+
+          %ReqLLM.Message{
+            role: role,
+            content: if(content, do: [ReqLLM.Message.ContentPart.text(content)], else: []),
+            tool_calls: req_llm_tool_calls
+          }
+
+        %{role: role, content: content} when is_binary(content) ->
+          %{role: role, content: content}
+
+        msg ->
+          msg
+      end)
+
+    system_msgs ++ user_msgs
+  end
+
+  @doc """
+  Generate text with tool definitions.
+
+  Passes tools to the LLM provider. If the LLM returns tool calls,
+  they are included in the response as `tool_calls`.
+  """
+  @spec generate_with_tools(String.t(), [message()], [map()], keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def generate_with_tools(model, messages, tools, opts \\ []) do
+    case parse_provider(model) do
+      {:ollama, _model_name} ->
+        {:error, :tool_calling_not_supported}
+
+      {:openai_compat, _base_url, _model_name} ->
+        {:error, :tool_calling_not_supported}
+
+      {:req_llm, model_id} ->
+        call_req_llm_with_tools(model_id, messages, tools, opts)
+    end
   end
 
   # --- Provider Implementations ---
@@ -381,6 +449,65 @@ defmodule LLMClient.Providers do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp call_req_llm_with_tools(model, messages, tools, opts) do
+    timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+    http_opts = Keyword.get(opts, :req_http_options, [])
+    cache_enabled = Keyword.get(opts, :cache, false)
+
+    {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
+    extra_opts = apply_bedrock_region(model, extra_opts)
+
+    # Convert OpenAI-format tool definitions to ReqLLM.Tool structs
+    req_llm_tools = Enum.map(tools, &to_req_llm_tool/1)
+
+    req_opts =
+      [receive_timeout: timeout, req_http_options: http_opts, tools: req_llm_tools]
+      |> Keyword.merge(extra_opts)
+
+    case ReqLLM.generate_text(model, messages, req_opts) do
+      {:ok, response} ->
+        text = ReqLLM.Response.text(response)
+        usage = ReqLLM.Response.usage(response) || %{}
+        tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
+        raw_tool_calls = ReqLLM.Response.tool_calls(response)
+
+        if raw_tool_calls != [] do
+          # Normalize ReqLLM.ToolCall structs to our format
+          normalized_tc =
+            Enum.map(raw_tool_calls, fn tc ->
+              {args, args_error} =
+                case Jason.decode(tc.function.arguments || "{}") do
+                  {:ok, parsed} -> {parsed, nil}
+                  {:error, _} -> {%{}, "Invalid JSON arguments: #{tc.function.arguments}"}
+                end
+
+              entry = %{id: tc.id, name: tc.function.name, args: args}
+              if args_error, do: Map.put(entry, :args_error, args_error), else: entry
+            end)
+
+          {:ok, %{tool_calls: normalized_tc, content: text, tokens: tokens}}
+        else
+          {:ok, %{content: text || "", tokens: tokens}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Convert an OpenAI-format tool definition map to a ReqLLM.Tool struct
+  defp to_req_llm_tool(%{"type" => "function", "function" => func}) do
+    tool_opts = [
+      name: func["name"],
+      description: func["description"] || "",
+      parameter_schema: func["parameters"],
+      callback: fn _args -> nil end
+    ]
+
+    {:ok, tool} = ReqLLM.Tool.new(tool_opts)
+    tool
   end
 
   # Apply caching based on provider type

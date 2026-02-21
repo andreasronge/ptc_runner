@@ -98,5 +98,28 @@ defmodule PtcRunner.SubAgent.LLMResolverTest do
       response = %{content: "hello", tokens: %{input: 5}, extra: "ignored"}
       assert LLMResolver.normalize_response(response) == %{content: "hello", tokens: %{input: 5}}
     end
+
+    test "normalizes tool_calls response" do
+      response = %{
+        tool_calls: [%{id: "tc_1", name: "search", args: %{"q" => "foo"}}],
+        content: nil,
+        tokens: %{input: 10, output: 5}
+      }
+
+      assert LLMResolver.normalize_response(response) == %{
+               tool_calls: [%{id: "tc_1", name: "search", args: %{"q" => "foo"}}],
+               content: nil,
+               tokens: %{input: 10, output: 5}
+             }
+    end
+
+    test "handles map with nil content (catch-all clause)" do
+      response = %{some_field: "value"}
+      assert LLMResolver.normalize_response(response) == %{content: nil, tokens: nil}
+    end
+
+    test "handles empty map" do
+      assert LLMResolver.normalize_response(%{}) == %{content: nil, tokens: nil}
+    end
   end
 end

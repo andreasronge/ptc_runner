@@ -60,6 +60,9 @@ defmodule PtcRunner.SubAgent do
 
   Can be either a plain string (backward compatible) or a map with content and optional tokens.
   When tokens are provided, they are included in telemetry measurements and accumulated in Step.usage.
+
+  For `:tool_calling` mode, the LLM callback may also return tool calls:
+  `%{tool_calls: [%{id: "call_1", name: "search", args: %{"q" => "foo"}}], content: nil | "...", tokens: %{...}}`
   """
   @type llm_response ::
           String.t()
@@ -69,6 +72,11 @@ defmodule PtcRunner.SubAgent do
                 optional(:input) => pos_integer(),
                 optional(:output) => pos_integer()
               }
+            }
+          | %{
+              required(:tool_calls) => [map()],
+              optional(:content) => String.t() | nil,
+              optional(:tokens) => map()
             }
 
   @type llm_callback :: (map() -> {:ok, llm_response()} | {:error, term()})
@@ -93,8 +101,9 @@ defmodule PtcRunner.SubAgent do
 
   - `:ptc_lisp` - Default. LLM generates PTC-Lisp code that is executed.
   - `:json` - LLM generates JSON directly matching the signature's return type.
+  - `:tool_calling` - LLM uses native tool calling API. ptc_runner owns the tool execution loop.
   """
-  @type output_mode :: :ptc_lisp | :json
+  @type output_mode :: :ptc_lisp | :json | :tool_calling
 
   @typedoc """
   Output format options for truncation and display.
@@ -631,7 +640,7 @@ defmodule PtcRunner.SubAgent do
 
         {context, received_field_descriptions} ->
           # Determine execution mode
-          # JSON mode always uses the loop (even for single-shot) since it has its own simpler flow
+          # JSON and tool_calling modes always use the loop (even for single-shot)
           # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
           if agent.output == :ptc_lisp and agent.max_turns == 1 and map_size(agent.tools) == 0 and
                agent.retry_turns == 0 do
@@ -1243,16 +1252,20 @@ defmodule PtcRunner.SubAgent do
         }
 
   def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
-    alias PtcRunner.SubAgent.Loop.JsonMode
+    alias PtcRunner.SubAgent.Loop.{JsonMode, ToolCallingMode}
 
     context = Keyword.get(opts, :context, %{})
 
-    # Use JSON mode preview for JSON output agents
-    if agent.output == :json do
-      preview = JsonMode.preview_prompt(agent, context)
-      Map.put(preview, :tool_schemas, [])
-    else
-      preview_prompt_ptc_lisp(agent, context)
+    case agent.output do
+      :json ->
+        preview = JsonMode.preview_prompt(agent, context)
+        Map.put(preview, :tool_schemas, [])
+
+      :tool_calling ->
+        ToolCallingMode.preview_prompt(agent, context)
+
+      _ptc_lisp ->
+        preview_prompt_ptc_lisp(agent, context)
     end
   end
 

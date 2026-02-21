@@ -45,7 +45,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     end
 
     test "rejects invalid output mode atom" do
-      assert_raise ArgumentError, ~r/output must be :ptc_lisp or :json/, fn ->
+      assert_raise ArgumentError, ~r/output must be :ptc_lisp, :json, or :tool_calling/, fn ->
         SubAgent.new(prompt: "Test", output: :invalid)
       end
     end

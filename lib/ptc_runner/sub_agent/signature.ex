@@ -196,25 +196,27 @@ defmodule PtcRunner.SubAgent.Signature do
   def returns_list?({:signature, _params, {:list, _}}), do: true
   def returns_list?(_), do: false
 
-  defp type_to_json_schema(:string), do: %{"type" => "string"}
-  defp type_to_json_schema(:int), do: %{"type" => "integer"}
-  defp type_to_json_schema(:float), do: %{"type" => "number"}
-  defp type_to_json_schema(:bool), do: %{"type" => "boolean"}
-  defp type_to_json_schema(:keyword), do: %{"type" => "string"}
+  @doc false
+  @spec type_to_json_schema(type()) :: map()
+  def type_to_json_schema(:string), do: %{"type" => "string"}
+  def type_to_json_schema(:int), do: %{"type" => "integer"}
+  def type_to_json_schema(:float), do: %{"type" => "number"}
+  def type_to_json_schema(:bool), do: %{"type" => "boolean"}
+  def type_to_json_schema(:keyword), do: %{"type" => "string"}
   # Bedrock requires input_schema to have a "type" field, so :any uses "object"
-  defp type_to_json_schema(:any), do: %{"type" => "object"}
-  defp type_to_json_schema(:map), do: %{"type" => "object"}
+  def type_to_json_schema(:any), do: %{"type" => "object"}
+  def type_to_json_schema(:map), do: %{"type" => "object"}
 
-  defp type_to_json_schema({:list, inner_type}) do
+  def type_to_json_schema({:list, inner_type}) do
     %{"type" => "array", "items" => type_to_json_schema(inner_type)}
   end
 
-  defp type_to_json_schema({:optional, inner_type}) do
+  def type_to_json_schema({:optional, inner_type}) do
     # Optional just affects the required list, not the type schema
     type_to_json_schema(inner_type)
   end
 
-  defp type_to_json_schema({:map, fields}) do
+  def type_to_json_schema({:map, fields}) do
     {properties, required} =
       Enum.reduce(fields, {%{}, []}, fn {name, type}, {props, req} ->
         {inner_type, is_optional} = unwrap_optional(type)
@@ -232,6 +234,8 @@ defmodule PtcRunner.SubAgent.Signature do
     }
   end
 
-  defp unwrap_optional({:optional, inner}), do: {inner, true}
-  defp unwrap_optional(type), do: {type, false}
+  @doc false
+  @spec unwrap_optional(type()) :: {type(), boolean()}
+  def unwrap_optional({:optional, inner}), do: {inner, true}
+  def unwrap_optional(type), do: {type, false}
 end
