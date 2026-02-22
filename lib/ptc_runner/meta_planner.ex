@@ -120,7 +120,7 @@ defmodule PtcRunner.MetaPlanner do
       SubAgent.new(
         prompt: prompt,
         signature: ":map",
-        output: :json,
+        output: :text,
         schema: plan_schema(),
         max_turns: 1,
         retry_turns: 2,
@@ -447,7 +447,7 @@ defmodule PtcRunner.MetaPlanner do
       SubAgent.new(
         prompt: prompt,
         signature: ":map",
-        output: :json,
+        output: :text,
         schema: plan_schema(),
         max_turns: 1,
         retry_turns: 2,

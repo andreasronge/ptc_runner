@@ -1,15 +1,15 @@
-defmodule PtcRunner.SubAgent.JsonModeTest do
+defmodule PtcRunner.SubAgent.TextModeJsonTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
 
   describe "JSON mode routing" do
-    test "routes to JSON mode when output: :json" do
+    test "routes to JSON mode when output: :text" do
       agent =
         SubAgent.new(
           prompt: "Return greeting",
-          output: :json,
+          output: :text,
           signature: "() -> {message :string}",
           max_turns: 2
         )
@@ -51,7 +51,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Classify sentiment",
-          output: :json,
+          output: :text,
           signature: "() -> {sentiment :string, score :float}",
           max_turns: 1
         )
@@ -71,7 +71,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Extract data",
-          output: :json,
+          output: :text,
           signature: "() -> {count :int}",
           max_turns: 1
         )
@@ -95,7 +95,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return data",
-          output: :json,
+          output: :text,
           signature: "() -> {name :string, age :int}",
           max_turns: 1
         )
@@ -114,7 +114,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return nested data",
-          output: :json,
+          output: :text,
           signature: "() -> {user {name :string, emails [:string]}}",
           max_turns: 1
         )
@@ -128,11 +128,11 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert step.return == %{"user" => %{"name" => "Bob", "emails" => ["a@b.com", "c@d.com"]}}
     end
 
-    test "passes output: :json and schema to LLM callback" do
+    test "passes output: :text and schema to LLM callback" do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -147,7 +147,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       {:ok, _step} = Loop.run(agent, llm: llm)
 
       assert_receive {:llm_input, input}
-      assert input.output == :json
+      assert input.output == :text
 
       assert input.schema == %{
                "type" => "object",
@@ -161,7 +161,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Analyze {{text}}",
-          output: :json,
+          output: :text,
           signature: "(text :string) -> {length :int}",
           max_turns: 1
         )
@@ -185,7 +185,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Items:{{#items}} {{name}}{{/items}}",
-          output: :json,
+          output: :text,
           signature: "(items [{name :string}]) -> {count :int}",
           max_turns: 1
         )
@@ -210,7 +210,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Tags:{{#tags}} {{.}}{{/tags}}",
-          output: :json,
+          output: :text,
           signature: "(tags [:string]) -> {count :int}",
           max_turns: 1
         )
@@ -235,7 +235,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "{{#items}}Has items{{/items}}{{^items}}No items{{/items}}",
-          output: :json,
+          output: :text,
           signature: "(items [:string]) -> {status :string}",
           max_turns: 1
         )
@@ -263,7 +263,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 3
         )
@@ -290,7 +290,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 3
         )
@@ -317,7 +317,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 2
         )
@@ -337,7 +337,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 2
         )
@@ -355,7 +355,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> {message :string}",
           max_turns: 2
         )
@@ -392,7 +392,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -413,7 +413,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -441,7 +441,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -462,7 +462,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -480,7 +480,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -505,7 +505,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return greeting",
-          output: :json,
+          output: :text,
           signature: "() -> {message :string}",
           max_turns: 2
         )
@@ -519,7 +519,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       assert step.return == %{"message" => "hello"}
     end
 
-    test "string convenience form works with output: :json" do
+    test "string convenience form works with output: :text" do
       llm = fn _input ->
         {:ok, ~s|{"result": 42}|}
       end
@@ -528,7 +528,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
         SubAgent.run(
           "Return 42",
           llm: llm,
-          output: :json,
+          output: :text,
           signature: "() -> {result :int}",
           max_turns: 1
         )
@@ -542,7 +542,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       json_agent =
         SubAgent.new(
           prompt: "Get number",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -582,7 +582,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       json_agent =
         SubAgent.new(
           prompt: "Double {{value}}",
-          output: :json,
+          output: :text,
           signature: "(value :int) -> {result :int}",
           max_turns: 1
         )
@@ -608,7 +608,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent1 =
         SubAgent.new(
           prompt: "Step 1",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -616,7 +616,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent2 =
         SubAgent.new(
           prompt: "Step 2 with {{value}}",
-          output: :json,
+          output: :text,
           signature: "(value :int) -> {doubled :int}",
           max_turns: 1
         )
@@ -636,7 +636,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return IDs",
-          output: :json,
+          output: :text,
           signature: "() -> [:int]",
           max_turns: 1
         )
@@ -654,7 +654,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return items",
-          output: :json,
+          output: :text,
           signature: "() -> [{id :int, name :string}]",
           max_turns: 1
         )
@@ -672,7 +672,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return IDs",
-          output: :json,
+          output: :text,
           signature: "() -> [:int]",
           max_turns: 2
         )
@@ -699,7 +699,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return object",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -719,7 +719,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return IDs for {{topic}} from {{items}}",
-          output: :json,
+          output: :text,
           signature: "(topic :string, items [{id :int}]) -> [:int]",
           max_turns: 1
         )
@@ -743,7 +743,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Classify {{text}}",
-          output: :json,
+          output: :text,
           signature: "(text :string) -> {label :string}",
           max_turns: 1
         )
@@ -772,7 +772,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Analyze {{text}}",
-          output: :json,
+          output: :text,
           signature: "(text :string) -> {score :int, label :string}",
           max_turns: 1
         )
@@ -794,7 +794,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return IDs from {{items}}",
-          output: :json,
+          output: :text,
           signature: "(items [{id :int}]) -> [:int]",
           max_turns: 1
         )
@@ -850,7 +850,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -868,7 +868,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return IDs",
-          output: :json,
+          output: :text,
           signature: "() -> [:int]",
           max_turns: 1
         )
@@ -886,7 +886,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return items",
-          output: :json,
+          output: :text,
           signature: "() -> [{id :int, name :string}]",
           max_turns: 1
         )
@@ -904,7 +904,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Return value",
-          output: :json,
+          output: :text,
           signature: "() -> :any",
           max_turns: 1
         )
@@ -922,7 +922,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 1
         )
@@ -940,7 +940,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {value :int}",
           max_turns: 10,
           turn_budget: 1
@@ -959,7 +959,7 @@ defmodule PtcRunner.SubAgent.JsonModeTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {sentiment :string}",
           field_descriptions: %{sentiment: "The detected sentiment"},
           max_turns: 1

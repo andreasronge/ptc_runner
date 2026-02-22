@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.ToolCallingModeTest do
+defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
@@ -10,7 +10,7 @@ defmodule PtcRunner.SubAgent.ToolCallingModeTest do
     defaults = [
       prompt: "Find information",
       signature: "() -> {answer :string}",
-      output: :tool_calling,
+      output: :text,
       tools: %{
         "search" =>
           {fn args -> "result for #{args["q"]}" end,
@@ -310,21 +310,23 @@ defmodule PtcRunner.SubAgent.ToolCallingModeTest do
   end
 
   describe "validation" do
-    test "tool_calling mode requires tools" do
-      assert_raise ArgumentError, ~r/requires at least one tool/, fn ->
-        SubAgent.new(
-          prompt: "Test",
-          output: :tool_calling,
-          signature: "() -> :string",
-          tools: %{}
-        )
-      end
+    test "text mode accepts tools without signature (text return)" do
+      agent =
+        SubAgent.new(prompt: "Test", output: :text, tools: %{"a" => fn _ -> :ok end})
+
+      assert agent.output == :text
     end
 
-    test "tool_calling mode requires signature" do
-      assert_raise ArgumentError, ~r/requires a signature/, fn ->
-        SubAgent.new(prompt: "Test", output: :tool_calling, tools: %{"a" => fn _ -> :ok end})
-      end
+    test "text mode accepts tools with signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {x :string}",
+          tools: %{"a" => fn _ -> :ok end}
+        )
+
+      assert agent.output == :text
     end
   end
 end

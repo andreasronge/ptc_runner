@@ -65,7 +65,7 @@ defmodule PtcRunner.MetaPlannerTest do
       end
 
       {:error, reason} = MetaPlanner.plan("Test", llm: mock_llm)
-      # SubAgent catches invalid JSON first (since output: :json), returning generation_error
+      # SubAgent catches invalid JSON first (since output: :text), returning generation_error
       assert {:generation_error, _} = reason
     end
   end

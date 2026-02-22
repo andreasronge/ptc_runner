@@ -46,12 +46,12 @@ SubAgents support two output modes:
 
 | Mode                  | Use When                                              | Output                  |
 | --------------------- | ----------------------------------------------------- | ----------------------- |
-| `:json`               | Classification, extraction, summarization             | Structured JSON         |
+| `:text`               | Classification, extraction, summarization             | Structured JSON         |
 | `:ptc_lisp` (default) | Computation, tool orchestration, multi-step reasoning | PTC-Lisp program result |
 
 ### JSON Mode - Direct LLM Tasks
 
-Use `output: :json` when the LLM can answer directly without computation:
+Use `output: :text` when the LLM can answer directly without computation:
 
 ```elixir
 alias PtcRunner.SubAgent
@@ -61,7 +61,7 @@ review = "Great product, fast shipping! Would buy again."
 
 {_, step} = SubAgent.run(
   "Classify as positive/negative/neutral with confidence 0.0-1.0: {{review}}",
-  output: :json,
+  output: :text,
   signature: "(review :string) -> {sentiment :string, confidence :float}",
   context: %{review: review},
   llm: my_llm

@@ -93,7 +93,7 @@ planner = SubAgent.new(
   signature: "(question :string) -> {steps [:string]}",
   max_turns: 1,
   retry_turns: 1,
-  output: :json
+  output: :text
 )
 
 question =
@@ -178,7 +178,7 @@ reviewer = SubAgent.new(
   signature: "(step :string, criteria :string, result :string) -> {approved :bool, summary :string, feedback :string}",
   max_turns: 1,
   retry_turns: 2,
-  output: :json
+  output: :text
 )
 
 # Planner: orchestrates worker→reviewer, reports progress, builds final answer

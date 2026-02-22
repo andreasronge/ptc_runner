@@ -259,15 +259,12 @@ defmodule PtcRunner.SubAgent.Validator do
       {:ok, :ptc_lisp} ->
         :ok
 
-      {:ok, :json} ->
-        validate_json_mode_constraints!(opts)
-
-      {:ok, :tool_calling} ->
-        validate_tool_calling_constraints!(opts)
+      {:ok, :text} ->
+        validate_text_mode_constraints!(opts)
 
       {:ok, other} ->
         raise ArgumentError,
-              "output must be :ptc_lisp, :json, or :tool_calling, got #{inspect(other)}"
+              "output must be :ptc_lisp or :text, got #{inspect(other)}"
 
       :error ->
         # Default is :ptc_lisp, no validation needed
@@ -275,61 +272,34 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  defp validate_tool_calling_constraints!(opts) do
-    # Must have tools
-    case Keyword.fetch(opts, :tools) do
-      {:ok, tools} when map_size(tools) > 0 -> :ok
-      _ -> raise ArgumentError, "output: :tool_calling requires at least one tool"
-    end
+  defp validate_text_mode_constraints!(opts) do
+    # Text mode: no compression, no firewall fields (when signature present)
+    validate_text_no_compression!(opts)
 
-    # Must have signature (final answer is JSON validated against it)
-    case Keyword.fetch(opts, :signature) do
-      {:ok, sig} when is_binary(sig) -> :ok
-      _ -> raise ArgumentError, "output: :tool_calling requires a signature"
-    end
-  end
-
-  defp validate_json_mode_constraints!(opts) do
-    # JSON mode requires: no tools, no compression, has signature, no firewall fields
-    validate_json_no_tools!(opts)
-    validate_json_no_compression!(opts)
-    validate_json_has_signature!(opts)
-    validate_json_no_firewall_fields!(opts)
-    validate_json_all_params_used!(opts)
-    validate_section_fields!(opts)
-  end
-
-  defp validate_json_no_tools!(opts) do
-    case Keyword.fetch(opts, :tools) do
-      {:ok, tools} when map_size(tools) > 0 ->
-        raise ArgumentError, "output: :json cannot be used with tools"
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp validate_json_no_compression!(opts) do
-    case Keyword.fetch(opts, :compression) do
-      {:ok, compression} when compression not in [nil, false] ->
-        raise ArgumentError, "output: :json cannot be used with compression"
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp validate_json_has_signature!(opts) do
+    # Only validate signature-related constraints when signature is present
     case Keyword.fetch(opts, :signature) do
       {:ok, sig} when is_binary(sig) ->
-        :ok
+        validate_text_no_firewall_fields!(opts)
+        validate_text_all_params_used!(opts)
+        validate_section_fields!(opts)
 
       _ ->
-        raise ArgumentError, "output: :json requires a signature"
+        # No signature is valid for text mode (plain text return)
+        :ok
     end
   end
 
-  defp validate_json_no_firewall_fields!(opts) do
+  defp validate_text_no_compression!(opts) do
+    case Keyword.fetch(opts, :compression) do
+      {:ok, compression} when compression not in [nil, false] ->
+        raise ArgumentError, "output: :text cannot be used with compression"
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp validate_text_no_firewall_fields!(opts) do
     alias PtcRunner.SubAgent.Signature
 
     case Keyword.fetch(opts, :signature) do
@@ -342,16 +312,14 @@ defmodule PtcRunner.SubAgent.Validator do
 
               field_name ->
                 raise ArgumentError,
-                      "output: :json signature cannot have firewall fields (#{field_name})"
+                      "output: :text signature cannot have firewall fields (#{field_name})"
             end
 
-          # Signature parsing error already handled by validate_signature!
           {:error, _} ->
             :ok
         end
 
       _ ->
-        # No signature case already handled by validate_json_has_signature!
         :ok
     end
   end
@@ -380,7 +348,7 @@ defmodule PtcRunner.SubAgent.Validator do
   defp find_firewall_field(_), do: nil
 
   # JSON mode: validate all signature params are used in prompt (via variables or sections)
-  defp validate_json_all_params_used!(opts) do
+  defp validate_text_all_params_used!(opts) do
     alias PtcRunner.SubAgent.{PromptExpander, Signature}
 
     prompt = Keyword.get(opts, :prompt)
@@ -402,7 +370,7 @@ defmodule PtcRunner.SubAgent.Validator do
         unused_list = unused |> MapSet.to_list() |> Enum.sort()
 
         raise ArgumentError,
-              "JSON mode requires all signature params in prompt. Unused: #{inspect(unused_list)}"
+              "Text mode requires all signature params in prompt. Unused: #{inspect(unused_list)}"
       end
     end
 

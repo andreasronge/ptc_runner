@@ -76,7 +76,7 @@ alias PtcRunner.SubAgent.Debug
 joke_agent = SubAgent.new(
   prompt: "Generate a short, punchy joke about {{topic}}. Just the joke, nothing else.",
   signature: "(topic :string) -> {joke :string}",
-  output: :json,
+  output: :text,
   description: "Generate a joke about the given topic",
   max_turns: 1
 )
@@ -108,7 +108,7 @@ improve_joke_agent = SubAgent.new(
   """,
   signature: "(joke :string) -> {improved_joke :string}",
   description: "Improve a joke with wordplay or twist",
-  output: :json,
+  output: :text,
   timeout: 5000,
   max_turns: 1
 )

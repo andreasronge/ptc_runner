@@ -1048,7 +1048,7 @@ defmodule PtcRunner.PlanExecutorTest do
 
         cond do
           # Quality gate checks (JSON mode with sufficiency prompt)
-          output_mode == :json and String.contains?(prompt, "data sufficiency checker") ->
+          output_mode == :text and String.contains?(prompt, "data sufficiency checker") ->
             gate_count = Agent.get_and_update(gate_call_count, fn n -> {n, n + 1} end)
 
             if gate_count == 0 do

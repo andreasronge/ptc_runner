@@ -192,7 +192,7 @@ defmodule LLMClient.Providers do
   @doc """
   Create a SubAgent-compatible callback for a model.
 
-  The callback handles both :json and :ptc_lisp modes automatically.
+  The callback handles all output modes automatically.
 
   ## Options
 
@@ -223,20 +223,15 @@ defmodule LLMClient.Providers do
   @doc """
   Handle a SubAgent request directly.
 
-  Routes to `generate_object/4` for :json mode, `generate_text/3` for :ptc_lisp.
+  Routes based on key presence: `schema:` → `generate_object/4`,
+  `tools:` → `generate_with_tools/4`, otherwise → `generate_text/3`.
 
   ## Request Map
 
-  For JSON mode:
   - `:system` - System prompt string
   - `:messages` - List of `%{role: atom, content: String.t()}`
-  - `:output` - `:json`
-  - `:schema` - JSON Schema map
-  - `:cache` - Boolean (optional)
-
-  For PTC-Lisp mode:
-  - `:system` - System prompt string
-  - `:messages` - List of `%{role: atom, content: String.t()}`
+  - `:schema` - JSON Schema map (triggers structured output)
+  - `:tools` - Tool definitions (triggers tool calling)
   - `:cache` - Boolean (optional)
 
   ## Returns
@@ -245,7 +240,7 @@ defmodule LLMClient.Providers do
   - `{:error, term()}` on failure
   """
   @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def call(model, %{output: :json, schema: schema} = req) do
+  def call(model, %{schema: schema} = req) when is_map(schema) do
     messages = build_messages(req)
 
     case generate_object(model, messages, schema, cache: req[:cache] || false) do
@@ -257,7 +252,7 @@ defmodule LLMClient.Providers do
     end
   end
 
-  def call(model, %{output: :tool_calling, tools: tools} = req) do
+  def call(model, %{tools: tools} = req) when is_list(tools) and tools != [] do
     messages = build_messages(req)
     generate_with_tools(model, messages, tools, cache: req[:cache] || false)
   end

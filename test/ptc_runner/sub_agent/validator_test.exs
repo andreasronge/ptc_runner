@@ -39,13 +39,13 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.output == :ptc_lisp
     end
 
-    test "accepts :json output mode with signature" do
-      agent = SubAgent.new(prompt: "Test", output: :json, signature: "() -> {x :string}")
-      assert agent.output == :json
+    test "accepts :text output mode with signature" do
+      agent = SubAgent.new(prompt: "Test", output: :text, signature: "() -> {x :string}")
+      assert agent.output == :text
     end
 
     test "rejects invalid output mode atom" do
-      assert_raise ArgumentError, ~r/output must be :ptc_lisp, :json, or :tool_calling/, fn ->
+      assert_raise ArgumentError, ~r/output must be :ptc_lisp or :text/, fn ->
         SubAgent.new(prompt: "Test", output: :invalid)
       end
     end
@@ -56,29 +56,30 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     end
   end
 
-  describe "json mode constraints" do
-    test "rejects json mode with tools" do
-      assert_raise ArgumentError, "output: :json cannot be used with tools", fn ->
+  describe "text mode constraints" do
+    test "accepts text mode with tools" do
+      agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {x :string}",
           tools: %{foo: fn _ -> :ok end}
         )
-      end
+
+      assert agent.output == :text
     end
 
-    test "rejects json mode without signature" do
-      assert_raise ArgumentError, "output: :json requires a signature", fn ->
-        SubAgent.new(prompt: "Test", output: :json)
-      end
+    test "accepts text mode without signature (plain text return)" do
+      agent = SubAgent.new(prompt: "Test", output: :text)
+      assert agent.output == :text
+      assert agent.parsed_signature == nil
     end
 
-    test "rejects json mode with compression: true" do
-      assert_raise ArgumentError, "output: :json cannot be used with compression", fn ->
+    test "rejects text mode with compression: true" do
+      assert_raise ArgumentError, "output: :text cannot be used with compression", fn ->
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {x :string}",
           compression: true
         )
@@ -86,10 +87,10 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     end
 
     test "rejects json mode with compression module" do
-      assert_raise ArgumentError, "output: :json cannot be used with compression", fn ->
+      assert_raise ArgumentError, "output: :text cannot be used with compression", fn ->
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {x :string}",
           compression: SomeModule
         )
@@ -100,33 +101,33 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {x :string}",
           compression: nil
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "accepts json mode with compression: false" do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {x :string}",
           compression: false
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "rejects json mode with firewall field in signature" do
       assert_raise ArgumentError,
-                   ~r/output: :json signature cannot have firewall fields \(_hidden\)/,
+                   ~r/output: :text signature cannot have firewall fields \(_hidden\)/,
                    fn ->
                      SubAgent.new(
                        prompt: "Test",
-                       output: :json,
+                       output: :text,
                        signature: "() -> {_hidden :string}"
                      )
                    end
@@ -134,11 +135,11 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
 
     test "rejects json mode with nested firewall field in signature" do
       assert_raise ArgumentError,
-                   ~r/output: :json signature cannot have firewall fields \(_nested\)/,
+                   ~r/output: :text signature cannot have firewall fields \(_nested\)/,
                    fn ->
                      SubAgent.new(
                        prompt: "Test",
-                       output: :json,
+                       output: :text,
                        signature: "() -> {x {_nested :int}}"
                      )
                    end
@@ -146,11 +147,11 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
 
     test "rejects json mode with firewall field in array element" do
       assert_raise ArgumentError,
-                   ~r/output: :json signature cannot have firewall fields \(_secret\)/,
+                   ~r/output: :text signature cannot have firewall fields \(_secret\)/,
                    fn ->
                      SubAgent.new(
                        prompt: "Test",
-                       output: :json,
+                       output: :text,
                        signature: "() -> {items [{name :string, _secret :string}]}"
                      )
                    end
@@ -160,57 +161,57 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {user {name :string, email :string}}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "accepts json mode with list of primitives" do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {items [:string]}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "accepts json mode with optional fields (non-firewall)" do
       agent =
         SubAgent.new(
           prompt: "Test",
-          output: :json,
+          output: :text,
           signature: "() -> {name :string, nickname :string?}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "rejects json mode with firewall field inside optional map field" do
       # Optional map field containing another map with firewall field
       assert_raise ArgumentError,
-                   ~r/output: :json signature cannot have firewall fields \(_id\)/,
+                   ~r/output: :text signature cannot have firewall fields \(_id\)/,
                    fn ->
                      SubAgent.new(
                        prompt: "Test",
-                       output: :json,
+                       output: :text,
                        signature: "() -> {data {user :string, _id :int}}"
                      )
                    end
     end
   end
 
-  describe "json mode all-params-used validation" do
-    test "rejects json mode with unused signature params" do
+  describe "text mode all-params-used validation" do
+    test "rejects text mode with unused signature params" do
       assert_raise ArgumentError,
-                   ~r/JSON mode requires all signature params in prompt. Unused: \["name"\]/,
+                   ~r/Text mode requires all signature params in prompt. Unused: \["name"\]/,
                    fn ->
                      SubAgent.new(
                        prompt: "Analyze {{text}}",
-                       output: :json,
+                       output: :text,
                        signature: "(text :string, name :string) -> {result :string}"
                      )
                    end
@@ -220,44 +221,44 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       agent =
         SubAgent.new(
           prompt: "Analyze {{text}} for {{name}}",
-          output: :json,
+          output: :text,
           signature: "(text :string, name :string) -> {result :string}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "accepts json mode when param used in section" do
       agent =
         SubAgent.new(
           prompt: "Process {{#items}}{{name}}{{/items}}",
-          output: :json,
+          output: :text,
           signature: "(items [{name :string}]) -> {count :int}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "accepts json mode when param used in inverted section" do
       agent =
         SubAgent.new(
           prompt: "{{^debug}}Production mode{{/debug}}",
-          output: :json,
+          output: :text,
           signature: "(debug :bool) -> {status :string}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "accepts zero-param json mode signature" do
       agent =
         SubAgent.new(
           prompt: "Return a greeting",
-          output: :json,
+          output: :text,
           signature: "() -> {greeting :string}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
   end
 
@@ -266,11 +267,11 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       agent =
         SubAgent.new(
           prompt: "{{#items}}{{name}}: {{price}}{{/items}}",
-          output: :json,
+          output: :text,
           signature: "(items [{name :string, price :float}]) -> {total :float}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "rejects section field not in element type" do
@@ -279,7 +280,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
                    fn ->
                      SubAgent.new(
                        prompt: "{{#items}}{{unknown}}{{/items}}",
-                       output: :json,
+                       output: :text,
                        signature: "(items [{name :string}]) -> {count :int}"
                      )
                    end
@@ -289,11 +290,11 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       agent =
         SubAgent.new(
           prompt: "Tags: {{#tags}}{{.}}, {{/tags}}",
-          output: :json,
+          output: :text,
           signature: "(tags [:string]) -> {count :int}"
         )
 
-      assert agent.output == :json
+      assert agent.output == :text
     end
 
     test "rejects dot placeholder for list of maps" do
@@ -302,7 +303,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
                    fn ->
                      SubAgent.new(
                        prompt: "{{#items}}{{.}}{{/items}}",
-                       output: :json,
+                       output: :text,
                        signature: "(items [{name :string}]) -> {count :int}"
                      )
                    end
@@ -314,7 +315,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
                    fn ->
                      SubAgent.new(
                        prompt: "{{#tags}}{{name}}{{/tags}}",
-                       output: :json,
+                       output: :text,
                        signature: "(tags [:string]) -> {count :int}"
                      )
                    end
