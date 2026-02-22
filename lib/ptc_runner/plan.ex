@@ -79,7 +79,7 @@ defmodule PtcRunner.Plan do
 
   @type task_type :: :task | :synthesis_gate | :human_review
 
-  @type output_mode :: :ptc_lisp | :json | nil
+  @type output_mode :: :ptc_lisp | :text | nil
 
   @type task :: %{
           id: String.t(),
@@ -90,7 +90,7 @@ defmodule PtcRunner.Plan do
           max_retries: non_neg_integer(),
           critical: boolean(),
           type: task_type(),
-          # Output mode: :ptc_lisp, :json, or nil (auto-detect based on tools)
+          # Output mode: :ptc_lisp, :text, or nil (auto-detect based on tools)
           output: output_mode(),
           # Output signature for JSON mode (e.g., "{stocks [{symbol :string, price :float}]}")
           signature: String.t() | nil,
@@ -325,9 +325,11 @@ defmodule PtcRunner.Plan do
   defp normalize_output_mode(nil), do: nil
   defp normalize_output_mode("ptc_lisp"), do: :ptc_lisp
   defp normalize_output_mode("lisp"), do: :ptc_lisp
-  defp normalize_output_mode("json"), do: :json
+  defp normalize_output_mode("json"), do: :text
+  defp normalize_output_mode("text"), do: :text
   defp normalize_output_mode(:ptc_lisp), do: :ptc_lisp
-  defp normalize_output_mode(:json), do: :json
+  defp normalize_output_mode(:text), do: :text
+  defp normalize_output_mode(:json), do: :text
   defp normalize_output_mode(_), do: nil
 
   defp normalize_on_failure(nil), do: :stop

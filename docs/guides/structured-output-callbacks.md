@@ -1,18 +1,18 @@
 # Structured Output Callbacks
 
-This guide explains how to implement LLM callbacks for SubAgents, including support for `output: :json` mode.
+This guide explains how to implement LLM callbacks for SubAgents, including support for `output: :text` mode.
 
 ## Overview
 
 ```elixir
 SubAgent.new(
   prompt: "Classify the sentiment of: {{text}}",
-  output: :json,
+  output: :text,
   signature: "(text :string) -> {sentiment :string, confidence :float}"
 )
 ```
 
-JSON mode uses the **same signature syntax** as PTC-Lisp mode, enabling seamless piping between agents.
+Text mode uses the **same signature syntax** as PTC-Lisp mode, enabling seamless piping between agents.
 
 ## Callback Interface
 
@@ -22,13 +22,16 @@ Your callback receives:
 %{
   system: String.t(),
   messages: list(),
-  output: :ptc_lisp | :json,
-  schema: json_schema() | nil,  # Present for :json, nil for :ptc_lisp
+  output: :ptc_lisp | :text,
+  schema: json_schema() | nil,  # Present when agent has a complex return type
+  tools: [tool_def()] | nil,    # Present when agent has tools
   cache: boolean()
 }
 ```
 
-For `:json` mode, `schema` contains a JSON Schema derived from the signature:
+The `schema` key is present when the agent has a complex return type (map, list, float, int), regardless of whether tools are used. The `tools` key is present when the agent has tools defined.
+
+For complex return types, `schema` contains a JSON Schema derived from the signature:
 
 ```elixir
 # signature: "(text :string) -> {sentiment :string, confidence :float}"
@@ -46,13 +49,27 @@ For `:json` mode, `schema` contains a JSON Schema derived from the signature:
 
 ## Implementation with ReqLLM
 
-[ReqLLM](https://hexdocs.pm/req_llm) provides `generate_object/4` which handles structured output across providers (OpenAI, Anthropic, Google, OpenRouter, etc.).
+[ReqLLM](https://hexdocs.pm/req_llm) provides `generate_object/4` and `generate_with_tools/4` which handle structured output across providers (OpenAI, Anthropic, Google, OpenRouter, etc.).
 
 ```elixir
 defmodule MyApp.LLMCallback do
   @model "openrouter:anthropic/claude-sonnet-4-20250514"
 
-  def call(%{output: :json, schema: schema} = req) do
+  # Tools present -> use generate_with_tools
+  def call(%{tools: tools} = req) when is_list(tools) and tools != [] do
+    messages = [%{role: :system, content: req.system} | req.messages]
+
+    case ReqLLM.generate_with_tools(@model, messages, tools) do
+      {:ok, response} ->
+        {:ok, %{content: response.content, tokens: extract_tokens(response.usage)}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Complex return type (schema present, no tools) -> use generate_object
+  def call(%{schema: schema} = req) when is_map(schema) do
     messages = [%{role: :system, content: req.system} | req.messages]
 
     case ReqLLM.generate_object(@model, messages, schema) do
@@ -64,7 +81,8 @@ defmodule MyApp.LLMCallback do
     end
   end
 
-  def call(%{output: :ptc_lisp} = req) do
+  # Plain text (no schema, no tools) -> use generate_text
+  def call(req) do
     messages = [%{role: :system, content: req.system} | req.messages]
 
     case ReqLLM.generate_text(@model, messages) do
@@ -91,10 +109,10 @@ end
 
 ## Using LLMClient (Simplest)
 
-The `llm_client` package provides `callback/1` that handles both modes automatically:
+The `llm_client` package provides `callback/1` that handles all modes automatically:
 
 ```elixir
-# One line - works for both :json and :ptc_lisp modes
+# One line - works for :text and :ptc_lisp modes
 llm = LLMClient.callback("sonnet")
 
 # Use with any SubAgent
@@ -125,7 +143,7 @@ If not using ReqLLM, implement provider-specific structured output:
 ### OpenAI
 
 ```elixir
-def call(%{output: :json, schema: schema} = req) do
+def call(%{schema: schema} = req) when is_map(schema) do
   result = OpenAI.chat(
     model: "gpt-4o",
     messages: [%{role: "system", content: req.system} | req.messages],
@@ -145,7 +163,7 @@ end
 ### Anthropic (Tool-as-Schema)
 
 ```elixir
-def call(%{output: :json, schema: schema} = req) do
+def call(%{schema: schema} = req) when is_map(schema) do
   tool = %{
     name: "respond",
     description: "Return your structured response",
@@ -180,21 +198,21 @@ PtcRunner always validates responses against the schema. If validation fails, it
 # Simple schema
 agent = SubAgent.new(
   prompt: "Greet {{name}}",
-  output: :json,
+  output: :text,
   signature: "(name :string) -> {message :string}"
 )
 
 # Nested schema
 agent = SubAgent.new(
   prompt: "Analyze: {{text}}",
-  output: :json,
+  output: :text,
   signature: "(text :string) -> {analysis {sentiment :string, entities [:string]}}"
 )
 
 # Output-only shorthand
 agent = SubAgent.new(
   prompt: "Return a greeting",
-  output: :json,
+  output: :text,
   signature: "{message :string}"  # Equivalent to "() -> {message :string}"
 )
 
@@ -202,7 +220,8 @@ agent = SubAgent.new(
 ```
 
 Verify:
-1. Response parses as valid JSON
+1. Response parses as valid JSON (when complex return type)
 2. Response matches expected schema
 3. Retries work when validation fails
 4. Token counts are captured correctly
+5. Plain text responses work when no signature or `:string` return type

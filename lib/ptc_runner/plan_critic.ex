@@ -361,7 +361,7 @@ defmodule PtcRunner.PlanCritic do
           "[{category :string, severity :string, task_id :string?, message :string, recommendation :string}]",
         max_turns: 1,
         timeout: Keyword.get(opts, :timeout, 30_000),
-        output: :json
+        output: :text
       )
 
     case SubAgent.run(agent, llm: llm) do

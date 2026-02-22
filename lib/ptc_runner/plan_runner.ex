@@ -576,7 +576,7 @@ defmodule PtcRunner.PlanRunner do
     agent =
       SubAgent.new(
         prompt: prompt,
-        output: :json,
+        output: :text,
         signature:
           "{sufficient :bool, missing [:string], evidence [{field :string, found :bool, source :string}]}",
         max_turns: 1,
@@ -782,8 +782,8 @@ defmodule PtcRunner.PlanRunner do
     # Build gate prompt with compression instructions
     gate_prompt = build_gate_prompt(agent_spec, task.input, results_summary)
 
-    # Gates default to JSON mode but can be overridden via task.output
-    output_mode = Map.get(task, :output) || :json
+    # Gates default to text mode but can be overridden via task.output
+    output_mode = Map.get(task, :output) || :text
     signature = Map.get(task, :signature) || ":any"
 
     agent =
@@ -895,10 +895,10 @@ defmodule PtcRunner.PlanRunner do
 
     # Determine output mode:
     # 1. Use task.output if explicitly specified
-    # 2. Otherwise auto-detect: tools present -> :ptc_lisp, no tools -> :json
+    # 2. Otherwise auto-detect: tools present -> :ptc_lisp, no tools -> :text
     output_mode =
       case Map.get(task, :output) do
-        nil -> if map_size(tools) > 0, do: :ptc_lisp, else: :json
+        nil -> if map_size(tools) > 0, do: :ptc_lisp, else: :text
         mode -> mode
       end
 
@@ -929,8 +929,8 @@ defmodule PtcRunner.PlanRunner do
 
           base_opts
 
-        :json ->
-          # JSON mode (simpler, no code generation needed)
+        :text ->
+          # Text mode (simpler, no code generation needed)
           # Use task signature if provided, otherwise fall back to :any
           signature = Map.get(task, :signature) || ":any"
 
@@ -939,7 +939,7 @@ defmodule PtcRunner.PlanRunner do
             signature: signature,
             max_turns: opts.max_turns,
             timeout: opts.timeout,
-            output: :json
+            output: :text
           ]
       end
 

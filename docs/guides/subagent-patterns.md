@@ -66,15 +66,15 @@ step_b.field_descriptions  #=> %{final: "The final computed value"}
 
 This is useful when building multi-agent pipelines where each agent benefits from understanding what the previous agent produced.
 
-### Mixing JSON and PTC-Lisp Modes
+### Mixing Text and PTC-Lisp Modes
 
-JSON mode and PTC-Lisp mode use the same signature syntax, enabling seamless piping:
+Text mode and PTC-Lisp mode use the same signature syntax, enabling seamless piping:
 
 ```elixir
-# JSON mode for extraction
+# Text mode for extraction
 extractor = SubAgent.new(
   prompt: "Extract name and age from: {{text}}",
-  output: :json,
+  output: :text,
   signature: "(text :string) -> {name :string, age :int}"
 )
 
@@ -551,7 +551,7 @@ PlanExecutor.run(plan, tool_registry, llm)
 
 - [Navigator Pattern](subagent-navigator.md) - Journaled tasks for crash-safe workflows
 - [Meta Planner](subagent-meta-planner.md) - Autonomous planning with self-correction
-- [JSON Mode Guide](subagent-json-mode.md) - Structured output without PTC-Lisp
+- [Text Mode Guide](subagent-text-mode.md) - Text mode, structured output, and native tool calling
 - [Advanced Topics](subagent-advanced.md) - Multi-turn ReAct and compile pattern
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [RLM Patterns](subagent-rlm-patterns.md) - Recursive Language Model patterns

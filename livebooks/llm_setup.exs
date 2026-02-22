@@ -79,7 +79,7 @@ defmodule LLMSetup do
       LLMClient.callback(model)
     else
       fn
-        %{system: system, messages: messages, output: :json, schema: schema} ->
+        %{system: system, messages: messages, output: :text, schema: schema} ->
           full_messages = [%{role: :system, content: system} | messages]
 
           case ReqLLM.generate_object(model, full_messages, schema, receive_timeout: 60_000) do

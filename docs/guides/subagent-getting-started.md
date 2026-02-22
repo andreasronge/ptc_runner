@@ -60,15 +60,15 @@ step.return["sentiment"]  #=> "positive"
 step.return["score"]      #=> 0.95
 ```
 
-### JSON Mode (Simpler Alternative)
+### Text Mode (Simpler Alternative)
 
-For classification, extraction, and reasoning tasks that don't need tools, use `output: :json`:
+For tasks that don't need PTC-Lisp, use `output: :text`. The behavior auto-detects based on whether tools are provided and the return type:
 
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
   "Extract the person's name and age from: {{text}}",
   context: %{text: "John is 25 years old"},
-  output: :json,
+  output: :text,
   signature: "(text :string) -> {name :string, age :int}",
   llm: my_llm
 )
@@ -77,31 +77,31 @@ step.return["name"]  #=> "John"
 step.return["age"]   #=> 25
 ```
 
-JSON mode skips PTC-Lisp entirely - the LLM returns structured JSON directly, validated against your signature. Use it when you need structured output but not computation or tool calls.
+With a complex return type and no tools, the LLM returns structured JSON directly. With no signature or a `:string` return type, it returns raw text. Use it when you need structured output but not computation.
 
-JSON mode supports full Mustache templating including sections for lists:
+Text mode supports full Mustache templating including sections for lists:
 
 ```elixir
 # Iterate over list data with {{#section}}...{{/section}}
 SubAgent.new(
   prompt: "Summarize these items: {{#items}}{{name}}, {{/items}}",
-  output: :json,
+  output: :text,
   signature: "(items [{name :string}]) -> {summary :string}"
 )
 ```
 
-**Constraints:** JSON mode requires a signature with all parameters used in the prompt, cannot use tools, and doesn't support compression or firewall fields.
+**Constraints:** Signature is optional. Tools are optional. Compression and firewall fields are not supported.
 
-See [JSON Mode Guide](subagent-json-mode.md) for Mustache syntax, validation rules, and examples.
+See [Text Mode Guide](subagent-text-mode.md) for Mustache syntax, validation rules, tool calling, and examples.
 
-### Tool Calling Mode (For Smaller LLMs)
+### Text Mode with Tools (For Smaller LLMs)
 
-For smaller or faster LLMs that can use native tool calling but can't generate PTC-Lisp, use `output: :tool_calling`:
+For smaller or faster LLMs that can use native tool calling but can't generate PTC-Lisp, use `output: :text` with tools:
 
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
   "What is 17 + 25? Use the add tool.",
-  output: :tool_calling,
+  output: :text,
   signature: "() -> {result :int}",
   tools: %{
     "add" => {fn args -> args["a"] + args["b"] end,
@@ -114,11 +114,11 @@ For smaller or faster LLMs that can use native tool calling but can't generate P
 step.return["result"]  #=> 42
 ```
 
-Tool calling mode converts tool signatures to JSON Schema and uses the LLM provider's native tool calling API. The LLM calls tools, ptc_runner executes them, and the loop continues until the LLM returns a final JSON answer validated against the signature.
+Text mode auto-detects tool calling when tools are provided. It converts tool signatures to JSON Schema and uses the LLM provider's native tool calling API. The LLM calls tools, ptc_runner executes them, and the loop continues until the LLM returns a final answer. If a complex return type is specified, the answer is validated as JSON against the signature. If no signature or `:string` return type, the raw text answer is returned.
 
-**Constraints:** Requires both a signature and at least one tool. No memory persistence between turns.
+**Constraints:** No memory persistence between turns.
 
-See [Tool Calling Guide](subagent-tool-calling.md) for multi-tool scenarios, limits, and error handling.
+See [Text Mode Guide](subagent-text-mode.md) for multi-tool scenarios, limits, and error handling.
 
 ## Adding Tools
 
@@ -144,9 +144,9 @@ With tools, the SubAgent enters an **agentic loop** - it calls tools and reasons
 |------|-----------|----------|
 | Single-shot | `max_turns: 1` and no tools | One LLM call, expression returned directly |
 | Loop (PTC-Lisp) | Tools or `max_turns > 1` | Multiple turns until `(return ...)` or `(fail ...)` |
-| Loop (Tool Calling) | `output: :tool_calling` | LLM calls tools via native API, returns final JSON |
+| Loop (Text) | `output: :text` with tools | LLM calls tools via native API, returns final text or JSON |
 
-In **single-shot mode**, the LLM's expression is evaluated and returned directly. In **PTC-Lisp loop mode**, the agent must explicitly call `return` or `fail` to complete. In **tool calling mode**, the loop ends when the LLM returns content without tool calls.
+In **single-shot mode**, the LLM's expression is evaluated and returned directly. In **PTC-Lisp loop mode**, the agent must explicitly call `return` or `fail` to complete. In **text mode with tools**, the loop ends when the LLM returns content without tool calls.
 
 > **Common Pitfall:** If your agent produces correct results but keeps looping until
 > `max_turns_exceeded`, it's likely in loop mode without calling `return`. Either set
@@ -437,8 +437,7 @@ State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-
 
 ## See Also
 
-- [JSON Mode Guide](subagent-json-mode.md) - Mustache templates, validation, and structured output
-- [Tool Calling Guide](subagent-tool-calling.md) - Native tool calling for smaller LLMs
+- [Text Mode Guide](subagent-text-mode.md) - Text mode, Mustache templates, tool calling, and structured output
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition

@@ -116,7 +116,7 @@ defmodule PageIndex.TocParser do
     """
 
     case SubAgent.run(prompt,
-           output: :json,
+           output: :text,
            signature: "{sections [:map]}",
            llm: llm
          ) do

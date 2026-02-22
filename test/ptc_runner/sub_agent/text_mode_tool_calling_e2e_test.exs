@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.ToolCallingE2ETest do
+defmodule PtcRunner.SubAgent.TextModeToolCallingE2ETest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.ToolCallingE2ETest do
         SubAgent.new(
           prompt: "What is 17 + 25? Use the add tool to compute the answer.",
           signature: "() -> {result :int}",
-          output: :tool_calling,
+          output: :text,
           tools: tools,
           max_turns: 5
         )
@@ -46,7 +46,7 @@ defmodule PtcRunner.SubAgent.ToolCallingE2ETest do
           prompt:
             "Calculate (6 * 7) - 10. First multiply 6 and 7, then subtract 10 from the result.",
           signature: "() -> {result :int}",
-          output: :tool_calling,
+          output: :text,
           tools: tools,
           max_turns: 5
         )

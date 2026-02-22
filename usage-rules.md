@@ -33,7 +33,7 @@ step.return  #=> [%{"id" => 1, "name" => "Laptop Pro", "price" => 999.99}]
 | `mission_timeout` | pos_integer \| nil | nil | Total wall-clock timeout (ms) |
 | `turn_budget` | pos_integer | 20 | Total turns across all retries |
 | `max_depth` | pos_integer | 10 | Nested agent depth limit |
-| `output` | atom | :ptc_lisp | `:ptc_lisp` or `:json` |
+| `output` | atom | :ptc_lisp | `:ptc_lisp` or `:text` |
 | `memory_strategy` | atom | :strict | `:strict` or `:rollback` |
 | `compression` | boolean | false | Enable turn history compression |
 | `llm_query` | boolean | false | Enable builtin llm-query tool |
@@ -65,12 +65,12 @@ SubAgent.new(prompt: "Find items for {{user}} about {{topic}}", ...)
 # The LLM accesses values via (data/user), (data/topic)
 ```
 
-**JSON mode** — placeholders are replaced with actual values, and sections are supported:
+**Text mode** — placeholders are replaced with actual values, and sections are supported:
 
 ```elixir
 SubAgent.new(
   prompt: "Summarize: {{title}}. {{#items}}Item: {{name}}. {{/items}}",
-  output: :json, ...
+  output: :text, ...
 )
 # Sections iterate over lists; {{^items}}...{{/items}} renders when empty/missing
 ```
@@ -209,26 +209,43 @@ llm = fn %{system: system, messages: messages} ->
 end
 ```
 
-## JSON Mode
+## Text Mode
 
-For classification/extraction without tools or PTC-Lisp:
+For classification/extraction without tools or PTC-Lisp, use `output: :text`. Behavior auto-detects from signature and tools:
+
+| Tools? | Return type | Behavior |
+|--------|-------------|----------|
+| No | `:string` or none | Raw text response |
+| No | complex (map, list, etc.) | JSON response |
+| Yes | `:string` or none | Tool loop → text answer |
+| Yes | complex | Tool loop → JSON answer |
 
 ```elixir
+# JSON variant (complex return type, no tools)
 {:ok, step} = SubAgent.run(
   "Extract name and age from: {{text}}",
-  output: :json,
+  output: :text,
   signature: "(text :string) -> {name :string, age :int}",
   context: %{text: "John is 25"},
   llm: my_llm
 )
+
+# Plain text variant (no signature or :string return)
+{:ok, step} = SubAgent.run(
+  "Summarize: {{text}}",
+  output: :text,
+  context: %{text: "Long article..."},
+  llm: my_llm
+)
+step.return  #=> "A concise summary..."
 ```
 
-### JSON Mode Constraints
+### Text Mode Constraints
 
-- **Cannot use tools** — `output: :json` and `tools` are mutually exclusive
-- **Requires signature** with all prompt parameters
-- **No firewall fields** (no `_` prefix)
-- **No compression**
+- **Signature is optional** — without one, returns raw text
+- **Tools are optional** — with tools, runs a tool calling loop
+- **No compression** or **firewall fields** (when signature present)
+- When signature present, all params must appear in prompt
 
 ## PTC-Lisp Key Patterns
 
@@ -273,7 +290,7 @@ Single-shot mode (`max_turns: 1`, no tools): expression result is the answer, no
 3. **Positional tool args** — Use `(tool/name {:key val})` not `(tool/name val)`
 4. **Missing return in loops** — Multi-turn agents must call `(return ...)` or `(fail ...)`
 5. **max_turns: 1 with tools** — Agent won't have enough turns to use tools; increase `max_turns`
-6. **JSON mode with tools** — `output: :json` cannot have tools
+6. **No signature in text mode** — without a signature, `output: :text` returns raw text (not JSON)
 7. **Forgetting system prompt** — LLM callback must include the `system` field in its request
 
 ## Recursive SubAgent

@@ -340,7 +340,7 @@ defmodule PtcRunner.PlanTest do
 
       assert t1.output == :ptc_lisp
       assert t2.output == :ptc_lisp
-      assert t3.output == :json
+      assert t3.output == :text
       # Default is nil (auto-detect based on tools)
       assert t4.output == nil
     end

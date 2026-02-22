@@ -100,10 +100,13 @@ defmodule PtcRunner.SubAgent do
   Output mode for SubAgent execution.
 
   - `:ptc_lisp` - Default. LLM generates PTC-Lisp code that is executed.
-  - `:json` - LLM generates JSON directly matching the signature's return type.
-  - `:tool_calling` - LLM uses native tool calling API. ptc_runner owns the tool execution loop.
+  - `:text` - Auto-detects behavior from tools and signature return type:
+    - No tools + `:string`/no signature → raw text response
+    - No tools + complex return type → JSON response (validated)
+    - Tools + `:string`/no signature → tool loop → text answer
+    - Tools + complex return type → tool loop → JSON answer
   """
-  @type output_mode :: :ptc_lisp | :json | :tool_calling
+  @type output_mode :: :ptc_lisp | :text
 
   @typedoc """
   Output format options for truncation and display.
@@ -223,6 +226,26 @@ defmodule PtcRunner.SubAgent do
   def default_format_options, do: @default_format_options
 
   @doc """
+  Returns true if the agent's return type is plain text (`:string` or no signature).
+
+  Used by TextMode to decide between raw text and JSON response handling.
+
+  ## Examples
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Hello", output: :text)
+      iex> PtcRunner.SubAgent.text_return?(agent)
+      true
+
+      iex> agent = PtcRunner.SubAgent.new(prompt: "Get data", signature: "() -> {name :string}", output: :text)
+      iex> PtcRunner.SubAgent.text_return?(agent)
+      false
+  """
+  @spec text_return?(t()) :: boolean()
+  def text_return?(%__MODULE__{parsed_signature: nil}), do: true
+  def text_return?(%__MODULE__{parsed_signature: {:signature, _, :string}}), do: true
+  def text_return?(%__MODULE__{}), do: false
+
+  @doc """
   Creates a SubAgent struct from keyword options.
 
   Raises `ArgumentError` if validation fails (missing required fields or invalid types).
@@ -260,7 +283,7 @@ defmodule PtcRunner.SubAgent do
   - `pmap_timeout` - Positive integer for max milliseconds per `pmap` parallel operation (default: 5000)
   - `max_depth` - Positive integer for maximum recursion depth in nested agents (default: 3)
   - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
-  - `output` - Output mode: `:ptc_lisp` (default) or `:json`
+  - `output` - Output mode: `:ptc_lisp` (default) or `:text`
   - `thinking` - Boolean enabling thinking section in output format (default: false)
   - `llm_query` - Boolean enabling LLM query mode (default: false)
   - `builtin_tools` - List of builtin tool families to enable (default: []). Available: `:grep` (adds grep and grep-n tools)
@@ -1252,17 +1275,13 @@ defmodule PtcRunner.SubAgent do
         }
 
   def preview_prompt(%__MODULE__{} = agent, opts \\ []) do
-    alias PtcRunner.SubAgent.Loop.{JsonMode, ToolCallingMode}
+    alias PtcRunner.SubAgent.Loop.TextMode
 
     context = Keyword.get(opts, :context, %{})
 
     case agent.output do
-      :json ->
-        preview = JsonMode.preview_prompt(agent, context)
-        Map.put(preview, :tool_schemas, [])
-
-      :tool_calling ->
-        ToolCallingMode.preview_prompt(agent, context)
+      :text ->
+        TextMode.preview_prompt(agent, context)
 
       _ptc_lisp ->
         preview_prompt_ptc_lisp(agent, context)

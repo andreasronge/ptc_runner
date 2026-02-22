@@ -95,7 +95,7 @@ planner = SubAgent.new(
   """,
   signature: "(question :string) -> {steps [:string]}",
   max_turns: 1,
-  output: :json
+  output: :text
 )
 
 question = "What are the latest stable versions of Elixir and Erlang/OTP, and what are the key new features in each?"

@@ -126,7 +126,7 @@ defmodule PtcRunner.SubAgent.PlannerWorkerE2ETest do
           "(step :string, criteria :string, result :string) -> {approved :bool, summary :string, feedback :string}",
         max_turns: 1,
         retry_turns: 2,
-        output: :json
+        output: :text
       )
 
     # --- Plan steps (2 steps — no synthesis step) ---

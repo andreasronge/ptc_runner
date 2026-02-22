@@ -144,12 +144,12 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       end
     end
 
-    test "raises ArgumentError if output: :json" do
+    test "raises ArgumentError if output: :text" do
       agent =
         SubAgent.new(
           prompt: "Test",
           signature: "() -> :string",
-          output: :json,
+          output: :text,
           max_turns: 1
         )
 

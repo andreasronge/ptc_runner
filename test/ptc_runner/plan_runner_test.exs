@@ -999,7 +999,7 @@ defmodule PtcRunner.PlanRunnerTest do
              ~s|```clojure\n(return {:items [{:name "Phone" :price 699.0} {:name "Laptop" :price 1299.0}]})\n```|}
 
           # JSON mode (synthesis gate)
-          output_mode == :json ->
+          output_mode == :text ->
             {:ok, ~S|{"summary": "Top items: Phone ($699) and Laptop ($1299)"}|}
 
           true ->
@@ -1085,8 +1085,8 @@ defmodule PtcRunner.PlanRunnerTest do
       mode = Agent.get(output_mode_used, & &1)
       Agent.stop(output_mode_used)
 
-      # Should auto-detect JSON mode (no tools, no explicit output)
-      assert mode == :json
+      # Should auto-detect text mode (no tools, no explicit output)
+      assert mode == :text
     end
   end
 
@@ -1110,10 +1110,10 @@ defmodule PtcRunner.PlanRunnerTest do
       mock_llm = fn input ->
         count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
 
-        # The quality gate call uses :json output mode with the sufficiency signature
+        # The quality gate call uses :text output mode with the sufficiency signature
         output_mode = Map.get(input, :output)
 
-        if output_mode == :json and count == 1 do
+        if output_mode == :text and count == 1 do
           # Quality gate check (JSON mode, triggered for "analyze" task)
           {:ok,
            ~s|{"sufficient": true, "missing": [], "evidence": [{"field": "data", "found": true, "source": "fetch"}]}|}
@@ -1154,7 +1154,7 @@ defmodule PtcRunner.PlanRunnerTest do
         messages = Map.get(input, :messages, [])
         prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
 
-        if output_mode == :json and String.contains?(prompt, "data sufficiency checker") do
+        if output_mode == :text and String.contains?(prompt, "data sufficiency checker") do
           # Quality gate check — says data is insufficient
           {:ok,
            ~s|{"sufficient": false, "missing": ["income statement data"], "evidence": [{"field": "revenue", "found": false, "source": "NOT FOUND"}]}|}
@@ -1256,7 +1256,7 @@ defmodule PtcRunner.PlanRunnerTest do
         count = Agent.get_and_update(call_count, fn n -> {n, n + 1} end)
         output_mode = Map.get(input, :output)
 
-        if output_mode == :json and count == 1 do
+        if output_mode == :text and count == 1 do
           {:ok,
            ~s|{"sufficient": true, "missing": [], "evidence": [{"field": "data", "found": true, "source": "fetch"}]}|}
         else
@@ -1359,7 +1359,7 @@ defmodule PtcRunner.PlanRunnerTest do
         messages = Map.get(input, :messages, [])
         prompt = if messages != [], do: hd(messages) |> Map.get(:content, ""), else: ""
 
-        if output_mode == :json and String.contains?(prompt, "data sufficiency checker") do
+        if output_mode == :text and String.contains?(prompt, "data sufficiency checker") do
           Agent.update(main_llm_called_for_gate, fn _ -> true end)
         end
 

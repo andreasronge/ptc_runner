@@ -185,7 +185,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   The wrapped function:
   - Resolves LLM from tool config or inherits from parent
-  - Creates a single-shot SubAgent with `output: :json`
+  - Creates a single-shot SubAgent with `output: :text`
   - Inherits system limits (nesting_depth, remaining_turns, mission_deadline)
   - Creates a child trace file when parent has tracing enabled
   """
@@ -260,7 +260,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
     end
   end
 
-  # Shared helper: runs ephemeral SubAgent with output: :json
+  # Shared helper: runs ephemeral SubAgent with output: :text
   defp execute_llm_json(name, %LLMTool{} = tool, args, state) do
     # Run validator if present
     if tool.validator do
@@ -288,7 +288,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
       SubAgent.new(
         prompt: tool.prompt,
         signature: sig,
-        output: :json,
+        output: :text,
         max_turns: 1
       )
 

@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.JsonModeE2ETest do
+defmodule PtcRunner.SubAgent.TextModeJsonE2ETest do
   use ExUnit.Case, async: false
 
   @moduledoc """
@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
       agent =
         SubAgent.new(
           prompt: "Classify the sentiment of: '{{text}}'",
-          output: :json,
+          output: :text,
           signature: "(text :string) -> {sentiment :string}",
           max_turns: 2
         )
@@ -47,7 +47,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
       agent =
         SubAgent.new(
           prompt: "Extract the name and age from: '{{text}}'",
-          output: :json,
+          output: :text,
           signature: "(text :string) -> {name :string, age :int}",
           max_turns: 2
         )
@@ -66,7 +66,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
       agent =
         SubAgent.new(
           prompt: "What is {{a}} + {{b}}?",
-          output: :json,
+          output: :text,
           signature: "(a :int, b :int) -> {result :int}",
           max_turns: 2
         )
@@ -84,7 +84,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
       agent =
         SubAgent.new(
           prompt: "Extract all fruits mentioned in: '{{text}}'",
-          output: :json,
+          output: :text,
           signature: "(text :string) -> {fruits [:string]}",
           max_turns: 2
         )
@@ -105,7 +105,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
       agent =
         SubAgent.new(
           prompt: "Analyze the review: '{{review}}'",
-          output: :json,
+          output: :text,
           signature: "(review :string) -> {sentiment :string, confidence :float}",
           field_descriptions: %{
             sentiment: "One of: positive, negative, neutral",
@@ -127,7 +127,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
 
   # Build LLM callback that works with JSON mode
   defp llm_callback do
-    fn %{system: system, messages: messages, output: output, schema: schema} = _input ->
+    fn %{system: system, messages: messages, output: _output, schema: schema} = _input ->
       # Build messages with system prompt
       full_messages = [%{role: :system, content: system} | messages]
 
@@ -137,7 +137,7 @@ defmodule PtcRunner.SubAgent.JsonModeE2ETest do
       opts = [receive_timeout: @timeout]
 
       opts =
-        if output == :json and schema do
+        if schema do
           # Some providers support structured output
           Keyword.put(opts, :response_format, %{type: "json_object"})
         else

@@ -740,7 +740,7 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
           Generate the plan now.
           """,
           signature: "(mission :string) -> :map",
-          output: :json,
+          output: :text,
           max_turns: 1,
           retry_turns: 2,
           timeout: 60_000
@@ -1021,7 +1021,7 @@ defmodule PtcRunner.SubAgent.MetaPlannerE2ETest do
         If the mission is trivial, you can return a simple plan or indicate no agents needed.
         """,
         signature: "(mission :string) -> :map",
-        output: :json,
+        output: :text,
         max_turns: 1,
         retry_turns: 2,
         timeout: 30_000

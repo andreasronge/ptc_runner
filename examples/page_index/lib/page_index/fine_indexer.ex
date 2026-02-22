@@ -156,7 +156,7 @@ defmodule PageIndex.FineIndexer do
       """
 
       case SubAgent.run(prompt,
-             output: :json,
+             output: :text,
              signature: "{summary :string}",
              llm: llm
            ) do

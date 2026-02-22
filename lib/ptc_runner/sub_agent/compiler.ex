@@ -93,7 +93,7 @@ defmodule PtcRunner.SubAgent.Compiler do
     raise ArgumentError, "only single-shot agents (max_turns: 1) can be compiled"
   end
 
-  def compile(%SubAgent{output: :json}, _opts) do
+  def compile(%SubAgent{output: :text}, _opts) do
     raise ArgumentError, "only PTC-Lisp agents (output: :ptc_lisp) can be compiled"
   end
 
