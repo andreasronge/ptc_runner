@@ -119,7 +119,9 @@ defmodule Alma.DebugLog do
         _ -> ""
       end
 
-    Enum.join([header | episodes], "\n") <> store_section
+    sim_summary = format_aggregate_similarity(trajectories)
+
+    Enum.join([header | episodes], "\n") <> store_section <> sim_summary
   end
 
   defp select_episodes(results, max_episodes) when length(results) <= max_episodes, do: results
@@ -218,11 +220,120 @@ defmodule Alma.DebugLog do
           ]
       end
 
-    error_lines ++ print_lines ++ tool_lines ++ return_line
+    sim_lines = format_similarity_stats(log, phase_tag)
+
+    error_lines ++ print_lines ++ tool_lines ++ sim_lines ++ return_line
   end
 
   defp format_runtime_log(%{phase: phase}, _max_result_chars) do
     ["[#{phase_tag(phase)}] ERROR: incomplete log"]
+  end
+
+  # Format per-query similarity stats lines for a single runtime log.
+  defp format_similarity_stats(%{similarity_stats: stats, embed_mode: embed_mode}, phase_tag)
+       when is_list(stats) and stats != [] do
+    find_stats = Enum.filter(stats, &(&1.op == :find))
+
+    if find_stats == [] do
+      []
+    else
+      query_lines =
+        Enum.map(find_stats, fn %{query: query, scores: scores, embed_ms: embed_ms} ->
+          {top, spread, quality} = score_summary(scores)
+
+          "[#{phase_tag}] SIMILARITY: query=#{inspect(query)} " <>
+            "top=#{format_score(top)} spread=#{format_score(spread)} " <>
+            "k=#{length(scores)} #{quality} embed_ms=#{embed_ms}"
+        end)
+
+      # Aggregate line
+      all_tops = Enum.map(find_stats, fn s -> score_top(s.scores) end)
+      mean_top = safe_mean(all_tops)
+      min_top = Enum.min(all_tops, fn -> 0.0 end)
+      low_count = Enum.count(all_tops, &(&1 < 0.5))
+      total_embed_ms = find_stats |> Enum.map(& &1.embed_ms) |> Enum.sum()
+      mode_str = if embed_mode, do: " embed=#{embed_mode}", else: ""
+
+      agg_line =
+        "[#{phase_tag}] SIM_SUMMARY: #{length(find_stats)} queries " <>
+          "mean_top=#{format_score(mean_top)} min_top=#{format_score(min_top)} " <>
+          "low_quality=#{low_count} total_embed_ms=#{total_embed_ms}#{mode_str}"
+
+      query_lines ++ [agg_line]
+    end
+  end
+
+  defp format_similarity_stats(_, _), do: []
+
+  defp score_top(scores) when scores == [], do: 0.0
+  defp score_top(scores), do: Enum.max(scores)
+
+  defp score_summary([]), do: {0.0, 0.0, "NO_RESULTS"}
+
+  defp score_summary(scores) do
+    top = Enum.max(scores)
+    bottom = Enum.min(scores)
+    spread = top - bottom
+
+    quality =
+      cond do
+        top < 0.3 -> "LOW_QUALITY"
+        top < 0.5 -> "WEAK"
+        spread < 0.1 -> "NO_DISCRIMINATION"
+        true -> "OK"
+      end
+
+    {top, spread, quality}
+  end
+
+  defp safe_mean([]), do: 0.0
+  defp safe_mean(values), do: Enum.sum(values) / length(values)
+
+  defp format_score(f), do: :erlang.float_to_binary(f * 1.0, decimals: 3)
+
+  # Aggregate similarity stats across all episodes for the design summary.
+  defp format_aggregate_similarity(trajectories) do
+    all_stats =
+      trajectories
+      |> Enum.flat_map(fn result ->
+        (Map.get(result, :runtime_logs) || [])
+        |> Enum.flat_map(fn log ->
+          (Map.get(log, :similarity_stats) || [])
+          |> Enum.filter(&(&1.op == :find))
+        end)
+      end)
+
+    if all_stats == [] do
+      ""
+    else
+      all_tops = Enum.map(all_stats, fn s -> score_top(s.scores) end)
+      mean_top = safe_mean(all_tops)
+      min_top = Enum.min(all_tops, fn -> 0.0 end)
+      max_top = Enum.max(all_tops, fn -> 0.0 end)
+      low_count = Enum.count(all_tops, &(&1 < 0.5))
+      no_result_count = Enum.count(all_stats, &(&1.scores == []))
+      total_embed_ms = all_stats |> Enum.map(& &1.embed_ms) |> Enum.sum()
+      mean_embed_ms = if all_stats != [], do: div(total_embed_ms, length(all_stats)), else: 0
+
+      # Get embed mode from the first runtime log that has it
+      embed_mode_str =
+        trajectories
+        |> Enum.find_value("unknown", fn result ->
+          (Map.get(result, :runtime_logs) || [])
+          |> Enum.find_value(fn log -> Map.get(log, :embed_mode) end)
+        end)
+
+      lines = [
+        "\n=== SIMILARITY QUALITY ===",
+        "Embed mode: #{embed_mode_str}",
+        "Total queries: #{length(all_stats)} (#{no_result_count} empty)",
+        "Top scores: mean=#{format_score(mean_top)} min=#{format_score(min_top)} max=#{format_score(max_top)}",
+        "Low quality (top < 0.5): #{low_count}/#{length(all_stats)}",
+        "Mean embed latency: #{mean_embed_ms}ms"
+      ]
+
+      "\n" <> Enum.join(lines, "\n")
+    end
   end
 
   defp extract_action_message(%{result: result}, max_chars) when is_map(result) do

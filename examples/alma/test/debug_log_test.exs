@@ -203,6 +203,138 @@ defmodule Alma.DebugLogTest do
     end
   end
 
+  describe "similarity stats formatting" do
+    test "formats per-query similarity lines in runtime log" do
+      parent = %{
+        design: %{name: "embed_test"},
+        score: 0.5,
+        trajectories: [
+          %{
+            success?: true,
+            steps: 3,
+            runtime_logs: [
+              %{
+                phase: :recall,
+                prints: [],
+                tool_calls: [],
+                similarity_stats: [
+                  %{op: :find, query: "find the key", scores: [0.92, 0.45, 0.12], embed_ms: 42}
+                ],
+                embed_mode: :dense
+              }
+            ]
+          }
+        ]
+      }
+
+      output = DebugLog.format_parents([parent])
+
+      assert output =~ "[recall] SIMILARITY: query=\"find the key\""
+      assert output =~ "top=0.920"
+      assert output =~ "spread=0.800"
+      assert output =~ "embed_ms=42"
+      assert output =~ "OK"
+      assert output =~ "[recall] SIM_SUMMARY: 1 queries"
+      assert output =~ "embed=dense"
+    end
+
+    test "flags low quality scores" do
+      parent = %{
+        design: %{name: "ngram_test"},
+        score: 0.1,
+        trajectories: [
+          %{
+            success?: false,
+            steps: 20,
+            runtime_logs: [
+              %{
+                phase: :recall,
+                prints: [],
+                tool_calls: [],
+                similarity_stats: [
+                  %{op: :find, query: "key", scores: [0.22, 0.19, 0.17], embed_ms: 0}
+                ],
+                embed_mode: :ngram
+              }
+            ]
+          }
+        ]
+      }
+
+      output = DebugLog.format_parents([parent])
+
+      assert output =~ "LOW_QUALITY"
+      assert output =~ "low_quality=1"
+      assert output =~ "embed=ngram"
+    end
+
+    test "formats aggregate similarity section across episodes" do
+      parent = %{
+        design: %{name: "agg_test"},
+        score: 0.6,
+        trajectories: [
+          %{
+            success?: true,
+            steps: 3,
+            runtime_logs: [
+              %{
+                phase: :recall,
+                prints: [],
+                tool_calls: [],
+                similarity_stats: [
+                  %{op: :find, query: "key", scores: [0.95, 0.3], embed_ms: 40}
+                ],
+                embed_mode: :dense
+              }
+            ]
+          },
+          %{
+            success?: true,
+            steps: 5,
+            runtime_logs: [
+              %{
+                phase: :recall,
+                prints: [],
+                tool_calls: [],
+                similarity_stats: [
+                  %{op: :find, query: "torch", scores: [0.4, 0.2], embed_ms: 35}
+                ],
+                embed_mode: :dense
+              }
+            ]
+          }
+        ]
+      }
+
+      output = DebugLog.format_parents([parent])
+
+      assert output =~ "=== SIMILARITY QUALITY ==="
+      assert output =~ "Embed mode: dense"
+      assert output =~ "Total queries: 2"
+      assert output =~ "Low quality (top < 0.5): 1/2"
+    end
+
+    test "handles empty similarity stats gracefully" do
+      parent = %{
+        design: %{name: "no_stats"},
+        score: 0.5,
+        trajectories: [
+          %{
+            success?: true,
+            steps: 3,
+            runtime_logs: [
+              %{phase: :recall, prints: [], tool_calls: []}
+            ]
+          }
+        ]
+      }
+
+      output = DebugLog.format_parents([parent])
+
+      refute output =~ "SIMILARITY"
+    end
+  end
+
   describe "format_stores/1" do
     test "formats vector and graph store summary" do
       memory = %{
