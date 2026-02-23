@@ -201,6 +201,81 @@ defmodule Alma.DebugLogTest do
       assert output =~ "design_a (score: 0.8)"
       assert output =~ "design_b (score: 0.2)"
     end
+
+    test "includes collection trajectories with mem-update tool calls" do
+      parent = %{
+        design: %{name: "with_collection"},
+        score: 0.4,
+        collection_trajectories: [
+          %{
+            success?: true,
+            steps: 5,
+            runtime_logs: [
+              %{
+                phase: :recall,
+                prints: [],
+                tool_calls: [
+                  %{
+                    name: "find-similar",
+                    args: %{"query" => "torch"},
+                    result: []
+                  }
+                ]
+              },
+              %{
+                phase: :"mem-update",
+                prints: [],
+                tool_calls: [
+                  %{
+                    name: "store-obs",
+                    args: %{"text" => "torch at room_B", "collection" => "objects"},
+                    result: "stored:1"
+                  },
+                  %{
+                    name: "graph-update",
+                    args: %{"edges" => [["room_A", "room_B"]]},
+                    result: "ok"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        trajectories: [
+          %{
+            success?: true,
+            steps: 3,
+            runtime_logs: [
+              %{phase: :recall, prints: [], tool_calls: []}
+            ]
+          }
+        ]
+      }
+
+      output = DebugLog.format_parents([parent])
+
+      assert output =~ "--- COLLECTION PHASE ---"
+      assert output =~ "--- DEPLOYMENT PHASE ---"
+      assert output =~ "[mem-update] TOOL store-obs:"
+      assert output =~ "stored:1"
+      assert output =~ "[mem-update] TOOL graph-update:"
+    end
+
+    test "works without collection_trajectories key" do
+      parent = %{
+        design: %{name: "legacy"},
+        score: 0.3,
+        trajectories: [
+          %{success?: true, steps: 2, runtime_logs: []}
+        ]
+      }
+
+      output = DebugLog.format_parents([parent])
+
+      assert output =~ "legacy"
+      assert output =~ "--- DEPLOYMENT PHASE ---"
+      refute output =~ "--- COLLECTION PHASE ---"
+    end
   end
 
   describe "similarity stats formatting" do
