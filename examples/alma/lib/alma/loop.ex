@@ -298,6 +298,7 @@ defmodule Alma.Loop do
       design: design,
       score: normalized_score,
       trajectories: deployment_results,
+      collection_trajectories: collection_results,
       parent_ids: parent_ids,
       generation: generation,
       errors: all_errors,

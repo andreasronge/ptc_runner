@@ -101,17 +101,48 @@ defmodule Alma.DebugLog do
   defp format_design(parent, max_episodes, max_result_chars) do
     name = Map.get(parent.design, :name, "unknown")
     score = Float.round(parent.score * 1.0, 2)
-    trajectories = Map.get(parent, :trajectories, [])
+    deployment_trajectories = Map.get(parent, :trajectories, [])
+    collection_trajectories = Map.get(parent, :collection_trajectories, [])
 
     header = "=== DESIGN: #{name} (score: #{score}) ==="
 
-    episodes =
-      trajectories
-      |> select_episodes(max_episodes)
-      |> Enum.with_index(1)
-      |> Enum.map(fn {result, idx} ->
-        format_episode(result, idx, max_result_chars)
-      end)
+    # Collection episodes include mem-update tool calls
+    collection_episodes =
+      if collection_trajectories != [] do
+        selected = select_episodes(collection_trajectories, max_episodes)
+
+        header_line = "--- COLLECTION PHASE ---"
+
+        episode_lines =
+          selected
+          |> Enum.with_index(1)
+          |> Enum.map(fn {result, idx} ->
+            format_episode(result, idx, max_result_chars)
+          end)
+
+        [header_line | episode_lines]
+      else
+        []
+      end
+
+    # Deployment episodes (recall-only, frozen memory)
+    deployment_episodes =
+      if deployment_trajectories != [] do
+        selected = select_episodes(deployment_trajectories, max_episodes)
+
+        header_line = "--- DEPLOYMENT PHASE ---"
+
+        episode_lines =
+          selected
+          |> Enum.with_index(1)
+          |> Enum.map(fn {result, idx} ->
+            format_episode(result, idx, max_result_chars)
+          end)
+
+        [header_line | episode_lines]
+      else
+        []
+      end
 
     store_section =
       case Map.get(parent, :final_memory) do
@@ -119,9 +150,11 @@ defmodule Alma.DebugLog do
         _ -> ""
       end
 
-    sim_summary = format_aggregate_similarity(trajectories)
+    all_trajectories = collection_trajectories ++ deployment_trajectories
+    sim_summary = format_aggregate_similarity(all_trajectories)
 
-    Enum.join([header | episodes], "\n") <> store_section <> sim_summary
+    all_lines = [header] ++ collection_episodes ++ deployment_episodes
+    Enum.join(all_lines, "\n") <> store_section <> sim_summary
   end
 
   defp select_episodes(results, max_episodes) when length(results) <= max_episodes, do: results
