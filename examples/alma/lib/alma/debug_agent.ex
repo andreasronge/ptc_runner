@@ -39,6 +39,7 @@ defmodule Alma.DebugAgent do
             name: "debug_agent",
             prompt: mission_prompt(parents, debug_log),
             system_prompt: %{prefix: system_prompt()},
+            output: :text,
             builtin_tools: [:grep],
             max_turns: 5,
             timeout: 15_000,
@@ -47,38 +48,10 @@ defmodule Alma.DebugAgent do
 
         case SubAgent.run(agent, llm: llm, context: %{"debug_log" => debug_log}) do
           {:ok, step} ->
-            result = ensure_string(step.return)
-
-            # Fallback: LLMs sometimes write the `## Analysis` outside the (return ...) block.
-            # If the result is a placeholder, check if the raw response contains the analysis.
-            raw = Map.get(step, :raw_response) || ""
-            has_markdown? = String.contains?(raw, "## Analysis")
-
-            cond do
-              not placeholder?(result) ->
-                {:ok, result}
-
-              has_markdown? ->
-                # Extract everything from "## Analysis" onwards
-                {start, _len} = :binary.match(raw, "## Analysis")
-                {:ok, String.slice(raw, start..-1)}
-
-              step.prints != [] ->
-                {:ok, Enum.join(step.prints, "\n")}
-
-              true ->
-                {:ok, result}
-            end
+            {:ok, step.return || ""}
 
           {:error, reason} ->
-            # Even on error, the LLM might have written the analysis outside the code block before failing
-            raw = Map.get(reason, :raw_response) || ""
-            if String.contains?(raw, "## Analysis") do
-              {start, _len} = :binary.match(raw, "## Analysis")
-              {:ok, String.slice(raw, start..-1)}
-            else
-              {:error, reason}
-            end
+            {:error, reason}
         end
       end
     end
@@ -87,14 +60,8 @@ defmodule Alma.DebugAgent do
   defp system_prompt do
     """
     You are a memory design debugger. You have access to runtime logs from \
-    memory design evaluations. Use `grep` and `grep-n` on `data/debug_log` \
+    memory design evaluations. Use the grep tools on `data/debug_log` \
     to search for patterns in the logs and produce evidence-based analysis.
-
-    Tool tips:
-    - `grep-n` returns `[{:line N :text "..." :match true/false}]`
-    - Use the `context` param to see surrounding lines: \
-    `(tool/grep-n {"pattern" "ERROR" "text" data/debug_log "context" 2})` \
-    shows 2 lines before/after each match, with `:match false` for context lines.
 
     Useful grep patterns:
     - `"TOOL find-similar.*\\[\\]"` — recall queries that returned empty results
@@ -106,12 +73,7 @@ defmodule Alma.DebugAgent do
     - `"TOOL graph-update"` — what graph edges were added
     - `"TOOL graph-path.*nil"` — path queries that found no route
 
-    CRITICAL: Your `(return ...)` call is the ONLY output that gets used. \
-    Do NOT print your analysis — put the ENTIRE analysis text inside \
-    `(return "...")`. Nothing printed via println reaches the meta-agent. \
-    Build the full analysis string and pass it to return.
-
-    Structure the returned string in two sections:
+    Your final message is the output that gets used. Structure it in two sections:
 
     ## Analysis
     Cite specific evidence from the logs. Quote relevant log lines you found \
@@ -128,11 +90,6 @@ defmodule Alma.DebugAgent do
     specific weaknesses you found in the logs.
 
     Keep your analysis under 400 words.
-
-    Example return:
-    ```
-    (return "## Analysis\\nRecall returned empty advice in 3/4 episodes...\\n\\n## Mandatory Constraints\\n1. mem-update MUST call store-obs...")
-    ```
     """
   end
 
@@ -159,25 +116,7 @@ defmodule Alma.DebugAgent do
     4. Graph — is the spatial graph being built and queried?
     5. Debug output — any println clues about what's happening?
 
-    Use grep to search the debug log, then return your analysis.
+    Search the debug log using the grep tools, then provide your analysis.
     """
   end
-
-  # Detect placeholder returns where the LLM didn't put real content in (return ...)
-  defp placeholder?(text) do
-    text == "" or
-      String.contains?(String.downcase(text), [
-        "see output above",
-        "see above",
-        "analysis complete",
-        "see the analysis",
-        "analysis provided"
-      ])
-  end
-
-  defp ensure_string(value) when is_binary(value), do: value
-  defp ensure_string(nil), do: ""
-  defp ensure_string(value) when is_map(value), do: Jason.encode!(value)
-  defp ensure_string(value) when is_list(value), do: Jason.encode!(value)
-  defp ensure_string(value), do: to_string(value)
 end

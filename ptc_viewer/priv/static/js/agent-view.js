@@ -563,6 +563,7 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
     : events.find(e => e.event === 'run.start' &&
       (!e.metadata?.parent_span_id || !allSpanIds.has(e.metadata.parent_span_id)));
   const rootSpanId = rootRun?.span_id;
+  const agentOutputMode = rootRun?.metadata?.agent?.output || null;
 
   // Filter to only root agent's LLM calls (parent_span_id matches root span)
   const llmPairs = paired.filter(p => p.type === 'llm' &&
@@ -668,7 +669,8 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
       firstToolName: firstRegularToolName,
       agentSig: rootAgent?.signature || null,
       agentToolNames: rootAgent ? Object.keys(rootAgent.tools || {}) : null,
-      agentMaxTurns: rootAgent?.max_turns ?? null
+      agentMaxTurns: rootAgent?.max_turns ?? null,
+      agentOutput: agentOutputMode
     };
   });
 }
@@ -767,11 +769,17 @@ function renderTurnDetail(container, turn, state, data) {
     </div>`;
   }
 
-  // Program with syntax highlighting
+  // Program with syntax highlighting (PTC-Lisp mode)
   if (turn.program) {
     html += `<div class="turn-section">
       <div class="section-title">Program ${turn.tokens ? `<span class="meta">${formatTokenBreakdown(turn.tokens)}</span>` : ''}</div>
       <div class="code-block">${highlightLisp(turn.program)}</div>
+    </div>`;
+  } else if (turn.rawResponse && turn.agentOutput === 'text') {
+    // Text mode agents: raw response is the normal output, not a parse failure
+    html += `<div class="turn-section">
+      <div class="section-title">Response ${turn.tokens ? `<span class="meta">${formatTokenBreakdown(turn.tokens)}</span>` : ''}</div>
+      <div class="code-block">${escapeHtml(turn.rawResponse)}</div>
     </div>`;
   } else if (turn.rawResponse) {
     html += `<div class="turn-section">

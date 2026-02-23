@@ -137,20 +137,38 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   defp summarize_value(v), do: v
 
   # Result summarizer to avoid memory bloat in telemetry metadata
+  @result_max_bytes 2000
+
   defp summarize_result(result) when is_list(result) do
-    "List(#{length(result)})"
+    inspected = inspect(result, limit: 5, printable_limit: 500)
+
+    if byte_size(inspected) > @result_max_bytes do
+      String.slice(inspected, 0, @result_max_bytes) <> "... (#{length(result)} items)"
+    else
+      inspected
+    end
   end
 
   defp summarize_result(result) when is_map(result) do
-    "Map(#{map_size(result)})"
+    inspected = inspect(result, limit: 10, printable_limit: 500)
+
+    if byte_size(inspected) > @result_max_bytes do
+      String.slice(inspected, 0, @result_max_bytes) <> "... (#{map_size(result)} keys)"
+    else
+      inspected
+    end
   end
 
   defp summarize_result(result) when is_binary(result) do
-    "String(#{byte_size(result)} bytes)"
+    if byte_size(result) > @result_max_bytes do
+      String.slice(result, 0, @result_max_bytes) <> "... (#{byte_size(result)} bytes)"
+    else
+      result
+    end
   end
 
   defp summarize_result(result) do
-    inspect(result, limit: 3, printable_limit: 100)
+    inspect(result, limit: 5, printable_limit: 500)
   end
 
   @doc """
