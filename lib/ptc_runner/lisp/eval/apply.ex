@@ -126,7 +126,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
     try do
-      {:ok, apply(fun, converted_args), eval_ctx}
+      push_side_effect_stash()
+      result = apply(fun, converted_args)
+      {:ok, result, pop_side_effects(eval_ctx)}
     rescue
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
@@ -248,7 +250,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        when is_function(fun, 1) do
     # Convert any closures/builtins in args to callable functions
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
-    {:ok, fun.(converted_args), eval_ctx}
+    push_side_effect_stash()
+    result = fun.(converted_args)
+    {:ok, result, pop_side_effects(eval_ctx)}
   end
 
   # Multi-arity builtins: select function based on argument count
@@ -267,7 +271,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       fun = elem(funs, idx)
 
       try do
-        {:ok, apply(fun, converted_args), eval_ctx}
+        push_side_effect_stash()
+        result = apply(fun, converted_args)
+        {:ok, result, pop_side_effects(eval_ctx)}
       rescue
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
@@ -287,7 +293,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, _do_eval_fn)
        when is_function(fun) do
-    {:ok, apply(fun, args), eval_ctx}
+    push_side_effect_stash()
+    result = apply(fun, args)
+    {:ok, result, pop_side_effects(eval_ctx)}
   end
 
   # Map as function: (map key) → Map.get(map, key)
@@ -484,13 +492,24 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   def closure_to_fun({:collect, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
 
   # Special forms like println - convert to a function
-  # Note: println side effects are lost when used in HOFs like map (same as pmap)
   def closure_to_fun({:special, :println}, %EvalContext{}, _do_eval_fn) do
     fn arg ->
-      # Side effect is lost, but at least it doesn't error
-      # User should use doseq pattern instead: (doseq [x coll] (println x))
-      # For now, just return nil like println does
-      _ = arg
+      message =
+        case arg do
+          s when is_binary(s) -> s
+          v -> format_for_println(v)
+        end
+
+      # Stash the print in the process dictionary for HOF side-effect collection
+      case Process.get(:__ptc_hof_stack, []) do
+        [top | rest] ->
+          updated = %{top | prints: [message | top.prints]}
+          Process.put(:__ptc_hof_stack, [updated | rest])
+
+        [] ->
+          :ok
+      end
+
       nil
     end
   end
@@ -586,8 +605,63 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       )
 
     case do_eval_fn.(body, eval_ctx) do
-      {:ok, result, _} -> result
-      {:error, reason} -> raise RuntimeError, Helpers.format_closure_error(reason)
+      {:ok, result, final_ctx} ->
+        # Stash side effects (tool_calls, prints) in process dictionary
+        # so they survive the Erlang HOF boundary (closure_to_fun returns only a value)
+        stash_side_effects(final_ctx)
+        result
+
+      {:error, reason} ->
+        raise RuntimeError, Helpers.format_closure_error(reason)
+    end
+  end
+
+  # Side-effect accumulation via Process dictionary.
+  # When closures run inside Erlang HOFs (Enum.reduce, Enum.map, etc.),
+  # the eval context is lost because the wrapper function can only return a value.
+  # We stash tool_calls and prints in the process dictionary so the HOF caller
+  # can collect them after the HOF completes.
+  #
+  # Uses a stack to handle nested HOFs: each HOF pushes a fresh accumulator,
+  # inner HOFs push/pop their own level, and the outer HOF collects everything.
+
+  defp push_side_effect_stash do
+    stack = Process.get(:__ptc_hof_stack, [])
+    Process.put(:__ptc_hof_stack, [%{tool_calls: [], prints: []} | stack])
+  end
+
+  defp stash_side_effects(%EvalContext{} = ctx) do
+    case Process.get(:__ptc_hof_stack, []) do
+      [top | rest] ->
+        # EvalContext stores tool_calls/prints in prepend order (newest first).
+        # Maintain prepend order in the stash: current invocation's newest first,
+        # then previous invocations'.
+        updated = %{
+          tool_calls: ctx.tool_calls ++ top.tool_calls,
+          prints: ctx.prints ++ top.prints
+        }
+
+        Process.put(:__ptc_hof_stack, [updated | rest])
+
+      [] ->
+        :ok
+    end
+  end
+
+  defp pop_side_effects(%EvalContext{} = eval_ctx) do
+    case Process.get(:__ptc_hof_stack, []) do
+      [top | rest] ->
+        Process.put(:__ptc_hof_stack, rest)
+
+        # Stash is in prepend order (newest first), same as eval_ctx.
+        # Prepend stash before eval_ctx's existing items so the final
+        # Enum.reverse in Lisp.run produces chronological order.
+        eval_ctx
+        |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
+        |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
+
+      [] ->
+        eval_ctx
     end
   end
 

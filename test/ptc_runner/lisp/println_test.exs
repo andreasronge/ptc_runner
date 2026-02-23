@@ -80,7 +80,7 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert step.prints == ["x is 3", "x is 2", "x is 1"]
   end
 
-  test "map println does not error but output is lost (like pmap)" do
+  test "map println captures output from HOF closures" do
     source = """
     (map println [1 2 3])
     """
@@ -88,8 +88,8 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     {:ok, step} = Lisp.run(source)
     # Returns list of nils (println returns nil)
     assert step.return == [nil, nil, nil]
-    # Prints are NOT captured (same as pmap - HOF side effects lost)
-    assert step.prints == []
+    # Prints are captured from HOF closure invocations
+    assert step.prints == ["1", "2", "3"]
   end
 
   test "println output truncated at 2000 characters (TRN-011)" do
