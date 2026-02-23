@@ -28,7 +28,7 @@ MemoryArena finds that RAG-based memory often hurts because compressed/reordered
 
 This is the single highest-priority fix. Two paths:
 
-- **Real embeddings** — swap the n-gram embedder for a real embedding API (OpenAI, Bedrock, or local Bumblebee model). The `VectorStore` interface stays the same; only `embed/1` changes. This would make `find-similar` actually distinguish "key" from "torch".
+- **Real embeddings** — ✅ Done. `LLMClient.embed/2` wires real embedding APIs (OpenAI, Google, Ollama) through `VectorStore`. Use `--embed-model openai:text-embedding-3-small` to enable. VectorStore now accepts pre-computed dense vectors; n-gram fallback is preserved when no embed model is configured.
 - **Lean on the graph store** — the graph store works correctly today. Designs that use `graph-path` for spatial navigation and avoid `find-similar` for item lookup would sidestep the embedding quality problem entirely. The evolutionary loop should discover this given enough iterations, but the DebugAgent could accelerate it by flagging low similarity scores as unreliable.
 
 ### Recall format as part of the design space
@@ -113,7 +113,7 @@ Tradeoff: one LLM call per invocation. Wait for evidence that designs need it be
 
 - **Additional archive seeds** — beyond null + spatial, seed with a "cheatsheet" design (uses `tool/summarize` to maintain an evolving advice document) and a "trajectory replay" design (stores full episode summaries, retrieves most similar).
 - **Namespace-as-design consolidation** — store the full namespace as a single source string via `CoreToSource.export_namespace/1` instead of separate `mem_update_source` and `recall_source`. Simplifies persistence and novelty comparison.
-- **Real embeddings** — see "Representation mismatch" in the MemoryArena section. This is the highest-priority infrastructure change.
+- **Real embeddings** — ✅ Done. See `LLMClient.embed/2` and `--embed-model` CLI option.
 
 ## Operational
 
