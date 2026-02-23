@@ -5,12 +5,12 @@ defmodule Alma.DebugAgentTest do
 
   describe "analyze/2" do
     test "returns empty string for empty parents" do
-      assert DebugAgent.analyze([], llm: fn _ -> {:ok, %{content: "test"}} end) == {:ok, ""}
+      assert DebugAgent.analyze([], llm: fn _ -> {:ok, %{content: "test"}} end) == {:ok, "", nil}
     end
 
     test "returns empty string when no llm provided" do
       parents = [%{design: %{name: "test"}, score: 0.5, trajectories: []}]
-      assert DebugAgent.analyze(parents) == {:ok, ""}
+      assert DebugAgent.analyze(parents) == {:ok, "", nil}
     end
 
     test "passes debug_log as context to SubAgent" do
@@ -55,7 +55,7 @@ defmodule Alma.DebugAgentTest do
       end
 
       result = DebugAgent.analyze(parents, llm: mock_llm)
-      assert {:ok, critique} = result
+      assert {:ok, critique, _child_trace_id} = result
       assert is_binary(critique)
     end
   end

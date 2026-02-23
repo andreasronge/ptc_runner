@@ -2,7 +2,7 @@ defmodule Alma.DebugAgent do
   @moduledoc """
   Debug agent that analyzes parent designs using grep over runtime logs.
 
-  Replaces `Alma.Analyst` with a SubAgent that has access to `grep`/`grep-n`
+  Replaces `Alma.Analyst` with a SubAgent that has access to `grep-log`/`grep-n-log`
   builtin tools. Instead of a single-shot LLM call reading source + metrics,
   the debug agent can search through actual runtime data: println output,
   tool call traces, error messages, and return values from mem-update/recall.
@@ -12,19 +12,23 @@ defmodule Alma.DebugAgent do
   """
 
   alias PtcRunner.SubAgent
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.Collector
   alias Alma.DebugLog
 
   @doc """
   Analyzes parent designs by grepping through their runtime logs.
 
-  Returns `{:ok, critique}` or `{:error, reason}`.
+  Returns `{:ok, critique, child_trace_id}` or `{:error, reason}`.
+  When tracing is active, creates a separate child trace file for ptc_viewer drill-in.
   """
-  @spec analyze([map()], keyword()) :: {:ok, String.t()} | {:error, term()}
+  @spec analyze([map()], keyword()) ::
+          {:ok, String.t(), String.t() | nil} | {:error, term()}
   def analyze(parents, opts \\ []) do
     llm = Keyword.get(opts, :llm)
 
     if is_nil(llm) or Enum.empty?(parents) do
-      {:ok, ""}
+      {:ok, "", nil}
     else
       debug_log = DebugLog.format_parents(parents, opts)
 
@@ -32,7 +36,7 @@ defmodule Alma.DebugAgent do
       # that were never evaluated with runtime logging)
       if String.length(debug_log) < 200 or
            not String.contains?(debug_log, ["TOOL ", "PRINT:", "ERROR:", "RETURN:"]) do
-        {:ok, ""}
+        {:ok, "", nil}
       else
         agent =
           SubAgent.new(
@@ -40,27 +44,65 @@ defmodule Alma.DebugAgent do
             prompt: mission_prompt(parents, debug_log),
             system_prompt: %{prefix: system_prompt()},
             output: :text,
-            builtin_tools: [:grep],
+            builtin_tools: [:grep_log],
             max_turns: 5,
             timeout: 15_000,
             max_heap: 6_250_000
           )
 
-        case SubAgent.run(agent, llm: llm, context: %{"debug_log" => debug_log}) do
-          {:ok, step} ->
-            {:ok, step.return || ""}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
+        run_agent(agent, llm, debug_log)
       end
+    end
+  end
+
+  defp run_agent(agent, llm, debug_log) do
+    case TraceLog.current_collector() do
+      nil ->
+        # No tracing — run normally
+        case SubAgent.run(agent, llm: llm, context: %{"debug_log" => debug_log}) do
+          {:ok, step} -> {:ok, step.return || "", nil}
+          {:error, reason} -> {:error, reason}
+        end
+
+      collector ->
+        # Create child trace file for viewer drill-in
+        child_trace_id = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+        trace_dir = collector |> Collector.path() |> Path.dirname()
+        child_path = Path.join(trace_dir, "trace_#{child_trace_id}.jsonl")
+        parent_trace_id = Collector.trace_id(collector)
+
+        child_trace_context = %{
+          trace_id: child_trace_id,
+          parent_span_id: PtcRunner.SubAgent.Telemetry.current_span_id(),
+          depth: 1,
+          trace_dir: trace_dir
+        }
+
+        {:ok, result, _path} =
+          TraceLog.with_trace(
+            fn ->
+              SubAgent.run(agent,
+                llm: llm,
+                context: %{"debug_log" => debug_log},
+                trace_context: child_trace_context
+              )
+            end,
+            path: child_path,
+            trace_id: child_trace_id,
+            meta: %{parent_trace_id: parent_trace_id, depth: 1, tool_name: "debug_agent"}
+          )
+
+        case result do
+          {:ok, step} -> {:ok, step.return || "", child_trace_id}
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
   defp system_prompt do
     """
     You are a memory design debugger. You have access to runtime logs from \
-    memory design evaluations. Use the grep tools on `data/debug_log` \
+    memory design evaluations. Use the `grep-log` and `grep-n-log` tools \
     to search for patterns in the logs and produce evidence-based analysis.
 
     Useful grep patterns:
@@ -107,7 +149,8 @@ defmodule Alma.DebugAgent do
     Analyze these parent memory designs:
     #{parent_summary}
 
-    Debug log available in `data/debug_log` (#{String.length(debug_log)} chars).
+    Debug log available via `grep-log` and `grep-n-log` tools \
+    (#{String.length(debug_log)} chars).
 
     Focus areas:
     1. Recall quality — is the advice specific and useful, or empty/generic?
@@ -116,7 +159,8 @@ defmodule Alma.DebugAgent do
     4. Graph — is the spatial graph being built and queried?
     5. Debug output — any println clues about what's happening?
 
-    Search the debug log using the grep tools, then provide your analysis.
+    Search the debug log using the `grep-log` and `grep-n-log` tools, then \
+    provide your analysis.
     """
   end
 end

@@ -74,10 +74,19 @@ defmodule Alma.Loop do
             %{"generation" => generation, "parent_count" => length(parents)},
             fn ->
               case DebugAgent.analyze(parents, meta_opts) do
-                {:ok, critique} when critique != "" ->
-                  Keyword.put(meta_opts, :analyst_critique, critique)
+                {:ok, critique, child_trace_id} ->
+                  result =
+                    if critique != "",
+                      do: Keyword.put(meta_opts, :analyst_critique, critique),
+                      else: meta_opts
 
-                _ ->
+                  if child_trace_id do
+                    {:__trace_meta__, result, %{child_trace_id: child_trace_id}}
+                  else
+                    result
+                  end
+
+                {:error, _reason} ->
                   meta_opts
               end
             end
