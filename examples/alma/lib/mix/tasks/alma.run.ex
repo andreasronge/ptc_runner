@@ -17,6 +17,8 @@ defmodule Mix.Tasks.Alma.Run do
     * `--no-family` - disable family mode (legacy single-seed behavior)
     * `--model` - LLM model for task execution (default: "bedrock:haiku")
     * `--meta-model` - LLM model for meta agent and analyst (default: same as --model)
+    * `--embed-model` - embedding model for VectorStore similarity (default: "embed" → ollama:nomic-embed-text)
+    * `--no-embed` - disable real embeddings, use n-gram fallback
     * `--no-trace` - disable trace output
     * `--quiet` - disable verbose output
 
@@ -47,6 +49,8 @@ defmodule Mix.Tasks.Alma.Run do
           deploy_seeds: :integer,
           model: :string,
           meta_model: :string,
+          embed_model: :string,
+          no_embed: :boolean,
           no_trace: :boolean,
           quiet: :boolean
         ]
@@ -54,6 +58,14 @@ defmodule Mix.Tasks.Alma.Run do
 
     model = Keyword.get(opts, :model, "bedrock:haiku")
     meta_model = Keyword.get(opts, :meta_model)
+
+    embed_model =
+      cond do
+        Keyword.get(opts, :no_embed, false) -> nil
+        Keyword.has_key?(opts, :embed_model) -> Keyword.get(opts, :embed_model)
+        true -> "embed"
+      end
+
     trace = !Keyword.get(opts, :no_trace, false)
     verbose = !Keyword.get(opts, :quiet, false)
 
@@ -79,10 +91,13 @@ defmodule Mix.Tasks.Alma.Run do
         verbose: verbose,
         trace: trace
       ] ++
-        if(meta_model, do: [meta_llm: LLMClient.callback(meta_model)], else: [])
+        if(meta_model, do: [meta_llm: LLMClient.callback(meta_model)], else: []) ++
+        if(embed_model, do: [embed_model: LLMClient.resolve!(embed_model)], else: [])
 
     Mix.shell().info(
-      "Starting ALMA with #{model}" <> if(meta_model, do: " (meta: #{meta_model})", else: "")
+      "Starting ALMA with #{model}" <>
+        if(meta_model, do: " (meta: #{meta_model})", else: "") <>
+        if(embed_model, do: " (embed: #{embed_model})", else: "")
     )
 
     Mix.shell().info("  iterations: #{alma_opts[:iterations]}")
@@ -91,6 +106,7 @@ defmodule Mix.Tasks.Alma.Run do
     Mix.shell().info("  seed: #{alma_opts[:seed]}")
     Mix.shell().info("  family: #{inspect(alma_opts[:family])}")
     Mix.shell().info("  deploy_seeds: #{deploy_seeds}")
+    Mix.shell().info("  embed_model: #{embed_model || "n-gram"}")
     Mix.shell().info("  trace: #{trace}\n")
 
     case Alma.run(alma_opts) do
