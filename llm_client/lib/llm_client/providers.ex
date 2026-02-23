@@ -618,6 +618,97 @@ defmodule LLMClient.Providers do
     end)
   end
 
+  @doc """
+  Generate embeddings for text input.
+
+  ## Arguments
+    - model: Provider-prefixed model string
+    - input: Text string or list of strings
+    - opts: Options passed to the provider
+
+  ## Returns
+    - `{:ok, [float()]}` for single input
+    - `{:ok, [[float()]]}` for batch input
+    - `{:error, reason}`
+  """
+  @spec embed(String.t(), String.t() | [String.t()], keyword()) ::
+          {:ok, [float()] | [[float()]]} | {:error, term()}
+  def embed(model, input, opts \\ []) do
+    case parse_provider(model) do
+      {:ollama, model_name} ->
+        call_ollama_embed(model_name, input, opts)
+
+      {:openai_compat, base_url, model_name} ->
+        call_openai_compat_embed(base_url, model_name, input, opts)
+
+      {:req_llm, model_id} ->
+        ReqLLM.Embedding.embed(model_id, input, opts)
+    end
+  end
+
+  @doc """
+  Generate embeddings, raising on error.
+  """
+  @spec embed!(String.t(), String.t() | [String.t()], keyword()) :: [float()] | [[float()]]
+  def embed!(model, input, opts \\ []) do
+    case embed(model, input, opts) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "Embedding error: #{inspect(reason)}"
+    end
+  end
+
+  defp call_ollama_embed(model, input, opts) do
+    base_url = Keyword.get(opts, :ollama_base_url, @ollama_base_url)
+    timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+
+    case Req.post("#{base_url}/api/embed",
+           json: %{model: model, input: input},
+           receive_timeout: timeout
+         ) do
+      {:ok, %{status: 200, body: %{"embeddings" => [embedding]}}} when is_binary(input) ->
+        {:ok, embedding}
+
+      {:ok, %{status: 200, body: %{"embeddings" => embeddings}}} ->
+        {:ok, embeddings}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, %{status: status, body: body}}
+
+      {:error, %{reason: :econnrefused}} ->
+        {:error, "Ollama not running at #{base_url}. Start with: ollama serve"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp call_openai_compat_embed(base_url, model, input, opts) do
+    timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+
+    case Req.post("#{base_url}/embeddings",
+           json: %{model: model, input: input},
+           receive_timeout: timeout
+         ) do
+      {:ok, %{status: 200, body: %{"data" => [%{"embedding" => embedding}]}}}
+      when is_binary(input) ->
+        {:ok, embedding}
+
+      {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
+        embeddings =
+          data
+          |> Enum.sort_by(& &1["index"])
+          |> Enum.map(& &1["embedding"])
+
+        {:ok, embeddings}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, %{status: status, body: body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # --- Provider Parsing ---
 
   defp parse_provider("ollama:" <> model_name) do

@@ -116,6 +116,32 @@ defmodule LLMClient do
     LLMClient.Providers.generate_object!(resolved, messages, schema, opts)
   end
 
+  @doc """
+  Generate embeddings for text input.
+
+  Routes to the appropriate provider based on model prefix.
+
+  ## Examples
+
+      {:ok, vector} = LLMClient.embed("openai:text-embedding-3-small", "hello world")
+
+  """
+  def embed(model, input, opts \\ []) do
+    with {:ok, resolved} <- LLMClient.Registry.resolve(model) do
+      LLMClient.Providers.embed(resolved, input, opts)
+    end
+  end
+
+  @doc """
+  Generate embeddings, raising on error.
+  """
+  def embed!(model, input, opts \\ []) do
+    case embed(model, input, opts) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "Embedding error: #{inspect(reason)}"
+    end
+  end
+
   def available?(model) do
     case LLMClient.Registry.resolve(model) do
       {:ok, resolved} -> LLMClient.Providers.available?(resolved)

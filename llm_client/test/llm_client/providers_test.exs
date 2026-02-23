@@ -40,6 +40,29 @@ defmodule LLMClient.ProvidersTest do
     end
   end
 
+  describe "embed/2" do
+    test "returns a list of floats for ollama when available" do
+      case LLMClient.embed("ollama:nomic-embed-text", "hello") do
+        {:ok, embedding} ->
+          assert is_list(embedding)
+          assert Enum.all?(embedding, &is_number/1)
+
+        {:error, _} ->
+          # Ollama not running, that's fine
+          :ok
+      end
+    end
+
+    test "embed! raises on connection error" do
+      # Use a non-existent ollama server to guarantee failure
+      assert_raise RuntimeError, ~r/Embedding error/, fn ->
+        LLMClient.Providers.embed!("ollama:nomic-embed-text", "hello",
+          ollama_base_url: "http://localhost:1"
+        )
+      end
+    end
+  end
+
   describe "call/2" do
     test "routes JSON mode to generate_object and returns structured_output_not_supported for ollama" do
       req = %{

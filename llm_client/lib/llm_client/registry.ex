@@ -105,6 +105,13 @@ defmodule LLMClient.Registry do
         groq: "openai/gpt-oss-120b"
       }
     },
+    # Embedding models
+    "embed" => %{
+      description: "Nomic Embed Text - Local embedding via Ollama (768d)",
+      providers: %{
+        ollama: "nomic-embed-text"
+      }
+    },
     # Local models (Ollama only)
     "deepseek-local" => %{
       description: "DeepSeek Coder 6.7B - Local via Ollama",
@@ -246,10 +253,22 @@ defmodule LLMClient.Registry do
 
     case Map.get(model.providers, provider) do
       nil ->
-        available = model.providers |> Map.keys() |> Enum.join(", ")
+        # If the model has exactly one provider, use it automatically
+        case Map.to_list(model.providers) do
+          [{sole_provider, model_id}] ->
+            req_llm_provider =
+              if sole_provider in [:bedrock, :amazon_bedrock],
+                do: :amazon_bedrock,
+                else: sole_provider
 
-        {:error,
-         "Model '#{alias_name}' is not available on #{provider}. Available providers: #{available}"}
+            {:ok, "#{req_llm_provider}:#{model_id}"}
+
+          _ ->
+            available = model.providers |> Map.keys() |> Enum.join(", ")
+
+            {:error,
+             "Model '#{alias_name}' is not available on #{provider}. Available providers: #{available}"}
+        end
 
       model_id ->
         # Use amazon_bedrock prefix for ReqLLM compatibility
