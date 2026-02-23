@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Alma.Smoke do
   Smoke test to verify an LLM can drive the ALMA task agent.
 
   Runs a single easy GraphWorld episode (3 rooms, object adjacent to start)
-  and reports whether the model can generate valid PTC-Lisp tool calls.
+  and reports whether the model can drive the task agent via native tool calling.
 
   ## Usage
 

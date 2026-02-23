@@ -54,6 +54,24 @@ defmodule LLMClient.Registry do
         anthropic: "claude-sonnet-4-5-20250929"
       }
     },
+    "ministral" => %{
+      description: "Ministral 3 8B - Mistral's fast edge model via Bedrock",
+      providers: %{
+        bedrock: "mistral.ministral-3-8b-instruct"
+      }
+    },
+    "nova-micro" => %{
+      description: "Amazon Nova Micro - Cheapest Bedrock model, text only",
+      providers: %{
+        bedrock: "amazon.nova-micro-v1:0"
+      }
+    },
+    "nova-lite" => %{
+      description: "Amazon Nova Lite - Fast, low-cost multimodal model",
+      providers: %{
+        bedrock: "amazon.nova-lite-v1:0"
+      }
+    },
     "qwen-coder" => %{
       description: "Qwen3 Coder 30B - Code generation via Bedrock",
       providers: %{
@@ -231,7 +249,12 @@ defmodule LLMClient.Registry do
 
             # Direct model ID (e.g., openrouter:anthropic/claude-haiku-4.5)
             provider in @cloud_providers ->
-              {:direct, name}
+              # Normalize bedrock → amazon_bedrock for ReqLLM compatibility
+              if provider in [:bedrock, :amazon_bedrock] do
+                {:direct, "amazon_bedrock:#{model_part}"}
+              else
+                {:direct, name}
+              end
 
             true ->
               {:error, unknown_provider_error(provider_str)}

@@ -23,20 +23,19 @@ defmodule Alma.TaskAgent do
     try do
       tools = make_tools(agent_pid, knowledge)
 
+      goal_text = "Place #{task_config.goal.object} in #{task_config.goal.destination}"
+
       agent =
         SubAgent.new(
           name: "task_agent",
           prompt: task_agent_prompt(),
-          signature: "(goal :string) -> :any",
+          output: :text,
           tools: tools,
           max_turns: 10,
           max_tool_calls: 10,
           timeout: 5000,
-          max_heap: 6_250_000,
-          format_options: [feedback_max_chars: 2048]
+          max_heap: 6_250_000
         )
-
-      goal_text = "Place #{task_config.goal.object} in #{task_config.goal.destination}"
 
       case SubAgent.run(agent,
              llm: llm,
@@ -109,9 +108,10 @@ defmodule Alma.TaskAgent do
 
   defp task_agent_prompt do
     """
-    Navigate connected rooms to complete the goal. Call recall first for advice
-    from past episodes, then act efficiently — combine multiple tool calls per
-    turn when possible (e.g. pick_up then move_to, or look then move_to).
+    Navigate connected rooms to complete the goal: {{goal}}.
+    Call recall first for advice from past episodes, then use the tools
+    efficiently — combine multiple tool calls per turn when possible
+    (e.g. pick_up then move_to, or look then move_to).
     """
   end
 

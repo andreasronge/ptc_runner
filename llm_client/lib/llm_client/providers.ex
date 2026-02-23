@@ -392,6 +392,7 @@ defmodule LLMClient.Providers do
   end
 
   defp call_req_llm(model, messages, opts) do
+    model = maybe_resolve_inference_profile(model)
     timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
     http_opts = Keyword.get(opts, :req_http_options, [])
     cache_enabled = Keyword.get(opts, :cache, false)
@@ -420,6 +421,7 @@ defmodule LLMClient.Providers do
   end
 
   defp call_req_llm_object(model, messages, schema, opts) do
+    model = maybe_resolve_inference_profile(model)
     timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
     http_opts = Keyword.get(opts, :req_http_options, [])
     cache_enabled = Keyword.get(opts, :cache, false)
@@ -447,6 +449,7 @@ defmodule LLMClient.Providers do
   end
 
   defp call_req_llm_with_tools(model, messages, tools, opts) do
+    model = maybe_resolve_inference_profile(model)
     timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
     http_opts = Keyword.get(opts, :req_http_options, [])
     cache_enabled = Keyword.get(opts, :cache, false)
@@ -568,8 +571,62 @@ defmodule LLMClient.Providers do
     opts
   end
 
-  defp bedrock_model?(model) do
+  defp bedrock_model?(model) when is_binary(model) do
     String.starts_with?(model, "amazon_bedrock:") or String.starts_with?(model, "bedrock:")
+  end
+
+  defp bedrock_model?(%{provider: :amazon_bedrock}), do: true
+  defp bedrock_model?(_), do: false
+
+  # Bedrock inference profile support.
+  # Some models (Nova, etc.) require inference profile IDs (e.g., "eu.amazon.nova-micro-v1:0")
+  # instead of base model IDs. LLMDB doesn't know about inference profiles, so we:
+  # 1. Auto-add region prefix for models that need it (based on configured region)
+  # 2. Strip the prefix for LLMDB lookup, set full ID as provider_model_id
+  @bedrock_inference_prefixes ["us.", "eu.", "ap.", "ca.", "global."]
+  @bedrock_inference_required_families ["amazon."]
+
+  defp maybe_resolve_inference_profile("amazon_bedrock:" <> model_id = full) do
+    cond do
+      # Already has a region prefix (e.g., "eu.amazon.nova-micro-v1:0")
+      String.starts_with?(model_id, @bedrock_inference_prefixes) ->
+        [_region, base_id] = String.split(model_id, ".", parts: 2)
+
+        case ReqLLM.model("amazon_bedrock:#{base_id}") do
+          {:ok, model} -> %{model | provider_model_id: model_id}
+          {:error, _} -> full
+        end
+
+      # Needs a region prefix (e.g., "amazon.nova-micro-v1:0" → "eu.amazon.nova-micro-v1:0")
+      Enum.any?(@bedrock_inference_required_families, &String.starts_with?(model_id, &1)) ->
+        region_prefix = bedrock_region_prefix()
+
+        case ReqLLM.model("amazon_bedrock:#{model_id}") do
+          {:ok, model} -> %{model | provider_model_id: "#{region_prefix}.#{model_id}"}
+          {:error, _} -> full
+        end
+
+      true ->
+        full
+    end
+  end
+
+  defp maybe_resolve_inference_profile(model), do: model
+
+  # Map AWS region to Bedrock inference profile prefix
+  defp bedrock_region_prefix do
+    region =
+      System.get_env("AWS_REGION") ||
+        Application.get_env(:llm_client, :bedrock_region) ||
+        @default_bedrock_region
+
+    cond do
+      String.starts_with?(region, "us-") -> "us"
+      String.starts_with?(region, "eu-") -> "eu"
+      String.starts_with?(region, "ap-") -> "ap"
+      String.starts_with?(region, "ca-") -> "ca"
+      true -> "us"
+    end
   end
 
   defp anthropic_model_on_openrouter?(model) do
