@@ -1295,6 +1295,17 @@ input[type="file"] { display: none; }
 .span-tree-node.run .span-tree-label {
   color: var(--accent);
 }
+.span-tree-badge {
+  color: var(--muted);
+  font-size: 10px;
+  background: var(--bg-hover);
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.span-tree-group[open] > summary .span-tree-badge {
+  display: none;
+}
 .span-tree-meta {
   color: var(--muted);
   font-size: 10px;
