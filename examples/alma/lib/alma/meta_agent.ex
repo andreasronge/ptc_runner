@@ -186,12 +186,16 @@ defmodule Alma.MetaAgent do
     - "query" (required, string): the search text
     - "k" (optional, int, default 3): number of results to return
     - "collection" (optional, string): restrict search to one namespace; omit to search all
+    - "contains" (optional, string): pre-filter results to texts containing this exact substring. Use to match specific object names before ranking by similarity.
     Returns: list of maps [{"score" float, "text" string, "metadata" map} ...]
 
     ```clojure
     ;; Search within a specific collection
     (tool/find-similar {"query" "where is the target?" "k" 5 "collection" "facts"})
     ;; → [{"score" 0.85 "text" "observed X at location Y" "metadata" {"type" "observation"}} ...]
+
+    ;; Search with contains pre-filter — only entries mentioning "horn" are considered
+    (tool/find-similar {"query" "horn location" "k" 3 "contains" "horn"})
 
     ;; Search across all collections
     (tool/find-similar {"query" "how to reach destination" "k" 3})
@@ -201,7 +205,9 @@ defmodule Alma.MetaAgent do
     - In `mem-update`: store observations from `data/observation_log` regardless
       of success/failure — failed episodes still contain useful data.
     - In `recall`: query with the current goal or task description to retrieve
-      relevant past experiences.
+      relevant past experiences. When looking for a specific object, always use
+      `"contains"` with the object name to avoid false matches from semantically
+      similar but unrelated entries.
     - Use collections to separate different types of knowledge.
     </vector_store_tools>
 
