@@ -69,9 +69,27 @@ defmodule Alma.VectorStoreTest do
   describe "store and find_similar with sparse vectors" do
     test "stores and retrieves entries" do
       store = VectorStore.new()
-      {1, store} = VectorStore.store(store, "the cat sat on the mat", VectorStore.embed("the cat sat on the mat"))
-      {2, store} = VectorStore.store(store, "the dog sat on the log", VectorStore.embed("the dog sat on the log"))
-      {3, store} = VectorStore.store(store, "quantum physics lecture notes", VectorStore.embed("quantum physics lecture notes"))
+
+      {1, store} =
+        VectorStore.store(
+          store,
+          "the cat sat on the mat",
+          VectorStore.embed("the cat sat on the mat")
+        )
+
+      {2, store} =
+        VectorStore.store(
+          store,
+          "the dog sat on the log",
+          VectorStore.embed("the dog sat on the log")
+        )
+
+      {3, store} =
+        VectorStore.store(
+          store,
+          "quantum physics lecture notes",
+          VectorStore.embed("quantum physics lecture notes")
+        )
 
       results = VectorStore.find_similar(store, VectorStore.embed("the cat sat on the mat"), 2)
 
@@ -81,11 +99,26 @@ defmodule Alma.VectorStoreTest do
 
     test "top-k ranking — most similar first" do
       store = VectorStore.new()
-      {_, store} = VectorStore.store(store, "apple pie recipe", VectorStore.embed("apple pie recipe"))
-      {_, store} = VectorStore.store(store, "apple crumble recipe", VectorStore.embed("apple crumble recipe"))
-      {_, store} = VectorStore.store(store, "quantum mechanics textbook", VectorStore.embed("quantum mechanics textbook"))
 
-      [first, second | _] = VectorStore.find_similar(store, VectorStore.embed("apple pie recipe"), 3)
+      {_, store} =
+        VectorStore.store(store, "apple pie recipe", VectorStore.embed("apple pie recipe"))
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "apple crumble recipe",
+          VectorStore.embed("apple crumble recipe")
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "quantum mechanics textbook",
+          VectorStore.embed("quantum mechanics textbook")
+        )
+
+      [first, second | _] =
+        VectorStore.find_similar(store, VectorStore.embed("apple pie recipe"), 3)
 
       assert first["score"] >= second["score"]
       assert first["text"] == "apple pie recipe"
@@ -131,14 +164,39 @@ defmodule Alma.VectorStoreTest do
   describe "collection namespacing" do
     test "store/5 tags entries with collection" do
       store = VectorStore.new()
-      {1, store} = VectorStore.store(store, "spatial data", VectorStore.embed("spatial data"), %{}, "spatial")
+
+      {1, store} =
+        VectorStore.store(
+          store,
+          "spatial data",
+          VectorStore.embed("spatial data"),
+          %{},
+          "spatial"
+        )
+
       assert store.entries[1].collection == "spatial"
     end
 
     test "find_similar with collection only returns matching entries" do
       store = VectorStore.new()
-      {_, store} = VectorStore.store(store, "the cat in the kitchen", VectorStore.embed("the cat in the kitchen"), %{}, "spatial")
-      {_, store} = VectorStore.store(store, "the cat likes tuna", VectorStore.embed("the cat likes tuna"), %{}, "strategy")
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "the cat in the kitchen",
+          VectorStore.embed("the cat in the kitchen"),
+          %{},
+          "spatial"
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "the cat likes tuna",
+          VectorStore.embed("the cat likes tuna"),
+          %{},
+          "strategy"
+        )
 
       results = VectorStore.find_similar(store, VectorStore.embed("cat"), 10, "spatial")
       assert length(results) == 1
@@ -147,8 +205,24 @@ defmodule Alma.VectorStoreTest do
 
     test "find_similar without collection returns from all collections" do
       store = VectorStore.new()
-      {_, store} = VectorStore.store(store, "observation about rooms", VectorStore.embed("observation about rooms"), %{}, "spatial")
-      {_, store} = VectorStore.store(store, "observation about strategy", VectorStore.embed("observation about strategy"), %{}, "strategy")
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "observation about rooms",
+          VectorStore.embed("observation about rooms"),
+          %{},
+          "spatial"
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "observation about strategy",
+          VectorStore.embed("observation about strategy"),
+          %{},
+          "strategy"
+        )
 
       results = VectorStore.find_similar(store, VectorStore.embed("observation"), 10)
       assert length(results) == 2
@@ -156,13 +230,149 @@ defmodule Alma.VectorStoreTest do
 
     test "different collections don't interfere with each other's rankings" do
       store = VectorStore.new()
-      {_, store} = VectorStore.store(store, "apple pie recipe", VectorStore.embed("apple pie recipe"), %{}, "food")
-      {_, store} = VectorStore.store(store, "apple crumble recipe", VectorStore.embed("apple crumble recipe"), %{}, "food")
-      {_, store} = VectorStore.store(store, "apple computer history", VectorStore.embed("apple computer history"), %{}, "tech")
 
-      food_results = VectorStore.find_similar(store, VectorStore.embed("apple pie recipe"), 10, "food")
+      {_, store} =
+        VectorStore.store(
+          store,
+          "apple pie recipe",
+          VectorStore.embed("apple pie recipe"),
+          %{},
+          "food"
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "apple crumble recipe",
+          VectorStore.embed("apple crumble recipe"),
+          %{},
+          "food"
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "apple computer history",
+          VectorStore.embed("apple computer history"),
+          %{},
+          "tech"
+        )
+
+      food_results =
+        VectorStore.find_similar(store, VectorStore.embed("apple pie recipe"), 10, "food")
+
       assert length(food_results) == 2
       assert Enum.all?(food_results, &String.contains?(&1["text"], "recipe"))
+    end
+  end
+
+  describe "contains pre-filter" do
+    test "find_similar with contains returns only matching entries" do
+      store = VectorStore.new()
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "horn found in room_A",
+          VectorStore.embed("horn found in room_A")
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "coin found in room_B",
+          VectorStore.embed("coin found in room_B")
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "horn found in room_C",
+          VectorStore.embed("horn found in room_C")
+        )
+
+      results =
+        VectorStore.find_similar(store, VectorStore.embed("horn location"), 10, nil, "horn")
+
+      assert length(results) == 2
+      assert Enum.all?(results, &String.contains?(&1["text"], "horn"))
+    end
+
+    test "contains composes with collection filter" do
+      store = VectorStore.new()
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "horn found in room_A",
+          VectorStore.embed("horn found in room_A"),
+          %{},
+          "spatial"
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "horn is shiny",
+          VectorStore.embed("horn is shiny"),
+          %{},
+          "facts"
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "coin found in room_B",
+          VectorStore.embed("coin found in room_B"),
+          %{},
+          "spatial"
+        )
+
+      results = VectorStore.find_similar(store, VectorStore.embed("horn"), 10, "spatial", "horn")
+      assert length(results) == 1
+      assert hd(results)["text"] == "horn found in room_A"
+    end
+
+    test "contains with no matches returns empty list" do
+      store = VectorStore.new()
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "coin found in room_A",
+          VectorStore.embed("coin found in room_A")
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "sword found in room_B",
+          VectorStore.embed("sword found in room_B")
+        )
+
+      results = VectorStore.find_similar(store, VectorStore.embed("horn"), 10, nil, "horn")
+      assert results == []
+    end
+
+    test "nil contains returns all entries (no filtering)" do
+      store = VectorStore.new()
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "horn found in room_A",
+          VectorStore.embed("horn found in room_A")
+        )
+
+      {_, store} =
+        VectorStore.store(
+          store,
+          "coin found in room_B",
+          VectorStore.embed("coin found in room_B")
+        )
+
+      results = VectorStore.find_similar(store, VectorStore.embed("found"), 10, nil, nil)
+      assert length(results) == 2
     end
   end
 end

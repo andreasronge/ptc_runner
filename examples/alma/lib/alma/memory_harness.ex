@@ -402,12 +402,13 @@ defmodule Alma.MemoryHarness do
            query = Map.fetch!(args, "query")
            k = Map.get(args, "k", 3)
            collection = Map.get(args, "collection")
+           contains = Map.get(args, "contains")
 
            {embed_us, query_vector} = :timer.tc(fn -> embed_fn.(query) end)
 
            results =
              Agent.get(vs_agent, fn vs ->
-               VectorStore.find_similar(vs, query_vector, k, collection)
+               VectorStore.find_similar(vs, query_vector, k, collection, contains)
              end)
 
            scores = Enum.map(results, & &1["score"])
@@ -425,7 +426,7 @@ defmodule Alma.MemoryHarness do
            end)
 
            results
-         end, "(query :string, k :int, collection :string) -> [:map]"},
+         end, "(query :string, k :int, collection :string, contains :string) -> [:map]"},
       "graph-neighbors" =>
         {fn args ->
            node = Map.fetch!(args, "node")

@@ -31,10 +31,11 @@ defmodule Alma.VectorStore do
   Returns a list of maps: `[%{"score" => float, "text" => string, "metadata" => map}]`,
   sorted by descending similarity score.
   """
-  def find_similar(store, query_vector, k \\ 3, collection \\ nil) do
+  def find_similar(store, query_vector, k \\ 3, collection \\ nil, contains \\ nil) do
     store.entries
     |> Enum.filter(fn {_id, entry} ->
-      is_nil(collection) or Map.get(entry, :collection) == collection
+      (is_nil(collection) or Map.get(entry, :collection) == collection) and
+        (is_nil(contains) or String.contains?(entry.text, contains))
     end)
     |> Enum.map(fn {_id, entry} ->
       score = cosine_similarity(query_vector, entry.vector)
