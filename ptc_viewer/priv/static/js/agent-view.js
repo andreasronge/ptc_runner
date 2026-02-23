@@ -420,7 +420,30 @@ function renderSpanTree(events, selectedRunSpanId) {
     return { name, resultSummary, resultFull, argsFull };
   }
 
+  // Check if a subtree contains a specific span ID (for auto-expanding selected run's group)
+  function containsSpanId(spanNode, targetId) {
+    if (!targetId) return false;
+    if (spanNode.id === targetId) return true;
+    return spanNode.children.some(c => containsSpanId(c, targetId));
+  }
+
+  // Count visible runs and tools in a subtree (for count badges on collapsed groups)
+  function countDescendants(spanNode) {
+    let runs = 0, tools = 0;
+    for (const child of spanNode.children) {
+      const isRun = child.events.some(e => e.event === 'run.start');
+      const isTool = child.events.some(e => e.event === 'tool.start');
+      if (isRun) runs++;
+      else if (isTool) tools++;
+      const sub = countDescendants(child);
+      runs += sub.runs;
+      tools += sub.tools;
+    }
+    return { runs, tools };
+  }
+
   let runCounter = 0;
+  let groupCounter = 0;
 
   function renderNode(spanNode, depth) {
     const isRun = spanNode.events.some(e => e.event === 'run.start');
@@ -464,10 +487,20 @@ function renderSpanTree(events, selectedRunSpanId) {
       // If this tool span has child runs, render as a group header
       const hasChildRuns = spanNode.children.some(c => c.events.some(e => e.event === 'run.start'));
       if (hasChildRuns) {
-        html += `<details class="span-tree-group" open>
+        groupCounter++;
+        const isFirstGroup = groupCounter === 1;
+        const containsSelected = containsSpanId(spanNode, selectedRunSpanId);
+        const shouldOpen = isFirstGroup || containsSelected;
+        const counts = countDescendants(spanNode);
+        const badgeParts = [];
+        if (counts.runs > 0) badgeParts.push(`${counts.runs} run${counts.runs !== 1 ? 's' : ''}`);
+        if (counts.tools > 0) badgeParts.push(`${counts.tools} tool${counts.tools !== 1 ? 's' : ''}`);
+        const badge = badgeParts.length ? badgeParts.join(', ') : '';
+        html += `<details class="span-tree-group"${shouldOpen ? ' open' : ''}>
           <summary class="span-tree-node tool-group" style="padding-left: ${depth * 16}px">
             <span class="span-tree-toggle">&#9656;</span>
             <span class="span-tree-label">${escapeHtml(name)}</span>
+            ${badge ? `<span class="span-tree-badge">${badge}</span>` : ''}
             <span class="span-tree-meta">${formatDuration(duration)}</span>
           </summary>`;
         for (const child of spanNode.children) {
