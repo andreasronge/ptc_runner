@@ -2,10 +2,10 @@ defmodule Alma.DebugAgent do
   @moduledoc """
   Debug agent that analyzes parent designs using grep over runtime logs.
 
-  Replaces `Alma.Analyst` with a SubAgent that has access to `grep-log`/`grep-n-log`
-  builtin tools. Instead of a single-shot LLM call reading source + metrics,
-  the debug agent can search through actual runtime data: println output,
-  tool call traces, error messages, and return values from mem-update/recall.
+  Runs as a PTC-Lisp SubAgent with `grep`/`grep-n` builtin tools. The debug
+  log is passed as context (`data/debug_log`) and the agent greps over it to
+  search through actual runtime data (println output, tool call traces, error
+  messages, return values) and returns a structured critique via `(return ...)`.
 
   The agent produces the same output format as the Analyst (`## Analysis` +
   `## Mandatory Constraints`) for compatibility with `MetaAgent`.
@@ -43,8 +43,7 @@ defmodule Alma.DebugAgent do
             name: "debug_agent",
             prompt: mission_prompt(parents, debug_log),
             system_prompt: %{prefix: system_prompt()},
-            output: :text,
-            builtin_tools: [:grep_log],
+            builtin_tools: [:grep],
             max_turns: 5,
             timeout: 15_000,
             max_heap: 6_250_000
@@ -102,8 +101,11 @@ defmodule Alma.DebugAgent do
   defp system_prompt do
     """
     You are a memory design debugger. You have access to runtime logs from \
-    memory design evaluations. Use the `grep-log` and `grep-n-log` tools \
-    to search for patterns in the logs and produce evidence-based analysis.
+    memory design evaluations. The debug log is in `data/debug_log`. Use the \
+    `grep` and `grep-n` tools to search for patterns in it.
+
+    Example: `(tool/grep {:pattern "ERROR:" :text data/debug_log})`
+    Example: `(tool/grep-n {:pattern "FAILED" :text data/debug_log :context 2})`
 
     Useful grep patterns:
     - `"TOOL find-similar.*\\[\\]"` — recall queries that returned empty results
@@ -131,7 +133,8 @@ defmodule Alma.DebugAgent do
     MUST satisfy. These are hard requirements, not suggestions. Address the \
     specific weaknesses you found in the logs.
 
-    Keep your analysis under 400 words.
+    Keep your analysis under 400 words. Return the full analysis text \
+    via `(return "your analysis...")`.
     """
   end
 
@@ -149,8 +152,8 @@ defmodule Alma.DebugAgent do
     Analyze these parent memory designs:
     #{parent_summary}
 
-    Debug log available via `grep-log` and `grep-n-log` tools \
-    (#{String.length(debug_log)} chars).
+    Debug log is in `data/debug_log` (#{String.length(debug_log)} chars). \
+    Search it with `(tool/grep {:pattern "..." :text data/debug_log})`.
 
     Focus areas:
     1. Recall quality — is the advice specific and useful, or empty/generic?
@@ -159,8 +162,8 @@ defmodule Alma.DebugAgent do
     4. Graph — is the spatial graph being built and queried?
     5. Debug output — any println clues about what's happening?
 
-    Search the debug log using the `grep-log` and `grep-n-log` tools, then \
-    provide your analysis.
+    Search the debug log using grep, then return your analysis via \
+    `(return "...")`.
     """
   end
 end

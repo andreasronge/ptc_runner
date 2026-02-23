@@ -163,7 +163,8 @@ defmodule Alma.DebugLog do
     task_error =
       case Map.get(result, :error) do
         nil -> []
-        err -> ["[task] ERROR: #{truncate(to_string(err), max_result_chars)}"]
+        err when is_binary(err) -> ["[task] ERROR: #{truncate(err, max_result_chars)}"]
+        err -> ["[task] ERROR: #{truncate(inspect(err), max_result_chars)}"]
       end
 
     log_lines =
