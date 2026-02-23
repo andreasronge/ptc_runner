@@ -16,8 +16,14 @@ defmodule Alma.Trace do
   """
   def span(name, metadata \\ %{}, fun) when is_function(fun, 0) do
     Telemetry.span([:tool], %{tool_name: name, args: metadata}, fn ->
-      result = fun.()
-      {result, %{tool_name: name, result: summarize(result)}}
+      case fun.() do
+        {:__trace_meta__, result, %{} = extra_meta} ->
+          stop = Map.merge(%{tool_name: name, result: summarize(result)}, extra_meta)
+          {result, stop}
+
+        result ->
+          {result, %{tool_name: name, result: summarize(result)}}
+      end
     end)
   end
 
