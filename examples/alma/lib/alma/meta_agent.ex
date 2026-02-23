@@ -142,6 +142,10 @@ defmodule Alma.MetaAgent do
 
     Use `let` for local variables within a function. Do NOT use `defonce` or
     `def` to build persistent state — use the provided tool stores instead.
+    You MAY use `def` to define shared constants (e.g. collection names) at
+    the top level before your functions, so both `mem-update` and `recall`
+    reference the same values:
+    `(def obs-col "observations")` then use `obs-col` in both functions.
 
     Guard against empty data: `data/observation_log` may be `[]` if the agent
     failed immediately. Always guard:
@@ -209,6 +213,13 @@ defmodule Alma.MetaAgent do
       `"contains"` with the object name to avoid false matches from semantically
       similar but unrelated entries.
     - Use collections to separate different types of knowledge.
+    - Safest default: omit `"collection"` in `tool/find-similar` to search
+      globally across all stored knowledge. Only filter by collection when you
+      are certain the exact collection name matches what `tool/store-obs` used.
+    - CRITICAL: If you use collection names, the exact string in `tool/store-obs`
+      MUST match the string queried in `tool/find-similar`. Storing to "strategy"
+      and querying "locations" will retrieve nothing. Use `def` to define shared
+      collection name constants to prevent this mismatch.
     </vector_store_tools>
 
     <graph_tools>
@@ -302,15 +313,18 @@ defmodule Alma.MetaAgent do
     Define your functions and return metadata in a single program:
 
     ```clojure
+    ;; Define shared constants so both functions use the same collection names
+    (def obs-col "observations")
+
     (defn mem-update []
       ;; Extract facts from data/observation_log, data/task, data/actions
-      ;; Store observations with tool/store-obs
+      ;; Store observations with tool/store-obs using obs-col
       ;; Build spatial graph with tool/graph-update
       ...)
 
     (defn recall []
       ;; Query stored knowledge using data/task for context
-      ;; Use tool/find-similar and/or tool/graph-path
+      ;; Use tool/find-similar with obs-col, and/or tool/graph-path
       ;; Return specific advice — not generic text
       ...)
 
