@@ -19,7 +19,16 @@ defmodule Alma.MemoryHarnessTest do
       design = MemoryHarness.null_design()
 
       assert MemoryHarness.retrieve(design, %{}, %{}) ==
-               {"", nil, %{phase: :recall, prints: [], tool_calls: [], return: nil, error: nil}}
+               {"", nil,
+                %{
+                  phase: :recall,
+                  prints: [],
+                  tool_calls: [],
+                  return: nil,
+                  error: nil,
+                  similarity_stats: [],
+                  embed_mode: nil
+                }}
     end
 
     test "calls recall closure with task context" do
@@ -154,7 +163,15 @@ defmodule Alma.MemoryHarnessTest do
 
       assert MemoryHarness.update(design, episode, original) ==
                {original, nil,
-                %{phase: :"mem-update", prints: [], tool_calls: [], return: nil, error: nil}}
+                %{
+                  phase: :"mem-update",
+                  prints: [],
+                  tool_calls: [],
+                  return: nil,
+                  error: nil,
+                  similarity_stats: [],
+                  embed_mode: nil
+                }}
     end
 
     test "calls mem_update closure and returns updated memory" do

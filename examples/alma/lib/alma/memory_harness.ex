@@ -68,6 +68,8 @@ defmodule Alma.MemoryHarness do
                   else: ctx
               end)
 
+            embed_mode = embed_mode(opts)
+
             case Keyword.get(opts, :store_agents) do
               {vs_agent, gs_agent} ->
                 run_with_shared_agents(
@@ -79,8 +81,8 @@ defmodule Alma.MemoryHarness do
                   opts
                 )
                 |> case do
-                  {:ok, step} ->
-                    {step.return || "", nil, extract_log(step, :recall)}
+                  {:ok, step, sim_stats} ->
+                    {step.return || "", nil, extract_log(step, :recall, sim_stats, embed_mode)}
 
                   {:error, reason} ->
                     {"", "recall failed: #{format_error(reason)}", error_log(reason, :recall)}
@@ -89,8 +91,8 @@ defmodule Alma.MemoryHarness do
               nil ->
                 run_with_tools("(recall)", context, run_memory, memory, opts)
                 |> case do
-                  {:ok, step, _updated_vs, _updated_gs} ->
-                    {step.return || "", nil, extract_log(step, :recall)}
+                  {:ok, step, _updated_vs, _updated_gs, sim_stats} ->
+                    {step.return || "", nil, extract_log(step, :recall, sim_stats, embed_mode)}
 
                   {:error, reason} ->
                     {"", "recall failed: #{format_error(reason)}", error_log(reason, :recall)}
@@ -132,16 +134,18 @@ defmodule Alma.MemoryHarness do
               |> Map.merge(strip_stores(memory))
               |> Map.put(:"mem-update", closure)
 
+            embed_mode = embed_mode(opts)
+
             run_with_tools("(mem-update)", context, run_memory, memory, opts)
             |> case do
-              {:ok, step, updated_vs, updated_gs} ->
+              {:ok, step, updated_vs, updated_gs, sim_stats} ->
                 updated =
                   step.memory
                   |> Map.delete(:"mem-update")
                   |> Map.put(@vector_store_key, updated_vs)
                   |> Map.put(@graph_store_key, updated_gs)
 
-                {updated, nil, extract_log(step, :"mem-update")}
+                {updated, nil, extract_log(step, :"mem-update", sim_stats, embed_mode)}
 
               {:error, reason} ->
                 {memory, "mem-update failed: #{format_error(reason)}",
@@ -268,15 +272,16 @@ defmodule Alma.MemoryHarness do
 
   # Runs a Lisp expression with vector store and graph store tools injected.
   # Uses Agents to hold mutable state across tool calls within a single Lisp.run invocation.
-  # Returns {:ok, step, updated_vector_store, updated_graph_store} | {:error, reason}.
+  # Returns {:ok, step, updated_vector_store, updated_graph_store, sim_stats} | {:error, reason}.
   defp run_with_tools(expr, context, run_memory, memory, opts) do
     vs = Map.get(memory, @vector_store_key, VectorStore.new())
     gs = Map.get(memory, @graph_store_key, GraphStore.new())
     {:ok, vs_agent} = Agent.start_link(fn -> vs end)
     {:ok, gs_agent} = Agent.start_link(fn -> gs end)
+    {:ok, stats_agent} = Agent.start_link(fn -> [] end)
 
     try do
-      tools = build_tools(vs_agent, gs_agent, opts)
+      tools = build_tools(vs_agent, gs_agent, stats_agent, opts)
 
       case Lisp.run(expr,
              context: context,
@@ -289,7 +294,8 @@ defmodule Alma.MemoryHarness do
         {:ok, step} ->
           updated_vs = Agent.get(vs_agent, & &1)
           updated_gs = Agent.get(gs_agent, & &1)
-          {:ok, step, updated_vs, updated_gs}
+          sim_stats = Agent.get(stats_agent, & &1) |> Enum.reverse()
+          {:ok, step, updated_vs, updated_gs, sim_stats}
 
         {:error, reason} ->
           {:error, reason}
@@ -297,32 +303,44 @@ defmodule Alma.MemoryHarness do
     after
       Agent.stop(vs_agent)
       Agent.stop(gs_agent)
+      Agent.stop(stats_agent)
     end
   end
 
   # Runs a Lisp expression using shared (pre-existing) store Agents.
   # Used during deployment where stores are frozen and shared across tasks.
-  # Returns {:ok, step} | {:error, reason}.
+  # Returns {:ok, step, sim_stats} | {:error, reason}.
   defp run_with_shared_agents(expr, context, run_memory, vs_agent, gs_agent, opts) do
-    tools = build_read_only_tools(vs_agent, gs_agent, opts)
+    {:ok, stats_agent} = Agent.start_link(fn -> [] end)
 
-    case Lisp.run(expr,
-           context: context,
-           memory: run_memory,
-           tools: tools,
-           filter_context: false,
-           max_heap: 6_250_000,
-           max_tool_calls: 50
-         ) do
-      {:ok, step} -> {:ok, step}
-      {:error, reason} -> {:error, reason}
+    try do
+      tools = build_read_only_tools(vs_agent, gs_agent, stats_agent, opts)
+
+      case Lisp.run(expr,
+             context: context,
+             memory: run_memory,
+             tools: tools,
+             filter_context: false,
+             max_heap: 6_250_000,
+             max_tool_calls: 50
+           ) do
+        {:ok, step} ->
+          sim_stats = Agent.get(stats_agent, & &1) |> Enum.reverse()
+          {:ok, step, sim_stats}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    after
+      Agent.stop(stats_agent)
     end
   end
 
   # Builds the tools map for Lisp.run. Tool closures read/write the vector store
   # and graph store through Agents for mutable state during a single execution.
-  defp build_tools(vs_agent, gs_agent, opts) do
-    read_only = build_read_only_tools(vs_agent, gs_agent, opts)
+  defp build_tools(vs_agent, gs_agent, stats_agent, opts) do
+    embed_fn = build_embed_fn(opts)
+    read_only = build_read_only_tools(vs_agent, gs_agent, stats_agent, opts, embed_fn)
 
     Map.merge(read_only, %{
       "store-obs" =>
@@ -331,8 +349,14 @@ defmodule Alma.MemoryHarness do
            metadata = Map.get(args, "metadata", %{})
            collection = Map.get(args, "collection", "default")
 
+           {embed_us, vector} = :timer.tc(fn -> embed_fn.(text) end)
+
+           Agent.update(stats_agent, fn stats ->
+             [%{op: :store, embed_ms: div(embed_us, 1000)} | stats]
+           end)
+
            Agent.get_and_update(vs_agent, fn vs ->
-             {id, updated} = VectorStore.store(vs, text, metadata, collection)
+             {id, updated} = VectorStore.store(vs, text, vector, metadata, collection)
              {"stored:#{id}", updated}
            end)
          end, "(text :string, metadata :map, collection :string) -> :string"},
@@ -349,9 +373,25 @@ defmodule Alma.MemoryHarness do
     })
   end
 
+  # Returns a function that embeds text using either a real embedding model or n-gram fallback.
+  defp build_embed_fn(opts) do
+    case Keyword.get(opts, :embed_model) do
+      nil -> &VectorStore.embed/1
+      model -> fn text -> LLMClient.embed!(model, text) end
+    end
+  end
+
+  defp embed_mode(opts) do
+    case Keyword.get(opts, :embed_model) do
+      nil -> :ngram
+      _model -> :dense
+    end
+  end
+
   # Builds read-only tools for shared store access during deployment.
   # No store-obs or graph-update — stores are frozen.
-  defp build_read_only_tools(vs_agent, gs_agent, opts) do
+  defp build_read_only_tools(vs_agent, gs_agent, stats_agent, opts, embed_fn \\ nil) do
+    embed_fn = embed_fn || build_embed_fn(opts)
     llm = Keyword.get(opts, :llm)
 
     # Execute queries inside the Agent callback so only the small result
@@ -362,7 +402,29 @@ defmodule Alma.MemoryHarness do
            query = Map.fetch!(args, "query")
            k = Map.get(args, "k", 3)
            collection = Map.get(args, "collection")
-           Agent.get(vs_agent, fn vs -> VectorStore.find_similar(vs, query, k, collection) end)
+
+           {embed_us, query_vector} = :timer.tc(fn -> embed_fn.(query) end)
+
+           results =
+             Agent.get(vs_agent, fn vs ->
+               VectorStore.find_similar(vs, query_vector, k, collection)
+             end)
+
+           scores = Enum.map(results, & &1["score"])
+
+           Agent.update(stats_agent, fn stats ->
+             [
+               %{
+                 op: :find,
+                 query: String.slice(query, 0, 80),
+                 scores: scores,
+                 embed_ms: div(embed_us, 1000)
+               }
+               | stats
+             ]
+           end)
+
+           results
          end, "(query :string, k :int, collection :string) -> [:map]"},
       "graph-neighbors" =>
         {fn args ->
@@ -463,7 +525,7 @@ defmodule Alma.MemoryHarness do
   defp ensure_string(value) when is_list(value), do: Jason.encode!(value)
   defp ensure_string(value), do: to_string(value)
 
-  defp extract_log(step, phase) do
+  defp extract_log(step, phase, similarity_stats \\ [], embed_mode \\ nil) do
     error =
       case step do
         %{fail: %{message: msg}} when is_binary(msg) -> msg
@@ -478,11 +540,22 @@ defmodule Alma.MemoryHarness do
           %{name: tc.name, args: tc.args, result: tc.result}
         end),
       return: step.return,
-      error: error
+      error: error,
+      similarity_stats: similarity_stats,
+      embed_mode: embed_mode
     }
   end
 
-  defp empty_log(phase), do: %{phase: phase, prints: [], tool_calls: [], return: nil, error: nil}
+  defp empty_log(phase),
+    do: %{
+      phase: phase,
+      prints: [],
+      tool_calls: [],
+      return: nil,
+      error: nil,
+      similarity_stats: [],
+      embed_mode: nil
+    }
 
   # Extract partial log from a failed Step (preserves prints/tool_calls up to the crash)
   defp error_log(%PtcRunner.Step{} = step, phase), do: extract_log(step, phase)
