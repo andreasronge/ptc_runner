@@ -198,7 +198,7 @@ design.namespace ──merge──► episodic memory ──put closure──►
 | `tool/graph-neighbors` | `(node :string) -> [:string]` | Get sorted neighbors of a node |
 | `tool/graph-path` | `(from :string, to :string) -> [:string]` | BFS shortest path, or `nil` if disconnected |
 
-The **vector store** (`Alma.VectorStore`) uses character n-gram bag-of-words vectors — deterministic, no API calls, fast enough for GraphWorld-scale text. Collection namespacing lets designs maintain logically separate stores (e.g. `"spatial"` vs `"strategy"`) while still allowing cross-collection search when no collection is specified.
+The **vector store** (`Alma.VectorStore`) supports both dense vectors (from real embedding models via `--embed-model`) and sparse n-gram vectors (default, no API calls needed). When `--embed-model` is set, embedding I/O happens outside the Agent lock for safe concurrent access. Collection namespacing lets designs maintain logically separate stores (e.g. `"spatial"` vs `"strategy"`) while still allowing cross-collection search when no collection is specified.
 
 The **graph store** (`Alma.GraphStore`) provides an in-process undirected adjacency map with BFS pathfinding, equivalent to what the original Python ALMA offloads to NetworkX. Designs can build spatial maps incrementally via `tool/graph-update` and query them for neighbors or shortest paths.
 
@@ -256,6 +256,7 @@ mix alma.run                                    # 5 iterations, 3 episodes, 6 ro
 mix alma.run --iterations 10 --episodes 5       # longer run
 mix alma.run --model bedrock:sonnet             # use a different model
 mix alma.run --meta-model openrouter:openai/gpt-5 --model bedrock:haiku  # strong meta, cheap exec
+mix alma.run --embed-model openai:text-embedding-3-small  # real embeddings for VectorStore
 mix alma.run --rooms 6 --seed 123               # larger world, different seed
 mix alma.run --no-trace                         # disable trace file output
 mix alma.run --quiet                            # suppress per-iteration output
@@ -274,6 +275,8 @@ mix alma.run --quiet                            # suppress per-iteration output
 | `--deploy-seeds` | `3` | Seed offsets for deployment scoring (more = robust) |
 | `--model` | `bedrock:haiku` | LLM model for task execution |
 | `--meta-model` | same as `--model` | LLM model for meta agent and debug agent |
+| `--embed-model` | `embed` (ollama:nomic-embed-text) | Embedding model for VectorStore similarity |
+| `--no-embed` | off | Disable real embeddings, use n-gram fallback |
 | `--no-trace` | off | Disable JSONL trace file output |
 | `--quiet` | off | Suppress verbose iteration output |
 
