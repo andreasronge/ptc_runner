@@ -74,6 +74,7 @@ alias PtcRunner.SubAgent.Debug
 
 # 1. SubAgent tool: generate_joke (actual LLM call)
 joke_agent = SubAgent.new(
+  name: "joke producer",
   prompt: "Generate a short, punchy joke about {{topic}}. Just the joke, nothing else.",
   signature: "(topic :string) -> {joke :string}",
   output: :text,
@@ -101,6 +102,7 @@ check_punchline_tool = {
 
 # 3. SubAgent tool: improve_joke (actual LLM call)
 improve_joke_agent = SubAgent.new(
+  name: "improver",
   prompt: """
   Improve this joke by adding wordplay or a surprising twist: {{joke}}
 
@@ -169,6 +171,7 @@ The compile pattern separates **derivation** (LLM writes logic once) from **exec
 ```elixir
 # First, create a fresh orchestrator agent (must use PTC-Lisp output, which is the default)
 orchestrator_agent = SubAgent.new(
+  name: "orchestrator",
   prompt: """
   Create a joke about {{topic}} using the available tools.
 
