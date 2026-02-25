@@ -131,16 +131,16 @@ Text mode also supports tools. Define tools as arity-1 functions that receive a 
 ```elixir
 defmodule Calculator do
   @doc "Add two numbers"
-  @spec add(%{String.t() => integer()}) :: integer()
+  @spec add(%{a: integer(), b: integer()}) :: integer()
   def add(%{"a" => a, "b" => b}), do: a + b
 
   @doc "Multiply two numbers"
-  @spec multiply(%{String.t() => integer()}) :: integer()
+  @spec multiply(%{a: integer(), b: integer()}) :: integer()
   def multiply(%{"a" => a, "b" => b}), do: a * b
 end
 ```
 
-Pass the functions as tools with explicit signatures — PtcRunner converts them to JSON Schema for the LLM provider's native tool calling API:
+PtcRunner auto-extracts the `@doc` and `@spec` into tool descriptions and JSON Schema for the LLM provider's native tool calling API — just pass bare function references:
 
 ```elixir
 {:ok, step} = SubAgent.run(
@@ -148,15 +148,15 @@ Pass the functions as tools with explicit signatures — PtcRunner converts them
   output: :text,
   signature: "() -> {result :int}",
   tools: %{
-    "add" => {&Calculator.add/1, "(a :int, b :int) -> :int"},
-    "multiply" => {&Calculator.multiply/1, "(a :int, b :int) -> :int"}
+    "add" => &Calculator.add/1,
+    "multiply" => &Calculator.multiply/1
   },
   llm: my_llm
 )
 step.return["result"]  #=> 35
 ```
 
-For arity-1 functions with `@doc` and `@spec`, PtcRunner auto-extracts the description and signature — no manual annotation needed. See the [Text Mode guide](docs/guides/subagent-text-mode.md) for all four variants (plain text, JSON, tool+text, tool+JSON).
+For full control (or anonymous functions), pass an explicit signature string instead. See the [Text Mode guide](docs/guides/subagent-text-mode.md) for all four variants (plain text, JSON, tool+text, tool+JSON).
 
 ### Signatures and JSON Schema
 
