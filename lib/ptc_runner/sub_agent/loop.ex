@@ -155,7 +155,7 @@ defmodule PtcRunner.SubAgent.Loop do
           %{}
         )
 
-      {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}}}
+      {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}, name: agent.name}}
     else
       # Check turn budget before starting
       if remaining_turns <= 0 do
@@ -166,7 +166,7 @@ defmodule PtcRunner.SubAgent.Loop do
             %{}
           )
 
-        {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}}}
+        {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}, name: agent.name}}
       else
         run_opts = %{
           llm: llm,
@@ -222,7 +222,7 @@ defmodule PtcRunner.SubAgent.Loop do
       run_opts.mission_deadline || calculate_mission_deadline(agent.mission_timeout)
 
     # Expand template in mission
-    # JSON mode: embed actual values (no Data section)
+    # Text mode: embed actual values (no Data section)
     # PTC-Lisp mode: use annotations (data is in Data Inventory section)
     expanded_prompt = expand_template(agent.prompt, run_opts.context, agent.output)
 
@@ -293,7 +293,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Tool result cache for tools with cache: true
       tool_cache: run_opts.tool_cache,
       # Accumulated child steps across all turns (for TraceTree)
-      child_steps: []
+      child_steps: [],
+      # Agent name for TraceTree display
+      agent_name: agent.name
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -585,7 +587,8 @@ defmodule PtcRunner.SubAgent.Loop do
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt,
             tools: state.normalized_tools,
-            child_steps: state.child_steps
+            child_steps: state.child_steps,
+            name: state.agent_name
         }
 
         {:stop, {:error, step_with_metrics}, nil, nil}
@@ -993,7 +996,7 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Expand template placeholders
-  # - JSON mode: embed actual values (no Data section, values are in the task)
+  # - Text mode: embed actual values (no Data section, values are in the task)
   # - PTC-Lisp mode: use annotated references (data is in Data Inventory section)
   defp expand_template(prompt, context, output_mode \\ :ptc_lisp) when is_map(context) do
     alias PtcRunner.SubAgent.PromptExpander
@@ -1181,7 +1184,8 @@ defmodule PtcRunner.SubAgent.Loop do
         tools: state.normalized_tools,
         summaries: state.summaries,
         journal: state.journal,
-        child_steps: state.child_steps
+        child_steps: state.child_steps,
+        name: state.agent_name
     }
 
     {:error, step_with_metrics}
@@ -1228,7 +1232,8 @@ defmodule PtcRunner.SubAgent.Loop do
         original_prompt: state.original_prompt,
         tools: state.normalized_tools,
         summaries: Map.merge(state.summaries, lisp_step.summaries),
-        child_steps: all_child_steps
+        child_steps: all_child_steps,
+        name: state.agent_name
     }
 
     {:ok, final_step}

@@ -93,16 +93,23 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   """
   @spec run(SubAgent.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(%SubAgent{} = agent, llm, state) do
-    cond do
-      has_tools?(agent) ->
-        run_tool_variant(agent, llm, state)
+    result =
+      cond do
+        has_tools?(agent) ->
+          run_tool_variant(agent, llm, state)
 
-      SubAgent.text_return?(agent) ->
-        run_text_only(agent, llm, state)
+        SubAgent.text_return?(agent) ->
+          run_text_only(agent, llm, state)
 
-      true ->
-        run_json_only(agent, llm, state)
-    end
+        true ->
+          run_json_only(agent, llm, state)
+      end
+
+    stamp_agent_name(result, state)
+  end
+
+  defp stamp_agent_name({status, step}, state) do
+    {status, %{step | name: state[:agent_name]}}
   end
 
   # ============================================================

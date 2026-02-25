@@ -107,6 +107,12 @@ defmodule PtcRunner.SubAgent.Debug do
     show_usage = Keyword.get(opts, :usage, false)
     system_opt = Keyword.get(opts, :system)
     original_prompt = step.original_prompt
+    agent_name = step.name
+
+    # Print agent name header if available
+    if agent_name do
+      IO.puts("\n#{ansi(:bold)}[#{agent_name}]#{ansi(:reset)}")
+    end
 
     # If system: option is given, show system prompt sections and return
     if system_opt do
@@ -247,7 +253,7 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
     end
 
-    # Print program or JSON mode indicator
+    # Print program or text mode indicator
     print_program_section(turn, raw_mode)
 
     # Print tool calls if any
@@ -277,7 +283,7 @@ defmodule PtcRunner.SubAgent.Debug do
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
   end
 
-  # Print program section (or JSON mode indicator)
+  # Print program section (or text mode indicator)
   defp print_program_section(turn, raw_mode) do
     cond do
       turn.program ->
@@ -291,9 +297,9 @@ defmodule PtcRunner.SubAgent.Debug do
         end)
 
       turn.success? ->
-        # JSON mode - no program, show response format
+        # Text mode - no program, show response format
         IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Response:#{ansi(:reset)}")
-        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(JSON mode)#{ansi(:reset)}")
+        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}(text mode)#{ansi(:reset)}")
 
       true ->
         IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}Program:#{ansi(:reset)}")
@@ -373,8 +379,10 @@ defmodule PtcRunner.SubAgent.Debug do
     turns = get_turn_count(step)
     duration_ms = get_in(step.usage, [:duration_ms]) || 0
 
+    name_label = if step.name, do: " #{ansi(:bold)}#{step.name}#{ansi(:reset)}", else: ""
+
     IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{status} Step #{index}/#{total}")
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{status} Step #{index}/#{total}#{name_label}")
 
     if step.fail do
       reason = step.fail.reason
