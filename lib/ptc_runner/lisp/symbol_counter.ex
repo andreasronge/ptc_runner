@@ -134,6 +134,9 @@ defmodule PtcRunner.Lisp.SymbolCounter do
     Enum.reduce(exprs, acc, fn elem, inner_acc -> collect_symbols(elem, inner_acc) end)
   end
 
+  # Regex literals contain only a string pattern, no new atoms
+  defp collect_symbols({:regex_literal, _}, acc), do: acc
+
   # Literals and strings don't create atoms
   defp collect_symbols({:string, _}, acc), do: acc
   defp collect_symbols(n, acc) when is_number(n), do: acc

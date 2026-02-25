@@ -55,14 +55,45 @@ defmodule PtcRunner.Lisp.RegexIntegrationTest do
     end
   end
 
-  describe "regex literal error message" do
-    test "provides helpful error for #\"...\" syntax" do
-      source = ~S|(clojure.string/split "a b c" #"\s+")|
-      {:error, %{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
+  describe "regex literal #\"...\"" do
+    test "produces a compiled regex" do
+      source = ~S|#"\d+"|
+      {:ok, %{return: result}} = Lisp.run(source)
+      # re-pattern returns an Erlang compiled regex (re_mp tuple)
+      assert {:re_mp, _, _, _} = result
+    end
 
-      assert message =~ "regex literals"
-      assert message =~ "re-split"
-      assert message =~ "split-lines"
+    test "works with re-split" do
+      source = ~S|(re-split #"\s+" "a b c")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "works with re-find" do
+      source = ~S|(re-find #"(\d+)" "abc123")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == ["123", "123"]
+    end
+
+    test "works with re-seq" do
+      source = ~S|(re-seq #"\d+" "a1b2c3")|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == ["1", "2", "3"]
+    end
+
+    test "invalid regex is caught at analysis time" do
+      source = ~S|#"[a-z"|
+      {:error, %{fail: %{reason: :invalid_form, message: message}}} = Lisp.run(source)
+      assert message =~ "invalid regex literal"
+      assert message =~ "missing terminating"
+    end
+
+    test "equivalent to re-pattern call" do
+      source1 = ~S|(re-split #"," "a,b,c")|
+      source2 = ~S|(re-split (re-pattern ",") "a,b,c")|
+      {:ok, %{return: r1}} = Lisp.run(source1)
+      {:ok, %{return: r2}} = Lisp.run(source2)
+      assert r1 == r2
     end
   end
 end

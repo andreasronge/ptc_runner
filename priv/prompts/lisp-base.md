@@ -40,7 +40,7 @@ data/products                      ; read-only input data
 - No chained comparisons — `(<= 1 x 10)` must be `(and (>= x 1) (<= x 10))`
 - No `some` — use `(first (filter pred coll))`
 - `for` — list comprehension with `:when`, `:let`, `:while` modifiers: `(for [x xs :when (odd? x)] (* x 2))`
-- No regex literals (`#"..."`) — use `(re-pattern "...")` with `re-find`/`re-matches`/`re-split`
+- `#"..."` is shorthand for `(re-pattern "...")` — use with `re-find`/`re-matches`/`re-split`
 - `loop/recur` limited to 1000 iterations
 - No atoms/refs — no `(atom ...)`, `@deref`, `swap!`, `reset!`, `doseq` — use `reduce`:
   ```clojure
@@ -48,7 +48,7 @@ data/products                      ; read-only input data
   ;; Right: (reduce (fn [acc x] (assoc acc ...)) {} xs)
   ```
 - No `partial` — use anonymous functions `#(...)`
-- No reader macros — no `#_` (discard), `#'` (var quote), `#""` (regex literal)
+- No reader macros — no `#_` (discard), `#'` (var quote)
 - No `try/catch/throw` — use `fail` for errors
 </restrictions>
 
@@ -83,7 +83,7 @@ String search:
 - `(index-of "hello" "l" 3)` — optional from-index parameter
 
 Regex & Parsing:
-- ✗ `#"pattern"` → ✓ `(re-pattern "pattern")` — no regex literals
+- `#"pattern"` is shorthand for `(re-pattern "pattern")` — both work
 - ✗ `Integer/parseInt` → ✓ `parse-long` or `parse-int` — no Java interop
 - ✗ `(parse-long (second (re-find ...)))` → ✓ `(extract-int "pattern" str)` — simplified extraction
 - ✗ `clojure.string/split` → ✓ `(split s ",")` or `(re-split (re-pattern "\\s+") s)`
