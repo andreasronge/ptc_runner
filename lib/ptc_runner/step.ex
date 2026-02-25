@@ -188,6 +188,7 @@ defmodule PtcRunner.Step do
     :turns,
     :trace_id,
     :parent_trace_id,
+    :name,
     :field_descriptions,
     :prints,
     :tool_calls,
@@ -229,8 +230,8 @@ defmodule PtcRunner.Step do
   - `output_tokens`: Total output tokens (SubAgent only, optional)
   - `total_tokens`: Input + output tokens (SubAgent only, optional)
   - `llm_requests`: Number of LLM API calls (SubAgent only, optional)
-  - `schema_used`: Whether JSON schema was sent to LLM (JSON mode only, optional)
-  - `schema_bytes`: Size of JSON schema in bytes (JSON mode only, optional)
+  - `schema_used`: Whether JSON schema was sent to LLM (text mode only, optional)
+  - `schema_bytes`: Size of JSON schema in bytes (text mode only, optional)
   """
   @type usage :: %{
           required(:duration_ms) => non_neg_integer(),
@@ -386,6 +387,7 @@ defmodule PtcRunner.Step do
         turns: nil,
         trace_id: nil,
         parent_trace_id: nil,
+        name: nil,
         field_descriptions: nil
       }
 

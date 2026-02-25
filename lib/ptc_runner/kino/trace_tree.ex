@@ -238,6 +238,9 @@ if Code.ensure_loaded?(Kino.JS) do
 
     defp extract_name(%PtcRunner.Step{} = step) do
       cond do
+        step.name && step.name != "" ->
+          step.name
+
         step.prompt && String.length(step.prompt) > 0 ->
           step.prompt |> String.slice(0, 40) |> String.trim()
 
