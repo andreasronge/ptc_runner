@@ -184,7 +184,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Regex literals:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values.
 
-**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `pr-str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
 
 **String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
 
@@ -1962,6 +1962,7 @@ The `seq` function converts a collection to a sequence:
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `str` | `(str ...)` | Convert and concatenate to string |
+| `pr-str` | `(pr-str ...)` | Readable string representation (strings quoted, nil as "nil", space-separated) |
 | `subs` | `(subs s start)` | Substring from index to end |
 | `subs` | `(subs s start end)` | Substring from start to end |
 | `split` | `(split s separator)` | Split string by separator |
@@ -2002,6 +2003,10 @@ The `seq` function converts a collection to a sequence:
 - `(str true)` → `"true"` (boolean conversion)
 - `(str :user)` → `":user"` (keyword with colon)
 - `(str nil "x")` → `"x"` (nil coerced to empty string)
+- `(str {:a 1})` → `"{:a 1}"` (collections use Clojure syntax)
+- `(pr-str "hello")` → `"\"hello\""` (string gets quoted)
+- `(pr-str nil)` → `"nil"` (nil as readable literal)
+- `(pr-str 1 "a")` → `"1 \"a\""` (space-separated, strings quoted)
 - `(split "a,b,c" ",")` → `["a" "b" "c"]` (split by separator)
 - `(split "hello" "")` → `["h" "e" "l" "l" "o"]` (split into characters)
 - `(split "a,,b" ",")` → `["a" "" "b"]` (preserves empty elements)
