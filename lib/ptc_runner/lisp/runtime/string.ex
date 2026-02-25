@@ -5,6 +5,8 @@ defmodule PtcRunner.Lisp.Runtime.String do
   Provides string concatenation, substring, join, split, and parsing functions.
   """
 
+  alias PtcRunner.Lisp.Format
+
   @doc """
   Convert zero or more values to string and concatenate.
 
@@ -19,12 +21,33 @@ defmodule PtcRunner.Lisp.Runtime.String do
   """
   def str_variadic(args), do: Enum.map_join(args, &to_str/1)
 
+  @doc """
+  Return a readable string representation of zero or more values, space-separated.
+
+  Like Clojure's `pr-str`, produces output suitable for reading back:
+  - Strings get wrapped in quotes: `(pr-str "hello")` → `"\"hello\""`
+  - nil becomes "nil": `(pr-str nil)` → `"nil"`
+  - Multiple args joined by space: `(pr-str 1 "a")` → `"1 \"a\""`
+  """
+  def pr_str_variadic([]), do: ""
+
+  def pr_str_variadic(args) do
+    Enum.map_join(args, " ", fn val ->
+      Format.to_clojure(val) |> elem(0)
+    end)
+  end
+
   def to_str(nil), do: ""
   def to_str(s) when is_binary(s), do: s
   def to_str(:infinity), do: "Infinity"
   def to_str(:negative_infinity), do: "-Infinity"
   def to_str(:nan), do: "NaN"
   def to_str(atom) when is_atom(atom), do: inspect(atom)
+
+  def to_str(x) when is_map(x) or is_list(x) do
+    Format.to_clojure(x) |> elem(0)
+  end
+
   def to_str(x), do: inspect(x)
 
   @doc """
