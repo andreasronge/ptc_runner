@@ -484,6 +484,16 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
     test "handles nil in collection" do
       assert Runtime.join(", ", [1, nil, 3]) == "1, , 3"
     end
+
+    test "joins set without separator" do
+      result = Runtime.join(MapSet.new(["a"]))
+      assert result == "a"
+    end
+
+    test "joins set with separator" do
+      result = Runtime.join(", ", MapSet.new(["x"]))
+      assert result == "x"
+    end
   end
 
   describe "split" do

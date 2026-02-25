@@ -96,4 +96,38 @@ defmodule PtcRunner.Lisp.RegexIntegrationTest do
       assert r1 == r2
     end
   end
+
+  describe "split accepts regex" do
+    test "split with regex literal" do
+      {:ok, %{return: result}} = Lisp.run(~S|(split "a  b c" #"\s+")|)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "split with re-pattern" do
+      {:ok, %{return: result}} = Lisp.run(~S|(split "a1b2c" (re-pattern "\\d"))|)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "split still works with plain string" do
+      {:ok, %{return: result}} = Lisp.run(~S|(split "a,b,c" ",")|)
+      assert result == ["a", "b", "c"]
+    end
+  end
+
+  describe "replace accepts regex" do
+    test "replace with regex literal" do
+      {:ok, %{return: result}} = Lisp.run(~S|(replace "a  b   c" #"\s+" " ")|)
+      assert result == "a b c"
+    end
+
+    test "replace with re-pattern" do
+      {:ok, %{return: result}} = Lisp.run(~S|(replace "abc123def" (re-pattern "\\d+") "X")|)
+      assert result == "abcXdef"
+    end
+
+    test "replace still works with plain string" do
+      {:ok, %{return: result}} = Lisp.run(~S|(replace "hello" "l" "r")|)
+      assert result == "herro"
+    end
+  end
 end
