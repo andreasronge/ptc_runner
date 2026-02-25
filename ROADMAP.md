@@ -80,28 +80,62 @@ v0.7: Plan & Execute, Tracing, Language ✅
 
   Architecture: Pure library, developer owns persistence
 
-v0.8: State Management
+v0.8: Text Mode, Language & Tooling ✅
+  Unified Text Mode:
+  - Renamed JSON mode to text mode, unifying :json and :tool_calling
+  - Native tool calling mode for smaller LLMs
+  - TextMode module with separate JsonHandler
+  - ToolSchema for tool schema generation
+
+  PTC-Lisp:
+  - defonce special form for idempotent initialization
+  - pr-str function, str fixed for Clojure-conformant collection printing
+  - #"..." regex literal support
+  - CoreToSource for Core AST to PTC-Lisp serialization
+  - MapSet support for some/every?/not-any?/join/split/replace
+  - Preserved tool_calls/prints from HOF closures and loop/recur
+
+  SubAgent:
+  - max_tool_calls limit to prevent runaway tool loops
+  - pmap_max_concurrency config for parallel task limits
+  - SubAgent name propagated to Step for TraceTree/Debug display
+  - Journal/step-done prompt sections gated behind journaling: true
+  - Prompt migration from markdown to XML tags
+
+  LLM Client:
+  - Embedding API (embed/2,3 and embed!/2,3)
+  - Groq provider, Bedrock inference profile support
+  - Migrated to ReqLLM pricing
+
+  Tracing & Viewer:
+  - Plan progress in Debug/TraceTree
+  - ptc_viewer: multi-run span tree, collapsible groups, draggable sidebar
+  - Trace sanitize max_map_size to prevent heap overflow
+
+  Examples:
+  - ALMA: evolutionary memory design for GraphWorld/ALFWorld environments
+
+v0.9: Function Passing Between SubAgents
+  - Share function definitions across recursive agent levels
+  - CoreToSource-based namespace export/import
+  - Eliminate redundant code generation in :self recursive pattern
+  See: docs/plans/function-passing-between-subagents.md
+
+FUTURE (not scheduled):
+  State Management:
   - JSON serialization as default (Step <-> JSON)
   - Resume from serialized state
   - MFA tuple tool format for serializability
-  Architecture: First child_spec components (opt-in)
 
-v0.9: Streaming & Sessions
+  Streaming & Sessions:
   - on_token / on_tool_start / on_tool_end callbacks
   - Session GenServer for long-lived agents
   - SandboxPool for concurrency limiting
-  Architecture: Complete supervision tree available
 
-v1.0: Production Ready
+  Production:
   - Stable serialization format
   - Phoenix/Oban integration guides
   - Performance benchmarks
-  Architecture: Evaluate user feedback on OTP adoption
-
-UNDER CONSIDERATION (not scheduled):
-  - :text mode for free-form responses
-  - :chat mode for traditional tool-calling agents
-  See: docs/plans/question-mode-plan.md
 ```
 
 ---
@@ -117,7 +151,11 @@ UNDER CONSIDERATION (not scheduled):
 | `(task id expr)` | Idempotent execution — checks journal, skips if already done |
 | Journal | Pure map of task ID → result, passed in via context |
 
-### State Serialization (v0.8)
+### Function Passing (v0.9)
+
+Share parent-defined functions with child agents in recursive `:self` patterns. Uses `CoreToSource` to serialize the parent's `user_ns` into PTC-Lisp source that is prepended to the child's context. See `docs/plans/function-passing-between-subagents.md`.
+
+### State Serialization (future)
 
 - JSON as default format (debuggability with `jq` over efficiency)
 - MFA tuples for serializable tools (no registry, no global state)
@@ -154,6 +192,8 @@ Recommended integration: use ptc_runner as a pure library within your own GenSer
 4. **Developer owns persistence**: Journal is a pure map; no DB/Oban dependency.
 5. **Serialization format**: JSON default, binary opt-in.
 6. **Tool serialization**: MFA tuples (no registry needed).
+7. **Unified text mode**: Single `:text` output mode replaced separate `:json` and `:tool_calling` modes.
+8. **XML prompts**: System prompts use XML tags instead of markdown headings for better LLM parsing.
 
 ---
 
@@ -170,4 +210,6 @@ Recommended integration: use ptc_runner as a pure library within your own GenSer
 - Architecture: `lib/ptc_runner/sub_agent/` (Loop, Telemetry, ToolNormalizer)
 - Step struct: `lib/ptc_runner/step.ex`
 - Sandbox: `lib/ptc_runner/sandbox.ex`
-- Plans: `docs/plans/v0.7-journaled-tasks.md`
+- Plans: `docs/plans/v0.7-journaled-tasks.md`, `docs/plans/function-passing-between-subagents.md`
+- Text Mode: `lib/ptc_runner/sub_agent/loop/text_mode.ex`
+- CoreToSource: `lib/ptc_runner/lisp/core_to_source.ex`
