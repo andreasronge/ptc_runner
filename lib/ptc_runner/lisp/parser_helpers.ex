@@ -90,4 +90,12 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   def build_short_fn({:short_fn, body_asts}) do
     {:short_fn, body_asts}
   end
+
+  # ============================================================
+  # Regex literal building
+  # ============================================================
+
+  def build_regex_literal({:regex_literal, chars}) do
+    {:regex_literal, Enum.map_join(chars, &to_string_part/1)}
+  end
 end

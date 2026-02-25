@@ -44,7 +44,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `sum`, `avg` | Simple collection aggregators (§8) |
 | `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Field-based collection aggregators (§8) |
 | `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
-| `re-pattern` | Compile string to regex without literal syntax (§8.8) |
+| `re-pattern`, `#"..."` | Compile string to regex (§8.8) |
 | `pluck` | Extract field values from collections (§8) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
 | `float`, `double`, `int` | Type coercion (to float / to integer) |
@@ -182,7 +182,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Multi-line strings:** Strings may contain literal newline characters (like Clojure). Escape sequences (`\n`, `\r`) also work.
 
-**Not supported:** Regex literals (use `re-pattern` instead).
+**Regex literals:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values.
 
 **String operations:** Strings support `count`, `empty?`, `seq`, `str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
 
@@ -2354,7 +2354,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 (extract-int "x=(\\d+) y=(\\d+)" "x=10 y=20" 2 0) ; => 20 (group 2 with default)
 ```
 
-**Note:** Regex literals (`#"..."`) are not supported. Use `(re-pattern "...")` instead. For simple delimiter splitting, prefer `(split s "delimiter")` or `(split-lines s)` for newlines.
+**Note:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values. For simple delimiter splitting, prefer `(split s "delimiter")` or `(split-lines s)` for newlines.
 
 **Safety Constraints:**
 - **Match Limit:** Regex execution is restricted to 100,000 backtracking steps. Exceeding this limit (e.g., due to ReDoS) terminates evaluation with an error.

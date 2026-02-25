@@ -127,6 +127,13 @@ defmodule PtcRunner.Lisp.Parser do
     |> ignore(string("\""))
     |> reduce({ParserHelpers, :build_string, []})
 
+  regex_literal =
+    ignore(string("#\""))
+    |> repeat(string_char)
+    |> ignore(string("\""))
+    |> tag(:regex_literal)
+    |> map({ParserHelpers, :build_regex_literal, []})
+
   # Keywords (no / allowed, but operator chars like > < + * = are allowed for Clojure conformance)
   keyword =
     ignore(string(":"))
@@ -223,6 +230,7 @@ defmodule PtcRunner.Lisp.Parser do
       float_literal,
       integer_literal,
       string_literal,
+      regex_literal,
       char_literal,
       keyword,
       symbol,
@@ -372,16 +380,6 @@ defmodule PtcRunner.Lisp.Parser do
     source_clean = Regex.replace(~r/;[^\n]*/, source_without_strings, "")
 
     cond do
-      # Regex literals: #"pattern"
-      Regex.match?(~r/#"/, source_clean) ->
-        """
-        regex literals (#"...") are not supported. Use instead:
-        - (split s "delimiter") for literal delimiters
-        - (split-lines s) for newlines
-        - (re-split (re-pattern "\\\\s+") s) for regex patterns
-        - (re-find (re-pattern "...") s) for matching\
-        """
-
       # Reader discard macro: #_ (Clojure-specific, not supported)
       Regex.match?(~r/#_/, source_clean) ->
         "reader discard syntax (#_) is not supported. Use ; for comments"

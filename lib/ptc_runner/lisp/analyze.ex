@@ -87,6 +87,22 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
+  # Regex literal: #"..." desugars to (re-pattern "...")
+  # ============================================================
+
+  defp do_analyze({:regex_literal, pattern}, _tail?) do
+    case :re.compile(pattern) do
+      {:ok, _} ->
+        {:ok, {:call, {:var, :"re-pattern"}, [{:string, pattern}]}}
+
+      {:error, {reason, position}} ->
+        {:error,
+         {:invalid_form,
+          "invalid regex literal #\"#{pattern}\": #{reason} at position #{position}"}}
+    end
+  end
+
+  # ============================================================
   # Symbols and variables
   # ============================================================
 

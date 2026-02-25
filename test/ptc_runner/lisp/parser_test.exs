@@ -266,10 +266,9 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:error, {:parse_error, _}} = Parser.parse("# {1 2}")
     end
 
-    test "regex literals are rejected with helpful error" do
-      assert {:error, {:parse_error, message}} = Parser.parse(~S|(split "a b" #" ")|)
-      assert message =~ "regex literals"
-      assert message =~ "not supported"
+    test "regex literals are parsed successfully" do
+      assert {:ok, {:list, [{:symbol, :split}, {:string, "a b"}, {:regex_literal, " "}]}} =
+               Parser.parse(~S|(split "a b" #" ")|)
     end
 
     test "reader discard syntax #_ is rejected with helpful error" do
