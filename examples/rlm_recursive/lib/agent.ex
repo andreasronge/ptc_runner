@@ -57,6 +57,7 @@ defmodule RlmRecursive.Agent do
       max_turns: max_turns,
       timeout: 60_000,
       pmap_timeout: 60_000,
+      pmap_max_concurrency: 4,
       mission_timeout: 120_000,
       llm: llm
     )
@@ -77,14 +78,15 @@ defmodule RlmRecursive.Agent do
       max_turns: max_turns,
       timeout: 60_000,
       pmap_timeout: 60_000,
+      pmap_max_concurrency: 4,
       mission_timeout: 120_000,
       llm: llm
     )
   end
 
   def new(:pairs, opts) do
-    max_depth = Keyword.get(opts, :max_depth, 5)
-    max_turns = Keyword.get(opts, :max_turns, 15)
+    max_depth = Keyword.get(opts, :max_depth, 8)
+    max_turns = Keyword.get(opts, :max_turns, 20)
     llm = Keyword.get(opts, :llm)
 
     SubAgent.new(
@@ -95,9 +97,10 @@ defmodule RlmRecursive.Agent do
       builtin_tools: [:grep],
       max_depth: max_depth,
       max_turns: max_turns,
-      timeout: 60_000,
-      pmap_timeout: 60_000,
-      mission_timeout: 300_000,
+      turn_budget: 40,
+      timeout: 120_000,
+      pmap_timeout: 120_000,
+      mission_timeout: 600_000,
       llm: llm
     )
   end
@@ -124,6 +127,7 @@ defmodule RlmRecursive.Agent do
       llm: llm,
       timeout: 120_000,
       pmap_timeout: 120_000,
+      pmap_max_concurrency: 4,
       mission_timeout: 600_000,
       memory_strategy: :rollback
     )
