@@ -32,18 +32,7 @@ Run these checks and stop on first failure:
    - Show recent commits since last tag: `git log $(git describe --tags --abbrev=0)..HEAD --oneline`
    - Stop and wait for the user to update CHANGELOG.md
 
-## Step 3: Check usage-rules.md is current
-
-1. Read `usage-rules.md` and check the public API surface it documents
-2. Check if any of these have changed since the last release tag:
-   - `lib/ptc_runner/sub_agent.ex` (SubAgent.new/1 options, run/2 options)
-   - `lib/ptc_runner/tool.ex` (tool definition formats)
-   - `lib/ptc_runner/lisp/` (new built-in functions or changed behavior)
-   - `docs/signature-syntax.md` (signature type system)
-3. If there are significant API changes not reflected in usage-rules.md, stop and tell the user what needs updating
-4. Also run `mix usage_rules.sync AGENTS.md --all --yes` to ensure consumer rules are current
-
-## Step 4: Quality checks
+## Step 3: Quality checks
 
 Run each and fix issues before proceeding:
 
@@ -55,14 +44,14 @@ Run each and fix issues before proceeding:
 6. `mix docs` - verify no warnings in output
 7. `mix hex.build` - verify package builds
 
-## Step 5: Version bump
+## Step 4: Version bump
 
 1. Read current version from `mix.exs`
 2. If it differs from $ARGUMENTS, update the `version:` field in `mix.exs` to `"$ARGUMENTS"`
 3. Search for the old version string in docs and livebooks: `grep -r 'OLD_VERSION' README.md livebooks/ docs/`
 4. Update any `{:ptc_runner, "~> OLD_VERSION"}` references to `"~> $ARGUMENTS"` in README.md and livebooks
 
-## Step 6: Commit, tag, and push
+## Step 5: Commit, tag, and push
 
 Ask the user for confirmation before proceeding. Show:
 - Version: $ARGUMENTS
@@ -71,12 +60,12 @@ Ask the user for confirmation before proceeding. Show:
 
 After confirmation:
 
-1. Stage all changed files: `git add mix.exs CHANGELOG.md AGENTS.md` (and any other modified files)
+1. Stage all changed files: `git add mix.exs CHANGELOG.md` (and any other modified files)
 2. Commit with message: `chore: prepare release $ARGUMENTS`
 3. Create annotated tag: `git tag -a "v$ARGUMENTS" -m "Release $ARGUMENTS"`
 4. Push: `git push && git push --tags`
 
-## Step 7: Done
+## Step 6: Done
 
 Report success and remind the user:
 - The GitHub Action will verify the tag, run tests, publish to Hex.pm, and publish docs to HexDocs
