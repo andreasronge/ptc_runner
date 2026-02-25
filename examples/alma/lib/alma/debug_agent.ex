@@ -107,15 +107,29 @@ defmodule Alma.DebugAgent do
     Example: `(tool/grep {:pattern "ERROR:" :text data/debug_log})`
     Example: `(tool/grep-n {:pattern "FAILED" :text data/debug_log :context 2})`
 
+    Log format: Every line is tagged with episode ID and phase.
+    - `[C1:recall]` — collection episode 1, recall phase
+    - `[C1:mem-update]` — collection episode 1, memory update phase
+    - `[C1:task]` — collection episode 1, task agent actions
+    - `[D1:recall]` — deployment episode 1, recall phase
+    - `[D1:task]` — deployment episode 1, task agent actions
+    Episode headers include the goal: `--- EPISODE C1: FAILED (12 steps) — clean mug ---`
+
     Useful grep patterns:
-    - `"TOOL find-similar.*\\[\\]"` — recall queries that returned empty results
-    - `"ERROR:"` — runtime errors in mem-update or recall
-    - `"FAILED"` — failed episodes
+    - `"FAILED"` — failed episodes (header includes goal and step count)
+    - `"SUCCESS"` — successful episodes
+    - `"\\[C1:task\\]"` — all actions in collection episode 1
+    - `"\\[D2:task\\]"` — all actions in deployment episode 2
+    - `"\\[D.:recall\\]"` — all recall phases across deployment episodes
     - `"RETURN:.*\\"\\"" ` — recall returning empty advice
-    - `"PRINT:"` — debug println output from the design
+    - `"ERROR:"` — runtime errors in mem-update or recall
+    - `"TOOL find-similar.*\\[\\]"` — recall queries that returned empty results
     - `"TOOL store-obs"` — what observations were stored
-    - `"TOOL graph-update"` — what graph edges were added
-    - `"TOOL graph-path.*nil"` — path queries that found no route
+
+    Workflow: Start with `"FAILED"` to identify failing episodes and their goals. \
+    Then drill into 1-2 specific episodes (e.g. `"\\[D2:task\\]"`) to trace what \
+    the agent did step by step. Compare with a successful episode to understand \
+    what different recall advice or strategy would have helped.
 
     Your final message is the output that gets used. Structure it in two sections:
 
@@ -124,9 +138,9 @@ defmodule Alma.DebugAgent do
     via grep. Identify:
     - Whether recall is returning useful advice or empty/generic text
     - Whether mem-update is storing enough observations
+    - Whether the agent's actions make progress toward goals
+    - Any patterns in failed vs successful episodes
     - Whether tool calls are succeeding or failing
-    - Whether the graph is being built and queried effectively
-    - Any println debug output that reveals issues
 
     ## Mandatory Constraints
     Based on your analysis, list 2-4 concrete constraints that the NEXT design \
@@ -134,7 +148,7 @@ defmodule Alma.DebugAgent do
     specific weaknesses you found in the logs.
 
     Keep your analysis under 400 words. Return the full analysis text \
-    via `(return "your analysis...")`.
+    via `(return "...")`.
     """
   end
 
@@ -155,12 +169,15 @@ defmodule Alma.DebugAgent do
     Debug log is in `data/debug_log` (#{String.length(debug_log)} chars). \
     Search it with `(tool/grep {:pattern "..." :text data/debug_log})`.
 
+    Start by grepping for `"FAILED"` to see which episodes failed and their goals. \
+    Then drill into 1-2 failed episodes (e.g. `"\\[D2:task\\]"`) to trace what the \
+    agent actually did. Compare with a successful episode.
+
     Focus areas:
     1. Recall quality — is the advice specific and useful, or empty/generic?
-    2. Store usage — are observations being stored effectively?
-    3. Errors — any runtime failures in mem-update or recall?
-    4. Graph — is the spatial graph being built and queried?
-    5. Debug output — any println clues about what's happening?
+    2. Agent behavior — do failed episodes show clear strategy mistakes?
+    3. Store usage — are observations being stored effectively?
+    4. Errors — any runtime failures in mem-update or recall?
 
     Search the debug log using grep, then return your analysis via \
     `(return "...")`.

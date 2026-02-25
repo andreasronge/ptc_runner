@@ -9,7 +9,6 @@ defmodule Alma.Loop do
 
   alias Alma.{Analysis, Archive, DebugAgent, MetaAgent, MemoryHarness}
   alias Alma.Environments.GraphWorld
-  alias Alma.Environments.GraphWorld.Generator
 
   require Logger
 
@@ -33,7 +32,10 @@ defmodule Alma.Loop do
       Keyword.put_new_lazy(opts, :observe_fn, fn ->
         fn task_config ->
           state = env_module.reset(task_config)
-          env_module.observe(state)
+          observation = env_module.observe(state)
+
+          real_goal = env_module.format_goal(state[:goal] || task_config.goal)
+          {observation, real_goal}
         end
       end)
 
@@ -176,13 +178,15 @@ defmodule Alma.Loop do
   # Runs a quick smoke test: 2 collection episodes to build memory, then
   # 1 recall to check if the design produces useful advice text.
   defp examine(design, env_config, opts, attempt) do
+    env_module = Keyword.get(opts, :environment, GraphWorld)
+
     Alma.Trace.span(
       "alma:examine",
       %{"design" => design.name, "attempt" => attempt},
       fn ->
         # Generate 2 collection tasks with a distinct seed range
         examine_env = Map.put(env_config, :seed, Map.get(env_config, :seed, 42) + 5000)
-        collection_tasks = Generator.generate_batch(2, examine_env)
+        collection_tasks = env_module.generate_tasks(2, examine_env)
 
         # Run collection to build memory
         {_results, memory, errors} =
@@ -193,9 +197,27 @@ defmodule Alma.Loop do
         else
           # Generate a recall task and check advice quality
           recall_env = Map.put(env_config, :seed, Map.get(env_config, :seed, 42) + 6000)
-          [recall_task] = Generator.generate_batch(1, recall_env)
+          [recall_task] = env_module.generate_tasks(1, recall_env)
 
-          {advice, recall_error, _log} = MemoryHarness.retrieve(design, recall_task, memory, opts)
+          # Replace placeholder goal with real goal from environment
+          observe_fn = Keyword.get(opts, :observe_fn)
+
+          {retrieve_opts, recall_task} =
+            if observe_fn do
+              case observe_fn.(recall_task) do
+                {obs, real_goal} when is_binary(real_goal) ->
+                  updated = Map.put(recall_task, :goal, real_goal)
+                  {Keyword.put(opts, :current_observation, obs), updated}
+
+                obs when is_binary(obs) ->
+                  {Keyword.put(opts, :current_observation, obs), recall_task}
+              end
+            else
+              {opts, recall_task}
+            end
+
+          {advice, recall_error, _log} =
+            MemoryHarness.retrieve(design, recall_task, memory, retrieve_opts)
 
           cond do
             recall_error != nil ->
@@ -225,9 +247,9 @@ defmodule Alma.Loop do
     # 3. Collection phase — use family batch if family is set
     collection_tasks =
       if Map.get(env_config, :family) do
-        Generator.generate_family_batch(episodes, env_config)
+        env_module.generate_family_tasks(episodes, env_config)
       else
-        Generator.generate_batch(episodes, env_config)
+        env_module.generate_tasks(episodes, env_config)
       end
 
     # Carry forward memory from prior generation if persist_memory is enabled
@@ -260,7 +282,7 @@ defmodule Alma.Loop do
           |> Enum.map(fn seed_idx ->
             seed_offset = 1000 * seed_idx
             deployment_env = Map.update!(env_config, :seed, &(&1 + seed_offset))
-            deployment_tasks = Generator.generate_batch(episodes, deployment_env)
+            deployment_tasks = env_module.generate_tasks(episodes, deployment_env)
 
             Alma.Trace.span(
               "alma:deploy_seed",
@@ -281,7 +303,7 @@ defmodule Alma.Loop do
       |> Enum.flat_map(fn seed_idx ->
         seed_offset = 1000 * seed_idx
         deployment_env = Map.update!(env_config, :seed, &(&1 + seed_offset))
-        Generator.generate_batch(episodes, deployment_env)
+        env_module.generate_tasks(episodes, deployment_env)
       end)
 
     # 5. Analyze, score, and archive

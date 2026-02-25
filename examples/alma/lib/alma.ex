@@ -9,7 +9,6 @@ defmodule Alma do
 
   alias Alma.{Archive, Loop, MemoryHarness}
   alias Alma.Environments.GraphWorld
-  alias Alma.Environments.GraphWorld.Generator
 
   @doc """
   Runs the ALMA meta-learning loop.
@@ -58,19 +57,28 @@ defmodule Alma do
   defp do_run(opts) do
     iterations = Keyword.get(opts, :iterations, 5)
     episodes = Keyword.get(opts, :episodes, 5)
-    rooms = Keyword.get(opts, :rooms, 5)
-    seed = Keyword.get(opts, :seed, 42)
     verbose = Keyword.get(opts, :verbose, true)
 
     preflight_check!(opts, verbose)
 
-    family = Keyword.get(opts, :family, seed)
-    env_config = %{rooms: rooms, objects: 3, connectivity: 0.3, seed: seed, family: family}
     env_module = Keyword.get(opts, :environment, GraphWorld)
+
+    Code.ensure_loaded(env_module)
+
+    env_config =
+      if function_exported?(env_module, :setup, 1) do
+        env_module.setup(opts)
+      else
+        %{seed: Keyword.get(opts, :seed, 42)}
+      end
 
     observe_fn = fn task_config ->
       state = env_module.reset(task_config)
-      env_module.observe(state)
+      observation = env_module.observe(state)
+
+      # Return {observation, real_goal} so the harness can fix placeholder goals
+      real_goal = env_module.format_goal(state[:goal] || task_config.goal)
+      {observation, real_goal}
     end
 
     progress_fn =
@@ -82,54 +90,72 @@ defmodule Alma do
       end
 
     harness_opts =
-      Keyword.take(opts, [:llm])
+      Keyword.take(opts, [:llm, :environment])
+      |> Keyword.put_new(:environment, env_module)
       |> Keyword.put(:observe_fn, observe_fn)
-      |> then(fn opts ->
-        if progress_fn, do: Keyword.put(opts, :on_task_done, progress_fn), else: opts
+      |> then(fn o ->
+        if progress_fn, do: Keyword.put(o, :on_task_done, progress_fn), else: o
+      end)
+      |> then(fn o ->
+        if mc = env_config[:max_concurrency], do: Keyword.put(o, :max_concurrency, mc), else: o
       end)
 
-    archive = Archive.new() |> Archive.seed_null() |> Archive.seed_spatial()
+    archive = Archive.new() |> Archive.seed_null() |> Archive.seed_environment(env_module)
 
-    # Run baseline evaluation with null design (no memory) across multiple seeds
-    deploy_seeds = Keyword.get(opts, :deploy_seeds, 3)
-    null_design = MemoryHarness.null_design()
+    try do
+      # Run baseline evaluation with null design (no memory) across multiple seeds
+      deploy_seeds = Keyword.get(opts, :deploy_seeds, 3)
+      null_design = MemoryHarness.null_design()
 
-    total_baseline = deploy_seeds * episodes
-    if verbose, do: IO.write("Running baseline (#{total_baseline} tasks)...")
+      total_baseline = deploy_seeds * episodes
+      if verbose, do: IO.write("Running baseline (#{total_baseline} tasks)...")
 
-    baseline_results =
-      1..deploy_seeds
-      |> Enum.flat_map(fn seed_idx ->
-        seed_offset = 1000 * seed_idx
-        baseline_env = Map.update!(env_config, :seed, &(&1 + seed_offset))
-        baseline_tasks = Generator.generate_batch(episodes, baseline_env)
+      baseline_results =
+        1..deploy_seeds
+        |> Enum.flat_map(fn seed_idx ->
+          seed_offset = 1000 * seed_idx
+          baseline_env = Map.update!(env_config, :seed, &(&1 + seed_offset))
+          baseline_tasks = env_module.generate_tasks(episodes, baseline_env)
 
-        {results, _errors} =
-          MemoryHarness.evaluate_deployment(null_design, %{}, baseline_tasks, harness_opts)
+          {results, _errors} =
+            MemoryHarness.evaluate_deployment(null_design, %{}, baseline_tasks, harness_opts)
 
-        results
-      end)
+          results
+        end)
 
-    baseline_score = Loop.score_results(baseline_results)
+      baseline_score = Loop.score_results(baseline_results)
 
-    if verbose do
-      IO.puts(" done")
-      IO.puts("Baseline score (no memory): #{Float.round(baseline_score * 1.0, 2)}\n")
+      if verbose do
+        IO.puts(" done")
+        IO.puts("Baseline score (no memory): #{Float.round(baseline_score * 1.0, 2)}\n")
+      end
+
+      opts =
+        opts
+        |> Keyword.put(:baseline_score, baseline_score)
+        |> Keyword.put(:observe_fn, observe_fn)
+
+      opts =
+        if mc = env_config[:max_concurrency],
+          do: Keyword.put_new(opts, :max_concurrency, mc),
+          else: opts
+
+      archive =
+        Enum.reduce(1..iterations, archive, fn gen, acc ->
+          Loop.iteration(acc, gen, env_config, episodes, opts ++ [verbose: verbose])
+        end)
+
+      if verbose do
+        IO.puts("\n=== Final Results ===")
+        IO.puts(Archive.summary(archive))
+      end
+
+      archive
+    after
+      if function_exported?(env_module, :teardown, 1) do
+        env_module.teardown(env_config)
+      end
     end
-
-    opts = Keyword.put(opts, :baseline_score, baseline_score)
-
-    archive =
-      Enum.reduce(1..iterations, archive, fn gen, acc ->
-        Loop.iteration(acc, gen, env_config, episodes, opts ++ [verbose: verbose])
-      end)
-
-    if verbose do
-      IO.puts("\n=== Final Results ===")
-      IO.puts(Archive.summary(archive))
-    end
-
-    archive
   end
 
   defp preflight_check!(opts, verbose) do

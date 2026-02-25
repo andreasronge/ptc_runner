@@ -279,6 +279,78 @@ defmodule Alma.Environments.GraphWorldTest do
     end
   end
 
+  describe "Environment callbacks" do
+    test "task_prompt returns a non-empty string" do
+      prompt = GraphWorld.task_prompt()
+      assert is_binary(prompt)
+      assert String.length(prompt) > 10
+      assert String.contains?(prompt, "{{goal}}")
+    end
+
+    test "task_tools returns a map with expected tool names" do
+      {:ok, agent_pid} = Agent.start_link(fn -> %{} end)
+
+      try do
+        tools = GraphWorld.task_tools(agent_pid, "some advice")
+        assert is_map(tools)
+        assert Map.has_key?(tools, "look")
+        assert Map.has_key?(tools, "move_to")
+        assert Map.has_key?(tools, "pick_up")
+        assert Map.has_key?(tools, "put_down")
+        assert Map.has_key?(tools, "recall")
+      after
+        Agent.stop(agent_pid)
+      end
+    end
+
+    test "generate_tasks delegates to Generator" do
+      tasks = GraphWorld.generate_tasks(3, %{seed: 42, rooms: 5, objects: 3, connectivity: 0.3})
+      assert length(tasks) == 3
+      # Verify they're proper task configs
+      for task <- tasks do
+        assert is_map(task.rooms)
+        assert is_binary(task.agent_location)
+        assert is_map(task.goal)
+      end
+    end
+
+    test "generate_family_tasks delegates to Generator" do
+      tasks =
+        GraphWorld.generate_family_tasks(3, %{
+          family: 1,
+          seed: 42,
+          rooms: 5,
+          objects: 3,
+          connectivity: 0.3
+        })
+
+      assert length(tasks) == 3
+    end
+
+    test "seed_design_source returns valid PTC-Lisp source" do
+      source = GraphWorld.seed_design_source()
+      assert is_binary(source)
+      assert String.contains?(source, "mem-update")
+      assert String.contains?(source, "recall")
+
+      # Verify it compiles
+      assert {:ok, _step} = PtcRunner.Lisp.run(source)
+    end
+
+    test "seed_environment compiles GraphWorld baseline into archive" do
+      archive =
+        Alma.Archive.new()
+        |> Alma.Archive.seed_null()
+        |> Alma.Archive.seed_environment(GraphWorld)
+
+      assert length(archive.entries) == 2
+      seed_entry = Enum.at(archive.entries, 1)
+      assert seed_entry.design.name == "spatial_baseline"
+      assert is_tuple(seed_entry.design.mem_update)
+      assert is_tuple(seed_entry.design.recall)
+    end
+  end
+
   defp bfs(_rooms, [], visited), do: visited
 
   defp bfs(rooms, [current | rest], visited) do
