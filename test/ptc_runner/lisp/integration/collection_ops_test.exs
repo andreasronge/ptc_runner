@@ -1005,4 +1005,50 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == [10, 21, 32]
     end
   end
+
+  describe "_by functions with map arguments" do
+    test "max-by second on map returns entry with largest value" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(max-by second {:a 1 :b 3 :c 2})|)
+      assert result == [:b, 3]
+    end
+
+    test "min-by second on map returns entry with smallest value" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(min-by second {:a 1 :b 3 :c 2})|)
+      assert result == [:a, 1]
+    end
+
+    test "sum-by second on map sums all values" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sum-by second {:a 1 :b 3 :c 2})|)
+      assert result == 6
+    end
+
+    test "avg-by second on map averages all values" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(avg-by second {:a 1 :b 3 :c 2})|)
+      assert result == 2.0
+    end
+
+    test "group-by first on map groups entries by key" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(group-by first {:a 1 :b 2})|)
+      assert result == %{a: [[:a, 1]], b: [[:b, 2]]}
+    end
+
+    test "distinct-by second on map removes entries with duplicate values" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(distinct-by second {:a 1 :b 1 :c 2})|)
+      assert length(result) == 2
+      seconds = Enum.map(result, &List.last/1)
+      assert Enum.sort(seconds) == [1, 2]
+    end
+
+    test "sum-by with anonymous function on map" do
+      source = ~S|(sum-by (fn [entry] (second entry)) {:a 1 :b 3 :c 2})|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == 6
+    end
+
+    test "max-by with anonymous function on map" do
+      source = ~S|(max-by (fn [entry] (second entry)) {:a 1 :b 3 :c 2})|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [:b, 3]
+    end
+  end
 end
