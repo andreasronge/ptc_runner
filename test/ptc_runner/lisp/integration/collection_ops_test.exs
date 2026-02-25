@@ -1051,4 +1051,47 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == [:b, 3]
     end
   end
+
+  describe "_by functions with MapSet arguments" do
+    test "max-by identity on set returns max element" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(max-by identity (set [1 3 2]))|)
+      assert result == 3
+    end
+
+    test "min-by identity on set returns min element" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(min-by identity (set [1 3 2]))|)
+      assert result == 1
+    end
+
+    test "sum-by identity on set sums all elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sum-by identity (set [1 3 2]))|)
+      assert result == 6
+    end
+
+    test "avg-by identity on set averages all elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(avg-by identity (set [1 3 2]))|)
+      assert result == 2.0
+    end
+
+    test "group-by identity on set groups elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(group-by identity (set [1 2 3]))|)
+      assert result == %{1 => [1], 2 => [2], 3 => [3]}
+    end
+
+    test "distinct-by identity on set returns all elements (already unique)" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(distinct-by identity (set [1 2 3]))|)
+      assert Enum.sort(result) == [1, 2, 3]
+    end
+
+    test "sort-by identity on set returns sorted list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by identity (set [3 1 2]))|)
+      assert result == [1, 2, 3]
+    end
+
+    test "sum-by :age on set of maps" do
+      source = ~S|(sum-by :age (set [{:name "alice" :age 30} {:name "bob" :age 25}]))|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == 55
+    end
+  end
 end
