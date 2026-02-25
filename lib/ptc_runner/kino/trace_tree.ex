@@ -115,10 +115,22 @@ if Code.ensure_loaded?(Kino.JS) do
       }
 
       function renderDetail(node) {
-        if (!node.turns || node.turns.length === 0) return "";
+        const parts = [];
 
-        return node.turns.map((turn, i) => {
-          const parts = [];
+        // Summaries (plan progress)
+        if (node.summaries && node.summaries.length > 0) {
+          const secStyle = "margin-top:6px;";
+          const labelStyle = "color:#808080;font-size:11px;text-transform:uppercase;font-weight:600;";
+          const items = node.summaries.map(s =>
+            `<div style="padding:2px 0;"><span style="color:#4ec9b0;">✓</span> <span style="font-weight:500;">${escHtml(s.id)}</span>: ${escHtml(s.summary)}</div>`
+          ).join("");
+          parts.push(`<div style="${secStyle}"><span style="${labelStyle}">PROGRESS</span>${items}</div>`);
+        }
+
+        if (!node.turns || node.turns.length === 0) return parts.join("");
+
+        parts.push(node.turns.map((turn, i) => {
+          const turnParts = [];
           const secStyle = "margin-top:6px;";
           const labelStyle = "color:#808080;font-size:11px;text-transform:uppercase;font-weight:600;";
           const preStyle = "background:#1e1e1e;border-radius:4px;padding:8px;margin:4px 0;font-size:12px;overflow-x:auto;white-space:pre-wrap;border:1px solid #3c3c3c;max-height:300px;overflow-y:auto;";
@@ -128,17 +140,17 @@ if Code.ensure_loaded?(Kino.JS) do
             const msgHtml = turn.messages.map(m =>
               `<div style="margin:4px 0;"><span style="color:#c586c0;font-size:11px;">${escHtml(m.role)}</span><pre style="${preStyle}">${escHtml(m.content)}</pre></div>`
             ).join("");
-            parts.push(`<div style="${secStyle}"><details><summary style="${labelStyle}cursor:pointer;">INPUT MESSAGES (${turn.messages.length})</summary>${msgHtml}</details></div>`);
+            turnParts.push(`<div style="${secStyle}"><details><summary style="${labelStyle}cursor:pointer;">INPUT MESSAGES (${turn.messages.length})</summary>${msgHtml}</details></div>`);
           }
 
           // Raw response (LLM output including reasoning)
           if (turn.raw_response) {
-            parts.push(`<div style="${secStyle}"><details><summary style="${labelStyle}cursor:pointer;">RAW RESPONSE</summary><pre style="${preStyle}color:#6a9955;">${escHtml(turn.raw_response)}</pre></details></div>`);
+            turnParts.push(`<div style="${secStyle}"><details><summary style="${labelStyle}cursor:pointer;">RAW RESPONSE</summary><pre style="${preStyle}color:#6a9955;">${escHtml(turn.raw_response)}</pre></details></div>`);
           }
 
           // Program
           if (turn.program) {
-            parts.push(`<div style="${secStyle}"><span style="${labelStyle}">PROGRAM</span><pre style="${preStyle}">${escHtml(turn.program)}</pre></div>`);
+            turnParts.push(`<div style="${secStyle}"><span style="${labelStyle}">PROGRAM</span><pre style="${preStyle}">${escHtml(turn.program)}</pre></div>`);
           }
 
           // Tool calls with args and results
@@ -150,22 +162,22 @@ if Code.ensure_loaded?(Kino.JS) do
               detail += `</div>`;
               return detail;
             }).join("");
-            parts.push(`<div style="${secStyle}"><span style="${labelStyle}">TOOLS</span>${toolHtml}</div>`);
+            turnParts.push(`<div style="${secStyle}"><span style="${labelStyle}">TOOLS</span>${toolHtml}</div>`);
           }
 
           // Prints
           if (turn.prints && turn.prints.length > 0) {
-            parts.push(`<div style="${secStyle}"><span style="${labelStyle}">PRINTS</span><pre style="${preStyle}color:#ce9178;">${escHtml(turn.prints.join("\\n"))}</pre></div>`);
+            turnParts.push(`<div style="${secStyle}"><span style="${labelStyle}">PRINTS</span><pre style="${preStyle}color:#ce9178;">${escHtml(turn.prints.join("\\n"))}</pre></div>`);
           }
 
           // Result
           if (turn.result) {
-            parts.push(`<div style="${secStyle}"><span style="${labelStyle}">RESULT</span><pre style="${preStyle}">${escHtml(turn.result)}</pre></div>`);
+            turnParts.push(`<div style="${secStyle}"><span style="${labelStyle}">RESULT</span><pre style="${preStyle}">${escHtml(turn.result)}</pre></div>`);
           }
 
           // Error
           if (turn.error) {
-            parts.push(`<div style="${secStyle}color:#f44747;"><span style="${labelStyle}">ERROR</span><pre style="background:rgba(244,71,71,0.1);border-radius:4px;padding:8px;margin:4px 0;font-size:12px;">${escHtml(turn.error)}</pre></div>`);
+            turnParts.push(`<div style="${secStyle}color:#f44747;"><span style="${labelStyle}">ERROR</span><pre style="background:rgba(244,71,71,0.1);border-radius:4px;padding:8px;margin:4px 0;font-size:12px;">${escHtml(turn.error)}</pre></div>`);
           }
 
           const turnNum = turn.number || (i + 1);
@@ -175,10 +187,12 @@ if Code.ensure_loaded?(Kino.JS) do
           return `
             <div style="border-left:2px solid #3c3c3c;padding-left:12px;margin:6px 0;">
               <div style="color:#569cd6;font-size:12px;font-weight:500;">Turn ${turnNum}${typeLabel}${successIcon}</div>
-              ${parts.join("")}
+              ${turnParts.join("")}
             </div>
           `;
-        }).join("");
+        }).join(""));
+
+        return parts.join("");
       }
 
       function formatDuration(ms) {
@@ -221,6 +235,15 @@ if Code.ensure_loaded?(Kino.JS) do
     defp step_to_node(%PtcRunner.Step{} = step) do
       turns = extract_turns(step)
 
+      summaries =
+        case step.summaries do
+          s when is_map(s) and map_size(s) > 0 ->
+            Enum.map(s, fn {id, summary} -> %{id: id, summary: summary} end)
+
+          _ ->
+            []
+        end
+
       %{
         trace_id: step.trace_id || random_id(),
         parent_trace_id: step.parent_trace_id,
@@ -231,6 +254,7 @@ if Code.ensure_loaded?(Kino.JS) do
         failed: step.fail != nil,
         fail_reason: step.fail && step.fail[:reason],
         turns: turns,
+        summaries: summaries,
         children: [],
         child_trace_ids: step.child_traces || []
       }

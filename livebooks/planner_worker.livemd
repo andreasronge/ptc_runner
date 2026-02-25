@@ -84,7 +84,7 @@ planner = SubAgent.new(
   Research question: {{question}}
 
   You have access to a `fetch_page` tool that retrieves web page text, plus
-  `(grep pattern text)` and `(grep-n pattern text)` for searching text.
+  `(tool/grep {:pattern p :text t})` and `(tool/grep-n {:pattern p :text t})` for searching text.
 
   Plan the steps needed to answer this question. Return exactly 2 steps:
   one per research topic. Do NOT include a compilation/synthesis step —
@@ -123,6 +123,7 @@ and reports progress. The planner handles retries at the orchestration level.
 ```elixir
 # Worker: multi-turn research agent for one focused task
 worker = SubAgent.new(
+  name: "worker",
   prompt: """
   {{task}}
 
@@ -133,13 +134,14 @@ worker = SubAgent.new(
     Check `(:status result)` — `"ok"` means success, `"error"` means failure (404, timeout, etc.).
     On error, try an alternative URL instead of retrying the same one.
   - For GitHub files, use raw URLs: `https://raw.githubusercontent.com/OWNER/REPO/REF/PATH`
-  - Use `(grep pattern text)` or `(grep-n pattern text)` to search text.
-    Note: `grep-n` is a function name, NOT `grep -n`.
+  - Use `(tool/grep {:pattern p :text t})` or `(tool/grep-n {:pattern p :text t})` to search text.
+    These are tool calls with named arguments, NOT shell commands.
   - Return a map with your findings as soon as you have useful data.
     Partial results are better than no results.
   """,
   description: "Research worker: fetches web pages and extracts information for a specific task",
   signature: "(task :string) -> :map",
+  builtin_tools: [:grep, :"grep-n"],
   tools: %{
     "fetch_page" =>
       {fetch_page,
@@ -155,6 +157,7 @@ worker = SubAgent.new(
 
 # Reviewer: single-shot judge, returns structured verdict
 reviewer = SubAgent.new(
+  name: "reviewer",
   prompt: """
   You are a quality reviewer. Evaluate whether the research result
   satisfies the acceptance criteria.
@@ -182,7 +185,12 @@ reviewer = SubAgent.new(
 )
 
 # Planner: orchestrates worker→reviewer, reports progress, builds final answer
+# The `plan:` option injects a Progress checklist into the user message (requires journaling).
+# Each step starts unchecked; calling `(step-done "id" "summary")` checks it off.
+# The updated checklist is re-rendered in the feedback after each turn so the LLM
+# can see what's done and what remains.
 planner_executor = SubAgent.new(
+  name: "planner",
   prompt: """
   Answer this research question: {{question}}
 
@@ -191,22 +199,19 @@ planner_executor = SubAgent.new(
   and verify results with `reviewer`. You never fetch pages yourself.
 
   ## The `do-step` Pattern
-  Define a helper that dispatches to worker and reviewer. Format the result
-  as readable key-value pairs before sending to the reviewer:
-
-  (defn format-result [m]
-    (reduce (fn [acc k] (str acc k ": " (get m k) "\\n")) "" (keys m)))
+  Define a helper that dispatches to worker and reviewer. Use `(pr-str map)`
+  to format the result as readable key-value pairs before sending to the reviewer:
 
   (defn do-step [id task criteria]
     (let [result (tool/research_worker {:task task})
-          result_str (format-result result)
+          result_str (pr-str result)
           review (tool/reviewer {:step task :criteria criteria :result result_str})]
       (if (:approved review)
         (do (step-done id (:summary review)) result)
         (do (step-done id (str "REJECTED: " (:feedback review))) nil))))
 
   ## Rules
-  - Always define `format-result` and `do-step` first, then use them for each plan step.
+  - Always define `do-step` first, then use it for each plan step.
   - Use the step IDs from the Progress checklist.
   - Batch independent steps in the same turn (e.g. steps 1 and 2 together).
   - Maximum 1 retry per step. If a step fails twice, skip it and move on.
@@ -224,6 +229,7 @@ planner_executor = SubAgent.new(
   """,
   signature: "(question :string) -> :map",
   plan: plan,
+  journaling: true,
   tools: %{
     "research_worker" => SubAgent.as_tool(worker, cache: true),
     "reviewer" => SubAgent.as_tool(reviewer, cache: true)
@@ -309,7 +315,7 @@ The reviewer is a dedicated judge with explicit acceptance criteria.
 
 * **No synthesis step**: The planner builds the final answer map itself from collected data,
   rather than delegating to the worker. This avoids the worker echoing back task text.
-* **Formatted results for reviewer**: `format-result` converts maps to readable key-value
+* **Formatted results for reviewer**: `(pr-str map)` converts maps to readable key-value
   strings instead of passing opaque `%{...}` via `(str map)`.
 * **Max 1 retry per step**: Prevents the planner from burning all turns retrying one step.
 * **Pragmatic reviewer**: Approves partial results with real data; only rejects empty/irrelevant output.
@@ -355,7 +361,8 @@ After all steps complete, the planner builds the final answer itself:
   (single-shot JSON) but it adds up.
 
 * **Prompt complexity** — the planner must write the `do-step` helper correctly.
-  If the LLM struggles with this, consider providing it as a built-in function.
+  Using `pr-str` eliminates the need for a custom `format-result` helper,
+  but the overall pattern still requires careful prompting.
 
 * **`step-done` in `defn`** — works because `defn` calls run in the same process.
   Would NOT work if `do-step` were called inside `pmap`/`pcalls`.
