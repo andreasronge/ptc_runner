@@ -754,6 +754,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.sum()
   end
 
+  def sum_by(key, coll) when is_map(coll) and not is_struct(coll),
+    do: sum_by(key, to_seq_list(coll))
+
   def sum_by(_key, nil), do: 0
 
   # avg_by: atom or string keys
@@ -786,6 +789,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def avg_by(key, coll) when is_map(coll) and not is_struct(coll),
+    do: avg_by(key, to_seq_list(coll))
+
   def avg_by(_key, nil), do: nil
 
   # min_by: atom or string keys
@@ -811,6 +817,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       filtered -> Enum.min_by(filtered, &Callable.call(keyfn, [&1]))
     end
   end
+
+  def min_by(key, coll) when is_map(coll) and not is_struct(coll),
+    do: min_by(key, to_seq_list(coll))
 
   def min_by(_key, nil), do: nil
 
@@ -838,6 +847,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def max_by(key, coll) when is_map(coll) and not is_struct(coll),
+    do: max_by(key, to_seq_list(coll))
+
   def max_by(_key, nil), do: nil
 
   # distinct_by: atom or string keys
@@ -855,6 +867,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.uniq_by(coll, &Callable.call(keyfn, [&1]))
   end
 
+  def distinct_by(key, coll) when is_map(coll) and not is_struct(coll),
+    do: distinct_by(key, to_seq_list(coll))
+
   def distinct_by(_key, nil), do: []
 
   @doc """
@@ -868,6 +883,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def max_key_variadic([_f]) do
     raise ArgumentError, "max-key requires at least 2 arguments (function and one value)"
   end
+
+  # Single value → return directly without calling f (Clojure behavior)
+  def max_key_variadic([_f, x]), do: x
 
   def max_key_variadic([f | args]) when args != [] do
     Enum.max_by(args, &Callable.call(f, [&1]))
@@ -884,6 +902,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def min_key_variadic([_f]) do
     raise ArgumentError, "min-key requires at least 2 arguments (function and one value)"
   end
+
+  # Single value → return directly without calling f (Clojure behavior)
+  def min_key_variadic([_f, x]), do: x
 
   def min_key_variadic([f | args]) when args != [] do
     Enum.min_by(args, &Callable.call(f, [&1]))
@@ -935,6 +956,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def group_by(keyfn, coll) when is_list(coll) do
     Enum.group_by(coll, &Callable.call(keyfn, [&1]))
   end
+
+  def group_by(key, coll) when is_map(coll) and not is_struct(coll),
+    do: group_by(key, to_seq_list(coll))
 
   def group_by(_key, nil), do: %{}
 

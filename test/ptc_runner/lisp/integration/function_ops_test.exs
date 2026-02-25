@@ -166,6 +166,14 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       assert result == "hello"
     end
 
+    test "max-key with single map arg returns map directly (Clojure behavior)" do
+      source = ~S|(max-key val {:a 10 :b 42})|
+
+      {:ok, %Step{return: result}} = Lisp.run(source)
+
+      assert result == %{a: 10, b: 42}
+    end
+
     test "sum-by with function key" do
       source = ~S"""
       (let [pairs [["a" 10] ["b" 20] ["c" 30]]]
