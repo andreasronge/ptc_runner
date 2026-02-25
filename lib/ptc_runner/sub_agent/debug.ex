@@ -134,6 +134,11 @@ defmodule PtcRunner.SubAgent.Debug do
           print_compressed_view(step)
       end
 
+      # Print plan progress summaries if any
+      if step.summaries && map_size(step.summaries) > 0 do
+        print_summaries(step.summaries)
+      end
+
       if show_usage and usage do
         print_usage_summary(usage)
 
@@ -462,6 +467,23 @@ defmodule PtcRunner.SubAgent.Debug do
       {chunk, rest} = String.split_at(line, max_length)
       do_wrap_line(rest, max_length, [chunk | acc])
     end
+  end
+
+  # Print plan progress summaries
+  defp print_summaries(summaries) do
+    header = " Progress "
+
+    IO.puts(
+      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
+    )
+
+    Enum.each(summaries, fn {id, summary} ->
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:green)}[done]#{ansi(:reset)} #{ansi(:bold)}#{id}#{ansi(:reset)}: #{summary}"
+      )
+    end)
+
+    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
   end
 
   # Print usage summary
