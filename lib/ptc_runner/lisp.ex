@@ -51,6 +51,7 @@ defmodule PtcRunner.Lisp do
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
     - `:pmap_timeout` - Timeout in milliseconds per pmap/pcalls task (default: 5000). Increase for LLM-backed tools.
+    - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools.
     - `:max_heap` - Max heap size in words (default: 1_250_000)
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
@@ -143,6 +144,7 @@ defmodule PtcRunner.Lisp do
     filter_context = Keyword.get(opts, :filter_context, true)
     budget = Keyword.get(opts, :budget)
     pmap_timeout = Keyword.get(opts, :pmap_timeout)
+    pmap_max_concurrency = Keyword.get(opts, :pmap_max_concurrency)
     trace_context = Keyword.get(opts, :trace_context)
     journal = Keyword.get(opts, :journal)
     tool_cache = Keyword.get(opts, :tool_cache, %{})
@@ -178,6 +180,7 @@ defmodule PtcRunner.Lisp do
         filter_context: filter_context,
         budget: budget,
         pmap_timeout: pmap_timeout,
+        pmap_max_concurrency: pmap_max_concurrency,
         trace_context: trace_context,
         journal: journal,
         tool_cache: tool_cache,
@@ -246,6 +249,7 @@ defmodule PtcRunner.Lisp do
       filter_context: filter_context,
       budget: budget,
       pmap_timeout: pmap_timeout,
+      pmap_max_concurrency: pmap_max_concurrency,
       trace_context: trace_context,
       journal: journal,
       tool_cache: tool_cache,
@@ -271,6 +275,7 @@ defmodule PtcRunner.Lisp do
           max_print_length: max_print_length,
           budget: budget,
           pmap_timeout: pmap_timeout,
+          pmap_max_concurrency: pmap_max_concurrency,
           trace_context: trace_context,
           journal: journal,
           tool_cache: tool_cache,
