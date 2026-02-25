@@ -34,6 +34,7 @@ data/products                      ; read-only input data
 </language_reference>
 
 <restrictions>
+- Comments (`;`) MUST be on their own line, never inline — `;` mid-line breaks operators like `<=` and `->>`
 - No namespaced keywords (`:foo/bar`)
 - No `(range)` without args — use `(range 10)`
 - No `if` without else — use `(if x y nil)` or `when`
