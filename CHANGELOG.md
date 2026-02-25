@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-02-25
+
+### Breaking Changes
+
+- Renamed JSON mode to text mode — `:json` and `:tool_calling` unified into single `:text` output mode
+- Removed backward compatibility shims for old mode names
+- Renamed builtin tool names to match new text mode conventions
+- Migrated system prompts from markdown headings to XML tags
+- Removed `gpt-nano` and `gpt-mini` model entries from LLM registry
+
+### Added
+
+**Unified Text Mode**
+
+- `TextMode` module replacing `JsonMode`, with separate `JsonHandler` for structured output
+- Native tool calling mode for smaller LLMs that support API-level tool use
+- `ToolSchema` module for generating tool schemas from signatures
+- Guard against nil `assistant_content` in tool-call messages
+
+**PTC-Lisp Enhancements**
+
+- `defonce` special form for idempotent variable initialization
+- `pr-str` function for readable string representation
+- `#"..."` regex literal support
+- `CoreToSource` module for Core AST to PTC-Lisp source serialization
+- MapSet support for `some`, `every?`, `not-any?`, `join`, `split`, `replace`
+- Preserved `tool_calls` and `prints` from inside HOF closures
+- Preserved `tool_calls` and `tool_cache` across `loop`/`recur` iterations
+- Handle `:var` nodes in `SymbolCounter`
+- Handle `#'name` var reader syntax in analyzer
+- Handle `defonce` in `collect_undefined_vars` static analysis
+- Skip bare vars in `or` during static undefined-var analysis
+- Treat unbound vars as nil in `or` for safe memory defaults
+- `str` fixed to use Clojure syntax for collections
+- Return nil for keyword lookup on non-map types (Clojure conformance)
+
+**SubAgent Improvements**
+
+- `max_tool_calls` limit to prevent runaway tool loops
+- `pmap_max_concurrency` config to control parallel task limits
+- SubAgent `name` propagated to `Step` for TraceTree and Debug display
+- Journal/step-done prompt sections gated behind `journaling: true`
+- Moved `defonce` docs from base prompt to multi-turn addon
+
+**LLM Client**
+
+- `embed/2,3` and `embed!/2,3` for embedding API support
+- Groq provider support
+- Bedrock inference profile support
+- Migrated to ReqLLM pricing (removed `LLMClient.calculate_cost`)
+
+**Tracing & Viewer**
+
+- Plan progress display in `Debug` and `TraceTree`
+- ptc_viewer: multi-run span tree layout styles
+- ptc_viewer: collapse span tree groups by default with count badges
+- ptc_viewer: draggable sidebar resizer and preserved scroll position
+- Trace sanitize `max_map_size` limit to prevent heap overflow
+
+**Examples**
+
+- ALMA: evolutionary memory design for GraphWorld and ALFWorld environments
+- ALMA: domain-blind `Environment` behaviour with multi-env support
+- ALMA: vector store with cosine similarity and real embeddings
+- ALMA: grep-based DebugAgent with ptc_viewer drill-in
+- RLM recursive: `pmap_max_concurrency` tuning and LCM-inspired directions
+
+### Changed
+
+- Consolidated `gpt-oss` registry entries to 120B only
+- Simplified planner livebook to two-role pattern, dropped reviewer
+- Simplified README Calculator example to use auto-extracted signatures
+- Bumped `credo` 1.7.15 → 1.7.16
+- Bumped `req_llm` 1.2.0 → 1.5.1
+
+### Fixed
+
+- Skip structs in `KeyNormalizer.normalize_keys`
+- Include `raw_response` in `turn.stop` telemetry for parse errors
+- Add agent names to joke workflow livebook for better trace display
+
 ## [0.7.0] - 2026-02-12
 
 ### Breaking Changes
@@ -505,6 +586,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.8.0]: https://github.com/andreasronge/ptc_runner/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/andreasronge/ptc_runner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/andreasronge/ptc_runner/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/andreasronge/ptc_runner/compare/v0.5.1...v0.5.2
