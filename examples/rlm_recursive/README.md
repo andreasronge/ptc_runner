@@ -206,6 +206,21 @@ lib/
 (tool/query {:corpus subset :min_age data/min_age :hobby data/hobby})
 ```
 
+## Comparison with Python RLM
+
+This implementation differs from the [original Python RLM](https://arxiv.org/abs/2512.24601) in several ways:
+
+| Aspect | Python RLM | PTC-Lisp RLM |
+|--------|-----------|---------------|
+| **Generated code** | Python via `exec()` | PTC-Lisp (Clojure-like) |
+| **Sandbox** | Soft — blocklist of dangerous builtins, same process | Hard — isolated BEAM process, 1s timeout, 10MB memory |
+| **Recursion** | `rlm_query(prompt)` function call | `(tool/search {:corpus chunk})` tool call |
+| **Concurrency** | `rlm_query_batched()` — sequential | `(pmap ...)` — truly concurrent via BEAM processes |
+| **Leaf behavior** | Falls back to plain LLM completion (no REPL) | Returns max-depth error |
+| **Termination** | `FINAL(answer)` / `FINAL_VAR(var)` | `(return value)` / `(fail reason)` |
+
+Both implementations share the same core pattern: each recursive child gets its own LLM call that generates a fresh program — no function definitions are shared across recursion levels. Context data flows from parent to child, but code does not.
+
 ## Comparison with `examples/parallel_workers/`
 
 | Feature | `parallel_workers/` (Simple) | `rlm_recursive/` (Advanced) |
