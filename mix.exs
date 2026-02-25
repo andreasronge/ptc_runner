@@ -56,7 +56,7 @@ defmodule PtcRunner.MixProject do
       {:kino, "~> 0.14", optional: true},
       {:llm_client, path: "llm_client", only: [:test, :dev]},
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
-      {:usage_rules, "~> 0.1", only: :dev, runtime: false}
+      {:usage_rules, "~> 1.2", only: :dev, runtime: false}
     ]
   end
 
