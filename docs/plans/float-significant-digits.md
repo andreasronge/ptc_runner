@@ -37,7 +37,6 @@ Change doc from "Decimal places for floats" to "Significant digits for floats (d
 
 ### 5. Update guide docs
 - `docs/guides/subagent-concepts.md:195` — update table
-- `usage-rules.md:40` — update table
 
 ### 6. Update tests
 **File:** `test/ptc_runner/lisp/lisp_options_test.exs`
