@@ -528,7 +528,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     assistant_msg = %{
       role: :assistant,
-      content: assistant_content,
+      content: assistant_content || "",
       tool_calls:
         Enum.map(tool_calls_with_ids, fn tc ->
           %{
