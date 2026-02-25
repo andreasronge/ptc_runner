@@ -377,6 +377,27 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       assert result == true
     end
+
+    test "some with predicate on set" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(some #(> % 3) (set [1 2 3 4 5]))|)
+
+      assert result == true
+    end
+
+    test "every? with predicate on set" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(every? #(> % 0) (set [1 2 3]))|)
+
+      assert result == true
+    end
+
+    test "not-any? with predicate on set" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(not-any? #(> % 10) (set [1 2 3]))|)
+
+      assert result == true
+    end
   end
 
   # ==========================================================================

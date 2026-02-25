@@ -951,6 +951,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find_value(coll, set_pred(set))
   end
 
+  def some(pred, %MapSet{} = set), do: Enum.find_value(set, &Callable.call(pred, [&1]))
   def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, &Callable.call(pred, [&1]))
 
   def some(pred, coll) when is_binary(coll),
@@ -966,6 +967,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.all?(coll, set_pred(set))
   end
 
+  def every?(pred, %MapSet{} = set), do: Enum.all?(set, &Callable.call(pred, [&1]))
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, &Callable.call(pred, [&1]))
 
   def every?(pred, coll) when is_binary(coll),
@@ -981,6 +983,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     not Enum.any?(coll, set_pred(set))
   end
 
+  def not_any?(pred, %MapSet{} = set), do: not Enum.any?(set, &Callable.call(pred, [&1]))
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, &Callable.call(pred, [&1]))
 
   def not_any?(pred, coll) when is_binary(coll),

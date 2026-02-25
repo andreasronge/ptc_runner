@@ -57,8 +57,14 @@ defmodule PtcRunner.Lisp.Runtime.String do
     Enum.map_join(coll, &to_str/1)
   end
 
+  def join(%MapSet{} = set), do: join(MapSet.to_list(set))
+
   def join(separator, coll) when is_binary(separator) and is_list(coll) do
     Enum.map_join(coll, separator, &to_str/1)
+  end
+
+  def join(separator, %MapSet{} = set) when is_binary(separator) do
+    Enum.map_join(set, separator, &to_str/1)
   end
 
   @doc """
@@ -68,6 +74,10 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (split "a,,b" ",") returns ["a" "" "b"]
   """
   def split(s, "") when is_binary(s), do: String.graphemes(s)
+
+  def split(s, {:re_mp, _, _, _} = re) when is_binary(s) do
+    PtcRunner.Lisp.Runtime.Regex.re_split(re, s)
+  end
 
   def split(s, separator) when is_binary(s) and is_binary(separator) do
     String.split(s, separator)
@@ -105,6 +115,11 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (replace "hello" "l" "L") returns "heLLo"
   - (replace "aaa" "a" "b") returns "bbb"
   """
+  def replace(s, {:re_mp, mp, _, _}, replacement)
+      when is_binary(s) and is_binary(replacement) do
+    :re.replace(s, mp, replacement, [:global, {:return, :binary}])
+  end
+
   def replace(s, pattern, replacement)
       when is_binary(s) and is_binary(pattern) and is_binary(replacement) do
     String.replace(s, pattern, replacement)
