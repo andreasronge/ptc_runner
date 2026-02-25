@@ -35,7 +35,7 @@ defmodule PtcRunner.SubAgent.Compiler do
   ## Requirements
 
   - `max_turns: 1` - Only single-shot agents can be compiled
-  - `output: :ptc_lisp` - Only PTC-Lisp output mode (not `:json`)
+  - `output: :ptc_lisp` - Only PTC-Lisp output mode (not `:text`)
 
   ## Tool Support
 

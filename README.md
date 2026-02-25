@@ -44,7 +44,7 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 
 ### Key Features
 
-- **Two execution modes**: [PTC-Lisp](docs/ptc-lisp-specification.md) for multi-turn agentic workflows with tools, or [JSON mode](docs/guides/subagent-json-mode.md) for single-turn structured output via Mustache templates
+- **Two execution modes**: [PTC-Lisp](docs/ptc-lisp-specification.md) for multi-turn agentic workflows with tools, or [text mode](docs/guides/subagent-text-mode.md) for direct LLM responses with optional native tool calling
 - **Signatures**: Type contracts (`{sentiment :string, score :float}`) that validate outputs and drive auto-retry on mismatch
 - **Context firewall**: `_` prefixed fields stay in BEAM memory, hidden from LLM prompts
 - **Transactional memory**: `def` persists data across turns without bloating context
@@ -100,6 +100,88 @@ compiled.execute.(%{topic: "cats"}, llm: my_llm)
 ```
 
 See the [Joke Workflow Livebook](livebooks/joke_workflow.livemd) for a complete example.
+
+### Text Mode
+
+Not every task needs PTC-Lisp. Text mode (`output: :text`) uses the LLM provider's native tool calling API — ideal for smaller models or straightforward tasks:
+
+```elixir
+# Plain text — no signature, raw string response
+{:ok, step} = SubAgent.run(
+  "Summarize this article: {{text}}",
+  context: %{text: article},
+  output: :text,
+  llm: my_llm
+)
+step.return  #=> "The article discusses..."
+
+# Structured JSON — signature validates the response
+{:ok, step} = SubAgent.run(
+  "Classify the sentiment of: {{text}}",
+  context: %{text: "I love this product!"},
+  output: :text,
+  signature: "() -> {sentiment :string, score :float}",
+  llm: my_llm
+)
+step.return  #=> %{"sentiment" => "positive", "score" => 0.95}
+```
+
+Text mode also supports tools. Define tools as arity-1 functions that receive a map of arguments:
+
+```elixir
+defmodule Calculator do
+  @doc "Add two numbers"
+  @spec add(%{String.t() => integer()}) :: integer()
+  def add(%{"a" => a, "b" => b}), do: a + b
+
+  @doc "Multiply two numbers"
+  @spec multiply(%{String.t() => integer()}) :: integer()
+  def multiply(%{"a" => a, "b" => b}), do: a * b
+end
+```
+
+Pass the functions as tools with explicit signatures — PtcRunner converts them to JSON Schema for the LLM provider's native tool calling API:
+
+```elixir
+{:ok, step} = SubAgent.run(
+  "What is (3 + 4) * 5?",
+  output: :text,
+  signature: "() -> {result :int}",
+  tools: %{
+    "add" => {&Calculator.add/1, "(a :int, b :int) -> :int"},
+    "multiply" => {&Calculator.multiply/1, "(a :int, b :int) -> :int"}
+  },
+  llm: my_llm
+)
+step.return["result"]  #=> 35
+```
+
+For arity-1 functions with `@doc` and `@spec`, PtcRunner auto-extracts the description and signature — no manual annotation needed. See the [Text Mode guide](docs/guides/subagent-text-mode.md) for all four variants (plain text, JSON, tool+text, tool+JSON).
+
+### Signatures and JSON Schema
+
+Signatures are compact type contracts that validate SubAgent inputs and outputs:
+
+```
+"(query :string, limit :int) -> {total :float, items [{id :int, name :string}]}"
+```
+
+Under the hood, PtcRunner converts signatures to **JSON Schema** in two places:
+
+| Where | When | Purpose |
+|-------|------|---------|
+| **Tool definitions** | Text mode with tools | Tool signatures → JSON Schema parameters sent to the LLM provider's native tool calling API |
+| **Structured output** | Text mode with complex return type | Return signature → JSON Schema passed to the LLM callback for provider-specific structured output (e.g., OpenAI `response_format`) |
+
+In PTC-Lisp mode, signatures stay in their compact form — the LLM sees them in the prompt and PtcRunner validates the result directly. JSON Schema is only generated when interfacing with LLM provider APIs that require it.
+
+Auto-extraction from `@spec` means you can define tools as regular Elixir functions and skip writing signatures by hand. For full control, pass an explicit signature string:
+
+```elixir
+"search" => {&MyApp.search/2, signature: "(query :string, limit :int) -> [{id :int}]"}
+```
+
+See [Signature Syntax](docs/signature-syntax.md) for the full type reference.
 
 ### Meta Planner
 

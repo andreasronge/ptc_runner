@@ -682,7 +682,7 @@ defmodule PtcRunner.SubAgent do
               opts
             )
           else
-            # Loop mode (including JSON mode) - delegate to Loop.run/2
+            # Loop mode (including text mode) - delegate to Loop.run/2
             # Update opts with prepared context and received field descriptions
             updated_opts =
               opts
@@ -1251,7 +1251,7 @@ defmodule PtcRunner.SubAgent do
   - `:system` - The static system prompt (cacheable - does NOT include mission)
   - `:user` - The full first user message (context sections + mission)
   - `:tool_schemas` - List of tool schema maps with name, signature, and description fields
-  - `:schema` - JSON schema for the return type (JSON mode only, nil for PTC-Lisp)
+  - `:schema` - JSON schema for the return type (text mode only, nil for PTC-Lisp)
 
   ## Examples
 

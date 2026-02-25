@@ -328,10 +328,18 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     tool_schemas = ToolSchema.to_tool_definitions(effective_tools)
     normalized_tools = ToolNormalizer.normalize(effective_tools, state, agent)
 
+    # Build reverse name map: sanitized API name → original tool name
+    # e.g., "grep_n" → "grep-n", so we can find tools when the LLM uses sanitized names
+    api_name_map =
+      Map.new(normalized_tools, fn {name, _} ->
+        {ToolSchema.sanitize_name(name), name}
+      end)
+
     tc_state =
       state
       |> Map.put(:tool_schemas, tool_schemas)
       |> Map.put(:normalized_tools_map, normalized_tools)
+      |> Map.put(:api_name_map, api_name_map)
       |> Map.put(:total_tool_calls, 0)
       |> Map.put(:all_tool_calls, [])
 
@@ -579,8 +587,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp execute_single_tool(tool_name, tool_args, state) do
     start = System.monotonic_time(:millisecond)
 
+    # Resolve sanitized API name back to original tool name
+    # e.g., LLM returns "grep_n" but tools map has "grep-n"
+    resolved_name = Map.get(state.api_name_map, tool_name, tool_name)
+
     {result_str, result, error} =
-      case Map.fetch(state.normalized_tools_map, tool_name) do
+      case Map.fetch(state.normalized_tools_map, resolved_name) do
         {:ok, tool_fn} when is_function(tool_fn, 1) ->
           try do
             result = tool_fn.(tool_args)

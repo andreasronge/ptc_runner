@@ -142,14 +142,6 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       assert result =~ "config"
     end
 
-    test "handles legacy 5-tuple closure" do
-      closure = {:closure, [{:var, :x}], nil, %{}, []}
-      result = User.render(%{legacy: closure}, [])
-
-      assert result =~ "(legacy [x])"
-      refute result =~ "->"
-    end
-
     test "mixed functions and values" do
       closure1 = {:closure, [{:var, :x}], nil, %{}, [], %{return_type: "integer"}}
       closure2 = {:closure, [{:var, :item}], nil, %{}, [], %{}}

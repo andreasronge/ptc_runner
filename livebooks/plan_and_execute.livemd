@@ -188,7 +188,7 @@ end
 
 This livebook demonstrates the **plan-and-execute** pattern:
 
-1. **Planner** (single-shot, JSON mode) generates a step-by-step plan
+1. **Planner** (single-shot, text mode) generates a step-by-step plan
 2. **Executor** (multi-turn, PTC-Lisp) follows the plan with built-in progress tracking
 
 The executor gets a **progress checklist** each turn showing:

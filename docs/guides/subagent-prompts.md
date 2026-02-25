@@ -196,7 +196,7 @@ IO.puts(preview.system)  # Full system prompt
 IO.puts(preview.user)    # Expanded user prompt
 ```
 
-## JSON Mode Templating
+## Text Mode Templating
 
 Text mode uses full Mustache templating with sections for iterating lists. This differs from PTC-Lisp mode where data appears in the Data Inventory section.
 

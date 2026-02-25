@@ -58,17 +58,6 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert message =~ "Unknown tool"
       assert message =~ "unknown-tool"
     end
-
-    test "deprecated call syntax returns clear error message" do
-      # The (call "tool" args) syntax is deprecated, use (tool/tool-name args) instead
-      source = ~S|(call "search" {:query "foo"})|
-
-      assert {:error, %Step{fail: %{reason: :invalid_form, message: message}}} =
-               Lisp.run(source)
-
-      assert message =~ "deprecated"
-      assert message =~ "tool/"
-    end
   end
 
   describe "invalid programs - type errors" do

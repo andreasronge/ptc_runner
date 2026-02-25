@@ -220,17 +220,6 @@ defmodule PtcRunner.PlanTest do
       assert t3.critical == true
     end
 
-    test "normalizes log_and_continue to skip" do
-      raw = %{
-        "tasks" => [
-          %{"id" => "t1", "input" => "test", "on_failure" => "log_and_continue"}
-        ]
-      }
-
-      {:ok, plan} = Plan.parse(raw)
-      assert hd(plan.tasks).on_failure == :skip
-    end
-
     test "parses task type field" do
       raw = %{
         "tasks" => [
@@ -274,9 +263,7 @@ defmodule PtcRunner.PlanTest do
         "tasks" => [
           %{"id" => "t1", "input" => "x", "type" => "human_review"},
           %{"id" => "t2", "input" => "x", "type" => "review"},
-          %{"id" => "t3", "input" => "x", "type" => "approval"},
-          %{"id" => "t4", "input" => "x", "type" => "human_approval"},
-          %{"id" => "t5", "input" => "x", "type" => "manual"}
+          %{"id" => "t3", "input" => "x", "type" => "approval"}
         ]
       }
 
@@ -292,9 +279,7 @@ defmodule PtcRunner.PlanTest do
         "tasks" => [
           %{"id" => "t1", "input" => "x", "quality_gate" => true},
           %{"id" => "t2", "input" => "x", "quality_gate" => false},
-          %{"id" => "t3", "input" => "x", "quality_gate" => "true"},
-          %{"id" => "t4", "input" => "x", "quality_gate" => "false"},
-          %{"id" => "t5", "input" => "x"}
+          %{"id" => "t3", "input" => "x"}
         ]
       }
 
@@ -303,14 +288,10 @@ defmodule PtcRunner.PlanTest do
       t1 = Enum.find(plan.tasks, &(&1.id == "t1"))
       t2 = Enum.find(plan.tasks, &(&1.id == "t2"))
       t3 = Enum.find(plan.tasks, &(&1.id == "t3"))
-      t4 = Enum.find(plan.tasks, &(&1.id == "t4"))
-      t5 = Enum.find(plan.tasks, &(&1.id == "t5"))
 
       assert t1.quality_gate == true
       assert t2.quality_gate == false
-      assert t3.quality_gate == true
-      assert t4.quality_gate == false
-      assert t5.quality_gate == nil
+      assert t3.quality_gate == nil
     end
 
     test "string task gets quality_gate nil" do
@@ -325,9 +306,8 @@ defmodule PtcRunner.PlanTest do
       raw = %{
         "tasks" => [
           %{"id" => "t1", "input" => "x", "output" => "ptc_lisp"},
-          %{"id" => "t2", "input" => "x", "output" => "lisp"},
-          %{"id" => "t3", "input" => "x", "output" => "json"},
-          %{"id" => "t4", "input" => "x"}
+          %{"id" => "t2", "input" => "x", "output" => "text"},
+          %{"id" => "t3", "input" => "x"}
         ]
       }
 
@@ -336,13 +316,11 @@ defmodule PtcRunner.PlanTest do
       t1 = Enum.find(plan.tasks, &(&1.id == "t1"))
       t2 = Enum.find(plan.tasks, &(&1.id == "t2"))
       t3 = Enum.find(plan.tasks, &(&1.id == "t3"))
-      t4 = Enum.find(plan.tasks, &(&1.id == "t4"))
 
       assert t1.output == :ptc_lisp
-      assert t2.output == :ptc_lisp
-      assert t3.output == :text
+      assert t2.output == :text
       # Default is nil (auto-detect based on tools)
-      assert t4.output == nil
+      assert t3.output == nil
     end
   end
 

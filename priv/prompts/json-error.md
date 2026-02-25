@@ -1,6 +1,6 @@
-# JSON Mode Error Feedback
+# Text Mode (JSON variant) Error Feedback
 
-Error feedback for JSON validation failures.
+Error feedback for text mode JSON validation failures.
 
 <!-- version: 2 -->
 <!-- date: 2026-02-18 -->

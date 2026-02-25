@@ -1,6 +1,6 @@
-# JSON Mode User Message Template
+# Text Mode (JSON variant) User Message Template
 
-User message template for JSON output mode.
+User message template for text mode structured JSON output.
 
 <!-- version: 3 -->
 <!-- date: 2026-02-18 -->

@@ -386,6 +386,8 @@ Use `builtin_tools` to enable utility tool families without defining them yourse
 
 The `:grep` family adds `tool/grep` and `tool/grep-n` (line-numbered variant). Multiple families can be combined: `builtin_tools: [:grep]`. User-defined tools with the same name take precedence.
 
+**Text mode note:** In text mode (`output: :text`), tool names with hyphens are automatically sanitized to underscores for the LLM provider API (e.g., `grep-n` becomes `grep_n`). The mapping is handled transparently.
+
 ## Agent as Data
 
 For reusable agents, create the struct separately:

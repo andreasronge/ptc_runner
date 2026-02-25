@@ -1,6 +1,6 @@
-# JSON Mode System Prompt
+# Text Mode (JSON variant) System Prompt
 
-System prompt for JSON output mode.
+System prompt for text mode structured JSON output.
 
 <!-- version: 2 -->
 <!-- date: 2026-02-18 -->

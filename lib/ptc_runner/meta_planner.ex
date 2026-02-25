@@ -352,11 +352,11 @@ defmodule PtcRunner.MetaPlanner do
                 "type" => "string",
                 "enum" => ["ptc_lisp", "json"],
                 "description" =>
-                  "Execution mode: ptc_lisp for computation tasks (verified arithmetic), json for Q&A/synthesis. Default: auto-detect (tools → ptc_lisp, no tools → json)"
+                  "Execution mode: ptc_lisp for computation tasks (verified arithmetic), text for Q&A/synthesis. Default: auto-detect (tools → ptc_lisp, no tools → text)"
               },
               "signature" => %{
                 "type" => "string",
-                "description" => "Output signature for JSON mode (REQUIRED for synthesis_gate)"
+                "description" => "Output signature for text mode (REQUIRED for synthesis_gate)"
               },
               "quality_gate" => %{
                 "type" => "boolean",

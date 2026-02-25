@@ -86,7 +86,6 @@ defmodule PtcRunner.SubAgent.Namespace.User do
   defp uninformative?(_), do: false
 
   defp closure?({:closure, _, _, _, _, _}), do: true
-  defp closure?({:closure, _, _, _, _}), do: true
   defp closure?(_), do: false
 
   # Format functions: (name [params]) with optional docstring and return_type
@@ -121,9 +120,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
     end)
   end
 
-  # Extract params from closure (5-tuple or 6-tuple)
   defp format_params({:closure, params, _, _, _, _}), do: do_format_params(params)
-  defp format_params({:closure, params, _, _, _}), do: do_format_params(params)
 
   defp do_format_params({:variadic, leading, rest}) do
     leading_str = Enum.map_join(leading, " ", &extract_param_name/1)

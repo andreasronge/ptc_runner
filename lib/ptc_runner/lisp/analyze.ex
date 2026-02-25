@@ -208,13 +208,6 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_form, "(. obj method) syntax is not supported. Use (.method obj) instead."}}
   end
 
-  defp dispatch_list_form({:symbol, :call}, _rest, _list, _tail?) do
-    {:error,
-     {:invalid_form,
-      "(call \"tool\" args) is deprecated, use (tool/name args) instead. " <>
-        "Example: (call \"search\" {:query \"foo\"}) becomes (tool/search {:query \"foo\"})"}}
-  end
-
   defp dispatch_list_form({:symbol, :return}, rest, _list, tail?), do: analyze_return(rest, tail?)
   defp dispatch_list_form({:symbol, :fail}, rest, _list, tail?), do: analyze_fail(rest, tail?)
   defp dispatch_list_form({:symbol, :task}, rest, _list, tail?), do: analyze_task(rest, tail?)

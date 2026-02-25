@@ -185,7 +185,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       type: turn_type
     }
 
-    # Include raw_response when program is nil (e.g. parse errors, JSON mode)
+    # Include raw_response when program is nil (e.g. parse errors, text mode)
     # so trace viewers can show what the LLM actually generated
     metadata =
       if is_nil(program) and raw_response do
