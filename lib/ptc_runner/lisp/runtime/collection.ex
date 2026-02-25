@@ -322,7 +322,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.sort_by(graphemes(coll), &Callable.call(keyfn, [&1]))
   end
 
-  def sort_by(keyfn, coll) when is_map(coll) do
+  def sort_by(keyfn, %MapSet{} = set), do: sort_by(keyfn, MapSet.to_list(set))
+
+  def sort_by(keyfn, coll) when is_map(coll) and not is_struct(coll) do
     # When sorting a map, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
@@ -340,7 +342,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.sort_by(coll, &Callable.call(keyfn, [&1]), wrap_comparator(comp))
   end
 
-  def sort_by(keyfn, comp, coll) when is_map(coll) do
+  def sort_by(keyfn, comp, %MapSet{} = set), do: sort_by(keyfn, comp, MapSet.to_list(set))
+
+  def sort_by(keyfn, comp, coll) when is_map(coll) and not is_struct(coll) do
     # When sorting a map with custom comparator, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
@@ -754,6 +758,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.sum()
   end
 
+  def sum_by(key, %MapSet{} = set), do: sum_by(key, MapSet.to_list(set))
+
   def sum_by(key, coll) when is_map(coll) and not is_struct(coll),
     do: sum_by(key, to_seq_list(coll))
 
@@ -789,6 +795,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def avg_by(key, %MapSet{} = set), do: avg_by(key, MapSet.to_list(set))
+
   def avg_by(key, coll) when is_map(coll) and not is_struct(coll),
     do: avg_by(key, to_seq_list(coll))
 
@@ -817,6 +825,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       filtered -> Enum.min_by(filtered, &Callable.call(keyfn, [&1]))
     end
   end
+
+  def min_by(key, %MapSet{} = set), do: min_by(key, MapSet.to_list(set))
 
   def min_by(key, coll) when is_map(coll) and not is_struct(coll),
     do: min_by(key, to_seq_list(coll))
@@ -847,6 +857,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
+  def max_by(key, %MapSet{} = set), do: max_by(key, MapSet.to_list(set))
+
   def max_by(key, coll) when is_map(coll) and not is_struct(coll),
     do: max_by(key, to_seq_list(coll))
 
@@ -866,6 +878,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def distinct_by(keyfn, coll) when is_list(coll) do
     Enum.uniq_by(coll, &Callable.call(keyfn, [&1]))
   end
+
+  def distinct_by(key, %MapSet{} = set), do: distinct_by(key, MapSet.to_list(set))
 
   def distinct_by(key, coll) when is_map(coll) and not is_struct(coll),
     do: distinct_by(key, to_seq_list(coll))
@@ -956,6 +970,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def group_by(keyfn, coll) when is_list(coll) do
     Enum.group_by(coll, &Callable.call(keyfn, [&1]))
   end
+
+  def group_by(key, %MapSet{} = set), do: group_by(key, MapSet.to_list(set))
 
   def group_by(key, coll) when is_map(coll) and not is_struct(coll),
     do: group_by(key, to_seq_list(coll))
