@@ -485,7 +485,7 @@ defmodule PtcRunner.Lisp.Eval do
             end,
             timeout: eval_ctx2.pmap_timeout,
             ordered: true,
-            max_concurrency: System.schedulers_online() * 2
+            max_concurrency: eval_ctx2.pmap_max_concurrency
           )
           |> Enum.to_list()
 
@@ -577,7 +577,7 @@ defmodule PtcRunner.Lisp.Eval do
               end,
               timeout: eval_ctx2.pmap_timeout,
               ordered: true,
-              max_concurrency: System.schedulers_online() * 2
+              max_concurrency: eval_ctx2.pmap_max_concurrency
             )
             |> Enum.to_list()
 

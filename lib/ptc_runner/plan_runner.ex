@@ -45,6 +45,7 @@ defmodule PtcRunner.PlanRunner do
     Format: `"Description. Input: {param: type}. Output: {field: type}"`
   - `timeout` - Per-task sandbox timeout in ms (default: 30_000)
   - `pmap_timeout` - Per-pmap/pcalls task timeout in ms (default: same as `timeout`). Increase for LLM-backed tools.
+  - `pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools.
   - `max_turns` - Max turns per agent (default: 5)
   - `max_concurrency` - Max parallel tasks per phase (default: 10)
   - `reviews` - Map of task_id => decision for human review tasks (default: %{})
@@ -148,6 +149,7 @@ defmodule PtcRunner.PlanRunner do
     available_tools = Keyword.get(opts, :available_tools, %{})
     timeout = Keyword.get(opts, :timeout, 30_000)
     pmap_timeout = Keyword.get(opts, :pmap_timeout, timeout)
+    pmap_max_concurrency = Keyword.get(opts, :pmap_max_concurrency)
     max_turns = Keyword.get(opts, :max_turns, 5)
     llm_registry = Keyword.get(opts, :llm_registry, %{})
     max_concurrency = Keyword.get(opts, :max_concurrency, 10)
@@ -168,6 +170,7 @@ defmodule PtcRunner.PlanRunner do
       builtin_tools: Keyword.get(opts, :builtin_tools, []),
       timeout: timeout,
       pmap_timeout: pmap_timeout,
+      pmap_max_concurrency: pmap_max_concurrency,
       max_turns: max_turns,
       max_concurrency: max_concurrency,
       reviews: reviews,
@@ -914,6 +917,12 @@ defmodule PtcRunner.PlanRunner do
             timeout: opts.timeout,
             pmap_timeout: opts.pmap_timeout
           ]
+
+          # Inject pmap_max_concurrency if provided
+          base_opts =
+            if opts.pmap_max_concurrency,
+              do: Keyword.put(base_opts, :pmap_max_concurrency, opts.pmap_max_concurrency),
+              else: base_opts
 
           # Inject builtin_tools for PTC-Lisp agents
           base_opts =

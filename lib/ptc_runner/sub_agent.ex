@@ -166,6 +166,7 @@ defmodule PtcRunner.SubAgent do
           thinking: boolean(),
           output: output_mode(),
           max_tool_calls: pos_integer() | nil,
+          pmap_max_concurrency: pos_integer(),
           memory_strategy: :strict | :rollback,
           plan: [plan_step()],
           journaling: boolean()
@@ -209,6 +210,7 @@ defmodule PtcRunner.SubAgent do
     retry_turns: 0,
     timeout: 5000,
     pmap_timeout: 5000,
+    pmap_max_concurrency: System.schedulers_online() * 2,
     memory_limit: 1_048_576,
     max_depth: 3,
     turn_budget: 20,
@@ -281,6 +283,7 @@ defmodule PtcRunner.SubAgent do
   - `float_precision` - Non-negative integer for decimal places in floats (default: 2)
   - `compression` - Compression strategy for turn history (see `t:compression_opts/0`)
   - `pmap_timeout` - Positive integer for max milliseconds per `pmap` parallel operation (default: 5000)
+  - `pmap_max_concurrency` - Positive integer for max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools or API rate limits.
   - `max_depth` - Positive integer for maximum recursion depth in nested agents (default: 3)
   - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
   - `output` - Output mode: `:ptc_lisp` (default) or `:text`
@@ -554,6 +557,7 @@ defmodule PtcRunner.SubAgent do
         :retry_turns,
         :timeout,
         :pmap_timeout,
+        :pmap_max_concurrency,
         :max_heap,
         :prompt_limit,
         :mission_timeout,

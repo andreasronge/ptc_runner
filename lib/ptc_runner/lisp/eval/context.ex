@@ -15,12 +15,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
   |-------|---------|----------|---------|
   | `loop_limit` | 1,000 | 10,000 | Max loop/recursion iterations |
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
+  | `pmap_max_concurrency` | `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
   """
 
   @default_print_length 2000
   @max_loop_limit 10_000
 
   @default_pmap_timeout 5_000
+  @default_pmap_max_concurrency System.schedulers_online() * 2
 
   defstruct [
     :ctx,
@@ -37,6 +39,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     max_print_length: @default_print_length,
     max_tool_calls: nil,
     pmap_timeout: @default_pmap_timeout,
+    pmap_max_concurrency: @default_pmap_max_concurrency,
     prints: [],
     tool_calls: [],
     pmap_calls: [],
@@ -122,6 +125,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           max_tool_calls: pos_integer() | nil,
           max_print_length: pos_integer(),
           pmap_timeout: pos_integer(),
+          pmap_max_concurrency: pos_integer(),
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
@@ -137,6 +141,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
   - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
   - `:pmap_timeout` - Timeout in ms for each pmap task (default: 5000). Increase for LLM-backed tools.
+  - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`)
   - `:trace_context` - Trace context for nested agent tracing (default: nil)
 
   ## Examples
@@ -169,6 +174,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
+      pmap_max_concurrency:
+        Keyword.get(opts, :pmap_max_concurrency, @default_pmap_max_concurrency),
       budget: Keyword.get(opts, :budget),
       trace_context: Keyword.get(opts, :trace_context),
       journal: Keyword.get(opts, :journal),
