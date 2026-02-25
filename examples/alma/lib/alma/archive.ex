@@ -158,23 +158,41 @@ defmodule Alma.Archive do
   end
 
   @doc """
-  Seeds the archive with a spatial baseline that uses vector store tools.
+  Seeds the archive with the environment's baseline design.
 
-  The design stores item locations and room connections via `tool/store-obs`
-  and retrieves relevant spatial knowledge via `tool/find-similar` during recall.
+  Calls `env_module.seed_design_source/0` to get PTC-Lisp source,
+  compiles it, and adds the resulting design to the archive.
+  If the environment doesn't provide a seed or it fails to compile,
+  the archive is returned unchanged.
   """
-  def seed_spatial(%__MODULE__{} = archive) do
-    source = spatial_baseline_source()
+  def seed_environment(%__MODULE__{} = archive, env_module) do
+    Code.ensure_loaded(env_module)
 
+    if function_exported?(env_module, :seed_design_source, 0) do
+      case env_module.seed_design_source() do
+        nil -> archive
+        source -> compile_and_seed(archive, source)
+      end
+    else
+      archive
+    end
+  end
+
+  defp compile_and_seed(archive, source) do
     case PtcRunner.Lisp.run(source) do
       {:ok, step} ->
         mem_update = step.memory[:"mem-update"]
         recall = step.memory[:recall]
 
+        return_val = unwrap_return(step.return)
+        name = if is_map(return_val), do: return_val["name"], else: "env_baseline"
+
+        description =
+          if is_map(return_val), do: return_val["description"], else: "Environment baseline"
+
         design = %{
-          name: "spatial_baseline",
-          description:
-            "Builds graph from exits, stores objects by collection, provides pathfinding in recall",
+          name: name,
+          description: description,
           mem_update: mem_update,
           recall: recall,
           mem_update_source: PtcRunner.Lisp.CoreToSource.serialize_closure(mem_update),
@@ -191,53 +209,12 @@ defmodule Alma.Archive do
         })
 
       {:error, _reason} ->
-        # Fall back to just null if spatial source fails to compile
         archive
     end
   end
 
-  defp spatial_baseline_source do
-    ~S"""
-    (do
-      (defn mem-update []
-        ;; Always extract spatial and object data — failed episodes reveal the map too
-        (doseq [obs data/observation_log]
-          (let [result (:result obs)
-                loc (:location result)
-                objects (:objects result)
-                exits (:exits result)]
-            (when loc
-              ;; Build graph from observed room connections
-              (when (seq exits)
-                (tool/graph-update {"edges" (map (fn [exit] [loc exit]) exits)}))
-              ;; Store object sightings in a dedicated collection
-              (when (seq objects)
-                (doseq [obj objects]
-                  (tool/store-obs {"text" (str obj " seen in " loc)
-                                   "metadata" {"item" obj "room" loc}
-                                   "collection" "objects"})))))))
-
-      (defn recall []
-        (let [goal (:goal data/task)
-              target (if (map? goal) (:object goal) (str goal))
-              dest (if (map? goal) (:destination goal) nil)
-              ;; Look up where the target was seen
-              hits (tool/find-similar {"query" (str target) "k" 3 "collection" "objects"})
-              item-loc (when (seq hits) (get (first hits) "metadata"))
-              item-room (when item-loc (get item-loc "room"))
-              ;; Compute path to destination if we know it
-              start (:agent_location data/task)
-              path-to-dest (when (and start dest) (tool/graph-path {"from" start "to" dest}))]
-          (str
-            (if item-room (str target " was seen in " item-room ". ") "")
-            (if (and path-to-dest (> (count path-to-dest) 1))
-              (str "Path to " dest ": " (clojure.string/join " -> " path-to-dest))
-              (if dest (str "Deliver to " dest ".") "")))))
-
-      (return {"name" "spatial_baseline"
-               "description" "Builds graph from exits, stores objects by collection, provides pathfinding in recall"}))
-    """
-  end
+  defp unwrap_return({:__ptc_return__, value}), do: value
+  defp unwrap_return(value), do: value
 
   @doc """
   Saves the archive to a JSON file.

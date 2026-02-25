@@ -117,16 +117,16 @@ defmodule Alma.MetaAgent do
     MUST use the provided tools (tool/store-obs, tool/graph-update) to persist
     knowledge. Do NOT use `defonce` or `def` for persistence — all cross-episode
     state must go through the tool-backed stores (vector store, graph store).
-    IMPORTANT: `data/observation_log` contains spatial data (rooms visited,
-    exits seen, objects found) regardless of whether the episode succeeded.
-    Always extract and store this data — failed episodes reveal the environment
-    just as much as successful ones.
+    IMPORTANT: `data/observation_log` contains environment observations (states
+    visited, connections found, entities observed) regardless of whether the
+    episode succeeded. Always extract and store this data — failed episodes
+    reveal the environment just as much as successful ones.
 
     `recall` — called before each new task with task info in context.
     MUST use tool/find-similar and/or tool/graph-path to retrieve stored knowledge.
     Must return a text string with advice for the task agent. Keep advice
-    short and action-oriented — include specific room names and object locations
-    from memory, not generic exploration suggestions.
+    short and action-oriented — include specific details from stored knowledge
+    (names, locations, entities), not generic exploration suggestions.
 
     Both functions take no arguments — context is accessed via `data/` prefix.
     Helper functions must be defined before they are used.

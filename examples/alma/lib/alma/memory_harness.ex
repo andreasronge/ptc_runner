@@ -168,10 +168,19 @@ defmodule Alma.MemoryHarness do
 
     {rev_results, memory, rev_errors} =
       Enum.reduce(tasks, {[], initial_memory, []}, fn task_config, {results, memory, errors} ->
-        retrieve_opts =
-          if observe_fn,
-            do: Keyword.put(opts, :current_observation, observe_fn.(task_config)),
-            else: opts
+        {retrieve_opts, task_config} =
+          if observe_fn do
+            case observe_fn.(task_config) do
+              {obs, real_goal} when is_binary(real_goal) ->
+                updated = Map.put(task_config, :goal, real_goal)
+                {Keyword.put(opts, :current_observation, obs), updated}
+
+              obs when is_binary(obs) ->
+                {Keyword.put(opts, :current_observation, obs), task_config}
+            end
+          else
+            {opts, task_config}
+          end
 
         {knowledge, recall_error, recall_log} =
           retrieve(design, task_config, memory, retrieve_opts)
@@ -224,10 +233,19 @@ defmodule Alma.MemoryHarness do
         tasks
         |> Task.async_stream(
           fn task_config ->
-            retrieve_opts =
-              if observe_fn,
-                do: Keyword.put(opts, :current_observation, observe_fn.(task_config)),
-                else: opts
+            {retrieve_opts, task_config} =
+              if observe_fn do
+                case observe_fn.(task_config) do
+                  {obs, real_goal} when is_binary(real_goal) ->
+                    updated = Map.put(task_config, :goal, real_goal)
+                    {Keyword.put(opts, :current_observation, obs), updated}
+
+                  obs when is_binary(obs) ->
+                    {Keyword.put(opts, :current_observation, obs), task_config}
+                end
+              else
+                {opts, task_config}
+              end
 
             retrieve_opts = Keyword.put(retrieve_opts, :store_agents, {vs_agent, gs_agent})
 
@@ -240,7 +258,7 @@ defmodule Alma.MemoryHarness do
             result = Map.put(result, :runtime_logs, [recall_log])
             {result, recall_error}
           end,
-          max_concurrency: System.schedulers_online(),
+          max_concurrency: Keyword.get(opts, :max_concurrency, System.schedulers_online()),
           ordered: true,
           timeout: :infinity
         )
@@ -288,6 +306,7 @@ defmodule Alma.MemoryHarness do
              memory: run_memory,
              tools: tools,
              filter_context: false,
+             timeout: 10_000,
              max_heap: 6_250_000,
              max_tool_calls: 50
            ) do
@@ -321,6 +340,7 @@ defmodule Alma.MemoryHarness do
              memory: run_memory,
              tools: tools,
              filter_context: false,
+             timeout: 10_000,
              max_heap: 6_250_000,
              max_tool_calls: 50
            ) do
@@ -399,10 +419,14 @@ defmodule Alma.MemoryHarness do
     tools = %{
       "find-similar" =>
         {fn args ->
-           query = Map.fetch!(args, "query")
+           query = Map.get(args, "query")
            k = Map.get(args, "k", 3)
            collection = Map.get(args, "collection")
            contains = Map.get(args, "contains")
+
+           if not is_binary(query) or query == "" do
+             raise "find-similar: query must be a non-empty string, got: #{inspect(query)}"
+           end
 
            {embed_us, query_vector} = :timer.tc(fn -> embed_fn.(query) end)
 

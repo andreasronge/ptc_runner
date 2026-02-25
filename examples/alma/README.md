@@ -1,6 +1,6 @@
 # ALMA — Autonomous Learning of Memory Algorithms
 
-An example that evolves memory strategies for autonomous agents using an LLM-driven evolutionary loop. Agents navigate a procedurally generated graph world, and ALMA discovers PTC-Lisp programs that help them learn from experience.
+An example that evolves memory strategies for autonomous agents using an LLM-driven evolutionary loop. ALMA discovers PTC-Lisp programs that help agents learn from experience across pluggable environments (GraphWorld, ALFWorld).
 
 ## How It Works
 
@@ -90,7 +90,7 @@ This implementation is inspired by [ALMA (Automated meta-Learning of Memory desi
 | **Observation data** | Raw text strings (`"You are in room_A. You see: key..."`) — memory code must parse with string splitting/regex | Structured maps via `data/` context (`(:location (:result obs))`) — no parsing needed, less error-prone |
 | **Persistence** | Python code strings stored directly | Closures stored as `(fn ...)` strings via `CoreToSource.serialize_closure/1`; hydrated by running through `Lisp.run` |
 | **Safety** | Docker containers for sandboxing `exec()`'d code | BEAM process sandbox with timeout (1s) and memory limits (10MB) — no containers needed |
-| **Environments** | ALFWorld, TextWorld, Baba Is AI, MiniHack | GraphWorld (procedural room navigation) — simpler but extensible via the `Environment` behaviour |
+| **Environments** | ALFWorld, TextWorld, Baba Is AI, MiniHack | GraphWorld + ALFWorld via pluggable `Environment` behaviour |
 
 ### Why PTC-Lisp instead of Python strings?
 
@@ -116,17 +116,22 @@ Alma.run/1                        Entry point — orchestrates the loop
   │     ├── MemoryHarness         Calls live closures with injected tools
   │     │     ├── VectorStore     N-gram embedding + cosine similarity (with collections)
   │     │     ├── GraphStore      Undirected graph + BFS pathfinding
-  │     │     └── TaskAgent.run   Runs a single task via SubAgent + tools
+  │     │     └── TaskAgent.run   Runs a single task via env-provided tools
   │     └── Analysis              Trajectory metrics and compression for MetaAgent
   │
   ├── Alma.Archive                Evolutionary archive with weighted sampling
   │                               AST-based novelty, JSON persistence
-  │                               Seeds: null baseline + spatial baseline
+  │                               Seeds: null baseline + env-specific baseline
   │
   ├── Alma.Trace                  Telemetry spans for ptc_viewer tracing
   │
-  └── Environments.GraphWorld     Procedurally generated room navigation
-        └── Generator             Seeded task/graph generation
+  ├── Alma.Environment            Behaviour for pluggable environments
+  │
+  ├── Environments.GraphWorld     Procedurally generated room navigation
+  │     └── Generator             Seeded task/graph generation
+  │
+  └── Environments.ALFWorld       Text-based household tasks (via Python bridge)
+        └── Port                  GenServer wrapping Elixir Port for Python
 ```
 
 | Module | Purpose |
@@ -139,12 +144,15 @@ Alma.run/1                        Entry point — orchestrates the loop
 | `Alma.MemoryHarness` | Calls design closures with namespace merge, tool injection, and runtime log capture |
 | `Alma.VectorStore` | Pure Elixir vector store with character n-gram cosine similarity and collection namespacing |
 | `Alma.GraphStore` | Undirected graph adjacency map with BFS shortest-path |
-| `Alma.TaskAgent` | Runs one navigation task via SubAgent with GraphWorld tools |
+| `Alma.TaskAgent` | Runs one task via SubAgent with environment-provided tools |
 | `Alma.Archive` | Evolutionary archive with AST-based novelty and weighted sampling |
 | `Alma.Analysis` | Trajectory metrics and compressed episode summaries for MetaAgent context |
 | `Alma.Trace` | Telemetry spans for ptc_viewer tracing |
-| `Alma.Environments.GraphWorld` | Room navigation environment with `Environment` behaviour |
+| `Alma.Environment` | Behaviour defining the pluggable environment interface |
+| `Alma.Environments.GraphWorld` | Room navigation environment |
 | `Alma.Environments.GraphWorld.Generator` | Seeded procedural task generation |
+| `Alma.Environments.ALFWorld` | ALFWorld household environment (Python bridge) |
+| `Alma.Environments.ALFWorld.Port` | GenServer wrapping Elixir Port for Python bridge |
 
 ### Lisp-Native Designs
 
@@ -220,11 +228,38 @@ Designs are serialized for persistence using `CoreToSource.serialize_closure/1`,
 
 On load, `Archive.hydrate/1` reconstructs each closure by evaluating its source string through `Lisp.run`. Novelty comparison concatenates both source strings for AST-based distance calculation.
 
+### Pluggable Environments
+
+ALMA uses an `Alma.Environment` behaviour that decouples the evolutionary loop from any specific domain. Each environment provides:
+
+- `reset/1`, `step/2`, `observe/1`, `success?/1` — core simulation
+- `task_prompt/0`, `task_tools/2` — SubAgent configuration for the task agent
+- `generate_tasks/2`, `generate_family_tasks/2` — procedural task generation
+- `summarize_observation/2`, `format_goal/1` — trajectory analysis
+- `seed_design_source/0` — optional PTC-Lisp baseline for the archive
+- `context_schema/0` — optional data schema for MetaAgent prompts
+
+The loop, archive, harness, and meta-agent are all domain-blind — they work with any environment that implements the behaviour.
+
 ### GraphWorld Environment
 
 A grid of connected rooms containing objects with meaningful names (key, book, lamp, gem, scroll, etc.). The agent has four tools (`look`, `move_to`, `pick_up`, `put_down`) and must deliver a target object to a destination room within 20 steps. Graphs are procedurally generated with configurable room count, object count, connectivity, and seed.
 
 **Family-based generation:** When `:family` is set, topology (room connectivity) is seeded by the family seed while object/goal/agent placement is seeded by `:seed`. This means episodes within the same family share room layout, making spatial memory genuinely transferable across episodes. By default, family mode is on (family = seed).
+
+### ALFWorld Environment
+
+Text-based household tasks from the [ALFWorld](https://github.com/alfworld/alfworld) benchmark — the primary domain in the original ALMA paper. The agent selects from admissible text commands (e.g., "go to desk 1", "take mug 1 from desk 1", "put mug 1 in/on shelf 1") to complete household goals like cleaning, heating, or placing objects.
+
+Communication with ALFWorld happens via a Python bridge (`priv/alfworld_bridge.py`) running as an Elixir Port. The bridge stays alive across episodes for efficient reuse.
+
+**Prerequisites:** Python 3 with `alfworld` installed (`pip install alfworld`). ALFWorld data must be downloaded (`alfworld-download`).
+
+```bash
+mix alma.run --env alfworld                          # default settings
+mix alma.run --env alfworld --python /path/to/python # custom Python
+mix alma.run --env alfworld --iterations 3 --episodes 2
+```
 
 ### Archive Sampling
 
@@ -252,12 +287,14 @@ mix test              # no LLM calls required
 The simplest way to run ALMA is via the Mix task:
 
 ```bash
-mix alma.run                                    # 5 iterations, 3 episodes, 6 rooms, bedrock:haiku
+mix alma.run                                    # GraphWorld, 5 iterations, 3 episodes, bedrock:haiku
 mix alma.run --iterations 10 --episodes 5       # longer run
 mix alma.run --model bedrock:sonnet             # use a different model
 mix alma.run --meta-model openrouter:openai/gpt-5 --model bedrock:haiku  # strong meta, cheap exec
 mix alma.run --embed-model openai:text-embedding-3-small  # real embeddings for VectorStore
 mix alma.run --rooms 6 --seed 123               # larger world, different seed
+mix alma.run --env alfworld                     # ALFWorld household tasks (requires Python)
+mix alma.run --env alfworld --python python3.11 # ALFWorld with specific Python
 mix alma.run --no-trace                         # disable trace file output
 mix alma.run --quiet                            # suppress per-iteration output
 ```
@@ -266,6 +303,7 @@ mix alma.run --quiet                            # suppress per-iteration output
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--env` | `graph_world` | Environment: `graph_world` or `alfworld` |
 | `--iterations` | `5` | Number of evolutionary iterations |
 | `--episodes` | `3` | Tasks per collection/deployment phase |
 | `--rooms` | `8` | Rooms per GraphWorld environment |
@@ -279,6 +317,8 @@ mix alma.run --quiet                            # suppress per-iteration output
 | `--no-embed` | off | Disable real embeddings, use n-gram fallback |
 | `--no-trace` | off | Disable JSONL trace file output |
 | `--quiet` | off | Suppress verbose iteration output |
+| `--python` | `python3` | Python executable path (ALFWorld only) |
+| `--alfworld-data` | `~/.cache/alfworld/` | ALFWorld data directory |
 
 Tracing is enabled by default — each run writes a timestamped file to `traces/alma_<timestamp>.jsonl`.
 
@@ -332,4 +372,4 @@ archive = Alma.Archive.load("archive.json") |> Alma.Archive.hydrate()
 
 ## Future Improvements
 
-See [FUTURE.md](FUTURE.md) for planned improvements: benchmarking, `tool/analyze`, archive seeds, real embeddings, and operational enhancements.
+See [FUTURE.md](FUTURE.md) for planned improvements.

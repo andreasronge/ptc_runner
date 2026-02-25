@@ -130,6 +130,126 @@ defmodule Alma.Environments.GraphWorld do
     "Place #{goal.object} in #{goal.destination}"
   end
 
+  @impl true
+  def task_prompt do
+    """
+    Navigate connected rooms to complete the goal: {{goal}}.
+    Call recall first for advice from past episodes, then use the tools
+    efficiently — combine multiple tool calls per turn when possible
+    (e.g. pick_up then move_to, or look then move_to).
+    """
+  end
+
+  @impl true
+  def task_tools(agent_pid, knowledge) do
+    %{
+      "look" => {
+        fn _args ->
+          Agent.get(agent_pid, &__MODULE__.observe/1)
+        end,
+        signature: "() -> :any",
+        description:
+          "Look around the current room. Returns location, exits, objects, inventory, and goal."
+      },
+      "move_to" => {
+        fn %{"room" => room} ->
+          Agent.get_and_update(agent_pid, fn state ->
+            __MODULE__.step(state, {:move_to, room})
+          end)
+        end,
+        signature: "(room :string) -> :any", description: "Move to an adjacent room."
+      },
+      "pick_up" => {
+        fn %{"object" => object} ->
+          Agent.get_and_update(agent_pid, fn state ->
+            __MODULE__.step(state, {:pick_up, object})
+          end)
+        end,
+        signature: "(object :string) -> :any",
+        description: "Pick up an object in the current room."
+      },
+      "put_down" => {
+        fn %{"object" => object} ->
+          Agent.get_and_update(agent_pid, fn state ->
+            __MODULE__.step(state, {:put_down, object})
+          end)
+        end,
+        signature: "(object :string) -> :any",
+        description: "Put down an object from your inventory in the current room."
+      },
+      "recall" => {
+        fn _args -> knowledge end,
+        signature: "() -> :string",
+        description: "Recall knowledge from past episodes. Returns advice text."
+      }
+    }
+  end
+
+  @impl true
+  def generate_tasks(count, env_config) do
+    Alma.Environments.GraphWorld.Generator.generate_batch(count, env_config)
+  end
+
+  @impl true
+  def generate_family_tasks(count, env_config) do
+    Alma.Environments.GraphWorld.Generator.generate_family_batch(count, env_config)
+  end
+
+  @impl true
+  def setup(opts) do
+    %{
+      rooms: Keyword.get(opts, :rooms, 5),
+      objects: 3,
+      connectivity: 0.3,
+      seed: Keyword.get(opts, :seed, 42),
+      family: Keyword.get(opts, :family, Keyword.get(opts, :seed, 42))
+    }
+  end
+
+  @impl true
+  def seed_design_source do
+    ~S"""
+    (do
+      (defn mem-update []
+        ;; Always extract spatial and object data — failed episodes reveal the map too
+        (doseq [obs data/observation_log]
+          (let [result (:result obs)
+                loc (:location result)
+                objects (:objects result)
+                exits (:exits result)]
+            (when loc
+              ;; Build graph from observed room connections
+              (when (seq exits)
+                (tool/graph-update {"edges" (map (fn [exit] [loc exit]) exits)}))
+              ;; Store object sightings in a dedicated collection
+              (when (seq objects)
+                (doseq [obj objects]
+                  (tool/store-obs {"text" (str obj " seen in " loc)
+                                   "metadata" {"item" obj "room" loc}
+                                   "collection" "objects"})))))))
+
+      (defn recall []
+        (let [goal (:goal data/task)
+              target (if (map? goal) (:object goal) (str goal))
+              dest (if (map? goal) (:destination goal) nil)
+              ;; Look up where the target was seen
+              hits (tool/find-similar {"query" (str target) "k" 3 "collection" "objects"})
+              item-loc (when (seq hits) (get (first hits) "metadata"))
+              item-room (when item-loc (get item-loc "room"))
+              ;; Compute path to destination if we know it
+              start (:agent_location data/task)
+              path-to-dest (when (and start dest) (tool/graph-path {"from" start "to" dest}))]
+          (str
+            (if item-room (str target " was seen in " item-room ". ") "")
+            (if (and path-to-dest (> (count path-to-dest) 1))
+              (str "Path to " dest ": " (clojure.string/join " -> " path-to-dest))
+              (if dest (str "Deliver to " dest ".") "")))))
+
+      (return {"name" "spatial_baseline"
+               "description" "Builds graph from exits, stores objects by collection, provides pathfinding in recall"}))
+    """
+  end
+
   defp execute_action(state, {:move_to, room}) do
     current_room = Map.fetch!(state.rooms, state.agent_location)
 

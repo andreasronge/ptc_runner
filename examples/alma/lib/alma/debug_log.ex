@@ -117,7 +117,7 @@ defmodule Alma.DebugLog do
           selected
           |> Enum.with_index(1)
           |> Enum.map(fn {result, idx} ->
-            format_episode(result, idx, max_result_chars)
+            format_episode(result, "C#{idx}", max_result_chars)
           end)
 
         [header_line | episode_lines]
@@ -136,7 +136,7 @@ defmodule Alma.DebugLog do
           selected
           |> Enum.with_index(1)
           |> Enum.map(fn {result, idx} ->
-            format_episode(result, idx, max_result_chars)
+            format_episode(result, "D#{idx}", max_result_chars)
           end)
 
         [header_line | episode_lines]
@@ -185,26 +185,28 @@ defmodule Alma.DebugLog do
     end
   end
 
-  defp format_episode(result, idx, max_result_chars) do
+  defp format_episode(result, ep_tag, max_result_chars) do
     status = if result.success?, do: "SUCCESS", else: "FAILED"
     steps = Map.get(result, :steps, 0)
     runtime_logs = Map.get(result, :runtime_logs, [])
+    goal = extract_episode_goal(result)
 
-    header = "--- EPISODE #{idx}: #{status} (#{steps} steps) ---"
+    goal_suffix = if goal != "", do: " — #{goal}", else: ""
+    header = "--- EPISODE #{ep_tag}: #{status} (#{steps} steps)#{goal_suffix} ---"
 
     # Task-level error (e.g. timeout, crash)
     task_error =
       case Map.get(result, :error) do
         nil -> []
-        err when is_binary(err) -> ["[task] ERROR: #{truncate(err, max_result_chars)}"]
-        err -> ["[task] ERROR: #{truncate(inspect(err), max_result_chars)}"]
+        err when is_binary(err) -> ["[#{ep_tag}:task] ERROR: #{truncate(err, max_result_chars)}"]
+        err -> ["[#{ep_tag}:task] ERROR: #{truncate(inspect(err), max_result_chars)}"]
       end
 
     log_lines =
       if runtime_logs == [] do
         []
       else
-        Enum.flat_map(runtime_logs, &format_runtime_log(&1, max_result_chars))
+        Enum.flat_map(runtime_logs, &format_runtime_log(&1, ep_tag, max_result_chars))
       end
 
     # Task agent actions from observation_log
@@ -213,34 +215,44 @@ defmodule Alma.DebugLog do
       |> Enum.map(fn obs ->
         action = Map.get(obs, :action, "?")
         msg = extract_action_message(obs, max_result_chars)
-        "[task] #{action}: #{msg}"
+        "[#{ep_tag}:task] #{action}: #{msg}"
       end)
 
     Enum.join([header | task_error] ++ log_lines ++ task_actions, "\n")
   end
 
+  defp extract_episode_goal(result) do
+    case Map.get(result, :goal) do
+      goal when is_binary(goal) -> truncate(goal, 80)
+      _ -> ""
+    end
+  end
+
+  defp format_runtime_log(log, ep_tag, max_result_chars)
+
   defp format_runtime_log(
          %{phase: phase, prints: prints, tool_calls: tool_calls} = log,
+         ep_tag,
          max_result_chars
        ) do
-    phase_tag = phase_tag(phase)
+    tag = "#{ep_tag}:#{phase_tag(phase)}"
 
     error_lines =
       case Map.get(log, :error) do
         nil -> []
-        err -> ["[#{phase_tag}] ERROR: #{truncate(to_string(err), max_result_chars)}"]
+        err -> ["[#{tag}] ERROR: #{truncate(to_string(err), max_result_chars)}"]
       end
 
     print_lines =
       Enum.map(prints || [], fn p ->
-        "[#{phase_tag}] PRINT: #{truncate(to_string(p), max_result_chars)}"
+        "[#{tag}] PRINT: #{truncate(to_string(p), max_result_chars)}"
       end)
 
     tool_lines =
       Enum.map(tool_calls || [], fn tc ->
         args_str = format_args(tc.args)
         result_str = format_result(tc.result, max_result_chars)
-        "[#{phase_tag}] TOOL #{tc.name}: #{args_str} -> #{result_str}"
+        "[#{tag}] TOOL #{tc.name}: #{args_str} -> #{result_str}"
       end)
 
     return_line =
@@ -250,17 +262,17 @@ defmodule Alma.DebugLog do
 
         ret ->
           [
-            "[#{phase_tag}] RETURN: #{truncate(inspect(ret, limit: 10, printable_limit: max_result_chars), max_result_chars)}"
+            "[#{tag}] RETURN: #{truncate(inspect(ret, limit: 10, printable_limit: max_result_chars), max_result_chars)}"
           ]
       end
 
-    sim_lines = format_similarity_stats(log, phase_tag)
+    sim_lines = format_similarity_stats(log, tag)
 
     error_lines ++ print_lines ++ tool_lines ++ sim_lines ++ return_line
   end
 
-  defp format_runtime_log(%{phase: phase}, _max_result_chars) do
-    ["[#{phase_tag(phase)}] ERROR: incomplete log"]
+  defp format_runtime_log(%{phase: phase}, ep_tag, _max_result_chars) do
+    ["[#{ep_tag}:#{phase_tag(phase)}] ERROR: incomplete log"]
   end
 
   # Format per-query similarity stats lines for a single runtime log.
@@ -371,10 +383,13 @@ defmodule Alma.DebugLog do
   end
 
   defp extract_action_message(%{result: result}, max_chars) when is_map(result) do
-    # Prefer :message field (GraphWorld actions), fall back to inspect
-    case Map.get(result, :message) do
-      msg when is_binary(msg) -> truncate(msg, max_chars)
-      _ -> truncate(inspect(result, limit: 5, printable_limit: max_chars), max_chars)
+    # Prefer :message (GraphWorld) or :obs (ALFWorld), fall back to inspect
+    msg = Map.get(result, :message) || Map.get(result, :obs)
+
+    if is_binary(msg) do
+      truncate(msg, max_chars)
+    else
+      truncate(inspect(result, limit: 5, printable_limit: max_chars), max_chars)
     end
   end
 
