@@ -33,7 +33,7 @@ defmodule PtcRunner.SubAgent.LLMTool do
 
   ## Three Output Modes
 
-  1. **JSON mode** (default) — LLM returns JSON, validated against signature return type.
+  1. **Text mode** (default) — LLM returns JSON, validated against signature return type.
   2. **Template mode** — LLM returns JSON (`json_signature`), then `response_template`
      renders a PTC-Lisp expression with Mustache placeholders filled from the JSON.
      The template runs in a no-tools sandbox. Best for turning simple LLM judgments

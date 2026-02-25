@@ -122,7 +122,7 @@ defmodule PtcRunner.Prompts do
   def lisp_addon_journal_with_header, do: @lisp_addon_journal
 
   # ============================================================================
-  # JSON Mode Templates
+  # Text Mode (JSON variant) Templates
   # ============================================================================
 
   @json_system_file Path.join(@prompts_dir, "json-system.md")
@@ -137,15 +137,15 @@ defmodule PtcRunner.Prompts do
   @json_user @json_user_file |> File.read!() |> PromptLoader.extract_content()
   @json_error @json_error_file |> File.read!() |> PromptLoader.extract_content()
 
-  @doc "JSON mode system prompt."
+  @doc "Text mode (JSON variant) system prompt."
   @spec json_system() :: String.t()
   def json_system, do: @json_system
 
-  @doc "JSON mode user message template (Mustache)."
+  @doc "Text mode (JSON variant) user message template (Mustache)."
   @spec json_user() :: String.t()
   def json_user, do: @json_user
 
-  @doc "JSON mode error feedback template (Mustache)."
+  @doc "Text mode (JSON variant) error feedback template (Mustache)."
   @spec json_error() :: String.t()
   def json_error, do: @json_error
 

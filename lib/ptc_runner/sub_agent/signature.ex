@@ -190,7 +190,7 @@ defmodule PtcRunner.SubAgent.Signature do
   @doc """
   Check if signature returns a list type.
 
-  Used to determine if JSON mode response needs unwrapping.
+  Used to determine if text mode response needs unwrapping.
   """
   @spec returns_list?(signature()) :: boolean()
   def returns_list?({:signature, _params, {:list, _}}), do: true

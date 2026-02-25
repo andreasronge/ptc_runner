@@ -13,7 +13,7 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   - Simple: `{{name}}`
   - Nested: `{{user.name}}` or `{{items.count}}`
 
-  ## Mustache Sections (JSON Mode Only)
+  ## Mustache Sections (Text Mode Only)
 
   The `expand/3` function supports Mustache sections for iterating over lists:
 
@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   - Scalar lists with dot: `{{#tags}}{{.}} {{/tags}}`
   - Inverted sections: `{{^items}}No items{{/items}}`
 
-  **Note:** Sections are intended for JSON mode agents where data is embedded directly
+  **Note:** Sections are intended for text mode agents where data is embedded directly
   in the prompt. For PTC-Lisp mode, use `expand_annotated/2` which returns annotations
   like `~{data/var}` and does not support sections (the Data Inventory is flat).
 
@@ -214,7 +214,7 @@ defmodule PtcRunner.SubAgent.PromptExpander do
     case Mustache.parse(template) do
       {:ok, ast} ->
         # Check for sections - annotated mode only supports simple variables
-        # (Sections are for JSON mode only where data is embedded directly)
+        # (Sections are for text mode only where data is embedded directly)
         if has_sections?(ast) do
           {:error, {:sections_not_supported, "expand_annotated does not support sections"}}
         else

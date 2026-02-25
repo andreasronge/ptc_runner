@@ -89,9 +89,30 @@ defmodule PtcRunner.SubAgent.ToolSchema do
     }
   end
 
+  @doc """
+  Sanitize a tool name for LLM provider APIs.
+
+  Replaces hyphens with underscores since most LLM providers require
+  tool names to match `[a-zA-Z0-9_]+`. PTC-Lisp mode uses hyphens
+  (e.g., `grep-n`, `llm-query`) but these are invalid in native tool calling APIs.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.ToolSchema.sanitize_name("grep-n")
+      "grep_n"
+
+      iex> PtcRunner.SubAgent.ToolSchema.sanitize_name("search")
+      "search"
+
+  """
+  @spec sanitize_name(String.t()) :: String.t()
+  def sanitize_name(name) when is_binary(name) do
+    String.replace(name, "-", "_")
+  end
+
   # Build the full tool definition map
   defp build_definition(name, description, parameters) do
-    func = %{"name" => name}
+    func = %{"name" => sanitize_name(name)}
     func = if description, do: Map.put(func, "description", description), else: func
 
     func =

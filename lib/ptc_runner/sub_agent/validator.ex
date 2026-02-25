@@ -347,7 +347,7 @@ defmodule PtcRunner.SubAgent.Validator do
   # Primitives and other types don't contain fields
   defp find_firewall_field(_), do: nil
 
-  # JSON mode: validate all signature params are used in prompt (via variables or sections)
+  # Text mode: validate all signature params are used in prompt (via variables or sections)
   defp validate_text_all_params_used!(opts) do
     alias PtcRunner.SubAgent.{PromptExpander, Signature}
 

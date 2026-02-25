@@ -92,7 +92,7 @@ defmodule PtcRunner.Plan do
           type: task_type(),
           # Output mode: :ptc_lisp, :text, or nil (auto-detect based on tools)
           output: output_mode(),
-          # Output signature for JSON mode (e.g., "{stocks [{symbol :string, price :float}]}")
+          # Output signature for text mode (e.g., "{stocks [{symbol :string, price :float}]}")
           signature: String.t() | nil,
           # Verification (Phase 1)
           verification: String.t() | nil,
@@ -131,7 +131,7 @@ defmodule PtcRunner.Plan do
   """
   @spec parse(map()) :: {:ok, t()} | {:error, term()}
   def parse(raw_plan) when is_map(raw_plan) do
-    # Unwrap "object" key if present (JSON mode artifact)
+    # Unwrap "object" key if present (text mode artifact)
     plan = unwrap_object(raw_plan)
 
     agents = extract_agents(plan)
@@ -317,19 +317,14 @@ defmodule PtcRunner.Plan do
   defp normalize_task_type("human_review"), do: :human_review
   defp normalize_task_type("review"), do: :human_review
   defp normalize_task_type("approval"), do: :human_review
-  defp normalize_task_type("human_approval"), do: :human_review
-  defp normalize_task_type("manual"), do: :human_review
   defp normalize_task_type(_), do: :task
 
   # Normalize output mode - nil means auto-detect based on tools
   defp normalize_output_mode(nil), do: nil
   defp normalize_output_mode("ptc_lisp"), do: :ptc_lisp
-  defp normalize_output_mode("lisp"), do: :ptc_lisp
-  defp normalize_output_mode("json"), do: :text
   defp normalize_output_mode("text"), do: :text
   defp normalize_output_mode(:ptc_lisp), do: :ptc_lisp
   defp normalize_output_mode(:text), do: :text
-  defp normalize_output_mode(:json), do: :text
   defp normalize_output_mode(_), do: nil
 
   defp normalize_on_failure(nil), do: :stop
@@ -337,8 +332,6 @@ defmodule PtcRunner.Plan do
   defp normalize_on_failure("retry"), do: :retry
   defp normalize_on_failure("stop"), do: :stop
   defp normalize_on_failure("replan"), do: :replan
-  defp normalize_on_failure("log_and_continue"), do: :skip
-  defp normalize_on_failure("continue"), do: :skip
   defp normalize_on_failure(_), do: :stop
 
   defp normalize_on_verification_failure(nil), do: :replan
@@ -350,8 +343,6 @@ defmodule PtcRunner.Plan do
 
   defp normalize_quality_gate(true), do: true
   defp normalize_quality_gate(false), do: false
-  defp normalize_quality_gate("true"), do: true
-  defp normalize_quality_gate("false"), do: false
   defp normalize_quality_gate(_), do: nil
 
   @type validation_issue :: %{

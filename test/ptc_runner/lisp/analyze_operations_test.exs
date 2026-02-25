@@ -313,15 +313,6 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
     end
   end
 
-  describe "call tool invocation (deprecated)" do
-    test "call syntax returns deprecation error" do
-      raw = {:list, [{:symbol, :call}, {:string, "get-users"}]}
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "deprecated"
-      assert msg =~ "tool/"
-    end
-  end
-
   describe "tool/ invocation syntax" do
     test "tool/ with no args" do
       raw = {:list, [{:ns_symbol, :tool, :"get-users"}]}

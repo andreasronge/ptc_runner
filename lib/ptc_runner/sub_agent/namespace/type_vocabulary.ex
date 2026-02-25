@@ -61,7 +61,6 @@ defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
   def type_of(nil), do: "nil"
   def type_of(a) when is_atom(a), do: "keyword"
   def type_of({:closure, _, _, _, _, _}), do: "#fn[...]"
-  def type_of({:closure, _, _, _, _}), do: "#fn[...]"
   def type_of(f) when is_function(f), do: "fn"
   def type_of(_), do: "unknown"
 end

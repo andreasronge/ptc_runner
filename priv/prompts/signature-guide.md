@@ -25,4 +25,4 @@ Signatures define the machine-readable contract for agent outputs.
 
 1. **Synthesis Gates**: ALWAYS. It ensures the gate produces a valid object for downstream tasks.
 2. **Critical Tasks**: When you need to ensure the LLM returns exactly the right keys and types.
-3. **JSON Mode**: If a task has no tools, the signature forces the LLM to skip Lisp code generation and return JSON directly.
+3. **Text Mode**: If a task has no tools, the signature forces the LLM to skip Lisp code generation and return JSON directly.

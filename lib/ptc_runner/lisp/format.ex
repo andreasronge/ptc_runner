@@ -338,12 +338,6 @@ defmodule PtcRunner.Lisp.Format do
   end
 
   # Recursively replace internal types with inspectable wrappers
-  # Handle both 5-tuple (legacy) and 6-tuple (with metadata) closures
-  defp sanitize({:closure, params, _body, _env, _history}) do
-    names = Enum.map_join(params, " ", &extract_param_name/1)
-    %Fn{params: names}
-  end
-
   defp sanitize({:closure, params, _body, _env, _history, _metadata}) do
     names = Enum.map_join(params, " ", &extract_param_name/1)
     %Fn{params: names}

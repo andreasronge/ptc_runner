@@ -49,7 +49,7 @@ SubAgents support two output modes:
 | `:text`               | Classification, extraction, summarization             | Structured JSON         |
 | `:ptc_lisp` (default) | Computation, tool orchestration, multi-step reasoning | PTC-Lisp program result |
 
-### JSON Mode - Direct LLM Tasks
+### Text Mode - Direct LLM Tasks
 
 Use `output: :text` when the LLM can answer directly without computation:
 
