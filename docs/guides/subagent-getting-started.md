@@ -225,7 +225,50 @@ See [Signature Syntax](../signature-syntax.md) for full syntax.
 
 ## Providing an LLM
 
-SubAgent is provider-agnostic. You supply a callback function:
+### Built-in Adapter (Recommended)
+
+Add `{:req_llm, "~> 1.2"}` to your deps, then use `PtcRunner.LLM.callback/2`:
+
+```elixir
+llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
+PtcRunner.SubAgent.run(prompt, llm: llm, signature: "...")
+```
+
+The adapter routes by model prefix and handles structured output, tool calling, and prompt caching:
+
+```elixir
+# Cloud providers
+PtcRunner.LLM.callback("openrouter:anthropic/claude-sonnet-4")
+PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+PtcRunner.LLM.callback("anthropic:claude-haiku-4-5-20251001")
+PtcRunner.LLM.callback("google:gemini-2.5-flash")
+
+# Local providers
+PtcRunner.LLM.callback("ollama:deepseek-coder:6.7b")
+PtcRunner.LLM.callback("openai-compat:http://localhost:1234/v1|model")
+```
+
+Streaming through SubAgent is available via the `on_chunk` runtime option:
+
+```elixir
+llm = PtcRunner.LLM.callback("bedrock:haiku")
+on_chunk = fn %{delta: text} -> IO.write(text) end
+
+{:ok, step} = SubAgent.run(agent, llm: llm, on_chunk: on_chunk)
+# step.return contains the complete response
+```
+
+When the adapter supports `stream/2`, chunks arrive in real-time. Otherwise
+`on_chunk` fires once with the full content (graceful degradation). For agents
+with tools, `on_chunk` fires on the final text answer only — tool-calling turns
+are not streamed.
+
+See `PtcRunner.LLM` for adapter configuration, custom adapters, and low-level
+`PtcRunner.LLM.stream/2`.
+
+### Custom Callback
+
+SubAgent is provider-agnostic. You can supply any callback function:
 
 ```elixir
 llm = fn %{system: system, messages: messages} ->
@@ -248,43 +291,13 @@ The callback receives:
 | `tool_names` | `[String.t()]` | Available tool names |
 | `llm_opts` | `map()` | Custom options passed through |
 
-### Using Atoms with a Registry
-
-For convenience, use atoms like `:sonnet` by providing an `llm_registry` map. The registry is inherited by child SubAgents. See `PtcRunner.SubAgent.run/2` for registry options and app-level defaults.
-
-### Example with ReqLLM
-
-```elixir
-defmodule MyApp.LLM do
-  @timeout 30_000
-
-  def callback(model \\ "openrouter:anthropic/claude-haiku-4.5") do
-    fn %{system: system, messages: messages} ->
-      full_messages = [%{role: :system, content: system} | messages]
-
-      case ReqLLM.generate_text(model, full_messages, receive_timeout: @timeout) do
-        {:ok, %ReqLLM.Response{} = r} ->
-          usage = ReqLLM.Response.usage(r)
-          {:ok, %{
-            content: ReqLLM.Response.text(r),
-            tokens: %{input: usage[:input_tokens] || 0, output: usage[:output_tokens] || 0}
-          }}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end
-  end
-end
-
-# Usage
-llm = MyApp.LLM.callback()
-PtcRunner.SubAgent.run(prompt, llm: llm, signature: "...")
-```
-
 > **Note:** The callback must include the `system` prompt in the messages sent to the LLM.
 > The SubAgent's system prompt contains critical PTC-Lisp instructions that guide the LLM
 > to output valid programs.
+
+### Using Atoms with a Registry
+
+For convenience, use atoms like `:sonnet` by providing an `llm_registry` map. The registry is inherited by child SubAgents. See `PtcRunner.SubAgent.run/2` for registry options and app-level defaults.
 
 ## Defining Tools
 
