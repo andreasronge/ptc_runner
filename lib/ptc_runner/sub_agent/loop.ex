@@ -128,6 +128,7 @@ defmodule PtcRunner.SubAgent.Loop do
     trace_mode = Keyword.get(opts, :trace, true)
     llm_retry = Keyword.get(opts, :llm_retry)
     collect_messages = Keyword.get(opts, :collect_messages, false)
+    on_chunk = Keyword.get(opts, :on_chunk)
     # Field descriptions received from upstream agent in a chain
     received_field_descriptions = Keyword.get(opts, :_received_field_descriptions)
     # Budget callback options
@@ -187,7 +188,8 @@ defmodule PtcRunner.SubAgent.Loop do
           trace_context: trace_context,
           max_heap: max_heap,
           journal: journal,
-          tool_cache: tool_cache
+          tool_cache: tool_cache,
+          on_chunk: on_chunk
         }
 
         run_with_telemetry(agent, run_opts)
@@ -295,7 +297,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Accumulated child steps across all turns (for TraceTree)
       child_steps: [],
       # Agent name for TraceTree display
-      agent_name: agent.name
+      agent_name: agent.name,
+      # Streaming callback for text-only mode
+      on_chunk: run_opts.on_chunk
     }
 
     # Route to appropriate execution mode based on agent.output
