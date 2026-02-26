@@ -180,6 +180,26 @@ From your perspective as a library user:
 
 The LLM handles state internally to cache tool results, track progress, and avoid redundant work.
 
+### Inherited Functions (`:self` Tools)
+
+When a tool is declared as `:self` (recursive agent), the child automatically inherits the parent's PTC-Lisp closures. Functions defined with `defn` in the parent are available in the child without redefinition.
+
+```
+Parent agent (turn 1):  (defn parse-line [s] ...)
+Parent agent (turn 2):  (tool/worker {:chunk data/chunk})
+                              │
+Child agent (turn 1):         └─► parse-line is available
+                                  (map parse-line data/items)
+```
+
+Inheritance rules:
+- Only **closures** (functions) are inherited, not plain `def` values
+- Names starting with `_` or `__ptc_` are excluded
+- Inherited functions appear under a separate `user/ (inherited)` header in the prompt
+- If the child redefines an inherited function, it moves to the child's own `user/ (your prelude)` section
+
+This reduces token waste — the LLM doesn't regenerate helper functions at each recursion depth. See [RLM Patterns](subagent-rlm-patterns.md) for practical examples.
+
 For structured progress tracking, use the `plan:` option to define steps. The LLM reports completion with `(step-done "id" "summary")`, and a progress checklist is rendered between turns. See [Navigator Pattern](subagent-navigator.md#semantic-progress-with-plans).
 
 ## Defaults

@@ -371,6 +371,21 @@ Enable `llm_query: true` to let the agent make ad-hoc LLM calls from PTC-Lisp wi
 
 The agent can call `tool/llm-query` with a prompt and optional signature for classification, judgment, or extraction tasks. See [Composition Patterns](subagent-patterns.md#builtin-ad-hoc-llm-queries-llm_query) for details.
 
+### Recursive Agents (`:self` Tools)
+
+Use `:self` to let an agent call itself recursively. Parent-defined closures (`defn`) are automatically inherited by child invocations:
+
+```elixir
+agent = SubAgent.new(
+  prompt: "Analyze {{chunk}}",
+  signature: "(chunk :string) -> {findings [:string]}",
+  tools: %{"worker" => :self},
+  max_depth: 3
+)
+```
+
+See [Composition Patterns — Recursive Agents](subagent-patterns.md#recursive-agents-with-self-and-function-inheritance) and [RLM Patterns](subagent-rlm-patterns.md) for details.
+
 ## Builtin Tools
 
 Use `builtin_tools` to enable utility tool families without defining them yourself:

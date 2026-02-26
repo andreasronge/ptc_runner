@@ -3667,6 +3667,29 @@ The LLM receives this error and can generate a corrected program.
 | Memory pollution | Shallow merge, explicit keys only |
 | Cross-turn attacks | Memory is agent-scoped, not shared |
 
+### 16.11 Inherited Namespace for Recursive Agents
+
+When a `:self` tool invokes a child agent, the parent's closures are injected into the child's initial memory. The child can call inherited functions directly as symbols.
+
+**What is inherited:**
+- Closures defined with `defn` (not plain `def` values)
+- Excluding names starting with `_` or `__ptc_`
+
+**What is NOT inherited:**
+- Plain values (`def counter 99`)
+- Non-`:self` SubAgentTool children (isolated by design)
+
+**Prompt rendering:** Inherited functions appear under `user/ (inherited)` with signature and docstring. The function body and captured environment are never shown:
+
+```
+;; === user/ (inherited) ===
+(parse-line [s])              ; "Extracts timestamp and level"
+```
+
+**Override semantics:** If the child redefines an inherited function with `defn`, the child's version takes precedence and moves to `user/ (your prelude)`.
+
+**Depth accumulation:** At depth N, the child's memory contains its own definitions plus all inherited closures from depth N-1 (which includes everything from N-2, etc.). When the child invokes `:self`, `extract_closures` passes all non-internal closures to depth N+1.
+
 ---
 
 ## Appendix A: Symbol Resolution

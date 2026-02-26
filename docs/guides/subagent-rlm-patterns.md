@@ -125,6 +125,31 @@ The agent decides dynamically whether to process or subdivide:
       (return {:findings (flatten (map :findings results))}))))
 ```
 
+## Sharing Helpers via Inheritance
+
+With `:self` tools, parent-defined closures automatically propagate to children. Define parsing or transformation helpers once in the parent; every recursive child reuses them without regeneration.
+
+```clojure
+;; Parent turn 1: define a shared parser
+(defn extract-incident [line]
+  (when (or (includes? line "CRITICAL") (includes? line "ERROR"))
+    {:line line :level (if (includes? line "CRITICAL") "critical" "error")}))
+
+;; Parent turn 2: subdivide — children inherit extract-incident
+(let [halves (partition 500 (split-lines data/chunk))
+      results (pmap #(tool/worker {:chunk (join "\n" %)}) halves)]
+  (return {:findings (flatten (map :findings results))}))
+```
+
+Each child's prompt shows the inherited function signature and docstring under `user/ (inherited)`:
+
+```
+;; === user/ (inherited) ===
+(extract-incident [line])     ; "Extracts CRITICAL/ERROR incidents"
+```
+
+This saves tokens at every recursion depth — without inheritance, each child would need to regenerate identical helper functions. For a 3-level recursion with 4 children per level, that's 20 redundant function definitions eliminated.
+
 ## Budget-Aware Orchestration
 
 Agents can query remaining budget via `(budget/remaining)`:

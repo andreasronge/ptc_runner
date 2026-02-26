@@ -193,6 +193,59 @@ tools = %{
 
 See `PtcRunner.SubAgent.run/2` for details on setting up the registry.
 
+### Recursive Agents with `:self` and Function Inheritance
+
+Use `:self` to create recursive agents that call themselves. Parent-defined closures automatically propagate to children:
+
+```elixir
+analyzer = SubAgent.new(
+  prompt: "Analyze {{chunk}}. If large, subdivide with 'worker' tool.",
+  signature: "(chunk :string) -> {findings [:string]}",
+  tools: %{"worker" => :self},
+  max_depth: 3,
+  max_turns: 5
+)
+```
+
+The parent defines helper functions once; children inherit them:
+
+```clojure
+;; Parent turn 1: define a parser
+(defn parse-line "Extracts timestamp and level" [line]
+  {:timestamp (subs line 0 19) :level (subs line 20 25)})
+
+;; Parent turn 2: call worker — child inherits parse-line
+(let [halves (partition 1000 (split-lines data/chunk))]
+  (return {:findings
+    (flatten (pmap #(tool/worker {:chunk (join "\n" %)}) halves))}))
+```
+
+The child sees `parse-line` in its `user/ (inherited)` section and can call it directly — no regeneration needed. Only `:self` tools inherit; non-`:self` `SubAgentTool` children remain isolated.
+
+### Passing Functions as Parameters
+
+For explicit function passing to any SubAgent (not just `:self`), use the `:fn` signature type:
+
+```elixir
+worker = SubAgent.new(
+  prompt: "Apply transform to each item",
+  signature: "(items [:map], transform_fn :fn) -> [:map]",
+  max_turns: 1
+)
+
+tools = %{"process" => SubAgent.as_tool(worker)}
+```
+
+The parent passes a closure via the tool call arguments. The child calls it from `data/`:
+
+```clojure
+;; Parent defines and passes a function
+(defn normalize [record] (assoc record :status "processed"))
+(tool/process {:items data/records :transform_fn normalize})
+```
+
+See [Signature Syntax — Function Parameters](../signature-syntax.md#function-parameters-fn) for the `:fn` type reference.
+
 ## LLM-Powered Tools
 
 For tools needing LLM judgment (classification, evaluation, summarization):

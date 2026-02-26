@@ -44,6 +44,7 @@ signature: "{name :string, price :float}"
 | `:float` | Floating point | `3.14`, `-0.5` |
 | `:bool` | Boolean | `true`, `false` |
 | `:keyword` | Keyword/atom | `:pending`, `:active` |
+| `:fn` | Function/closure | Callable from PTC-Lisp |
 | `:any` | Any value | Matches everything |
 
 ### Invalid Type Names (Common Mistakes)
@@ -166,6 +167,36 @@ Firewalled fields:
 - **Hidden** from parent LLM when agent is used as tool
 
 This protects LLM context windows while preserving data flow.
+
+---
+
+## Function Parameters (`:fn`)
+
+Use `:fn` to pass closures (PTC-Lisp functions) between agents:
+
+```elixir
+signature: "(items [:map], transform_fn :fn) -> [:map]"
+```
+
+The child agent calls the function via the `data/` namespace:
+
+```clojure
+(map data/transform_fn data/items)
+```
+
+Closures in `data/` render with their parameter signature and docstring:
+
+```
+data/transform_fn             ; fn [item] -- Normalizes a record
+```
+
+Optional function parameters use the `?` suffix:
+
+```elixir
+signature: "(items [:map], filter_fn :fn?) -> [:map]"
+```
+
+Validation accepts closure tuples or `nil` for `:fn` params. Non-closure values are rejected.
 
 ---
 
@@ -463,7 +494,7 @@ get_user(id :int) -> {name :string, email :string?}
 
 ```
 Primitives:
-  :string :int :float :bool :keyword :any
+  :string :int :float :bool :keyword :fn :any
 
 Lists:
   [:int]                          # list of integers
