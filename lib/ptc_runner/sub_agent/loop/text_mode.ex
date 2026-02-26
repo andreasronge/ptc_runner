@@ -138,6 +138,9 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     turn_start = System.monotonic_time()
 
+    # Wrap on_chunk with call tracking for graceful degradation
+    {was_streamed?, tracked_on_chunk} = track_on_chunk(state[:on_chunk])
+
     llm_input = %{
       system: system_prompt,
       messages: messages,
@@ -146,8 +149,17 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       cache: state.cache
     }
 
+    # Add stream callback to request when on_chunk is set
+    llm_input =
+      if tracked_on_chunk, do: Map.put(llm_input, :stream, tracked_on_chunk), else: llm_input
+
     case call_llm_with_telemetry(llm, llm_input, state, agent) do
       {:ok, %{content: content, tokens: tokens}} ->
+        # Graceful degradation: if callback didn't stream, fire on_chunk once
+        if state[:on_chunk] && !was_streamed?.() do
+          safe_on_chunk(state[:on_chunk], content)
+        end
+
         state_with_tokens =
           state
           |> Metrics.accumulate_tokens(tokens)
@@ -645,6 +657,9 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp handle_final_answer(content, agent, state) do
     if SubAgent.text_return?(agent) do
+      # Fire on_chunk with full content for tool-variant final answer
+      if state[:on_chunk], do: safe_on_chunk(state[:on_chunk], content)
+
       # Text return: raw string as step.return
       {turn, step} = build_tool_text_success_step(content, state, agent)
       {:stop, {:ok, step}, turn, state.turn_tokens}
@@ -733,6 +748,28 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     map_size(SubAgent.effective_tools(agent)) > 0
   end
 
+  defp safe_on_chunk(on_chunk, content) do
+    on_chunk.(%{delta: content})
+  rescue
+    e ->
+      require Logger
+      Logger.warning("on_chunk callback failed: #{Exception.message(e)}")
+  end
+
+  defp track_on_chunk(nil), do: {fn -> false end, nil}
+
+  defp track_on_chunk(on_chunk) do
+    ref = :atomics.new(1, [])
+
+    tracked = fn chunk ->
+      :atomics.put(ref, 1, 1)
+      on_chunk.(chunk)
+    end
+
+    was_called = fn -> :atomics.get(ref, 1) == 1 end
+    {was_called, tracked}
+  end
+
   defp check_termination(agent, state) do
     cond do
       state.turn > agent.max_turns ->
@@ -766,7 +803,9 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     start_meta = %{agent: agent, turn: state.turn, messages: input.messages}
 
     Telemetry.span([:llm], start_meta, fn ->
-      result = LLMRetry.call_with_retry(llm, input, state.llm_registry, state.llm_retry)
+      # Bypass retry when streaming — can't retry after partial chunks sent
+      retry_config = if input[:stream], do: nil, else: state.llm_retry
+      result = LLMRetry.call_with_retry(llm, input, state.llm_registry, retry_config)
 
       {extra_measurements, stop_meta} =
         case result do
