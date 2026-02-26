@@ -49,6 +49,9 @@ Always run `mix precommit` before `git push`. If it fails, fix all issues before
 lib/ptc_runner/
 ├── sub_agent/        # Loop logic, prompt generation, signatures
 ├── lisp/             # Parser, analyzer, interpreter
+├── llm.ex            # LLM behaviour + convenience API
+├── llm/              # Built-in adapters
+│   └── req_llm_adapter.ex  # ReqLLM adapter (optional dep)
 ├── sandbox.ex        # Isolated BEAM process execution
 ├── step.ex           # Result type for all executions
 ├── tool.ex           # Tool normalization

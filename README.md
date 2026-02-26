@@ -197,9 +197,23 @@ mix ptc.viewer --trace-dir path/to/traces
 
 ```elixir
 def deps do
-  [{:ptc_runner, "~> 0.8.0"}]
+  [
+    {:ptc_runner, "~> 0.8.0"},
+    {:req_llm, "~> 1.2"}  # optional — enables built-in LLM adapter
+  ]
 end
 ```
+
+With `req_llm` installed, create LLM callbacks with zero configuration:
+
+```elixir
+llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
+
+# or with prompt caching
+llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+```
+
+`PtcRunner.LLM.callback/2` routes by model prefix (`openrouter:`, `bedrock:`, `anthropic:`, `ollama:`, etc.) and handles structured output, tool calling, and prompt caching. See `PtcRunner.LLM` for custom adapters.
 
 ## Documentation
 
