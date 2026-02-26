@@ -110,6 +110,7 @@ defmodule PtcRunner.SubAgent.Compression.SingleUserCoalesced do
         tools: tools,
         data: data,
         memory: memory,
+        inherited_ns: opts[:inherited_ns] || %{},
         has_println: has_println,
         sample_limit: sample_limit,
         sample_printable_limit: sample_printable_limit

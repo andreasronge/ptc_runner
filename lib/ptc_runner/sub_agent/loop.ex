@@ -143,6 +143,9 @@ defmodule PtcRunner.SubAgent.Loop do
     journal = Keyword.get(opts, :journal)
     tool_cache = Keyword.get(opts, :tool_cache, %{})
 
+    # Closures inherited from parent agent via :self tool
+    inherited_ns = Keyword.get(opts, :_inherited_ns) || %{}
+
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
 
@@ -187,7 +190,8 @@ defmodule PtcRunner.SubAgent.Loop do
           trace_context: trace_context,
           max_heap: max_heap,
           journal: journal,
-          tool_cache: tool_cache
+          tool_cache: tool_cache,
+          inherited_ns: inherited_ns
         }
 
         run_with_telemetry(agent, run_opts)
@@ -231,7 +235,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
     # Build first user message with dynamic context prepended
     # This includes data inventory, tool schemas, expected output, plus the mission
-    first_user_message = build_first_user_message(agent, run_opts, expanded_prompt)
+    first_user_message =
+      build_first_user_message(agent, run_opts, expanded_prompt, run_opts.inherited_ns)
 
     initial_state = %{
       llm: run_opts.llm,
@@ -241,7 +246,7 @@ defmodule PtcRunner.SubAgent.Loop do
       context: run_opts.context,
       turns: [],
       start_time: System.monotonic_time(:millisecond),
-      memory: %{},
+      memory: run_opts.inherited_ns,
       last_fail: nil,
       nesting_depth: run_opts.nesting_depth,
       remaining_turns: run_opts.remaining_turns,
@@ -295,7 +300,11 @@ defmodule PtcRunner.SubAgent.Loop do
       # Accumulated child steps across all turns (for TraceTree)
       child_steps: [],
       # Agent name for TraceTree display
-      agent_name: agent.name
+      agent_name: agent.name,
+      # Parent agent struct for :self tool detection in ToolNormalizer
+      parent_agent: agent,
+      # Inherited closures from parent (immutable, for prompt rendering only)
+      inherited_ns: run_opts.inherited_ns
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -1048,11 +1057,12 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # Build the first user message with dynamic context prepended to mission
-  defp build_first_user_message(agent, run_opts, expanded_mission) do
+  defp build_first_user_message(agent, run_opts, expanded_mission, inherited_ns) do
     context_prompt =
       SystemPrompt.generate_context(agent,
         context: run_opts.context,
-        received_field_descriptions: run_opts.received_field_descriptions
+        received_field_descriptions: run_opts.received_field_descriptions,
+        inherited_ns: inherited_ns
       )
 
     # Initial progress checklist (all pending) if agent has a plan
@@ -1115,6 +1125,7 @@ defmodule PtcRunner.SubAgent.Loop do
       |> Keyword.put(:turns_left, turns_left)
       |> Keyword.put(:signature, agent.signature)
       |> Keyword.put(:field_descriptions, agent.field_descriptions)
+      |> Keyword.put(:inherited_ns, state.inherited_ns)
 
     # Call the compression strategy
     # Strategy returns {[%{role: :system, ...}, %{role: :user, ...}], stats}

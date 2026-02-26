@@ -51,7 +51,9 @@ defmodule PtcRunner.SubAgent.Namespace do
         context_signature: config[:context_signature]
       ] ++ sample_opts
 
-    user_opts = [has_println: config[:has_println] || false] ++ sample_opts
+    user_opts =
+      [has_println: config[:has_println] || false, inherited_ns: config[:inherited_ns] || %{}] ++
+        sample_opts
 
     [
       Tool.render(config[:tools] || %{}),

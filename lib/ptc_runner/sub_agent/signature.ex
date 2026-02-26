@@ -45,6 +45,7 @@ defmodule PtcRunner.SubAgent.Signature do
           | :keyword
           | :any
           | :map
+          | :fn
           | {:optional, type()}
           | {:list, type()}
           | {:map, [field()]}
@@ -206,6 +207,7 @@ defmodule PtcRunner.SubAgent.Signature do
   # Bedrock requires input_schema to have a "type" field, so :any uses "object"
   def type_to_json_schema(:any), do: %{"type" => "object"}
   def type_to_json_schema(:map), do: %{"type" => "object"}
+  def type_to_json_schema(:fn), do: %{"type" => "object"}
 
   def type_to_json_schema({:list, inner_type}) do
     %{"type" => "array", "items" => type_to_json_schema(inner_type)}

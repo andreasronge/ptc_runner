@@ -64,6 +64,16 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
 
   defp extract_param_types(_), do: %{}
 
+  # Closure values in data/ — render as callable function with params + docstring
+  defp format_entry(name, {:closure, params, _, _, _, meta}, _param_types, _field_descs, _opts) do
+    name_str = to_string(name)
+    params_str = format_closure_params(params)
+    padded_name = String.pad_trailing("data/#{name_str}", @name_width)
+    docstring = Map.get(meta, :docstring)
+    doc_part = if docstring, do: " -- #{docstring}", else: ""
+    "#{padded_name}; fn [#{params_str}]#{doc_part}"
+  end
+
   defp format_entry(name, value, param_types, field_descriptions, opts) do
     name_str = to_string(name)
     is_firewalled = String.starts_with?(name_str, "_")
@@ -113,6 +123,19 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
   rescue
     ArgumentError -> Map.get(descriptions, to_string(key))
   end
+
+  defp format_closure_params({:variadic, leading, rest}) do
+    leading_str = Enum.map_join(leading, " ", &extract_param_name/1)
+    rest_str = "& #{extract_param_name(rest)}"
+    if leading_str == "", do: rest_str, else: "#{leading_str} #{rest_str}"
+  end
+
+  defp format_closure_params(params) when is_list(params) do
+    Enum.map_join(params, " ", &extract_param_name/1)
+  end
+
+  defp extract_param_name({:var, name}), do: Atom.to_string(name)
+  defp extract_param_name(_), do: "_"
 
   defp format_sample(value, opts) do
     limit = Keyword.get(opts, :sample_limit, 3)

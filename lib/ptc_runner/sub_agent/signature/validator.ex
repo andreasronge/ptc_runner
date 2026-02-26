@@ -83,6 +83,13 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     []
   end
 
+  # Function type - must be a closure tuple (nil handled by {:optional, :fn})
+  defp validate_type({:closure, _, _, _, _, _}, :fn, _path), do: []
+
+  defp validate_type(data, :fn, path) do
+    [error_at(path, "expected fn (closure), got #{type_name(data)}")]
+  end
+
   # Optional types
   defp validate_type(nil, {:optional, _type}, _path) do
     []

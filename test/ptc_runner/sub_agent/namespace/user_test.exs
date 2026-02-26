@@ -207,4 +207,43 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       refute result =~ "token"
     end
   end
+
+  describe "inherited namespace rendering" do
+    test "inherited functions render under separate header" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{docstring: "Doubles x"}}
+      result = User.render(%{double: closure, count: 5}, inherited_ns: %{double: closure})
+
+      assert result =~ ";; === user/ (inherited) ==="
+      assert result =~ ~s|(double [x])|
+      assert result =~ ~s|"Doubles x"|
+      assert result =~ ";; === user/ (your prelude) ==="
+      assert result =~ "count"
+    end
+
+    test "only inherited section when no own entries" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+      result = User.render(%{f: closure}, inherited_ns: %{f: closure})
+
+      assert result =~ ";; === user/ (inherited) ==="
+      refute result =~ ";; === user/ (your prelude) ==="
+    end
+
+    test "no inherited section when inherited_ns is empty" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+      result = User.render(%{f: closure}, [])
+
+      refute result =~ "inherited"
+      assert result =~ ";; === user/ (your prelude) ==="
+    end
+
+    test "child override moves function to own section" do
+      parent_closure = {:closure, [{:var, :x}], {:lit, 1}, %{}, [], %{}}
+      child_closure = {:closure, [{:var, :x}], {:lit, 2}, %{}, [], %{}}
+      result = User.render(%{f: child_closure}, inherited_ns: %{f: parent_closure})
+
+      refute result =~ ";; === user/ (inherited) ==="
+      assert result =~ ";; === user/ (your prelude) ==="
+      assert result =~ "(f [x])"
+    end
+  end
 end

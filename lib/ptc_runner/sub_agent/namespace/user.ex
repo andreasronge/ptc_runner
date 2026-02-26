@@ -49,14 +49,72 @@ defmodule PtcRunner.SubAgent.Namespace.User do
 
       iex> PtcRunner.SubAgent.Namespace.User.render(%{_secret: "token123"}, [])
       ";; === user/ (your prelude) ===\\n_secret                       ; = string, [Hidden]"
+
+      iex> closure = {:closure, [{:var, :x}], nil, %{}, [], %{docstring: "Doubles x"}}
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, inherited_ns: %{double: closure})
+      ";; === user/ (inherited) ===\\n(double [x])                  ; \\"Doubles x\\""
+
+      iex> inherited = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+      iex> PtcRunner.SubAgent.Namespace.User.render(%{f: inherited, count: 5}, inherited_ns: %{f: inherited})
+      ";; === user/ (inherited) ===\\n(f [x])\\n\\n;; === user/ (your prelude) ===\\ncount                         ; = integer, sample: 5"
   """
   @spec render(map(), keyword()) :: String.t() | nil
   def render(memory, _opts) when map_size(memory) == 0, do: nil
 
   def render(memory, opts) do
+    inherited_ns = Keyword.get(opts, :inherited_ns, %{})
+    {inherited_entries, own_memory} = split_inherited(memory, inherited_ns)
+
+    inherited_section = render_inherited_section(inherited_entries)
+    own_section = render_own_section(own_memory, opts)
+
+    case {inherited_section, own_section} do
+      {nil, nil} -> nil
+      {inh, nil} -> inh
+      {nil, own} -> own
+      {inh, own} -> inh <> "\n\n" <> own
+    end
+  end
+
+  # Separate inherited entries from self-defined ones
+  # Uses value identity to detect child overrides (moved to "own" section)
+  defp split_inherited(memory, inherited_ns) when map_size(inherited_ns) == 0 do
+    {[], memory}
+  end
+
+  defp split_inherited(memory, inherited_ns) do
+    {inherited, own} =
+      memory
+      |> Enum.split_with(fn {name, value} ->
+        Map.get(inherited_ns, name) == value
+      end)
+
+    {inherited, Map.new(own)}
+  end
+
+  # Inherited section: signature + docstring only, never source code
+  defp render_inherited_section([]), do: nil
+
+  defp render_inherited_section(entries) do
+    closures =
+      entries
+      |> Enum.filter(fn {_, v} -> closure?(v) end)
+      |> Enum.sort_by(&elem(&1, 0))
+
+    if closures == [] do
+      nil
+    else
+      lines = format_functions(closures)
+      [";; === user/ (inherited) ===" | lines] |> Enum.join("\n")
+    end
+  end
+
+  # Own section: existing behavior for self-defined entries
+  defp render_own_section(memory, _opts) when map_size(memory) == 0, do: nil
+
+  defp render_own_section(memory, opts) do
     {functions, values} = partition_memory(memory)
 
-    # Return nil if no informative entries after filtering
     if functions == [] and values == [] do
       nil
     else

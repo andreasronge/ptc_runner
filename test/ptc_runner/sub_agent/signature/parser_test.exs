@@ -33,6 +33,18 @@ defmodule PtcRunner.SubAgent.Signature.ParserTest do
     end
   end
 
+  describe "parse/1 - fn type" do
+    test "parses :fn type" do
+      assert {:ok, {:signature, [{"data", {:list, :any}}, {"mapper", :fn}], {:list, :string}}} =
+               Parser.parse("(data [:any], mapper :fn) -> [:string]")
+    end
+
+    test "parses optional :fn type" do
+      assert {:ok, {:signature, [{"filter", {:optional, :fn}}], :any}} =
+               Parser.parse("(filter :fn?) -> :any")
+    end
+  end
+
   describe "parse/1 - optional types" do
     test "parses optional primitive" do
       assert {:ok, {:signature, [], {:optional, :string}}} = Parser.parse(":string?")

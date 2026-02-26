@@ -85,4 +85,21 @@ defmodule PtcRunner.SubAgent.Namespace.DataTest do
       assert result =~ "data/users"
     end
   end
+
+  describe "closure rendering in data/" do
+    test "renders closure with signature and docstring" do
+      closure = {:closure, [{:var, :line}], nil, %{}, [], %{docstring: "Parse a log line"}}
+      result = Data.render(%{mapper_fn: closure})
+      assert result =~ "data/mapper_fn"
+      assert result =~ "fn [line]"
+      assert result =~ "Parse a log line"
+    end
+
+    test "renders closure without docstring" do
+      closure = {:closure, [{:var, :a}, {:var, :b}], nil, %{}, [], %{}}
+      result = Data.render(%{compare: closure})
+      assert result =~ "fn [a b]"
+      refute result =~ "--"
+    end
+  end
 end

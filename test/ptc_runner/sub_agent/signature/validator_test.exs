@@ -77,6 +77,27 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
     end
   end
 
+  describe "validate/2 - fn type" do
+    test "validates closure for :fn type" do
+      closure = {:closure, [{:var, :x}], {:var, :x}, %{}, [], %{}}
+      assert :ok = Validator.validate(closure, :fn)
+    end
+
+    test "rejects non-closure for :fn type" do
+      assert {:error, [%{path: [], message: "expected fn (closure), got " <> _}]} =
+               Validator.validate("not a fn", :fn)
+    end
+
+    test "rejects nil for required :fn type" do
+      assert {:error, [%{path: [], message: "expected fn (closure), got " <> _}]} =
+               Validator.validate(nil, :fn)
+    end
+
+    test "accepts nil for optional :fn type" do
+      assert :ok = Validator.validate(nil, {:optional, :fn})
+    end
+  end
+
   describe "validate/2 - optional types" do
     test "accepts nil for optional" do
       assert :ok = Validator.validate(nil, {:optional, :string})

@@ -48,6 +48,7 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
       string("bool"),
       string("keyword"),
       string("map"),
+      string("fn"),
       string("any")
     ])
     |> map({String, :to_atom, []})
@@ -179,7 +180,7 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
     parsec(:signature) |> eos()
   )
 
-  @valid_types ~w(string int float bool keyword map any)
+  @valid_types ~w(string int float bool keyword map fn any)
 
   @doc """
   Parse a signature string into AST.
