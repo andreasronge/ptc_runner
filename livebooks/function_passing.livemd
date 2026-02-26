@@ -1,0 +1,295 @@
+# Function Passing Between Agents
+
+## Section
+
+Demonstrates how PTC-Lisp closures flow between agents: implicit inheritance via `:self` tools, explicit `:fn` parameters, and mixing text mode with PTC-Lisp mode.
+
+**Scenario:** Score and rank conference talk proposals using shared helper functions.
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+  else
+    [{:ptc_runner, "~> 0.8.0"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.0"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+## Setup
+
+```elixir
+# Load LLM setup: local file if available, otherwise fetch from GitHub
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} =
+    Req.get!(
+      "https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs"
+    )
+
+  Code.eval_string(code)
+end
+
+setup = LLMSetup.setup()
+```
+
+```elixir
+setup = LLMSetup.choose_provider(setup)
+```
+
+```elixir
+my_llm = LLMSetup.choose_model(setup)
+```
+
+## Test Data
+
+A batch of conference talk proposals to process:
+
+```elixir
+alias PtcRunner.SubAgent
+alias PtcRunner.SubAgent.Debug
+
+proposals = [
+  %{
+    id: 1,
+    title: "Building Fault-Tolerant Systems with OTP",
+    abstract: "Deep dive into supervisors, GenServers, and the let-it-crash philosophy.",
+    speaker: "Alice Chen"
+  },
+  %{
+    id: 2,
+    title: "ROI of Developer Experience Programs",
+    abstract: "Measuring business impact of investing in internal tooling and developer happiness.",
+    speaker: "Bob Martinez"
+  },
+  %{
+    id: 3,
+    title: "Attention Is All You Need — A Retrospective",
+    abstract: "How transformer architectures changed NLP and what comes next.",
+    speaker: "Carol Wu"
+  },
+  %{
+    id: 4,
+    title: "Zero-Downtime Deployments in Practice",
+    abstract: "Blue-green, canary, and rolling strategies with real production war stories.",
+    speaker: "Dan Okafor"
+  },
+  %{
+    id: 5,
+    title: "From Monolith to Microservices — Lessons Learned",
+    abstract: "What went right, what went wrong, and what we'd do differently.",
+    speaker: "Eve Park"
+  },
+  %{
+    id: 6,
+    title: "The Economics of Open Source Maintenance",
+    abstract: "Sustainability models for maintainers: sponsorship, dual licensing, and foundations.",
+    speaker: "Frank Reyes"
+  }
+]
+
+Kino.DataTable.new(proposals)
+```
+
+## Part 1: Inherited Functions via `:self`
+
+A recursive agent defines helper functions on turn 1, then fans out work to `:self` workers.
+Children inherit the helpers automatically — no regeneration needed.
+
+The agent:
+
+1. Defines `normalize-title` and `score-proposal` as reusable helpers
+2. Splits proposals into chunks
+3. Delegates each chunk to a `:self` worker that inherits both functions
+
+```elixir
+scorer = SubAgent.new(
+  name: "scorer",
+  prompt: """
+  Score conference talk proposals in data/proposals.
+
+  First, define two helper functions:
+  1. (defn normalize-title [p] ...) — lowercase and trim the :title field
+  2. (defn score-proposal [p] ...) — return an integer 1-10 based on how
+     practical and actionable the :abstract sounds (use string analysis,
+     not LLM calls)
+
+  Then on your next turn, split proposals into two halves and delegate
+  each half to tool/worker. Each worker should map score-proposal over
+  its chunk and return the scored list.
+
+  Aggregate results from both workers into a single flat list sorted
+  by score descending.
+  """,
+  signature: "(proposals [:map]) -> [{id :int, title :string, score :int}]",
+  tools: %{"worker" => :self},
+  max_depth: 2,
+  max_turns: 5,
+  timeout: 30_000
+)
+
+{_, step} = SubAgent.run(scorer, llm: my_llm, context: %{proposals: proposals})
+Debug.print_trace(step)
+```
+
+```elixir
+PtcRunner.Kino.TraceTree.new(step)
+```
+
+```elixir
+step.return
+```
+
+Inspect the child turns to confirm inheritance. The child's prompt should show `user/ (inherited)` with `normalize-title` and `score-proposal` — no function bodies, just signatures and docstrings:
+
+```elixir
+if step.child_steps && length(step.child_steps) > 0 do
+  child = hd(step.child_steps)
+
+  first_turn = hd(child.turns)
+  user_msg = Enum.find(first_turn.messages, &(&1.role == :user))
+
+  if user_msg do
+    inherited_section =
+      user_msg.content
+      |> String.split("\n")
+      |> Enum.filter(&String.contains?(&1, "inherited"))
+
+    IO.puts("=== Inherited section found in child prompt ===")
+
+    user_msg.content
+    |> String.split("\n")
+    |> Enum.drop_while(&(not String.contains?(&1, "inherited")))
+    |> Enum.take_while(&(&1 != ""))
+    |> Enum.each(&IO.puts/1)
+  end
+else
+  IO.puts("No child steps captured (enable collect_messages or check trace)")
+end
+```
+
+## Part 2: Explicit `:fn` Parameters
+
+Pass a custom ranking function from a parent agent to a worker via the `:fn` signature type.
+The worker doesn't know the ranking logic — it just calls whatever function it receives.
+
+```elixir
+# Worker: applies a ranking function it receives as a parameter
+ranker_worker = SubAgent.new(
+  name: "ranker",
+  prompt: """
+  Sort the items in data/items using the ranking function in data/rank_fn.
+
+  Call (data/rank_fn item) on each item to get a numeric score,
+  then sort by that score descending.
+  Return the sorted list.
+  """,
+  signature: "(items [:map], rank_fn :fn) -> [:map]",
+  max_turns: 1
+)
+
+ranker_tool = SubAgent.as_tool(ranker_worker, description: "Rank items using a provided function")
+
+# Parent: defines a ranking function and passes it to the worker
+parent = SubAgent.new(
+  name: "conference-ranker",
+  prompt: """
+  Rank the proposals in data/proposals.
+
+  Define a ranking function that scores each proposal by counting
+  the number of words in :abstract (longer = higher score).
+  Pass it to tool/rank via the :rank_fn parameter.
+
+  Return the ranked list from the tool result.
+  """,
+  signature: "(proposals [:map]) -> [:map]",
+  tools: %{"rank" => ranker_tool},
+  max_turns: 3
+)
+
+{_, step2} = SubAgent.run(parent, llm: my_llm, context: %{proposals: proposals})
+Debug.print_trace(step2)
+```
+
+```elixir
+PtcRunner.Kino.TraceTree.new(step2)
+```
+
+```elixir
+step2.return
+```
+
+## Part 3: Text Mode + PTC-Lisp Composition
+
+Use a text-mode agent for classification (structured JSON output), then a PTC-Lisp agent
+for computation. The text classifier becomes a tool inside the PTC-Lisp orchestrator.
+
+```elixir
+# Text-mode classifier: labels each proposal's track
+classifier = SubAgent.new(
+  name: "classifier",
+  prompt: """
+  Classify this conference talk proposal into exactly one track.
+
+  Title: {{title}}
+  Abstract: {{abstract}}
+
+  Tracks: "engineering", "business", "research"
+  """,
+  signature: "(title :string, abstract :string) -> {track :string, confidence :float}",
+  output: :text,
+  max_turns: 1,
+  description: "Classify a talk proposal into a conference track"
+)
+
+# Verify it works standalone
+{_, sample} =
+  SubAgent.run(classifier,
+    llm: my_llm,
+    context: %{title: "Building with OTP", abstract: "Supervisors and GenServers"}
+  )
+
+IO.puts("Track: #{sample.return["track"]}, Confidence: #{sample.return["confidence"]}")
+```
+
+Now wire the text classifier as a tool inside a PTC-Lisp orchestrator:
+
+```elixir
+classifier_tool = SubAgent.as_tool(classifier)
+
+orchestrator = SubAgent.new(
+  name: "track-organizer",
+  prompt: """
+  Organize the proposals in data/proposals by conference track.
+
+  For each proposal, call tool/classify with its :title and :abstract
+  to get the track assignment. Then group proposals by track and return
+  a map with track names as keys and lists of proposal titles as values.
+  """,
+  signature: "(proposals [:map]) -> :map",
+  tools: %{"classify" => classifier_tool},
+  max_turns: 3,
+  timeout: 10_000
+)
+
+{_, step3} = SubAgent.run(orchestrator, llm: my_llm, context: %{proposals: proposals})
+Debug.print_trace(step3, usage: true)
+```
+
+```elixir
+step3.return
+```
+
+## Summary
+
+| Feature               | Mechanism                                 | When to use                                   |
+| --------------------- | ----------------------------------------- | --------------------------------------------- |
+| Inherited closures    | `tools: %{"name" => :self}`               | Recursive agents sharing helpers across depth |
+| Explicit `:fn` params | `signature: "(rank_fn :fn) -> ..."`       | Passing strategy functions to any worker      |
+| Text + PTC-Lisp mix   | `output: :text` as tool in PTC-Lisp agent | LLM judgment (classify/extract) + computation |
