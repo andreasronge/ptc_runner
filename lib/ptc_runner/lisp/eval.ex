@@ -31,7 +31,7 @@ defmodule PtcRunner.Lisp.Eval do
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
   @type env :: %{atom() => term()}
-  @type tool_executor :: (String.t(), map() -> term())
+  @type tool_executor :: (String.t(), map(), map() -> term())
 
   @type value ::
           nil
@@ -802,6 +802,17 @@ defmodule PtcRunner.Lisp.Eval do
   defp stringify_key(k) when is_binary(k), do: KeyNormalizer.normalize_key(k)
   defp stringify_key(k), do: inspect(k)
 
+  # Call tool_exec with user_ns (3-arity) or without (2-arity for backward compat).
+  # The 3-arity form passes the live Lisp user namespace so SubAgentTool wrappers
+  # can extract inherited closures defined in the same program as the tool call.
+  defp call_tool_exec(tool_exec, tool_name, args_map, user_ns) do
+    if is_function(tool_exec, 3) do
+      tool_exec.(tool_name, args_map, user_ns)
+    else
+      tool_exec.(tool_name, args_map)
+    end
+  end
+
   # Record a tool call with timing, execution, error capture, and evaluation context update.
   # Captures the error field if the tool raises an exception, records it, and throws a special
   # exception that includes the updated eval_ctx so the error can be properly reported.
@@ -863,7 +874,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     {raw_result, error, error_child_step, error_child_trace_id} =
       try do
-        {tool_exec.(tool_name, args_map), nil, nil, nil}
+        {call_tool_exec(tool_exec, tool_name, args_map, eval_ctx.user_ns), nil, nil, nil}
       rescue
         e in ExecutionError ->
           if e.child_step do

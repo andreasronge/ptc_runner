@@ -89,26 +89,42 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   """
   @spec wrap_with_telemetry(String.t(), function(), SubAgent.t()) :: function()
   def wrap_with_telemetry(name, func, agent) do
-    fn args ->
-      start_meta = %{agent: agent, tool_name: name, args: summarize_args(args)}
+    telemetry_body = fn result ->
+      stop_meta = %{agent: agent, tool_name: name, result: summarize_result(result)}
 
-      Telemetry.span([:tool], start_meta, fn ->
-        result = func.(args)
+      # Include child_trace_id if result contains trace wrapper
+      stop_meta =
+        case result do
+          %{__child_trace_id__: id} when not is_nil(id) ->
+            Map.put(stop_meta, :child_trace_id, id)
 
-        stop_meta = %{agent: agent, tool_name: name, result: summarize_result(result)}
+          _ ->
+            stop_meta
+        end
 
-        # Include child_trace_id if result contains trace wrapper
-        stop_meta =
-          case result do
-            %{__child_trace_id__: id} when not is_nil(id) ->
-              Map.put(stop_meta, :child_trace_id, id)
+      {result, stop_meta}
+    end
 
-            _ ->
-              stop_meta
-          end
+    # Preserve arity: 2-arity functions (SubAgentTool) receive user_ns from the
+    # Lisp evaluator for inherited closure extraction at call time.
+    if is_function(func, 2) do
+      fn args, user_ns ->
+        start_meta = %{agent: agent, tool_name: name, args: summarize_args(args)}
 
-        {result, stop_meta}
-      end)
+        Telemetry.span([:tool], start_meta, fn ->
+          result = func.(args, user_ns)
+          telemetry_body.(result)
+        end)
+      end
+    else
+      fn args ->
+        start_meta = %{agent: agent, tool_name: name, args: summarize_args(args)}
+
+        Telemetry.span([:tool], start_meta, fn ->
+          result = func.(args)
+          telemetry_body.(result)
+        end)
+      end
     end
   end
 
@@ -351,13 +367,22 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   """
   @spec wrap_sub_agent_tool(String.t(), SubAgentTool.t(), map()) :: function()
   def wrap_sub_agent_tool(name, %SubAgentTool{} = tool, state) do
-    fn args ->
+    # 2-arity: receives live user_ns from the Lisp evaluator at call time.
+    # This ensures closures defined in the same program as the tool call
+    # (e.g. defn + tool/search in one turn) are included in inherited_ns.
+    fn args, user_ns ->
       # Resolve LLM in priority order: agent.llm > bound_llm > parent's llm
       resolved_llm = tool.agent.llm || tool.bound_llm || state.llm
 
       unless resolved_llm do
         raise ArgumentError, "No LLM available for SubAgentTool execution"
       end
+
+      # For :self tools, extract closures from the live Lisp namespace.
+      # This includes both closures from previous turns (already in memory)
+      # and closures defined earlier in the current program (in user_ns).
+      inherited_ns =
+        if self_tool?(tool, state), do: extract_closures(user_ns), else: nil
 
       # Build run options (without trace_context - that's handled by TraceLog)
       run_opts =
@@ -370,6 +395,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
           _mission_deadline: state.mission_deadline
         ]
         |> maybe_add_opt(:max_heap, state[:max_heap])
+        |> maybe_add_opt(:_inherited_ns, inherited_ns)
 
       # If parent has tracing enabled, create a child trace file
       if has_trace_context?(state) do
@@ -379,6 +405,32 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
       end
     end
   end
+
+  # A :self tool points to the same agent struct as the parent.
+  # resolve_self_tools stores the original (pre-resolution) agent in SubAgentTool.agent,
+  # while parent_agent has resolved tools, so we compare without the tools field.
+  defp self_tool?(%SubAgentTool{agent: child_agent}, state) do
+    parent = state[:parent_agent]
+
+    parent != nil and
+      %{parent | tools: nil} == %{child_agent | tools: nil}
+  end
+
+  # Extract non-internal closures from memory for inheritance
+  defp extract_closures(memory) when is_map(memory) do
+    memory
+    |> Enum.filter(fn
+      {name, {:closure, _, _, _, _, _}} ->
+        name_str = Atom.to_string(name)
+        not String.starts_with?(name_str, "_")
+
+      _ ->
+        false
+    end)
+    |> Map.new()
+  end
+
+  defp extract_closures(_), do: %{}
 
   # Execute SubAgentTool with tracing - creates a child trace file
   defp execute_with_trace(name, agent, run_opts, state) do

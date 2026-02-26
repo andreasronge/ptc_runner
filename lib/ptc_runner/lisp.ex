@@ -156,8 +156,10 @@ defmodule PtcRunner.Lisp do
       # Note: tool_executor handles {:error, reason} returns and unknown tools by raising
       # ExecutionError. This matches the behavior in SubAgent.Loop.ToolNormalizer,
       # which handles the SubAgent execution path.
-      tool_executor = fn name, args ->
-        execute_tool(normalized_tools, name, args)
+      # The third argument (user_ns) is the live Lisp namespace at call time,
+      # used by SubAgentTool wrappers to extract inherited closures for :self tools.
+      tool_executor = fn name, args, user_ns ->
+        execute_tool(normalized_tools, name, args, user_ns)
       end
 
       # Build tools_meta lookup: %{name => %{cache: bool}}
@@ -729,10 +731,20 @@ defmodule PtcRunner.Lisp do
 
   defp collect_tool_names(_other, acc), do: acc
 
-  defp execute_tool(normalized_tools, name, args) do
+  defp execute_tool(normalized_tools, name, args, user_ns) do
     case Map.fetch(normalized_tools, name) do
       {:ok, %Tool{function: fun}} ->
-        case fun.(args) do
+        # Tool functions are 1-arity (args) or 2-arity (args, user_ns).
+        # 2-arity is used by ToolNormalizer's SubAgentTool wrapper to receive
+        # the live Lisp namespace for inherited closure extraction.
+        result =
+          if is_function(fun, 2) do
+            fun.(args, user_ns)
+          else
+            fun.(args)
+          end
+
+        case result do
           {:ok, value} ->
             value
 

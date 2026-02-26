@@ -114,7 +114,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           ctx: map(),
           user_ns: map(),
           env: map(),
-          tool_exec: (String.t(), map() -> term()),
+          tool_exec: (String.t(), map(), map() -> term()),
           turn_history: list(),
           budget: map() | nil,
           trace_context: trace_context(),
@@ -146,24 +146,24 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   ## Examples
 
-      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [])
       iex> ctx.user_ns
       %{}
 
-      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [], max_print_length: 500)
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [], max_print_length: 500)
       iex> ctx.max_print_length
       500
 
-      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [], budget: %{turns: 10})
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [], budget: %{turns: 10})
       iex> ctx.budget
       %{turns: 10}
 
-      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [], pmap_timeout: 60_000)
+      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [], pmap_timeout: 60_000)
       iex> ctx.pmap_timeout
       60000
 
   """
-  @spec new(map(), map(), map(), (String.t(), map() -> term()), list(), keyword()) :: t()
+  @spec new(map(), map(), map(), (String.t(), map(), map() -> term()), list(), keyword()) :: t()
   def new(ctx, user_ns, env, tool_exec, turn_history, opts \\ []) do
     %__MODULE__{
       ctx: ctx,
