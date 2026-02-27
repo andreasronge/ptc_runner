@@ -122,7 +122,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     {:ok, expanded_prompt} =
       PromptExpander.expand(agent.prompt, state.context, on_missing: :keep)
 
-    messages = [%{role: :user, content: expanded_prompt}]
+    messages = (state[:initial_messages] || []) ++ [%{role: :user, content: expanded_prompt}]
 
     state =
       state
@@ -404,7 +404,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           |> elem(1)
 
         user_msg = build_tool_user_message(agent, expanded_prompt, state.context)
-        [%{role: :user, content: user_msg}]
+        (state[:initial_messages] || []) ++ [%{role: :user, content: user_msg}]
       else
         state.messages
       end

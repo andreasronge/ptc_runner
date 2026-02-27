@@ -395,10 +395,45 @@ Use `defn` to define reusable functions:
 
 State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-concepts.md) for details.
 
+## Multi-Turn Chat
+
+For chat applications where conversation history persists across calls, use `chat/3`:
+
+```elixir
+agent = PtcRunner.SubAgent.new(
+  prompt: "placeholder",
+  output: :text,
+  system_prompt: "You are a helpful assistant."
+)
+
+# First turn
+{:ok, reply, messages} = PtcRunner.SubAgent.chat(agent, "Hello!", llm: my_llm)
+
+# Second turn — pass messages back to continue the conversation
+{:ok, reply2, messages2} = PtcRunner.SubAgent.chat(
+  agent, "Tell me more",
+  llm: my_llm, messages: messages
+)
+```
+
+`chat/3` forces `output: :text` and automatically threads conversation history. The system prompt is managed by the agent struct — you don't need to include it in the messages list.
+
+Streaming works via `on_chunk`:
+
+```elixir
+{:ok, reply, messages} = PtcRunner.SubAgent.chat(agent, "Hello!",
+  llm: my_llm,
+  on_chunk: fn %{delta: text} -> IO.write(text) end
+)
+```
+
+See [Phoenix Streaming](phoenix-streaming.md) for a full LiveView integration recipe.
+
 ## See Also
 
 - [LLM Setup](subagent-llm-setup.md) - Providers, streaming, custom adapters, framework integration
 - [Text Mode Guide](subagent-text-mode.md) - Text mode, Mustache templates, tool calling, and structured output
+- [Phoenix Streaming](phoenix-streaming.md) - Real-time streaming in LiveView
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
