@@ -213,13 +213,14 @@ llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
 llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 ```
 
-`PtcRunner.LLM.callback/2` routes by model prefix (`openrouter:`, `bedrock:`, `anthropic:`, `ollama:`, etc.) and handles structured output, tool calling, and prompt caching. See `PtcRunner.LLM` for custom adapters.
+`PtcRunner.LLM.callback/2` routes by model prefix (`openrouter:`, `bedrock:`, `anthropic:`, `ollama:`, etc.) and handles structured output, tool calling, and prompt caching. See the [LLM Setup guide](docs/guides/subagent-llm-setup.md) for all providers, streaming, custom adapters, and framework integration.
 
 ## Documentation
 
 ### Guides
 
 - **[Getting Started](docs/guides/subagent-getting-started.md)** - Build your first SubAgent
+- **[LLM Setup](docs/guides/subagent-llm-setup.md)** - Providers, streaming, custom adapters, framework integration
 - **[Core Concepts](docs/guides/subagent-concepts.md)** - Context, memory, and the firewall convention
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
