@@ -225,79 +225,24 @@ See [Signature Syntax](../signature-syntax.md) for full syntax.
 
 ## Providing an LLM
 
-### Built-in Adapter (Recommended)
-
-Add `{:req_llm, "~> 1.2"}` to your deps, then use `PtcRunner.LLM.callback/2`:
+Add `{:req_llm, "~> 1.2"}` to your deps for the built-in adapter:
 
 ```elixir
 llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
-PtcRunner.SubAgent.run(prompt, llm: llm, signature: "...")
+{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: llm)
 ```
 
-The adapter routes by model prefix and handles structured output, tool calling, and prompt caching:
-
-```elixir
-# Cloud providers
-PtcRunner.LLM.callback("openrouter:anthropic/claude-sonnet-4")
-PtcRunner.LLM.callback("bedrock:haiku", cache: true)
-PtcRunner.LLM.callback("anthropic:claude-haiku-4-5-20251001")
-PtcRunner.LLM.callback("google:gemini-2.5-flash")
-
-# Local providers
-PtcRunner.LLM.callback("ollama:deepseek-coder:6.7b")
-PtcRunner.LLM.callback("openai-compat:http://localhost:1234/v1|model")
-```
-
-Streaming through SubAgent is available via the `on_chunk` runtime option:
-
-```elixir
-llm = PtcRunner.LLM.callback("bedrock:haiku")
-on_chunk = fn %{delta: text} -> IO.write(text) end
-
-{:ok, step} = SubAgent.run(agent, llm: llm, on_chunk: on_chunk)
-# step.return contains the complete response
-```
-
-When the adapter supports `stream/2`, chunks arrive in real-time. Otherwise
-`on_chunk` fires once with the full content (graceful degradation). For agents
-with tools, `on_chunk` fires on the final text answer only — tool-calling turns
-are not streamed.
-
-See `PtcRunner.LLM` for adapter configuration, custom adapters, and low-level
-`PtcRunner.LLM.stream/2`.
-
-### Custom Callback
-
-SubAgent is provider-agnostic. You can supply any callback function:
+Or supply any callback function directly:
 
 ```elixir
 llm = fn %{system: system, messages: messages} ->
   # Call your LLM provider here
   {:ok, response_text}
-  # Or include token counts for usage stats:
-  # {:ok, %{content: response_text, tokens: %{input: 100, output: 50}}}
 end
-
-PtcRunner.SubAgent.run(prompt, llm: llm, signature: "...")
 ```
 
-The callback receives:
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `system` | `String.t()` | System prompt with instructions |
-| `messages` | `[map()]` | Conversation history |
-| `turn` | `integer()` | Current turn number |
-| `tool_names` | `[String.t()]` | Available tool names |
-| `llm_opts` | `map()` | Custom options passed through |
-
-> **Note:** The callback must include the `system` prompt in the messages sent to the LLM.
-> The SubAgent's system prompt contains critical PTC-Lisp instructions that guide the LLM
-> to output valid programs.
-
-### Using Atoms with a Registry
-
-For convenience, use atoms like `:sonnet` by providing an `llm_registry` map. The registry is inherited by child SubAgents. See `PtcRunner.SubAgent.run/2` for registry options and app-level defaults.
+See [LLM Setup](subagent-llm-setup.md) for provider configuration, streaming, custom
+adapters, and framework integration (Req, LangChain, Bumblebee).
 
 ## Defining Tools
 
@@ -452,6 +397,7 @@ State is scoped per-agent and hidden from prompts. See [Core Concepts](subagent-
 
 ## See Also
 
+- [LLM Setup](subagent-llm-setup.md) - Providers, streaming, custom adapters, framework integration
 - [Text Mode Guide](subagent-text-mode.md) - Text mode, Mustache templates, tool calling, and structured output
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
