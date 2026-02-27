@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-27
+
+### Added
+
+- `SubAgent.chat/3` for multi-turn chat with conversation history threading
+- `on_chunk` streaming callback for real-time token-by-token output in text mode
+- `PtcRunner.LLM` behaviour with `call/2` and optional `stream/2` callbacks
+- `PtcRunner.LLM.callback/2` convenience API with built-in ReqLLM adapter
+- Graceful streaming degradation — `on_chunk` fires once with full content when adapter doesn't support streaming
+
+### Documentation
+
+- LLM Setup guide with provider configuration, streaming, custom adapters, and framework integration
+- Phoenix Streaming guide for LiveView integration with `chat/3` and `on_chunk`
+- Structured Output Callbacks guide for implementing LLM callbacks
+- Added phoenix-streaming and structured-output-callbacks guides to ExDoc
+- Updated getting-started guide with chat, streaming, and LLM adapter sections
+
 ## [0.8.0] - 2026-02-25
 
 ### Breaking Changes
@@ -586,6 +604,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.9.0]: https://github.com/andreasronge/ptc_runner/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/andreasronge/ptc_runner/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/andreasronge/ptc_runner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/andreasronge/ptc_runner/compare/v0.5.2...v0.6.0
