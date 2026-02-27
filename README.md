@@ -198,7 +198,7 @@ mix ptc.viewer --trace-dir path/to/traces
 ```elixir
 def deps do
   [
-    {:ptc_runner, "~> 0.8.0"},
+    {:ptc_runner, "~> 0.9.0"},
     {:req_llm, "~> 1.2"}  # optional — enables built-in LLM adapter
   ]
 end
