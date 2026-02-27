@@ -33,6 +33,8 @@ defmodule PtcRunner.SubAgent do
   - [Patterns](guides/subagent-patterns.md) - Composition and orchestration
   - `new/1` - All struct fields and options
   - `run/2` - Runtime options and LLM registry
+  - `chat/3` - Multi-turn chat with history threading
+  - [Phoenix Streaming](guides/phoenix-streaming.md) - Real-time streaming in LiveView
   """
 
   @typedoc """
@@ -741,6 +743,71 @@ defmodule PtcRunner.SubAgent do
     case run(agent, opts) do
       {:ok, step} -> step
       {:error, step} -> raise PtcRunner.SubAgentError, %{step: step}
+    end
+  end
+
+  @doc """
+  Multi-turn chat with conversation history threading.
+
+  Wraps `run/2` for chat use cases where conversation history must persist
+  across calls. Forces `output: :text` and `collect_messages: true`.
+
+  ## Parameters
+
+  - `agent` - A `%SubAgent{}` struct (should use `output: :text`)
+  - `user_message` - The user's message for this turn
+  - `opts` - Runtime options (same as `run/2`, plus `:messages`)
+
+  ## Options
+
+  - `:messages` - Prior conversation history (default: `[]`). Pass the
+    `updated_messages` from a previous `chat/3` call to continue the conversation.
+  - All other options are forwarded to `run/2` (e.g., `:llm`, `:context`)
+
+  ## Returns
+
+  - `{:ok, response_text, updated_messages}` — the assistant's response and
+    the full message history to pass into the next `chat/3` call
+  - `{:error, reason}` — on failure
+
+  ## Examples
+
+      agent = SubAgent.new(
+        prompt: "placeholder",
+        output: :text,
+        system_prompt: "You are a helpful assistant."
+      )
+
+      # First turn
+      {:ok, reply, messages} = SubAgent.chat(agent, "Hello!", llm: my_llm)
+
+      # Second turn (pass messages back)
+      {:ok, reply2, messages2} = SubAgent.chat(agent, "Tell me more", llm: my_llm, messages: messages)
+  """
+  @spec chat(t(), String.t(), keyword()) ::
+          {:ok, String.t(), [map()]} | {:error, term()}
+  def chat(%__MODULE__{} = agent, user_message, opts \\ []) do
+    {history, opts} = Keyword.pop(opts, :messages, [])
+
+    # Strip system messages from history — the loop regenerates the system prompt
+    initial_messages =
+      Enum.reject(history, fn msg -> msg[:role] == :system end)
+
+    # Force text mode and clear any signature — chat/3 always returns plain text.
+    # A signature would engage JSON-parsing mode, breaking the String.t() return type.
+    agent = %{agent | prompt: user_message, output: :text, signature: nil, parsed_signature: nil}
+
+    run_opts =
+      opts
+      |> Keyword.put(:collect_messages, true)
+      |> Keyword.put(:initial_messages, initial_messages)
+
+    case run(agent, run_opts) do
+      {:ok, step} ->
+        {:ok, step.return, step.messages}
+
+      {:error, step} ->
+        {:error, step.fail || step}
     end
   end
 

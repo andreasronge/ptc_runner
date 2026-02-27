@@ -129,6 +129,7 @@ defmodule PtcRunner.SubAgent.Loop do
     llm_retry = Keyword.get(opts, :llm_retry)
     collect_messages = Keyword.get(opts, :collect_messages, false)
     on_chunk = Keyword.get(opts, :on_chunk)
+    initial_messages = Keyword.get(opts, :initial_messages)
     # Field descriptions received from upstream agent in a chain
     received_field_descriptions = Keyword.get(opts, :_received_field_descriptions)
     # Budget callback options
@@ -189,7 +190,8 @@ defmodule PtcRunner.SubAgent.Loop do
           max_heap: max_heap,
           journal: journal,
           tool_cache: tool_cache,
-          on_chunk: on_chunk
+          on_chunk: on_chunk,
+          initial_messages: initial_messages
         }
 
         run_with_telemetry(agent, run_opts)
@@ -299,7 +301,9 @@ defmodule PtcRunner.SubAgent.Loop do
       # Agent name for TraceTree display
       agent_name: agent.name,
       # Streaming callback for text-only mode
-      on_chunk: run_opts.on_chunk
+      on_chunk: run_opts.on_chunk,
+      # Prior conversation history for chat mode
+      initial_messages: run_opts.initial_messages
     }
 
     # Route to appropriate execution mode based on agent.output

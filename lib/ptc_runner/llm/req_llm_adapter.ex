@@ -256,28 +256,20 @@ if Code.ensure_loaded?(ReqLLM) do
                 []
             end)
 
-          # Lazy stream that fetches real usage after content stream is consumed.
-          # ReqLLM.StreamResponse.usage/1 blocks until metadata is available,
-          # which happens after the content stream completes.
+          # Lazy single-element stream that fetches real usage after content is consumed.
+          # ReqLLM.StreamResponse.usage/1 blocks until the content stream completes.
           done_stream =
-            Stream.resource(
-              fn -> :pending end,
-              fn
-                :pending ->
-                  usage = ReqLLM.StreamResponse.usage(stream_response) || %{}
+            Stream.map([nil], fn _ ->
+              usage = ReqLLM.StreamResponse.usage(stream_response) || %{}
 
-                  tokens = %{
-                    input: usage[:input_tokens] || 0,
-                    output: usage[:output_tokens] || 0
-                  }
-
-                  {[%{done: true, tokens: tokens}], :emitted}
-
-                :emitted ->
-                  {:halt, :emitted}
-              end,
-              fn _ -> :ok end
-            )
+              %{
+                done: true,
+                tokens: %{
+                  input: usage[:input_tokens] || 0,
+                  output: usage[:output_tokens] || 0
+                }
+              }
+            end)
 
           {:ok, Stream.concat(content_stream, done_stream)}
 
