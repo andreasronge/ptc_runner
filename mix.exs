@@ -104,6 +104,9 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-compression.md",
         "docs/guides/subagent-advanced.md",
         "docs/guides/subagent-prompts.md",
+        # Integration Guides
+        "docs/guides/phoenix-streaming.md",
+        "docs/guides/structured-output-callbacks.md",
         # Reference
         "docs/signature-syntax.md",
         "docs/benchmark-eval.md",
@@ -118,6 +121,7 @@ defmodule PtcRunner.MixProject do
       ],
       groups_for_extras: [
         "SubAgent Guides": ~r/docs\/guides\/subagent-.+\.md/,
+        "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
         Reference: ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
       ],
