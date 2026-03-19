@@ -71,12 +71,6 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
         "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
   end
 
-  defp specific_type_error(name, [key, %{} = _map] = args)
-       when name in [:map, :mapv] and is_atom(key) and not is_boolean(key) do
-    {:ok,
-     {:type_error, "#{name}: keyword accessor requires a list of maps, got a single map", args}}
-  end
-
   defp specific_type_error(:pluck, [key, %{} = _map] = args) when is_atom(key) do
     {:ok,
      {:type_error,
