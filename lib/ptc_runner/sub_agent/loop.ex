@@ -130,6 +130,7 @@ defmodule PtcRunner.SubAgent.Loop do
     collect_messages = Keyword.get(opts, :collect_messages, false)
     on_chunk = Keyword.get(opts, :on_chunk)
     initial_messages = Keyword.get(opts, :initial_messages)
+    initial_memory = Keyword.get(opts, :initial_memory, %{})
     # Field descriptions received from upstream agent in a chain
     received_field_descriptions = Keyword.get(opts, :_received_field_descriptions)
     # Budget callback options
@@ -191,7 +192,8 @@ defmodule PtcRunner.SubAgent.Loop do
           journal: journal,
           tool_cache: tool_cache,
           on_chunk: on_chunk,
-          initial_messages: initial_messages
+          initial_messages: initial_messages,
+          initial_memory: initial_memory
         }
 
         run_with_telemetry(agent, run_opts)
@@ -241,11 +243,12 @@ defmodule PtcRunner.SubAgent.Loop do
       llm: run_opts.llm,
       llm_registry: run_opts.llm_registry,
       turn: 1,
-      messages: [%{role: :user, content: first_user_message}],
+      messages:
+        (run_opts.initial_messages || []) ++ [%{role: :user, content: first_user_message}],
       context: run_opts.context,
       turns: [],
       start_time: System.monotonic_time(:millisecond),
-      memory: %{},
+      memory: run_opts.initial_memory,
       last_fail: nil,
       nesting_depth: run_opts.nesting_depth,
       remaining_turns: run_opts.remaining_turns,
@@ -1060,7 +1063,8 @@ defmodule PtcRunner.SubAgent.Loop do
     context_prompt =
       SystemPrompt.generate_context(agent,
         context: run_opts.context,
-        received_field_descriptions: run_opts.received_field_descriptions
+        received_field_descriptions: run_opts.received_field_descriptions,
+        memory: run_opts.initial_memory
       )
 
     # Initial progress checklist (all pending) if agent has a plan

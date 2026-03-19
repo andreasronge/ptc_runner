@@ -198,6 +198,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   def generate_context(%SubAgent{} = agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
     received_field_descriptions = Keyword.get(opts, :received_field_descriptions)
+    memory = Keyword.get(opts, :memory, %{})
 
     # Parse signature if present
     context_signature = parse_signature(agent.signature)
@@ -216,7 +217,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         data: context,
         field_descriptions: all_field_descriptions,
         context_signature: context_signature,
-        memory: %{},
+        memory: memory,
         has_println: false
       })
 

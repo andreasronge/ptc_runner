@@ -750,64 +750,112 @@ defmodule PtcRunner.SubAgent do
   Multi-turn chat with conversation history threading.
 
   Wraps `run/2` for chat use cases where conversation history must persist
-  across calls. Forces `output: :text` and `collect_messages: true`.
+  across calls. Auto-detects mode based on `agent.output`:
+
+  - **`:text`** — Forces text mode, clears signature. Returns plain text.
+  - **`:ptc_lisp`** — Keeps PTC-Lisp mode and signature. Returns structured data
+    and memory (variables defined via `def`).
 
   ## Parameters
 
-  - `agent` - A `%SubAgent{}` struct (should use `output: :text`)
+  - `agent` - A `%SubAgent{}` struct
   - `user_message` - The user's message for this turn
-  - `opts` - Runtime options (same as `run/2`, plus `:messages`)
+  - `opts` - Runtime options (same as `run/2`, plus `:messages` and `:memory`)
 
   ## Options
 
   - `:messages` - Prior conversation history (default: `[]`). Pass the
     `updated_messages` from a previous `chat/3` call to continue the conversation.
+  - `:memory` - Prior memory map (default: `%{}`). For PTC-Lisp mode, pass the
+    memory from a previous `chat/3` call so the LLM can access prior variables.
   - All other options are forwarded to `run/2` (e.g., `:llm`, `:context`)
 
   ## Returns
 
-  - `{:ok, response_text, updated_messages}` — the assistant's response and
-    the full message history to pass into the next `chat/3` call
+  - `{:ok, result, updated_messages, memory}` — the result (text or structured),
+    the full message history, and the memory map (empty for text mode)
   - `{:error, reason}` — on failure
 
   ## Examples
 
+      # Text mode
       agent = SubAgent.new(
         prompt: "placeholder",
         output: :text,
         system_prompt: "You are a helpful assistant."
       )
 
-      # First turn
-      {:ok, reply, messages} = SubAgent.chat(agent, "Hello!", llm: my_llm)
+      {:ok, reply, messages, _memory} = SubAgent.chat(agent, "Hello!", llm: my_llm)
+      {:ok, reply2, messages2, _memory} = SubAgent.chat(
+        agent, "Tell me more",
+        llm: my_llm, messages: messages
+      )
 
-      # Second turn (pass messages back)
-      {:ok, reply2, messages2} = SubAgent.chat(agent, "Tell me more", llm: my_llm, messages: messages)
+      # PTC-Lisp mode with memory threading
+      agent = SubAgent.new(
+        prompt: "placeholder",
+        output: :ptc_lisp,
+        system_prompt: "You are a helpful assistant.",
+        tools: my_tools
+      )
+
+      {:ok, result, messages, memory} = SubAgent.chat(agent, "Look up X", llm: my_llm)
+      {:ok, result2, messages2, memory2} = SubAgent.chat(
+        agent, "Now use that result",
+        llm: my_llm, messages: messages, memory: memory
+      )
   """
   @spec chat(t(), String.t(), keyword()) ::
-          {:ok, String.t(), [map()]} | {:error, term()}
+          {:ok, term(), [map()], map()} | {:error, term()}
   def chat(%__MODULE__{} = agent, user_message, opts \\ []) do
     {history, opts} = Keyword.pop(opts, :messages, [])
+    {memory, opts} = Keyword.pop(opts, :memory, %{})
 
     # Strip system messages from history — the loop regenerates the system prompt
     initial_messages =
       Enum.reject(history, fn msg -> msg[:role] == :system end)
 
-    # Force text mode and clear any signature — chat/3 always returns plain text.
-    # A signature would engage JSON-parsing mode, breaking the String.t() return type.
-    agent = %{agent | prompt: user_message, output: :text, signature: nil, parsed_signature: nil}
+    case agent.output do
+      :text ->
+        # Force text mode and clear any signature — returns plain text.
+        agent = %{
+          agent
+          | prompt: user_message,
+            output: :text,
+            signature: nil,
+            parsed_signature: nil
+        }
 
-    run_opts =
-      opts
-      |> Keyword.put(:collect_messages, true)
-      |> Keyword.put(:initial_messages, initial_messages)
+        run_opts =
+          opts
+          |> Keyword.put(:collect_messages, true)
+          |> Keyword.put(:initial_messages, initial_messages)
 
-    case run(agent, run_opts) do
-      {:ok, step} ->
-        {:ok, step.return, step.messages}
+        case run(agent, run_opts) do
+          {:ok, step} ->
+            {:ok, step.return, step.messages, %{}}
 
-      {:error, step} ->
-        {:error, step.fail || step}
+          {:error, step} ->
+            {:error, step.fail || step}
+        end
+
+      :ptc_lisp ->
+        # PTC-Lisp mode — keep output/signature, thread memory
+        agent = %{agent | prompt: user_message}
+
+        run_opts =
+          opts
+          |> Keyword.put(:collect_messages, true)
+          |> Keyword.put(:initial_messages, initial_messages)
+          |> Keyword.put(:initial_memory, memory)
+
+        case run(agent, run_opts) do
+          {:ok, step} ->
+            {:ok, step.return, step.messages, step.memory}
+
+          {:error, step} ->
+            {:error, step.fail || step}
+        end
     end
   end
 
