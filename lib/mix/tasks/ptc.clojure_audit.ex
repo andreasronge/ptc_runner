@@ -104,52 +104,51 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
   end
 
   defp ptc_lisp_builtins do
-    builtin_names =
-      Env.initial()
-      |> Map.keys()
-      |> MapSet.new()
+    builtin_keys = Env.initial() |> Map.keys()
 
     # Special forms handled by the analyzer/evaluator, not in Env.initial()
-    special_forms =
-      MapSet.new([
-        :let,
-        :loop,
-        :recur,
-        :fn,
-        :defn,
-        :def,
-        :defonce,
-        :if,
-        :"if-not",
-        :"if-let",
-        :when,
-        :"when-not",
-        :"when-let",
-        :cond,
-        :do,
-        :and,
-        :or,
-        :for,
-        :doseq,
-        :->,
-        :"->>",
-        :apply,
-        :return,
-        :fail,
-        :task,
-        :"task-reset",
-        :"step-done",
-        :where,
-        :"all-of",
-        :"any-of",
-        :"none-of",
-        :juxt,
-        :pmap,
-        :pcalls,
-        :println
-      ])
+    special_form_list = [
+      :let,
+      :loop,
+      :recur,
+      :fn,
+      :defn,
+      :def,
+      :defonce,
+      :if,
+      :"if-not",
+      :"if-let",
+      :when,
+      :"when-not",
+      :"when-let",
+      :cond,
+      :do,
+      :and,
+      :or,
+      :for,
+      :doseq,
+      :->,
+      :"->>",
+      :apply,
+      :return,
+      :fail,
+      :task,
+      :"task-reset",
+      :"step-done",
+      :where,
+      :"all-of",
+      :"any-of",
+      :"none-of",
+      :juxt,
+      :pmap,
+      :pcalls,
+      :println
+    ]
 
-    {MapSet.union(builtin_names, special_forms), special_forms}
+    special_forms = MapSet.new(special_form_list)
+    all_supported = MapSet.new(builtin_keys ++ special_form_list)
+
+    {all_supported, special_forms}
   end
 
   defp classify_with_llm(vars, model, chunk_size) do
