@@ -1094,4 +1094,58 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == 55
     end
   end
+
+  describe "keep" do
+    @describetag :keep
+
+    test "even? returns true/false (never nil), so keep preserves all results" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep even? (range 1 10))|)
+      assert result == [false, true, false, true, false, true, false, true, false]
+    end
+
+    test "conditional return filters and transforms" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep (fn [x] (when (odd? x) x)) (range 10))|)
+
+      assert result == [1, 3, 5, 7, 9]
+    end
+
+    test "identity keeps false but drops nil" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep identity [false nil 1 2 nil 3])|)
+
+      assert result == [false, 1, 2, 3]
+    end
+
+    test "transform and filter in one step" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep (fn [x] (when (> x 2) (* x x))) [1 2 3 4 5])|)
+
+      assert result == [9, 16, 25]
+    end
+
+    test "empty collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep identity [])|)
+      assert result == []
+    end
+
+    test "nil collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep identity nil)|)
+      assert result == []
+    end
+
+    test "all-nil results" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep (fn [x] nil) [1 2 3])|)
+
+      assert result == []
+    end
+
+    test "map entry handling" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep (fn [[k v]] (when (> v 1) k)) {:a 1 :b 2 :c 3})|)
+
+      assert Enum.sort(result) == [:b, :c]
+    end
+  end
 end
