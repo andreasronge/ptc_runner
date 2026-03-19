@@ -17,6 +17,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   alias PtcRunner.Prompts
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Loop.{JsonHandler, LLMRetry, Metrics, ToolNormalizer}
   alias PtcRunner.SubAgent.{PromptExpander, Signature, Telemetry}
   alias PtcRunner.SubAgent.ToolSchema
@@ -336,7 +337,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # ============================================================
 
   defp run_tool_variant(agent, llm, state) do
-    effective_tools = SubAgent.effective_tools(agent)
+    effective_tools = BuiltinTools.effective_tools(agent)
     tool_schemas = ToolSchema.to_tool_definitions(effective_tools)
     normalized_tools = ToolNormalizer.normalize(effective_tools, state, agent)
 
@@ -745,7 +746,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # ============================================================
 
   defp has_tools?(%SubAgent{} = agent) do
-    map_size(SubAgent.effective_tools(agent)) > 0
+    map_size(BuiltinTools.effective_tools(agent)) > 0
   end
 
   defp safe_on_chunk(on_chunk, content) do

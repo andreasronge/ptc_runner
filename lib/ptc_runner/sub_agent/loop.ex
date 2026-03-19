@@ -63,6 +63,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.{Lisp, Step, Turn}
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.BuiltinTools
 
   alias PtcRunner.SubAgent.Loop.{
     LLMRetry,
@@ -551,7 +552,7 @@ defmodule PtcRunner.SubAgent.Loop do
       if must_return_mode do
         []
       else
-        Map.keys(SubAgent.effective_tools(agent))
+        Map.keys(BuiltinTools.effective_tools(agent))
       end
 
     llm_input = %{
@@ -731,7 +732,7 @@ defmodule PtcRunner.SubAgent.Loop do
         state.context
       end
 
-    tools = SubAgent.effective_tools(agent)
+    tools = BuiltinTools.effective_tools(agent)
 
     # Normalize SubAgentTool instances to functions with telemetry
     normalized_tools = ToolNormalizer.normalize(tools, state, agent)

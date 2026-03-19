@@ -49,7 +49,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   require Logger
 
   alias PtcRunner.Lisp.LanguageSpec
-  alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Namespace
   alias PtcRunner.SubAgent.PromptExpander
   alias PtcRunner.SubAgent.Signature
@@ -95,8 +95,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       true
 
   """
-  @spec generate(SubAgent.t(), keyword()) :: String.t()
-  def generate(%SubAgent{} = agent, opts \\ []) do
+  @spec generate(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  def generate(agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
     error_context = Keyword.get(opts, :error_context)
     resolution_context = Keyword.get(opts, :resolution_context, %{})
@@ -144,8 +144,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       false
 
   """
-  @spec generate_system(SubAgent.t(), keyword()) :: String.t()
-  def generate_system(%SubAgent{} = agent, opts \\ []) do
+  @spec generate_system(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  def generate_system(agent, opts \\ []) do
     resolution_context = Keyword.get(opts, :resolution_context, %{})
 
     {language_ref, output_fmt} = resolve_static_sections(agent, resolution_context)
@@ -168,7 +168,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   See `generate_system/2` for documentation.
   """
-  @spec generate_static(SubAgent.t(), keyword()) :: String.t()
+  @spec generate_static(PtcRunner.SubAgent.t(), keyword()) :: String.t()
   def generate_static(agent, opts \\ []), do: generate_system(agent, opts)
 
   @doc """
@@ -194,8 +194,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       false
 
   """
-  @spec generate_context(SubAgent.t(), keyword()) :: String.t()
-  def generate_context(%SubAgent{} = agent, opts \\ []) do
+  @spec generate_context(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  def generate_context(agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
     received_field_descriptions = Keyword.get(opts, :received_field_descriptions)
     memory = Keyword.get(opts, :memory, %{})
@@ -208,7 +208,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     all_field_descriptions =
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
-    tools = SubAgent.effective_tools(agent)
+    tools = BuiltinTools.effective_tools(agent)
 
     # Use compact Namespace format (same as Turn 2+)
     namespace_content =
@@ -281,7 +281,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       "PREFIX\\nbase"
 
   """
-  @spec apply_customization(String.t(), SubAgent.system_prompt_opts() | nil) :: String.t()
+  @spec apply_customization(String.t(), PtcRunner.SubAgent.system_prompt_opts() | nil) ::
+          String.t()
   def apply_customization(base_prompt, nil), do: base_prompt
 
   # String override - use as-is
@@ -373,7 +374,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   # ============================================================
 
   defp generate_base_prompt(
-         %SubAgent{} = agent,
+         agent,
          context,
          resolution_context,
          received_field_descriptions
@@ -390,7 +391,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       Map.merge(agent.context_descriptions || %{}, received_field_descriptions || %{})
 
     # Inject builtin llm-query tool if enabled
-    tools = SubAgent.effective_tools(agent)
+    tools = BuiltinTools.effective_tools(agent)
 
     # Use compact Namespace format (same as Turn 2+)
     namespace_content =
@@ -461,7 +462,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   end
 
   # Resolve language_ref and output_fmt from agent config
-  defp resolve_static_sections(%SubAgent{} = agent, resolution_context) do
+  defp resolve_static_sections(agent, resolution_context) do
     # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
     # When journal is enabled, use :multi_turn_journal instead of :multi_turn
     default_spec =
