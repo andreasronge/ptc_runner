@@ -39,6 +39,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   defdelegate filter(pred, coll), to: Collection
   defdelegate remove(pred, coll), to: Collection
+  defdelegate keep(f, coll), to: Collection
   defdelegate find(pred, coll), to: Collection
   defdelegate map(f, coll), to: Collection
   defdelegate map(f, coll1, coll2), to: Collection

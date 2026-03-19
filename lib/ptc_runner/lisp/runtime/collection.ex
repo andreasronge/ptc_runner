@@ -133,6 +133,71 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
+  # keep: returns non-nil results of (f item)
+  # Unlike filter (which returns original items), keep returns f's results.
+  # Unlike map, keep removes nil results. false IS kept.
+
+  def keep(key, coll) when is_list(coll) and is_atom(key) do
+    Enum.reduce(coll, [], fn item, acc ->
+      case FlexAccess.flex_get(item, key) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(key, _coll) when is_list(key), do: vector_arg_error(key, "function or key")
+
+  def keep(%MapSet{} = set, coll) when is_list(coll) do
+    Enum.reduce(coll, [], fn item, acc ->
+      if MapSet.member?(set, item), do: [item | acc], else: acc
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(f, coll) when is_list(coll) do
+    Enum.reduce(coll, [], fn item, acc ->
+      case Callable.call(f, [item]) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(f, coll) when is_binary(coll) do
+    Enum.reduce(graphemes(coll), [], fn item, acc ->
+      case Callable.call(f, [item]) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(f, %MapSet{} = set) do
+    Enum.reduce(set, [], fn item, acc ->
+      case Callable.call(f, [item]) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(f, coll) when is_map(coll) do
+    Enum.reduce(coll, [], fn {k, v}, acc ->
+      case Callable.call(f, [[k, v]]) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(_f, nil), do: []
+
   def find(key, coll) when is_list(coll) and is_atom(key) do
     Enum.find(coll, truthy_key_pred(key))
   end

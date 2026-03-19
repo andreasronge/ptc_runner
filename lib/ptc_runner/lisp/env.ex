@@ -228,6 +228,7 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       {:filter, {:normal, &Runtime.filter/2}},
       {:remove, {:normal, &Runtime.remove/2}},
+      {:keep, {:normal, &Runtime.keep/2}},
       {:find, {:normal, &Runtime.find/2}},
       {:map, {:multi_arity, :map, {&Runtime.map/2, &Runtime.map/3, &Runtime.map/4}}},
       {:mapv, {:multi_arity, :mapv, {&Runtime.mapv/2, &Runtime.mapv/3, &Runtime.mapv/4}}},

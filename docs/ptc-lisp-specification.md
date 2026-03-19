@@ -1433,6 +1433,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 |----------|-----------|-------------|
 | `filter` | `(filter pred coll)` | Keep items where pred is truthy |
 | `remove` | `(remove pred coll)` | Remove items where pred is truthy |
+| `keep` | `(keep f coll)` | Non-nil results of (f item). false is kept. |
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
@@ -1457,6 +1458,26 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 ;; Remove entries where value is nil
 (remove (fn [[k v]] (nil? v)) {:a 1 :b nil :c 3})
 ;; => [[:a 1] [:c 3]]
+```
+
+**`keep`** applies a function and returns non-nil results (hybrid of `map` + `filter`). Unlike `filter`, it returns `f`'s results, not the original items. Unlike `map`, it drops nil results. `false` is kept:
+
+```clojure
+;; keep only odd numbers, returning them
+(keep (fn [x] (when (odd? x) x)) (range 10))
+;; => [1 3 5 7 9]
+
+;; identity keeps false but drops nil
+(keep identity [false nil 1 2 nil 3])
+;; => [false 1 2 3]
+
+;; transform and filter in one step
+(keep (fn [x] (when (> x 2) (* x x))) [1 2 3 4 5])
+;; => [9 16 25]
+
+;; keep over map entries
+(keep (fn [[k v]] (when (> v 1) k)) {:a 1 :b 2 :c 3})
+;; => [:b :c]
 ```
 
 #### Transforming
