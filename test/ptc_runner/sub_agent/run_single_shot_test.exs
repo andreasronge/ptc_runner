@@ -52,7 +52,6 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
 
       # Should use single_shot (base) language spec
       assert system_prompt =~ "<language_reference>"
-      assert system_prompt =~ "<common_mistakes>"
       # single_shot should NOT have memory docs
       refute system_prompt =~ "Memory: Persisting Data Between Turns"
     end

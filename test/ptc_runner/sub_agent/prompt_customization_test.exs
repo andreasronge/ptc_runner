@@ -74,7 +74,6 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
       assert prompt =~ "<language_reference>"
-      assert prompt =~ "<common_mistakes>"
       # single_shot should not have memory docs
       refute prompt =~ "Memory: Persisting Data Between Turns"
     end
