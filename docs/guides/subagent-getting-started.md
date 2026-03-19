@@ -407,21 +407,52 @@ agent = PtcRunner.SubAgent.new(
 )
 
 # First turn
-{:ok, reply, messages} = PtcRunner.SubAgent.chat(agent, "Hello!", llm: my_llm)
+{:ok, reply, messages, _memory} = PtcRunner.SubAgent.chat(agent, "Hello!", llm: my_llm)
 
 # Second turn — pass messages back to continue the conversation
-{:ok, reply2, messages2} = PtcRunner.SubAgent.chat(
+{:ok, reply2, messages2, _memory} = PtcRunner.SubAgent.chat(
   agent, "Tell me more",
   llm: my_llm, messages: messages
 )
 ```
 
-`chat/3` forces `output: :text` and automatically threads conversation history. The system prompt is managed by the agent struct — you don't need to include it in the messages list.
+`chat/3` auto-detects mode based on `agent.output`:
+
+- **`:text`** — Forces text mode, clears signature. Returns plain text with empty memory.
+- **`:ptc_lisp`** — Keeps PTC-Lisp mode. Returns structured data and memory (variables defined via `def`).
+
+The system prompt is managed by the agent struct — you don't need to include it in the messages list.
+
+### PTC-Lisp Mode Chat
+
+For chatbots that need tools, memory, or computed results:
+
+```elixir
+agent = PtcRunner.SubAgent.new(
+  prompt: "placeholder",
+  output: :ptc_lisp,
+  system_prompt: "You are a helpful assistant.",
+  tools: my_tools
+)
+
+# First turn — LLM can use tools and define variables
+{:ok, result, messages, memory} = PtcRunner.SubAgent.chat(agent, "Look up X", llm: my_llm)
+
+# Second turn — thread both messages and memory
+{:ok, result2, messages2, memory2} = PtcRunner.SubAgent.chat(
+  agent, "Now use that result",
+  llm: my_llm, messages: messages, memory: memory
+)
+```
+
+The `:memory` option seeds the PTC-Lisp environment with variables from a prior call, so the LLM can reference them without re-computing.
+
+### Streaming
 
 Streaming works via `on_chunk`:
 
 ```elixir
-{:ok, reply, messages} = PtcRunner.SubAgent.chat(agent, "Hello!",
+{:ok, reply, messages, _memory} = PtcRunner.SubAgent.chat(agent, "Hello!",
   llm: my_llm,
   on_chunk: fn %{delta: text} -> IO.write(text) end
 )

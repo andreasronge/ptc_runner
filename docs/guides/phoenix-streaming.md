@@ -47,7 +47,7 @@ defmodule MyAppWeb.ChatLive do
         )
 
       case result do
-        {:ok, _reply, updated_messages} ->
+        {:ok, _reply, updated_messages, _memory} ->
           send(lv_pid, {:chat_done, updated_messages})
 
         {:error, reason} ->
