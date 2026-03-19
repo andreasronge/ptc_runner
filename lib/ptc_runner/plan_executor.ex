@@ -849,10 +849,10 @@ defmodule PtcRunner.PlanExecutor do
   defp inject_builtin_descriptions(available_tools, []), do: available_tools
 
   defp inject_builtin_descriptions(available_tools, builtin_families) do
-    alias PtcRunner.SubAgent
+    alias PtcRunner.SubAgent.BuiltinTools
     alias PtcRunner.Tool
 
-    builtin_entries = SubAgent.expand_builtin_tools(builtin_families)
+    builtin_entries = BuiltinTools.expand_builtin_tools(builtin_families)
 
     builtin_descriptions =
       for {name, sentinel} <- builtin_entries,
