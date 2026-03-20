@@ -116,16 +116,10 @@ Functions listed as `🔲 candidate` in the audit that showed up in conformance 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `fn-literal-test` line 196 |
 
-```clojure
-;; Clojure
-(apply #(do %&) [1 2 3])   ;=> (1 2 3)
-
-;; PTC-Lisp
-(apply #(do %&) [1 2 3])   ;=> error
-```
+**Fix:** Updated `placeholder?` to recognize `%&`, and extended the short fn desugarer (`determine_arity`, `generate_params`, `placeholder_to_param`) to produce variadic `(fn [p1 & rest] ...)` forms when `%&` is present.
 
 ### GAP-C04: `:strs` map destructuring
 
