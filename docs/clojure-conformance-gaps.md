@@ -118,7 +118,7 @@ Functions listed as `🔲 candidate` in the audit that showed up in conformance 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | fixed |
 | **Source** | SCI `destructure-test` line 139 |
 
 ```clojure
@@ -126,10 +126,10 @@ Functions listed as `🔲 candidate` in the audit that showed up in conformance 
 ((fn [{:strs [a]}] a) {"a" 1})   ;=> 1
 
 ;; PTC-Lisp
-((fn [{:strs [a]}] a) {"a" 1})   ;=> error
+((fn [{:strs [a]}] a) {"a" 1})   ;=> 1
 ```
 
-Destructuring with `:strs` binds string keys to local variables. Less common than `:keys` but used with JSON-like data.
+**Fix:** Added `:strs` as a parallel pattern type to `:keys` across analyzer, pattern matcher, scope analysis, and formatter. `:strs` converts key atoms to strings before lookup via `flex_fetch`.
 
 ---
 
@@ -257,6 +257,177 @@ No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
 ```
 
 Clojure detects duplicate computed keys at runtime and throws an error. PTC-Lisp silently deduplicates. Without exception handling (`try`/`catch`), a duplicate-key error would crash the entire program with no recovery path. Silent deduplication is more resilient for LLM-generated sandboxed code.
+
+### DIV-07: No user-defined namespaces
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+No user-defined namespaces or modules. All definitions live in a single flat namespace.
+
+**Rationale:** Simplicity. Single-file programs don't need module systems.
+
+### DIV-08: No full Java interop
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+No general Java/host interop. A minimal Date/Time subset is supported (see spec §8.13).
+
+**Rationale:** Security. Arbitrary host access would break the sandbox.
+
+### DIV-09: No file I/O
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+No `slurp`, `spit`, or any filesystem access.
+
+**Rationale:** Security. All data must flow through the tool/context API.
+
+### DIV-10: No exception handling
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+No `try`, `catch`, `throw`. Use `(fail reason)` for error signaling.
+
+**Rationale:** Simplicity and safety. Exception handling adds complexity; `fail` provides a single, predictable error path.
+
+### DIV-11: No multi-methods or protocols
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+No `defmulti`, `defmethod`, `defprotocol`, `defrecord`.
+
+**Rationale:** Complexity. Not needed for data transformation pipelines.
+
+### DIV-12: No `partial`, `comp`, or transducers
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+Function composition utilities and transducers are not supported.
+
+**Rationale:** Simplicity. Threading macros (`->`, `->>`) cover most composition needs.
+
+### DIV-13: Namespaced keywords not supported
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+`:foo/bar` style namespaced keywords are not supported. Only simple keywords like `:name`, `:user-id`.
+
+**Rationale:** Simplicity. No user-defined namespaces means namespace-qualified keywords have no use.
+
+### DIV-14: `if-let`/`when-let` only support single symbol bindings
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure: supports destructuring
+(if-let [{:keys [a]} (get-map)] a nil)
+
+;; PTC-Lisp: only single symbol
+(if-let [x (get-map)] (:a x) nil)
+```
+
+**Rationale:** Simplicity. Destructuring in `let` covers this need.
+
+### DIV-15: No multi-arity `defn`
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure
+(defn f ([x] x) ([x y] (+ x y)))
+
+;; PTC-Lisp: not supported — use separate defn forms or rest args
+```
+
+**Rationale:** Simplicity. Rest args and separate functions cover most cases.
+
+### DIV-16: No pre/post conditions in `defn`
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertion failures would crash the program.
+
+**Rationale:** No exception handling (DIV-10) makes pre/post conditions dangerous in sandboxed code.
+
+### DIV-17: Nested `#()` not allowed
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure: also disallows this
+#(map #(+ % 1) %&)   ;=> error in both Clojure and PTC-Lisp
+```
+
+**Rationale:** Matches Clojure. Ambiguous which `%` refers to which scope.
+
+### DIV-18: `parse-long`/`parse-double` return `nil` for non-string input
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Spec §8.9 |
+
+```clojure
+;; Clojure 1.11+
+(parse-long 42)   ;=> IllegalArgumentException
+
+;; PTC-Lisp
+(parse-long 42)   ;=> nil
+```
+
+**Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
+
+### GAP-S08: `even?`/`odd?` raise type-error on floats
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P2 |
+| **Status** | open |
+| **Source** | Spec §8.8 |
+
+```clojure
+;; Clojure
+(even? 4.0)   ;=> true
+
+;; PTC-Lisp
+(even? 4.0)   ;=> type-error (expects integer)
+```
+
+Clojure accepts whole-number floats for `even?`/`odd?`. PTC-Lisp strictly requires integers. This can bite when using division results (which always return floats).
 
 ---
 
