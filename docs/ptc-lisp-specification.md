@@ -725,7 +725,80 @@ Binds a value from an expression and evaluates the body only if the value is tru
 
 ---
 
-### 5.8 `do` — Sequential Evaluation
+### 5.8 `if-some` and `when-some` — Nil-safe Conditional Binding
+
+Like `if-let`/`when-let` but tests only for `nil`, not falsiness. `false` binds successfully.
+
+**`if-some` syntax:**
+```clojure
+(if-some [name expr]
+  then-expr
+  else-expr)
+```
+
+**`when-some` syntax:**
+```clojure
+(when-some [name expr]
+  body-expr ...)
+```
+
+**Semantics:**
+- `if-some` evaluates `expr`, binds result to `name`, then evaluates `then-expr` if the value is not `nil`, otherwise `else-expr`
+- `when-some` returns `nil` when the value is `nil`, otherwise evaluates the body
+- The key difference from `if-let`/`when-let`: `false` is treated as a valid (non-nil) value
+- Desugars at analysis time: `(if-some [x expr] then else)` → `(let [x expr] (if (nil? x) else then))`
+
+**Examples:**
+```clojure
+(if-some [x 42] x :nope)            ; => 42
+(if-some [x nil] x :nope)           ; => :nope
+(if-some [x false] x :nope)         ; => false (false is NOT nil)
+
+(when-some [x 42] (inc x))          ; => 43
+(when-some [x nil] (inc x))         ; => nil
+(when-some [x false] x)             ; => false
+```
+
+**Implicit `do`:** `when-some` supports multiple body expressions:
+
+```clojure
+(when-some [x (find-value)]
+  (def found x)
+  (* x 2))
+```
+
+---
+
+### 5.9 `when-first` — First Element Binding
+
+Binds the first element of a collection and evaluates the body only if the collection is non-empty.
+
+**Syntax:**
+```clojure
+(when-first [name coll-expr]
+  body-expr ...)
+```
+
+**Semantics:**
+- Evaluates `coll-expr` once, calls `seq` on it
+- If the result is `nil` (empty or nil collection), returns `nil`
+- Otherwise, binds the first element to `name` and evaluates the body
+- Single-evaluation: the collection expression is only evaluated once
+
+**Examples:**
+```clojure
+(when-first [x [1 2 3]] x)          ; => 1
+(when-first [x []] x)               ; => nil
+(when-first [x nil] x)              ; => nil
+
+(when-first [x [10]]
+  (def a x)
+  (* a 2))                          ; => 20
+```
+
+---
+
+### 5.10 `do` — Sequential Evaluation
 
 Evaluates expressions in order, returning the value of the last expression:
 
@@ -747,7 +820,7 @@ Evaluates expressions in order, returning the value of the last expression:
 
 ---
 
-### 5.9 `def` — User Namespace Binding
+### 5.11 `def` — User Namespace Binding
 
 Binds a name to a value in the user namespace, persisting across turns:
 
@@ -790,7 +863,7 @@ Binds a name to a value in the user namespace, persisting across turns:
 
 ---
 
-### 5.10 `defonce` — Idempotent Initialization
+### 5.12 `defonce` — Idempotent Initialization
 
 Binds a name to a value only if not already defined. Safe for multi-turn use:
 
@@ -812,7 +885,7 @@ Binds a name to a value only if not already defined. Safe for multi-turn use:
 
 ---
 
-### 5.11 `defn` — Named Function Definition
+### 5.13 `defn` — Named Function Definition
 
 Syntactic sugar for defining named functions in the user namespace:
 
@@ -885,7 +958,7 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ---
 
-### 5.11 `loop` and `recur` — Tail Recursion
+### 5.14 `loop` and `recur` — Tail Recursion
 
 `loop` establishes a recursion point, and `recur` transfers control back to that point with new values.
 
@@ -935,7 +1008,7 @@ Syntactic sugar for defining named functions in the user namespace:
 **Safety Mechanism:**
 To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive calls. If a loop exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error.
 
-### 5.12 `for` — List Comprehension
+### 5.15 `for` — List Comprehension
 
 `for` produces a list by evaluating a body expression for each element of one or more collections.
 
@@ -1007,7 +1080,7 @@ To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive call
 
 Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuring.
 
-### 5.13 `task` — Journaled Task Execution
+### 5.16 `task` — Journaled Task Execution
 
 `task` executes an expression with caching and idempotency semantics. When a journal is available, tasks are memoized by ID, enabling safe retry loops in agentic execution.
 
@@ -1057,7 +1130,7 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ---
 
-### 5.14 `step-done` — Semantic Progress Reporting
+### 5.17 `step-done` — Semantic Progress Reporting
 
 `step-done` records a summary for a plan step, signaling completion with a human-readable description. Used with the `plan` option on SubAgent to render progress checklists.
 
@@ -1092,7 +1165,7 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ---
 
-### 5.15 `task-reset` — Clear Journaled Task Cache
+### 5.18 `task-reset` — Clear Journaled Task Cache
 
 `task-reset` removes a cached task result from the journal, allowing it to be re-executed on the next call to `(task id expr)`.
 
@@ -1172,6 +1245,69 @@ Equivalent to:
 (-> {:a 1} (assoc :b 2) (assoc :c 3))         ; => {:a 1 :b 2 :c 3}
 (-> {:a {:b 1}} (get-in [:a :b]))             ; => 1
 (-> {:a 1} (update :a inc))                   ; => {:a 2}
+```
+
+### 6.3 `as->` — Named Thread
+
+Binds the threaded value to a name, making it available in any argument position:
+
+```clojure
+(as-> expr name
+  form1
+  form2)
+```
+
+The name is rebound at each step to the result of the previous form. With zero forms, returns the expr directly.
+
+```clojure
+(as-> 1 x (+ x 1) (* x 2))           ; => 4
+(as-> 42 x)                           ; => 42
+(as-> [1 2 3] x (count x))           ; => 3
+```
+
+### 6.4 `cond->` and `cond->>` — Conditional Threading
+
+Threads through forms only where the corresponding test is true:
+
+```clojure
+(cond-> expr
+  test1 form1
+  test2 form2)
+```
+
+- `cond->` threads as the **first argument** (like `->`)
+- `cond->>` threads as the **last argument** (like `->>`)
+- Requires even number of test/form pairs after the initial expression
+- With zero clauses, returns expr unchanged
+
+```clojure
+(cond-> 1 true inc false dec)         ; => 2
+(cond-> 42 false inc false dec)       ; => 42
+(cond-> 42)                           ; => 42
+(cond-> 10 true (- 5))               ; => 5 (thread-first)
+(cond->> 10 true (- 5))              ; => -5 (thread-last)
+```
+
+### 6.5 `some->` and `some->>` — Nil-safe Threading
+
+Threads through forms, short-circuiting to `nil` if any intermediate result is `nil`:
+
+```clojure
+(some-> expr form1 form2)
+```
+
+- `some->` threads as the **first argument**
+- `some->>` threads as the **last argument**
+- `false` is NOT nil — threading continues through `false` values
+- With zero forms, returns expr directly
+
+```clojure
+(some-> 1 inc)                        ; => 2
+(some-> nil inc)                      ; => nil (short-circuits)
+(some-> {:a nil} (:a) inc)           ; => nil (mid-chain nil)
+(some-> false not)                    ; => true (false is not nil)
+(some->> [1 2 3] (map inc))          ; => [2 3 4]
+(some->> nil (map inc))              ; => nil
 ```
 
 ---
@@ -1439,6 +1575,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `filter` | `(filter pred coll)` | Keep items where pred is truthy |
+| `filterv` | `(filterv pred coll)` | Same as filter (vectors are the default) |
 | `remove` | `(remove pred coll)` | Remove items where pred is truthy |
 | `keep` | `(keep f coll)` | Non-nil results of (f item). false is kept. |
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
@@ -1683,6 +1820,7 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `cons` | `(cons x seq)` | Prepend item to sequence |
 | `conj` | `(conj coll x ...)` | Add elements to collection |
 | `concat` | `(concat coll1 coll2 ...)` | Join collections |
 | `into` | `(into to from)` | Pour from into to |
@@ -1690,8 +1828,16 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `interleave` | `(interleave c1 c2)` | Interleave collections |
 | `interpose` | `(interpose sep coll)` | Insert separator between elements |
 | `zip` | `(zip c1 c2)` | Combine into pairs |
+| `zipmap` | `(zipmap keys vals)` | Create map from keys and values seqs |
+| `empty` | `(empty coll)` | Return empty collection of same type |
+| `peek` | `(peek coll)` | Return last element without removing |
+| `pop` | `(pop coll)` | Return collection without last element |
+| `subvec` | `(subvec v start)` `(subvec v start end)` | Return subvector (clamps indices) |
+| `disj` | `(disj set x ...)` | Remove elements from set |
 
 ```clojure
+(cons 0 [1 2 3])           ; => [0 1 2 3]
+(cons 0 nil)               ; => [0]
 (conj [1 2] 3)             ; => [1 2 3]
 (conj #{1 2} 3)            ; => #{1 2 3}
 (conj {:a 1} [:b 2])       ; => {:a 1 :b 2}
@@ -1705,6 +1851,19 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (flatten [[1 2] [3 [4]]])  ; => [1 2 3 4]
 (interpose ", " ["a" "b" "c"]) ; => ["a" ", " "b" ", " "c"]
 (zip [1 2] [:a :b])        ; => [[1 :a] [2 :b]]
+(zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
+(zipmap [:a :b] [1 2 3])   ; => {:a 1 :b 2} (truncates to shorter)
+(empty [1 2 3])             ; => []
+(empty {:a 1})              ; => {}
+(empty nil)                 ; => nil
+(peek [1 2 3])              ; => 3
+(peek [])                   ; => nil
+(pop [1 2 3])               ; => [1 2]
+(pop [])                    ; => nil
+(subvec [0 1 2 3 4] 1 3)   ; => [1 2]
+(subvec [0 1 2 3 4] 2)     ; => [2 3 4]
+(disj #{1 2 3} 2)           ; => #{1 3}
+(disj #{1 2 3} 2 3)         ; => #{1}
 ```
 
 #### Combinatorial
@@ -1937,6 +2096,9 @@ The `seq` function converts a collection to a sequence:
 | `vals` | `(vals m)` | Get all values |
 | `entries` | `(entries m)` | Get all `[key value]` pairs as a list |
 | `update-vals` | `(update-vals m f)` | Apply f to each value (matches Clojure 1.11) |
+| `update-keys` | `(update-keys m f)` | Apply f to each key (collision: retained value unspecified) |
+| `merge-with` | `(merge-with f m1 m2 ...)` | Merge maps with combining function for duplicates |
+| `reduce-kv` | `(reduce-kv f init m)` | Reduce map with f receiving (acc, key, val) |
 
 ```clojure
 (get {:a 1} :a)                    ; => 1
@@ -1964,6 +2126,17 @@ The `seq` function converts a collection to a sequence:
 (-> orders
     (group-by :status)
     (update-vals count))           ; => ...
+
+;; update-keys: apply function to each key
+(update-keys {:a 1 :b 2} str)     ; => {":a" 1 ":b" 2}
+
+;; merge-with: merge maps with combining function for duplicate keys
+(merge-with + {:a 1 :b 2} {:a 3 :c 4})  ; => {:a 4 :b 2 :c 4}
+(merge-with + {:a 1} {:a 2} {:a 3})     ; => {:a 6}
+
+;; reduce-kv: reduce over map key-value pairs
+(reduce-kv (fn [acc k v] (+ acc v)) 0 {:a 1 :b 2 :c 3})  ; => 6
+(reduce-kv (fn [acc k v] (assoc acc k (* v 2))) {} {:a 1 :b 2}) ; => {:a 2 :b 4}
 ```
 
 **List Index Support:**

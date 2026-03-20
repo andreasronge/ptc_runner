@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
   def get(m, k) when is_map(m), do: FlexAccess.flex_get(m, k)
@@ -288,6 +289,88 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   end
 
   def update_vals(nil, _f), do: nil
+
+  @doc """
+  Applies a function to each key in a map, returning a new map.
+  If key collisions occur, the retained value is unspecified.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.update_keys(%{a: 1, b: 2}, &Atom.to_string/1)
+      %{"a" => 1, "b" => 2}
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.update_keys(%{}, &Atom.to_string/1)
+      %{}
+  """
+  def update_keys(m, f) when is_map(m) do
+    Map.new(m, fn {k, v} -> {Callable.call(f, [k]), v} end)
+  end
+
+  def update_keys(nil, _f), do: nil
+
+  @doc """
+  Removes items from a set. Returns nil for nil input.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.disj(MapSet.new([1, 2, 3]), 2)
+      MapSet.new([1, 3])
+  """
+  def disj(nil, _x), do: nil
+  def disj(%MapSet{} = set, x), do: MapSet.delete(set, x)
+
+  @doc """
+  Merges maps using a combining function for duplicate keys.
+  Nil maps are treated as empty maps.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.merge_with_variadic([fn a, b -> a + b end, %{a: 1}, %{a: 2, b: 3}])
+      %{a: 3, b: 3}
+  """
+  def merge_with_variadic([]) do
+    raise ArgumentError, "merge-with requires at least 1 argument (the combining function)"
+  end
+
+  def merge_with_variadic([_f]), do: %{}
+
+  def merge_with_variadic([f | maps]) do
+    maps
+    |> Enum.map(fn
+      nil -> %{}
+      m -> m
+    end)
+    |> Enum.reduce(%{}, fn m, acc ->
+      Map.merge(acc, m, fn _k, v1, v2 -> Callable.call(f, [v1, v2]) end)
+    end)
+  end
+
+  @doc """
+  Reduces a map with a function that receives accumulator, key, and value.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.reduce_kv(fn acc, k, v -> acc + v end, 0, %{a: 1, b: 2})
+      3
+  """
+  def reduce_kv(f, init, m) when is_map(m) and not is_struct(m) do
+    Enum.reduce(m, init, fn {k, v}, acc -> Callable.call(f, [acc, k, v]) end)
+  end
+
+  def reduce_kv(_f, init, nil), do: init
+
+  @doc """
+  Creates a map from a seq of keys and a seq of values.
+  Truncates to the shorter input. Accepts any seqable inputs.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.zipmap([:a, :b, :c], [1, 2, 3])
+      %{a: 1, b: 2, c: 3}
+  """
+  def zipmap(keys, vals) do
+    Enum.zip(Normalize.to_seq(keys), Normalize.to_seq(vals)) |> Map.new()
+  end
 
   # Helper to apply a function with proper arity error handling
   # Uses Callable.call/2 to handle both plain functions and builtin tuples

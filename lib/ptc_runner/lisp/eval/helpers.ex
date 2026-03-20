@@ -121,21 +121,27 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
                    :when,
                    :"if-let",
                    :"when-let",
+                   :"if-some",
+                   :"when-some",
+                   :"when-first",
                    :cond,
                    :do,
                    :and,
                    :or,
-                   :not
+                   :not,
+                   :->,
+                   :"->>",
+                   :"as->",
+                   :"cond->",
+                   :"cond->>",
+                   :"some->",
+                   :"some->>"
                  ])
 
   # Common Clojure/Java functions that don't exist in PTC-Lisp, with alternatives
   @clojure_alternatives %{
     "format" => "use str and arithmetic, e.g. (str (* 100.0 (/ a b)) \"%\")",
-    "subvec" => "use (take n (drop m coll))",
     "keep-indexed" => "use (filter pred (map-indexed vector coll))",
-    "frequencies" => "use (reduce (fn [acc x] (update acc x (fnil inc 0))) {} coll)",
-    "group-by" => "use (reduce (fn [acc x] (update acc (f x) (fnil conj []) x)) {} coll)",
-    "zipmap" => "use (into {} (map vector keys vals))",
     "re-find" => "use grep for line matching, or (re-pattern \"...\") with re-find",
     "re-seq" => "use (re-seq (re-pattern \"...\") text) — requires compiled regex",
     "printf" => "use println with str",
