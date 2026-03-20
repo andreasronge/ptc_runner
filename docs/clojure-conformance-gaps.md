@@ -316,16 +316,16 @@ No `defmulti`, `defmethod`, `defprotocol`, `defrecord`.
 
 **Rationale:** Complexity. Not needed for data transformation pipelines.
 
-### DIV-12: No `partial`, `comp`, or transducers
+### DIV-12: No transducers
 
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
 
-Function composition utilities and transducers are not supported.
+Transducers are not supported. `comp`, `partial`, `complement`, `constantly`, `every-pred`, and `some-fn` are now supported (see §8.10).
 
-**Rationale:** Simplicity. Threading macros (`->`, `->>`) cover most composition needs.
+**Rationale:** Transducers add significant complexity. Threading macros (`->`, `->>`) and the supported combinators cover most composition needs.
 
 ### DIV-13: Namespaced keywords not supported
 

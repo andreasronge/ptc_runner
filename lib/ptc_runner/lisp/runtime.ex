@@ -190,6 +190,12 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate boolean(x), to: Predicates
   defdelegate identity(x), to: Predicates
   defdelegate fnil(f, default), to: Predicates
+  defdelegate comp_variadic(fns), to: Predicates
+  defdelegate partial_variadic(args), to: Predicates
+  defdelegate complement(f), to: Predicates
+  defdelegate constantly(value), to: Predicates
+  defdelegate every_pred_variadic(preds), to: Predicates
+  defdelegate some_fn_variadic(fns), to: Predicates
 
   # ============================================================
   # String Manipulation
