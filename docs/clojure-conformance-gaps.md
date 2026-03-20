@@ -159,22 +159,7 @@ Destructuring with `:strs` binds string keys to local variables. Less common tha
 
 **Fix:** `assoc_variadic` already handled many pairs correctly. The conformance test comparison failed because Babashka output goes through JSON (string keys) while PTC-Lisp uses integer keys. Fixed `normalize_value` in `ClojureValidator` to normalize integer map keys to strings.
 
-### GAP-S05: No duplicate key detection at runtime in set/map literals
-
-| Field | Value |
-|-------|-------|
-| **Priority** | P2 |
-| **Status** | open |
-| **Source** | SCI `core-test` line 114-116 |
-
-```clojure
-;; Clojure: throws "Duplicate key: 1"
-(let [a 1 b 1] #{a b})
-
-;; PTC-Lisp: silently creates #{1} (no error)
-```
-
-Clojure detects duplicate keys at runtime when computed values collide. PTC-Lisp silently deduplicates.
+### ~~GAP-S05~~: Moved to DIV-06 (intentional divergence)
 
 ### GAP-S06: Parameter named `fn` shadows builtin incorrectly
 
@@ -277,6 +262,23 @@ No `defmacro`, `macroexpand`, `eval`, `read-string`. LLM safety boundary.
 | **Status** | by design |
 
 No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
+
+### DIV-06: Silent deduplication of computed duplicate keys in map/set literals
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | SCI `core-test` line 114-116 |
+
+```clojure
+;; Clojure: throws "Duplicate key: 1"
+(let [a 1 b 1] #{a b})
+
+;; PTC-Lisp: silently creates #{1} (no error)
+```
+
+Clojure detects duplicate computed keys at runtime and throws an error. PTC-Lisp silently deduplicates. Without exception handling (`try`/`catch`), a duplicate-key error would crash the entire program with no recovery path. Silent deduplication is more resilient for LLM-generated sandboxed code.
 
 ---
 

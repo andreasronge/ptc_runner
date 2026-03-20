@@ -630,14 +630,20 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
   # Expanded partial: core-test - duplicate keys (line 114-116)
   # ---------------------------------------------------------------------------
 
+  # DIV-06: Intentional divergence — PTC-Lisp silently deduplicates instead of
+  # erroring on duplicate computed keys in map/set literals. Without exception
+  # handling, an error would crash the program with no recovery path. Silent
+  # dedup is more resilient for LLM-generated sandboxed code.
   describe "SCI core-test - duplicate keys" do
     @describetag :clojure
 
-    test "duplicate keys in set literal errors" do
+    @tag :skip
+    test "duplicate keys in set literal errors (DIV-06: silent dedup by design)" do
       assert_clojure_equivalent(~S|(let [a 1 b 1] #{a b})|)
     end
 
-    test "duplicate keys in map literal errors" do
+    @tag :skip
+    test "duplicate keys in map literal errors (DIV-06: silent dedup by design)" do
       assert_clojure_equivalent("(let [a 1 b 1] {a 1 b 2})")
     end
   end
