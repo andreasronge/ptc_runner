@@ -75,6 +75,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise "type_error: #{msg}"
   end
 
+  def filter(key, %MapSet{} = set) when is_atom(key) do
+    Enum.filter(set, truthy_key_pred(key))
+  end
+
+  def filter(%MapSet{} = pred_set, %MapSet{} = coll) do
+    Enum.filter(coll, fn item -> MapSet.member?(pred_set, item) end)
+  end
+
   def filter(pred, %MapSet{} = set), do: Enum.filter(set, &Callable.call(pred, [&1]))
 
   def filter(key, coll) when is_list(coll) and is_atom(key) do
@@ -87,6 +95,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.filter(coll, set_pred(set))
   end
 
+  # Keyword on string graphemes: graphemes are strings, not maps, so keyword access always returns nil
+  def filter(key, coll) when is_atom(key) and is_binary(coll), do: []
+
   def filter(%MapSet{} = set, coll) when is_binary(coll) do
     Enum.filter(graphemes(coll), set_pred(set))
   end
@@ -96,12 +107,32 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def filter(pred, coll) when is_binary(coll),
     do: Enum.filter(graphemes(coll), &Callable.call(pred, [&1]))
 
+  def filter(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    coll
+    |> Enum.filter(fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
+  def filter(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    coll
+    |> Enum.filter(fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
   def filter(pred, coll) when is_map(coll) do
     # When filtering a map, each entry is passed as [key, value] pair
     # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
     coll
     |> Enum.filter(fn {k, v} -> Callable.call(pred, [[k, v]]) end)
     |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
+  def remove(key, %MapSet{} = set) when is_atom(key) do
+    Enum.reject(set, truthy_key_pred(key))
+  end
+
+  def remove(%MapSet{} = pred_set, %MapSet{} = coll) do
+    Enum.reject(coll, fn item -> MapSet.member?(pred_set, item) end)
   end
 
   def remove(pred, %MapSet{} = set), do: Enum.reject(set, &Callable.call(pred, [&1]))
@@ -116,6 +147,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.reject(coll, set_pred(set))
   end
 
+  # Keyword on string: always falsy, so nothing is removed
+  def remove(key, coll) when is_atom(key) and is_binary(coll), do: graphemes(coll)
+
   def remove(%MapSet{} = set, coll) when is_binary(coll) do
     Enum.reject(graphemes(coll), set_pred(set))
   end
@@ -124,6 +158,18 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def remove(pred, coll) when is_binary(coll),
     do: Enum.reject(graphemes(coll), &Callable.call(pred, [&1]))
+
+  def remove(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    coll
+    |> Enum.reject(fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
+  def remove(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    coll
+    |> Enum.reject(fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
+    |> Enum.map(fn {k, v} -> [k, v] end)
+  end
 
   def remove(pred, coll) when is_map(coll) do
     # When removing from a map, each entry is passed as [key, value] pair
@@ -166,6 +212,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.reverse()
   end
 
+  # Keyword on string: always nil, so keep returns empty
+  def keep(key, coll) when is_atom(key) and is_binary(coll), do: []
+
+  def keep(%MapSet{} = set, coll) when is_binary(coll) do
+    Enum.reduce(graphemes(coll), [], fn item, acc ->
+      if MapSet.member?(set, item), do: [item | acc], else: acc
+    end)
+    |> Enum.reverse()
+  end
+
   def keep(f, coll) when is_binary(coll) do
     Enum.reduce(graphemes(coll), [], fn item, acc ->
       case Callable.call(f, [item]) do
@@ -176,12 +232,46 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.reverse()
   end
 
+  def keep(key, %MapSet{} = set) when is_atom(key) do
+    Enum.reduce(set, [], fn item, acc ->
+      case FlexAccess.flex_get(item, key) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(%MapSet{} = pred_set, %MapSet{} = coll) do
+    Enum.reduce(coll, [], fn item, acc ->
+      if MapSet.member?(pred_set, item), do: [item | acc], else: acc
+    end)
+    |> Enum.reverse()
+  end
+
   def keep(f, %MapSet{} = set) do
     Enum.reduce(set, [], fn item, acc ->
       case Callable.call(f, [item]) do
         nil -> acc
         result -> [result | acc]
       end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    Enum.reduce(coll, [], fn {k, v}, acc ->
+      case FlexAccess.flex_get([k, v], key) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  def keep(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    Enum.reduce(coll, [], fn {k, v}, acc ->
+      if MapSet.member?(pred_set, [k, v]), do: [[k, v] | acc], else: acc
     end)
     |> Enum.reverse()
   end
@@ -210,8 +300,45 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def find(pred, coll) when is_list(coll), do: Enum.find(coll, &Callable.call(pred, [&1]))
 
+  # Keyword on string: always nil, so find returns nil
+  def find(key, coll) when is_atom(key) and is_binary(coll), do: nil
+
+  def find(%MapSet{} = set, coll) when is_binary(coll),
+    do: Enum.find(graphemes(coll), fn item -> MapSet.member?(set, item) end)
+
   def find(pred, coll) when is_binary(coll),
     do: Enum.find(graphemes(coll), &Callable.call(pred, [&1]))
+
+  def find(key, %MapSet{} = set) when is_atom(key) do
+    Enum.find(set, truthy_key_pred(key))
+  end
+
+  def find(%MapSet{} = pred_set, %MapSet{} = coll) do
+    Enum.find(coll, fn item -> MapSet.member?(pred_set, item) end)
+  end
+
+  def find(pred, %MapSet{} = set), do: Enum.find(set, &Callable.call(pred, [&1]))
+
+  def find(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    case Enum.find(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end) do
+      {k, v} -> [k, v]
+      nil -> nil
+    end
+  end
+
+  def find(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    case Enum.find(coll, fn {k, v} -> MapSet.member?(pred_set, [k, v]) end) do
+      {k, v} -> [k, v]
+      nil -> nil
+    end
+  end
+
+  def find(pred, coll) when is_map(coll) and not is_struct(coll) do
+    case Enum.find(coll, fn {k, v} -> Callable.call(pred, [[k, v]]) end) do
+      {k, v} -> [k, v]
+      nil -> nil
+    end
+  end
 
   def map(key, coll) when is_list(coll) and is_atom(key),
     do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
@@ -220,13 +347,30 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def map(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
 
+  # Keyword on string: flex_get on graphemes always returns nil
+  def map(key, coll) when is_atom(key) and is_binary(coll),
+    do: Enum.map(graphemes(coll), fn _ -> nil end)
+
   def map(%MapSet{} = set, coll) when is_binary(coll),
     do: Enum.map(graphemes(coll), set_pred(set))
 
   def map(f, coll) when is_list(coll), do: Enum.map(coll, &Callable.call(f, [&1]))
   def map(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), &Callable.call(f, [&1]))
 
+  def map(key, %MapSet{} = set) when is_atom(key),
+    do: Enum.map(set, &FlexAccess.flex_get(&1, key))
+
+  def map(%MapSet{} = pred_set, %MapSet{} = coll), do: Enum.map(coll, set_pred(pred_set))
+
   def map(f, %MapSet{} = set), do: Enum.map(set, &Callable.call(f, [&1]))
+
+  def map(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    Enum.map(coll, fn {k, v} -> FlexAccess.flex_get([k, v], key) end)
+  end
+
+  def map(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    Enum.map(coll, fn {k, v} -> if MapSet.member?(pred_set, [k, v]), do: [k, v], else: nil end)
+  end
 
   def map(f, coll) when is_map(coll) do
     # When mapping over a map, each entry is passed as [key, value] pair
@@ -240,13 +384,30 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def mapv(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
 
+  # Keyword on string: flex_get on graphemes always returns nil
+  def mapv(key, coll) when is_atom(key) and is_binary(coll),
+    do: Enum.map(graphemes(coll), fn _ -> nil end)
+
   def mapv(%MapSet{} = set, coll) when is_binary(coll),
     do: Enum.map(graphemes(coll), set_pred(set))
 
   def mapv(f, coll) when is_list(coll), do: Enum.map(coll, &Callable.call(f, [&1]))
   def mapv(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), &Callable.call(f, [&1]))
 
+  def mapv(key, %MapSet{} = set) when is_atom(key),
+    do: Enum.map(set, &FlexAccess.flex_get(&1, key))
+
+  def mapv(%MapSet{} = pred_set, %MapSet{} = coll), do: Enum.map(coll, set_pred(pred_set))
+
   def mapv(f, %MapSet{} = set), do: Enum.map(set, &Callable.call(f, [&1]))
+
+  def mapv(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    Enum.map(coll, fn {k, v} -> FlexAccess.flex_get([k, v], key) end)
+  end
+
+  def mapv(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    Enum.map(coll, fn {k, v} -> if MapSet.member?(pred_set, [k, v]), do: [k, v], else: nil end)
+  end
 
   def mapv(f, coll) when is_map(coll) do
     Enum.map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
@@ -1056,11 +1217,27 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.find_value(coll, set_pred(set))
   end
 
+  def some(key, %MapSet{} = set) when is_atom(key) do
+    Enum.find_value(set, truthy_key_pred(key))
+  end
+
+  def some(%MapSet{} = pred_set, %MapSet{} = coll) do
+    Enum.find_value(coll, fn item -> if MapSet.member?(pred_set, item), do: item end)
+  end
+
   def some(pred, %MapSet{} = set), do: Enum.find_value(set, &Callable.call(pred, [&1]))
   def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, &Callable.call(pred, [&1]))
 
   def some(pred, coll) when is_binary(coll),
     do: Enum.find_value(graphemes(coll), &Callable.call(pred, [&1]))
+
+  def some(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    Enum.find_value(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
+  end
+
+  def some(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    Enum.find_value(coll, fn {k, v} -> if MapSet.member?(pred_set, [k, v]), do: [k, v] end)
+  end
 
   def every?(key, coll) when is_list(coll) and is_atom(key) do
     Enum.all?(coll, truthy_key_pred(key))
@@ -1072,11 +1249,27 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.all?(coll, set_pred(set))
   end
 
+  def every?(key, %MapSet{} = set) when is_atom(key) do
+    Enum.all?(set, truthy_key_pred(key))
+  end
+
+  def every?(%MapSet{} = pred_set, %MapSet{} = coll) do
+    Enum.all?(coll, fn item -> MapSet.member?(pred_set, item) end)
+  end
+
   def every?(pred, %MapSet{} = set), do: Enum.all?(set, &Callable.call(pred, [&1]))
   def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, &Callable.call(pred, [&1]))
 
   def every?(pred, coll) when is_binary(coll),
     do: Enum.all?(graphemes(coll), &Callable.call(pred, [&1]))
+
+  def every?(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    Enum.all?(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
+  end
+
+  def every?(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    Enum.all?(coll, fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
+  end
 
   def not_any?(key, coll) when is_list(coll) and is_atom(key) do
     not Enum.any?(coll, truthy_key_pred(key))
@@ -1088,11 +1281,27 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     not Enum.any?(coll, set_pred(set))
   end
 
+  def not_any?(key, %MapSet{} = set) when is_atom(key) do
+    not Enum.any?(set, truthy_key_pred(key))
+  end
+
+  def not_any?(%MapSet{} = pred_set, %MapSet{} = coll) do
+    not Enum.any?(coll, fn item -> MapSet.member?(pred_set, item) end)
+  end
+
   def not_any?(pred, %MapSet{} = set), do: not Enum.any?(set, &Callable.call(pred, [&1]))
   def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, &Callable.call(pred, [&1]))
 
   def not_any?(pred, coll) when is_binary(coll),
     do: not Enum.any?(graphemes(coll), &Callable.call(pred, [&1]))
+
+  def not_any?(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
+    not Enum.any?(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
+  end
+
+  def not_any?(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
+    not Enum.any?(coll, fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
+  end
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 

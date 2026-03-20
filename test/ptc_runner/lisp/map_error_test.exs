@@ -5,11 +5,10 @@ defmodule PtcRunner.Lisp.MapErrorTest do
   alias PtcRunner.Step
 
   describe "map with keyword and single map" do
-    test "provides clear error message" do
-      {:error, %Step{fail: fail}} = Lisp.run("(map :key {:key 1})")
-
-      assert fail.message ==
-               "type_error: map: keyword accessor requires a list of maps, got a single map"
+    test "keyword on map applies to [k,v] entry pairs" do
+      {:ok, %Step{return: result}} = Lisp.run("(map :key {:key 1})")
+      # keyword access on [k,v] vector returns nil (Clojure-consistent)
+      assert result == [nil]
     end
 
     test "still works with list of maps" do
@@ -24,11 +23,10 @@ defmodule PtcRunner.Lisp.MapErrorTest do
   end
 
   describe "mapv with keyword and single map" do
-    test "provides clear error message" do
-      {:error, %Step{fail: fail}} = Lisp.run("(mapv :key {:key 1})")
-
-      assert fail.message ==
-               "type_error: mapv: keyword accessor requires a list of maps, got a single map"
+    test "keyword on map applies to [k,v] entry pairs" do
+      {:ok, %Step{return: result}} = Lisp.run("(mapv :key {:key 1})")
+      # keyword access on [k,v] vector returns nil (Clojure-consistent)
+      assert result == [nil]
     end
 
     test "still works with list of maps" do

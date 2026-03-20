@@ -10,8 +10,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Trace filtering based on execution result
   """
 
-  alias PtcRunner.{Step, SubAgent}
-  alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
+  alias PtcRunner.Step
+  alias PtcRunner.SubAgent.{Definition, LLMResolver, Telemetry}
   alias PtcRunner.Turn
 
   @doc """
@@ -153,7 +153,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   """
   @spec emit_turn_stop_immediate(
           Turn.t() | nil,
-          SubAgent.t() | map(),
+          Definition.t() | map(),
           map(),
           integer(),
           map() | nil
