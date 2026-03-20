@@ -856,4 +856,40 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
       assert_clojure_equivalent("(let [a 1 b 1] {a 1 b 2})")
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # case and condp
+  # ---------------------------------------------------------------------------
+
+  describe "SCI core-test - case" do
+    @describetag :clojure
+
+    test "case keyword match with default" do
+      assert_clojure_equivalent("(case :a :a 1 :b 2 99)")
+    end
+
+    test "case no match returns default" do
+      assert_clojure_equivalent("(case :z :a 1 :b 2 99)")
+    end
+
+    test "case number match" do
+      assert_clojure_equivalent("(case 42 1 :one 42 :forty-two :default)")
+    end
+  end
+
+  describe "SCI core-test - condp" do
+    @describetag :clojure
+
+    test "condp = match" do
+      assert_clojure_equivalent("(condp = 1 1 :a 2 :b)")
+    end
+
+    test "condp = with default" do
+      assert_clojure_equivalent("(condp = 3 1 :a 2 :b :default)")
+    end
+
+    test "condp > comparison" do
+      assert_clojure_equivalent("(condp > 5 10 :big 3 :small)")
+    end
+  end
 end

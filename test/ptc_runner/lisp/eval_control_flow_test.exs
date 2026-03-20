@@ -309,4 +309,134 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
       assert fun.(%{a: 1, b: 2})
     end
   end
+
+  describe "case — value dispatch" do
+    alias PtcRunner.Lisp
+
+    test "keyword matching" do
+      assert {:ok, %{return: 1}} = Lisp.run("(case :a :a 1 :b 2)")
+    end
+
+    test "string matching" do
+      assert {:ok, %{return: 1}} = Lisp.run(~s|(case "x" "x" 1 "y" 2)|)
+    end
+
+    test "number matching" do
+      assert {:ok, %{return: "forty-two"}} = Lisp.run(~s|(case 42 1 "one" 42 "forty-two")|)
+    end
+
+    test "grouped match" do
+      assert {:ok, %{return: 2}} = Lisp.run("(case :c (:a :b) 1 (:c :d) 2)")
+    end
+
+    test "default" do
+      assert {:ok, %{return: "default"}} = Lisp.run(~s|(case :z :a 1 :b 2 "default")|)
+    end
+
+    test "no match, no default returns nil" do
+      assert {:ok, %{return: nil}} = Lisp.run("(case :z :a 1 :b 2)")
+    end
+
+    test "nil matching" do
+      assert {:ok, %{return: "matched"}} = Lisp.run(~s|(case nil nil "matched" :a "nope")|)
+    end
+
+    test "boolean matching" do
+      assert {:ok, %{return: "yes"}} = Lisp.run(~s|(case true true "yes" false "no")|)
+    end
+
+    test "expression evaluated once" do
+      # Use def to track evaluation count
+      code = """
+      (do
+        (def counter 0)
+        (case (do (def counter (inc counter)) :a)
+          :a "matched"
+          :b "nope")
+        counter)
+      """
+
+      assert {:ok, %{return: 1}} = Lisp.run(code)
+    end
+
+    test "expression only, no clauses returns nil" do
+      assert {:ok, %{return: nil}} = Lisp.run("(case :a)")
+    end
+
+    test "float test value" do
+      assert {:ok, %{return: "pi"}} = Lisp.run(~s|(case 3.14 3.14 "pi" 2.71 "e")|)
+    end
+  end
+
+  describe "condp — predicate dispatch" do
+    alias PtcRunner.Lisp
+
+    test "basic equality" do
+      assert {:ok, %{return: 1}} = Lisp.run("(condp = :a :a 1 :b 2)")
+    end
+
+    test "comparison: (pred test expr) order" do
+      # (condp > 5 10 "big" 3 "small")
+      # calls (> 10 5) → true → "big"
+      assert {:ok, %{return: "big"}} = Lisp.run(~s|(condp > 5 10 "big" 3 "small")|)
+    end
+
+    test "default" do
+      assert {:ok, %{return: "default"}} = Lisp.run(~s|(condp = :z :a 1 "default")|)
+    end
+
+    test "no match, no default returns nil" do
+      assert {:ok, %{return: nil}} = Lisp.run("(condp = :z :a 1 :b 2)")
+    end
+
+    test "pred invoked per clause" do
+      code = """
+      (do
+        (def pred-count 0)
+        (let [my-pred (fn [a b] (do (def pred-count (inc pred-count)) (= a b)))]
+          (condp my-pred :b :a 1 :b 2))
+        pred-count)
+      """
+
+      assert {:ok, %{return: 2}} = Lisp.run(code)
+    end
+
+    test "pred expression evaluated once" do
+      code = """
+      (do
+        (def build-count 0)
+        (condp (do (def build-count (inc build-count)) =) :b
+          :a 1
+          :b 2
+          :c 3)
+        build-count)
+      """
+
+      assert {:ok, %{return: 1}} = Lisp.run(code)
+    end
+
+    test "expr evaluated once" do
+      code = """
+      (do
+        (def expr-count 0)
+        (condp = (do (def expr-count (inc expr-count)) :a)
+          :a "matched"
+          :b "nope")
+        expr-count)
+      """
+
+      assert {:ok, %{return: 1}} = Lisp.run(code)
+    end
+
+    test "condp with custom predicate" do
+      code = """
+      (condp = (+ 1 1)
+        1 "one"
+        2 "two"
+        3 "three")
+      """
+
+      assert {:ok, %{return: "two"}} = Lisp.run(code)
+    end
+  end
 end

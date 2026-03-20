@@ -125,6 +125,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
                    :"when-some",
                    :"when-first",
                    :cond,
+                   :case,
+                   :condp,
                    :do,
                    :and,
                    :or,

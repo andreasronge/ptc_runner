@@ -94,7 +94,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `byte-array` | ❌ not-relevant | Creates byte Java array | Java array creation |
 | `bytes` | ❌ not-relevant | Casts to byte array | Java array casting |
 | `bytes?` | ❌ not-relevant | Returns true if value is byte array | Java array type check |
-| `case` | 🔲 candidate | Constant-time dispatch on expression value | pure constant-time dispatch control flow |
+| `case` | ✅ supported | Value dispatch on expression (linear nested-if) | pure control flow, desugars to nested if |
 | `cast` | ❌ not-relevant | Throws ClassCastException if not instance | relies on Java type system and exception handling |
 | `cat` | 🔲 candidate | Transducer concatenating input collections | pure transducer for collection transformation |
 | `char` | 🔲 candidate | Coerces to char | pure data type coercion |
@@ -118,7 +118,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `cond` | ✅ supported | Multi-way conditional |  |
 | `cond->` | ✅ supported | Threads through forms where tests true | pure threading macro for logical branching |
 | `cond->>` | ✅ supported | Threads as last arg where tests true | pure threading macro for logical branching |
-| `condp` | 🔲 candidate | Predicate dispatch against expression | pure control flow dispatch |
+| `condp` | ✅ supported | Predicate dispatch against expression | pure control flow dispatch |
 | `conj` | ✅ supported | Returns collection with items added |  |
 | `conj!` | ❌ not-relevant | Adds item to transient collection | operates on transient collections (mutable) |
 | `cons` | ✅ supported | Returns seq with item prepended |  |

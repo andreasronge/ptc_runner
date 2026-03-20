@@ -211,4 +211,225 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalsTest do
       assert {:error, {:invalid_arity, :"when-not", _}} = Analyze.analyze(raw)
     end
   end
+
+  describe "case desugars to let + nested if" do
+    test "basic single-clause case with keyword" do
+      # (case :a :a 1)
+      raw = {:list, [{:symbol, :case}, {:keyword, :a}, {:keyword, :a}, 1]}
+
+      assert {:ok, {:let, [{:binding, {:var, _}, {:keyword, :a}}], {:if, _, 1, nil}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "multiple clauses" do
+      # (case :b :a 1 :b 2)
+      raw = {:list, [{:symbol, :case}, {:keyword, :b}, {:keyword, :a}, 1, {:keyword, :b}, 2]}
+      assert {:ok, {:let, _, {:if, _, 1, {:if, _, 2, nil}}}} = Analyze.analyze(raw)
+    end
+
+    test "grouped values" do
+      # (case :b (:a :b) 1)
+      raw =
+        {:list,
+         [
+           {:symbol, :case},
+           {:keyword, :b},
+           {:list, [{:keyword, :a}, {:keyword, :b}]},
+           1
+         ]}
+
+      assert {:ok, {:let, _, {:if, {:or, [_, _]}, 1, nil}}} = Analyze.analyze(raw)
+    end
+
+    test "trailing default (bare expression)" do
+      # (case :z :a 1 "default")
+      raw = {:list, [{:symbol, :case}, {:keyword, :z}, {:keyword, :a}, 1, {:string, "default"}]}
+
+      assert {:ok, {:let, _, {:if, _, 1, {:string, "default"}}}} = Analyze.analyze(raw)
+    end
+
+    test "no default desugars with nil" do
+      # (case :z :a 1 :b 2)
+      raw = {:list, [{:symbol, :case}, {:keyword, :z}, {:keyword, :a}, 1, {:keyword, :b}, 2]}
+      assert {:ok, {:let, _, {:if, _, 1, {:if, _, 2, nil}}}} = Analyze.analyze(raw)
+    end
+
+    test "error: no arguments" do
+      raw = {:list, [{:symbol, :case}]}
+
+      assert {:error, {:invalid_form, "case requires at least an expression to test"}} =
+               Analyze.analyze(raw)
+    end
+
+    test "error: non-literal test value (symbol)" do
+      # (case :a x 1)
+      raw = {:list, [{:symbol, :case}, {:keyword, :a}, {:symbol, :x}, 1]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "compile-time constants"
+    end
+
+    test "error: non-literal test value (function call)" do
+      # (case :a (foo) 1)
+      raw = {:list, [{:symbol, :case}, {:keyword, :a}, {:list, [{:symbol, :foo}]}, 1]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "compile-time constants"
+    end
+
+    test "string and number test values" do
+      # (case 42 "x" 1 42 2)
+      raw = {:list, [{:symbol, :case}, 42, {:string, "x"}, 1, 42, 2]}
+      assert {:ok, {:let, _, {:if, _, 1, {:if, _, 2, nil}}}} = Analyze.analyze(raw)
+    end
+
+    test "nil as a valid test value" do
+      # (case nil nil "matched")
+      raw = {:list, [{:symbol, :case}, nil, nil, {:string, "matched"}]}
+      assert {:ok, {:let, _, {:if, _, {:string, "matched"}, nil}}} = Analyze.analyze(raw)
+    end
+
+    test "true/false as test values" do
+      # (case true true "yes" false "no")
+      raw = {:list, [{:symbol, :case}, true, true, {:string, "yes"}, false, {:string, "no"}]}
+
+      assert {:ok, {:let, _, {:if, _, {:string, "yes"}, {:if, _, {:string, "no"}, nil}}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "expression-only case returns nil" do
+      # (case :a) — just the expression, no clauses
+      raw = {:list, [{:symbol, :case}, {:keyword, :a}]}
+      assert {:ok, {:let, _, nil}} = Analyze.analyze(raw)
+    end
+  end
+
+  describe "condp desugars to let + nested if with predicate calls" do
+    test "basic condp = with keyword tests" do
+      # (condp = :a :a 1 :b 2)
+      raw =
+        {:list,
+         [{:symbol, :condp}, {:symbol, :=}, {:keyword, :a}, {:keyword, :a}, 1, {:keyword, :b}, 2]}
+
+      assert {:ok, {:let, [{:binding, _, _}, {:binding, _, _}], {:if, _, 1, {:if, _, 2, nil}}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "condp > with number tests" do
+      # (condp > 5 10 "big" 3 "small")
+      raw =
+        {:list,
+         [
+           {:symbol, :condp},
+           {:symbol, :>},
+           5,
+           10,
+           {:string, "big"},
+           3,
+           {:string, "small"}
+         ]}
+
+      assert {:ok, {:let, _, {:if, _, {:string, "big"}, {:if, _, {:string, "small"}, nil}}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "trailing default" do
+      # (condp = :z :a 1 "default")
+      raw =
+        {:list,
+         [
+           {:symbol, :condp},
+           {:symbol, :=},
+           {:keyword, :z},
+           {:keyword, :a},
+           1,
+           {:string, "default"}
+         ]}
+
+      assert {:ok, {:let, _, {:if, _, 1, {:string, "default"}}}} = Analyze.analyze(raw)
+    end
+
+    test "no default desugars with nil" do
+      # (condp = :z :a 1 :b 2)
+      raw =
+        {:list,
+         [{:symbol, :condp}, {:symbol, :=}, {:keyword, :z}, {:keyword, :a}, 1, {:keyword, :b}, 2]}
+
+      assert {:ok, {:let, _, {:if, _, 1, {:if, _, 2, nil}}}} = Analyze.analyze(raw)
+    end
+
+    test "error: fewer than 3 args" do
+      raw = {:list, [{:symbol, :condp}, {:symbol, :=}]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "condp requires a predicate"
+    end
+
+    test "error: :>> in clauses" do
+      # (condp = :a :a :>> inc)
+      arrow_kw = {:keyword, String.to_atom(">>")}
+
+      raw =
+        {:list,
+         [
+           {:symbol, :condp},
+           {:symbol, :=},
+           {:keyword, :a},
+           {:keyword, :a},
+           arrow_kw,
+           {:symbol, :inc}
+         ]}
+
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "result-fn form is not supported"
+    end
+
+    test "error: 0 clauses (just pred + expr)" do
+      # (condp = :a) — no clauses at all
+      raw = {:list, [{:symbol, :condp}, {:symbol, :=}, {:keyword, :a}]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "condp requires a predicate"
+    end
+
+    test "error: default-only (no clause pairs)" do
+      # (condp = :a "default") — 1 clause arg = default only, no test/result pairs
+      raw =
+        {:list, [{:symbol, :condp}, {:symbol, :=}, {:keyword, :a}, {:string, "default"}]}
+
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "at least one test/result clause pair"
+    end
+
+    test ":>> keyword as test value (not in result position) is allowed" do
+      # (condp = :a :>> 1 :b 2) — :>> is the test value, not result-fn syntax
+      arrow_kw = {:keyword, String.to_atom(">>")}
+
+      raw =
+        {:list,
+         [{:symbol, :condp}, {:symbol, :=}, {:keyword, :a}, arrow_kw, 1, {:keyword, :b}, 2]}
+
+      assert {:ok, {:let, _, _}} = Analyze.analyze(raw)
+    end
+  end
+
+  describe "case edge cases for grouped matches" do
+    test "error: empty group" do
+      # (case :a () 1)
+      raw = {:list, [{:symbol, :case}, {:keyword, :a}, {:list, []}, 1]}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "at least one value"
+    end
+
+    test "error: nested group" do
+      # (case :a ((:a :b)) 1) — nested list inside group
+      raw =
+        {:list,
+         [
+           {:symbol, :case},
+           {:keyword, :a},
+           {:list, [{:list, [{:keyword, :a}, {:keyword, :b}]}]},
+           1
+         ]}
+
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "compile-time constants"
+    end
+  end
 end

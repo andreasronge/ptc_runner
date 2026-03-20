@@ -667,7 +667,55 @@ Tests conditions in order, returns first matching result:
 (cond false "only")                           ; => nil
 ```
 
-### 5.7 `if-let` and `when-let` — Conditional Binding
+### 5.7 `case` — Value Dispatch
+
+Dispatches on an expression's value against compile-time constants:
+
+```clojure
+(case expr
+  value1 result1
+  value2 result2
+  (:val3 :val4) result3    ; grouped match
+  default-result)           ; optional trailing default
+```
+
+- Test values must be compile-time constants (keywords, strings, numbers, booleans, nil)
+- Grouped values `(:val1 :val2)` match any value in the group
+- Returns `nil` if no match and no default (diverges from Clojure which throws)
+- Expression evaluated exactly once
+
+```clojure
+(case :a :a 1 :b 2)                  ; => 1
+(case :z :a 1 :b 2 99)               ; => 99
+(case :c (:a :b) 1 (:c :d) 2)        ; => 2
+(case :z :a 1)                        ; => nil
+(case nil nil "matched" :a "nope")    ; => "matched"
+```
+
+### 5.8 `condp` — Predicate Dispatch
+
+Dispatches using a predicate function called as `(pred test-val expr)`:
+
+```clojure
+(condp pred expr
+  test1 result1
+  test2 result2
+  default-result)           ; optional trailing default
+```
+
+- Calls `(pred test-val expr)` for each clause
+- Both `pred` and `expr` evaluated exactly once
+- Returns `nil` if no match and no default (diverges from Clojure which throws)
+- The `:>>` form is not supported
+
+```clojure
+(condp = :a :a 1 :b 2)               ; => 1
+(condp > 5 10 "big" 3 "small")       ; => "big" (because (> 10 5) is true)
+(condp = :z :a 1 "default")          ; => "default"
+(condp = :z :a 1 :b 2)               ; => nil
+```
+
+### 5.9 `if-let` and `when-let` — Conditional Binding
 
 Binds a value from an expression and evaluates the body only if the value is truthy.
 
@@ -725,7 +773,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
 
 ---
 
-### 5.8 `if-some` and `when-some` — Nil-safe Conditional Binding
+### 5.10 `if-some` and `when-some` — Nil-safe Conditional Binding
 
 Like `if-let`/`when-let` but tests only for `nil`, not falsiness. `false` binds successfully.
 
@@ -769,7 +817,7 @@ Like `if-let`/`when-let` but tests only for `nil`, not falsiness. `false` binds 
 
 ---
 
-### 5.9 `when-first` — First Element Binding
+### 5.11 `when-first` — First Element Binding
 
 Binds the first element of a collection and evaluates the body only if the collection is non-empty.
 
@@ -798,7 +846,7 @@ Binds the first element of a collection and evaluates the body only if the colle
 
 ---
 
-### 5.10 `do` — Sequential Evaluation
+### 5.12 `do` — Sequential Evaluation
 
 Evaluates expressions in order, returning the value of the last expression:
 
@@ -820,7 +868,7 @@ Evaluates expressions in order, returning the value of the last expression:
 
 ---
 
-### 5.11 `def` — User Namespace Binding
+### 5.13 `def` — User Namespace Binding
 
 Binds a name to a value in the user namespace, persisting across turns:
 
@@ -863,7 +911,7 @@ Binds a name to a value in the user namespace, persisting across turns:
 
 ---
 
-### 5.12 `defonce` — Idempotent Initialization
+### 5.14 `defonce` — Idempotent Initialization
 
 Binds a name to a value only if not already defined. Safe for multi-turn use:
 
@@ -885,7 +933,7 @@ Binds a name to a value only if not already defined. Safe for multi-turn use:
 
 ---
 
-### 5.13 `defn` — Named Function Definition
+### 5.15 `defn` — Named Function Definition
 
 Syntactic sugar for defining named functions in the user namespace:
 
@@ -958,7 +1006,7 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ---
 
-### 5.14 `loop` and `recur` — Tail Recursion
+### 5.16 `loop` and `recur` — Tail Recursion
 
 `loop` establishes a recursion point, and `recur` transfers control back to that point with new values.
 
@@ -1008,7 +1056,7 @@ Syntactic sugar for defining named functions in the user namespace:
 **Safety Mechanism:**
 To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive calls. If a loop exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error.
 
-### 5.15 `for` — List Comprehension
+### 5.17 `for` — List Comprehension
 
 `for` produces a list by evaluating a body expression for each element of one or more collections.
 
@@ -1080,7 +1128,7 @@ To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive call
 
 Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuring.
 
-### 5.16 `task` — Journaled Task Execution
+### 5.18 `task` — Journaled Task Execution
 
 `task` executes an expression with caching and idempotency semantics. When a journal is available, tasks are memoized by ID, enabling safe retry loops in agentic execution.
 
@@ -1130,7 +1178,7 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ---
 
-### 5.17 `step-done` — Semantic Progress Reporting
+### 5.19 `step-done` — Semantic Progress Reporting
 
 `step-done` records a summary for a plan step, signaling completion with a human-readable description. Used with the `plan` option on SubAgent to render progress checklists.
 
@@ -1165,7 +1213,7 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ---
 
-### 5.18 `task-reset` — Clear Journaled Task Cache
+### 5.20 `task-reset` — Clear Journaled Task Cache
 
 `task-reset` removes a cached task result from the journal, allowing it to be re-executed on the next call to `(task id expr)`.
 

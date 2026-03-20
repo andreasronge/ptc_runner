@@ -31,11 +31,21 @@ defmodule PtcRunner.Lisp.Analyze do
                       :"if-not",
                       :"if-let",
                       :"when-let",
+                      :"if-some",
+                      :"when-some",
+                      :"when-first",
                       :cond,
+                      :case,
+                      :condp,
                       :and,
                       :or,
                       :->,
                       :"->>",
+                      :"as->",
+                      :"cond->",
+                      :"cond->>",
+                      :"some->",
+                      :"some->>",
                       :comment,
                       :doseq,
                       :for
@@ -204,14 +214,41 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :"when-let"}, rest, _list, tail?),
     do: analyze_when_let(rest, tail?)
 
+  # Conditionals: nil-safe binding variants
+  defp dispatch_list_form({:symbol, :"if-some"}, rest, _list, tail?),
+    do: analyze_if_some(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"when-some"}, rest, _list, tail?),
+    do: analyze_when_some(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"when-first"}, rest, _list, tail?),
+    do: analyze_when_first(rest, tail?)
+
   # Conditionals: multi-way
   defp dispatch_list_form({:symbol, :cond}, rest, _list, tail?), do: analyze_cond(rest, tail?)
+  defp dispatch_list_form({:symbol, :case}, rest, _list, tail?), do: analyze_case(rest, tail?)
+  defp dispatch_list_form({:symbol, :condp}, rest, _list, tail?), do: analyze_condp(rest, tail?)
 
   defp dispatch_list_form({:symbol, :->}, rest, _list, tail?),
     do: analyze_thread(:->, rest, tail?)
 
   defp dispatch_list_form({:symbol, :"->>"}, rest, _list, tail?),
     do: analyze_thread(:"->>", rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"as->"}, rest, _list, tail?),
+    do: analyze_as_thread(rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"cond->"}, rest, _list, tail?),
+    do: analyze_cond_thread(:->, rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"cond->>"}, rest, _list, tail?),
+    do: analyze_cond_thread(:"->>", rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"some->"}, rest, _list, tail?),
+    do: analyze_some_thread(:->, rest, tail?)
+
+  defp dispatch_list_form({:symbol, :"some->>"}, rest, _list, tail?),
+    do: analyze_some_thread(:"->>", rest, tail?)
 
   defp dispatch_list_form({:symbol, :do}, rest, _list, tail?), do: analyze_do(rest, tail?)
   defp dispatch_list_form({:symbol, :comment}, _rest, _list, _tail?), do: {:ok, nil}
@@ -408,8 +445,44 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_when_let(args, tail?),
     do: Conditionals.analyze_when_let(args, tail?, &do_analyze/2, &wrap_body/2)
 
+  defp analyze_if_some(args, tail?),
+    do:
+      Conditionals.analyze_if_some(
+        args,
+        tail?,
+        &do_analyze/2,
+        &wrap_body/2,
+        &mark_shadow_for_binding/2
+      )
+
+  defp analyze_when_some(args, tail?),
+    do:
+      Conditionals.analyze_when_some(
+        args,
+        tail?,
+        &do_analyze/2,
+        &wrap_body/2,
+        &mark_shadow_for_binding/2
+      )
+
+  defp analyze_when_first(args, tail?),
+    do:
+      Conditionals.analyze_when_first(
+        args,
+        tail?,
+        &do_analyze/2,
+        &wrap_body/2,
+        &mark_shadow_for_binding/2
+      )
+
   defp analyze_cond(args, tail?),
     do: Conditionals.analyze_cond(args, tail?, &do_analyze/2, &wrap_body/2)
+
+  defp analyze_case(args, tail?),
+    do: Conditionals.analyze_case(args, tail?, &do_analyze/2, &wrap_body/2)
+
+  defp analyze_condp(args, tail?),
+    do: Conditionals.analyze_condp(args, tail?, &do_analyze/2, &wrap_body/2)
 
   # ============================================================
   # Special form: fn (anonymous functions)
@@ -578,6 +651,132 @@ defmodule PtcRunner.Lisp.Analyze do
   defp apply_thread_step(_kind, acc, step_ast, tail?) do
     with {:ok, f} <- do_analyze(step_ast, false) do
       resolve_call_or_recur(f, [acc], tail?)
+    end
+  end
+
+  # ============================================================
+  # Threading macro: as->
+  # ============================================================
+
+  defp analyze_as_thread([_expr_ast, {:symbol, _name}] = args, tail?) do
+    analyze_as_thread_impl(args, tail?)
+  end
+
+  defp analyze_as_thread([_expr_ast, {:symbol, _name} | _forms] = args, tail?) do
+    analyze_as_thread_impl(args, tail?)
+  end
+
+  defp analyze_as_thread(_, _tail?) do
+    {:error, {:invalid_thread_form, :"as->", "expected (as-> expr name form ...)"}}
+  end
+
+  defp analyze_as_thread_impl([expr_ast, {:symbol, name} | forms], tail?) do
+    with {:ok, acc} <- do_analyze(expr_ast, false) do
+      as_thread_steps(name, acc, forms, tail?)
+    end
+  end
+
+  defp as_thread_steps(_name, acc, [], _tail?), do: {:ok, acc}
+
+  defp as_thread_steps(name, acc, [form | rest], tail?) do
+    is_last? = rest == []
+    step_tail? = is_last? and tail?
+
+    # Mark shadowing in the form if the name shadows a special form
+    shadowed = compute_shadowed_names({:var, name})
+    form = mark_shadowed_calls(form, shadowed)
+
+    with {:ok, form_core} <- do_analyze(form, step_tail?) do
+      if is_last? do
+        {:ok, {:let, [{:binding, {:var, name}, acc}], form_core}}
+      else
+        with {:ok, inner} <- as_thread_steps(name, {:var, name}, rest, tail?) do
+          {:ok,
+           {:let, [{:binding, {:var, name}, acc}],
+            {:let, [{:binding, {:var, name}, form_core}], inner}}}
+        end
+      end
+    end
+  end
+
+  # ============================================================
+  # Threading macros: cond-> and cond->>
+  # ============================================================
+
+  defp analyze_cond_thread(_kind, [], _tail?) do
+    {:error, {:invalid_thread_form, :"cond->", "requires at least one expression"}}
+  end
+
+  defp analyze_cond_thread(kind, [expr_ast | clause_forms], tail?) do
+    if rem(length(clause_forms), 2) != 0 do
+      form_name = if kind == :->, do: :"cond->", else: :"cond->>"
+
+      {:error,
+       {:invalid_thread_form, form_name,
+        "requires even number of test/form pairs after expression"}}
+    else
+      with {:ok, acc} <- do_analyze(expr_ast, false) do
+        pairs = clause_forms |> Enum.chunk_every(2) |> Enum.map(fn [t, f] -> {t, f} end)
+        cond_thread_steps(kind, acc, pairs, tail?)
+      end
+    end
+  end
+
+  defp cond_thread_steps(_kind, acc, [], _tail?), do: {:ok, acc}
+
+  defp cond_thread_steps(kind, acc, pairs, _tail?) do
+    temp = {:var, :__ct}
+
+    pairs
+    |> Enum.reverse()
+    |> Enum.reduce_while({:ok, temp}, fn {test_ast, step_ast}, {:ok, inner} ->
+      with {:ok, test_core} <- do_analyze(test_ast, false),
+           {:ok, stepped} <- apply_thread_step(kind, temp, step_ast, false) do
+        {:cont, {:ok, {:let, [{:binding, temp, {:if, test_core, stepped, temp}}], inner}}}
+      else
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, body} -> {:ok, {:let, [{:binding, temp, acc}], body}}
+      {:error, _} = err -> err
+    end
+  end
+
+  # ============================================================
+  # Threading macros: some-> and some->>
+  # ============================================================
+
+  defp analyze_some_thread(_kind, [], _tail?) do
+    {:error, {:invalid_thread_form, :"some->", "requires at least one expression"}}
+  end
+
+  defp analyze_some_thread(_kind, [expr_ast], _tail?) do
+    do_analyze(expr_ast, false)
+  end
+
+  defp analyze_some_thread(kind, [expr_ast | steps], tail?) do
+    with {:ok, acc} <- do_analyze(expr_ast, false) do
+      some_thread_steps(kind, acc, steps, tail?)
+    end
+  end
+
+  defp some_thread_steps(_kind, acc, [], _tail?), do: {:ok, acc}
+
+  defp some_thread_steps(kind, acc, [step | rest], tail?) do
+    is_last? = rest == []
+    step_tail? = is_last? and tail?
+    temp = {:var, :__st}
+    nil_check = {:call, {:var, :nil?}, [temp]}
+
+    with {:ok, stepped} <- apply_thread_step(kind, temp, step, step_tail?) do
+      if is_last? do
+        {:ok, {:let, [{:binding, temp, acc}], {:if, nil_check, nil, stepped}}}
+      else
+        with {:ok, inner} <- some_thread_steps(kind, stepped, rest, tail?) do
+          {:ok, {:let, [{:binding, temp, acc}], {:if, nil_check, nil, inner}}}
+        end
+      end
     end
   end
 
@@ -925,6 +1124,13 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp pattern_names(_), do: []
+
+  # Compute and apply shadowing for a single binding name in conditional forms.
+  # Used as a callback by if-some, when-some, when-first in Conditionals module.
+  defp mark_shadow_for_binding({:var, name}, asts) when is_list(asts) do
+    shadowed = [name] |> MapSet.new() |> MapSet.intersection(@shadowable_forms)
+    mark_shadowed_asts(asts, shadowed)
+  end
 
   # Mark a list of RawAST forms with shadowed calls.
   defp mark_shadowed_asts(asts, shadowed) when is_list(asts) do
