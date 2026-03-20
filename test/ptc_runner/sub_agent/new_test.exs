@@ -2,6 +2,7 @@ defmodule PtcRunner.SubAgent.NewTest do
   use ExUnit.Case, async: true
 
   doctest PtcRunner.SubAgent
+  doctest PtcRunner.SubAgent.BuiltinTools
 
   alias PtcRunner.SubAgent
 

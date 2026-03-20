@@ -23,6 +23,7 @@ defmodule PtcRunner.SubAgent.Chaining do
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.CompiledAgent
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.PromptExpander
 
   @doc """
@@ -57,7 +58,7 @@ defmodule PtcRunner.SubAgent.Chaining do
       20
 
   """
-  @spec then!(Step.t(), SubAgent.t() | CompiledAgent.t() | String.t(), keyword()) :: Step.t()
+  @spec then!(Step.t(), Definition.t() | CompiledAgent.t() | String.t(), keyword()) :: Step.t()
   def then!(step, agent, opts \\ []) do
     validate_chain_keys!(step, agent)
     SubAgent.run!(agent, Keyword.put(opts, :context, step))
@@ -78,7 +79,7 @@ defmodule PtcRunner.SubAgent.Chaining do
   """
   @spec then(
           {:ok, Step.t()} | {:error, Step.t()},
-          SubAgent.t() | CompiledAgent.t() | String.t(),
+          Definition.t() | CompiledAgent.t() | String.t(),
           keyword()
         ) ::
           {:ok, Step.t()} | {:error, Step.t()}
@@ -94,10 +95,10 @@ defmodule PtcRunner.SubAgent.Chaining do
   end
 
   # Validates that step output keys satisfy the next agent's signature requirements.
-  defp validate_chain_keys!(%Step{}, %SubAgent{signature: nil}), do: :ok
+  defp validate_chain_keys!(%Step{}, %Definition{signature: nil}), do: :ok
   defp validate_chain_keys!(%Step{fail: fail}, _agent) when fail != nil, do: :ok
 
-  defp validate_chain_keys!(%Step{return: return}, %SubAgent{signature: sig}) do
+  defp validate_chain_keys!(%Step{return: return}, %Definition{signature: sig}) do
     do_validate_chain_keys!(return, sig)
   end
 

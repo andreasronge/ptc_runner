@@ -29,6 +29,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.{LLMTool, SubAgentTool, Telemetry}
 
   @doc """
@@ -46,7 +47,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   Map of tool names to wrapped executable functions.
   """
-  @spec normalize(map(), map(), SubAgent.t()) :: map()
+  @spec normalize(map(), map(), Definition.t()) :: map()
   def normalize(tools, state, agent) when is_map(tools) do
     Map.new(tools, fn
       {name, :builtin_grep} ->
@@ -87,7 +88,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
   Emits `[:sub_agent, :tool, :start]` and `[:sub_agent, :tool, :stop]` events.
   """
-  @spec wrap_with_telemetry(String.t(), function(), SubAgent.t()) :: function()
+  @spec wrap_with_telemetry(String.t(), function(), Definition.t()) :: function()
   def wrap_with_telemetry(name, func, agent) do
     fn args ->
       start_meta = %{agent: agent, tool_name: name, args: summarize_args(args)}
@@ -303,7 +304,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
     sig = tool.json_signature || tool.signature
 
     agent =
-      SubAgent.new(
+      Definition.new(
         prompt: tool.prompt,
         signature: sig,
         output: :text,
