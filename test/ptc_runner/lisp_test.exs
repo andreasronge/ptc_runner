@@ -71,8 +71,8 @@ defmodule PtcRunner.LispTest do
                Lisp.run("(and true false)")
     end
 
-    test "and with all truthy" do
-      assert {:ok, %{return: true, memory: %{}}} = Lisp.run("(and true 2 3)")
+    test "and with all truthy returns last value" do
+      assert {:ok, %{return: 3, memory: %{}}} = Lisp.run("(and true 2 3)")
     end
   end
 

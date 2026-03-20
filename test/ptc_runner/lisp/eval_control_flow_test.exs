@@ -31,8 +31,12 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
     end
 
     test "all truthy returns last value" do
-      # Note: empty and evaluates to true
-      assert {:ok, true, %{}} = Eval.eval({:and, []}, %{}, %{}, %{}, &dummy_tool/2)
+      exprs = [true, true, 0]
+      assert {:ok, 0, %{}} = Eval.eval({:and, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
+    test "single truthy returns the value" do
+      assert {:ok, 1, %{}} = Eval.eval({:and, [1]}, %{}, %{}, %{}, &dummy_tool/2)
     end
 
     test "falsy short-circuits" do
