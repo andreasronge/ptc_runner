@@ -2298,11 +2298,12 @@ To iterate over just keys or values, extract them first:
 - All predicates (including `zero?`) return `false` for `Double/NaN`.
 - `Double/NaN` is not equal to itself: `(= Double/NaN Double/NaN)` is `false`.
 
-**Integer predicates on floats:** `even?` and `odd?` require integers — floats raise a `type-error` (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-evenodd-raise-type-error-on-floats)). Since division always returns floats, use `mod` instead:
+**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-evenodd-handle-floats-gracefully)).
 
 ```clojure
-;; Check if x is divisible by 2
-(zero? (mod x 2))    ; works for integers
+(even? 4)     ; => true
+(even? 4.0)   ; => true  (whole-number float)
+(even? 4.5)   ; => false (non-whole float)
 ```
 
 ### 8.9 String Parsing
