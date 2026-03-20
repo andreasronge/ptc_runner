@@ -154,4 +154,43 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
       {:error, _} = err -> err
     end
   end
+
+  @doc """
+  Coerces a value to match the expected shape of a pattern.
+
+  Used for rest-arg keyword arguments: when a variadic rest pattern expects map
+  destructuring, converts a flat key-value list to a map. Returns an error tuple
+  for odd-length lists. Returns the value unchanged for non-map patterns.
+
+  ## Examples
+
+      iex> pattern = {:destructure, {:keys, [:a], []}}
+      iex> PtcRunner.Lisp.Eval.Patterns.coerce_for_pattern(pattern, [:a, 1])
+      %{a: 1}
+
+      iex> PtcRunner.Lisp.Eval.Patterns.coerce_for_pattern({:var, :xs}, [1, 2])
+      [1, 2]
+  """
+  @spec coerce_for_pattern(pattern(), term()) ::
+          term() | {:error, {:destructure_error, String.t()}}
+  def coerce_for_pattern({:destructure, {:keys, _, _}}, args) when is_list(args),
+    do: pairs_to_map(args)
+
+  def coerce_for_pattern({:destructure, {:map, _, _, _}}, args) when is_list(args),
+    do: pairs_to_map(args)
+
+  def coerce_for_pattern({:destructure, {:as, _, inner}}, args) when is_list(args),
+    do: coerce_for_pattern(inner, args)
+
+  def coerce_for_pattern(_pattern, value), do: value
+
+  defp pairs_to_map(list) when rem(length(list), 2) == 1,
+    do:
+      {:error, {:destructure_error, "keyword args must be even, got odd count: #{length(list)}"}}
+
+  defp pairs_to_map(list) do
+    list
+    |> Enum.chunk_every(2)
+    |> Enum.into(%{}, fn [k, v] -> {k, v} end)
+  end
 end
