@@ -1,8 +1,9 @@
 defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   @moduledoc """
-  Tests for collection operations in PTC-Lisp.
+  Integration tests for collection operations in PTC-Lisp.
 
-  Covers group-by, update-vals, update, and update-in operations.
+  This is the canonical location for all collection operation tests.
+  Tests exercise operations through `Lisp.run/2` to verify end-to-end behavior.
   """
   use ExUnit.Case, async: true
 
@@ -1427,6 +1428,572 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "MapSet predicate on map" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(not-any? #{[:a 1]} {:a 1 :b 2})|)
       assert result == false
+    end
+  end
+
+  # ============================================================
+  # into
+  # ============================================================
+
+  describe "into" do
+    test "into [] with map converts entries to vectors" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into [] {:a 1 :b 2})|)
+      assert length(result) == 2
+      assert [:a, 1] in result
+      assert [:b, 2] in result
+    end
+
+    test "into [] with empty map returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into [] {})|)
+      assert result == []
+    end
+
+    test "into [] with list keeps elements as-is" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into [] [1 2 3])|)
+      assert result == [1, 2, 3]
+    end
+
+    test "into with existing vector appends list elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into [99] [1 2])|)
+      assert result == [99, 1, 2]
+    end
+
+    test "into #{} with list adds elements to set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into #{} [1 2 3])|)
+      assert result == MapSet.new([1, 2, 3])
+    end
+
+    test "into #{1} with list adds new elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into #{1} [2 3])|)
+      assert result == MapSet.new([1, 2, 3])
+    end
+
+    test "into {} with list of pairs creates map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into {} [[:a 1] [:b 2]])|)
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "into {} with another map merges them" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into {:a 1} {:b 2})|)
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "into {:a 1} with list of pairs overwrites existing key" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into {:a 1} [[:a 2]])|)
+      assert result == %{a: 2}
+    end
+
+    test "into with nil source returns original collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(into [1 2] nil)|)
+      assert result == [1, 2]
+    end
+  end
+
+  # ============================================================
+  # entries, key, val
+  # ============================================================
+
+  describe "entries" do
+    test "entries on map returns sorted list of pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(entries {:z 26 :a 1 :m 13})|)
+      assert result == [[:a, 1], [:m, 13], [:z, 26]]
+    end
+
+    test "entries on empty map returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(entries {})|)
+      assert result == []
+    end
+  end
+
+  describe "key and val" do
+    test "key extracts key from entry" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(key [:a 1])|)
+      assert result == :a
+    end
+
+    test "val extracts value from entry" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(val [:a 1])|)
+      assert result == 1
+    end
+  end
+
+  # ============================================================
+  # zip
+  # ============================================================
+
+  describe "zip" do
+    test "zip returns list of vectors" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zip [1 2 3] [:a :b :c])|)
+      assert result == [[1, :a], [2, :b], [3, :c]]
+    end
+
+    test "zip with unequal lengths truncates to shorter" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zip [1 2] [:a :b :c])|)
+      assert result == [[1, :a], [2, :b]]
+    end
+
+    test "zip with empty lists returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zip [] [])|)
+      assert result == []
+    end
+
+    test "zip elements are accessible with first/second" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(first (first (zip [1 2] [:a :b])))|)
+      assert result == 1
+    end
+  end
+
+  # ============================================================
+  # parse-long, parse-double
+  # ============================================================
+
+  describe "parse-long" do
+    test "parses valid integers" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-long "42")|)
+      assert result == 42
+    end
+
+    test "returns nil for invalid input" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-long "abc")|)
+      assert result == nil
+    end
+
+    test "returns nil for float string" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-long "3.14")|)
+      assert result == nil
+    end
+
+    test "handles nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-long nil)|)
+      assert result == nil
+    end
+  end
+
+  describe "parse-double" do
+    test "parses valid floats" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-double "3.14")|)
+      assert result == 3.14
+    end
+
+    test "parses integer string as float" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-double "42")|)
+      assert result == 42.0
+    end
+
+    test "returns nil for invalid input" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(parse-double "abc")|)
+      assert result == nil
+    end
+  end
+
+  # ============================================================
+  # empty?, not-empty
+  # ============================================================
+
+  describe "empty? and not-empty" do
+    test "empty? returns true for empty collections" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(empty? [])|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(empty? "")|)
+      {:ok, %Step{return: r3}} = Lisp.run(~S|(empty? {})|)
+      {:ok, %Step{return: r4}} = Lisp.run(~S|(empty? #{})|)
+      assert r1 == true
+      assert r2 == true
+      assert r3 == true
+      assert r4 == true
+    end
+
+    test "empty? returns true for nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(empty? nil)|)
+      assert result == true
+    end
+
+    test "empty? returns false for non-empty collections" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(empty? [1])|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(empty? "a")|)
+      {:ok, %Step{return: r3}} = Lisp.run(~S|(empty? {:a 1})|)
+      assert r1 == false
+      assert r2 == false
+      assert r3 == false
+    end
+
+    test "not-empty returns collection for non-empty, nil for empty" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(not-empty [1 2])|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(not-empty [])|)
+      {:ok, %Step{return: r3}} = Lisp.run(~S|(not-empty nil)|)
+      assert r1 == [1, 2]
+      assert r2 == nil
+      assert r3 == nil
+    end
+  end
+
+  # ============================================================
+  # String operations
+  # ============================================================
+
+  describe "subs" do
+    test "returns substring from start index" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subs "hello" 1)|)
+      assert result == "ello"
+    end
+
+    test "returns substring from start to end index" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subs "hello" 1 3)|)
+      assert result == "el"
+    end
+
+    test "handles out of bounds" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subs "hello" 10)|)
+      assert result == ""
+    end
+  end
+
+  describe "join" do
+    test "joins collection with separator" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(join ", " ["a" "b" "c"])|)
+      assert result == "a, b, c"
+    end
+
+    test "joins without separator" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(join ["a" "b" "c"])|)
+      assert result == "abc"
+    end
+
+    test "converts elements to strings" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(join ", " [1 "two" true])|)
+      assert result == "1, two, true"
+    end
+
+    test "handles empty collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(join ", " [])|)
+      assert result == ""
+    end
+  end
+
+  describe "split" do
+    test "splits string by separator" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split "a,b,c" ",")|)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "splits into graphemes when separator is empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split "hello" "")|)
+      assert result == ["h", "e", "l", "l", "o"]
+    end
+  end
+
+  describe "trim" do
+    test "removes leading and trailing whitespace" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(trim "  hello  ")|)
+      assert result == "hello"
+    end
+  end
+
+  describe "replace (string)" do
+    test "replaces all occurrences" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(replace "hello" "l" "L")|)
+      assert result == "heLLo"
+    end
+
+    test "handles no match" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(replace "hello" "x" "y")|)
+      assert result == "hello"
+    end
+  end
+
+  describe "upcase and downcase" do
+    test "upcase converts to uppercase" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(upcase "hello")|)
+      assert result == "HELLO"
+    end
+
+    test "downcase converts to lowercase" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(downcase "HELLO")|)
+      assert result == "hello"
+    end
+  end
+
+  describe "starts-with?, ends-with?, includes?" do
+    test "starts-with? checks prefix" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(starts-with? "hello" "he")|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(starts-with? "hello" "x")|)
+      assert r1 == true
+      assert r2 == false
+    end
+
+    test "ends-with? checks suffix" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(ends-with? "hello" "lo")|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(ends-with? "hello" "x")|)
+      assert r1 == true
+      assert r2 == false
+    end
+
+    test "includes? checks substring" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(includes? "hello" "ll")|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(includes? "hello" "x")|)
+      assert r1 == true
+      assert r2 == false
+    end
+  end
+
+  # ============================================================
+  # filter/remove with set predicate on string
+  # ============================================================
+
+  describe "filter/remove with set predicate on string" do
+    test "filter string characters using set predicate" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter #{"r"} "raspberry")|)
+      assert result == ["r", "r", "r"]
+    end
+
+    test "remove string characters using set predicate" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove #{"r"} "raspberry")|)
+      assert result == ["a", "s", "p", "b", "e", "y"]
+    end
+  end
+
+  # ============================================================
+  # range
+  # ============================================================
+
+  describe "range" do
+    test "range(end) returns sequence from 0 to end exclusive" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(range 5)|)
+      assert result == [0, 1, 2, 3, 4]
+    end
+
+    test "range(start, end) returns sequence" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(range 5 10)|)
+      assert result == [5, 6, 7, 8, 9]
+    end
+
+    test "range(start, end, step) returns sequence with step" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(range 0 10 2)|)
+      assert result == [0, 2, 4, 6, 8]
+    end
+
+    test "range with negative step" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(range 10 0 -2)|)
+      assert result == [10, 8, 6, 4, 2]
+    end
+
+    test "range with empty result" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(range 0)|)
+      assert result == []
+    end
+  end
+
+  # ============================================================
+  # frequencies
+  # ============================================================
+
+  describe "frequencies" do
+    test "counts occurrences of each element" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(frequencies [1 2 1 3 2 1])|)
+      assert result == %{1 => 3, 2 => 2, 3 => 1}
+    end
+
+    test "handles empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(frequencies [])|)
+      assert result == %{}
+    end
+
+    test "handles strings as graphemes" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(frequencies "hello")|)
+      assert result == %{"h" => 1, "e" => 1, "l" => 2, "o" => 1}
+    end
+  end
+
+  # ============================================================
+  # butlast, take-last, drop-last
+  # ============================================================
+
+  describe "butlast" do
+    test "returns all but last element" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(butlast [1 2 3 4])|)
+      assert result == [1, 2, 3]
+    end
+
+    test "returns empty list for single-element list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(butlast [1])|)
+      assert result == []
+    end
+
+    test "returns empty list for nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(butlast nil)|)
+      assert result == []
+    end
+
+    test "works on strings (graphemes)" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(butlast "hello")|)
+      assert result == ["h", "e", "l", "l"]
+    end
+  end
+
+  describe "take-last" do
+    test "returns last n elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(take-last 2 [1 2 3 4])|)
+      assert result == [3, 4]
+    end
+
+    test "returns all elements when n > length" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(take-last 5 [1 2])|)
+      assert result == [1, 2]
+    end
+
+    test "returns empty list when n is 0" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(take-last 0 [1 2 3])|)
+      assert result == []
+    end
+
+    test "works on strings (graphemes)" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(take-last 2 "hello")|)
+      assert result == ["l", "o"]
+    end
+  end
+
+  describe "drop-last" do
+    test "drops last element by default" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(drop-last [1 2 3 4])|)
+      assert result == [1, 2, 3]
+    end
+
+    test "drops last n elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(drop-last 2 [1 2 3 4])|)
+      assert result == [1, 2]
+    end
+
+    test "returns empty list when dropping all" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(drop-last 3 [1 2 3])|)
+      assert result == []
+    end
+
+    test "works on strings" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(drop-last "hello")|)
+      assert result == ["h", "e", "l", "l"]
+    end
+  end
+
+  # ============================================================
+  # reduce on various collection types
+  # ============================================================
+
+  describe "reduce" do
+    test "reduce on lists" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce + 0 [1 2 3])|)
+      assert result == 6
+    end
+
+    test "reduce on maps" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(reduce (fn [acc [_ v]] (+ acc v)) 0 {:a 1 :b 2})|)
+
+      assert result == 3
+    end
+
+    test "reduce on strings (graphemes)" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce (fn [acc x] (str acc "-" x)) "a" "bc")|)
+      assert result == "a-b-c"
+    end
+
+    test "reduce on empty collection with init" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce + 99 [])|)
+      assert result == 99
+    end
+
+    test "reduce 2-arg on single element returns element without calling f" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce + [42])|)
+      assert result == 42
+    end
+  end
+
+  # ============================================================
+  # sort-by on maps
+  # ============================================================
+
+  describe "sort-by on maps" do
+    test "sort-by on map returns sorted list of pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by second {:a 3 :b 1 :c 2})|)
+      assert result == [[:b, 1], [:c, 2], [:a, 3]]
+    end
+
+    test "sort-by on empty map returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by second {})|)
+      assert result == []
+    end
+  end
+
+  # ============================================================
+  # filter/remove on maps (seqable map support)
+  # ============================================================
+
+  describe "filter on maps" do
+    test "filter on map returns matching entries as pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter (fn [[_ v]] (> v 1)) {:a 1 :b 2 :c 3})|)
+      assert Enum.sort(result) == [[:b, 2], [:c, 3]]
+    end
+
+    test "filter on empty map returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter (fn [_] true) {})|)
+      assert result == []
+    end
+  end
+
+  describe "remove on maps" do
+    test "remove on map removes matching entries" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove (fn [[_ v]] (= v 2)) {:a 1 :b 2 :c 3})|)
+      assert Enum.sort(result) == [[:a, 1], [:c, 3]]
+    end
+  end
+
+  # ============================================================
+  # take/drop/take-while/drop-while/distinct on maps
+  # ============================================================
+
+  describe "take and drop on maps" do
+    test "take on map returns n pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(take 2 {:a 1 :b 2 :c 3})|)
+      assert length(result) == 2
+    end
+
+    test "drop on map drops n pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(drop 1 {:a 1 :b 2 :c 3})|)
+      assert length(result) == 2
+    end
+
+    test "take on empty map returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(take 2 {})|)
+      assert result == []
+    end
+
+    test "distinct on map returns all pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(distinct {:a 1 :b 2})|)
+      assert length(result) == 2
+    end
+  end
+
+  # ============================================================
+  # map-indexed
+  # ============================================================
+
+  describe "map-indexed" do
+    test "maps over a list with index" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) ["a" "b" "c"])|)
+      assert result == [[0, "a"], [1, "b"], [2, "c"]]
+    end
+
+    test "maps over a string with index" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) "abc")|)
+      assert result == [[0, "a"], [1, "b"], [2, "c"]]
+    end
+
+    test "works with empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) [])|)
+      assert result == []
+    end
+
+    test "maps over a map with index" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) {:a 1})|)
+      assert result == [[0, [:a, 1]]]
     end
   end
 end
