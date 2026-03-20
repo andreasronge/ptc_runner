@@ -65,9 +65,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       state
       | total_input_tokens: state.total_input_tokens + input,
         total_output_tokens: state.total_output_tokens + output,
-        total_cache_creation_tokens:
-          Map.get(state, :total_cache_creation_tokens, 0) + cache_creation,
-        total_cache_read_tokens: Map.get(state, :total_cache_read_tokens, 0) + cache_read,
+        total_cache_creation_tokens: state.total_cache_creation_tokens + cache_creation,
+        total_cache_read_tokens: state.total_cache_read_tokens + cache_read,
         llm_requests: state.llm_requests + 1,
         turn_tokens: tokens
     }
@@ -96,20 +95,20 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     }
 
     # Add compression stats if captured from compression strategy
-    compression_stats = Map.get(state, :compression_stats)
+    compression_stats = state.compression_stats
     base = if compression_stats, do: Map.put(base, :compression, compression_stats), else: base
 
     # Add token counts if any LLM calls were made with token reporting
     if state.total_input_tokens > 0 or state.total_output_tokens > 0 do
-      cache_creation = Map.get(state, :total_cache_creation_tokens, 0)
-      cache_read = Map.get(state, :total_cache_read_tokens, 0)
+      cache_creation = state.total_cache_creation_tokens
+      cache_read = state.total_cache_read_tokens
 
       token_stats = %{
         input_tokens: state.total_input_tokens,
         output_tokens: state.total_output_tokens,
         total_tokens: state.total_input_tokens + state.total_output_tokens,
         llm_requests: state.llm_requests,
-        system_prompt_tokens: Map.get(state, :system_prompt_tokens, 0)
+        system_prompt_tokens: state.system_prompt_tokens
       }
 
       # Add cache token stats if any caching occurred
@@ -164,7 +163,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     # Use explicit turn_tokens if provided, otherwise fall back to state.turn_tokens
     tokens = turn_tokens || state.turn_tokens
     measurements = build_turn_measurements(turn_duration, tokens)
-    turn_type = Map.get(state, :current_turn_type, :normal)
+    turn_type = state.current_turn_type || :normal
 
     # Extract program, result preview, prints, and raw_response from turn (nil-safe)
     {program, result_preview, prints, raw_response} =
@@ -304,7 +303,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     memory = Keyword.get(opts, :memory, state.memory)
     turn_type = Keyword.get(opts, :type, :normal)
     # Get messages from state (set by loop before LLM call)
-    messages = Map.get(state, :current_messages)
+    messages = state.current_messages
 
     # Convert tool_calls to Turn's simplified format
     simplified_tool_calls =
@@ -316,7 +315,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         }
       end)
 
-    system_prompt = Map.get(state, :current_system_prompt)
+    system_prompt = state.current_system_prompt
 
     params = %{
       prints: prints,

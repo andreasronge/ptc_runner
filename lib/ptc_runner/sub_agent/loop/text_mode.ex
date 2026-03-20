@@ -110,7 +110,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   defp stamp_agent_name({status, step}, state) do
-    {status, %{step | name: state[:agent_name]}}
+    {status, %{step | name: state.agent_name}}
   end
 
   # ============================================================
@@ -123,12 +123,9 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     {:ok, expanded_prompt} =
       PromptExpander.expand(agent.prompt, state.context, on_missing: :keep)
 
-    messages = (state[:initial_messages] || []) ++ [%{role: :user, content: expanded_prompt}]
+    messages = (state.initial_messages || []) ++ [%{role: :user, content: expanded_prompt}]
 
-    state =
-      state
-      |> Map.put(:current_turn_type, :normal)
-      |> Map.put(:expanded_prompt, expanded_prompt)
+    state = %{state | current_turn_type: :normal, expanded_prompt: expanded_prompt}
 
     Telemetry.emit([:turn, :start], %{}, %{
       agent: agent,
@@ -140,7 +137,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     turn_start = System.monotonic_time()
 
     # Wrap on_chunk with call tracking for graceful degradation
-    {was_streamed?, tracked_on_chunk} = track_on_chunk(state[:on_chunk])
+    {was_streamed?, tracked_on_chunk} = track_on_chunk(state.on_chunk)
 
     llm_input = %{
       system: system_prompt,
@@ -157,15 +154,14 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     case call_llm_with_telemetry(llm, llm_input, state, agent) do
       {:ok, %{content: content, tokens: tokens}} ->
         # Graceful degradation: if callback didn't stream, fire on_chunk once
-        if state[:on_chunk] && !was_streamed?.() do
-          safe_on_chunk(state[:on_chunk], content)
+        if state.on_chunk && !was_streamed?.() do
+          safe_on_chunk(state.on_chunk, content)
         end
 
         state_with_tokens =
           state
           |> Metrics.accumulate_tokens(tokens)
-          |> Map.put(:current_messages, messages)
-          |> Map.put(:current_system_prompt, system_prompt)
+          |> then(&%{&1 | current_messages: messages, current_system_prompt: system_prompt})
 
         turn =
           Metrics.build_turn(state_with_tokens, content, nil, content,
@@ -230,10 +226,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # ============================================================
 
   defp run_json_only(agent, llm, state) do
-    json_state =
-      state
-      |> Map.put(:schema, build_schema(agent))
-      |> Map.put(:json_mode, true)
+    json_state = %{state | schema: build_schema(agent), json_mode: true}
 
     json_driver_loop(agent, llm, json_state)
   end
@@ -244,7 +237,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         result
 
       :continue ->
-        state = Map.put(state, :current_turn_type, :normal)
+        state = %{state | current_turn_type: :normal}
 
         Telemetry.emit([:turn, :start], %{}, %{
           agent: agent,
@@ -299,8 +292,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         state_with_tokens =
           state
           |> Metrics.accumulate_tokens(tokens)
-          |> Map.put(:current_messages, messages)
-          |> Map.put(:current_system_prompt, system_prompt)
+          |> then(&%{&1 | current_messages: messages, current_system_prompt: system_prompt})
 
         json_handler_opts = [
           build_error_feedback: fn error, response ->
@@ -348,13 +340,14 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         {ToolSchema.sanitize_name(name), name}
       end)
 
-    tc_state =
+    tc_state = %{
       state
-      |> Map.put(:tool_schemas, tool_schemas)
-      |> Map.put(:normalized_tools_map, normalized_tools)
-      |> Map.put(:api_name_map, api_name_map)
-      |> Map.put(:total_tool_calls, 0)
-      |> Map.put(:all_tool_calls, [])
+      | tool_schemas: tool_schemas,
+        normalized_tools_map: normalized_tools,
+        api_name_map: api_name_map,
+        total_tool_calls: 0,
+        all_tool_calls: []
+    }
 
     tool_driver_loop(agent, llm, tc_state)
   end
@@ -365,7 +358,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         result
 
       :continue ->
-        state = Map.put(state, :current_turn_type, :normal)
+        state = %{state | current_turn_type: :normal}
 
         Telemetry.emit([:turn, :start], %{}, %{
           agent: agent,
@@ -405,7 +398,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           |> elem(1)
 
         user_msg = build_tool_user_message(agent, expanded_prompt, state.context)
-        (state[:initial_messages] || []) ++ [%{role: :user, content: user_msg}]
+        (state.initial_messages || []) ++ [%{role: :user, content: user_msg}]
       else
         state.messages
       end
@@ -426,8 +419,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         state_with_tokens =
           state
           |> Metrics.accumulate_tokens(response.tokens)
-          |> Map.put(:current_messages, messages)
-          |> Map.put(:current_system_prompt, system_prompt)
+          |> then(&%{&1 | current_messages: messages, current_system_prompt: system_prompt})
 
         handle_tool_calls(tool_calls, response.content, agent, state_with_tokens)
 
@@ -435,24 +427,25 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         state_with_tokens =
           state
           |> Metrics.accumulate_tokens(tokens)
-          |> Map.put(:current_messages, messages)
-          |> Map.put(:current_system_prompt, system_prompt)
+          |> then(&%{&1 | current_messages: messages, current_system_prompt: system_prompt})
 
         handle_final_answer(content, agent, state_with_tokens)
 
       {:ok, %{content: nil, tool_calls: nil}} ->
-        state_with_tokens =
+        state_with_tokens = %{
           state
-          |> Map.put(:current_messages, messages)
-          |> Map.put(:current_system_prompt, system_prompt)
+          | current_messages: messages,
+            current_system_prompt: system_prompt
+        }
 
         handle_empty_response(agent, state_with_tokens)
 
       {:ok, %{content: nil}} ->
-        state_with_tokens =
+        state_with_tokens = %{
           state
-          |> Map.put(:current_messages, messages)
-          |> Map.put(:current_system_prompt, system_prompt)
+          | current_messages: messages,
+            current_system_prompt: system_prompt
+        }
 
         handle_empty_response(agent, state_with_tokens)
 
@@ -659,7 +652,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp handle_final_answer(content, agent, state) do
     if Definition.text_return?(agent) do
       # Fire on_chunk with full content for tool-variant final answer
-      if state[:on_chunk], do: safe_on_chunk(state[:on_chunk], content)
+      if state.on_chunk, do: safe_on_chunk(state.on_chunk, content)
 
       # Text return: raw string as step.return
       {turn, step} = build_tool_text_success_step(content, state, agent)
@@ -1104,7 +1097,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     usage =
       state
       |> Metrics.build_final_usage(duration_ms, 0, -1)
-      |> add_schema_metrics(state[:schema])
+      |> add_schema_metrics(state.schema)
 
     step_with_metrics = %{
       step
@@ -1113,7 +1106,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         messages: build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
-        tools: state[:normalized_tools]
+        tools: state.normalized_tools
     }
 
     {:error, step_with_metrics}
@@ -1126,7 +1119,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp build_collected_messages(%{collect_messages: false}, _messages), do: nil
 
   defp build_collected_messages(%{collect_messages: true} = state, messages) do
-    system_prompt = Map.get(state, :current_system_prompt, "")
+    system_prompt = state.current_system_prompt || ""
     [%{role: :system, content: system_prompt} | messages]
   end
 

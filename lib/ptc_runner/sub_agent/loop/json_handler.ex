@@ -279,7 +279,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     usage =
       state
       |> Metrics.build_final_usage(duration_ms, 0)
-      |> add_schema_metrics(state[:schema])
+      |> add_schema_metrics(state.schema)
 
     final_step = %Step{
       return: normalized_return,
@@ -298,7 +298,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
       original_prompt: state.original_prompt,
       prints: [],
       tool_calls: all_tool_calls,
-      tools: state[:normalized_tools]
+      tools: state.normalized_tools
     }
 
     {turn, final_step}
@@ -322,7 +322,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     usage =
       state
       |> Metrics.build_final_usage(duration_ms, 0)
-      |> add_schema_metrics(state[:schema])
+      |> add_schema_metrics(state.schema)
 
     final_step = %{
       error_step
@@ -397,7 +397,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   defp build_collected_messages(%{collect_messages: false}, _messages), do: nil
 
   defp build_collected_messages(%{collect_messages: true} = state, messages) do
-    system_prompt = Map.get(state, :current_system_prompt, "")
+    system_prompt = state.current_system_prompt || ""
     [%{role: :system, content: system_prompt} | messages]
   end
 end

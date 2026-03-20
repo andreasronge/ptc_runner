@@ -320,7 +320,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
         _remaining_turns: state.remaining_turns,
         _mission_deadline: state.mission_deadline
       ]
-      |> maybe_add_opt(:max_heap, state[:max_heap])
+      |> maybe_add_opt(:max_heap, Map.get(state, :max_heap))
 
     if has_trace_context?(state) do
       execute_with_trace(name, agent, run_opts, state)
@@ -370,7 +370,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
           _remaining_turns: state.remaining_turns,
           _mission_deadline: state.mission_deadline
         ]
-        |> maybe_add_opt(:max_heap, state[:max_heap])
+        |> maybe_add_opt(:max_heap, Map.get(state, :max_heap))
 
       # If parent has tracing enabled, create a child trace file
       if has_trace_context?(state) do
