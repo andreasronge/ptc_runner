@@ -312,6 +312,16 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == true
     end
 
+    test "some with keyword returns extracted value, not boolean" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(some :a [{:a 1} {:b 2}])|)
+      assert result == 1
+    end
+
+    test "some with keyword skips false and returns next truthy value" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(some :a [{:a false} {:a 42}])|)
+      assert result == 42
+    end
+
     test "some with keyword returns nil when none match" do
       items = [%{active: false}, %{active: nil}]
 
@@ -1341,7 +1351,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "some with non-list collections" do
     test "keyword predicate on set" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(some :a #{{:a 1} {:b 2}})|)
-      assert result == true
+      assert result == 1
     end
 
     test "MapSet predicate on set" do

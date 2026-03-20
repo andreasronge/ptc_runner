@@ -12,6 +12,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   defp graphemes(s), do: String.graphemes(s)
 
   defp truthy_key_pred(key), do: fn item -> !!FlexAccess.flex_get(item, key) end
+  defp value_key_pred(key), do: fn item -> FlexAccess.flex_get(item, key) end
 
   defp to_seq_list(nil), do: []
   defp to_seq_list(coll) when is_list(coll), do: coll
@@ -1208,7 +1209,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def frequencies(coll) when is_binary(coll), do: Enum.frequencies(graphemes(coll))
 
   def some(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.find_value(coll, truthy_key_pred(key))
+    Enum.find_value(coll, value_key_pred(key))
   end
 
   def some(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
@@ -1218,7 +1219,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def some(key, %MapSet{} = set) when is_atom(key) do
-    Enum.find_value(set, truthy_key_pred(key))
+    Enum.find_value(set, value_key_pred(key))
   end
 
   def some(%MapSet{} = pred_set, %MapSet{} = coll) do
@@ -1232,7 +1233,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     do: Enum.find_value(graphemes(coll), &Callable.call(pred, [&1]))
 
   def some(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    Enum.find_value(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
+    Enum.find_value(coll, fn {k, v} -> FlexAccess.flex_get([k, v], key) end)
   end
 
   def some(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
