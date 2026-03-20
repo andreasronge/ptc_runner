@@ -91,6 +91,12 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
         _ -> false
       end)
 
+    strs_pair =
+      Enum.find(pairs, fn
+        {{:keyword, k}, _} -> k == :strs
+        _ -> false
+      end)
+
     or_pair =
       Enum.find(pairs, fn
         {{:keyword, k}, _} -> k == :or
@@ -104,7 +110,7 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
       end)
 
     # Extract rename/nested pattern pairs (pattern keys paired with keyword/symbol source keys)
-    special_keys = [:keys, :or, :as]
+    special_keys = [:keys, :strs, :or, :as]
 
     rename_pairs =
       pairs
@@ -114,19 +120,24 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
       end)
 
     with {:ok, keys} <- extract_keys_opt(keys_pair),
+         {:ok, strs} <- extract_strs_opt(strs_pair),
          {:ok, renames} <- extract_renames(rename_pairs),
          {:ok, defaults} <- extract_defaults(or_pair) do
-      # Only create a pattern if we have keys, renames, or defaults
       has_keys = not Enum.empty?(keys)
+      has_strs = not Enum.empty?(strs)
       has_renames = not Enum.empty?(renames)
       has_defaults = not Enum.empty?(defaults)
 
-      if has_keys || has_renames || has_defaults do
+      # Convert :strs names into renames with string source keys
+      strs_as_renames = Enum.map(strs, fn name -> {{:var, name}, Atom.to_string(name)} end)
+      all_renames = renames ++ strs_as_renames
+
+      if has_keys || has_strs || has_renames || has_defaults do
         base_pattern =
-          if has_renames do
-            {:destructure, {:map, keys, renames, defaults}}
-          else
+          if Enum.empty?(all_renames) do
             {:destructure, {:keys, keys, defaults}}
+          else
+            {:destructure, {:map, keys, all_renames, defaults}}
           end
 
         maybe_wrap_as(base_pattern, as_pair)
@@ -146,6 +157,19 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
 
       _ ->
         {:error, {:invalid_form, "invalid :keys destructuring form"}}
+    end
+  end
+
+  defp extract_strs_opt(strs_pair) do
+    case strs_pair do
+      {{:keyword, :strs}, {:vector, key_asts}} ->
+        extract_keys(key_asts)
+
+      nil ->
+        {:ok, []}
+
+      _ ->
+        {:error, {:invalid_form, "invalid :strs destructuring form"}}
     end
   end
 

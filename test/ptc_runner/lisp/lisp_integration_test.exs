@@ -812,4 +812,46 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert msg =~ "odd count"
     end
   end
+
+  describe ":strs map destructuring" do
+    test "basic :strs destructuring" do
+      code = ~s|((fn [{:strs [a]}] a) {"a" 1})|
+      {:ok, %{return: 1}} = Lisp.run(code)
+    end
+
+    test "multiple :strs keys" do
+      code = ~s|((fn [{:strs [a b]}] [a b]) {"a" 1 "b" 2})|
+      {:ok, %{return: [1, 2]}} = Lisp.run(code)
+    end
+
+    test ":strs with defaults" do
+      code = ~s|((fn [{:strs [a] :or {a 0}}] a) {})|
+      {:ok, %{return: 0}} = Lisp.run(code)
+    end
+
+    test "missing key returns nil" do
+      code = ~s|((fn [{:strs [a]}] a) {"b" 1})|
+      {:ok, %{return: nil}} = Lisp.run(code)
+    end
+
+    test ":strs with :as binding" do
+      code = ~s|((fn [{:strs [a] :as m}] [a m]) {"a" 1})|
+      {:ok, %{return: [1, %{"a" => 1}]}} = Lisp.run(code)
+    end
+
+    test "mixed :keys and :strs destructuring" do
+      code = ~s|(let [{:keys [a] :strs [b]} {:a 1 "b" 2}] [a b])|
+      {:ok, %{return: [1, 2]}} = Lisp.run(code)
+    end
+
+    test ":strs with rename" do
+      code = ~s|(let [{:strs [a] x :x} {:x 10 "a" 1}] [a x])|
+      {:ok, %{return: [1, 10]}} = Lisp.run(code)
+    end
+
+    test "variadic keyword args with :strs" do
+      code = ~s|((fn [& {:strs [a b]}] [a b]) "a" 1 "b" 2)|
+      {:ok, %{return: [1, 2]}} = Lisp.run(code)
+    end
+  end
 end
