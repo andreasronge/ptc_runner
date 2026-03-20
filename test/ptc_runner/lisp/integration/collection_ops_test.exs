@@ -1148,4 +1148,275 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert Enum.sort(result) == [:b, :c]
     end
   end
+
+  # ==========================================================================
+  # Non-list collection predicate combinations (#815)
+  # ==========================================================================
+
+  describe "filter with non-list collections" do
+    test "keyword predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter :a #{{:a 1} {:b 2}})|)
+      assert result == [%{a: 1}]
+    end
+
+    test "MapSet predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter #{1 2} #{1 3 5})|)
+      assert Enum.sort(result) == [1]
+    end
+
+    test "keyword predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter :a {:a 1 :b 2})|)
+      assert result == []
+    end
+
+    test "MapSet predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter #{[:a 1]} {:a 1 :b 2})|)
+      assert result == [[:a, 1]]
+    end
+
+    test "keyword predicate on string returns empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filter :a "abc")|)
+      assert result == []
+    end
+  end
+
+  describe "remove with non-list collections" do
+    test "keyword predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove :a #{{:a 1} {:b 2}})|)
+      assert result == [%{b: 2}]
+    end
+
+    test "MapSet predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove #{1 2} #{1 3 5})|)
+      assert Enum.sort(result) == [3, 5]
+    end
+
+    test "keyword predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove :a {:a 1 :b 2})|)
+      assert length(result) == 2
+    end
+
+    test "MapSet predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove #{[:a 1]} {:a 1 :b 2})|)
+      assert result == [[:b, 2]]
+    end
+
+    test "keyword predicate on string keeps all graphemes" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(remove :a "abc")|)
+      assert result == ["a", "b", "c"]
+    end
+  end
+
+  describe "keep with non-list collections" do
+    test "keyword predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep :a #{{:a 1} {:b 2}})|)
+      assert result == [1]
+    end
+
+    test "MapSet predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep #{1 2} #{1 3})|)
+      assert result == [1]
+    end
+
+    test "MapSet predicate on string" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep #{"1" "2"} "123")|)
+      assert Enum.sort(result) == ["1", "2"]
+    end
+
+    test "keyword predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep :a {:a 1 :b 2})|)
+      assert result == []
+    end
+
+    test "MapSet predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep #{[:a 1]} {:a 1 :b 2})|)
+      assert result == [[:a, 1]]
+    end
+
+    test "keyword predicate on string returns empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keep :a "abc")|)
+      assert result == []
+    end
+  end
+
+  describe "find with non-list collections" do
+    test "keyword predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find :a #{{:b 2} {:a 1}})|)
+      assert result == %{a: 1}
+    end
+
+    test "function predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find even? #{1 2 3})|)
+      assert result == 2
+    end
+
+    test "MapSet predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find #{2 4} #{1 2 3})|)
+      assert result == 2
+    end
+
+    test "MapSet predicate on string" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find #{"b" "c"} "abc")|)
+      assert result == "b"
+    end
+
+    test "function predicate on map collection" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(find (fn [[k v]] (> v 1)) {:a 1 :b 2})|)
+
+      assert result == [:b, 2]
+    end
+
+    test "keyword predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find :a {:a 1 :b 2})|)
+      # keyword on [k,v] pairs returns nil, so find returns nil
+      assert result == nil
+    end
+
+    test "MapSet predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find #{[:a 1]} {:a 1 :b 2})|)
+      assert result == [:a, 1]
+    end
+
+    test "keyword predicate on string returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find :a "abc")|)
+      assert result == nil
+    end
+  end
+
+  describe "map with non-list collections" do
+    test "keyword predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map :a #{{:a 1} {:a 2}})|)
+      assert Enum.sort(result) == [1, 2]
+    end
+
+    test "MapSet predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map #{1 2} #{1 3})|)
+      assert Enum.sort(result) == Enum.sort([nil, 1])
+    end
+
+    test "keyword predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map :a {:a 1 :b 2})|)
+      assert length(result) == 2
+    end
+
+    test "MapSet predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map #{[:a 1]} {:a 1 :b 2})|)
+      assert Enum.sort(result) == [nil, [:a, 1]]
+    end
+
+    test "keyword predicate on string returns nils" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(map :a "abc")|)
+      assert result == [nil, nil, nil]
+    end
+  end
+
+  describe "mapv with non-list collections" do
+    test "keyword predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(mapv :a #{{:a 1} {:a 2}})|)
+      assert Enum.sort(result) == [1, 2]
+    end
+
+    test "MapSet predicate on set collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(mapv #{1 2} #{1 3})|)
+      assert Enum.sort(result) == Enum.sort([nil, 1])
+    end
+
+    test "keyword predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(mapv :a {:a 1 :b 2})|)
+      assert length(result) == 2
+    end
+
+    test "MapSet predicate on map collection" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(mapv #{[:a 1]} {:a 1 :b 2})|)
+      assert Enum.sort(result) == [nil, [:a, 1]]
+    end
+
+    test "keyword predicate on string returns nils" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(mapv :a "abc")|)
+      assert result == [nil, nil, nil]
+    end
+  end
+
+  describe "some with non-list collections" do
+    test "keyword predicate on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(some :a #{{:a 1} {:b 2}})|)
+      assert result == true
+    end
+
+    test "MapSet predicate on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(some #{1 2} #{3 1})|)
+      assert result == 1
+    end
+
+    test "keyword predicate on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(some :a {:a 1 :b 2})|)
+      # keyword on [k,v] pairs always returns nil/false
+      assert result == nil
+    end
+
+    test "MapSet predicate on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(some #{[:a 1]} {:a 1 :b 2})|)
+      assert result == [:a, 1]
+    end
+  end
+
+  describe "every? with non-list collections" do
+    test "keyword predicate on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(every? :a #{{:a 1} {:a 2}})|)
+      assert result == true
+    end
+
+    test "keyword predicate on set with missing key" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(every? :a #{{:a 1} {:b 2}})|)
+      assert result == false
+    end
+
+    test "MapSet predicate on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(every? #{1 2 3} #{1 2})|)
+      assert result == true
+    end
+
+    test "MapSet predicate on set fails" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(every? #{1 2} #{1 3})|)
+      assert result == false
+    end
+
+    test "keyword predicate on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(every? :a {:a 1 :b 2})|)
+      assert result == false
+    end
+
+    test "MapSet predicate on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(every? #{[:a 1] [:b 2]} {:a 1 :b 2})|)
+      assert result == true
+    end
+  end
+
+  describe "not-any? with non-list collections" do
+    test "keyword predicate on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(not-any? :a #{{:b 1} {:c 2}})|)
+      assert result == true
+    end
+
+    test "keyword predicate on set with match" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(not-any? :a #{{:a 1} {:b 2}})|)
+      assert result == false
+    end
+
+    test "MapSet predicate on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(not-any? #{1 2} #{3 4})|)
+      assert result == true
+    end
+
+    test "keyword predicate on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(not-any? :a {:a 1 :b 2})|)
+      assert result == true
+    end
+
+    test "MapSet predicate on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(not-any? #{[:a 1]} {:a 1 :b 2})|)
+      assert result == false
+    end
+  end
 end
