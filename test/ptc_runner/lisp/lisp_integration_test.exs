@@ -783,4 +783,33 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, %{return: true}} = Lisp.run(code)
     end
   end
+
+  describe "keyword args via rest destructuring" do
+    test "basic keyword args with :keys" do
+      code = ~s|(defn foo [& {:keys [a b]}] {:a a :b b}) (foo :a 1 :b 2)|
+      {:ok, %{return: result}} = Lisp.run(code)
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "keyword args with zero rest args defaults to nil" do
+      code = ~s|(defn foo [& {:keys [a]}] a) (foo)|
+      {:ok, %{return: nil}} = Lisp.run(code)
+    end
+
+    test "keyword args with leading params" do
+      code = ~s|((fn [x & {:keys [a]}] [x a]) 1 :a 2)|
+      {:ok, %{return: [1, 2]}} = Lisp.run(code)
+    end
+
+    test "keyword args with :as binding" do
+      code = ~s|((fn [& {:keys [a] :as opts}] [a opts]) :a 1)|
+      {:ok, %{return: [1, %{a: 1}]}} = Lisp.run(code)
+    end
+
+    test "odd number of keyword args returns error" do
+      code = ~s|((fn [& {:keys [a]}] a) :a)|
+      assert {:error, %{fail: %{reason: :destructure_error, message: msg}}} = Lisp.run(code)
+      assert msg =~ "odd count"
+    end
+  end
 end

@@ -802,9 +802,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     case leading_res do
       {:ok, leading_bindings} ->
-        case Patterns.match_pattern(rest_pattern, rest_args) do
-          {:ok, rest_bindings} -> {:ok, Map.merge(leading_bindings, rest_bindings)}
-          {:error, _} = err -> err
+        case coerce_rest_args(rest_pattern, rest_args) do
+          {:error, _} = err ->
+            err
+
+          rest_value ->
+            case Patterns.match_pattern(rest_pattern, rest_value) do
+              {:ok, rest_bindings} -> {:ok, Map.merge(leading_bindings, rest_bindings)}
+              {:error, _} = err -> err
+            end
         end
 
       err ->
@@ -820,6 +826,29 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         {:error, _} = err -> {:halt, err}
       end
     end)
+  end
+
+  # Coerce rest args list to map when pattern expects map destructuring.
+  # Matches Clojure: (fn [& {:keys [a]}] a) treats rest args as key-value pairs.
+  defp coerce_rest_args({:destructure, {:keys, _, _}}, args) when is_list(args),
+    do: pairs_to_map(args)
+
+  defp coerce_rest_args({:destructure, {:map, _, _, _}}, args) when is_list(args),
+    do: pairs_to_map(args)
+
+  defp coerce_rest_args({:destructure, {:as, _, inner}}, args) when is_list(args),
+    do: coerce_rest_args(inner, args)
+
+  defp coerce_rest_args(_pattern, args), do: args
+
+  defp pairs_to_map(list) when rem(length(list), 2) == 1,
+    do:
+      {:error, {:destructure_error, "keyword args must be even, got odd count: #{length(list)}"}}
+
+  defp pairs_to_map(list) do
+    list
+    |> Enum.chunk_every(2)
+    |> Enum.into(%{}, fn [k, v] -> {k, v} end)
   end
 
   # Format arities list for human-readable error messages

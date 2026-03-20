@@ -52,7 +52,7 @@ Systematic tracking of every `deftest` in the SCI test suite against PTC-Lisp.
 | 245 | `def-location-test` | n/a | macros |
 | 260 | `defn-test` | partial | Basic defn, redefinition ported. Skipped: multi-arity defn, metadata, docstring introspection |
 | 299 | `source-fn-test` | n/a | `clojure.repl/source-fn` not supported |
-| 303 | `defn-kwargs-test` | ported | Keyword args via rest destructuring — fails (GAP-S07) |
+| 303 | `defn-kwargs-test` | ported | Keyword args via rest destructuring — fixed (GAP-S07) |
 | 307 | `resolve-test` | n/a | namespaces, resolve |
 | 352 | `type-hint-let-test` | n/a | java-interop |
 | 365 | `type-hint-let-pops-after-nest-test` | n/a | java-interop |
