@@ -6,7 +6,7 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
   formats validation errors for LLM feedback.
   """
 
-  alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Signature
 
   @doc """
@@ -14,7 +14,7 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
 
   Returns `:ok` or `{:error, [validation_error()]}`.
   """
-  @spec validate(SubAgent.t(), term()) :: :ok | {:error, [Signature.validation_error()]}
+  @spec validate(Definition.t(), term()) :: :ok | {:error, [Signature.validation_error()]}
   def validate(%{parsed_signature: nil}, _value), do: :ok
   def validate(%{parsed_signature: {:signature, _, :any}}, _value), do: :ok
 
@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
 
   Builds an actionable error message that helps the LLM fix the return type.
   """
-  @spec format_error_for_llm(SubAgent.t(), term(), [Signature.validation_error()]) :: String.t()
+  @spec format_error_for_llm(Definition.t(), term(), [Signature.validation_error()]) :: String.t()
   def format_error_for_llm(agent, actual_value, errors) do
     expected_type = format_expected_type(agent)
     error_details = format_error_details(errors)

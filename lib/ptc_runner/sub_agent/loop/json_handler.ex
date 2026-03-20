@@ -8,7 +8,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   """
 
   alias PtcRunner.Step
-  alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.{JsonParser, KeyNormalizer, Signature}
   alias PtcRunner.SubAgent.Loop.Metrics
 
@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   - `{:stop, {:error, step}, turn, turn_tokens}` on final failure
   - `{:continue, state, turn}` for retry with feedback
   """
-  @spec handle_json_answer(String.t(), SubAgent.t(), map(), keyword()) ::
+  @spec handle_json_answer(String.t(), Definition.t(), map(), keyword()) ::
           {:continue, map(), map()}
           | {:stop, {:ok | :error, Step.t()}, map() | nil, map() | nil}
   def handle_json_answer(content, agent, state, opts \\ []) do
@@ -167,7 +167,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   # ============================================================
 
   @doc "Validate return value against signature."
-  @spec validate_return(SubAgent.t(), term()) :: :ok | {:error, list()}
+  @spec validate_return(Definition.t(), term()) :: :ok | {:error, list()}
   def validate_return(%{parsed_signature: nil}, _value), do: :ok
   def validate_return(%{parsed_signature: {:signature, _, :any}}, _value), do: :ok
 
@@ -189,7 +189,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   # ============================================================
 
   @doc "Validate parsed JSON map and complete or retry."
-  @spec validate_and_complete(map(), String.t(), SubAgent.t(), map(), keyword()) ::
+  @spec validate_and_complete(map(), String.t(), Definition.t(), map(), keyword()) ::
           {:continue, map(), map()}
           | {:stop, {:ok | :error, Step.t()}, map() | nil, map() | nil}
   def validate_and_complete(parsed, response, agent, state, opts \\ []) do
@@ -206,7 +206,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   end
 
   @doc "Validate parsed list and complete or retry."
-  @spec validate_and_complete_list(list(), String.t(), SubAgent.t(), map(), keyword()) ::
+  @spec validate_and_complete_list(list(), String.t(), Definition.t(), map(), keyword()) ::
           {:continue, map(), map()}
           | {:stop, {:ok | :error, Step.t()}, map() | nil, map() | nil}
   def validate_and_complete_list(parsed_list, response, agent, state, opts \\ []) do
@@ -227,7 +227,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   # ============================================================
 
   @doc "Handle parse error - retry with feedback or return error signal."
-  @spec handle_parse_error(String.t(), String.t(), SubAgent.t(), map(), keyword()) ::
+  @spec handle_parse_error(String.t(), String.t(), Definition.t(), map(), keyword()) ::
           {:continue, map(), map()}
           | {:stop, {:error, Step.t()}, map() | nil, map() | nil}
   def handle_parse_error(error, response, agent, state, opts \\ []) do
@@ -240,7 +240,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   end
 
   @doc "Handle validation error - retry with feedback or return error signal."
-  @spec handle_validation_error(list(), String.t(), SubAgent.t(), map(), keyword()) ::
+  @spec handle_validation_error(list(), String.t(), Definition.t(), map(), keyword()) ::
           {:continue, map(), map()}
           | {:stop, {:error, Step.t()}, map() | nil, map() | nil}
   def handle_validation_error(errors, response, agent, state, opts \\ []) do

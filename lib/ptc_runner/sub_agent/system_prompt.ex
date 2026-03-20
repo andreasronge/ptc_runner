@@ -95,7 +95,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       true
 
   """
-  @spec generate(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  @spec generate(PtcRunner.SubAgent.Definition.t(), keyword()) :: String.t()
   def generate(agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
     error_context = Keyword.get(opts, :error_context)
@@ -144,7 +144,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       false
 
   """
-  @spec generate_system(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  @spec generate_system(PtcRunner.SubAgent.Definition.t(), keyword()) :: String.t()
   def generate_system(agent, opts \\ []) do
     resolution_context = Keyword.get(opts, :resolution_context, %{})
 
@@ -168,7 +168,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   See `generate_system/2` for documentation.
   """
-  @spec generate_static(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  @spec generate_static(PtcRunner.SubAgent.Definition.t(), keyword()) :: String.t()
   def generate_static(agent, opts \\ []), do: generate_system(agent, opts)
 
   @doc """
@@ -194,7 +194,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       false
 
   """
-  @spec generate_context(PtcRunner.SubAgent.t(), keyword()) :: String.t()
+  @spec generate_context(PtcRunner.SubAgent.Definition.t(), keyword()) :: String.t()
   def generate_context(agent, opts \\ []) do
     context = Keyword.get(opts, :context, %{})
     received_field_descriptions = Keyword.get(opts, :received_field_descriptions)
@@ -281,7 +281,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       "PREFIX\\nbase"
 
   """
-  @spec apply_customization(String.t(), PtcRunner.SubAgent.system_prompt_opts() | nil) ::
+  @spec apply_customization(String.t(), PtcRunner.SubAgent.Definition.system_prompt_opts() | nil) ::
           String.t()
   def apply_customization(base_prompt, nil), do: base_prompt
 

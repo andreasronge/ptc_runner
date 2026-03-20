@@ -22,6 +22,7 @@ defmodule PtcRunner.SubAgent.Compiler do
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.CompiledAgent
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.ToolNormalizer
   alias PtcRunner.SubAgent.{SubAgentTool, Telemetry}
 
@@ -87,17 +88,17 @@ defmodule PtcRunner.SubAgent.Compiler do
       iex> compiled.llm_required?
       true
   """
-  @spec compile(SubAgent.t(), keyword()) ::
+  @spec compile(Definition.t(), keyword()) ::
           {:ok, CompiledAgent.t()} | {:error, PtcRunner.Step.t()}
-  def compile(%SubAgent{max_turns: max_turns}, _opts) when max_turns != 1 do
+  def compile(%Definition{max_turns: max_turns}, _opts) when max_turns != 1 do
     raise ArgumentError, "only single-shot agents (max_turns: 1) can be compiled"
   end
 
-  def compile(%SubAgent{output: :text}, _opts) do
+  def compile(%Definition{output: :text}, _opts) do
     raise ArgumentError, "only PTC-Lisp agents (output: :ptc_lisp) can be compiled"
   end
 
-  def compile(%SubAgent{} = agent, opts) do
+  def compile(%Definition{} = agent, opts) do
     # Validate that all tools are compilable (no LLM-dependent tools)
     validate_compilable_tools!(agent.tools)
 
@@ -271,7 +272,7 @@ defmodule PtcRunner.SubAgent.Compiler do
     opts = Keyword.merge([context: args, tools: tools], lisp_opts)
 
     case PtcRunner.Lisp.run(source, opts) do
-      {:ok, step} -> SubAgent.unwrap_sentinels(step)
+      {:ok, step} -> Definition.unwrap_sentinels(step)
       {:error, step} -> {:error, step}
     end
   end
@@ -310,9 +311,9 @@ defmodule PtcRunner.SubAgent.Compiler do
 
   # Builds sample data for compilation by merging user-provided sample with
   # auto-generated defaults from the signature. User values take precedence.
-  defp build_sample_data(%SubAgent{parsed_signature: nil}, user_sample), do: user_sample
+  defp build_sample_data(%Definition{parsed_signature: nil}, user_sample), do: user_sample
 
-  defp build_sample_data(%SubAgent{parsed_signature: {:signature, params, _}}, user_sample) do
+  defp build_sample_data(%Definition{parsed_signature: {:signature, params, _}}, user_sample) do
     # Generate default sample values for each input parameter
     generated =
       params
