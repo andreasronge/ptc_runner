@@ -302,7 +302,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.update_keys(%{}, &Atom.to_string/1)
       %{}
   """
-  def update_keys(m, f) when is_map(m) do
+  def update_keys(m, f) when is_map(m) and not is_struct(m) do
     Map.new(m, fn {k, v} -> {Callable.call(f, [k]), v} end)
   end
 
