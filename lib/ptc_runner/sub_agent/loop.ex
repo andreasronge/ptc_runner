@@ -62,8 +62,8 @@ defmodule PtcRunner.SubAgent.Loop do
   """
 
   alias PtcRunner.{Lisp, Step, Turn}
-  alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.BuiltinTools
+  alias PtcRunner.SubAgent.Definition
 
   alias PtcRunner.SubAgent.Loop.{
     LLMRetry,
@@ -82,7 +82,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   ## Parameters
 
-  - `agent` - A `%SubAgent{}` struct
+  - `agent` - A `%Definition{}` struct
   - `opts` - Keyword list with:
     - `llm` - Required. LLM callback function
     - `context` - Initial context map (default: %{})
@@ -119,8 +119,8 @@ defmodule PtcRunner.SubAgent.Loop do
       iex> step.return
       %{"result" => 8}
   """
-  @spec run(SubAgent.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
-  def run(%SubAgent{} = agent, opts) do
+  @spec run(Definition.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
+  def run(%Definition{} = agent, opts) do
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
     llm_registry = Keyword.get(opts, :llm_registry, %{})
@@ -323,7 +323,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Check all termination conditions before executing a turn.
   # Returns {:stop, result} to terminate or :continue to proceed.
-  @spec check_termination(SubAgent.t(), map()) :: {:stop, {:ok | :error, Step.t()}} | :continue
+  @spec check_termination(Definition.t(), map()) :: {:stop, {:ok | :error, Step.t()}} | :continue
   defp check_termination(agent, state) do
     cond do
       # Unified budget exhausted (work + retry turns)
@@ -431,7 +431,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Main iterative loop that drives agent execution.
   # Uses tail-call optimization by returning from each iteration
   # and emitting telemetry immediately after each turn completes.
-  @spec driver_loop(SubAgent.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
+  @spec driver_loop(Definition.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
   defp driver_loop(agent, llm, state) do
     case check_termination(agent, state) do
       {:stop, result} ->
@@ -515,7 +515,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Execute a single turn - builds LLM input, calls LLM, processes response
   # Returns {:continue, new_state, turn} or {:stop, result, turn, turn_tokens}
-  @spec execute_turn(SubAgent.t(), term(), map()) ::
+  @spec execute_turn(Definition.t(), term(), map()) ::
           {:continue, map(), Turn.t()}
           | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
   defp execute_turn(agent, llm, state) do
@@ -660,7 +660,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Handle LLM response - parse and execute code
   # Returns signal for driver_loop (or legacy loop to process)
-  @spec handle_llm_response(String.t(), SubAgent.t(), map()) ::
+  @spec handle_llm_response(String.t(), Definition.t(), map()) ::
           {:stop, {:ok | :error, Step.t()}, Turn.t()} | {:continue, map(), Turn.t()}
   defp handle_llm_response(response, agent, state) do
     case ResponseHandler.parse(response) do
@@ -702,7 +702,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Handle error with unified budget model - returns signal for driver_loop
   # Decrements work_turns_remaining if not in retry phase, otherwise retry_turns_remaining
   # Returns {:continue, new_state, turn} for the driver_loop to process
-  @spec handle_error_with_budget(String.t(), String.t(), Turn.t() | nil, map(), SubAgent.t()) ::
+  @spec handle_error_with_budget(String.t(), String.t(), Turn.t() | nil, map(), Definition.t()) ::
           {:continue, map(), Turn.t()}
   defp handle_error_with_budget(response, error_message, turn_or_nil, state, agent) do
     # Build Turn struct if not provided
@@ -748,7 +748,7 @@ defmodule PtcRunner.SubAgent.Loop do
   @spec execute_code_with_tools(
           String.t(),
           String.t(),
-          SubAgent.t(),
+          Definition.t(),
           map(),
           map(),
           map()
@@ -820,7 +820,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # - {:stop, {:ok, step}, turn, turn_tokens} for successful completion
   # - {:stop, {:error, step}, turn, turn_tokens} for explicit fail or memory limit
   # - {:continue, new_state, turn} for normal execution continuation
-  @spec handle_successful_execution(String.t(), String.t(), Step.t(), map(), SubAgent.t()) ::
+  @spec handle_successful_execution(String.t(), String.t(), Step.t(), map(), Definition.t()) ::
           {:stop, {:ok | :error, Step.t()}, Turn.t(), map() | nil} | {:continue, map(), Turn.t()}
   defp handle_successful_execution(code, response, lisp_step, state, agent) do
     cond do
@@ -1260,7 +1260,7 @@ defmodule PtcRunner.SubAgent.Loop do
           String.t(),
           Step.t(),
           map(),
-          SubAgent.t(),
+          Definition.t(),
           list()
         ) :: {:continue, map(), Turn.t()}
   defp handle_return_validation_error(code, response, lisp_step, state, agent, errors) do
