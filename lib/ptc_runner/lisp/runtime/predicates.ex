@@ -205,11 +205,11 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
     end
   end
 
-  def even?(x) do
-    if is_number(x), do: rem(x, 2) == 0, else: false
-  end
+  def even?(x) when is_integer(x), do: rem(x, 2) == 0
+  def even?(x) when is_float(x) and x == trunc(x), do: rem(trunc(x), 2) == 0
+  def even?(_), do: false
 
-  def odd?(x) do
-    if is_number(x), do: rem(x, 2) != 0, else: false
-  end
+  def odd?(x) when is_integer(x), do: rem(x, 2) != 0
+  def odd?(x) when is_float(x) and x == trunc(x), do: rem(trunc(x), 2) != 0
+  def odd?(_), do: false
 end
