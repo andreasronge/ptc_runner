@@ -289,6 +289,86 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(odd? 4)")
     end
 
+    test "int? and integer?" do
+      assert_clojure_equivalent("(int? 42)")
+      assert_clojure_equivalent("(int? 3.14)")
+      assert_clojure_equivalent("(int? nil)")
+      assert_clojure_equivalent("(integer? 42)")
+      assert_clojure_equivalent("(integer? 3.14)")
+    end
+
+    test "float? and double?" do
+      assert_clojure_equivalent("(float? 3.14)")
+      assert_clojure_equivalent("(float? 42)")
+      assert_clojure_equivalent("(float? nil)")
+      assert_clojure_equivalent("(double? 3.14)")
+      assert_clojure_equivalent("(double? 42)")
+    end
+
+    test "false? and true?" do
+      assert_clojure_equivalent("(false? false)")
+      assert_clojure_equivalent("(false? true)")
+      assert_clojure_equivalent("(false? nil)")
+      assert_clojure_equivalent("(false? 0)")
+      assert_clojure_equivalent("(true? true)")
+      assert_clojure_equivalent("(true? false)")
+      assert_clojure_equivalent("(true? nil)")
+      assert_clojure_equivalent("(true? 1)")
+    end
+
+    test "fn?" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(fn? inc)")
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(fn? (fn [x] x))")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(fn? 42)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(fn? nil)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(fn? :hello)")
+    end
+
+    test "symbol?" do
+      # PTC-Lisp has no symbols; always returns false
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(symbol? :hello)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(symbol? 42)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(symbol? nil)")
+    end
+
+    test "decimal? and ratio?" do
+      # BEAM has no BigDecimal or ratio types; always false
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(decimal? 3.14)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(ratio? 1)")
+    end
+
+    test "rational?" do
+      assert_clojure_equivalent("(rational? 42)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(rational? 3.14)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(rational? nil)")
+    end
+
+    test "nat-int?, neg-int?, pos-int?" do
+      assert_clojure_equivalent("(nat-int? 0)")
+      assert_clojure_equivalent("(nat-int? 5)")
+      assert_clojure_equivalent("(nat-int? -1)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(nat-int? 3.14)")
+      assert_clojure_equivalent("(neg-int? -1)")
+      assert_clojure_equivalent("(neg-int? 0)")
+      assert_clojure_equivalent("(neg-int? 5)")
+      assert_clojure_equivalent("(pos-int? 5)")
+      assert_clojure_equivalent("(pos-int? 0)")
+      assert_clojure_equivalent("(pos-int? -1)")
+    end
+
+    test "infinite?" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(infinite? Double/POSITIVE_INFINITY)")
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(infinite? Double/NEGATIVE_INFINITY)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(infinite? 42)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(infinite? Double/NaN)")
+    end
+
+    test "NaN?" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(NaN? Double/NaN)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(NaN? 42)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(NaN? Double/POSITIVE_INFINITY)")
+    end
+
     test "even? and odd? handle floats gracefully instead of crashing (GAP-S08)" do
       # Clojure throws IllegalArgumentException on floats;
       # PTC-Lisp returns true/false for whole-number floats, false for non-whole

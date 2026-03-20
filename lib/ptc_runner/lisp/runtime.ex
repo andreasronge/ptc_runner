@@ -266,6 +266,21 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate boolean?(x), to: Predicates
   defdelegate number?(x), to: Predicates
   defdelegate int?(x), to: Predicates
+  defdelegate integer?(x), to: Predicates
+  defdelegate float?(x), to: Predicates
+  defdelegate double?(x), to: Predicates
+  defdelegate false?(x), to: Predicates
+  defdelegate true?(x), to: Predicates
+  defdelegate fn?(x), to: Predicates
+  defdelegate symbol?(x), to: Predicates
+  defdelegate decimal?(x), to: Predicates
+  defdelegate ratio?(x), to: Predicates
+  defdelegate rational?(x), to: Predicates
+  defdelegate nat_int?(x), to: Predicates
+  defdelegate neg_int?(x), to: Predicates
+  defdelegate pos_int?(x), to: Predicates
+  defdelegate infinite?(x), to: Predicates
+  defdelegate nan?(x), to: Predicates
   defdelegate string?(x), to: Predicates
   defdelegate char?(x), to: Predicates
   defdelegate regex?(x), to: Predicates

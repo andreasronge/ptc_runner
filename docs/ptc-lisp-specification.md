@@ -2414,12 +2414,28 @@ The `seq` function converts a collection to a sequence:
 | `some?` | Is not nil? |
 | `boolean?` | Is boolean? |
 | `number?` | Is number? |
+| `int?` | Is integer? |
+| `integer?` | Is integer? (alias for `int?`) |
+| `float?` | Is float? |
+| `double?` | Is float? (alias for `float?`) |
 | `string?` | Is string? |
 | `char?` | Is single-character string? (See §3.5) |
 | `keyword?` | Is keyword? |
 | `vector?` | Is vector? |
 | `map?` | Is map? |
 | `set?` | Is set? |
+| `fn?` | Is function? |
+| `false?` | Is exactly `false`? |
+| `true?` | Is exactly `true`? |
+| `symbol?` | Always false (PTC-Lisp uses keywords, not symbols) |
+| `decimal?` | Always false (BEAM has no BigDecimal) |
+| `ratio?` | Always false (BEAM has no ratio type) |
+| `rational?` | Is integer? (integers are the only BEAM rationals) |
+| `nat-int?` | Is non-negative integer? (>= 0) |
+| `neg-int?` | Is negative integer? |
+| `pos-int?` | Is positive integer? (> 0) |
+| `infinite?` | Is positive or negative infinity? |
+| `NaN?` | Is NaN? |
 | `coll?` | Is collection? (vectors, maps, or sets) |
 | `sequential?` | Is ordered collection? (vectors only) |
 | `seq?` | Is sequence? (vectors only; same as `sequential?` in PTC-Lisp) |
