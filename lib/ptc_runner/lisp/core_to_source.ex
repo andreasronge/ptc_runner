@@ -454,7 +454,10 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp format_pattern({:destructure, {:map, _keys, renames, defaults}}) do
     renames_str =
-      Enum.map_join(renames, " ", fn {local, key} -> "#{local} :#{key}" end)
+      Enum.map_join(renames, " ", fn
+        {local, key} when is_binary(key) -> "#{format_pattern(local)} \"#{key}\""
+        {local, key} -> "#{format_pattern(local)} :#{key}"
+      end)
 
     case defaults do
       [] ->

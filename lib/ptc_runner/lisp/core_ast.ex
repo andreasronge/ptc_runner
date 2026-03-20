@@ -72,7 +72,7 @@ defmodule PtcRunner.Lisp.CoreAST do
   @type pattern ::
           {:var, atom()}
           | {:destructure, {:keys, [atom()], keyword()}}
-          | {:destructure, {:map, [atom()], [{atom(), atom()}], keyword()}}
+          | {:destructure, {:map, [atom()], [{pattern(), term()}], keyword()}}
           | {:destructure, {:as, atom(), pattern()}}
           | {:destructure, {:seq, [pattern()]}}
           # Rest pattern: [a b & rest] binds rest to remaining elements
