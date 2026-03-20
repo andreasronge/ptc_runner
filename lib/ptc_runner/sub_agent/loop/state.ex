@@ -27,6 +27,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
   `current_turn_type`, `current_system_prompt`, `current_messages`, `compression_stats`
   """
 
+  alias PtcRunner.Turn
+
   @enforce_keys [:llm, :context, :turn, :messages, :start_time, :work_turns_remaining]
 
   defstruct [
@@ -121,5 +123,79 @@ defmodule PtcRunner.SubAgent.Loop.State do
     all_tool_calls: []
   ]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          # Core — llm is a function or atom resolved via registry
+          llm: (map() -> {:ok, map()} | {:error, term()}) | atom(),
+          llm_registry: map() | nil,
+          context: map(),
+          messages: [map()],
+          start_time: integer(),
+          turn: pos_integer(),
+          turns: [Turn.t()],
+          memory: map() | nil,
+          last_fail: term(),
+          nesting_depth: non_neg_integer(),
+          remaining_turns: integer(),
+          mission_deadline: DateTime.t() | nil,
+          cache: boolean(),
+          debug: boolean(),
+          trace_mode: boolean() | :on_error,
+          llm_retry: map() | nil,
+          collect_messages: boolean(),
+          # Token accumulation
+          total_input_tokens: non_neg_integer(),
+          total_output_tokens: non_neg_integer(),
+          total_cache_creation_tokens: non_neg_integer(),
+          total_cache_read_tokens: non_neg_integer(),
+          llm_requests: non_neg_integer(),
+          system_prompt_tokens: non_neg_integer(),
+          turn_tokens: map() | nil,
+          # Turn history
+          turn_history: [term()],
+          # Field descriptions
+          received_field_descriptions: map() | nil,
+          # System prompt capture
+          collected_system_prompt: String.t() | nil,
+          # Prompt tracking
+          expanded_prompt: String.t() | nil,
+          original_prompt: String.t() | nil,
+          normalized_tools: map() | nil,
+          # Budget model
+          work_turns_remaining: integer(),
+          retry_turns_remaining: integer(),
+          last_return_error: String.t() | nil,
+          # Budget callback options
+          token_limit: pos_integer() | nil,
+          on_budget_exceeded: :return_partial | :fail | nil,
+          budget_callback: (map() -> :continue | :stop) | nil,
+          # Trace context
+          trace_context: map() | nil,
+          # Lisp resource limits
+          max_heap: pos_integer() | nil,
+          # Journal / summaries / tool_cache
+          journal: map() | nil,
+          summaries: map(),
+          tool_cache: map() | nil,
+          # Child steps
+          child_steps: [map()],
+          # Agent name
+          agent_name: String.t() | atom() | nil,
+          # Streaming callback
+          on_chunk: (String.t() -> term()) | nil,
+          # Prior conversation history
+          initial_messages: [map()] | nil,
+          # Transient per-turn fields
+          current_turn_type: :normal | :must_return | :retry | nil,
+          current_system_prompt: String.t() | nil,
+          current_messages: [map()] | nil,
+          compression_stats: map() | nil,
+          # TextMode-specific fields
+          schema: map() | nil,
+          json_mode: boolean() | nil,
+          tool_schemas: [map()] | nil,
+          normalized_tools_map: map() | nil,
+          api_name_map: map() | nil,
+          total_tool_calls: non_neg_integer(),
+          all_tool_calls: [map()]
+        }
 end
