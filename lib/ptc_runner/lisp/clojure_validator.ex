@@ -358,8 +358,14 @@ defmodule PtcRunner.Lisp.ClojureValidator do
 
   defp normalize_value(value) when is_map(value) and not is_struct(value) do
     Map.new(value, fn {k, v} ->
-      # Convert atom keys to strings for comparison
-      key = if is_atom(k), do: Atom.to_string(k), else: k
+      # Convert atom and integer keys to strings for comparison (JSON uses string keys)
+      key =
+        cond do
+          is_atom(k) -> Atom.to_string(k)
+          is_integer(k) -> Integer.to_string(k)
+          true -> k
+        end
+
       {key, normalize_value(v)}
     end)
   end

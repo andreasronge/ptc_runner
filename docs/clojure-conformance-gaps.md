@@ -123,37 +123,21 @@ Functions listed as `🔲 candidate` in the audit that showed up in conformance 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `cond-test` line 832; audit lists as candidate |
 | **Audit status** | `🔲 candidate` |
 
-```clojure
-;; Clojure
-(int? 2)       ;=> true
-(int? 2.0)     ;=> false
-(int? "hello") ;=> false
-```
-
-Also missing from the same family: `nat-int?`, `neg-int?`, `pos-int?` (all `🔲 candidate` in audit).
+**Fix:** Added `int?` predicate delegating to `is_integer/1`. Still missing from the same family: `nat-int?`, `neg-int?`, `pos-int?` (all `🔲 candidate` in audit).
 
 ### GAP-C02: `comment` form not supported
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `comment-test` line 632 |
 
-```clojure
-;; Clojure
-(comment "anything")     ;=> nil
-(comment (+ 1 2 3))     ;=> nil
-
-;; PTC-Lisp
-(comment "anything")     ;=> error: Undefined variable: comment
-```
-
-`comment` ignores all its arguments and returns nil. Useful for documentation and REPL exploration.
+**Fix:** Added `comment` as a special form in the analyzer that returns `nil` without evaluating its arguments.
 
 ### GAP-C03: `%&` rest args in anonymous function shorthand
 
@@ -198,16 +182,10 @@ Destructuring with `:strs` binds string keys to local variables. Less common tha
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `more-than-twenty-args-test` line 1596 |
 
-```clojure
-;; Clojure
-(assoc {} 1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9 10)
-;=> {1 2, 2 3, 3 4, 4 5, 5 6, 6 7, 7 8, 8 9, 9 10}
-
-;; PTC-Lisp: errors or produces wrong result
-```
+**Fix:** `assoc_variadic` already handled many pairs correctly. The conformance test comparison failed because Babashka output goes through JSON (string keys) while PTC-Lisp uses integer keys. Fixed `normalize_value` in `ClojureValidator` to normalize integer map keys to strings.
 
 ### GAP-S05: No duplicate key detection at runtime in set/map literals
 

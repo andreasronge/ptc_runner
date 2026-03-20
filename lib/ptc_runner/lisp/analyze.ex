@@ -188,6 +188,7 @@ defmodule PtcRunner.Lisp.Analyze do
     do: analyze_thread(:"->>", rest, tail?)
 
   defp dispatch_list_form({:symbol, :do}, rest, _list, tail?), do: analyze_do(rest, tail?)
+  defp dispatch_list_form({:symbol, :comment}, _rest, _list, _tail?), do: {:ok, nil}
   defp dispatch_list_form({:symbol, :and}, rest, _list, tail?), do: analyze_and(rest, tail?)
   defp dispatch_list_form({:symbol, :or}, rest, _list, tail?), do: analyze_or(rest, tail?)
   defp dispatch_list_form({:symbol, :where}, rest, _list, tail?), do: analyze_where(rest, tail?)
