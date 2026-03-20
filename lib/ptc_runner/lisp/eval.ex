@@ -349,9 +349,15 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:fn, params, body}, %EvalContext{} = eval_ctx) do
     # Capture the current environment and turn history (lexical scoping)
-    # We also capture the user_ns snapshot as before.
     # Metadata starts empty; return_type is populated when closure is called
     {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history, %{}}, eval_ctx}
+  end
+
+  # Named fn: (fn name [params] body) — name is bound inside body for self-recursion
+  defp do_eval({:fn, name, params, body}, %EvalContext{} = eval_ctx) do
+    # Store fn_name in metadata; execute_closure will bind the name at call time
+    {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history, %{fn_name: name}},
+     eval_ctx}
   end
 
   # ============================================================

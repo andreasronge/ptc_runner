@@ -37,8 +37,9 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:let, [binding()], t()}
           # Conditionals
           | {:if, t(), t(), t()}
-          # Anonymous function
+          # Anonymous function (optionally named for self-recursion)
           | {:fn, fn_params(), t()}
+          | {:fn, atom(), fn_params(), t()}
           # Sequential evaluation (special forms, not calls)
           | {:do, [t()]}
           # Short-circuit logic (special forms, not calls)

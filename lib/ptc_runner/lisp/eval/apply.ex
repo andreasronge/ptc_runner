@@ -675,7 +675,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp do_execute_closure(
-         {:closure, _closure_patterns, body, closure_env, closure_turn_history, _meta} = closure,
+         {:closure, _closure_patterns, body, closure_env, closure_turn_history, meta} = closure,
          binding_patterns,
          args,
          %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
@@ -684,6 +684,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     case bind_args(binding_patterns, args) do
       {:ok, bindings} ->
         new_env = Map.merge(closure_env, bindings)
+
+        # Named fn: bind the closure to its own name for self-recursion
+        new_env =
+          case meta do
+            %{fn_name: name} -> Map.put(new_env, name, closure)
+            _ -> new_env
+          end
+
         closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls

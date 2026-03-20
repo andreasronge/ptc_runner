@@ -37,16 +37,10 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `core-test` line 92 |
 
-```clojure
-;; Clojure
-(do (defn foo [] 1) (#(foo)))   ;=> 1
-
-;; PTC-Lisp (incorrect)
-(do (defn foo [] 1) (#(foo)))   ;=> <closure object>
-```
+**Fix:** `#(foo)` short fn desugaring now wraps a single symbol as a function call `(fn [] (foo))` instead of a variable reference.
 
 ### GAP-S03: `defn` inside `let` not visible across program expressions
 
@@ -75,24 +69,10 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `fn-test` line 199 |
 
-Clojure allows `(fn name [args] body)` where `name` is bound inside the body for self-recursion.
-
-```clojure
-;; Clojure
-((fn foo [x] (if (< x 3) (foo (inc x)) x)) 0)   ;=> 3
-
-;; PTC-Lisp
-((fn foo [x] (if (< x 3) (foo (inc x)) x)) 0)   ;=> error
-```
-
-This is the standard pattern for recursive anonymous functions. Without it, users must use `defn` + separate call or `loop`/`recur`.
-
-**Variants also affected:**
-- Named fn with rest args: `((fn foo [x & xs] xs) 1 2 3)`
-- Named fn with destructuring: `((fn foo [[x & xs]] xs) [1 2 3])`
+**Fix:** Added named `fn` support: `(fn name [params] body)` stores the name in closure metadata, and `do_execute_closure` binds the closure to its name at call time for self-recursion. Variants with rest args and destructuring also work.
 
 ### GAP-F02: Destructuring inside rest args
 

@@ -31,10 +31,20 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
           nil
 
         [single_form] ->
-          single_form
+          # A single symbol like #(foo) means call foo: (fn [] (foo))
+          # A single list like #((+ 1 2)) is already a call expression
+          # Literals like #(42) are kept as-is (will error at runtime like Clojure)
+          case single_form do
+            {:symbol, name} ->
+              if Analyze.placeholder?(name), do: single_form, else: {:list, [single_form]}
+
+            _ ->
+              single_form
+          end
 
         multiple_forms ->
-          # Multiple forms means it's likely a function call with args
+          # Multiple forms means it's a function call with args
+          # e.g. #(+ % 1) -> (fn [p1] (+ p1 1))
           {:list, multiple_forms}
       end
 

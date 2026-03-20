@@ -379,6 +379,17 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: fn (anonymous functions)
   # ============================================================
 
+  # Named fn: (fn name [params] body ...)
+  defp analyze_fn([{:symbol, name}, params_ast, first_body | rest_body]) when is_atom(name) do
+    body_asts = [first_body | rest_body]
+
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- wrap_body(body_asts, true) do
+      {:ok, {:fn, name, params, body}}
+    end
+  end
+
+  # Anonymous fn: (fn [params] body ...)
   defp analyze_fn([params_ast, first_body | rest_body]) do
     body_asts = [first_body | rest_body]
 
@@ -389,7 +400,8 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp analyze_fn(_) do
-    {:error, {:invalid_arity, :fn, "expected (fn [params] body ...)"}}
+    {:error,
+     {:invalid_arity, :fn, "expected (fn [params] body ...) or (fn name [params] body ...)"}}
   end
 
   defp analyze_fn_params({:vector, param_asts}) do
