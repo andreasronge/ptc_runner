@@ -3,7 +3,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   Analyzer for short function syntax (#()).
 
   Transforms short function forms into desugared anonymous functions
-  by extracting placeholders (%, %1, %2, etc.) and generating parameters.
+  by extracting placeholders (%, %1, %2, %&, etc.) and generating parameters.
   """
 
   alias PtcRunner.Lisp.Analyze
@@ -130,10 +130,15 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
 
   # Determine arity from placeholders
   defp determine_arity(placeholders) do
-    # Extract numeric placeholders
+    has_rest? = Enum.any?(placeholders, &(to_string(&1) == "%&"))
+
+    # Extract numeric placeholders (filter out % and %&)
     numeric =
       placeholders
-      |> Enum.filter(&(to_string(&1) != "%"))
+      |> Enum.filter(fn p ->
+        s = to_string(p)
+        s != "%" and s != "%&"
+      end)
       |> Enum.map(fn p ->
         p
         |> to_string()
@@ -141,23 +146,26 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
         |> String.to_integer()
       end)
 
-    case numeric do
-      [] ->
-        # Only % or no placeholders, arity is 1 if % exists, 0 otherwise
-        if Enum.any?(placeholders, &(to_string(&1) == "%")) do
-          1
-        else
-          0
-        end
+    base_arity =
+      case numeric do
+        [] ->
+          if Enum.any?(placeholders, &(to_string(&1) == "%")), do: 1, else: 0
 
-      nums ->
-        Enum.max(nums)
-    end
+        nums ->
+          Enum.max(nums)
+      end
+
+    if has_rest?, do: {:variadic, base_arity}, else: base_arity
   end
 
   # Generate parameter list based on arity (as symbols, not yet analyzed)
-  defp generate_params(0) do
-    []
+  defp generate_params(0), do: []
+
+  defp generate_params({:variadic, n}) do
+    leading =
+      if n > 0, do: Enum.map(1..n, fn i -> {:symbol, String.to_atom("p#{i}")} end), else: []
+
+    leading ++ [{:symbol, :&}, {:symbol, :rest}]
   end
 
   defp generate_params(arity) when arity > 0 do
@@ -218,6 +226,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   defp placeholder_to_param(name_str) when is_binary(name_str) do
     case name_str do
       "%" -> :p1
+      "%&" -> :rest
       "%" <> num_str -> String.to_atom("p#{num_str}")
     end
   end

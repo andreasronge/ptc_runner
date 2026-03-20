@@ -580,4 +580,36 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
       assert result == "postgres"
     end
   end
+
+  describe "#() with %& rest args" do
+    test "apply with %& collects all args" do
+      source = ~S|(apply #(do %&) [1 2 3])|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, 2, 3]
+    end
+
+    test "apply with %& and zero extra args" do
+      source = ~S|(apply #(do %&) [])|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == []
+    end
+
+    test "#() with %1 and %& mixed" do
+      source = ~S|(apply #(vector %1 %&) [1 2 3])|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, [2, 3]]
+    end
+
+    test "#() with % and %& mixed" do
+      source = ~S|(apply #(vector % %&) [1 2 3])|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == [1, [2, 3]]
+    end
+
+    test "#(count %&) counts rest args" do
+      source = ~S|(apply #(count %&) [1 2 3 4 5])|
+      {:ok, %Step{return: result}} = Lisp.run(source)
+      assert result == 5
+    end
+  end
 end

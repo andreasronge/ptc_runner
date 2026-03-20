@@ -3245,17 +3245,20 @@ The `#()` shorthand syntax provides concise lambdas (like Clojure):
 #(+ %1 %2)         ; explicit numbered parameters
 #(* % %)           ; same parameter used multiple times
 #(42)              ; zero-arity thunk (no parameters)
+#(vector %1 %&)    ; %& captures remaining args as a list
 ```
 
 The `#()` syntax desugars to the equivalent `fn`:
 - `#(+ % 1)` → `(fn [p1] (+ p1 1))`
 - `#(+ %1 %2)` → `(fn [p1 p2] (+ p1 p2))`
 - `#()` with no placeholders → `(fn [] ...)`
+- `#(vector %1 %&)` → `(fn [p1 & rest] (vector p1 rest))`
 - Arity is determined by the highest numbered placeholder, or 1 if only `%` is used
+- `%&` captures remaining arguments as a list (like `& rest` in `fn`)
 
 **Restrictions:**
 - `#()` accepts a single expression as the body
-- `%` and `%1`, `%2`, etc. are parameter placeholders (not regular symbols within `#()`)
+- `%`, `%1`, `%2`, etc. are parameter placeholders; `%&` captures rest args (not regular symbols within `#()`)
 - Nested `#()` is not allowed
 - Recursion is supported via `recur` (no self-reference by name, see §5.9)
 - Closures over local `let` bindings are allowed

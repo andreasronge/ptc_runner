@@ -826,7 +826,7 @@ defmodule PtcRunner.Lisp.Analyze do
   def placeholder?(name) do
     case to_string(name) do
       "%" -> true
-      "%" <> rest -> String.match?(rest, ~r/^\d+$/)
+      "%" <> rest -> String.match?(rest, ~r/^(\d+|&)$/)
       _ -> false
     end
   end
