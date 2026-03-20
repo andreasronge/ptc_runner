@@ -288,6 +288,16 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(odd? 3)")
       assert_clojure_equivalent("(odd? 4)")
     end
+
+    test "even? and odd? handle floats gracefully instead of crashing (GAP-S08)" do
+      # Clojure throws IllegalArgumentException on floats;
+      # PTC-Lisp returns true/false for whole-number floats, false for non-whole
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(even? 4.0)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(even? 3.0)")
+      {:ok, %{return: true}} = PtcRunner.Lisp.run("(odd? 3.0)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(odd? 4.0)")
+      {:ok, %{return: false}} = PtcRunner.Lisp.run("(even? 4.5)")
+    end
   end
 
   describe "Clojure conformance - higher-order functions" do

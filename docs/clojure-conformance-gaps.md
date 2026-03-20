@@ -411,23 +411,26 @@ No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertio
 
 **Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
 
-### GAP-S08: `even?`/`odd?` raise type-error on floats
+### GAP-S08: `even?`/`odd?` handle floats gracefully
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | fixed (intentional divergence) |
 | **Source** | Spec §8.8 |
 
 ```clojure
 ;; Clojure
-(even? 4.0)   ;=> true
+(even? 4.0)   ;=> IllegalArgumentException
 
 ;; PTC-Lisp
-(even? 4.0)   ;=> type-error (expects integer)
+(even? 4.0)   ;=> true
+(even? 4.5)   ;=> false
 ```
 
-Clojure accepts whole-number floats for `even?`/`odd?`. PTC-Lisp strictly requires integers. This can bite when using division results (which always return floats).
+Clojure throws on float arguments. PTC-Lisp accepts whole-number floats (returns true/false) and returns false for non-whole floats, consistent with the no-exceptions design (DIV-10). Previously PTC-Lisp crashed with an arithmetic error on any float input.
+
+**Fix:** Changed `even?`/`odd?` to truncate whole-number floats before `rem`, and return `false` for non-whole floats and non-numbers.
 
 ---
 
