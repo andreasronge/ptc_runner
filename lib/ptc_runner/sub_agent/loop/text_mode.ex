@@ -16,7 +16,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   alias PtcRunner.Prompts
   alias PtcRunner.Step
-  alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.BuiltinTools
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.{JsonHandler, LLMRetry, Metrics, ToolNormalizer}
   alias PtcRunner.SubAgent.{PromptExpander, Signature, Telemetry}
   alias PtcRunner.SubAgent.ToolSchema
@@ -31,13 +32,13 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   Returns the system and user messages that would be sent to the LLM,
   plus tool schemas and JSON schema when applicable.
   """
-  @spec preview_prompt(SubAgent.t(), map()) :: %{
+  @spec preview_prompt(Definition.t(), map()) :: %{
           system: String.t(),
           user: String.t(),
           tool_schemas: [map()],
           schema: map() | nil
         }
-  def preview_prompt(%SubAgent{} = agent, context) do
+  def preview_prompt(%Definition{} = agent, context) do
     {:ok, expanded_prompt} = PromptExpander.expand(agent.prompt, context, on_missing: :keep)
 
     if has_tools?(agent) do
@@ -47,7 +48,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       tool_schemas = ToolSchema.to_tool_definitions(agent.tools)
 
       schema =
-        if not SubAgent.text_return?(agent) and agent.parsed_signature,
+        if not Definition.text_return?(agent) and agent.parsed_signature,
           do: Signature.to_json_schema(agent.parsed_signature),
           else: nil
 
@@ -58,7 +59,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         schema: schema
       }
     else
-      if SubAgent.text_return?(agent) do
+      if Definition.text_return?(agent) do
         # Text-only variant
         %{
           system: build_text_system_prompt(agent),
@@ -91,14 +92,14 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   Auto-detects the variant based on tools and return type, then dispatches
   to the appropriate execution path.
   """
-  @spec run(SubAgent.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
-  def run(%SubAgent{} = agent, llm, state) do
+  @spec run(Definition.t(), term(), map()) :: {:ok, Step.t()} | {:error, Step.t()}
+  def run(%Definition{} = agent, llm, state) do
     result =
       cond do
         has_tools?(agent) ->
           run_tool_variant(agent, llm, state)
 
-        SubAgent.text_return?(agent) ->
+        Definition.text_return?(agent) ->
           run_text_only(agent, llm, state)
 
         true ->
@@ -336,7 +337,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # ============================================================
 
   defp run_tool_variant(agent, llm, state) do
-    effective_tools = SubAgent.effective_tools(agent)
+    effective_tools = BuiltinTools.effective_tools(agent)
     tool_schemas = ToolSchema.to_tool_definitions(effective_tools)
     normalized_tools = ToolNormalizer.normalize(effective_tools, state, agent)
 
@@ -656,7 +657,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # ============================================================
 
   defp handle_final_answer(content, agent, state) do
-    if SubAgent.text_return?(agent) do
+    if Definition.text_return?(agent) do
       # Fire on_chunk with full content for tool-variant final answer
       if state[:on_chunk], do: safe_on_chunk(state[:on_chunk], content)
 
@@ -744,8 +745,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # Shared Helpers
   # ============================================================
 
-  defp has_tools?(%SubAgent{} = agent) do
-    map_size(SubAgent.effective_tools(agent)) > 0
+  defp has_tools?(%Definition{} = agent) do
+    map_size(BuiltinTools.effective_tools(agent)) > 0
   end
 
   defp safe_on_chunk(on_chunk, content) do
@@ -926,7 +927,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   defp build_tool_output_instruction(agent) do
-    if SubAgent.text_return?(agent) do
+    if Definition.text_return?(agent) do
       "When you have the final answer, return it as plain text."
     else
       case agent.parsed_signature do

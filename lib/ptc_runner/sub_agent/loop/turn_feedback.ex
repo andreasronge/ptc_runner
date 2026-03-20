@@ -12,7 +12,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   alias PtcRunner.Mustache
   alias PtcRunner.Prompts
-  alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.ProgressRenderer
 
   @doc """
@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   For multi-turn agents with retry_turns, shows unified budget info.
   For multi-turn agents without retry_turns, shows legacy turn count.
   """
-  @spec append_turn_info(String.t(), SubAgent.t(), map()) :: String.t()
+  @spec append_turn_info(String.t(), Definition.t(), map()) :: String.t()
   def append_turn_info(message, agent, state) do
     if agent.max_turns <= 1 do
       message
@@ -89,7 +89,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   This is used by the loop to format error messages with context about
   work/retry budgets.
   """
-  @spec build_error_feedback(String.t(), SubAgent.t(), map()) :: String.t()
+  @spec build_error_feedback(String.t(), Definition.t(), map()) :: String.t()
   def build_error_feedback(error_message, agent, state) do
     # Start with the error message
     base = "Error: #{error_message}"
@@ -105,7 +105,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   Only shows explicit println output - the LLM must be intentional about what it inspects.
   """
-  @spec format(SubAgent.t(), map(), map()) :: {String.t(), boolean()}
+  @spec format(Definition.t(), map(), map()) :: {String.t(), boolean()}
   def format(agent, state, lisp_step) do
     max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
 
@@ -163,17 +163,17 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   Returns empty string if agent has no plan.
   """
-  @spec render_initial_progress(SubAgent.t()) :: String.t()
-  def render_initial_progress(%SubAgent{plan: []} = _agent), do: ""
-  def render_initial_progress(%SubAgent{journaling: false} = _agent), do: ""
+  @spec render_initial_progress(Definition.t()) :: String.t()
+  def render_initial_progress(%Definition{plan: []} = _agent), do: ""
+  def render_initial_progress(%Definition{journaling: false} = _agent), do: ""
 
-  def render_initial_progress(%SubAgent{plan: plan}) do
+  def render_initial_progress(%Definition{plan: plan}) do
     ProgressRenderer.render(plan, %{})
   end
 
   # Append progress checklist if agent has a plan and journal is enabled
-  defp append_progress(feedback, %SubAgent{plan: []}, _state, _lisp_step), do: feedback
-  defp append_progress(feedback, %SubAgent{journaling: false}, _state, _lisp_step), do: feedback
+  defp append_progress(feedback, %Definition{plan: []}, _state, _lisp_step), do: feedback
+  defp append_progress(feedback, %Definition{journaling: false}, _state, _lisp_step), do: feedback
 
   defp append_progress(feedback, agent, state, lisp_step) do
     # Merge current turn's summaries so they appear in the next turn's prompt.
