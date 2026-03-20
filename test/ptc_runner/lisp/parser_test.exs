@@ -337,6 +337,28 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
   end
 
+  # Regression: https://github.com/andreasronge/ptc_runner/issues/743
+  describe "no-space function calls" do
+    test "operator followed by paren parses as separate tokens" do
+      # (+(+ 1 2) 3) should be equivalent to (+ (+ 1 2) 3)
+      assert {:ok, with_space} = Parser.parse("(+ (+ 1 2) 3)")
+      assert {:ok, no_space} = Parser.parse("(+(+ 1 2) 3)")
+      assert with_space == no_space
+    end
+
+    test "nested no-space calls" do
+      assert {:ok, with_space} = Parser.parse("(+ (- 1 2) (+ 3 4))")
+      assert {:ok, no_space} = Parser.parse("(+(- 1 2)(+ 3 4))")
+      assert with_space == no_space
+    end
+
+    test "assoc with no-space arithmetic from issue example" do
+      assert {:ok, with_space} = Parser.parse("(assoc acc cat (+ (get acc cat 0) amt))")
+      assert {:ok, no_space} = Parser.parse("(assoc acc cat (+(get acc cat 0) amt))")
+      assert with_space == no_space
+    end
+  end
+
   describe "var reader syntax #'" do
     test "simple var" do
       assert {:ok, {:var, :x}} = Parser.parse("#'x")
