@@ -212,6 +212,31 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def number?(x), do: is_number(x) or SpecialValues.special?(x)
 
   def int?(x), do: is_integer(x)
+  def integer?(x), do: is_integer(x)
+  def float?(x), do: is_float(x)
+  def double?(x), do: is_float(x)
+
+  def false?(x), do: x === false
+  def true?(x), do: x === true
+
+  def fn?(x), do: type_of(x) == :function
+
+  # PTC-Lisp has no symbols (keywords are used instead), so symbol? always returns false
+  def symbol?(_x), do: false
+
+  # BEAM has no BigDecimal or ratio types
+  def decimal?(_x), do: false
+  def ratio?(_x), do: false
+
+  # rational? is true for integers (rationals without a fractional part)
+  def rational?(x), do: is_integer(x)
+
+  def nat_int?(x), do: is_integer(x) and x >= 0
+  def neg_int?(x), do: is_integer(x) and x < 0
+  def pos_int?(x), do: is_integer(x) and x > 0
+
+  def infinite?(x), do: SpecialValues.infinite?(x)
+  def nan?(x), do: SpecialValues.nan?(x)
 
   def string?(x), do: is_binary(x)
 
