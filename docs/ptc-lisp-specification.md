@@ -1,5 +1,9 @@
 # PTC-Lisp Language Specification
 
+**Related docs:**
+- [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
+- [Clojure Core Audit](clojure-core-audit.md) — function-level coverage of Clojure core
+
 ---
 
 ## 1. Overview
@@ -37,7 +41,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 
 | Extension | Description |
 |-----------|-------------|
-| Implicit `do` | Multiple expressions in `fn`, `let`, `when`, `when-let` bodies (§5, §13.2) |
+| Implicit `do` | Multiple expressions in `fn`, `let`, `when`, `when-let` bodies (§5, §13.1) |
 | `data/path`, `tool/name` | Namespace-qualified access to context data and tool invocation (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
 | `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
@@ -112,7 +116,7 @@ keyword = : symbol
 
 Examples: `:name`, `:user-id`, `:total`, `:else`
 
-Keywords with namespaces are **not supported**: ~~`:foo/bar`~~
+Keywords with namespaces are **not supported**: ~~`:foo/bar`~~ (see [DIV-13](clojure-conformance-gaps.md#div-13-namespaced-keywords-not-supported))
 
 ---
 
@@ -527,12 +531,17 @@ Extract values from maps by key. Supports both keyword and string keys.
 ; Binding the whole map with :as
 (let [{:keys [id] :as user} {:id 123 :name "Alice"}]
   (:name user)) ; => "Alice"
+
+; String key destructuring (useful for JSON-like data)
+(let [{:strs [name age]} {"name" "Alice" "age" 30}]
+  name)  ; => "Alice"
 ```
 
 **Supported destructuring forms:**
 - `[a b]` — sequential (vector)
 - `[a & rest]` — rest pattern (bind remaining elements)
 - `{:keys [a b]}` — map keyword keys
+- `{:strs [a b]}` — map string keys
 - `{:keys [a] :or {a default}}` — map with defaults
 - `{new-name :old-key}` — map renaming
 - `{:as symbol}` — bind collection to symbol
@@ -678,7 +687,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
 **Semantics:**
 - `if-let` evaluates `condition-expr`, binds result to `name`, then evaluates `then-expr` if truthy, otherwise `else-expr`
 - `when-let` is like `if-let` but returns `nil` instead of an else branch
-- Both only support single symbol bindings (no destructuring)
+- Both only support single symbol bindings, no destructuring (see [DIV-14](clojure-conformance-gaps.md#div-14-if-letwhen-let-only-support-single-symbol-bindings))
 - Desugars at analysis time: `(if-let [x expr] then else)` → `(let [x expr] (if x then else))`
 
 **Examples:**
@@ -872,9 +881,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 
-**Not supported:**
-- Multi-arity: `(defn f ([x] ...) ([x y] ...))` — use separate `defn` forms
-- Pre/post conditions
+**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-defn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-prepost-conditions-in-defn)).
 
 ---
 
@@ -2291,16 +2298,7 @@ To iterate over just keys or values, extract them first:
 - All predicates (including `zero?`) return `false` for `Double/NaN`.
 - `Double/NaN` is not equal to itself: `(= Double/NaN Double/NaN)` is `false`.
 
-**Integer predicates on floats:** The predicates `even?` and `odd?` require integers. Passing a float raises a `type-error`, even if the float represents a whole number:
-
-```clojure
-(even? 4)      ; => true
-(even? 4.0)    ; => TYPE ERROR (float, not integer)
-(odd? 3)       ; => true
-(odd? 3.0)     ; => TYPE ERROR (float, not integer)
-```
-
-Since division always returns floats (see Section 8.3), avoid using `even?`/`odd?` on division results. Use `mod` instead:
+**Integer predicates on floats:** `even?` and `odd?` require integers — floats raise a `type-error` (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-evenodd-raise-type-error-on-floats)). Since division always returns floats, use `mod` instead:
 
 ```clojure
 ;; Check if x is divisible by 2
@@ -2398,7 +2396,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 ```
 
 **Type checking:**
-Both functions accept strings and return `nil` for non-string input. **Note: This diverges from Clojure 1.11+, which raises `IllegalArgumentException` for non-string input. PTC-Lisp returns `nil` for safety in agentic contexts.**
+Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-longparse-double-return-nil-for-non-string-input)).
 
 ```clojure
 (parse-long 42)            ; => ...
@@ -3197,24 +3195,13 @@ type-error at line 5:
 
 ## 13. What Is NOT Supported
 
-### 13.1 Language Features
+PTC-Lisp intentionally omits many Clojure features for sandbox safety and simplicity. For a complete list of intentional divergences with rationale, see [Clojure Conformance Gaps — Intentional Divergences](clojure-conformance-gaps.md#intentional-divergences--by-design-not-bugs).
 
-| Feature | Reason |
-|---------|--------|
-| `lazy-seq` | All operations are eager |
-| Macros | No metaprogramming |
-| Namespaces (user-defined) | No modules |
-| Full Java interop | Security (Minimal subset for Date/Time supported: see §8.13) |
-| Atoms, refs, agents | No mutable state |
-| `eval`, `read-string` | Security |
-| File I/O (`slurp`, `spit`) | Security |
-| Regex literals | Complexity (use `re-pattern`) |
-| Multi-methods, protocols | Complexity |
-| `try`, `catch`, `throw` | No exception handling (use `fail` for errors) |
+Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`), `eval`/`read-string`, file I/O, `try`/`catch`/`throw`, multi-methods/protocols, user-defined namespaces, and full Java interop (minimal Date/Time subset supported: see §8.13).
 
 **Note:** `println` IS supported — see section 8.12. It writes to an internal trace buffer, not stdout.
 
-### 13.2 Anonymous Functions
+### 13.1 Anonymous Functions
 
 Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
 
@@ -3225,7 +3212,8 @@ Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
 (fn [a b] body)         ; multiple arguments
 (fn [a & rest] body)    ; variadic arguments
 (fn [[a b]] body)       ; vector destructuring in params
-(fn [{:keys [x]}] body) ; map destructuring in params
+(fn [{:keys [x]}] body) ; map destructuring in params (keyword keys)
+(fn [{:strs [x]}] body) ; map destructuring in params (string keys)
 ```
 
 **Implicit `do` (Clojure Extension):** Multiple body expressions are supported:
@@ -3259,7 +3247,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 **Restrictions:**
 - `#()` accepts a single expression as the body
 - `%`, `%1`, `%2`, etc. are parameter placeholders; `%&` captures rest args (not regular symbols within `#()`)
-- Nested `#()` is not allowed
+- Nested `#()` is not allowed ([DIV-17](clojure-conformance-gaps.md#div-17-nested--not-allowed))
 - Recursion is supported via `recur` (no self-reference by name, see §5.9)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
@@ -3288,29 +3276,11 @@ The `#()` syntax desugars to the equivalent `fn`:
 - Use `fn` for complex logic, destructuring, or multiple parameters
 - Use `where` for simple field comparisons in `filter`/`remove`/`find`
 
-### 13.3 Functions Excluded from Core
+### 13.2 Functions Excluded from Core
 
-- `iterate`, `repeat`, `cycle` (infinite sequences)
-- Infinite `(range)` (standard finite `range` is supported: see §8.1)
-- `partial`, `comp` (function composition)
-- Transducers
+For a complete function-level coverage report, see [Clojure Core Audit](clojure-core-audit.md).
 
-### 13.4 Clojure Compatibility Issues
-
-The following behaviors differ from standard Clojure/Babashka:
-
-| Issue | PTC-Lisp Behavior | Clojure Behavior | Workaround |
-|-------|-------------------|------------------|------------|
-| `keys` return type | Returns keywords (atoms) | Returns keywords | Use `(count (keys m))` for comparison |
-
-**Example workarounds:**
-
-```clojure
-;; Instead of possibly-nil values having to be guarded before destructuring
-;; You can now destructure nil directly (returns nil for all bindings)
-(let [{:keys [a]} nil]
-  a) ; => nil
-```
+Key exclusions: `iterate`, `repeat`, `cycle` (infinite sequences), infinite `(range)` (finite `range` is supported: see §8.1), `partial`, `comp`, and transducers.
 
 ---
 
@@ -3370,7 +3340,7 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 
 **Grammar notes:**
 - `/` is allowed in symbols for namespaced access (`data/bar`, `tool/bar`)
-- `/` is NOT allowed in keywords (`:foo/bar` is invalid)
+- `/` is NOT allowed in keywords (`:foo/bar` is invalid; see [DIV-13](clojure-conformance-gaps.md#div-13-namespaced-keywords-not-supported))
 - The operator position in `list-expr` accepts any expression, enabling:
   - `(:name user)` — keyword as function
   - `((fn [x] x) 42)` — anonymous function application
