@@ -3,40 +3,51 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   Collection operations for PTC-Lisp runtime.
 
   Provides filtering, mapping, sorting, and other collection manipulation functions.
+
+  Selection operations (filter, remove, find, some, every?, not_any?,
+  take_while, drop_while) are implemented in `Collection.Select`.
+
+  Transformation operations (map, mapv, mapcat, keep, map_indexed, pluck)
+  are implemented in `Collection.Transform`.
   """
 
   alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.Lisp.Runtime.Collection.Normalize
+  alias PtcRunner.Lisp.Runtime.Collection.Select
+  alias PtcRunner.Lisp.Runtime.Collection.Transform
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
-  # Convert string to list of graphemes for sequence operations
-  defp graphemes(s), do: String.graphemes(s)
+  # ============================================================
+  # Selection operations (delegated to Collection.Select)
+  # ============================================================
 
-  defp truthy_key_pred(key), do: fn item -> !!FlexAccess.flex_get(item, key) end
-  defp value_key_pred(key), do: fn item -> FlexAccess.flex_get(item, key) end
+  defdelegate filter(pred, coll), to: Select
+  defdelegate remove(pred, coll), to: Select
+  defdelegate find(pred, coll), to: Select
+  defdelegate some(pred, coll), to: Select
+  defdelegate every?(pred, coll), to: Select
+  defdelegate not_any?(pred, coll), to: Select
+  defdelegate take_while(pred, coll), to: Select
+  defdelegate drop_while(pred, coll), to: Select
 
-  defp to_seq_list(nil), do: []
-  defp to_seq_list(coll) when is_list(coll), do: coll
-  defp to_seq_list(coll) when is_binary(coll), do: graphemes(coll)
-  defp to_seq_list(%MapSet{} = set), do: MapSet.to_list(set)
+  # ============================================================
+  # Transformation operations (delegated to Collection.Transform)
+  # ============================================================
 
-  defp to_seq_list(m) when is_map(m) and not is_struct(m) do
-    Enum.map(m, fn {k, v} -> [k, v] end)
-  end
+  defdelegate map(f, coll), to: Transform
+  defdelegate map(f, c1, c2), to: Transform
+  defdelegate map(f, c1, c2, c3), to: Transform
+  defdelegate mapv(f, coll), to: Transform
+  defdelegate mapv(f, c1, c2), to: Transform
+  defdelegate mapv(f, c1, c2, c3), to: Transform
+  defdelegate mapcat(f, coll), to: Transform
+  defdelegate keep(f, coll), to: Transform
+  defdelegate map_indexed(f, coll), to: Transform
+  defdelegate pluck(key, coll), to: Transform
 
-  defp to_seq_list(other), do: Enum.to_list(other)
-
-  defp validate_n(n, _name) when is_integer(n) and n > 0, do: :ok
-
-  defp validate_n(n, name),
-    do: raise("type_error: #{name}: n must be a positive integer, got #{inspect(n)}")
-
-  defp validate_step(step, _name) when is_integer(step) and step > 0, do: :ok
-
-  defp validate_step(step, name),
-    do: raise("type_error: #{name}: step must be a positive integer, got #{inspect(step)}")
-
-  # Set-as-predicate: returns element if member, nil if not (used with filter/some/etc)
-  defp set_pred(set), do: fn item -> if MapSet.member?(set, item), do: item, else: nil end
+  # ============================================================
+  # Private helpers used by remaining operations
+  # ============================================================
 
   defp wrap_comparator(:asc), do: :asc
   defp wrap_comparator(:desc), do: :desc
@@ -63,474 +74,29 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise "type_error: invalid comparator: #{inspect(other)}. Expected :asc, :desc, or a function of 2 arguments."
   end
 
-  defp vector_arg_error(v, type) when is_list(v) do
-    msg =
-      case v do
-        [_] ->
-          "expected #{type}, got vector #{inspect(v)} - use #{inspect(List.first(v))} instead"
+  defp validate_n(n, _name) when is_integer(n) and n > 0, do: :ok
 
-        _ ->
-          "expected #{type}, got path #{inspect(v)} - paths require a function or data-extraction variant"
-      end
+  defp validate_n(n, name),
+    do: raise("type_error: #{name}: n must be a positive integer, got #{inspect(n)}")
 
-    raise "type_error: #{msg}"
-  end
+  defp validate_step(step, _name) when is_integer(step) and step > 0, do: :ok
 
-  def filter(key, %MapSet{} = set) when is_atom(key) do
-    Enum.filter(set, truthy_key_pred(key))
-  end
-
-  def filter(%MapSet{} = pred_set, %MapSet{} = coll) do
-    Enum.filter(coll, fn item -> MapSet.member?(pred_set, item) end)
-  end
-
-  def filter(pred, %MapSet{} = set), do: Enum.filter(set, &Callable.call(pred, [&1]))
-
-  def filter(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.filter(coll, truthy_key_pred(key))
-  end
-
-  def filter(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def filter(%MapSet{} = set, coll) when is_list(coll) do
-    Enum.filter(coll, set_pred(set))
-  end
-
-  # Keyword on string graphemes: graphemes are strings, not maps, so keyword access always returns nil
-  def filter(key, coll) when is_atom(key) and is_binary(coll), do: []
-
-  def filter(%MapSet{} = set, coll) when is_binary(coll) do
-    Enum.filter(graphemes(coll), set_pred(set))
-  end
-
-  def filter(pred, coll) when is_list(coll), do: Enum.filter(coll, &Callable.call(pred, [&1]))
-
-  def filter(pred, coll) when is_binary(coll),
-    do: Enum.filter(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def filter(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    coll
-    |> Enum.filter(fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
-    |> Enum.map(fn {k, v} -> [k, v] end)
-  end
-
-  def filter(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    coll
-    |> Enum.filter(fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
-    |> Enum.map(fn {k, v} -> [k, v] end)
-  end
-
-  def filter(pred, coll) when is_map(coll) do
-    # When filtering a map, each entry is passed as [key, value] pair
-    # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
-    coll
-    |> Enum.filter(fn {k, v} -> Callable.call(pred, [[k, v]]) end)
-    |> Enum.map(fn {k, v} -> [k, v] end)
-  end
-
-  def remove(key, %MapSet{} = set) when is_atom(key) do
-    Enum.reject(set, truthy_key_pred(key))
-  end
-
-  def remove(%MapSet{} = pred_set, %MapSet{} = coll) do
-    Enum.reject(coll, fn item -> MapSet.member?(pred_set, item) end)
-  end
-
-  def remove(pred, %MapSet{} = set), do: Enum.reject(set, &Callable.call(pred, [&1]))
-
-  def remove(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.reject(coll, truthy_key_pred(key))
-  end
-
-  def remove(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def remove(%MapSet{} = set, coll) when is_list(coll) do
-    Enum.reject(coll, set_pred(set))
-  end
-
-  # Keyword on string: always falsy, so nothing is removed
-  def remove(key, coll) when is_atom(key) and is_binary(coll), do: graphemes(coll)
-
-  def remove(%MapSet{} = set, coll) when is_binary(coll) do
-    Enum.reject(graphemes(coll), set_pred(set))
-  end
-
-  def remove(pred, coll) when is_list(coll), do: Enum.reject(coll, &Callable.call(pred, [&1]))
-
-  def remove(pred, coll) when is_binary(coll),
-    do: Enum.reject(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def remove(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    coll
-    |> Enum.reject(fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
-    |> Enum.map(fn {k, v} -> [k, v] end)
-  end
-
-  def remove(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    coll
-    |> Enum.reject(fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
-    |> Enum.map(fn {k, v} -> [k, v] end)
-  end
-
-  def remove(pred, coll) when is_map(coll) do
-    # When removing from a map, each entry is passed as [key, value] pair
-    # Returns a list of [key, value] pairs (not a map) per Clojure seqable semantics
-    coll
-    |> Enum.reject(fn {k, v} -> Callable.call(pred, [[k, v]]) end)
-    |> Enum.map(fn {k, v} -> [k, v] end)
-  end
-
-  # keep: returns non-nil results of (f item)
-  # Unlike filter (which returns original items), keep returns f's results.
-  # Unlike map, keep removes nil results. false IS kept.
-
-  def keep(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.reduce(coll, [], fn item, acc ->
-      case FlexAccess.flex_get(item, key) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(key, _coll) when is_list(key), do: vector_arg_error(key, "function or key")
-
-  def keep(%MapSet{} = set, coll) when is_list(coll) do
-    Enum.reduce(coll, [], fn item, acc ->
-      if MapSet.member?(set, item), do: [item | acc], else: acc
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(f, coll) when is_list(coll) do
-    Enum.reduce(coll, [], fn item, acc ->
-      case Callable.call(f, [item]) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  # Keyword on string: always nil, so keep returns empty
-  def keep(key, coll) when is_atom(key) and is_binary(coll), do: []
-
-  def keep(%MapSet{} = set, coll) when is_binary(coll) do
-    Enum.reduce(graphemes(coll), [], fn item, acc ->
-      if MapSet.member?(set, item), do: [item | acc], else: acc
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(f, coll) when is_binary(coll) do
-    Enum.reduce(graphemes(coll), [], fn item, acc ->
-      case Callable.call(f, [item]) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(key, %MapSet{} = set) when is_atom(key) do
-    Enum.reduce(set, [], fn item, acc ->
-      case FlexAccess.flex_get(item, key) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(%MapSet{} = pred_set, %MapSet{} = coll) do
-    Enum.reduce(coll, [], fn item, acc ->
-      if MapSet.member?(pred_set, item), do: [item | acc], else: acc
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(f, %MapSet{} = set) do
-    Enum.reduce(set, [], fn item, acc ->
-      case Callable.call(f, [item]) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    Enum.reduce(coll, [], fn {k, v}, acc ->
-      case FlexAccess.flex_get([k, v], key) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    Enum.reduce(coll, [], fn {k, v}, acc ->
-      if MapSet.member?(pred_set, [k, v]), do: [[k, v] | acc], else: acc
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(f, coll) when is_map(coll) do
-    Enum.reduce(coll, [], fn {k, v}, acc ->
-      case Callable.call(f, [[k, v]]) do
-        nil -> acc
-        result -> [result | acc]
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  def keep(_f, nil), do: []
-
-  def find(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.find(coll, truthy_key_pred(key))
-  end
-
-  def find(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def find(%MapSet{} = set, coll) when is_list(coll) do
-    Enum.find(coll, fn item -> MapSet.member?(set, item) end)
-  end
-
-  def find(pred, coll) when is_list(coll), do: Enum.find(coll, &Callable.call(pred, [&1]))
-
-  # Keyword on string: always nil, so find returns nil
-  def find(key, coll) when is_atom(key) and is_binary(coll), do: nil
-
-  def find(%MapSet{} = set, coll) when is_binary(coll),
-    do: Enum.find(graphemes(coll), fn item -> MapSet.member?(set, item) end)
-
-  def find(pred, coll) when is_binary(coll),
-    do: Enum.find(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def find(key, %MapSet{} = set) when is_atom(key) do
-    Enum.find(set, truthy_key_pred(key))
-  end
-
-  def find(%MapSet{} = pred_set, %MapSet{} = coll) do
-    Enum.find(coll, fn item -> MapSet.member?(pred_set, item) end)
-  end
-
-  def find(pred, %MapSet{} = set), do: Enum.find(set, &Callable.call(pred, [&1]))
-
-  def find(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    case Enum.find(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end) do
-      {k, v} -> [k, v]
-      nil -> nil
-    end
-  end
-
-  def find(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    case Enum.find(coll, fn {k, v} -> MapSet.member?(pred_set, [k, v]) end) do
-      {k, v} -> [k, v]
-      nil -> nil
-    end
-  end
-
-  def find(pred, coll) when is_map(coll) and not is_struct(coll) do
-    case Enum.find(coll, fn {k, v} -> Callable.call(pred, [[k, v]]) end) do
-      {k, v} -> [k, v]
-      nil -> nil
-    end
-  end
-
-  def map(key, coll) when is_list(coll) and is_atom(key),
-    do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
-
-  def map(key, _coll) when is_list(key), do: vector_arg_error(key, "function or key")
-
-  def map(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
-
-  # Keyword on string: flex_get on graphemes always returns nil
-  def map(key, coll) when is_atom(key) and is_binary(coll),
-    do: Enum.map(graphemes(coll), fn _ -> nil end)
-
-  def map(%MapSet{} = set, coll) when is_binary(coll),
-    do: Enum.map(graphemes(coll), set_pred(set))
-
-  def map(f, coll) when is_list(coll), do: Enum.map(coll, &Callable.call(f, [&1]))
-  def map(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), &Callable.call(f, [&1]))
-
-  def map(key, %MapSet{} = set) when is_atom(key),
-    do: Enum.map(set, &FlexAccess.flex_get(&1, key))
-
-  def map(%MapSet{} = pred_set, %MapSet{} = coll), do: Enum.map(coll, set_pred(pred_set))
-
-  def map(f, %MapSet{} = set), do: Enum.map(set, &Callable.call(f, [&1]))
-
-  def map(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    Enum.map(coll, fn {k, v} -> FlexAccess.flex_get([k, v], key) end)
-  end
-
-  def map(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    Enum.map(coll, fn {k, v} -> if MapSet.member?(pred_set, [k, v]), do: [k, v], else: nil end)
-  end
-
-  def map(f, coll) when is_map(coll) do
-    # When mapping over a map, each entry is passed as [key, value] pair
-    Enum.map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
-  end
-
-  def mapv(key, coll) when is_list(coll) and is_atom(key),
-    do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
-
-  def mapv(key, _coll) when is_list(key), do: vector_arg_error(key, "function or key")
-
-  def mapv(%MapSet{} = set, coll) when is_list(coll), do: Enum.map(coll, set_pred(set))
-
-  # Keyword on string: flex_get on graphemes always returns nil
-  def mapv(key, coll) when is_atom(key) and is_binary(coll),
-    do: Enum.map(graphemes(coll), fn _ -> nil end)
-
-  def mapv(%MapSet{} = set, coll) when is_binary(coll),
-    do: Enum.map(graphemes(coll), set_pred(set))
-
-  def mapv(f, coll) when is_list(coll), do: Enum.map(coll, &Callable.call(f, [&1]))
-  def mapv(f, coll) when is_binary(coll), do: Enum.map(graphemes(coll), &Callable.call(f, [&1]))
-
-  def mapv(key, %MapSet{} = set) when is_atom(key),
-    do: Enum.map(set, &FlexAccess.flex_get(&1, key))
-
-  def mapv(%MapSet{} = pred_set, %MapSet{} = coll), do: Enum.map(coll, set_pred(pred_set))
-
-  def mapv(f, %MapSet{} = set), do: Enum.map(set, &Callable.call(f, [&1]))
-
-  def mapv(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    Enum.map(coll, fn {k, v} -> FlexAccess.flex_get([k, v], key) end)
-  end
-
-  def mapv(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    Enum.map(coll, fn {k, v} -> if MapSet.member?(pred_set, [k, v]), do: [k, v], else: nil end)
-  end
-
-  def mapv(f, coll) when is_map(coll) do
-    Enum.map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
-  end
+  defp validate_step(step, name),
+    do: raise("type_error: #{name}: step must be a positive integer, got #{inspect(step)}")
 
   # ============================================================
-  # Multi-arity map: (map f coll1 coll2) and (map f coll1 coll2 coll3)
-  # Clojure semantics: f receives individual args, stops at shortest
+  # Sort operations
   # ============================================================
-
-  def map(_f, nil, _coll2), do: []
-  def map(_f, _coll1, nil), do: []
-
-  def map(f, coll1, coll2) when is_list(coll1) and is_list(coll2) do
-    Enum.zip_with(coll1, coll2, fn a, b -> Callable.call(f, [a, b]) end)
-  end
-
-  def map(f, coll1, coll2) when is_binary(coll1) and is_binary(coll2) do
-    Enum.zip_with(graphemes(coll1), graphemes(coll2), fn a, b -> Callable.call(f, [a, b]) end)
-  end
-
-  def map(_f, nil, _c2, _c3), do: []
-  def map(_f, _c1, nil, _c3), do: []
-  def map(_f, _c1, _c2, nil), do: []
-
-  def map(f, coll1, coll2, coll3)
-      when is_list(coll1) and is_list(coll2) and is_list(coll3) do
-    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
-  end
-
-  # Multi-arity mapv (identical to map since PTC-Lisp has no lazy sequences)
-
-  def mapv(_f, nil, _coll2), do: []
-  def mapv(_f, _coll1, nil), do: []
-
-  def mapv(f, coll1, coll2) when is_list(coll1) and is_list(coll2) do
-    Enum.zip_with(coll1, coll2, fn a, b -> Callable.call(f, [a, b]) end)
-  end
-
-  def mapv(f, coll1, coll2) when is_binary(coll1) and is_binary(coll2) do
-    Enum.zip_with(graphemes(coll1), graphemes(coll2), fn a, b -> Callable.call(f, [a, b]) end)
-  end
-
-  def mapv(_f, nil, _c2, _c3), do: []
-  def mapv(_f, _c1, nil, _c3), do: []
-  def mapv(_f, _c1, _c2, nil), do: []
-
-  def mapv(f, coll1, coll2, coll3)
-      when is_list(coll1) and is_list(coll2) and is_list(coll3) do
-    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
-  end
-
-  # ============================================================
-  # mapcat: map then concatenate results
-  # ============================================================
-
-  # Keyword support - extract field values and flatten
-  def mapcat(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.flat_map(coll, fn item ->
-      case FlexAccess.flex_get(item, key) do
-        nil -> []
-        val when is_list(val) -> val
-        val -> [val]
-      end
-    end)
-  end
-
-  def mapcat(f, coll) when is_list(coll) do
-    Enum.flat_map(coll, &Callable.call(f, [&1]))
-  end
-
-  def mapcat(f, coll) when is_binary(coll) do
-    Enum.flat_map(graphemes(coll), &Callable.call(f, [&1]))
-  end
-
-  def mapcat(f, %MapSet{} = set) do
-    Enum.flat_map(set, &Callable.call(f, [&1]))
-  end
-
-  def mapcat(f, coll) when is_map(coll) do
-    # When mapcatting over a map, each entry is passed as [key, value] pair
-    Enum.flat_map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
-  end
-
-  def mapcat(_f, nil), do: []
-
-  def map_indexed(f, coll) when is_list(coll) do
-    with_index_map(coll, f)
-  end
-
-  def map_indexed(f, coll) when is_binary(coll) do
-    with_index_map(graphemes(coll), f)
-  end
-
-  def map_indexed(f, %MapSet{} = set) do
-    with_index_map(set, f)
-  end
-
-  def map_indexed(f, coll) when is_map(coll) do
-    coll
-    |> Enum.with_index()
-    |> Enum.map(fn {{k, v}, idx} -> Callable.call(f, [idx, [k, v]]) end)
-  end
-
-  defp with_index_map(enumerable, f) do
-    enumerable
-    |> Enum.with_index()
-    |> Enum.map(fn {item, idx} -> Callable.call(f, [idx, item]) end)
-  end
-
-  def pluck(_key, nil), do: []
-  def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
-  def sort(coll) when is_binary(coll), do: Enum.sort(graphemes(coll))
+  def sort(coll) when is_binary(coll), do: Enum.sort(Normalize.graphemes(coll))
 
   def sort(comp, coll) when is_list(coll) do
     Enum.sort(coll, wrap_comparator(comp))
   end
 
   def sort(comp, coll) when is_binary(coll) do
-    Enum.sort(graphemes(coll), wrap_comparator(comp))
+    Enum.sort(Normalize.graphemes(coll), wrap_comparator(comp))
   end
 
   def sort_by(_keyfn, nil), do: []
@@ -546,14 +112,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def sort_by(keyfn, coll) when is_binary(coll) do
-    Enum.sort_by(graphemes(coll), &Callable.call(keyfn, [&1]))
+    Enum.sort_by(Normalize.graphemes(coll), &Callable.call(keyfn, [&1]))
   end
 
   def sort_by(keyfn, %MapSet{} = set), do: sort_by(keyfn, MapSet.to_list(set))
 
   def sort_by(keyfn, coll) when is_map(coll) and not is_struct(coll) do
-    # When sorting a map, each entry is passed as [key, value] pair
-    # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
     |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end)
     |> Enum.map(fn {k, v} -> [k, v] end)
@@ -572,15 +136,17 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def sort_by(keyfn, comp, %MapSet{} = set), do: sort_by(keyfn, comp, MapSet.to_list(set))
 
   def sort_by(keyfn, comp, coll) when is_map(coll) and not is_struct(coll) do
-    # When sorting a map with custom comparator, each entry is passed as [key, value] pair
-    # Returns a list of [key, value] pairs (not a map) to preserve sort order
     coll
     |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end, wrap_comparator(comp))
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
-  def reverse(coll) when is_binary(coll), do: Enum.reverse(graphemes(coll))
+  def reverse(coll) when is_binary(coll), do: Enum.reverse(Normalize.graphemes(coll))
+
+  # ============================================================
+  # Access operations
+  # ============================================================
 
   def first(nil), do: nil
   def first(coll) when is_list(coll), do: List.first(coll)
@@ -599,38 +165,38 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # rest - always returns list (empty list for empty/single-element collections)
   def rest(nil), do: []
   def rest(coll) when is_list(coll), do: Enum.drop(coll, 1)
-  def rest(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), 1)
+  def rest(coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), 1)
 
   # butlast - all but last element (empty list for empty/single-element collections)
   def butlast(nil), do: []
   def butlast(coll) when is_list(coll), do: Enum.drop(coll, -1)
-  def butlast(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), -1)
+  def butlast(coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), -1)
 
   # take-last - returns last n items (n <= 0 returns [])
   def take_last(_n, nil), do: []
   def take_last(n, _coll) when n <= 0, do: []
   def take_last(n, coll) when is_list(coll), do: Enum.take(coll, -n)
-  def take_last(n, coll) when is_binary(coll), do: Enum.take(graphemes(coll), -n)
+  def take_last(n, coll) when is_binary(coll), do: Enum.take(Normalize.graphemes(coll), -n)
 
   def take_last(n, coll) when is_map(coll) and not is_struct(coll),
-    do: take_last(n, to_seq_list(coll))
+    do: take_last(n, Normalize.to_seq(coll))
 
   # drop-last - removes last n items (default 1, n <= 0 returns full collection)
   def drop_last(nil), do: []
   def drop_last(coll) when is_list(coll), do: Enum.drop(coll, -1)
-  def drop_last(coll) when is_binary(coll), do: Enum.drop(graphemes(coll), -1)
+  def drop_last(coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), -1)
 
   def drop_last(coll) when is_map(coll) and not is_struct(coll),
-    do: drop_last(to_seq_list(coll))
+    do: drop_last(Normalize.to_seq(coll))
 
   def drop_last(_n, nil), do: []
   def drop_last(n, coll) when n <= 0 and is_list(coll), do: coll
-  def drop_last(n, coll) when n <= 0 and is_binary(coll), do: graphemes(coll)
+  def drop_last(n, coll) when n <= 0 and is_binary(coll), do: Normalize.graphemes(coll)
   def drop_last(n, coll) when is_list(coll), do: Enum.drop(coll, -n)
-  def drop_last(n, coll) when is_binary(coll), do: Enum.drop(graphemes(coll), -n)
+  def drop_last(n, coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), -n)
 
   def drop_last(n, coll) when is_map(coll) and not is_struct(coll),
-    do: drop_last(n, to_seq_list(coll))
+    do: drop_last(n, Normalize.to_seq(coll))
 
   # next - returns nil for empty/single-element collections
   def next(nil), do: nil
@@ -643,7 +209,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def next(coll) when is_binary(coll) do
-    case Enum.drop(graphemes(coll), 1) do
+    case Enum.drop(Normalize.graphemes(coll), 1) do
       [] -> nil
       tail -> tail
     end
@@ -655,67 +221,35 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def nfirst(coll) when is_list(coll), do: next(first(coll))
   def nnext(coll) when is_list(coll), do: next(next(coll))
 
+  # ============================================================
+  # Positional slice
+  # ============================================================
+
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
-  def take(n, coll) when is_binary(coll), do: Enum.take(graphemes(coll), n)
+  def take(n, coll) when is_binary(coll), do: Enum.take(Normalize.graphemes(coll), n)
 
   def take(n, coll) when is_map(coll) and not is_struct(coll) do
     coll |> Enum.take(n) |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
-  def drop(n, coll) when is_binary(coll), do: Enum.drop(graphemes(coll), n)
+  def drop(n, coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), n)
 
   def drop(n, coll) when is_map(coll) and not is_struct(coll) do
     coll |> Enum.drop(n) |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
-  def take_while(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.take_while(coll, truthy_key_pred(key))
-  end
-
-  def take_while(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def take_while(key, coll) when is_binary(coll) and is_atom(key) do
-    Enum.take_while(graphemes(coll), truthy_key_pred(key))
-  end
-
-  def take_while(pred, coll) when is_list(coll),
-    do: Enum.take_while(coll, &Callable.call(pred, [&1]))
-
-  def take_while(pred, coll) when is_binary(coll),
-    do: Enum.take_while(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def take_while(key, coll) when is_map(coll) and not is_struct(coll) and is_atom(key) do
-    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.take_while(truthy_key_pred(key))
-  end
-
-  def take_while(pred, coll) when is_map(coll) and not is_struct(coll) do
-    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.take_while(&Callable.call(pred, [&1]))
-  end
-
-  def drop_while(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.drop_while(coll, truthy_key_pred(key))
-  end
-
-  def drop_while(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def drop_while(pred, coll) when is_list(coll),
-    do: Enum.drop_while(coll, &Callable.call(pred, [&1]))
-
-  def drop_while(pred, coll) when is_binary(coll),
-    do: Enum.drop_while(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def drop_while(key, coll) when is_map(coll) and not is_struct(coll) and is_atom(key) do
-    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.drop_while(truthy_key_pred(key))
-  end
-
-  def drop_while(pred, coll) when is_map(coll) and not is_struct(coll) do
-    coll |> Stream.map(fn {k, v} -> [k, v] end) |> Enum.drop_while(&Callable.call(pred, [&1]))
-  end
+  # ============================================================
+  # Distinct
+  # ============================================================
 
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
-  def distinct(coll) when is_binary(coll), do: Enum.uniq(graphemes(coll))
-  def distinct(coll) when is_map(coll) and not is_struct(coll), do: to_seq_list(coll)
+  def distinct(coll) when is_binary(coll), do: Enum.uniq(Normalize.graphemes(coll))
+  def distinct(coll) when is_map(coll) and not is_struct(coll), do: Normalize.to_seq(coll)
+
+  # ============================================================
+  # Construction
+  # ============================================================
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
 
@@ -725,12 +259,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def conj(map, [k, v]) when is_map(map) and not is_struct(map), do: Map.put(map, k, v)
 
   def into(%MapSet{} = to, from) when is_map(from) and not is_struct(from) do
-    # When collecting from a map to a set, convert entries to [key, value] pairs
     Enum.into(Enum.map(from, fn {k, v} -> [k, v] end), to)
   end
 
   def into(%MapSet{} = to, from) do
-    # Handles nil from gracefully (Enum.into(nil, set) works)
     Enum.into(from || [], to)
   end
 
@@ -757,13 +289,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def into(to, from) when is_list(to) and is_map(from) do
-    # When collecting from a map, each entry is converted to [key, value] pair
-    # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists
     to ++ Enum.map(from, fn {k, v} -> [k, v] end)
   end
 
   def into(to, from) when is_list(to) do
-    # Use ++ instead of Enum.into to avoid deprecation warning for non-empty lists
     to ++ Enum.to_list(from || [])
   end
 
@@ -776,7 +305,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def flatten(coll) when is_list(coll), do: List.flatten(coll)
 
   def zip(c1, c2) when is_list(c1) and is_list(c2) do
-    # Return vectors [a, b] instead of tuples {a, b} for consistency with PTC-Lisp data model
     Enum.zip_with(c1, c2, fn a, b -> [a, b] end)
   end
 
@@ -808,52 +336,51 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def interpose(sep, coll) when is_list(coll), do: Enum.intersperse(coll, sep)
 
   # ============================================================
-  # partition: chunk collection into groups
+  # Partition
   # ============================================================
 
-  # partition with 2 args: (partition n coll) - chunks of n, discards incomplete
   def partition(n, coll) do
     validate_n(n, "partition")
-    Enum.chunk_every(to_seq_list(coll), n, n, :discard)
+    Enum.chunk_every(Normalize.to_seq(coll), n, n, :discard)
   end
 
-  # partition with 3 args: (partition n step coll) - sliding window
   def partition(n, step, coll) do
     validate_n(n, "partition")
     validate_step(step, "partition")
-    Enum.chunk_every(to_seq_list(coll), n, step, :discard)
+    Enum.chunk_every(Normalize.to_seq(coll), n, step, :discard)
   end
 
-  # partition with 4 args: (partition n step pad coll) - with padding
   def partition(n, step, pad, coll) do
     validate_n(n, "partition")
     validate_step(step, "partition")
-    Enum.chunk_every(to_seq_list(coll), n, step, pad)
+    Enum.chunk_every(Normalize.to_seq(coll), n, step, pad)
   end
 
   # ============================================================
-  # partition-all: like partition but keeps incomplete final chunk
+  # Partition-all
   # ============================================================
 
   def partition_all(n, coll) do
     validate_n(n, "partition-all")
-    Enum.chunk_every(to_seq_list(coll), n)
+    Enum.chunk_every(Normalize.to_seq(coll), n)
   end
 
   def partition_all(n, step, coll) do
     validate_n(n, "partition-all")
     validate_step(step, "partition-all")
-    Enum.chunk_every(to_seq_list(coll), n, step)
+    Enum.chunk_every(Normalize.to_seq(coll), n, step)
   end
 
-  def count(%MapSet{} = set), do: MapSet.size(set)
+  # ============================================================
+  # Count / Empty
+  # ============================================================
 
+  def count(%MapSet{} = set), do: MapSet.size(set)
   def count(coll) when is_binary(coll), do: String.length(coll)
   def count(coll) when is_list(coll) or is_map(coll), do: Enum.count(coll)
 
   def empty?(nil), do: true
   def empty?(%MapSet{} = set), do: MapSet.size(set) == 0
-
   def empty?(coll) when is_binary(coll), do: coll == ""
   def empty?(coll) when is_list(coll) or is_map(coll), do: Enum.empty?(coll)
 
@@ -871,7 +398,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def seq(s) when is_binary(s) do
     case s do
       "" -> nil
-      _ -> graphemes(s)
+      _ -> Normalize.graphemes(s)
     end
   end
 
@@ -891,8 +418,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def seq(nil), do: nil
 
+  # ============================================================
+  # Reduce
+  # ============================================================
+
   # reduce with 2 args: (reduce f coll) - uses first element as initial value
-  # Clojure: (f acc elem), Elixir: fn elem, acc -> ... end
   def reduce(f, coll) when is_list(coll) do
     case coll do
       [] -> nil
@@ -918,14 +448,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def reduce(f, coll) when is_binary(coll) do
-    case graphemes(coll) do
+    case Normalize.graphemes(coll) do
       [] -> nil
       [h | t] -> Enum.reduce(t, h, fn elem, acc -> Callable.call(f, [acc, elem]) end)
     end
   end
 
   # reduce with 3 args: (reduce f init coll)
-  # Clojure: (f acc elem), Elixir: fn elem, acc -> ... end
   def reduce(f, init, coll) when is_list(coll) do
     Enum.reduce(coll, init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
@@ -939,17 +468,19 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   def reduce(f, init, coll) when is_binary(coll) do
-    Enum.reduce(graphemes(coll), init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
+    Enum.reduce(Normalize.graphemes(coll), init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
 
-  # sum: sum of numbers in collection
+  # ============================================================
+  # Aggregation
+  # ============================================================
+
   def sum(coll) when is_list(coll) do
     coll |> Enum.reject(&is_nil/1) |> Enum.sum()
   end
 
   def sum(nil), do: 0
 
-  # avg: average of numbers in collection
   def avg(coll) when is_list(coll) do
     values = Enum.reject(coll, &is_nil/1)
 
@@ -988,7 +519,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def sum_by(key, %MapSet{} = set), do: sum_by(key, MapSet.to_list(set))
 
   def sum_by(key, coll) when is_map(coll) and not is_struct(coll),
-    do: sum_by(key, to_seq_list(coll))
+    do: sum_by(key, Normalize.to_seq(coll))
 
   def sum_by(_key, nil), do: 0
 
@@ -1025,7 +556,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def avg_by(key, %MapSet{} = set), do: avg_by(key, MapSet.to_list(set))
 
   def avg_by(key, coll) when is_map(coll) and not is_struct(coll),
-    do: avg_by(key, to_seq_list(coll))
+    do: avg_by(key, Normalize.to_seq(coll))
 
   def avg_by(_key, nil), do: nil
 
@@ -1056,7 +587,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def min_by(key, %MapSet{} = set), do: min_by(key, MapSet.to_list(set))
 
   def min_by(key, coll) when is_map(coll) and not is_struct(coll),
-    do: min_by(key, to_seq_list(coll))
+    do: min_by(key, Normalize.to_seq(coll))
 
   def min_by(_key, nil), do: nil
 
@@ -1087,7 +618,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def max_by(key, %MapSet{} = set), do: max_by(key, MapSet.to_list(set))
 
   def max_by(key, coll) when is_map(coll) and not is_struct(coll),
-    do: max_by(key, to_seq_list(coll))
+    do: max_by(key, Normalize.to_seq(coll))
 
   def max_by(_key, nil), do: nil
 
@@ -1109,7 +640,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def distinct_by(key, %MapSet{} = set), do: distinct_by(key, MapSet.to_list(set))
 
   def distinct_by(key, coll) when is_map(coll) and not is_struct(coll),
-    do: distinct_by(key, to_seq_list(coll))
+    do: distinct_by(key, Normalize.to_seq(coll))
 
   def distinct_by(_key, nil), do: []
 
@@ -1125,7 +656,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise ArgumentError, "max-key requires at least 2 arguments (function and one value)"
   end
 
-  # Single value → return directly without calling f (Clojure behavior)
   def max_key_variadic([_f, x]), do: x
 
   def max_key_variadic([f | args]) when args != [] do
@@ -1144,7 +674,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise ArgumentError, "min-key requires at least 2 arguments (function and one value)"
   end
 
-  # Single value → return directly without calling f (Clojure behavior)
   def min_key_variadic([_f, x]), do: x
 
   def min_key_variadic([f | args]) when args != [] do
@@ -1201,113 +730,20 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def group_by(key, %MapSet{} = set), do: group_by(key, MapSet.to_list(set))
 
   def group_by(key, coll) when is_map(coll) and not is_struct(coll),
-    do: group_by(key, to_seq_list(coll))
+    do: group_by(key, Normalize.to_seq(coll))
 
   def group_by(_key, nil), do: %{}
 
   def frequencies(coll) when is_list(coll), do: Enum.frequencies(coll)
-  def frequencies(coll) when is_binary(coll), do: Enum.frequencies(graphemes(coll))
+  def frequencies(coll) when is_binary(coll), do: Enum.frequencies(Normalize.graphemes(coll))
 
-  def some(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.find_value(coll, value_key_pred(key))
-  end
-
-  def some(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def some(%MapSet{} = set, coll) when is_list(coll) do
-    Enum.find_value(coll, set_pred(set))
-  end
-
-  def some(key, %MapSet{} = set) when is_atom(key) do
-    Enum.find_value(set, value_key_pred(key))
-  end
-
-  def some(%MapSet{} = pred_set, %MapSet{} = coll) do
-    Enum.find_value(coll, fn item -> if MapSet.member?(pred_set, item), do: item end)
-  end
-
-  def some(pred, %MapSet{} = set), do: Enum.find_value(set, &Callable.call(pred, [&1]))
-  def some(pred, coll) when is_list(coll), do: Enum.find_value(coll, &Callable.call(pred, [&1]))
-
-  def some(pred, coll) when is_binary(coll),
-    do: Enum.find_value(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def some(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    Enum.find_value(coll, fn {k, v} -> FlexAccess.flex_get([k, v], key) end)
-  end
-
-  def some(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    Enum.find_value(coll, fn {k, v} -> if MapSet.member?(pred_set, [k, v]), do: [k, v] end)
-  end
-
-  def every?(key, coll) when is_list(coll) and is_atom(key) do
-    Enum.all?(coll, truthy_key_pred(key))
-  end
-
-  def every?(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def every?(%MapSet{} = set, coll) when is_list(coll) do
-    Enum.all?(coll, set_pred(set))
-  end
-
-  def every?(key, %MapSet{} = set) when is_atom(key) do
-    Enum.all?(set, truthy_key_pred(key))
-  end
-
-  def every?(%MapSet{} = pred_set, %MapSet{} = coll) do
-    Enum.all?(coll, fn item -> MapSet.member?(pred_set, item) end)
-  end
-
-  def every?(pred, %MapSet{} = set), do: Enum.all?(set, &Callable.call(pred, [&1]))
-  def every?(pred, coll) when is_list(coll), do: Enum.all?(coll, &Callable.call(pred, [&1]))
-
-  def every?(pred, coll) when is_binary(coll),
-    do: Enum.all?(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def every?(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    Enum.all?(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
-  end
-
-  def every?(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    Enum.all?(coll, fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
-  end
-
-  def not_any?(key, coll) when is_list(coll) and is_atom(key) do
-    not Enum.any?(coll, truthy_key_pred(key))
-  end
-
-  def not_any?(key, _coll) when is_list(key), do: vector_arg_error(key, "predicate")
-
-  def not_any?(%MapSet{} = set, coll) when is_list(coll) do
-    not Enum.any?(coll, set_pred(set))
-  end
-
-  def not_any?(key, %MapSet{} = set) when is_atom(key) do
-    not Enum.any?(set, truthy_key_pred(key))
-  end
-
-  def not_any?(%MapSet{} = pred_set, %MapSet{} = coll) do
-    not Enum.any?(coll, fn item -> MapSet.member?(pred_set, item) end)
-  end
-
-  def not_any?(pred, %MapSet{} = set), do: not Enum.any?(set, &Callable.call(pred, [&1]))
-  def not_any?(pred, coll) when is_list(coll), do: not Enum.any?(coll, &Callable.call(pred, [&1]))
-
-  def not_any?(pred, coll) when is_binary(coll),
-    do: not Enum.any?(graphemes(coll), &Callable.call(pred, [&1]))
-
-  def not_any?(key, coll) when is_atom(key) and is_map(coll) and not is_struct(coll) do
-    not Enum.any?(coll, fn {k, v} -> !!FlexAccess.flex_get([k, v], key) end)
-  end
-
-  def not_any?(%MapSet{} = pred_set, coll) when is_map(coll) and not is_struct(coll) do
-    not Enum.any?(coll, fn {k, v} -> MapSet.member?(pred_set, [k, v]) end)
-  end
+  # ============================================================
+  # Membership
+  # ============================================================
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 
   def contains?(coll, key) when is_map(coll) do
-    # Check both atom and string versions of the key
     cond do
       Map.has_key?(coll, key) -> true
       is_atom(key) -> Map.has_key?(coll, to_string(key))
@@ -1320,7 +756,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def contains?(coll, val) when is_list(coll), do: val in coll
 
-  # Range implementation
+  # ============================================================
+  # Range
+  # ============================================================
+
   def range(end_val), do: range(0, end_val, 1)
   def range(start, end_val), do: range(start, end_val, 1)
 
@@ -1480,13 +919,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       [1, 2, 3]
   """
   def tree_seq(branch?, children, root) do
-    # Convert atoms to functions that do map access
     branch_fn = to_callable(branch?)
     children_fn = to_callable(children)
     tree_seq_acc(branch_fn, children_fn, root, []) |> Enum.reverse()
   end
 
-  # Convert an atom (keyword) to a function that accesses that key
   defp to_callable(key) when is_atom(key), do: fn item -> FlexAccess.flex_get(item, key) end
   defp to_callable(f), do: f
 
@@ -1501,7 +938,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
-  # Call a function (either a plain function or a Callable)
   defp call_fn(f, arg) when is_function(f, 1), do: f.(arg)
   defp call_fn(f, arg), do: Callable.call(f, [arg])
 end

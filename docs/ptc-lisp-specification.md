@@ -1475,8 +1475,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (keep (fn [x] (when (> x 2) (* x x))) [1 2 3 4 5])
 ;; => [9 16 25]
 
-;; keep over map entries
-(keep (fn [[k v]] (when (> v 1) k)) {:a 1 :b 2 :c 3})
+;; keep over map entries (sorted - map iteration order varies)
+(sort (keep (fn [[k v]] (when (> v 1) k)) {:a 1 :b 2 :c 3}))
 ;; => [:b :c]
 ```
 
