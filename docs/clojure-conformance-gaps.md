@@ -25,23 +25,12 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 | Field | Value |
 |-------|-------|
 | **Priority** | P0 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `core-test` line 81, `do-and-or-test` line 1812 |
 
 **Clojure behavior:** `and` returns the last truthy value or the first falsey value. `or` returns the first truthy value or the last falsey value.
 
-```clojure
-;; Clojure
-(and true true 0)   ;=> 0
-(and 1)             ;=> 1
-(and 1 nil)         ;=> nil
-
-;; PTC-Lisp (incorrect)
-(and true true 0)   ;=> true
-(and 1)             ;=> true
-```
-
-**Impact:** Breaks idiomatic patterns like `(and (get m :key) (process it))` and `(or val (compute-default))` where the return value matters.
+**Fix:** `do_eval_and` now tracks the last evaluated truthy value and returns it when the expression list is exhausted, matching Clojure semantics. `or` was already correct.
 
 ### GAP-S02: `#()` wrapping a `defn` call returns closure instead of invoking
 

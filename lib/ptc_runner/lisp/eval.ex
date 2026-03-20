@@ -235,7 +235,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Short-circuit logic: and
   defp do_eval({:and, exprs}, %EvalContext{} = eval_ctx) do
-    do_eval_and(exprs, eval_ctx)
+    do_eval_and(exprs, true, eval_ctx)
   end
 
   # Short-circuit logic: or
@@ -1031,12 +1031,13 @@ defmodule PtcRunner.Lisp.Eval do
   # Short-circuit logic helpers
   # ============================================================
 
-  defp do_eval_and([], %EvalContext{} = eval_ctx), do: {:ok, true, eval_ctx}
+  defp do_eval_and([], last_value, %EvalContext{} = eval_ctx),
+    do: {:ok, last_value, eval_ctx}
 
-  defp do_eval_and([e | rest], %EvalContext{} = eval_ctx) do
+  defp do_eval_and([e | rest], _last_value, %EvalContext{} = eval_ctx) do
     with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
       if Where.truthy?(value) do
-        do_eval_and(rest, eval_ctx2)
+        do_eval_and(rest, value, eval_ctx2)
       else
         # Short-circuit: return falsy value
         {:ok, value, eval_ctx2}
