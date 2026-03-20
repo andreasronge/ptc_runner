@@ -71,18 +71,10 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `fn-test` line 206 |
 
-```clojure
-;; Clojure
-((fn [x & [y]] y) 1 2 3)   ;=> 2
-
-;; PTC-Lisp
-((fn [x & [y]] y) 1 2 3)   ;=> error
-```
-
-The `& [y]` pattern destructures the rest args as a vector. Less common than plain `& xs` but used in Clojure code.
+**Fix:** Already working — rest args with vector destructuring (`[& [y]]`) are handled correctly by the existing variadic binding + pattern matching logic.
 
 ---
 
@@ -175,18 +167,10 @@ Destructuring with `:strs` binds string keys to local variables. Less common tha
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `defn-kwargs-test` line 303 |
 
-```clojure
-;; Clojure
-(defn foo [& {:keys [a]}] {:a a}) (foo :a 1)   ;=> {:a 1}
-
-;; PTC-Lisp
-;; error: destructure_error: expected map or nil, got [:a, 1]
-```
-
-Clojure auto-coerces rest args to a map when the destructuring pattern is a map. This enables keyword-argument style calling.
+**Fix:** Added coercion in `bind_args/2` that converts rest args from a flat key-value list to a map when the rest pattern is a map destructuring form (`{:keys ...}` or `{:map ...}`).
 
 ---
 
