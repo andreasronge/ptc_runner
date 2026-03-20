@@ -19,6 +19,28 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
 
+  # Special form names that can be shadowed by local bindings.
+  # These correspond to Clojure macros (not true special forms like if/def/recur/do).
+  @shadowable_forms MapSet.new([
+                      :fn,
+                      :defn,
+                      :let,
+                      :loop,
+                      :when,
+                      :"when-not",
+                      :"if-not",
+                      :"if-let",
+                      :"when-let",
+                      :cond,
+                      :and,
+                      :or,
+                      :->,
+                      :"->>",
+                      :comment,
+                      :doseq,
+                      :for
+                    ])
+
   @type error_reason ::
           {:invalid_form, String.t()}
           | {:invalid_arity, atom(), String.t()}
@@ -116,6 +138,10 @@ defmodule PtcRunner.Lisp.Analyze do
       {:ok, {:var, name}}
     end
   end
+
+  # Shadowed local: a symbol that was pre-marked because it shadows a special form name.
+  # Treated as a plain variable reference so dispatch_list_form won't match it as a special form.
+  defp do_analyze({:shadowed_local, name}, _tail?), do: {:ok, {:var, name}}
 
   # Var reader syntax: #'name produces {:var, name} from the parser
   defp do_analyze({:var, name}, _tail?) when is_atom(name), do: {:ok, {:var, name}}
@@ -267,9 +293,12 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_let([bindings_ast, first_body | rest_body], tail?) do
     body_asts = [first_body | rest_body]
 
-    with {:ok, bindings} <- analyze_bindings(bindings_ast),
-         {:ok, body} <- wrap_body(body_asts, tail?) do
-      {:ok, {:let, bindings, body}}
+    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
+      body_asts = mark_shadowed_asts(body_asts, shadowed)
+
+      with {:ok, body} <- wrap_body(body_asts, tail?) do
+        {:ok, {:let, bindings, body}}
+      end
     end
   end
 
@@ -283,17 +312,21 @@ defmodule PtcRunner.Lisp.Analyze do
     else
       elems
       |> Enum.chunk_every(2)
-      |> Enum.reduce_while({:ok, []}, fn [pattern_ast, value_ast], {:ok, acc} ->
+      |> Enum.reduce_while({:ok, [], MapSet.new()}, fn [pattern_ast, value_ast],
+                                                       {:ok, acc, shadowed} ->
+        marked_value = mark_shadowed_calls(value_ast, shadowed)
+
         with {:ok, pattern} <- analyze_pattern(pattern_ast),
-             {:ok, value} <- do_analyze(value_ast, false) do
-          {:cont, {:ok, [{:binding, pattern, value} | acc]}}
+             {:ok, value} <- do_analyze(marked_value, false) do
+          new_shadows = MapSet.union(shadowed, compute_shadowed_names(pattern))
+          {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
       |> case do
-        {:ok, rev} -> {:ok, Enum.reverse(rev)}
-        other -> other
+        {:ok, rev, shadows} -> {:ok, Enum.reverse(rev), shadows}
+        {:error, _} = err -> err
       end
     end
   end
@@ -309,9 +342,12 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_loop([bindings_ast, first_body | rest_body], _tail?) do
     body_asts = [first_body | rest_body]
 
-    with {:ok, bindings} <- analyze_bindings(bindings_ast),
-         {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:loop, bindings, body}}
+    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
+      body_asts = mark_shadowed_asts(body_asts, shadowed)
+
+      with {:ok, body} <- wrap_body(body_asts, true) do
+        {:ok, {:loop, bindings, body}}
+      end
     end
   end
 
@@ -383,9 +419,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_fn([{:symbol, name}, params_ast, first_body | rest_body]) when is_atom(name) do
     body_asts = [first_body | rest_body]
 
-    with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:fn, name, params, body}}
+    with {:ok, params} <- analyze_fn_params(params_ast) do
+      shadowed = compute_shadowed_names(params)
+      body_asts = mark_shadowed_asts(body_asts, shadowed)
+
+      with {:ok, body} <- wrap_body(body_asts, true) do
+        {:ok, {:fn, name, params, body}}
+      end
     end
   end
 
@@ -393,9 +433,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_fn([params_ast, first_body | rest_body]) do
     body_asts = [first_body | rest_body]
 
-    with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:fn, params, body}}
+    with {:ok, params} <- analyze_fn_params(params_ast) do
+      shadowed = compute_shadowed_names(params)
+      body_asts = mark_shadowed_asts(body_asts, shadowed)
+
+      with {:ok, body} <- wrap_body(body_asts, true) do
+        {:ok, {:fn, params, body}}
+      end
     end
   end
 
@@ -701,8 +745,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_defonce(args, _tail?),
     do: Definitions.analyze_defonce(args, &analyze_value/1)
 
-  defp analyze_defn(args, _tail?),
-    do: Definitions.analyze_defn(args, &analyze_fn_params/1, &wrap_body/2)
+  defp analyze_defn(args, _tail?) do
+    Definitions.analyze_defn(args, &analyze_fn_params/1, fn body_asts, tail?, params ->
+      shadowed = compute_shadowed_names(params)
+      body_asts = mark_shadowed_asts(body_asts, shadowed)
+      wrap_body(body_asts, tail?)
+    end)
+  end
 
   defp analyze_value(ast), do: do_analyze(ast, false)
 
@@ -830,4 +879,100 @@ defmodule PtcRunner.Lisp.Analyze do
       _ -> false
     end
   end
+
+  # ============================================================
+  # Local shadowing of special form names (GAP-S06)
+  # ============================================================
+
+  # Compute the set of special form names that are shadowed by fn params
+  # (list of patterns or {:variadic, ...} tuple from analyze_fn_params).
+  defp compute_shadowed_names(params) when is_list(params) do
+    params |> param_names() |> MapSet.new() |> MapSet.intersection(@shadowable_forms)
+  end
+
+  defp compute_shadowed_names({:variadic, _, _} = params) do
+    params |> param_names() |> MapSet.new() |> MapSet.intersection(@shadowable_forms)
+  end
+
+  # Compute shadowed names from a single analyzed pattern (for let/loop bindings).
+  defp compute_shadowed_names(pattern) do
+    pattern |> pattern_names() |> MapSet.new() |> MapSet.intersection(@shadowable_forms)
+  end
+
+  # Extract names bound by fn params (analyzed CoreAST form).
+  defp param_names(params) when is_list(params), do: Enum.flat_map(params, &pattern_names/1)
+
+  defp param_names({:variadic, leading, rest_pattern}) do
+    Enum.flat_map(leading, &pattern_names/1) ++ pattern_names(rest_pattern)
+  end
+
+  # Extract variable names from a single analyzed pattern.
+  defp pattern_names({:var, name}), do: [name]
+  defp pattern_names({:destructure, {:keys, keys, _defaults}}), do: keys
+
+  defp pattern_names({:destructure, {:map, keys, renames, _defaults}}) do
+    keys ++
+      Enum.flat_map(renames, fn {target_pattern, _source_key} -> pattern_names(target_pattern) end)
+  end
+
+  defp pattern_names({:destructure, {:as, name, inner}}), do: [name | pattern_names(inner)]
+
+  defp pattern_names({:destructure, {:seq, patterns}}),
+    do: Enum.flat_map(patterns, &pattern_names/1)
+
+  defp pattern_names({:destructure, {:seq_rest, leading, rest}}) do
+    Enum.flat_map(leading, &pattern_names/1) ++ pattern_names(rest)
+  end
+
+  defp pattern_names(_), do: []
+
+  # Mark a list of RawAST forms with shadowed calls.
+  defp mark_shadowed_asts(asts, shadowed) when is_list(asts) do
+    if Enum.empty?(shadowed),
+      do: asts,
+      else: Enum.map(asts, &do_mark_shadowed(&1, shadowed))
+  end
+
+  # Pre-transform RawAST to replace shadowed special form names in call position
+  # with {:shadowed_local, name} so dispatch_list_form treats them as function calls.
+  defp mark_shadowed_calls(ast, shadowed) do
+    if Enum.empty?(shadowed), do: ast, else: do_mark_shadowed(ast, shadowed)
+  end
+
+  defp do_mark_shadowed({:list, [{:symbol, name} | rest]}, shadowed) do
+    if MapSet.member?(shadowed, name) do
+      {:list, [{:shadowed_local, name} | Enum.map(rest, &do_mark_shadowed(&1, shadowed))]}
+    else
+      {:list, [{:symbol, name} | Enum.map(rest, &do_mark_shadowed(&1, shadowed))]}
+    end
+  end
+
+  defp do_mark_shadowed({:list, elems}, shadowed) do
+    {:list, Enum.map(elems, &do_mark_shadowed(&1, shadowed))}
+  end
+
+  defp do_mark_shadowed({:vector, elems}, shadowed) do
+    {:vector, Enum.map(elems, &do_mark_shadowed(&1, shadowed))}
+  end
+
+  defp do_mark_shadowed({:map, pairs}, shadowed) do
+    {:map,
+     Enum.map(pairs, fn {k, v} ->
+       {do_mark_shadowed(k, shadowed), do_mark_shadowed(v, shadowed)}
+     end)}
+  end
+
+  defp do_mark_shadowed({:set, elems}, shadowed) do
+    {:set, Enum.map(elems, &do_mark_shadowed(&1, shadowed))}
+  end
+
+  defp do_mark_shadowed({:short_fn, body}, shadowed) do
+    {:short_fn, Enum.map(body, &do_mark_shadowed(&1, shadowed))}
+  end
+
+  defp do_mark_shadowed({:program, exprs}, shadowed) do
+    {:program, Enum.map(exprs, &do_mark_shadowed(&1, shadowed))}
+  end
+
+  defp do_mark_shadowed(other, _shadowed), do: other
 end

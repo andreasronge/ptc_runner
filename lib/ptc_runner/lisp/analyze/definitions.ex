@@ -39,7 +39,7 @@ defmodule PtcRunner.Lisp.Analyze.Definitions do
     body_asts = [first_body | rest_body]
 
     with {:ok, params} <- analyze_fn_params_fn.(params_ast),
-         {:ok, body} <- wrap_body_fn.(body_asts, true) do
+         {:ok, body} <- wrap_body_fn.(body_asts, true, params) do
       {:ok, {:def, name, {:fn, params, body}, %{docstring: docstring}}}
     end
   end
@@ -53,7 +53,7 @@ defmodule PtcRunner.Lisp.Analyze.Definitions do
     body_asts = [first_body | rest_body]
 
     with {:ok, params} <- analyze_fn_params_fn.(params_ast),
-         {:ok, body} <- wrap_body_fn.(body_asts, true) do
+         {:ok, body} <- wrap_body_fn.(body_asts, true, params) do
       {:ok, {:def, name, {:fn, params, body}, %{}}}
     end
   end
