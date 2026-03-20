@@ -11,10 +11,9 @@ end
 # Build exclusion list based on tags
 # - :skip tests are temporarily disabled (must reference a GH issue)
 # - :e2e tests require API keys and are excluded by default
-# - :clojure tests run if Babashka is installed, can be excluded with --exclude clojure
-exclusions = [:skip, :e2e]
+# - :clojure tests require Babashka and are excluded by default, run with --include clojure
+exclusions = [:skip, :e2e, :clojure]
 
-# Check if user explicitly wants to skip clojure tests
-# This allows: mix test --exclude clojure
+# Run clojure conformance tests: mix test --include clojure
 ExUnit.configure(exclude: exclusions)
 ExUnit.start()
