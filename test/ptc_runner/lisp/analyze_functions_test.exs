@@ -228,5 +228,34 @@ defmodule PtcRunner.Lisp.AnalyzeFunctionsTest do
       raw = {:list, [{:symbol, :+}, {:symbol, :%}, 1]}
       assert {:error, {:invalid_placeholder, :%}} = Analyze.analyze(raw)
     end
+
+    test "#(do %&) desugars to variadic fn with rest" do
+      raw = {:short_fn, [{:symbol, :do}, {:symbol, :"%&"}]}
+
+      assert {:ok, {:fn, {:variadic, [], {:var, :rest}}, {:do, [{:var, :rest}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "#(vector %1 %&) desugars to variadic fn with leading param and rest" do
+      raw = {:short_fn, [{:symbol, :vector}, {:symbol, :"%1"}, {:symbol, :"%&"}]}
+
+      assert {:ok,
+              {:fn, {:variadic, [{:var, :p1}], {:var, :rest}},
+               {:call, {:var, :vector}, [{:var, :p1}, {:var, :rest}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "#(count %&) with only rest arg" do
+      raw = {:short_fn, [{:symbol, :count}, {:symbol, :"%&"}]}
+
+      assert {:ok,
+              {:fn, {:variadic, [], {:var, :rest}}, {:call, {:var, :count}, [{:var, :rest}]}}} =
+               Analyze.analyze(raw)
+    end
+
+    test "%& outside #() returns error" do
+      raw = {:symbol, :"%&"}
+      assert {:error, {:invalid_placeholder, :"%&"}} = Analyze.analyze(raw)
+    end
   end
 end
