@@ -889,14 +889,7 @@ defmodule PtcRunner.Lisp do
     {errors, _final_scope} =
       Enum.reduce(exprs, {[], scope}, fn expr, {errs, sc} ->
         new_errs = collect_undefined_vars(expr, sc)
-
-        new_sc =
-          case expr do
-            {:def, name, _value, _meta} -> MapSet.put(sc, name)
-            {:defonce, name, _value, _opts} -> MapSet.put(sc, name)
-            _ -> sc
-          end
-
+        new_sc = Enum.reduce(extract_def_names(expr), sc, &MapSet.put(&2, &1))
         {errs ++ new_errs, new_sc}
       end)
 
@@ -996,6 +989,26 @@ defmodule PtcRunner.Lisp do
     Logger.debug("collect_undefined_vars: unhandled node #{inspect(other, limit: 3)}")
     []
   end
+
+  # Extract def/defonce names from definite-execution contexts only.
+  # Used to propagate top-level vars across program expressions in {:do, ...}.
+  # Only recurses into forms guaranteed to execute: do, let, loop.
+  # Does NOT recurse into conditional (if, and, or) or deferred (fn) forms.
+  defp extract_def_names({:def, name, _value, _meta}), do: [name]
+  defp extract_def_names({:defonce, name, _value, _meta}), do: [name]
+  defp extract_def_names({:do, exprs}), do: Enum.flat_map(exprs, &extract_def_names/1)
+
+  defp extract_def_names({:let, bindings, body}) do
+    Enum.flat_map(bindings, fn {:binding, _pat, value} -> extract_def_names(value) end) ++
+      extract_def_names(body)
+  end
+
+  defp extract_def_names({:loop, bindings, body}) do
+    Enum.flat_map(bindings, fn {:binding, _pat, value} -> extract_def_names(value) end) ++
+      extract_def_names(body)
+  end
+
+  defp extract_def_names(_), do: []
 
   # Extract variable names from fn params
   defp fn_param_vars(params) when is_list(params) do

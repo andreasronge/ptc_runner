@@ -47,18 +47,10 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `closure-test` line 185 |
 
-```clojure
-;; Clojure
-(let [x 1] (defn foo [] x)) (foo)   ;=> 1
-
-;; PTC-Lisp
-(let [x 1] (defn foo [] x)) (foo)   ;=> error: Undefined variable: foo
-```
-
-`defn` inside a `let` should register the var at the top-level scope (it creates a global var in Clojure). The second program expression `(foo)` cannot see it.
+**Fix:** Static analysis (`collect_undefined_vars`) now uses `extract_def_names/1` to find `def`/`defonce` names inside definite-execution contexts (`let`, `do`, `loop`), propagating them to subsequent program expressions. Runtime eval already handled this correctly.
 
 ---
 
