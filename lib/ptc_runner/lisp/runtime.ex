@@ -74,6 +74,13 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate take_while(pred, coll), to: Collection
   defdelegate drop_while(pred, coll), to: Collection
   defdelegate distinct(coll), to: Collection
+  defdelegate cons(x, coll), to: Collection
+  defdelegate empty(coll), to: Collection
+  defdelegate peek(coll), to: Collection
+  defdelegate pop(coll), to: Collection
+  defdelegate subvec(coll, start), to: Collection
+  defdelegate subvec(coll, start, end_idx), to: Collection
+  defdelegate filterv(pred, coll), to: Collection
   defdelegate concat2(a, b), to: Collection
   defdelegate conj(coll, x), to: Collection
   defdelegate into(to, from), to: Collection
@@ -145,6 +152,11 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate val(entry), to: MapOps
   defdelegate entries(m), to: MapOps
   defdelegate update_vals(m, f), to: MapOps
+  defdelegate update_keys(m, f), to: MapOps
+  defdelegate disj(set, x), to: MapOps
+  defdelegate merge_with_variadic(args), to: MapOps
+  defdelegate reduce_kv(f, init, m), to: MapOps
+  defdelegate zipmap(keys, vals), to: MapOps
 
   # ============================================================
   # Arithmetic

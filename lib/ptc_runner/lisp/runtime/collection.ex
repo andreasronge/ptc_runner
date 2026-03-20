@@ -253,6 +253,23 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def concat2(a, b), do: Enum.concat(a || [], b || [])
 
+  @doc """
+  Returns a new seq with item prepended.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.cons(1, [2, 3])
+      [1, 2, 3]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.cons(1, nil)
+      [1]
+  """
+  def cons(x, nil), do: [x]
+  def cons(x, coll) when is_list(coll), do: [x | coll]
+  def cons(x, %MapSet{} = set), do: [x | MapSet.to_list(set)]
+  def cons(x, coll) when is_map(coll), do: [x | Enum.map(coll, fn {k, v} -> [k, v] end)]
+  def cons(x, coll) when is_binary(coll), do: [x | Normalize.graphemes(coll)]
+
   def conj(nil, x), do: [x]
   def conj(list, x) when is_list(list), do: list ++ [x]
   def conj(%MapSet{} = set, x), do: MapSet.put(set, x)
@@ -372,7 +389,92 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   # ============================================================
-  # Count / Empty
+  # Empty / Peek / Pop / Subvec
+  # ============================================================
+
+  @doc """
+  Returns an empty collection of the same type, or nil for nil input.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.empty([1, 2, 3])
+      []
+
+      iex> PtcRunner.Lisp.Runtime.Collection.empty(%{a: 1})
+      %{}
+  """
+  def empty(nil), do: nil
+  def empty(coll) when is_list(coll), do: []
+  def empty(%MapSet{}), do: MapSet.new()
+  def empty(coll) when is_map(coll), do: %{}
+  def empty(coll) when is_binary(coll), do: ""
+
+  @doc """
+  Returns the last element of a vector without removing it.
+  Returns nil for nil or empty collections.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.peek([1, 2, 3])
+      3
+
+      iex> PtcRunner.Lisp.Runtime.Collection.peek([])
+      nil
+  """
+  def peek(nil), do: nil
+  def peek([]), do: nil
+  def peek(coll) when is_list(coll), do: List.last(coll)
+
+  @doc """
+  Returns the collection without the last element.
+  Returns nil for nil. Returns nil for empty collections.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.pop([1, 2, 3])
+      [1, 2]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.pop([])
+      nil
+  """
+  def pop(nil), do: nil
+  def pop([]), do: nil
+  def pop([_]), do: []
+  def pop(coll) when is_list(coll), do: Enum.slice(coll, 0..(length(coll) - 2)//1)
+
+  @doc """
+  Returns a subvector from start (inclusive) to end (exclusive).
+  Clamps indices to valid range.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.subvec([0, 1, 2, 3, 4], 1, 3)
+      [1, 2]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.subvec([0, 1, 2, 3, 4], 2)
+      [2, 3, 4]
+  """
+  def subvec(coll, start) when is_list(coll) and is_integer(start) do
+    subvec(coll, start, length(coll))
+  end
+
+  def subvec(coll, start, end_idx)
+      when is_list(coll) and is_integer(start) and is_integer(end_idx) do
+    len = length(coll)
+    s = start |> max(0) |> min(len)
+    e = end_idx |> max(0) |> min(len)
+
+    if s >= e, do: [], else: Enum.slice(coll, s..(e - 1)//1)
+  end
+
+  @doc """
+  Like filter but always returns a vector. In PTC-Lisp, this is
+  equivalent to filter since all sequences are vectors.
+  """
+  def filterv(pred, coll), do: Select.filter(pred, coll)
+
+  # ============================================================
+  # Count
   # ============================================================
 
   def count(%MapSet{} = set), do: MapSet.size(set)

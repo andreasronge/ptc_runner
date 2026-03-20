@@ -154,7 +154,7 @@ defmodule PtcRunner.Lisp.Env do
   end
 
   def builtins_by_category(:set) do
-    [:set, :set?, :vec, :vector, :contains?, :intersection, :union, :difference]
+    [:set, :set?, :vec, :vector, :contains?, :intersection, :union, :difference, :disj]
   end
 
   def builtins_by_category(:regex) do
@@ -258,6 +258,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"drop-last", {:multi_arity, :"drop-last", {&Runtime.drop_last/1, &Runtime.drop_last/2}}},
       {:distinct, {:normal, &Runtime.distinct/1}},
       {:concat, {:variadic, &Runtime.concat2/2, []}},
+      {:cons, {:normal, &Runtime.cons/2}},
       {:conj, {:variadic_nonempty, :conj, &Runtime.conj/2}},
       {:into, {:normal, &Runtime.into/2}},
       {:flatten, {:normal, &Runtime.flatten/1}},
@@ -271,6 +272,11 @@ defmodule PtcRunner.Lisp.Env do
        {:multi_arity, :partition_all, {&Runtime.partition_all/2, &Runtime.partition_all/3}}},
       {:count, {:normal, &Runtime.count/1}},
       {:empty?, {:normal, &Runtime.empty?/1}},
+      {:empty, {:normal, &Runtime.empty/1}},
+      {:peek, {:normal, &Runtime.peek/1}},
+      {:pop, {:normal, &Runtime.pop/1}},
+      {:subvec, {:multi_arity, :subvec, {&Runtime.subvec/2, &Runtime.subvec/3}}},
+      {:filterv, {:normal, &Runtime.filterv/2}},
       {:"not-empty", {:normal, &Runtime.not_empty/1}},
       {:seq, {:normal, &Runtime.seq/1}},
       {:reduce, {:multi_arity, :reduce, {&Runtime.reduce/2, &Runtime.reduce/3}}},
@@ -318,6 +324,11 @@ defmodule PtcRunner.Lisp.Env do
       {:val, {:normal, &Runtime.val/1}},
       {:entries, {:normal, &Runtime.entries/1}},
       {:"update-vals", {:normal, &Runtime.update_vals/2}},
+      {:"update-keys", {:normal, &Runtime.update_keys/2}},
+      {:disj, {:variadic_nonempty, :disj, &Runtime.disj/2}},
+      {:"merge-with", {:collect, &Runtime.merge_with_variadic/1}},
+      {:"reduce-kv", {:normal, &Runtime.reduce_kv/3}},
+      {:zipmap, {:normal, &Runtime.zipmap/2}},
 
       # ============================================================
       # Utility functions

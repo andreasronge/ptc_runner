@@ -1996,4 +1996,344 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == [[0, [:a, 1]]]
     end
   end
+
+  # ==========================================================================
+  # cons - Prepend to sequence
+  # ==========================================================================
+
+  describe "cons" do
+    test "prepends to vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(cons 1 [2 3])|)
+      assert result == [1, 2, 3]
+    end
+
+    test "cons on nil returns single-element list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(cons 1 nil)|)
+      assert result == [1]
+    end
+
+    test "cons on empty vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(cons 1 [])|)
+      assert result == [1]
+    end
+
+    test "cons on set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(cons 0 #{1 2})|)
+      assert 0 in result
+      assert length(result) == 3
+    end
+
+    test "cons on map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(cons :x {:a 1})|)
+      assert hd(result) == :x
+    end
+
+    test "cons on string" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(cons "x" "ab")|)
+      assert result == ["x", "a", "b"]
+    end
+  end
+
+  # ==========================================================================
+  # disj - Remove from set
+  # ==========================================================================
+
+  describe "disj" do
+    test "removes element from set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(disj #{1 2 3} 2)|)
+      assert result == MapSet.new([1, 3])
+    end
+
+    test "removing non-existent element returns same set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(disj #{1 2} 5)|)
+      assert result == MapSet.new([1, 2])
+    end
+
+    test "disj on nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(disj nil :a)|)
+      assert result == nil
+    end
+
+    test "variadic disj removes multiple elements" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(disj #{1 2 3 4} 2 4)|)
+      assert result == MapSet.new([1, 3])
+    end
+  end
+
+  # ==========================================================================
+  # empty - Returns empty collection of same type
+  # ==========================================================================
+
+  describe "empty" do
+    test "empty vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(empty [1 2 3])|)
+      assert result == []
+    end
+
+    test "empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(empty {:a 1})|)
+      assert result == %{}
+    end
+
+    test "empty set" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(empty #{1 2})|)
+      assert result == MapSet.new()
+    end
+
+    test "empty string" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(empty "hello")|)
+      assert result == ""
+    end
+
+    test "empty nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(empty nil)|)
+      assert result == nil
+    end
+  end
+
+  # ==========================================================================
+  # merge-with - Merge maps with combining function
+  # ==========================================================================
+
+  describe "merge-with" do
+    test "merges with addition" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with + {:a 1 :b 2} {:a 3 :c 4})|)
+      assert result == %{a: 4, b: 2, c: 4}
+    end
+
+    test "merges multiple maps" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with + {:a 1} {:a 2} {:a 3})|)
+      assert result == %{a: 6}
+    end
+
+    test "merge-with no maps returns empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with +)|)
+      assert result == %{}
+    end
+
+    test "merge-with nil maps treated as empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with + nil {:a 1})|)
+      assert result == %{a: 1}
+    end
+
+    test "merge-with conj for aggregation" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with conj {:a [1]} {:a [2]})|)
+      assert result == %{a: [1, [2]]}
+    end
+
+    test "merge-with zero args raises error" do
+      {:error, _} = Lisp.run(~S|(merge-with)|)
+    end
+  end
+
+  # ==========================================================================
+  # reduce-kv - Reduce over map key-value pairs
+  # ==========================================================================
+
+  describe "reduce-kv" do
+    test "sums values in a map" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(reduce-kv (fn [acc k v] (+ acc v)) 0 {:a 1 :b 2 :c 3})|)
+
+      assert result == 6
+    end
+
+    test "builds new map from key-value pairs" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(reduce-kv (fn [acc k v] (assoc acc k (* v 2))) {} {:a 1 :b 2})|)
+
+      assert result == %{a: 2, b: 4}
+    end
+
+    test "reduce-kv on nil returns init" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce-kv (fn [acc k v] (+ acc v)) 42 nil)|)
+      assert result == 42
+    end
+
+    test "reduce-kv on empty map returns init" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce-kv (fn [acc k v] (+ acc v)) 0 {})|)
+      assert result == 0
+    end
+
+    test "collects keys" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(reduce-kv (fn [acc k v] (conj acc k)) [] {:x 1 :y 2})|)
+
+      assert Enum.sort(result) == [:x, :y]
+    end
+  end
+
+  # ==========================================================================
+  # zipmap - Create map from keys and values
+  # ==========================================================================
+
+  describe "zipmap" do
+    test "creates map from keys and values" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap [:a :b :c] [1 2 3])|)
+      assert result == %{a: 1, b: 2, c: 3}
+    end
+
+    test "truncates to shorter input" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap [:a :b] [1 2 3])|)
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "empty inputs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap [] [])|)
+      assert result == %{}
+    end
+
+    test "with string keys" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap ["x" "y"] [1 2])|)
+      assert result == %{"x" => 1, "y" => 2}
+    end
+
+    test "with string as keys seq" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap "ab" [1 2])|)
+      assert result == %{"a" => 1, "b" => 2}
+    end
+
+    test "with set as keys seq" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap #{:a :b} [1 2])|)
+      assert map_size(result) == 2
+    end
+  end
+
+  # ==========================================================================
+  # filterv - Filter returning vector
+  # ==========================================================================
+
+  describe "filterv" do
+    test "filters with predicate" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(filterv even? [1 2 3 4 5 6])|)
+      assert result == [2, 4, 6]
+    end
+
+    test "equivalent to filter" do
+      {:ok, %Step{return: r1}} = Lisp.run(~S|(filter odd? [1 2 3 4 5])|)
+      {:ok, %Step{return: r2}} = Lisp.run(~S|(filterv odd? [1 2 3 4 5])|)
+      assert r1 == r2
+    end
+  end
+
+  # ==========================================================================
+  # update-keys - Apply function to map keys
+  # ==========================================================================
+
+  describe "update-keys" do
+    test "transforms keys with function" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(update-keys {:a 1 :b 2} str)|)
+      assert result == %{":a" => 1, ":b" => 2}
+    end
+
+    test "update-keys on nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(update-keys nil str)|)
+      assert result == nil
+    end
+
+    test "update-keys on empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(update-keys {} str)|)
+      assert result == %{}
+    end
+
+    test "collision - one value retained" do
+      # Two keys that map to the same new key; retained value is unspecified
+      {:ok, %Step{return: result}} = Lisp.run(~S|(update-keys {1 "a" 1.0 "b"} int)|)
+      assert map_size(result) == 1
+      assert Map.has_key?(result, 1)
+    end
+  end
+
+  # ==========================================================================
+  # peek - Get last element without removing
+  # ==========================================================================
+
+  describe "peek" do
+    test "returns last element of vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(peek [1 2 3])|)
+      assert result == 3
+    end
+
+    test "peek on empty vector returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(peek [])|)
+      assert result == nil
+    end
+
+    test "peek on nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(peek nil)|)
+      assert result == nil
+    end
+
+    test "peek on single-element vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(peek [42])|)
+      assert result == 42
+    end
+  end
+
+  # ==========================================================================
+  # pop - Remove last element
+  # ==========================================================================
+
+  describe "pop" do
+    test "returns vector without last element" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(pop [1 2 3])|)
+      assert result == [1, 2]
+    end
+
+    test "pop on single-element vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(pop [1])|)
+      assert result == []
+    end
+
+    test "pop on nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(pop nil)|)
+      assert result == nil
+    end
+
+    test "pop on empty vector returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(pop [])|)
+      assert result == nil
+    end
+  end
+
+  # ==========================================================================
+  # subvec - Subvector
+  # ==========================================================================
+
+  describe "subvec" do
+    test "basic subvector with start and end" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [0 1 2 3 4] 1 3)|)
+      assert result == [1, 2]
+    end
+
+    test "subvec with only start" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [0 1 2 3 4] 2)|)
+      assert result == [2, 3, 4]
+    end
+
+    test "subvec from beginning" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [0 1 2 3] 0 2)|)
+      assert result == [0, 1]
+    end
+
+    test "subvec with start > end returns empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [0 1 2] 2 1)|)
+      assert result == []
+    end
+
+    test "subvec with end past length clamps" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [0 1 2] 1 100)|)
+      assert result == [1, 2]
+    end
+
+    test "subvec with negative start clamps to 0" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [0 1 2] -1 2)|)
+      assert result == [0, 1]
+    end
+
+    test "subvec empty vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [] 0 0)|)
+      assert result == []
+    end
+  end
 end

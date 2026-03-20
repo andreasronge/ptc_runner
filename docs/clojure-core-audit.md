@@ -54,7 +54,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `apply` | ✅ supported | Applies function to argument sequence |  |
 | `areduce` | ❌ not-relevant | Reduces expression across Java array | relies on Java array interoperability |
 | `array-map` | 🔲 candidate | Constructs array-map from key-value pairs | pure constructor for map data structure |
-| `as->` | 🔲 candidate | Binds name to expr, threads through forms | threading macro for pure data transformation |
+| `as->` | ✅ supported | Binds name to expr, threads through forms | threading macro for pure data transformation |
 | `aset` | ❌ not-relevant | Sets value in Java array at index | performs mutable operations on Java arrays |
 | `assert` | ❌ not-relevant | Throws AssertionError if expr false | relies on exception handling/throwing |
 | `assoc` | ✅ supported | Returns map/vector with added key-value pairs |  |
@@ -116,12 +116,12 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `completing` | 🔲 candidate | Returns reducing function with completion | pure function for reducing transformations |
 | `concat` | ✅ supported | Returns lazy seq concatenating collections |  |
 | `cond` | ✅ supported | Multi-way conditional |  |
-| `cond->` | 🔲 candidate | Threads through forms where tests true | pure threading macro for logical branching |
-| `cond->>` | 🔲 candidate | Threads as last arg where tests true | pure threading macro for logical branching |
+| `cond->` | ✅ supported | Threads through forms where tests true | pure threading macro for logical branching |
+| `cond->>` | ✅ supported | Threads as last arg where tests true | pure threading macro for logical branching |
 | `condp` | 🔲 candidate | Predicate dispatch against expression | pure control flow dispatch |
 | `conj` | ✅ supported | Returns collection with items added |  |
 | `conj!` | ❌ not-relevant | Adds item to transient collection | operates on transient collections (mutable) |
-| `cons` | 🔲 candidate | Returns seq with item prepended | pure collection construction |
+| `cons` | ✅ supported | Returns seq with item prepended |  |
 | `constantly` | ✅ supported | Returns function ignoring args, returning value |  |
 | `contains?` | ✅ supported | Returns true if key present in collection |  |
 | `count` | ✅ supported | Returns number of items in collection |  |
@@ -153,7 +153,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `deref` | ❌ not-relevant | Dereferences ref/delay/future/promise | relies on mutable state/concurrency types |
 | `derive` | ❌ not-relevant | Establishes hierarchical relationship | relies on global namespace/hierarchy state |
 | `descendants` | ❌ not-relevant | Returns all descendants of tag | relies on global namespace/hierarchy state |
-| `disj` | 🔲 candidate | Returns set with item removed | pure set transformation |
+| `disj` | ✅ supported | Returns set with item removed |  |
 | `disj!` | ❌ not-relevant | Removes from transient set | relies on transient/mutable data structures |
 | `dissoc` | ✅ supported | Returns map with key removed |  |
 | `dissoc!` | ❌ not-relevant | Removes from transient map | relies on transient/mutable data structures |
@@ -174,7 +174,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `drop-last` | ✅ supported | Returns seq without last n items |  |
 | `drop-while` | ✅ supported | Drops items while predicate true |  |
 | `eduction` | ❌ not-relevant | Returns reducible wrapper of transducer | relies on lazy/transducer abstractions |
-| `empty` | 🔲 candidate | Returns empty collection of same type | pure function returning empty collection |
+| `empty` | ✅ supported | Returns empty collection of same type |  |
 | `empty?` | ✅ supported | Returns true if collection empty |  |
 | `ensure` | ❌ not-relevant | Ensures ref not written by other transaction | relies on software transactional memory (ref/transactional state) |
 | `ensure-reduced` | 🔲 candidate | Wraps in reduced if not already | pure utility for reduction flow control |
@@ -198,7 +198,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `ffirst` | ✅ supported | First of first item |  |
 | `file-seq` | ❌ not-relevant | Lazy seq of files in directory tree | relies on lazy sequences and file I/O |
 | `filter` | ✅ supported | Returns items where predicate true |  |
-| `filterv` | 🔲 candidate | Returns vector of items where pred true | pure collection transformation |
+| `filterv` | ✅ supported | Returns vector of items where pred true |  |
 | `find` | ✅ supported | Returns map entry for key or nil |  |
 | `find-keyword` | ❌ not-relevant | Returns keyword with ns and name | relies on namespaces |
 | `find-ns` | ❌ not-relevant | Returns namespace or nil | relies on namespace system |
@@ -244,7 +244,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `if` | ✅ supported | Conditional branch |  |
 | `if-let` | ✅ supported | Conditional with binding |  |
 | `if-not` | ✅ supported | Negated conditional |  |
-| `if-some` | 🔲 candidate | Binds if not nil | pure control flow structure |
+| `if-some` | ✅ supported | Binds if not nil | pure control flow structure |
 | `ifn?` | 🔲 candidate | Returns true if invokable | pure predicate checking if a value is a function |
 | `import` | ❌ not-relevant | Imports Java classes | relies on Java interop |
 | `in-ns` | ❌ not-relevant | Changes current namespace | relies on namespace support |
@@ -309,7 +309,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `memfn` | ❌ not-relevant | Returns function calling Java method | relies on Java interop |
 | `memoize` | ❌ not-relevant | Caches function results by arguments | relies on mutable state for caching |
 | `merge` | ✅ supported | Merges maps |  |
-| `merge-with` | 🔲 candidate | Merges maps with combining function | pure map transformation function |
+| `merge-with` | ✅ supported | Merges maps with combining function |  |
 | `meta` | ❌ not-relevant | Returns metadata | relies on metadata support |
 | `methods` | ❌ not-relevant | Returns multimethod implementations | relies on multimethods |
 | `min` | ✅ supported | Returns least number |  |
@@ -349,10 +349,10 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `partition-all` | ✅ supported | Partitions without dropping partial group |  |
 | `partition-by` | 🔲 candidate | Partitions by change in function value | pure transformation on sequences |
 | `pcalls` | ✅ supported | Parallel calls to zero-arity functions |  |
-| `peek` | 🔲 candidate | Returns first/last without removing | pure data access for indexed/stack collections |
+| `peek` | ✅ supported | Returns last element of vector without removing |  |
 | `persistent!` | ❌ not-relevant | Converts transient to persistent | transients are unsupported |
 | `pmap` | ✅ supported | Parallel map over collection |  |
-| `pop` | 🔲 candidate | Returns collection without first/last | pure data transformation for collections |
+| `pop` | ✅ supported | Returns vector without last element |  |
 | `pop!` | ❌ not-relevant | Removes from transient collection | transients are unsupported |
 | `pos-int?` | 🔲 candidate | Returns true if positive integer | pure predicate |
 | `pos?` | ✅ supported | Returns true if number positive |  |
@@ -394,7 +394,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `record?` | ❌ not-relevant | Returns true if record | relies on class/type system not supported |
 | `recur` | ✅ supported | Rebinds loop vars and jumps to loop start |  |
 | `reduce` | ✅ supported | Reduces collection with function |  |
-| `reduce-kv` | 🔲 candidate | Reduces map with key-value function | pure collection transformation |
+| `reduce-kv` | ✅ supported | Reduces map with key-value function |  |
 | `reduced` | 🔲 candidate | Wraps value indicating reduction complete | pure control flow mechanism for reduction interruption |
 | `reduced?` | 🔲 candidate | Returns true if wrapped in reduced | pure predicate for checking reduction status |
 | `reductions` | ❌ not-relevant | Returns intermediate reduction results | returns a lazy sequence |
@@ -448,8 +448,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `simple-symbol?` | 🔲 candidate | Returns true if symbol has no ns | pure predicate for data validation |
 | `slurp` | ❌ not-relevant | Reads entire contents of file/URL | involves file/network I/O |
 | `some` | ✅ supported | Returns first truthy result or nil |  |
-| `some->` | 🔲 candidate | Threads through forms while non-nil | pure threading macro for data transformation |
-| `some->>` | 🔲 candidate | Threads as last arg while non-nil | pure threading macro for data transformation |
+| `some->` | ✅ supported | Threads through forms while non-nil | pure threading macro for data transformation |
+| `some->>` | ✅ supported | Threads as last arg while non-nil | pure threading macro for data transformation |
 | `some-fn` | ✅ supported | Returns pred true if any fn truthy |  |
 | `some?` | ✅ supported | Returns true if not nil |  |
 | `sort` | ✅ supported | Returns sorted sequence |  |
@@ -468,7 +468,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `struct-map` | ❌ not-relevant | Creates structure map from basis | legacy structure system, discouraged/deprecated |
 | `subs` | ✅ supported | Returns substring |  |
 | `subseq` | 🔲 candidate | Returns subseq of sorted collection | pure operation on sorted collections |
-| `subvec` | 🔲 candidate | Returns subvector | pure vector slice |
+| `subvec` | ✅ supported | Returns subvector (clamps out-of-bounds) |  |
 | `supers` | ❌ not-relevant | Returns all ancestors of class | relies on Java class hierarchy/interop |
 | `swap!` | ❌ not-relevant | Updates atom with function | requires mutable state (atom) |
 | `swap-vals!` | ❌ not-relevant | Updates atom, returns [old new] | requires mutable state (atom) |
@@ -517,7 +517,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `unsigned-bit-shift-right` | 🔲 candidate | Unsigned right shift | pure bitwise arithmetic operation |
 | `update` | ✅ supported | Applies function to map value at key |  |
 | `update-in` | ✅ supported | Applies function to nested map value |  |
-| `update-keys` | 🔲 candidate | Applies function to map keys | pure map transformation |
+| `update-keys` | ✅ supported | Applies function to map keys |  |
 | `update-proxy` | ❌ not-relevant | Updates proxy method implementations | relies on Java interop/proxy class system |
 | `update-vals` | ✅ supported | Applies function to map values |  |
 | `val` | ✅ supported | Returns value of map entry |  |
@@ -534,10 +534,10 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `vreset!` | ❌ not-relevant | Sets volatile value | relies on mutable state |
 | `vswap!` | ❌ not-relevant | Updates volatile with function | involves mutable state (volatiles) |
 | `when` | ✅ supported | Evaluates body if test true |  |
-| `when-first` | 🔲 candidate | Evaluates body if seq non-empty | pure logic operating on sequences (assuming non-lazy or realized collections) |
+| `when-first` | ✅ supported | Evaluates body if seq non-empty | pure logic operating on sequences (assuming non-lazy or realized collections) |
 | `when-let` | ✅ supported | Binds if truthy, evaluates body |  |
 | `when-not` | ✅ supported | Evaluates body if test false |  |
-| `when-some` | 🔲 candidate | Binds if not nil, evaluates body | pure control flow and binding logic |
+| `when-some` | ✅ supported | Binds if not nil, evaluates body | pure control flow and binding logic |
 | `while` | ❌ not-relevant | Repeats body while test true | imperative looping construct typically relying on side effects |
 | `with-bindings` | ❌ not-relevant | Executes body with thread-local bindings | relies on thread-local state which is not supported in the BEAM model for PTC-Lisp |
 | `with-in-str` | ❌ not-relevant | Evaluates body with string as input | relies on I/O streams |
@@ -549,4 +549,4 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `with-redefs` | ❌ not-relevant | Redefines vars for body duration | modifies global var bindings, which is not supported in a functional, immutable sandbox |
 | `xml-seq` | ❌ not-relevant | Lazy seq of XML elements | relies on lazy sequences and I/O-related parsing |
 | `zero?` | ✅ supported | Returns true if number is zero |  |
-| `zipmap` | 🔲 candidate | Creates map from keys and values seqs | pure function creating a map from two sequences |
+| `zipmap` | ✅ supported | Creates map from keys and values seqs |  |
