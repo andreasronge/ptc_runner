@@ -10,6 +10,9 @@ defmodule PtcRunner.Lisp.Analyze do
   Returns `{:ok, CoreAST.t()}` on success or `{:error, error_reason()}` on failure.
   """
 
+  alias PtcRunner.Lisp.Analyze.Conditionals
+  alias PtcRunner.Lisp.Analyze.Definitions
+  alias PtcRunner.Lisp.Analyze.Iteration
   alias PtcRunner.Lisp.Analyze.Patterns
   alias PtcRunner.Lisp.Analyze.Predicates
   alias PtcRunner.Lisp.Analyze.ShortFn
@@ -333,300 +336,11 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: doseq
   # ============================================================
 
-  defp analyze_doseq([{:vector, bindings}, first_body | rest_body], _tail?) do
-    body_asts = [first_body | rest_body]
+  defp analyze_doseq(args, _tail?),
+    do: Iteration.analyze_doseq(args, &do_analyze/2)
 
-    case parse_binding_segments(bindings) do
-      {:ok, segments} ->
-        do_build_doseq(segments, body_asts)
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp analyze_doseq([{:vector, _bindings}], _tail?) do
-    {:error,
-     {:invalid_arity, :doseq, "doseq requires at least one body expression, missing body"}}
-  end
-
-  defp analyze_doseq(_, _tail?) do
-    {:error, {:invalid_arity, :doseq, "expected (doseq [bindings] body ...)"}}
-  end
-
-  # Parse binding vector into segments: [{binding, collection, modifiers}, ...]
-  # Modifiers are :when/:let/:while keywords that follow a binding pair.
-  defp parse_binding_segments(bindings) do
-    parse_binding_segments(bindings, [])
-  end
-
-  defp parse_binding_segments([], acc) do
-    case acc do
-      [] -> {:error, {:invalid_form, "for/doseq requires at least one binding pair"}}
-      _ -> {:ok, Enum.reverse(acc)}
-    end
-  end
-
-  # Keyword in binding position → error
-  defp parse_binding_segments([{:keyword, k} | _], _acc) do
-    {:error,
-     {:invalid_form,
-      "expected a binding symbol, got keyword :#{k}. Keywords like :when/:let/:while must follow a binding pair"}}
-  end
-
-  defp parse_binding_segments([binding, coll | rest], acc) do
-    case parse_modifiers(rest, []) do
-      {:ok, modifiers, remaining} ->
-        segment = %{binding: binding, collection: coll, modifiers: modifiers}
-        parse_binding_segments(remaining, [segment | acc])
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp parse_binding_segments([_single], _acc) do
-    {:error, {:invalid_form, "for/doseq bindings require pairs, got trailing element"}}
-  end
-
-  @known_modifiers [:when, :let, :while]
-
-  defp parse_modifiers([{:keyword, k} | rest], acc) when k in @known_modifiers do
-    case {k, rest} do
-      {_, []} ->
-        {:error, {:invalid_form, "modifier :#{k} requires a value"}}
-
-      {:let, [{:vector, _} = vec | remaining]} ->
-        parse_modifiers(remaining, [{:let, vec} | acc])
-
-      {:let, [other | _]} ->
-        {:error,
-         {:invalid_form,
-          ":let modifier requires a vector of bindings, got: #{inspect_ast(other)}"}}
-
-      {mod, [expr | remaining]} ->
-        parse_modifiers(remaining, [{mod, expr} | acc])
-    end
-  end
-
-  defp parse_modifiers([{:keyword, k} | _], _acc) do
-    {:error, {:invalid_form, "unknown modifier :#{k} in for/doseq. Known: :when, :let, :while"}}
-  end
-
-  defp parse_modifiers(rest, acc) do
-    {:ok, Enum.reverse(acc), rest}
-  end
-
-  defp inspect_ast({:vector, _}), do: "vector"
-  defp inspect_ast({:symbol, s}), do: "symbol '#{s}'"
-  defp inspect_ast({:keyword, k}), do: ":#{k}"
-  defp inspect_ast(n) when is_number(n), do: "#{n}"
-  defp inspect_ast({:string, s}), do: inspect(s)
-  defp inspect_ast(other), do: inspect(other)
-
-  # Reconstruct flat binding tokens from a segment (for recursive inner for/doseq calls)
-  defp segment_to_bindings(%{binding: b, collection: c, modifiers: mods}) do
-    [b, c | Enum.flat_map(mods, &modifier_to_tokens/1)]
-  end
-
-  defp modifier_to_tokens({:let, vec}), do: [{:keyword, :let}, vec]
-  defp modifier_to_tokens({mod, expr}), do: [{:keyword, mod}, expr]
-
-  # Wrap an inner expression with modifiers applied in reverse declaration order.
-  # This ensures earlier modifiers wrap later ones (correct nesting).
-  defp wrap_with_modifiers(modifiers, inner, skip_expr, stop_expr) do
-    modifiers
-    |> Enum.reverse()
-    |> Enum.reduce(inner, fn
-      {:when, pred}, acc ->
-        {:list, [{:symbol, :if}, pred, acc, skip_expr]}
-
-      {:while, pred}, acc ->
-        {:list, [{:symbol, :if}, pred, acc, stop_expr]}
-
-      {:let, {:vector, _} = bindings_vec}, acc ->
-        {:list, [{:symbol, :let}, bindings_vec, acc]}
-    end)
-  end
-
-  defp do_build_doseq([segment | rest_segments], body_asts) do
-    %{binding: binding_ast, collection: coll_ast, modifiers: modifiers} = segment
-
-    case check_iterator_collection(:doseq, binding_ast, coll_ast) do
-      {:error, _} = err ->
-        err
-
-      {:ok, _} ->
-        inner_form =
-          if rest_segments == [] do
-            {:program, body_asts}
-          else
-            inner_bindings = Enum.flat_map(rest_segments, &segment_to_bindings/1)
-            {:list, [{:symbol, :doseq}, {:vector, inner_bindings} | body_asts]}
-          end
-
-        temp_sym = {:symbol, :"$doseq_temp"}
-
-        # Skip expression for :when — just advance iterator
-        skip_expr = {:list, [{:symbol, :recur}, {:list, [{:symbol, :next}, temp_sym]}]}
-
-        # Stop expression for :while — return nil immediately
-        stop_expr = nil
-
-        # Start with innermost: do { body; recur next }
-        recur_expr = {:list, [{:symbol, :recur}, {:list, [{:symbol, :next}, temp_sym]}]}
-
-        innermost =
-          {:list,
-           [
-             {:symbol, :do},
-             inner_form,
-             recur_expr
-           ]}
-
-        # Wrap with modifiers in reverse order
-        wrapped = wrap_with_modifiers(modifiers, innermost, skip_expr, stop_expr)
-
-        desugared =
-          {:list,
-           [
-             {:symbol, :loop},
-             {:vector, [temp_sym, {:list, [{:symbol, :seq}, coll_ast]}]},
-             {:list,
-              [
-                {:symbol, :if},
-                temp_sym,
-                {:list,
-                 [
-                   {:symbol, :let},
-                   {:vector, [binding_ast, {:list, [{:symbol, :first}, temp_sym]}]},
-                   wrapped
-                 ]},
-                nil
-              ]}
-           ]}
-
-        do_analyze(desugared, true)
-    end
-  end
-
-  defp check_iterator_collection(op, binding_ast, coll_ast) do
-    case coll_ast do
-      n when is_number(n) ->
-        name = binding_name_prefix(binding_ast)
-
-        {:error,
-         {:invalid_arity, op, "#{op} binding #{name}expected a collection, got: #{n} (number)"}}
-
-      {:keyword, k} ->
-        name = binding_name_prefix(binding_ast)
-
-        {:error,
-         {:invalid_arity, op, "#{op} binding #{name}expected a collection, got: :#{k} (keyword)"}}
-
-      _ ->
-        {:ok, coll_ast}
-    end
-  end
-
-  defp binding_name_prefix({:symbol, sym}), do: "'#{sym}' "
-  defp binding_name_prefix(_), do: ""
-
-  # ============================================================
-  # Special form: for (list comprehension)
-  # ============================================================
-
-  defp analyze_for([{:vector, bindings}, first_body | rest_body], _tail?) do
-    body_asts = [first_body | rest_body]
-
-    case parse_binding_segments(bindings) do
-      {:ok, segments} ->
-        do_build_for(segments, body_asts)
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp analyze_for([{:vector, _bindings}], _tail?) do
-    {:error, {:invalid_arity, :for, "for requires at least one body expression"}}
-  end
-
-  defp analyze_for(_, _tail?) do
-    {:error, {:invalid_arity, :for, "expected (for [bindings] body ...)"}}
-  end
-
-  defp do_build_for([segment | rest_segments], body_asts) do
-    %{binding: binding_ast, collection: coll_ast, modifiers: modifiers} = segment
-
-    case check_iterator_collection(:for, binding_ast, coll_ast) do
-      {:error, _} = err ->
-        err
-
-      {:ok, _} ->
-        inner_form =
-          if rest_segments == [] do
-            # Last segment: body result gets conj'd into accumulator
-            {:program, body_asts}
-          else
-            # More segments: recursive inner (for ...) call
-            inner_bindings = Enum.flat_map(rest_segments, &segment_to_bindings/1)
-            {:list, [{:symbol, :for}, {:vector, inner_bindings} | body_asts]}
-          end
-
-        seq_sym = {:symbol, :"$for_seq"}
-        acc_sym = {:symbol, :"$for_acc"}
-
-        body_expr =
-          if rest_segments == [] do
-            # (conj $for_acc body)
-            {:list, [{:symbol, :conj}, acc_sym, inner_form]}
-          else
-            # (into $for_acc (for [...] body))
-            {:list, [{:symbol, :into}, acc_sym, inner_form]}
-          end
-
-        # Skip expression for :when — advance iterator, keep acc
-        skip_expr =
-          {:list, [{:symbol, :recur}, {:list, [{:symbol, :next}, seq_sym]}, acc_sym]}
-
-        # Stop expression for :while — return accumulated results
-        stop_expr = acc_sym
-
-        # Innermost: (recur (next $for_seq) body_expr)
-        innermost =
-          {:list,
-           [
-             {:symbol, :recur},
-             {:list, [{:symbol, :next}, seq_sym]},
-             body_expr
-           ]}
-
-        # Wrap with modifiers in reverse order
-        wrapped = wrap_with_modifiers(modifiers, innermost, skip_expr, stop_expr)
-
-        desugared =
-          {:list,
-           [
-             {:symbol, :loop},
-             {:vector, [seq_sym, {:list, [{:symbol, :seq}, coll_ast]}, acc_sym, {:vector, []}]},
-             {:list,
-              [
-                {:symbol, :if},
-                seq_sym,
-                {:list,
-                 [
-                   {:symbol, :let},
-                   {:vector, [binding_ast, {:list, [{:symbol, :first}, seq_sym]}]},
-                   wrapped
-                 ]},
-                acc_sym
-              ]}
-           ]}
-
-        do_analyze(desugared, true)
-    end
-  end
+  defp analyze_for(args, _tail?),
+    do: Iteration.analyze_for(args, &do_analyze/2)
 
   # ============================================================
   # Pattern analysis (destructuring)
@@ -639,182 +353,26 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: if and when
   # ============================================================
 
-  defp analyze_if([cond_ast, then_ast, else_ast], tail?) do
-    with {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, t} <- do_analyze(then_ast, tail?),
-         {:ok, e} <- do_analyze(else_ast, tail?) do
-      {:ok, {:if, c, t, e}}
-    end
-  end
+  defp analyze_if(args, tail?),
+    do: Conditionals.analyze_if(args, tail?, &do_analyze/2, &wrap_body/2)
 
-  defp analyze_if([cond_ast, then_ast], tail?) do
-    with {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, t} <- do_analyze(then_ast, tail?) do
-      {:ok, {:if, c, t, nil}}
-    end
-  end
+  defp analyze_if_not(args, tail?),
+    do: Conditionals.analyze_if_not(args, tail?, &do_analyze/2, &wrap_body/2)
 
-  defp analyze_if(_, _tail?) do
-    {:error, {:invalid_arity, :if, "expected (if cond then else?)"}}
-  end
+  defp analyze_when(args, tail?),
+    do: Conditionals.analyze_when(args, tail?, &do_analyze/2, &wrap_body/2)
 
-  # ============================================================
-  # Special form: if-not
-  # ============================================================
+  defp analyze_when_not(args, tail?),
+    do: Conditionals.analyze_when_not(args, tail?, &do_analyze/2, &wrap_body/2)
 
-  # Desugar (if-not test then else) -> (if test else then)
-  defp analyze_if_not([cond_ast, then_ast, else_ast], tail?) do
-    with {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, t} <- do_analyze(then_ast, tail?),
-         {:ok, e} <- do_analyze(else_ast, tail?) do
-      {:ok, {:if, c, e, t}}
-    end
-  end
+  defp analyze_if_let(args, tail?),
+    do: Conditionals.analyze_if_let(args, tail?, &do_analyze/2, &wrap_body/2)
 
-  # Desugar (if-not test then) -> (if test nil then)
-  defp analyze_if_not([cond_ast, then_ast], tail?) do
-    with {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, t} <- do_analyze(then_ast, tail?) do
-      {:ok, {:if, c, nil, t}}
-    end
-  end
+  defp analyze_when_let(args, tail?),
+    do: Conditionals.analyze_when_let(args, tail?, &do_analyze/2, &wrap_body/2)
 
-  defp analyze_if_not(_, _tail?) do
-    {:error, {:invalid_arity, :"if-not", "expected (if-not cond then else?)"}}
-  end
-
-  defp analyze_when([cond_ast, first_body | rest_body], tail?) do
-    body_asts = [first_body | rest_body]
-
-    with {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, b} <- wrap_body(body_asts, tail?) do
-      {:ok, {:if, c, b, nil}}
-    end
-  end
-
-  defp analyze_when(_, _tail?) do
-    {:error, {:invalid_arity, :when, "expected (when cond body ...)"}}
-  end
-
-  # ============================================================
-  # Special form: if-let and when-let (conditional binding)
-  # ============================================================
-
-  # Desugar (if-let [x cond] then else) to (let [x cond] (if x then else))
-  defp analyze_if_let([{:vector, [name_ast, cond_ast]}, then_ast, else_ast], tail?) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, t} <- do_analyze(then_ast, tail?),
-         {:ok, e} <- do_analyze(else_ast, tail?) do
-      binding = {:binding, name, c}
-      {:ok, {:let, [binding], {:if, name, t, e}}}
-    end
-  end
-
-  defp analyze_if_let([{:vector, bindings}, _then_ast, _else_ast], _tail?)
-       when length(bindings) != 2 do
-    {:error, {:invalid_form, "if-let requires exactly one binding pair [name expr]"}}
-  end
-
-  defp analyze_if_let(_, _tail?) do
-    {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
-  end
-
-  # Desugar (when-let [x cond] body ...) to (let [x cond] (if x body nil))
-  defp analyze_when_let([{:vector, [name_ast, cond_ast]}, first_body | rest_body], tail?) do
-    body_asts = [first_body | rest_body]
-
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, b} <- wrap_body(body_asts, tail?) do
-      binding = {:binding, name, c}
-      {:ok, {:let, [binding], {:if, name, b, nil}}}
-    end
-  end
-
-  defp analyze_when_let([{:vector, bindings} | _body_asts], _tail?) when length(bindings) != 2 do
-    {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
-  end
-
-  defp analyze_when_let(_, _tail?) do
-    {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body ...)"}}
-  end
-
-  # ============================================================
-  # Special form: when-not
-  # ============================================================
-
-  # Desugar (when-not cond body ...) -> (if cond nil (do body ...))
-  defp analyze_when_not([cond_ast, first_body | rest_body], tail?) do
-    body_asts = [first_body | rest_body]
-
-    with {:ok, c} <- do_analyze(cond_ast, false),
-         {:ok, b} <- wrap_body(body_asts, tail?) do
-      {:ok, {:if, c, nil, b}}
-    end
-  end
-
-  defp analyze_when_not(_, _tail?) do
-    {:error, {:invalid_arity, :"when-not", "expected (when-not cond body ...)"}}
-  end
-
-  # Helper: only allow simple symbol bindings (no destructuring)
-  defp analyze_simple_binding({:symbol, name}), do: {:ok, {:var, name}}
-
-  defp analyze_simple_binding(_) do
-    {:error, {:invalid_form, "binding must be a simple symbol, not a destructuring pattern"}}
-  end
-
-  # ============================================================
-  # Special form: cond → nested if
-  # ============================================================
-
-  defp analyze_cond([], _tail?) do
-    {:error, {:invalid_cond_form, "cond requires at least one test/result pair"}}
-  end
-
-  defp analyze_cond(args, tail?) do
-    with {:ok, pairs, default} <- split_cond_args(args) do
-      build_nested_if(pairs, default, tail?)
-    end
-  end
-
-  defp split_cond_args(args) do
-    case Enum.split(args, length(args) - 2) do
-      {prefix, [{:keyword, :else}, default_ast]} ->
-        validate_pairs(prefix, default_ast)
-
-      _ ->
-        validate_pairs(args, nil)
-    end
-  end
-
-  defp validate_pairs(args, default_ast) do
-    if rem(length(args), 2) != 0 do
-      {:error, {:invalid_cond_form, "cond requires even number of test/result forms"}}
-    else
-      pairs = args |> Enum.chunk_every(2) |> Enum.map(fn [c, r] -> {c, r} end)
-      {:ok, pairs, default_ast}
-    end
-  end
-
-  defp build_nested_if(pairs, default_ast, tail?) do
-    with {:ok, default_core} <- maybe_analyze(default_ast, tail?) do
-      pairs
-      |> Enum.reverse()
-      |> Enum.reduce_while({:ok, default_core}, fn {c_ast, r_ast}, {:ok, acc} ->
-        with {:ok, c} <- do_analyze(c_ast, false),
-             {:ok, r} <- do_analyze(r_ast, tail?) do
-          {:cont, {:ok, {:if, c, r, acc}}}
-        else
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
-    end
-  end
-
-  defp maybe_analyze(nil, _tail?), do: {:ok, nil}
-  defp maybe_analyze(ast, tail?), do: do_analyze(ast, tail?)
+  defp analyze_cond(args, tail?),
+    do: Conditionals.analyze_cond(args, tail?, &do_analyze/2, &wrap_body/2)
 
   # ============================================================
   # Special form: fn (anonymous functions)
@@ -1120,131 +678,20 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # User namespace binding: def
+  # Definitions: def, defonce, defn
+  # Delegated to PtcRunner.Lisp.Analyze.Definitions
   # ============================================================
 
-  # (def name value)
-  defp analyze_def([{:symbol, name}, value_ast], _tail?) do
-    with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:def, name, value, %{}}}
-    end
-  end
+  defp analyze_def(args, _tail?),
+    do: Definitions.analyze_def(args, &analyze_value/1)
 
-  # (def name docstring value) - docstring preserved for user/ namespace display
-  defp analyze_def([{:symbol, name}, {:string, docstring}, value_ast], _tail?) do
-    with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:def, name, value, %{docstring: docstring}}}
-    end
-  end
+  defp analyze_defonce(args, _tail?),
+    do: Definitions.analyze_defonce(args, &analyze_value/1)
 
-  defp analyze_def([{:symbol, _name}], _tail?) do
-    {:error, {:invalid_arity, :def, "expected (def name value), got (def name) without value"}}
-  end
+  defp analyze_defn(args, _tail?),
+    do: Definitions.analyze_defn(args, &analyze_fn_params/1, &wrap_body/2)
 
-  defp analyze_def([{:symbol, _name} | _], _tail?) do
-    # First arg is a symbol but wrong number of total args
-    {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
-  end
-
-  defp analyze_def([non_symbol | _], _tail?) do
-    {:error, {:invalid_form, "def name must be a symbol, got: #{inspect(non_symbol)}"}}
-  end
-
-  defp analyze_def(_, _tail?) do
-    {:error, {:invalid_arity, :def, "expected (def name value) or (def name docstring value)"}}
-  end
-
-  # ============================================================
-  # Idempotent definition: defonce
-  # ============================================================
-
-  defp analyze_defonce([{:symbol, name}, value_ast], _tail?) do
-    with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:defonce, name, value, %{}}}
-    end
-  end
-
-  defp analyze_defonce([{:symbol, name}, {:string, docstring}, value_ast], _tail?) do
-    with {:ok, value} <- do_analyze(value_ast, false) do
-      {:ok, {:defonce, name, value, %{docstring: docstring}}}
-    end
-  end
-
-  defp analyze_defonce([{:symbol, _name}], _tail?) do
-    {:error,
-     {:invalid_arity, :defonce, "expected (defonce name value), got (defonce name) without value"}}
-  end
-
-  defp analyze_defonce([{:symbol, _name} | _], _tail?) do
-    {:error,
-     {:invalid_arity, :defonce, "expected (defonce name value) or (defonce name docstring value)"}}
-  end
-
-  defp analyze_defonce([non_symbol | _], _tail?) do
-    {:error, {:invalid_form, "defonce name must be a symbol, got: #{inspect(non_symbol)}"}}
-  end
-
-  defp analyze_defonce(_, _tail?) do
-    {:error,
-     {:invalid_arity, :defonce, "expected (defonce name value) or (defonce name docstring value)"}}
-  end
-
-  # ============================================================
-  # Named function definition: defn (desugars to def + fn)
-  # ============================================================
-
-  # (defn name docstring [params] body ...) - with docstring
-  defp analyze_defn(
-         [
-           {:symbol, name},
-           {:string, docstring},
-           {:vector, _} = params_ast,
-           first_body | rest_body
-         ],
-         _tail?
-       ) do
-    body_asts = [first_body | rest_body]
-
-    with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:def, name, {:fn, params, body}, %{docstring: docstring}}}
-    end
-  end
-
-  # (defn name [params] body ...) - without docstring
-  defp analyze_defn([{:symbol, name}, {:vector, _} = params_ast, first_body | rest_body], _tail?) do
-    body_asts = [first_body | rest_body]
-
-    with {:ok, params} <- analyze_fn_params(params_ast),
-         {:ok, body} <- wrap_body(body_asts, true) do
-      {:ok, {:def, name, {:fn, params, body}, %{}}}
-    end
-  end
-
-  # Error: (defn name [params]) - missing body
-  defp analyze_defn([{:symbol, _name}, {:vector, _params}], _tail?) do
-    {:error, {:invalid_arity, :defn, "expected (defn name [params] body), missing body"}}
-  end
-
-  # Error: (defn name) - missing params and body
-  defp analyze_defn([{:symbol, _name}], _tail?) do
-    {:error, {:invalid_arity, :defn, "expected (defn name [params] body)"}}
-  end
-
-  # Error: multi-arity syntax (defn f ([x] ...) ([x y] ...))
-  defp analyze_defn([{:symbol, _name}, {:list, _} | _], _tail?) do
-    {:error,
-     {:invalid_form, "multi-arity defn not supported, use separate defn forms for each arity"}}
-  end
-
-  # Error: non-symbol name
-  defp analyze_defn([non_symbol | _], _tail?) do
-    {:error, {:invalid_form, "defn name must be a symbol, got: #{inspect(non_symbol)}"}}
-  end
-
-  defp analyze_defn(_, _tail?) do
-    {:error, {:invalid_arity, :defn, "expected (defn name [params] body)"}}
-  end
+  defp analyze_value(ast), do: do_analyze(ast, false)
 
   # ============================================================
   # Comparison operators (strict 2-arity)
