@@ -396,14 +396,76 @@ defmodule PtcRunner.Lisp.SpecValidator do
     code_only = String.trim(code)
     expected_trimmed = String.trim(expected)
 
-    if String.length(code_only) > 0 and String.length(expected_trimmed) > 0 and
-         has_more_closing_than_opening?(code_only) do
-      new_acc =
-        accumulate_multiline_example(acc, all_indexed, idx, expected_trimmed, current_section)
+    cond do
+      String.length(expected_trimmed) == 0 ->
+        extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
 
-      extract_multiline_from_indexed(rest, all_indexed, new_acc, current_section)
-    else
-      extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+      # Comment-only result line (e.g., ";; => [1 3 5 7 9]") — code is on a preceding line
+      String.starts_with?(code_only, ";") or code_only == "" ->
+        new_acc =
+          accumulate_comment_result(acc, all_indexed, idx, expected_trimmed, current_section)
+
+        extract_multiline_from_indexed(rest, all_indexed, new_acc, current_section)
+
+      String.length(code_only) > 0 and has_more_closing_than_opening?(code_only) ->
+        new_acc =
+          accumulate_multiline_example(acc, all_indexed, idx, expected_trimmed, current_section)
+
+        extract_multiline_from_indexed(rest, all_indexed, new_acc, current_section)
+
+      true ->
+        extract_multiline_from_indexed(rest, all_indexed, acc, current_section)
+    end
+  end
+
+  # Handle comment-only result lines like ";; => [1 3 5 7 9]"
+  # The actual code is on the preceding line(s)
+  defp accumulate_comment_result(acc, all_indexed, comment_idx, expected_str, section) do
+    case parse_expected(expected_str) do
+      {category, value} when category in [:ok, :todo, :bug] ->
+        # Find the preceding non-comment, non-empty line as the code
+        case find_preceding_code(all_indexed, comment_idx) do
+          {:ok, code} ->
+            add_to_category(acc, category, code, value, section)
+
+          :not_found ->
+            acc
+        end
+
+      :skip ->
+        %{acc | skipped: acc.skipped + 1}
+
+      :error ->
+        acc
+    end
+  end
+
+  # Scan backwards from comment_idx to find the preceding code line(s)
+  defp find_preceding_code(indexed_lines, comment_idx) do
+    # Get the line just before the comment
+    case Enum.find(indexed_lines, fn {idx, _} -> idx == comment_idx - 1 end) do
+      {_, prev_line} ->
+        code = String.trim(prev_line)
+
+        cond do
+          # Skip empty/comment lines
+          code == "" or String.starts_with?(code, ";") ->
+            :not_found
+
+          # If balanced, it's a complete single-line expression
+          balanced_parens?(code) ->
+            {:ok, code}
+
+          # If unbalanced (more closing parens), scan further back
+          has_more_closing_than_opening?(code) ->
+            scan_backwards(indexed_lines, comment_idx - 2, code)
+
+          true ->
+            {:ok, code}
+        end
+
+      nil ->
+        :not_found
     end
   end
 
@@ -590,7 +652,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
         code = String.trim(code)
         expected = String.trim(expected)
 
-        if String.length(code) > 0 and String.length(expected) > 0 do
+        if String.length(code) > 0 and String.length(expected) > 0 and
+             not String.starts_with?(code, ";") do
           # Check if this is a fragment (incomplete expression)
           if fragment?(code) do
             :no_example

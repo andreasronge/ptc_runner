@@ -1080,4 +1080,39 @@ defmodule PtcRunner.Lisp.RuntimeCollectionTest do
       assert Runtime.distinct(%{}) == []
     end
   end
+
+  # Verify that atom predicates on strings still raise for functions
+  # that don't have explicit atom+binary special cases. These paths were
+  # never supported (flex_get doesn't accept string graphemes for keyword access).
+  # Before: FunctionClauseError from Collection. After: FunctionClauseError from FlexAccess.
+  describe "atom predicate on string - unsupported paths still error" do
+    test "some with atom key on string raises" do
+      assert_raise FunctionClauseError, fn -> Runtime.some(:name, "hello") end
+    end
+
+    test "every? with atom key on string raises" do
+      assert_raise FunctionClauseError, fn -> Runtime.every?(:name, "hello") end
+    end
+
+    test "every? with atom key on empty string returns true" do
+      # Empty string → empty graphemes → Enum.all?([], _) is true (no items to fail)
+      assert Runtime.every?(:name, "") == true
+    end
+
+    test "not_any? with atom key on string raises" do
+      assert_raise FunctionClauseError, fn -> Runtime.not_any?(:name, "hello") end
+    end
+
+    test "not_any? with atom key on empty string returns true" do
+      assert Runtime.not_any?(:name, "") == true
+    end
+
+    test "take_while with atom key on string raises" do
+      assert_raise FunctionClauseError, fn -> Runtime.take_while(:name, "hello") end
+    end
+
+    test "drop_while with atom key on string raises" do
+      assert_raise FunctionClauseError, fn -> Runtime.drop_while(:name, "hello") end
+    end
+  end
 end
