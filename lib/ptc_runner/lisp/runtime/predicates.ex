@@ -115,6 +115,8 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def number?(x), do: is_number(x) or SpecialValues.special?(x)
 
+  def int?(x), do: is_integer(x)
+
   def string?(x), do: is_binary(x)
 
   def keyword?(x),

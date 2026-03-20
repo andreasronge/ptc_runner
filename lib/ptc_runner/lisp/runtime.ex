@@ -247,6 +247,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate some?(x), to: Predicates
   defdelegate boolean?(x), to: Predicates
   defdelegate number?(x), to: Predicates
+  defdelegate int?(x), to: Predicates
   defdelegate string?(x), to: Predicates
   defdelegate char?(x), to: Predicates
   defdelegate regex?(x), to: Predicates

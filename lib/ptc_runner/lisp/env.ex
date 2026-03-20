@@ -374,6 +374,7 @@ defmodule PtcRunner.Lisp.Env do
       {:some?, {:normal, &Runtime.some?/1}},
       {:boolean?, {:normal, &Runtime.boolean?/1}},
       {:number?, {:normal, &Runtime.number?/1}},
+      {:int?, {:normal, &Runtime.int?/1}},
       {:string?, {:normal, &Runtime.string?/1}},
       {:char?, {:normal, &Runtime.char?/1}},
       {:keyword?, {:normal, &Runtime.keyword?/1}},
