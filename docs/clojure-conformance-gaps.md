@@ -152,15 +152,18 @@ Functions listed as `🔲 candidate` in the audit that showed up in conformance 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | SCI `variable-can-have-macro-or-var-name` line 904 |
 
 ```clojure
 ;; Clojure
 (defn foo [fn] (fn 1)) (foo inc)   ;=> 2
 
-;; PTC-Lisp: errors (parameter named `fn` doesn't properly shadow the special form)
+;; PTC-Lisp (fixed)
+(defn foo [fn] (fn 1)) (foo inc)   ;=> 2
 ```
+
+**Fix:** The analyzer pre-marks shadowed special form names in RawAST before analysis. When `fn`/`defn`/`let`/`loop` bindings introduce a name matching a shadowable form (Clojure macros like `fn`, `let`, `when`, `cond`), occurrences in call position are rewritten to `{:shadowed_local, name}`, treated as a plain variable reference. True special forms (`if`, `def`, `recur`, `do`) remain unshadowable, matching Clojure.
 
 ### GAP-S07: Keyword args via rest destructuring `[& {:keys [a]}]`
 

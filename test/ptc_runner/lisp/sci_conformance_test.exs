@@ -492,6 +492,41 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
     test "parameter named fn can be called" do
       assert_clojure_equivalent("(defn foo [fn] (fn 1)) (foo inc)")
     end
+
+    # GAP-S06 edge cases: shadowable names (Clojure macros)
+    test "let binding named fn shadows special form" do
+      assert_clojure_equivalent("(let [fn inc] (fn 1))")
+    end
+
+    test "let binding named let shadows special form" do
+      assert_clojure_equivalent("(let [let inc] (let 1))")
+    end
+
+    test "fn param named when shadows special form" do
+      assert_clojure_equivalent("(defn foo [when] (when 1)) (foo inc)")
+    end
+
+    test "fn param named cond shadows special form" do
+      assert_clojure_equivalent("(defn foo [cond] (cond 1)) (foo inc)")
+    end
+
+    test "sequential let bindings shadow incrementally" do
+      assert_clojure_equivalent("(let [fn inc x (fn 1)] x)")
+    end
+
+    test "fn param as value not in call position" do
+      assert_clojure_equivalent("(defn foo [fn] (map fn [1 2 3])) (foo inc)")
+    end
+
+    # Negative: true special forms must remain special even when locally bound
+    test "if remains special form even with local binding" do
+      # (let [if inc] (if true 1 2)) — if is a true special form, cannot be shadowed
+      assert_clojure_equivalent("(let [if inc] (if true 1 2))")
+    end
+
+    test "recur remains special form in tail position" do
+      assert_clojure_equivalent("(loop [x 0] (if (< x 3) (recur (inc x)) x))")
+    end
   end
 
   # ---------------------------------------------------------------------------
