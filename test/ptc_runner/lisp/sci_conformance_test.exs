@@ -257,12 +257,14 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
 
   # ---------------------------------------------------------------------------
   # From: recur-test (line 667)
+  # DIV-01: PTC-Lisp enforces a loop iteration limit (default 1000) for sandbox safety.
   # ---------------------------------------------------------------------------
 
   describe "SCI recur-test" do
     @describetag :clojure
 
-    test "recur in defn" do
+    @tag :skip
+    test "recur in defn (DIV-01: loop limit by design)" do
       assert_clojure_equivalent("(defn hello [x] (if (< x 10000) (recur (inc x)) x)) (hello 0)")
     end
   end
