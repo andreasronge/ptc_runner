@@ -99,6 +99,102 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   defp substitute_nil([nil | rest], default), do: [default | rest]
   defp substitute_nil(args, _default), do: args
 
+  # ============================================================
+  # HOF Combinators
+  # ============================================================
+
+  @doc """
+  Composes functions right-to-left. Zero args returns identity.
+  The rightmost function can accept multiple arguments; all others receive a single value.
+  """
+  def comp_variadic([]), do: {:normal, &identity/1}
+  def comp_variadic([f]), do: f
+
+  def comp_variadic(fns) do
+    [last_fn | rest] = Enum.reverse(fns)
+
+    {:collect,
+     fn args ->
+       initial = Callable.call(last_fn, args)
+       Enum.reduce(rest, initial, fn f, acc -> Callable.call(f, [acc]) end)
+     end}
+  end
+
+  @doc """
+  Returns a function with some arguments pre-filled.
+  `(partial f a b)` returns a function that calls `f` with `a`, `b`, plus any additional args.
+  """
+  def partial_variadic([]) do
+    raise ArgumentError, "partial requires at least 1 argument (the function)"
+  end
+
+  def partial_variadic([f]) do
+    {:collect, fn args -> Callable.call(f, args) end}
+  end
+
+  def partial_variadic([f | fixed]) do
+    {:collect, fn extra -> Callable.call(f, fixed ++ extra) end}
+  end
+
+  @doc """
+  Returns a function that returns the boolean opposite of `f`.
+  """
+  def complement(f) do
+    {:collect, fn args -> not truthy?(Callable.call(f, args)) end}
+  end
+
+  @doc """
+  Returns a function that always returns `value`, ignoring any arguments.
+  """
+  def constantly(value) do
+    {:collect, fn _args -> value end}
+  end
+
+  @doc """
+  Returns a function that checks all values against each predicate.
+  Short-circuits on first falsy result. Always returns true/false.
+  """
+  def every_pred_variadic([]) do
+    raise ArgumentError, "every-pred requires at least 1 predicate"
+  end
+
+  def every_pred_variadic(preds) do
+    {:collect,
+     fn vals ->
+       Enum.all?(preds, fn p ->
+         Enum.all?(vals, fn v -> truthy?(Callable.call(p, [v])) end)
+       end)
+     end}
+  end
+
+  @doc """
+  Returns a function that checks all values against each function.
+  Short-circuits on first truthy result, returning the actual value (not boolean).
+  """
+  def some_fn_variadic([]) do
+    raise ArgumentError, "some-fn requires at least 1 function"
+  end
+
+  def some_fn_variadic(fns) do
+    {:collect,
+     fn vals ->
+       Enum.reduce_while(fns, nil, fn f, last_result ->
+         case Enum.reduce_while(vals, last_result, fn v, _acc ->
+                result = Callable.call(f, [v])
+
+                if truthy?(result) do
+                  {:halt, {:found, result}}
+                else
+                  {:cont, result}
+                end
+              end) do
+           {:found, result} -> {:halt, result}
+           last -> {:cont, last}
+         end
+       end)
+     end}
+  end
+
   alias PtcRunner.Lisp.Runtime.SpecialValues
 
   defp truthy?(nil), do: false

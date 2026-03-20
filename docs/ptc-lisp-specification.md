@@ -2422,6 +2422,12 @@ Typical usage involves filtering valid parses from potentially invalid input:
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `juxt` | `(juxt f1 f2 ...)` | Returns a function that applies all functions and returns a vector of results |
+| `comp` | `(comp f1 f2 ...)` | Returns a function composing fns right-to-left; `(comp)` returns `identity` |
+| `partial` | `(partial f arg1 ...)` | Returns a function with some arguments pre-filled |
+| `complement` | `(complement f)` | Returns a function with the opposite truth value (always boolean) |
+| `constantly` | `(constantly x)` | Returns a function that always returns `x`, ignoring its arguments |
+| `every-pred` | `(every-pred p1 p2 ...)` | Returns a predicate true when all preds are satisfied (always boolean) |
+| `some-fn` | `(some-fn f1 f2 ...)` | Returns a function that returns the first truthy result from any fn |
 
 The `juxt` combinator creates a function that applies each of its argument functions to the same input and returns a vector containing all results. This is particularly useful for multi-criteria sorting and extracting multiple values at once.
 
@@ -2467,6 +2473,58 @@ The `juxt` combinator creates a function that applies each of its argument funct
 - Keywords (used as map accessors)
 - Closures (`fn` and `#()` syntax)
 - Builtin functions (`first`, `last`, `count`, etc.)
+
+**`comp`** — function composition (right-to-left):
+
+```clojure
+((comp str inc) 5)            ; => "6" (inc first, then str)
+((comp str +) 1 2 3)          ; => "6" (rightmost fn gets all args)
+((comp inc inc inc) 0)        ; => 3
+((comp) 42)                   ; => 42 (identity)
+(map (comp inc inc) [1 2 3])  ; => [3 4 5]
+```
+
+**`partial`** — partially apply arguments:
+
+```clojure
+((partial + 10) 5)              ; => 15
+((partial + 1 2))               ; => 3 (no extra args needed)
+(map (partial + 10) [1 2 3])    ; => [11 12 13]
+((partial str "a" "b") "c" "d") ; => "abcd"
+```
+
+**`complement`** — negate a predicate (returns boolean):
+
+```clojure
+((complement even?) 3)                 ; => true
+((complement even?) 4)                 ; => false
+(filter (complement even?) [1 2 3 4])  ; => [1 3]
+```
+
+**`constantly`** — ignore arguments, always return the same value:
+
+```clojure
+((constantly 5) 1 2 3)   ; => 5
+((constantly nil) :a :b)  ; => nil
+```
+
+**`every-pred`** — combine predicates with AND (returns boolean):
+
+```clojure
+((every-pred even? pos?) 4)       ; => true
+((every-pred even? pos?) -4)      ; => false (pos? fails)
+((every-pred even? pos?) 4 6 8)   ; => true (all values pass all preds)
+(filter (every-pred even? pos?) [-2 -1 0 1 2 3 4])  ; => [2 4]
+```
+
+**`some-fn`** — combine functions with OR (returns actual truthy value):
+
+```clojure
+((some-fn :a :b) {:a 1})   ; => 1 (returns the value, not true)
+((some-fn :a :b) {:b 2})   ; => 2
+((some-fn :a :b) {:c 3})   ; => nil (no match)
+((some-fn even? pos?) 3)   ; => true (pos? matches)
+```
 
 ### 8.11 Functional Tools: apply
 
@@ -3281,7 +3339,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 
 For a complete function-level coverage report, see [Clojure Core Audit](clojure-core-audit.md).
 
-Key exclusions: `iterate`, `repeat`, `cycle` (infinite sequences), infinite `(range)` (finite `range` is supported: see §8.1), `partial`, `comp`, and transducers.
+Key exclusions: `iterate`, `repeat`, `cycle` (infinite sequences), infinite `(range)` (finite `range` is supported: see §8.1), and transducers.
 
 ---
 

@@ -324,6 +324,12 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       {:identity, {:normal, &Runtime.identity/1}},
       {:fnil, {:normal, &Runtime.fnil/2}},
+      {:comp, {:collect, &Runtime.comp_variadic/1}},
+      {:partial, {:collect, &Runtime.partial_variadic/1}},
+      {:complement, {:normal, &Runtime.complement/1}},
+      {:constantly, {:normal, &Runtime.constantly/1}},
+      {:"every-pred", {:collect, &Runtime.every_pred_variadic/1}},
+      {:"some-fn", {:collect, &Runtime.some_fn_variadic/1}},
 
       # ============================================================
       # Arithmetic — variadic with identity

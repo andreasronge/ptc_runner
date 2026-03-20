@@ -667,6 +667,178 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
   # Expanded partial: core-test - duplicate keys (line 114-116)
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # HOF Combinators: comp, partial, complement, constantly, every-pred, some-fn
+  # ---------------------------------------------------------------------------
+
+  describe "comp" do
+    @describetag :clojure
+
+    test "zero-arg comp returns identity" do
+      assert_clojure_equivalent("((comp) 42)")
+    end
+
+    test "single-arg comp returns the function" do
+      assert_clojure_equivalent("((comp inc) 5)")
+    end
+
+    test "right-to-left composition" do
+      assert_clojure_equivalent("((comp str inc) 5)")
+    end
+
+    test "rightmost receives multiple args" do
+      assert_clojure_equivalent("((comp str +) 1 2 3)")
+    end
+
+    test "chain of three functions" do
+      assert_clojure_equivalent("((comp inc inc inc) 0)")
+    end
+  end
+
+  describe "partial" do
+    @describetag :clojure
+
+    test "partial with no fixed args delegates" do
+      assert_clojure_equivalent("((partial +) 1 2)")
+    end
+
+    test "partial with one fixed arg" do
+      assert_clojure_equivalent("((partial + 1) 2)")
+    end
+
+    test "partial with all args pre-filled" do
+      assert_clojure_equivalent("((partial + 1 2))")
+    end
+
+    test "partial with multiple extra args" do
+      assert_clojure_equivalent("((partial + 1) 2 3 4)")
+    end
+
+    test "partial with str" do
+      assert_clojure_equivalent(~S|((partial str "a" "b") "c" "d")|)
+    end
+  end
+
+  describe "complement" do
+    @describetag :clojure
+
+    test "complement of even? on odd" do
+      assert_clojure_equivalent("((complement even?) 3)")
+    end
+
+    test "complement of even? on even" do
+      assert_clojure_equivalent("((complement even?) 4)")
+    end
+
+    test "complement of nil? on nil" do
+      assert_clojure_equivalent("((complement nil?) nil)")
+    end
+
+    test "complement with multi-arg function" do
+      assert_clojure_equivalent("((complement <) 3 2)")
+    end
+  end
+
+  describe "constantly" do
+    @describetag :clojure
+
+    test "constantly with zero call-args" do
+      assert_clojure_equivalent("((constantly 5))")
+    end
+
+    test "constantly ignores args" do
+      assert_clojure_equivalent("((constantly 5) 1 2 3)")
+    end
+
+    test "constantly nil" do
+      assert_clojure_equivalent("((constantly nil) :a :b)")
+    end
+  end
+
+  describe "every-pred" do
+    @describetag :clojure
+
+    test "single pred true" do
+      assert_clojure_equivalent("((every-pred even?) 4)")
+    end
+
+    test "two preds both true" do
+      assert_clojure_equivalent("((every-pred even? pos?) 4)")
+    end
+
+    test "two preds one false" do
+      assert_clojure_equivalent("((every-pred even? pos?) -4)")
+    end
+
+    test "multi-value all pass" do
+      assert_clojure_equivalent("((every-pred even? pos?) 4 6 8)")
+    end
+
+    test "multi-value one fails" do
+      assert_clojure_equivalent("((every-pred even? pos?) 4 -6 8)")
+    end
+
+    test "three predicates" do
+      assert_clojure_equivalent("((every-pred number? pos? even?) 4)")
+    end
+
+    test "zero-arg invocation returns true (vacuous)" do
+      assert_clojure_equivalent("((every-pred even?))")
+    end
+  end
+
+  describe "some-fn" do
+    @describetag :clojure
+
+    test "returns actual truthy value from keyword lookup" do
+      assert_clojure_equivalent("((some-fn :a :b) {:a 1})")
+    end
+
+    test "falls through to second fn" do
+      assert_clojure_equivalent("((some-fn :a :b) {:b 2})")
+    end
+
+    test "returns nil when none match" do
+      assert_clojure_equivalent("((some-fn :a :b) {:c 3})")
+    end
+
+    test "skips nil-returning fns" do
+      assert_clojure_equivalent("((some-fn (constantly nil) (constantly 42)) 1)")
+    end
+
+    test "returns truthy boolean from predicate" do
+      assert_clojure_equivalent("((some-fn even? pos?) 3)")
+    end
+
+    test "returns false when no pred matches" do
+      assert_clojure_equivalent("((some-fn even? pos?) -3)")
+    end
+
+    test "zero-arg invocation returns nil" do
+      assert_clojure_equivalent("((some-fn even?))")
+    end
+  end
+
+  describe "HOF combinators in HOFs (integration)" do
+    @describetag :clojure
+
+    test "comp in map" do
+      assert_clojure_equivalent("(map (comp inc inc) [1 2 3])")
+    end
+
+    test "complement in filter" do
+      assert_clojure_equivalent("(filter (complement even?) [1 2 3 4])")
+    end
+
+    test "partial in map" do
+      assert_clojure_equivalent("(map (partial + 10) [1 2 3])")
+    end
+
+    test "every-pred in filter" do
+      assert_clojure_equivalent("(filter (every-pred even? pos?) [-2 -1 0 1 2 3 4])")
+    end
+  end
+
   # DIV-06: Intentional divergence — PTC-Lisp silently deduplicates instead of
   # erroring on duplicate computed keys in map/set literals. Without exception
   # handling, an error would crash the program with no recovery path. Silent

@@ -107,12 +107,12 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `coll?` | ✅ supported | Returns true if implements IPersistentCollection |  |
 | `comment` | ❌ not-relevant | Ignores body, yields nil | REPL/source code construct |
 | `commute` | ❌ not-relevant | Sets ref value via commutative function | mutable state primitive (refs) |
-| `comp` | 🔲 candidate | Composes functions right-to-left | pure function composition |
+| `comp` | ✅ supported | Composes functions right-to-left |  |
 | `comparator` | 🔲 candidate | Returns Comparator from predicate | pure function to create a comparison function |
 | `compare` | ✅ supported | Compares values returning neg/zero/pos |  |
 | `compare-and-set!` | ❌ not-relevant | Atomically sets atom if current equals old | operates on mutable state (atoms) |
 | `compile` | ❌ not-relevant | Compiles namespace into classfiles | compilation and class generation |
-| `complement` | 🔲 candidate | Returns function with opposite truth value | pure higher-order function |
+| `complement` | ✅ supported | Returns function with opposite truth value |  |
 | `completing` | 🔲 candidate | Returns reducing function with completion | pure function for reducing transformations |
 | `concat` | ✅ supported | Returns lazy seq concatenating collections |  |
 | `cond` | ✅ supported | Multi-way conditional |  |
@@ -122,7 +122,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `conj` | ✅ supported | Returns collection with items added |  |
 | `conj!` | ❌ not-relevant | Adds item to transient collection | operates on transient collections (mutable) |
 | `cons` | 🔲 candidate | Returns seq with item prepended | pure collection construction |
-| `constantly` | 🔲 candidate | Returns function ignoring args, returning value | pure higher-order function |
+| `constantly` | ✅ supported | Returns function ignoring args, returning value |  |
 | `contains?` | ✅ supported | Returns true if key present in collection |  |
 | `count` | ✅ supported | Returns number of items in collection |  |
 | `counted?` | 🔲 candidate | Returns true if constant-time count | pure predicate for collection capabilities |
@@ -183,7 +183,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `error-mode` | ❌ not-relevant | Returns agent error mode | relies on agent state |
 | `eval` | ❌ not-relevant | Evaluates form in current namespace | requires runtime compilation and namespace support |
 | `even?` | ✅ supported | Returns true if number is even |  |
-| `every-pred` | 🔲 candidate | Returns combined predicate (all must be true) | pure predicate combinator |
+| `every-pred` | ✅ supported | Returns combined predicate (all must be true) |  |
 | `every?` | ✅ supported | Returns true if pred true for all items |  |
 | `ex-cause` | ❌ not-relevant | Returns cause of exception | relies on exception handling |
 | `ex-data` | ❌ not-relevant | Returns data map of exception | relies on exception handling |
@@ -344,7 +344,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `parse-double` | ✅ supported | Parses string to double |  |
 | `parse-long` | ✅ supported | Parses string to long |  |
 | `parse-uuid` | 🔲 candidate | Parses string to UUID | pure string-to-data transformation |
-| `partial` | 🔲 candidate | Fixes supplied arguments to function | pure function partial application |
+| `partial` | ✅ supported | Fixes supplied arguments to function |  |
 | `partition` | ✅ supported | Partitions items into groups of n |  |
 | `partition-all` | ✅ supported | Partitions without dropping partial group |  |
 | `partition-by` | 🔲 candidate | Partitions by change in function value | pure transformation on sequences |
@@ -450,7 +450,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `some` | ✅ supported | Returns first truthy result or nil |  |
 | `some->` | 🔲 candidate | Threads through forms while non-nil | pure threading macro for data transformation |
 | `some->>` | 🔲 candidate | Threads as last arg while non-nil | pure threading macro for data transformation |
-| `some-fn` | 🔲 candidate | Returns pred true if any fn truthy | pure predicate combinator |
+| `some-fn` | ✅ supported | Returns pred true if any fn truthy |  |
 | `some?` | ✅ supported | Returns true if not nil |  |
 | `sort` | ✅ supported | Returns sorted sequence |  |
 | `sort-by` | ✅ supported | Returns seq sorted by function result |  |

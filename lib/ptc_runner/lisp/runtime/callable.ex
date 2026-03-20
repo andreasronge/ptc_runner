@@ -18,8 +18,28 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
 
   alias PtcRunner.Lisp.Runtime.Math
 
+  alias PtcRunner.Lisp.Runtime.FlexAccess
+
+  # Guard: true keywords (atoms that aren't nil, true, or false)
+  defguardp is_keyword(k) when is_atom(k) and k != nil and k != true and k != false
+
   @spec call(term(), [term()]) :: term()
   def call(f, args) when is_function(f), do: apply(f, args)
+
+  # Keyword as function: (:key map) → map lookup
+  def call(k, [m]) when is_keyword(k) and is_map(m), do: FlexAccess.flex_get(m, k)
+  def call(k, [nil]) when is_keyword(k), do: nil
+  def call(k, [_]) when is_keyword(k), do: nil
+
+  def call(k, [m, default]) when is_keyword(k) and is_map(m) do
+    case FlexAccess.flex_fetch(m, k) do
+      {:ok, val} -> val
+      :error -> default
+    end
+  end
+
+  def call(k, [nil, default]) when is_keyword(k), do: default
+
   def call({:normal, fun}, args), do: apply(fun, args)
 
   def call({:variadic, fun2, identity}, args) do
