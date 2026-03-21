@@ -95,6 +95,45 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       assert String.contains?(prompt, "<journaled_tasks>")
       assert String.contains?(prompt, "<semantic_progress>")
     end
+
+    test "auto_return equals base + addon_auto_return" do
+      base = LanguageSpec.get(:base)
+      addon = LanguageSpec.get(:addon_auto_return)
+      expected = base <> "\n\n" <> addon
+
+      assert LanguageSpec.get(:auto_return) == expected
+    end
+
+    test "auto_return contains expected content" do
+      prompt = LanguageSpec.get(:auto_return)
+      assert is_binary(prompt)
+      assert String.contains?(prompt, "println")
+      assert String.contains?(prompt, "exploration turn")
+    end
+
+    test "auto_return_journal equals base + addon_multi_turn + addon_journal" do
+      base = LanguageSpec.get(:base)
+      addon_mt = LanguageSpec.get(:addon_multi_turn)
+      addon_j = LanguageSpec.get(:addon_journal)
+      expected = base <> "\n\n" <> addon_mt <> "\n\n" <> addon_j
+
+      assert LanguageSpec.get(:auto_return_journal) == expected
+    end
+
+    test "auto_return_journal uses multi-turn rules, not auto-return rules" do
+      prompt = LanguageSpec.get(:auto_return_journal)
+      assert String.contains?(prompt, "<journaled_tasks>")
+      assert String.contains?(prompt, "<semantic_progress>")
+      # Uses multi-turn rules (return/fail), not auto-return
+      assert String.contains?(prompt, "(return answer)")
+      refute String.contains?(prompt, "exploration turn")
+    end
+
+    test "auto_return does not include journal sections" do
+      prompt = LanguageSpec.get(:auto_return)
+      refute String.contains?(prompt, "<journaled_tasks>")
+      refute String.contains?(prompt, "<semantic_progress>")
+    end
   end
 
   describe "list/0" do
@@ -107,6 +146,9 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       assert :addon_multi_turn in keys
       assert :addon_journal in keys
       assert :multi_turn_journal in keys
+      assert :auto_return in keys
+      assert :auto_return_journal in keys
+      assert :addon_auto_return in keys
     end
   end
 

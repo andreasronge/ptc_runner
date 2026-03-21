@@ -53,7 +53,8 @@ defmodule PtcDemo.Prompts do
   def get(profile \\ :single_shot)
 
   # Delegate standard prompts to the library
-  def get(profile) when profile in [:single_shot, :multi_turn, :base, :addon_memory] do
+  def get(profile)
+      when profile in [:single_shot, :multi_turn, :auto_return, :base, :addon_memory] do
     LibLanguageSpec.get(profile)
   end
 
@@ -75,7 +76,8 @@ defmodule PtcDemo.Prompts do
   def list do
     [
       {:single_shot, "Base language reference for single-turn queries"},
-      {:multi_turn, "Base + memory addon for multi-turn conversations"}
+      {:multi_turn, "Base + memory addon for multi-turn conversations"},
+      {:auto_return, "Base + auto-return (println to explore, last expr to answer)"}
     ]
   end
 
@@ -102,7 +104,7 @@ defmodule PtcDemo.Prompts do
       {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, multi_turn"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, multi_turn, auto_return"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}

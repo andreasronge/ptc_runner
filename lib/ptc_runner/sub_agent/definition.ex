@@ -135,7 +135,8 @@ defmodule PtcRunner.SubAgent.Definition do
           pmap_max_concurrency: pos_integer(),
           memory_strategy: :strict | :rollback,
           plan: [plan_step()],
-          journaling: boolean()
+          journaling: boolean(),
+          completion_mode: :explicit | :auto
         }
 
   @default_format_options [
@@ -181,7 +182,8 @@ defmodule PtcRunner.SubAgent.Definition do
     output: :ptc_lisp,
     memory_strategy: :strict,
     plan: [],
-    journaling: false
+    journaling: false,
+    completion_mode: :explicit
   ]
 
   @doc false
@@ -234,6 +236,17 @@ defmodule PtcRunner.SubAgent.Definition do
 
         :error ->
           opts
+      end
+
+    # Auto-enable journaling when a plan is present, regardless of completion_mode.
+    # The plan progress checklist and step-done tracking require journaling to
+    # render in turn feedback. Without it, the LLM never sees the checklist.
+    # This overrides an explicit journaling: false when a non-empty plan is given.
+    opts =
+      if Keyword.get(opts, :plan, []) != [] do
+        Keyword.put(opts, :journaling, true)
+      else
+        opts
       end
 
     struct(__MODULE__, opts)

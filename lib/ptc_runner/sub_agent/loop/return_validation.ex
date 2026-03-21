@@ -27,12 +27,19 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
 
   Builds an actionable error message that helps the LLM fix the return type.
   """
-  @spec format_error_for_llm(Definition.t(), term(), [Signature.validation_error()]) :: String.t()
-  def format_error_for_llm(agent, actual_value, errors) do
+  @spec format_error_for_llm(Definition.t(), term(), [Signature.validation_error()], atom()) ::
+          String.t()
+  def format_error_for_llm(agent, actual_value, errors, completion_mode \\ :explicit) do
     expected_type = format_expected_type(agent)
     error_details = format_error_details(errors)
     actual_str = inspect(actual_value, limit: 10, pretty: false)
     truncated_actual = String.slice(actual_str, 0, 200)
+
+    fix_instruction =
+      case completion_mode do
+        :auto -> "Please fix: ensure your last expression matches the expected type."
+        _ -> "Please fix and call (return ...) with a correctly typed value."
+      end
 
     """
     Return type validation failed.
@@ -40,7 +47,7 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
     Received: #{truncated_actual}
     Errors:
     #{error_details}
-    Please fix and call (return ...) with a correctly typed value.
+    #{fix_instruction}
     """
   end
 
