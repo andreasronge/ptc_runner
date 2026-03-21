@@ -2,9 +2,9 @@
 
 Core language reference for PTC-Lisp. Always included.
 
-<!-- version: 34 -->
+<!-- version: 35 -->
 <!-- date: 2026-03-21 -->
-<!-- changes: Add available builtins listing and not-available section -->
+<!-- changes: Simplify to overview style, remove full builtins listing, add Java interop summary -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -29,24 +29,25 @@ data/products                      ; read-only input data
 </language_reference>
 
 <builtins>
-Collections: map mapv filter remove keep find sort sort-by group-by frequencies reduce reduce-kv count first rest last nth take drop distinct flatten concat cons conj into reverse partition partition-by split-at zip zipmap empty? contains? every? some not-any? seq
-Maps: get get-in assoc assoc-in update update-in dissoc merge merge-with select-keys keys vals entries update-keys update-vals
-Strings: str format name subs join split trim replace upcase downcase starts-with? ends-with? includes? index-of parse-long parse-double
-Math: + - * / mod rem inc dec abs max min floor ceil round sqrt pow
-Logic: = not= > < >= <= not and or
-Predicates: nil? some? number? string? keyword? map? vector? set? coll? boolean? fn? empty? zero? pos? neg? even? odd?
-Threading: -> ->> as-> cond-> some-> some->>
-Higher-order: comp partial complement constantly every-pred some-fn fnil identity juxt
-Sets: set union intersection difference disj
-Regex: re-find re-matches re-seq re-pattern re-split
-Control: if if-not if-let when when-not when-let cond case condp let fn defn loop recur do for doseq
-Predicate builders: (where :field op value) (all-of pred1 pred2) (any-of p1 p2) (none-of p1 p2)
-Parallel: pmap pcalls
+A safe Clojure subset. Standard Clojure functions for collections, maps, strings, math, logic, predicates, threading, higher-order functions, sets, regex, and control flow work as expected.
+
+Extras: `(where :field op value)`, `(all-of p1 p2)`, `(any-of p1 p2)`, `(none-of p1 p2)` for predicate building. `pmap`/`pcalls` for parallel execution.
 </builtins>
+
+<java_interop>
+Minimal Java interop for Date/Time and string methods only:
+- `(java.util.Date.)` / `(java.util.Date. arg)` — current time or construct from millis/ISO-8601 string
+- `(java.time.LocalDate/parse "2026-01-15")` — parse ISO-8601 date
+- `(.getTime date)` — Unix millis from Date object
+- `(System/currentTimeMillis)` — current time in millis
+- String methods: `.indexOf`, `.lastIndexOf`, `.startsWith`, `.endsWith`, `.contains`, `.substring`, `.replace`, `.replaceAll`, `.matches`, `.toLowerCase`, `.toUpperCase`, `.trim`, `.length`, `.charAt`, `.split`
+
+No other Java interop is supported.
+</java_interop>
 
 <restrictions>
 - Comments (`;`) MUST be on their own line, never inline — `;` mid-line breaks operators like `<=` and `->>`
-- NOT available: lazy-seq, atom, ref, future, promise, try/catch/throw, loop without recur, dotimes, iterate, repeat, cycle, take-nth, list, hash-map, sorted-map, transients, metadata, namespaces, macros, Java interop (except Date), I/O (except println)
+- NOT available: lazy-seq, atom, ref, future, promise, try/catch/throw, dotimes, iterate, repeat, cycle, transients, metadata, namespaces, macros, general Java interop, I/O (except println)
 </restrictions>
 
 <!-- PTC_PROMPT_END -->
