@@ -547,6 +547,14 @@ defmodule PtcDemo.Agent do
       thinking: thinking
     ]
 
+    # Add completion_mode for auto_return prompt profile
+    base_opts =
+      if prompt_profile == :auto_return do
+        Keyword.put(base_opts, :completion_mode, :auto)
+      else
+        base_opts
+      end
+
     # Add plan and enable journaling when plan is present
     base_opts =
       if plan do

@@ -54,6 +54,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_memory_strategy!(opts)
     validate_max_tool_calls!(opts)
     validate_journaling!(opts)
+    validate_completion_mode!(opts)
     validate_self_tool_requires_signature!(opts)
   end
 
@@ -640,6 +641,14 @@ defmodule PtcRunner.SubAgent.Validator do
     case Keyword.fetch(opts, :journaling) do
       {:ok, val} when is_boolean(val) -> :ok
       {:ok, _} -> raise ArgumentError, "journaling must be a boolean"
+      :error -> :ok
+    end
+  end
+
+  defp validate_completion_mode!(opts) do
+    case Keyword.fetch(opts, :completion_mode) do
+      {:ok, mode} when mode in [:explicit, :auto] -> :ok
+      {:ok, _} -> raise ArgumentError, "completion_mode must be :explicit or :auto"
       :error -> :ok
     end
   end

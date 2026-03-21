@@ -468,6 +468,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     default_spec =
       cond do
         agent.max_turns <= 1 -> :single_shot
+        agent.completion_mode == :auto and agent.journaling -> :auto_return_journal
+        agent.completion_mode == :auto -> :auto_return
         agent.journaling -> :multi_turn_journal
         true -> :multi_turn
       end

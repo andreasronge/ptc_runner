@@ -1,15 +1,10 @@
-# Coordinator + Worker delegation test (Claude Code style)
+# Coordinator + Worker + Todo test (Claude Code style)
 #
-# The coordinator has NO data — only an analyst tool (worker sub-agent).
-# It must: 1) decide what to ask, 2) call the analyst, 3) inspect results,
-# 4) decide if more info is needed or assemble the answer.
-#
-# Uses completion_mode: :auto — println means "exploring", no println means "done".
+# The coordinator manages its own task list via a todo tool,
+# delegates work to an analyst tool, and auto-returns when done.
 #
 # Usage:
-#   cd demo && mix run scripts/coordinator_test.exs
-#
-# Set OPENROUTER_API_KEY in .env or environment.
+#   cd demo && mix run scripts/coordinator_todo_test.exs
 
 alias PtcDemo.{CLIBase, SampleData}
 alias PtcRunner.SubAgent
@@ -20,7 +15,7 @@ CLIBase.ensure_api_key!()
 model = System.get_env("COORDINATOR_MODEL") || "openrouter:google/gemini-3.1-flash-lite-preview"
 timeout = 60_000
 
-IO.puts("=== Coordinator + Worker Test (auto-return) ===")
+IO.puts("=== Coordinator + Todo Test ===")
 IO.puts("Model: #{model}\n")
 
 # --- LLM callback ---
@@ -73,7 +68,67 @@ analyst_tool = fn %{"question" => question} ->
   end
 end
 
-# --- Coordinator: auto-return mode, no data, only the analyst tool ---
+# --- Todo tool: Agent-backed task list ---
+
+{:ok, todo_pid} = Agent.start_link(fn -> {1, []} end)
+
+format_todos = fn ->
+  {_next_id, todos} = Agent.get(todo_pid, & &1)
+
+  if todos == [] do
+    "(empty)"
+  else
+    todos
+    |> Enum.reverse()
+    |> Enum.map(fn {id, text, status} ->
+      mark = if status == :done, do: "[x]", else: "[ ]"
+      "#{mark} #{id}. #{text}"
+    end)
+    |> Enum.join("\n")
+  end
+end
+
+reset_todos = fn ->
+  Agent.update(todo_pid, fn _ -> {1, []} end)
+end
+
+todo_tool = fn args ->
+  action = Map.get(args, "action")
+
+  case action do
+    "add" ->
+      text = Map.get(args, "text", "untitled")
+
+      Agent.update(todo_pid, fn {next_id, todos} ->
+        {next_id + 1, [{next_id, text, :pending} | todos]}
+      end)
+
+      format_todos.()
+
+    "done" ->
+      task_id = Map.get(args, "id")
+
+      Agent.update(todo_pid, fn {next_id, todos} ->
+        updated =
+          Enum.map(todos, fn
+            {^task_id, text, _} -> {task_id, text, :done}
+            other -> other
+          end)
+
+        {next_id, updated}
+      end)
+
+      format_todos.()
+
+    "list" ->
+      format_todos.()
+
+    _ ->
+      "Unknown action '#{action}'. Use: add, done, or list"
+  end
+end
+
+# --- Coordinator ---
 
 coordinator =
   SubAgent.new(
@@ -85,22 +140,34 @@ coordinator =
         {analyst_tool,
          signature: "(question :string) -> :any",
          description:
-           "Answers a data analysis question using datasets not available to you. " <>
-             "Datasets: employees (id, department, salary, remote, level), " <>
+           "Query datasets. Available: employees (id, department, salary, remote, level), " <>
              "expenses (employee_id, amount, category, status), " <>
              "orders (customer_id, total, created_at, status), " <>
-             "products (category, price, stock). " <>
-             "Ask focused questions that return simple values (numbers, lists, maps)."}
+             "products (category, price, stock)."},
+      "todo" =>
+        {todo_tool,
+         signature: "(action :string, text :string?, id :int?) -> :string",
+         description:
+           "Manage your task list. Actions: " <>
+             "'add' (text required) — add a task, " <>
+             "'done' (id required) — mark task complete, " <>
+             "'list' — show current tasks. " <>
+             "Returns the current todo list after each action."}
     },
     system_prompt: %{
       prefix: """
       You are a coordinator. You have NO direct data access.
-      Use the analyst tool to query datasets. Use println to inspect results.
-      When you have all the data you need, write your final answer as the last expression (no println).
+
+      Workflow:
+      1. Use the todo tool to plan your steps
+      2. Use the analyst tool to gather data
+      3. Use println to inspect results and track progress
+      4. Mark tasks done with the todo tool as you complete them
+      5. When all tasks are done, write your final answer (no println)
       """,
       language_spec: :auto_return
     },
-    max_turns: 6,
+    max_turns: 8,
     timeout: 120_000,
     max_heap: 50_000_000
   )
@@ -132,17 +199,6 @@ tests = [
         Map.has_key?(result, :silver) and
         Map.has_key?(result, :gold)
     end
-  },
-  %{
-    name: "Department with highest avg salary",
-    mission:
-      "Find which department has the highest average salary. " <>
-        "Return a map with :department (string) and :avg_salary (number).",
-    check: fn result ->
-      is_map(result) and
-        Map.has_key?(result, :department) and
-        Map.has_key?(result, :avg_salary)
-    end
   }
 ]
 
@@ -151,6 +207,9 @@ tests = [
 for test <- tests do
   IO.puts("--- #{test.name} ---")
   IO.puts("Mission: #{String.slice(test.mission, 0, 80)}...\n")
+
+  # Reset todo list between tests
+  reset_todos.()
 
   case SubAgent.run(coordinator,
          llm: llm,
@@ -161,6 +220,9 @@ for test <- tests do
       SubAgent.Debug.print_trace(step, raw: true, usage: true)
       result = step.return
       turns = length(step.turns)
+
+      IO.puts("\nTodo list at end:")
+      IO.puts(format_todos.())
 
       passed = test.check.(result)
       status = if passed, do: "PASS", else: "FAIL"

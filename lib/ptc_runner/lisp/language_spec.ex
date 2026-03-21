@@ -12,6 +12,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   | `:single_shot` | Base + single-shot rules |
   | `:multi_turn` | Base + multi-turn rules (return/fail, memory) |
   | `:multi_turn_journal` | Base + multi-turn + journal (task/step-done) |
+  | `:auto_return` | Base + auto-return rules (println to explore, last expr to answer) |
+  | `:auto_return_journal` | Base + multi-turn + journal (auto-return at loop level) |
 
   ## Raw Snippets
 
@@ -21,6 +23,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   | `:addon_single_shot` | Single-shot mode rules |
   | `:addon_multi_turn` | Multi-turn mode rules |
   | `:addon_journal` | Journal, task caching, semantic progress |
+  | `:addon_auto_return` | Auto-return mode rules |
 
   ## Version Metadata
 
@@ -50,7 +53,9 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @compositions %{
     single_shot: [:base, :addon_single_shot],
     multi_turn: [:base, :addon_multi_turn],
-    multi_turn_journal: [:base, :addon_multi_turn, :addon_journal]
+    multi_turn_journal: [:base, :addon_multi_turn, :addon_journal],
+    auto_return: [:base, :addon_auto_return],
+    auto_return_journal: [:base, :addon_multi_turn, :addon_journal]
   }
 
   # Snippet keys mapped to Prompts module functions
@@ -58,7 +63,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     base: :lisp_base,
     addon_single_shot: :lisp_addon_single_shot,
     addon_multi_turn: :lisp_addon_multi_turn,
-    addon_journal: :lisp_addon_journal
+    addon_journal: :lisp_addon_journal,
+    addon_auto_return: :lisp_addon_auto_return
   }
 
   # Parse metadata from file header
@@ -232,7 +238,9 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     composition_descriptions = [
       {:single_shot, "Base + single-shot rules"},
       {:multi_turn, "Base + multi-turn rules (return/fail, memory)"},
-      {:multi_turn_journal, "Base + multi-turn + journal (task/step-done)"}
+      {:multi_turn_journal, "Base + multi-turn + journal (task/step-done)"},
+      {:auto_return, "Base + auto-return rules (println to explore, last expr to answer)"},
+      {:auto_return_journal, "Base + multi-turn + journal (auto-return at loop level)"}
     ]
 
     snippet_descriptions =

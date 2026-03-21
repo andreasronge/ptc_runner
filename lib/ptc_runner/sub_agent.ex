@@ -270,7 +270,8 @@ defmodule PtcRunner.SubAgent do
         :memory_strategy,
         :max_tool_calls,
         :plan,
-        :journaling
+        :journaling,
+        :completion_mode
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -305,7 +306,8 @@ defmodule PtcRunner.SubAgent do
         :memory_strategy,
         :max_tool_calls,
         :plan,
-        :journaling
+        :journaling,
+        :completion_mode
       ])
 
     run(agent, runtime_opts)
