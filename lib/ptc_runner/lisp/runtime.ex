@@ -163,6 +163,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate merge_with_variadic(args), to: MapOps
   defdelegate reduce_kv(f, init, m), to: MapOps
   defdelegate zipmap(keys, vals), to: MapOps
+  defdelegate hash_map(args), to: MapOps
 
   # ============================================================
   # Arithmetic

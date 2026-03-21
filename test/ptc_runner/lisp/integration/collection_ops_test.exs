@@ -2200,6 +2200,32 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # hash-map - Create map from key-value pairs
+  # ==========================================================================
+
+  describe "hash-map" do
+    test "creates empty map with no args" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(hash-map)|)
+      assert result == %{}
+    end
+
+    test "creates map from key-value pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(hash-map :a 1 :b 2)|)
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "creates map with string keys" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(hash-map "x" 1 "y" 2)|)
+      assert result == %{"x" => 1, "y" => 2}
+    end
+
+    test "errors on odd number of arguments" do
+      {:error, %Step{fail: fail}} = Lisp.run(~S|(hash-map :a 1 :b)|)
+      assert fail.message =~ "even number"
+    end
+  end
+
+  # ==========================================================================
   # filterv - Filter returning vector
   # ==========================================================================
 

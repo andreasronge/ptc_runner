@@ -12,8 +12,8 @@ See also: [Function Reference](function-reference.md) | [Conformance Gaps](cloju
 
 | Status | Count |
 |--------|-------|
-| Supported | 210 |
-| Candidate | 72 |
+| Supported | 211 |
+| Candidate | 71 |
 | Not Relevant | 252 |
 | Not Classified | 0 |
 | **Total** | **534** |
@@ -240,7 +240,7 @@ See also: [Function Reference](function-reference.md) | [Conformance Gaps](cloju
 | `group-by` | ✅ supported | Groups items by function result |  |
 | `halt-when` | ❌ not_relevant | Transducer halting on predicate | relies on transducers which often involve stateful reduction and lazy-like sequence processing |
 | `hash` | 🔲 candidate | Returns hash code | pure function computing a value from data |
-| `hash-map` | 🔲 candidate | Creates hash map from pairs | pure function creating a hash map data structure |
+| `hash-map` | ✅ supported | Creates hash map from pairs |  |
 | `hash-ordered-coll` | 🔲 candidate | Returns hash of ordered collection | pure function computing a hash |
 | `hash-set` | 🔲 candidate | Creates hash set from items | pure function creating a hash set data structure |
 | `hash-unordered-coll` | 🔲 candidate | Returns hash of unordered collection | pure function computing a hash |
