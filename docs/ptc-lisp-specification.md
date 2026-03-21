@@ -188,7 +188,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Regex literals:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values.
 
-**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `pr-str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `pr-str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `format`, `name`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
 
 **String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
 
@@ -2229,6 +2229,8 @@ The `seq` function converts a collection to a sequence:
 | `index-of` | `(index-of s value from-index)` | Index of first occurrence from position |
 | `last-index-of` | `(last-index-of s value)` | Index of last occurrence, or `nil` if not found |
 | `last-index-of` | `(last-index-of s value from-index)` | Index of last occurrence up to position |
+| `format` | `(format fmt-string & args)` | Java-style format string |
+| `name` | `(name x)` | Returns name string of keyword or string |
 
 **Type coercion:** `str` converts values to strings using these rules:
 - `nil` → `""`
@@ -2288,6 +2290,24 @@ The `seq` function converts a collection to a sequence:
 - `(last-index-of "hello" "l" 2)` → `2` (search up to position)
 - `(last-index-of "hello" "")` → `5` (empty value returns string length)
 - `(last-index-of "aaa" "aa")` → `1` (overlapping matches handled correctly)
+- `(format "%s has %d items" "cart" 3)` → `"cart has 3 items"` (string and integer formatting)
+- `(format "%.2f" 3.14159)` → `"3.14"` (float with precision)
+- `(format "%d in hex is %x" 255 255)` → `"255 in hex is ff"` (decimal and hex)
+- `(format "%e" 1234.5)` → `"1.234500e+03"` (scientific notation)
+- `(format "%o" 8)` → `"10"` (octal)
+- `(format "100%%")` → `"100%"` (literal percent)
+- `(format "%s" nil)` → `""` (nil coerced via str — Clojure returns `"null"`, see divergence)
+- `(format "%s and %s" "a" "b" "c")` → `"a and b"` (extra args ignored)
+- `(format "%f" ##Inf)` → `"Infinity"` (special values work with %f)
+- `(format "%d" ##Inf)` → ERROR (special values error with %d)
+- `(name :foo)` → `"foo"` (keyword name without colon)
+- `(name "bar")` → `"bar"` (string passes through)
+- `(name nil)` → ERROR (nil not supported)
+- `(name 42)` → ERROR (numbers not supported)
+
+**`format`** supports these format specifiers: `%s` (string via `str`), `%d` (integer), `%f`/`%.Nf` (float with optional precision, default 6 decimal places), `%e` (scientific notation), `%x` (hex), `%o` (octal), `%%` (literal `%`). Extra arguments are ignored. Special values (`##Inf`, `##-Inf`, `##NaN`) work with `%s` and `%f`/`%e` but raise an error with `%d`. **Divergence:** `(format "%s" nil)` returns `""` (Clojure returns `"null"`).
+
+**`name`** returns the name string of a keyword (without the leading colon) or passes strings through unchanged. Raises an error on nil, numbers, booleans, and special values.
 
 **Note:** All string indices are grapheme-based (not byte offsets or UTF-16 code units), consistent with `subs`, `count`, and other PTC-Lisp string functions.
 
@@ -2314,6 +2334,7 @@ The `seq` function converts a collection to a sequence:
 | `float` | `(float x)` | Alias for double (Clojure compat) |
 | `double` | `(double x)` | Type coercion (to float) |
 | `int` | `(int x)` | Type coercion (to integer) |
+| `keyword` | `(keyword x)` | Type coercion (string to keyword) |
 
 **Special Value Behavior:**
 - **NaN Propagation**: Any arithmetic operation involving `Double/NaN` returns `Double/NaN`.
@@ -2343,6 +2364,13 @@ The `seq` function converts a collection to a sequence:
 (round 3.5)     ; => 4
 (double 5)      ; => 5.0
 (int 3.7)       ; => 3
+(keyword "foo")  ; => :foo
+(keyword :bar)   ; => :bar
+(keyword nil)    ; => nil
+(keyword "a/b")  ; => ERROR (no `/` per DIV-13)
+(keyword "")     ; => ERROR (empty string invalid)
+(keyword "+")    ; => ERROR (operator chars not allowed)
+(keyword ##Inf)  ; => ERROR (special values rejected)
 
 (/ 1.0 0.0)                         ; => ##Inf
 (/ 0.0 0.0)                         ; => ##NaN
@@ -2353,6 +2381,8 @@ The `seq` function converts a collection to a sequence:
 ```
 
 **Division behavior:** The `/` operator always returns a float, even for exact divisions. For integer division, use `quot` which truncates toward zero—useful for index calculations like `(take (quot n 2) coll)`. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
+
+**`keyword` coercion:** Coerces a string to a keyword, passes keywords through unchanged, and returns `nil` for `nil`. Validates that the name starts with a letter and contains only letters, digits, `-`, `_`, `?`, `!`—no `/` (per DIV-13), no spaces, no empty strings, and no operator characters (`+`, `*`, `<`, `>`, `=`). Special numeric values (`##Inf`, `##-Inf`, `##NaN`) are rejected. Uses `String.to_existing_atom/1` internally, so only keywords already known to the VM can be created.
 
 ### 8.5 Comparison
 

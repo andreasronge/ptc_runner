@@ -128,6 +128,8 @@ defmodule PtcRunner.Lisp.Env do
   @spec builtins_by_category(atom()) :: [atom()]
   def builtins_by_category(:string) do
     [
+      :format,
+      :name,
       :str,
       :"pr-str",
       :subs,
@@ -414,6 +416,7 @@ defmodule PtcRunner.Lisp.Env do
       {:set?, {:normal, &Runtime.set?/1}},
       {:set, {:normal, &Runtime.set/1}},
       {:vec, {:normal, &Runtime.vec/1}},
+      {:keyword, {:normal, &Runtime.keyword/1}},
       {:vector, {:collect, &Function.identity/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},
@@ -424,6 +427,8 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # String manipulation
       # ============================================================
+      {:format, {:collect, &Runtime.format_variadic/1}},
+      {:name, {:normal, &Runtime.name/1}},
       {:str, {:collect, &Runtime.str_variadic/1}},
       {:"pr-str", {:collect, &Runtime.pr_str_variadic/1}},
       {:subs, {:multi_arity, :subs, {&Runtime.subs/2, &Runtime.subs/3}}},

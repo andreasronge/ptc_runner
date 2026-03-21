@@ -236,6 +236,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate last_index_of(s, value), to: RuntimeString
   defdelegate last_index_of(s, value, from_index), to: RuntimeString
 
+  defdelegate format_variadic(args), to: RuntimeString
+  defdelegate name(x), to: RuntimeString
+
   # ============================================================
   # String Parsing
   # ============================================================
@@ -294,6 +297,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate type_of(x), to: Predicates
   defdelegate set(coll), to: Predicates
   defdelegate vec(coll), to: Predicates
+  defdelegate keyword(x), to: Predicates
 
   # ============================================================
   # Numeric Predicates

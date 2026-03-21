@@ -6,8 +6,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 
 | Status | Count |
 |--------|-------|
-| ✅ Supported | 192 |
-| 🔲 Candidate | 90 |
+| ✅ Supported | 195 |
+| 🔲 Candidate | 87 |
 | ❌ Not Relevant | 252 |
 | ❓ Unknown | 0 |
 | **Total** | **534** |
@@ -216,7 +216,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `fnil` | ✅ supported | Returns function with nil defaults |  |
 | `for` | ✅ supported | List comprehension from nested iteration |  |
 | `force` | ❌ not-relevant | Forces evaluation of delay | relies on lazy evaluation/delays |
-| `format` | 🔲 candidate | Returns formatted string | pure string formatting function |
+| `format` | ✅ supported | Returns formatted string | `(format "%s" nil)` returns `""` not `"null"` (DIV-21) |
 | `frequencies` | ✅ supported | Returns map of item frequencies |  |
 | `future` | ❌ not-relevant | Async computation | concurrency primitive |
 | `future-call` | ❌ not-relevant | Calls function asynchronously | concurrency primitive |
@@ -274,7 +274,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `keep-indexed` | 🔲 candidate | Keeps non-nil results with index | pure collection transformation |
 | `key` | ✅ supported | Returns key of map entry |  |
 | `keys` | ✅ supported | Returns map keys |  |
-| `keyword` | 🔲 candidate | Coerces to keyword | pure coercion to keyword type |
+| `keyword` | ✅ supported | Coerces to keyword | single-arity only; uses `to_existing_atom` |
 | `keyword?` | ✅ supported | Returns true if keyword |  |
 | `last` | ✅ supported | Returns last item |  |
 | `lazy-cat` | ❌ not-relevant | Lazy concatenation of expressions | relies on lazy sequences |
@@ -315,7 +315,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `min` | ✅ supported | Returns least number |  |
 | `min-key` | ✅ supported | Returns item with least function value |  |
 | `mod` | ✅ supported | Returns modulo |  |
-| `name` | 🔲 candidate | Returns name string of symbol/keyword | pure string property access |
+| `name` | ✅ supported | Returns name string of symbol/keyword | keywords and strings only (no symbols) |
 | `namespace` | ❌ not-relevant | Returns namespace of symbol/keyword | relies on namespace support |
 | `nat-int?` | ✅ supported | Returns true if non-negative integer |  |
 | `neg-int?` | ✅ supported | Returns true if negative integer |  |
