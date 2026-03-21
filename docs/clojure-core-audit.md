@@ -6,8 +6,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 
 | Status | Count |
 |--------|-------|
-| ✅ Supported | 150 |
-| 🔲 Candidate | 132 |
+| ✅ Supported | 192 |
+| 🔲 Candidate | 90 |
 | ❌ Not Relevant | 252 |
 | ❓ Unknown | 0 |
 | **Total** | **534** |
@@ -131,7 +131,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `cycle` | ❌ not-relevant | Returns infinite lazy seq repeating collection | relies on lazy sequences |
 | `dec` | ✅ supported | Returns number minus one |  |
 | `dec'` | 🔲 candidate | Decrements with arbitrary precision | pure arithmetic function |
-| `decimal?` | 🔲 candidate | Returns true if BigDecimal | pure type predicate |
+| `decimal?` | ✅ supported | Returns true if BigDecimal | always false on BEAM (DIV-20) |
 | `declare` | ❌ not-relevant | Defines var names with no bindings | relies on namespace/var system |
 | `dedupe` | 🔲 candidate | Removes consecutive duplicates | pure collection transformation |
 | `def` | ✅ supported | Creates and interns global var |  |
@@ -168,7 +168,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `doto` | ❌ not-relevant | Calls methods on object, returns object | relies on Java interop |
 | `double` | ✅ supported | Coerces to double |  |
 | `double-array` | ❌ not-relevant | Creates double Java array | relies on Java arrays |
-| `double?` | 🔲 candidate | Returns true if Double | pure predicate for data type checking |
+| `double?` | ✅ supported | Returns true if Double |  |
 | `doubles` | ❌ not-relevant | Casts to double array | relies on Java arrays |
 | `drop` | ✅ supported | Returns seq skipping first n items |  |
 | `drop-last` | ✅ supported | Returns seq without last n items |  |
@@ -194,7 +194,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `extend-type` | ❌ not-relevant | Extends type to implement protocol | relies on protocols |
 | `extenders` | ❌ not-relevant | Returns types extending protocol | relies on protocols |
 | `extends?` | ❌ not-relevant | Returns true if type extends protocol | relies on protocols |
-| `false?` | 🔲 candidate | Returns true if value is false | pure predicate |
+| `false?` | ✅ supported | Returns true if value is false |  |
 | `ffirst` | ✅ supported | First of first item |  |
 | `file-seq` | ❌ not-relevant | Lazy seq of files in directory tree | relies on lazy sequences and file I/O |
 | `filter` | ✅ supported | Returns items where predicate true |  |
@@ -207,11 +207,11 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `flatten` | ✅ supported | Flattens nested collections |  |
 | `float` | ✅ supported | Coerces to float |  |
 | `float-array` | ❌ not-relevant | Creates float Java array | creates Java array |
-| `float?` | 🔲 candidate | Returns true if Float | pure predicate for data type |
+| `float?` | ✅ supported | Returns true if Float |  |
 | `floats` | ❌ not-relevant | Casts to float array | handles Java arrays |
 | `flush` | ❌ not-relevant | Flushes output writer | I/O operation |
 | `fn` | ✅ supported | Defines anonymous function |  |
-| `fn?` | 🔲 candidate | Returns true if value is function | pure predicate for function type |
+| `fn?` | ✅ supported | Returns true if value is function |  |
 | `fnext` | ✅ supported | First of next item |  |
 | `fnil` | ✅ supported | Returns function with nil defaults |  |
 | `for` | ✅ supported | List comprehension from nested iteration |  |
@@ -251,14 +251,14 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `inc` | ✅ supported | Returns number plus one |  |
 | `inc'` | 🔲 candidate | Increments with arbitrary precision | pure mathematical transformation |
 | `indexed?` | 🔲 candidate | Returns true if supports indexed access | predicate for collection structure |
-| `infinite?` | 🔲 candidate | Returns true if number infinite | pure numerical predicate |
+| `infinite?` | ✅ supported | Returns true if number infinite |  |
 | `inst-ms` | 🔲 candidate | Milliseconds since epoch for instant | pure data extraction from date object |
 | `inst?` | 🔲 candidate | Returns true if instant | pure type predicate |
 | `instance?` | ❌ not-relevant | Returns true if instance of class | relies on Java class system |
 | `int` | ✅ supported | Coerces to int |  |
 | `int-array` | ❌ not-relevant | Creates int Java array | relies on Java array/mutability |
-| `int?` | 🔲 candidate | Returns true if Integer | pure type predicate |
-| `integer?` | 🔲 candidate | Returns true if integer | pure predicate for data type checking |
+| `int?` | ✅ supported | Returns true if Integer |  |
+| `integer?` | ✅ supported | Returns true if integer |  |
 | `interleave` | ✅ supported | Interleaves items from collections |  |
 | `intern` | ❌ not-relevant | Creates or returns var in namespace | operates on namespaces |
 | `interpose` | ✅ supported | Inserts separator between items |  |
@@ -317,8 +317,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `mod` | ✅ supported | Returns modulo |  |
 | `name` | 🔲 candidate | Returns name string of symbol/keyword | pure string property access |
 | `namespace` | ❌ not-relevant | Returns namespace of symbol/keyword | relies on namespace support |
-| `nat-int?` | 🔲 candidate | Returns true if non-negative integer | pure predicate |
-| `neg-int?` | 🔲 candidate | Returns true if negative integer | pure predicate |
+| `nat-int?` | ✅ supported | Returns true if non-negative integer |  |
+| `neg-int?` | ✅ supported | Returns true if negative integer |  |
 | `neg?` | ✅ supported | Returns true if number negative |  |
 | `newline` | ❌ not-relevant | Writes newline to output | relies on I/O |
 | `next` | ✅ supported | Returns seq after first item |  |
@@ -354,7 +354,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `pmap` | ✅ supported | Parallel map over collection |  |
 | `pop` | ✅ supported | Returns vector without last element |  |
 | `pop!` | ❌ not-relevant | Removes from transient collection | transients are unsupported |
-| `pos-int?` | 🔲 candidate | Returns true if positive integer | pure predicate |
+| `pos-int?` | ✅ supported | Returns true if positive integer |  |
 | `pos?` | ✅ supported | Returns true if number positive |  |
 | `pr` | ❌ not-relevant | Prints value in readable form | I/O operation |
 | `pr-str` | ✅ supported | Returns readable string of value |  |
@@ -378,8 +378,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `random-sample` | ❌ not-relevant | Returns random sample of items | relies on non-deterministic side effects/state |
 | `random-uuid` | ❌ not-relevant | Returns random UUID | relies on non-deterministic side effects |
 | `range` | ✅ supported | Returns sequence of numbers |  |
-| `ratio?` | 🔲 candidate | Returns true if ratio | pure type predicate |
-| `rational?` | 🔲 candidate | Returns true if rational number | pure type predicate |
+| `ratio?` | ✅ supported | Returns true if ratio | always false on BEAM (DIV-20) |
+| `rational?` | ✅ supported | Returns true if rational number | integers only on BEAM (DIV-20) |
 | `rationalize` | 🔲 candidate | Coerces to ratio | pure mathematical transformation |
 | `re-find` | ✅ supported | Returns first regex match |  |
 | `re-groups` | 🔲 candidate | Returns regex match groups | pure string processing function |
@@ -473,7 +473,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `swap!` | ❌ not-relevant | Updates atom with function | requires mutable state (atom) |
 | `swap-vals!` | ❌ not-relevant | Updates atom, returns [old new] | requires mutable state (atom) |
 | `symbol` | 🔲 candidate | Coerces to symbol | pure data coercion |
-| `symbol?` | 🔲 candidate | Returns true if symbol | predicate for pure data type |
+| `symbol?` | ✅ supported | Returns true if symbol | always false, no symbols in PTC-Lisp (DIV-19) |
 | `take` | ✅ supported | Returns first n items |  |
 | `take-last` | ✅ supported | Returns last n items |  |
 | `take-nth` | ❌ not-relevant | Returns every nth item | returns a lazy sequence |
@@ -488,7 +488,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `transduce` | 🔲 candidate | Reduces with transducer | Pure data transformation utility |
 | `transient` | ❌ not-relevant | Creates transient collection | Mutable state/transients are not supported |
 | `tree-seq` | ✅ supported | Depth-first seq from root |  |
-| `true?` | 🔲 candidate | Returns true if value is true | Pure predicate |
+| `true?` | ✅ supported | Returns true if value is true |  |
 | `try` | ❌ not-relevant | Exception handling | Exception handling is not supported |
 | `type` | ✅ supported | Returns type of value |  |
 | `unchecked-add` | ❌ not-relevant | Adds without overflow check | Java-specific math optimization |
