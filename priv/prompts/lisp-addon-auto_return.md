@@ -2,9 +2,9 @@
 
 Rules for multi-turn execution with automatic return based on println presence.
 
-<!-- version: 1 -->
+<!-- version: 2 -->
 <!-- date: 2026-03-21 -->
-<!-- changes: Initial auto-return addon -->
+<!-- changes: Add verification discipline from multi-turn prompt (hybrid) -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -16,14 +16,18 @@ When you have the answer, write a program whose last expression IS the answer �
 
 Rule: println present → exploration turn (continues). No println → answer turn (last expression returned).
 
-Explore first, answer last. Never write your final answer in the same program as println — you won't see the println output, so your answer would be a guess.
+Explore first, verify, answer last. When calling tools, always use `println` to inspect the results before writing your final answer. Only write a program without `println` when you have seen concrete evidence that your answer is correct. A guess is worse than another turn of exploration.
 
 ```clojure
+;; BAD — you call the tool but never see the result
+(def data (tool/search {:query "revenue"}))
+{:revenue 42000}  ; this is a guess — you never saw what data contains!
+
 ;; GOOD — inspect first
 (def data (tool/search {:query "revenue"}))
 (println "data:" data)
 
-;; GOOD — answer next turn (no println)
+;; GOOD — answer next turn, after seeing data (no println)
 {:revenue (apply + (map :total data))}
 ```
 
