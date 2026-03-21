@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   use Mix.Task
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Registry
   alias PtcRunner.SubAgent.Loop.ResponseHandler
 
   @switches [eval: :keep, load: :string, help: :boolean]
@@ -155,6 +156,10 @@ defmodule Mix.Tasks.Ptc.Repl do
         # Ignore empty lines, only Ctrl+D exits
         loop(history, memory)
 
+      ":" <> meta ->
+        handle_meta(String.trim(meta))
+        loop(history, memory)
+
       input ->
         {history, memory} = evaluate(input, history, memory)
         loop(history, memory)
@@ -201,6 +206,58 @@ defmodule Mix.Tasks.Ptc.Repl do
       {:error, step} ->
         IO.puts(format_error(step.fail))
         {history, memory}
+    end
+  end
+
+  defp handle_meta("doc " <> name) do
+    case Registry.doc(String.trim(name)) do
+      nil -> IO.puts("No documentation found for: #{name}")
+      entry -> print_doc(entry)
+    end
+  end
+
+  defp handle_meta("find " <> pattern), do: print_search_results(String.trim(pattern))
+  defp handle_meta("apropos " <> pattern), do: print_search_results(String.trim(pattern))
+
+  defp handle_meta(_) do
+    IO.puts("Unknown command. Available: :doc <name>, :find <pattern>, :apropos <pattern>")
+  end
+
+  defp print_doc(entry) do
+    IO.puts("-------------------------")
+    IO.puts(Enum.join(entry.signatures, "\n"))
+    IO.puts("  #{entry.description}")
+    if entry.notes, do: IO.puts("\n  #{entry.notes}")
+
+    if entry.examples != [] do
+      IO.puts("\nExamples:")
+
+      Enum.each(entry.examples, fn {code, result} ->
+        IO.puts("  #{code}")
+        IO.puts("  ;; => #{result}")
+      end)
+    end
+
+    if entry.see_also != [] do
+      IO.puts("\nSee also: #{Enum.join(entry.see_also, ", ")}")
+    end
+
+    IO.puts("-------------------------")
+  end
+
+  defp print_search_results(pattern) do
+    case Registry.find_doc(pattern) do
+      [] ->
+        IO.puts("No matches for: #{pattern}")
+
+      results ->
+        Enum.each(results, fn entry ->
+          sigs = Enum.join(entry.signatures, " | ")
+          IO.puts("  #{entry.name} — #{sigs}")
+          if entry.description != "", do: IO.puts("    #{entry.description}")
+        end)
+
+        IO.puts("\n#{length(results)} result(s)")
     end
   end
 

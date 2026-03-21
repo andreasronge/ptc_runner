@@ -61,6 +61,73 @@ defmodule PtcRunner.Lisp.Analyze do
           | {:unsupported_pattern, term()}
           | {:invalid_placeholder, atom()}
 
+  @doc """
+  Returns the canonical list of all forms handled by the analyzer.
+
+  These are forms dispatched via `dispatch_list_form/4` — special forms,
+  macros, predicate builders, and control flow that the analyzer intercepts
+  before the interpreter sees them.
+
+  ## Examples
+
+      iex> :let in PtcRunner.Lisp.Analyze.supported_forms()
+      true
+
+      iex> :filter in PtcRunner.Lisp.Analyze.supported_forms()
+      false
+  """
+  @spec supported_forms() :: [atom()]
+  def supported_forms do
+    [
+      :let,
+      :loop,
+      :recur,
+      :doseq,
+      :for,
+      :fn,
+      :if,
+      :"if-not",
+      :when,
+      :"when-not",
+      :"if-let",
+      :"when-let",
+      :"if-some",
+      :"when-some",
+      :"when-first",
+      :cond,
+      :case,
+      :condp,
+      :->,
+      :"->>",
+      :"as->",
+      :"cond->",
+      :"cond->>",
+      :"some->",
+      :"some->>",
+      :do,
+      :comment,
+      :and,
+      :or,
+      :where,
+      :"all-of",
+      :"any-of",
+      :"none-of",
+      :juxt,
+      :pmap,
+      :pcalls,
+      :apply,
+      :println,
+      :return,
+      :fail,
+      :task,
+      :"step-done",
+      :"task-reset",
+      :def,
+      :defonce,
+      :defn
+    ]
+  end
+
   @spec analyze(term()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
   def analyze(raw_ast) do
     do_analyze(raw_ast, false)

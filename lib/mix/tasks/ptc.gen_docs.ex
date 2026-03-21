@@ -1,0 +1,160 @@
+defmodule Mix.Tasks.Ptc.GenDocs do
+  @shortdoc "Generate function reference and clojure audit docs from registry"
+  @moduledoc """
+  Generates documentation from `priv/functions.exs`:
+
+  1. `docs/function-reference.md` — all implemented functions grouped by section
+  2. `docs/clojure-core-audit.md` — clojure.core coverage audit
+
+  ## Usage
+
+      mix ptc.gen_docs
+  """
+  use Mix.Task
+
+  alias PtcRunner.Lisp.Registry
+
+  @function_ref_path "docs/function-reference.md"
+  @audit_path "docs/clojure-core-audit.md"
+
+  @impl Mix.Task
+  def run(_args) do
+    Mix.Task.run("app.start")
+
+    generate_function_reference()
+    generate_clojure_audit()
+  end
+
+  defp generate_function_reference do
+    entries = Registry.implemented()
+
+    sections =
+      entries
+      |> Enum.group_by(& &1.section)
+      |> Enum.sort_by(fn {section, _} -> section_order(section) end)
+
+    content = """
+    <!-- Auto-generated from priv/functions.exs — do not edit by hand -->
+    # PTC-Lisp Function Reference
+
+    #{length(entries)} functions and special forms.
+
+    ## Table of Contents
+
+    #{toc(sections)}
+
+    #{Enum.map_join(sections, "\n\n", &render_section/1)}
+    """
+
+    File.write!(@function_ref_path, content)
+    Mix.shell().info("Generated #{@function_ref_path} (#{length(entries)} entries)")
+  end
+
+  defp toc(sections) do
+    Enum.map_join(sections, "\n", fn {section, entries} ->
+      anchor =
+        section |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
+
+      "- [#{section}](##{anchor}) (#{length(entries)})"
+    end)
+  end
+
+  defp section_order("Definitions & Bindings"), do: 0
+  defp section_order("Conditionals"), do: 1
+  defp section_order("Threading Macros"), do: 2
+  defp section_order("Control Flow"), do: 3
+  defp section_order("Iteration"), do: 4
+  defp section_order("Core"), do: 5
+  defp section_order("Predicate Builders"), do: 6
+  defp section_order("Functional Tools"), do: 7
+  defp section_order("Agent Control"), do: 8
+  defp section_order("String Functions"), do: 9
+  defp section_order("Set Operations"), do: 10
+  defp section_order("Regex Functions"), do: 11
+  defp section_order("Math Functions"), do: 12
+  defp section_order("Interop"), do: 13
+  defp section_order(_), do: 99
+
+  defp render_section({section, entries}) do
+    rows =
+      entries
+      |> Enum.sort_by(& &1.name)
+      |> Enum.map_join("\n", fn entry ->
+        sigs = Enum.join(entry.signatures, ", ")
+        ext = if entry.ptc_extension?, do: " *", else: ""
+        "| `#{entry.name}`#{ext} | `#{sigs}` | #{entry.description} |"
+      end)
+
+    examples =
+      entries
+      |> Enum.flat_map(fn entry ->
+        Enum.map(entry.examples, fn {code, result} -> {entry.name, code, result} end)
+      end)
+
+    example_block =
+      if examples == [] do
+        ""
+      else
+        examples_text =
+          Enum.map_join(examples, "\n", fn {_name, code, result} ->
+            "#{code}\n;; => #{result}"
+          end)
+
+        "\n```clojure\n#{examples_text}\n```"
+      end
+
+    """
+    ## #{section}
+
+    | Function | Signature | Description |
+    |----------|-----------|-------------|
+    #{rows}
+    #{example_block}
+    """
+  end
+
+  defp generate_clojure_audit do
+    entries = Registry.clojure_core_audit()
+
+    counts = Enum.frequencies_by(entries, & &1.status)
+
+    rows =
+      entries
+      |> Enum.sort_by(& &1.name)
+      |> Enum.map_join("\n", fn entry ->
+        icon = status_icon(entry.status)
+        "| `#{entry.name}` | #{icon} #{entry.status} | #{entry.description} | #{entry.notes} |"
+      end)
+
+    content = """
+    <!-- Auto-generated from priv/functions.exs — do not edit by hand -->
+    # Clojure Core Audit for PTC-Lisp
+
+    Comparison of `clojure.core` vars against PTC-Lisp builtins.
+
+    ## Summary
+
+    | Status | Count |
+    |--------|-------|
+    | Supported | #{counts[:supported] || 0} |
+    | Candidate | #{counts[:candidate] || 0} |
+    | Not Relevant | #{counts[:not_relevant] || 0} |
+    | Not Classified | #{counts[:not_classified] || 0} |
+    | **Total** | **#{length(entries)}** |
+
+    ## Details
+
+    | Var | Status | Description | Notes |
+    |-----|--------|-------------|-------|
+    #{rows}
+    """
+
+    File.write!(@audit_path, content)
+    Mix.shell().info("Generated #{@audit_path} (#{length(entries)} entries)")
+  end
+
+  defp status_icon(:supported), do: "✅"
+  defp status_icon(:candidate), do: "🔲"
+  defp status_icon(:not_relevant), do: "❌"
+  defp status_icon(_), do: "❓"
+end
