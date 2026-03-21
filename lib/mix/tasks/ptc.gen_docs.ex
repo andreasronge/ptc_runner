@@ -42,6 +42,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{length(entries)} functions and special forms.
 
+    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core Audit](clojure-core-audit.md)
+
     ## Table of Contents
 
     #{toc(sections)}
@@ -137,6 +139,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     > Manual edits will be overwritten. Edit `priv/functions.exs` instead.
 
     Comparison of `clojure.core` vars against PTC-Lisp builtins.
+
+    See also: [Function Reference](function-reference.md) | [Conformance Gaps](clojure-conformance-gaps.md)
 
     ## Summary
 

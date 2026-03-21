@@ -3,7 +3,7 @@
 A BEAM-native Elixir library for Programmatic Tool Calling (PTC), enabling LLMs to write safe programs that orchestrate tools and transform data inside a sandboxed environment.
 
 - **SubAgent API**: See `docs/guides/` (start with `subagent-getting-started.md`)
-- **PTC-Lisp**: See `docs/ptc-lisp-specification.md` for language reference
+- **PTC-Lisp**: See `docs/ptc-lisp-specification.md` for language reference, `docs/function-reference.md` for all built-in functions
 - **E2E tests**: `mix test --include e2e` (requires `OPENROUTER_API_KEY`)
 
 This is a **0.x library** — expect breaking changes. Backward compatibility is not a priority. When refactoring:

@@ -5,6 +5,7 @@ Tracked differences between PTC-Lisp and Clojure semantics, discovered via confo
 **Test file:** `test/ptc_runner/lisp/sci_conformance_test.exs`
 **Related issue:** [#832](https://github.com/andreasronge/ptc_runner/issues/832)
 **Audit (function coverage):** `docs/clojure-core-audit.md`
+**Function reference:** `docs/function-reference.md`
 
 ## Priority Levels
 
