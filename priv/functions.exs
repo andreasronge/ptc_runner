@@ -498,7 +498,8 @@
     },
     %{
       name: "compare",
-      description: "Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp.",
+      description:
+        "Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp.",
       binding: :normal,
       category: :core,
       dispatch: :env,
@@ -1030,7 +1031,11 @@
       binding: :multi_arity,
       category: :string,
       dispatch: :env,
-      signatures: ["(extract-int pattern s)", "(extract-int pattern s n)", "(extract-int pattern s n default)"],
+      signatures: [
+        "(extract-int pattern s)",
+        "(extract-int pattern s n)",
+        "(extract-int pattern s n default)"
+      ],
       since: nil,
       section: "String Functions",
       ptc_extension?: true,
@@ -2466,7 +2471,8 @@
     },
     %{
       name: "pr-str",
-      description: "Readable string representation (strings quoted, nil as \"nil\", space-separated)",
+      description:
+        "Readable string representation (strings quoted, nil as \"nil\", space-separated)",
       binding: :collect,
       category: :string,
       dispatch: :env,
@@ -3553,6 +3559,25 @@
       divergences: nil
     },
     %{
+      name: "hash-map",
+      description: "Create map from alternating key-value pairs",
+      binding: :collect,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(hash-map & kvs)"],
+      since: "0.9.0",
+      section: "Core",
+      ptc_extension?: false,
+      examples: [
+        {"(hash-map)", "%{}"},
+        {"(hash-map :a 1 :b 2)", "{:a 1, :b 2}"}
+      ],
+      notes: "Requires an even number of arguments. Equivalent to map literal `{:a 1 :b 2}`.",
+      see_also: ["assoc", "zipmap"],
+      clojure_var: "hash-map",
+      divergences: nil
+    },
+    %{
       name: "vector?",
       description: "",
       binding: :normal,
@@ -4018,7 +4043,8 @@
     },
     %{
       name: "juxt",
-      description: "Returns a function that applies all functions and returns a vector of results",
+      description:
+        "Returns a function that applies all functions and returns a vector of results",
       binding: nil,
       category: :core,
       dispatch: :analyze,
@@ -4338,39 +4364,104 @@
     }
   ],
   clojure_core_audit: [
-    %{name: "*", status: :supported, description: "Multiplies numbers; returns 1 with no args", notes: ""},
+    %{
+      name: "*",
+      status: :supported,
+      description: "Multiplies numbers; returns 1 with no args",
+      notes: ""
+    },
     %{
       name: "*'",
       status: :candidate,
       description: "Multiplies numbers with arbitrary precision",
       notes: "pure numerical operation"
     },
-    %{name: "+", status: :supported, description: "Adds numbers; returns 0 with no args", notes: ""},
+    %{
+      name: "+",
+      status: :supported,
+      description: "Adds numbers; returns 0 with no args",
+      notes: ""
+    },
     %{
       name: "+'",
       status: :candidate,
       description: "Adds numbers with arbitrary precision",
       notes: "pure numerical operation"
     },
-    %{name: "-", status: :supported, description: "Subtracts numbers or negates single argument", notes: ""},
+    %{
+      name: "-",
+      status: :supported,
+      description: "Subtracts numbers or negates single argument",
+      notes: ""
+    },
     %{
       name: "-'",
       status: :candidate,
       description: "Subtracts numbers with arbitrary precision",
       notes: "pure numerical operation"
     },
-    %{name: "->", status: :supported, description: "Threads expression as second argument through forms", notes: ""},
-    %{name: "->>", status: :supported, description: "Threads expression as last argument through forms", notes: ""},
-    %{name: ".", status: :not_relevant, description: "Java member access and method calls", notes: "Java interop"},
-    %{name: "..", status: :not_relevant, description: "Chains member access operations", notes: "Java interop"},
+    %{
+      name: "->",
+      status: :supported,
+      description: "Threads expression as second argument through forms",
+      notes: ""
+    },
+    %{
+      name: "->>",
+      status: :supported,
+      description: "Threads expression as last argument through forms",
+      notes: ""
+    },
+    %{
+      name: ".",
+      status: :not_relevant,
+      description: "Java member access and method calls",
+      notes: "Java interop"
+    },
+    %{
+      name: "..",
+      status: :not_relevant,
+      description: "Chains member access operations",
+      notes: "Java interop"
+    },
     %{name: "/", status: :supported, description: "Divides numbers", notes: ""},
-    %{name: "<", status: :supported, description: "Returns true if numbers monotonically increase", notes: ""},
-    %{name: "<=", status: :supported, description: "Returns true if numbers non-decreasing", notes: ""},
+    %{
+      name: "<",
+      status: :supported,
+      description: "Returns true if numbers monotonically increase",
+      notes: ""
+    },
+    %{
+      name: "<=",
+      status: :supported,
+      description: "Returns true if numbers non-decreasing",
+      notes: ""
+    },
     %{name: "=", status: :supported, description: "Equality comparison", notes: ""},
-    %{name: "==", status: :candidate, description: "Type-independent numeric equality", notes: "pure numeric predicate"},
-    %{name: ">", status: :supported, description: "Returns true if numbers monotonically decrease", notes: ""},
-    %{name: ">=", status: :supported, description: "Returns true if numbers non-increasing", notes: ""},
-    %{name: "abs", status: :supported, description: "Returns absolute value of number", notes: ""},
+    %{
+      name: "==",
+      status: :candidate,
+      description: "Type-independent numeric equality",
+      notes: "pure numeric predicate"
+    },
+    %{
+      name: ">",
+      status: :supported,
+      description: "Returns true if numbers monotonically decrease",
+      notes: ""
+    },
+    %{
+      name: ">=",
+      status: :supported,
+      description: "Returns true if numbers non-increasing",
+      notes: ""
+    },
+    %{
+      name: "abs",
+      status: :supported,
+      description: "Returns absolute value of number",
+      notes: ""
+    },
     %{
       name: "accessor",
       status: :candidate,
@@ -4419,8 +4510,18 @@
       description: "Returns length of Java array",
       notes: "Java interop (Java array length)"
     },
-    %{name: "alias", status: :not_relevant, description: "Adds namespace alias", notes: "namespace manipulation"},
-    %{name: "all-ns", status: :not_relevant, description: "Returns all namespaces", notes: "namespace system"},
+    %{
+      name: "alias",
+      status: :not_relevant,
+      description: "Adds namespace alias",
+      notes: "namespace manipulation"
+    },
+    %{
+      name: "all-ns",
+      status: :not_relevant,
+      description: "Returns all namespaces",
+      notes: "namespace system"
+    },
     %{
       name: "alter",
       status: :not_relevant,
@@ -4452,8 +4553,18 @@
       notes: "relies on Clojure's global hierarchy/multimethod system"
     },
     %{name: "and", status: :supported, description: "Short-circuit logical AND", notes: ""},
-    %{name: "any?", status: :candidate, description: "Returns true for any argument", notes: "pure predicate function"},
-    %{name: "apply", status: :supported, description: "Applies function to argument sequence", notes: ""},
+    %{
+      name: "any?",
+      status: :candidate,
+      description: "Returns true for any argument",
+      notes: "pure predicate function"
+    },
+    %{
+      name: "apply",
+      status: :supported,
+      description: "Applies function to argument sequence",
+      notes: ""
+    },
     %{
       name: "areduce",
       status: :not_relevant,
@@ -4466,7 +4577,12 @@
       description: "Constructs array-map from key-value pairs",
       notes: "pure constructor for map data structure"
     },
-    %{name: "as->", status: :supported, description: "Binds name to expr, threads through forms", notes: ""},
+    %{
+      name: "as->",
+      status: :supported,
+      description: "Binds name to expr, threads through forms",
+      notes: ""
+    },
     %{
       name: "aset",
       status: :not_relevant,
@@ -4479,15 +4595,30 @@
       description: "Throws AssertionError if expr false",
       notes: "relies on exception handling/throwing"
     },
-    %{name: "assoc", status: :supported, description: "Returns map/vector with added key-value pairs", notes: ""},
+    %{
+      name: "assoc",
+      status: :supported,
+      description: "Returns map/vector with added key-value pairs",
+      notes: ""
+    },
     %{
       name: "assoc!",
       status: :not_relevant,
       description: "Sets value in transient collection",
       notes: "relies on transient collections (mutability)"
     },
-    %{name: "assoc-in", status: :supported, description: "Associates value in nested structure", notes: ""},
-    %{name: "associative?", status: :supported, description: "Returns true if coll implements Associative", notes: ""},
+    %{
+      name: "assoc-in",
+      status: :supported,
+      description: "Associates value in nested structure",
+      notes: ""
+    },
+    %{
+      name: "associative?",
+      status: :supported,
+      description: "Returns true if coll implements Associative",
+      notes: ""
+    },
     %{
       name: "atom",
       status: :not_relevant,
@@ -4518,16 +4649,36 @@
       description: "Returns map based on JavaBean properties",
       notes: "Java interop (JavaBeans)"
     },
-    %{name: "bigdec", status: :candidate, description: "Coerces to BigDecimal", notes: "pure numerical coercion"},
-    %{name: "bigint", status: :candidate, description: "Coerces to BigInt", notes: "pure numerical coercion"},
-    %{name: "biginteger", status: :candidate, description: "Coerces to BigInteger", notes: "pure numerical coercion"},
+    %{
+      name: "bigdec",
+      status: :candidate,
+      description: "Coerces to BigDecimal",
+      notes: "pure numerical coercion"
+    },
+    %{
+      name: "bigint",
+      status: :candidate,
+      description: "Coerces to BigInt",
+      notes: "pure numerical coercion"
+    },
+    %{
+      name: "biginteger",
+      status: :candidate,
+      description: "Coerces to BigInteger",
+      notes: "pure numerical coercion"
+    },
     %{
       name: "binding",
       status: :not_relevant,
       description: "Binds vars to new values for body duration",
       notes: "relies on thread-local var binding mechanism"
     },
-    %{name: "bit-and", status: :candidate, description: "Bitwise AND", notes: "pure bitwise arithmetic"},
+    %{
+      name: "bit-and",
+      status: :candidate,
+      description: "Bitwise AND",
+      notes: "pure bitwise arithmetic"
+    },
     %{
       name: "bit-and-not",
       status: :candidate,
@@ -4552,7 +4703,12 @@
       description: "Bitwise complement",
       notes: "pure bitwise operation on integers"
     },
-    %{name: "bit-or", status: :candidate, description: "Bitwise OR", notes: "pure bitwise operation on integers"},
+    %{
+      name: "bit-or",
+      status: :candidate,
+      description: "Bitwise OR",
+      notes: "pure bitwise operation on integers"
+    },
     %{
       name: "bit-set",
       status: :candidate,
@@ -4590,8 +4746,18 @@
       description: "Creates boolean Java array",
       notes: "creates Java array, incompatible with BEAM/non-JVM environments"
     },
-    %{name: "boolean?", status: :supported, description: "Returns true if value is Boolean", notes: ""},
-    %{name: "booleans", status: :not_relevant, description: "Casts to boolean array", notes: "Java array manipulation"},
+    %{
+      name: "boolean?",
+      status: :supported,
+      description: "Returns true if value is Boolean",
+      notes: ""
+    },
+    %{
+      name: "booleans",
+      status: :not_relevant,
+      description: "Casts to boolean array",
+      notes: "Java array manipulation"
+    },
     %{
       name: "bound-fn",
       status: :not_relevant,
@@ -4617,16 +4783,36 @@
       notes: "designed for lazy sequences"
     },
     %{name: "butlast", status: :supported, description: "Returns all but last item", notes: ""},
-    %{name: "byte", status: :candidate, description: "Coerces to byte", notes: "pure numerical type coercion"},
-    %{name: "byte-array", status: :not_relevant, description: "Creates byte Java array", notes: "Java array creation"},
-    %{name: "bytes", status: :not_relevant, description: "Casts to byte array", notes: "Java array casting"},
+    %{
+      name: "byte",
+      status: :candidate,
+      description: "Coerces to byte",
+      notes: "pure numerical type coercion"
+    },
+    %{
+      name: "byte-array",
+      status: :not_relevant,
+      description: "Creates byte Java array",
+      notes: "Java array creation"
+    },
+    %{
+      name: "bytes",
+      status: :not_relevant,
+      description: "Casts to byte array",
+      notes: "Java array casting"
+    },
     %{
       name: "bytes?",
       status: :not_relevant,
       description: "Returns true if value is byte array",
       notes: "Java array type check"
     },
-    %{name: "case", status: :supported, description: "Constant-time dispatch on expression value", notes: ""},
+    %{
+      name: "case",
+      status: :supported,
+      description: "Constant-time dispatch on expression value",
+      notes: ""
+    },
     %{
       name: "cast",
       status: :not_relevant,
@@ -4639,9 +4825,24 @@
       description: "Transducer concatenating input collections",
       notes: "pure transducer for collection transformation"
     },
-    %{name: "char", status: :candidate, description: "Coerces to char", notes: "pure data type coercion"},
-    %{name: "char-array", status: :not_relevant, description: "Creates char Java array", notes: "creates Java array"},
-    %{name: "char?", status: :supported, description: "Returns true if value is Character", notes: ""},
+    %{
+      name: "char",
+      status: :candidate,
+      description: "Coerces to char",
+      notes: "pure data type coercion"
+    },
+    %{
+      name: "char-array",
+      status: :not_relevant,
+      description: "Creates char Java array",
+      notes: "creates Java array"
+    },
+    %{
+      name: "char?",
+      status: :supported,
+      description: "Returns true if value is Character",
+      notes: ""
+    },
     %{
       name: "chars",
       status: :not_relevant,
@@ -4666,7 +4867,12 @@
       description: "Returns Clojure version string",
       notes: "environment info irrelevant to pure data transformation"
     },
-    %{name: "coll?", status: :supported, description: "Returns true if implements IPersistentCollection", notes: ""},
+    %{
+      name: "coll?",
+      status: :supported,
+      description: "Returns true if implements IPersistentCollection",
+      notes: ""
+    },
     %{
       name: "comment",
       status: :not_relevant,
@@ -4679,14 +4885,24 @@
       description: "Sets ref value via commutative function",
       notes: "mutable state primitive (refs)"
     },
-    %{name: "comp", status: :supported, description: "Composes functions right-to-left", notes: ""},
+    %{
+      name: "comp",
+      status: :supported,
+      description: "Composes functions right-to-left",
+      notes: ""
+    },
     %{
       name: "comparator",
       status: :candidate,
       description: "Returns Comparator from predicate",
       notes: "pure function to create a comparison function"
     },
-    %{name: "compare", status: :supported, description: "Compares values returning neg/zero/pos", notes: ""},
+    %{
+      name: "compare",
+      status: :supported,
+      description: "Compares values returning neg/zero/pos",
+      notes: ""
+    },
     %{
       name: "compare-and-set!",
       status: :not_relevant,
@@ -4699,30 +4915,85 @@
       description: "Compiles namespace into classfiles",
       notes: "compilation and class generation"
     },
-    %{name: "complement", status: :supported, description: "Returns function with opposite truth value", notes: ""},
+    %{
+      name: "complement",
+      status: :supported,
+      description: "Returns function with opposite truth value",
+      notes: ""
+    },
     %{
       name: "completing",
       status: :candidate,
       description: "Returns reducing function with completion",
       notes: "pure function for reducing transformations"
     },
-    %{name: "concat", status: :supported, description: "Returns lazy seq concatenating collections", notes: ""},
+    %{
+      name: "concat",
+      status: :supported,
+      description: "Returns lazy seq concatenating collections",
+      notes: ""
+    },
     %{name: "cond", status: :supported, description: "Multi-way conditional", notes: ""},
-    %{name: "cond->", status: :supported, description: "Threads through forms where tests true", notes: ""},
-    %{name: "cond->>", status: :supported, description: "Threads as last arg where tests true", notes: ""},
-    %{name: "condp", status: :supported, description: "Predicate dispatch against expression", notes: ""},
-    %{name: "conj", status: :supported, description: "Returns collection with items added", notes: ""},
+    %{
+      name: "cond->",
+      status: :supported,
+      description: "Threads through forms where tests true",
+      notes: ""
+    },
+    %{
+      name: "cond->>",
+      status: :supported,
+      description: "Threads as last arg where tests true",
+      notes: ""
+    },
+    %{
+      name: "condp",
+      status: :supported,
+      description: "Predicate dispatch against expression",
+      notes: ""
+    },
+    %{
+      name: "conj",
+      status: :supported,
+      description: "Returns collection with items added",
+      notes: ""
+    },
     %{
       name: "conj!",
       status: :not_relevant,
       description: "Adds item to transient collection",
       notes: "operates on transient collections (mutable)"
     },
-    %{name: "cons", status: :supported, description: "Returns seq with item prepended", notes: ""},
-    %{name: "constantly", status: :supported, description: "Returns function ignoring args, returning value", notes: ""},
-    %{name: "contains?", status: :supported, description: "Returns true if key present in collection", notes: ""},
-    %{name: "count", status: :supported, description: "Returns number of items in collection", notes: ""},
-    %{name: "counted?", status: :supported, description: "Returns true if constant-time count", notes: ""},
+    %{
+      name: "cons",
+      status: :supported,
+      description: "Returns seq with item prepended",
+      notes: ""
+    },
+    %{
+      name: "constantly",
+      status: :supported,
+      description: "Returns function ignoring args, returning value",
+      notes: ""
+    },
+    %{
+      name: "contains?",
+      status: :supported,
+      description: "Returns true if key present in collection",
+      notes: ""
+    },
+    %{
+      name: "count",
+      status: :supported,
+      description: "Returns number of items in collection",
+      notes: ""
+    },
+    %{
+      name: "counted?",
+      status: :supported,
+      description: "Returns true if constant-time count",
+      notes: ""
+    },
     %{
       name: "create-ns",
       status: :not_relevant,
@@ -4755,10 +5026,25 @@
       description: "Defines var names with no bindings",
       notes: "relies on namespace/var system"
     },
-    %{name: "dedupe", status: :supported, description: "Removes consecutive duplicates", notes: ""},
+    %{
+      name: "dedupe",
+      status: :supported,
+      description: "Removes consecutive duplicates",
+      notes: ""
+    },
     %{name: "def", status: :supported, description: "Creates and interns global var", notes: ""},
-    %{name: "definterface", status: :not_relevant, description: "Creates Java interface", notes: "Java interop"},
-    %{name: "defmacro", status: :not_relevant, description: "Defines macro", notes: "macro system"},
+    %{
+      name: "definterface",
+      status: :not_relevant,
+      description: "Creates Java interface",
+      notes: "Java interop"
+    },
+    %{
+      name: "defmacro",
+      status: :not_relevant,
+      description: "Defines macro",
+      notes: "macro system"
+    },
     %{
       name: "defmethod",
       status: :not_relevant,
@@ -4772,8 +5058,18 @@
       notes: "multimethods"
     },
     %{name: "defn", status: :supported, description: "Defines named function", notes: ""},
-    %{name: "defn-", status: :not_relevant, description: "Defines private function", notes: "namespacing/metadata"},
-    %{name: "defonce", status: :supported, description: "Defines var only if not already defined", notes: ""},
+    %{
+      name: "defn-",
+      status: :not_relevant,
+      description: "Defines private function",
+      notes: "namespacing/metadata"
+    },
+    %{
+      name: "defonce",
+      status: :supported,
+      description: "Defines var only if not already defined",
+      notes: ""
+    },
     %{
       name: "defprotocol",
       status: :not_relevant,
@@ -4786,7 +5082,12 @@
       description: "Creates record type with fields",
       notes: "custom types/Java-like classes"
     },
-    %{name: "defstruct", status: :not_relevant, description: "Creates structure type", notes: "obsolete type system"},
+    %{
+      name: "defstruct",
+      status: :not_relevant,
+      description: "Creates structure type",
+      notes: "obsolete type system"
+    },
     %{
       name: "deftype",
       status: :not_relevant,
@@ -4849,17 +5150,42 @@
       description: "Removes from transient map",
       notes: "relies on transient/mutable data structures"
     },
-    %{name: "distinct", status: :supported, description: "Returns seq removing duplicates", notes: ""},
-    %{name: "distinct?", status: :supported, description: "Returns true if all args distinct", notes: ""},
-    %{name: "do", status: :supported, description: "Evaluates expressions, returns last", notes: ""},
-    %{name: "doall", status: :not_relevant, description: "Realizes entire lazy seq", notes: "relies on lazy sequences"},
+    %{
+      name: "distinct",
+      status: :supported,
+      description: "Returns seq removing duplicates",
+      notes: ""
+    },
+    %{
+      name: "distinct?",
+      status: :supported,
+      description: "Returns true if all args distinct",
+      notes: ""
+    },
+    %{
+      name: "do",
+      status: :supported,
+      description: "Evaluates expressions, returns last",
+      notes: ""
+    },
+    %{
+      name: "doall",
+      status: :not_relevant,
+      description: "Realizes entire lazy seq",
+      notes: "relies on lazy sequences"
+    },
     %{
       name: "dorun",
       status: :not_relevant,
       description: "Realizes lazy seq, returns nil",
       notes: "relies on lazy sequences"
     },
-    %{name: "doseq", status: :supported, description: "Iterates over sequences for side effects", notes: ""},
+    %{
+      name: "doseq",
+      status: :supported,
+      description: "Iterates over sequences for side effects",
+      notes: ""
+    },
     %{
       name: "dosync",
       status: :not_relevant,
@@ -4886,18 +5212,48 @@
       notes: "relies on Java arrays"
     },
     %{name: "double?", status: :supported, description: "Returns true if Double", notes: ""},
-    %{name: "doubles", status: :not_relevant, description: "Casts to double array", notes: "relies on Java arrays"},
-    %{name: "drop", status: :supported, description: "Returns seq skipping first n items", notes: ""},
-    %{name: "drop-last", status: :supported, description: "Returns seq without last n items", notes: ""},
-    %{name: "drop-while", status: :supported, description: "Drops items while predicate true", notes: ""},
+    %{
+      name: "doubles",
+      status: :not_relevant,
+      description: "Casts to double array",
+      notes: "relies on Java arrays"
+    },
+    %{
+      name: "drop",
+      status: :supported,
+      description: "Returns seq skipping first n items",
+      notes: ""
+    },
+    %{
+      name: "drop-last",
+      status: :supported,
+      description: "Returns seq without last n items",
+      notes: ""
+    },
+    %{
+      name: "drop-while",
+      status: :supported,
+      description: "Drops items while predicate true",
+      notes: ""
+    },
     %{
       name: "eduction",
       status: :not_relevant,
       description: "Returns reducible wrapper of transducer",
       notes: "relies on lazy/transducer abstractions"
     },
-    %{name: "empty", status: :supported, description: "Returns empty collection of same type", notes: ""},
-    %{name: "empty?", status: :supported, description: "Returns true if collection empty", notes: ""},
+    %{
+      name: "empty",
+      status: :supported,
+      description: "Returns empty collection of same type",
+      notes: ""
+    },
+    %{
+      name: "empty?",
+      status: :supported,
+      description: "Returns true if collection empty",
+      notes: ""
+    },
     %{
       name: "ensure",
       status: :not_relevant,
@@ -4934,9 +5290,24 @@
       description: "Evaluates form in current namespace",
       notes: "requires runtime compilation and namespace support"
     },
-    %{name: "even?", status: :supported, description: "Returns true if number is even", notes: ""},
-    %{name: "every-pred", status: :supported, description: "Returns combined predicate (all must be true)", notes: ""},
-    %{name: "every?", status: :supported, description: "Returns true if pred true for all items", notes: ""},
+    %{
+      name: "even?",
+      status: :supported,
+      description: "Returns true if number is even",
+      notes: ""
+    },
+    %{
+      name: "every-pred",
+      status: :supported,
+      description: "Returns combined predicate (all must be true)",
+      notes: ""
+    },
+    %{
+      name: "every?",
+      status: :supported,
+      description: "Returns true if pred true for all items",
+      notes: ""
+    },
     %{
       name: "ex-cause",
       status: :not_relevant,
@@ -4991,7 +5362,12 @@
       description: "Returns true if type extends protocol",
       notes: "relies on protocols"
     },
-    %{name: "false?", status: :supported, description: "Returns true if value is false", notes: ""},
+    %{
+      name: "false?",
+      status: :supported,
+      description: "Returns true if value is false",
+      notes: ""
+    },
     %{name: "ffirst", status: :supported, description: "First of first item", notes: ""},
     %{
       name: "file-seq",
@@ -4999,9 +5375,24 @@
       description: "Lazy seq of files in directory tree",
       notes: "relies on lazy sequences and file I/O"
     },
-    %{name: "filter", status: :supported, description: "Returns items where predicate true", notes: ""},
-    %{name: "filterv", status: :supported, description: "Returns vector of items where pred true", notes: ""},
-    %{name: "find", status: :supported, description: "Returns map entry for key or nil", notes: ""},
+    %{
+      name: "filter",
+      status: :supported,
+      description: "Returns items where predicate true",
+      notes: ""
+    },
+    %{
+      name: "filterv",
+      status: :supported,
+      description: "Returns vector of items where pred true",
+      notes: ""
+    },
+    %{
+      name: "find",
+      status: :supported,
+      description: "Returns map entry for key or nil",
+      notes: ""
+    },
     %{
       name: "find-keyword",
       status: :not_relevant,
@@ -5023,15 +5414,45 @@
     %{name: "first", status: :supported, description: "Returns first item", notes: ""},
     %{name: "flatten", status: :supported, description: "Flattens nested collections", notes: ""},
     %{name: "float", status: :supported, description: "Coerces to float", notes: ""},
-    %{name: "float-array", status: :not_relevant, description: "Creates float Java array", notes: "creates Java array"},
+    %{
+      name: "float-array",
+      status: :not_relevant,
+      description: "Creates float Java array",
+      notes: "creates Java array"
+    },
     %{name: "float?", status: :supported, description: "Returns true if Float", notes: ""},
-    %{name: "floats", status: :not_relevant, description: "Casts to float array", notes: "handles Java arrays"},
-    %{name: "flush", status: :not_relevant, description: "Flushes output writer", notes: "I/O operation"},
+    %{
+      name: "floats",
+      status: :not_relevant,
+      description: "Casts to float array",
+      notes: "handles Java arrays"
+    },
+    %{
+      name: "flush",
+      status: :not_relevant,
+      description: "Flushes output writer",
+      notes: "I/O operation"
+    },
     %{name: "fn", status: :supported, description: "Defines anonymous function", notes: ""},
-    %{name: "fn?", status: :supported, description: "Returns true if value is function", notes: ""},
+    %{
+      name: "fn?",
+      status: :supported,
+      description: "Returns true if value is function",
+      notes: ""
+    },
     %{name: "fnext", status: :supported, description: "First of next item", notes: ""},
-    %{name: "fnil", status: :supported, description: "Returns function with nil defaults", notes: ""},
-    %{name: "for", status: :supported, description: "List comprehension from nested iteration", notes: ""},
+    %{
+      name: "fnil",
+      status: :supported,
+      description: "Returns function with nil defaults",
+      notes: ""
+    },
+    %{
+      name: "for",
+      status: :supported,
+      description: "List comprehension from nested iteration",
+      notes: ""
+    },
     %{
       name: "force",
       status: :not_relevant,
@@ -5039,15 +5460,30 @@
       notes: "relies on lazy evaluation/delays"
     },
     %{name: "format", status: :supported, description: "Returns formatted string", notes: ""},
-    %{name: "frequencies", status: :supported, description: "Returns map of item frequencies", notes: ""},
-    %{name: "future", status: :not_relevant, description: "Async computation", notes: "concurrency primitive"},
+    %{
+      name: "frequencies",
+      status: :supported,
+      description: "Returns map of item frequencies",
+      notes: ""
+    },
+    %{
+      name: "future",
+      status: :not_relevant,
+      description: "Async computation",
+      notes: "concurrency primitive"
+    },
     %{
       name: "future-call",
       status: :not_relevant,
       description: "Calls function asynchronously",
       notes: "concurrency primitive"
     },
-    %{name: "future-cancel", status: :not_relevant, description: "Cancels future", notes: "concurrency primitive"},
+    %{
+      name: "future-cancel",
+      status: :not_relevant,
+      description: "Cancels future",
+      notes: "concurrency primitive"
+    },
     %{
       name: "future-cancelled?",
       status: :not_relevant,
@@ -5066,16 +5502,31 @@
       description: "Returns true if value is future",
       notes: "concurrency primitive"
     },
-    %{name: "gensym", status: :not_relevant, description: "Returns unique symbol", notes: "macro system utility"},
+    %{
+      name: "gensym",
+      status: :not_relevant,
+      description: "Returns unique symbol",
+      notes: "macro system utility"
+    },
     %{name: "get", status: :supported, description: "Returns value for key or nil", notes: ""},
-    %{name: "get-in", status: :supported, description: "Returns value at nested key path", notes: ""},
+    %{
+      name: "get-in",
+      status: :supported,
+      description: "Returns value at nested key path",
+      notes: ""
+    },
     %{
       name: "get-method",
       status: :not_relevant,
       description: "Returns multimethod implementation",
       notes: "multimethods not supported"
     },
-    %{name: "get-proxy-class", status: :not_relevant, description: "Returns proxy class", notes: "Java interop"},
+    %{
+      name: "get-proxy-class",
+      status: :not_relevant,
+      description: "Returns proxy class",
+      notes: "Java interop"
+    },
     %{
       name: "get-thread-bindings",
       status: :not_relevant,
@@ -5088,12 +5539,18 @@
       description: "Returns reference validator",
       notes: "mutable state validator"
     },
-    %{name: "group-by", status: :supported, description: "Groups items by function result", notes: ""},
+    %{
+      name: "group-by",
+      status: :supported,
+      description: "Groups items by function result",
+      notes: ""
+    },
     %{
       name: "halt-when",
       status: :not_relevant,
       description: "Transducer halting on predicate",
-      notes: "relies on transducers which often involve stateful reduction and lazy-like sequence processing"
+      notes:
+        "relies on transducers which often involve stateful reduction and lazy-like sequence processing"
     },
     %{
       name: "hash",
@@ -5103,9 +5560,9 @@
     },
     %{
       name: "hash-map",
-      status: :candidate,
+      status: :supported,
       description: "Creates hash map from pairs",
-      notes: "pure function creating a hash map data structure"
+      notes: ""
     },
     %{
       name: "hash-ordered-coll",
@@ -5135,7 +5592,8 @@
       name: "identical?",
       status: :not_relevant,
       description: "Returns true if same object",
-      notes: "relies on object identity which is not meaningful for serializable data in a BEAM-based environment"
+      notes:
+        "relies on object identity which is not meaningful for serializable data in a BEAM-based environment"
     },
     %{name: "identity", status: :supported, description: "Returns argument unchanged", notes: ""},
     %{name: "if", status: :supported, description: "Conditional branch", notes: ""},
@@ -5143,7 +5601,12 @@
     %{name: "if-not", status: :supported, description: "Negated conditional", notes: ""},
     %{name: "if-some", status: :supported, description: "Binds if not nil", notes: ""},
     %{name: "ifn?", status: :supported, description: "Returns true if invokable", notes: ""},
-    %{name: "import", status: :not_relevant, description: "Imports Java classes", notes: "relies on Java interop"},
+    %{
+      name: "import",
+      status: :not_relevant,
+      description: "Imports Java classes",
+      notes: "relies on Java interop"
+    },
     %{
       name: "in-ns",
       status: :not_relevant,
@@ -5157,15 +5620,30 @@
       description: "Increments with arbitrary precision",
       notes: "pure mathematical transformation"
     },
-    %{name: "indexed?", status: :supported, description: "Returns true if supports indexed access", notes: ""},
-    %{name: "infinite?", status: :supported, description: "Returns true if number infinite", notes: ""},
+    %{
+      name: "indexed?",
+      status: :supported,
+      description: "Returns true if supports indexed access",
+      notes: ""
+    },
+    %{
+      name: "infinite?",
+      status: :supported,
+      description: "Returns true if number infinite",
+      notes: ""
+    },
     %{
       name: "inst-ms",
       status: :candidate,
       description: "Milliseconds since epoch for instant",
       notes: "pure data extraction from date object"
     },
-    %{name: "inst?", status: :candidate, description: "Returns true if instant", notes: "pure type predicate"},
+    %{
+      name: "inst?",
+      status: :candidate,
+      description: "Returns true if instant",
+      notes: "pure type predicate"
+    },
     %{
       name: "instance?",
       status: :not_relevant,
@@ -5181,17 +5659,42 @@
     },
     %{name: "int?", status: :supported, description: "Returns true if Integer", notes: ""},
     %{name: "integer?", status: :supported, description: "Returns true if integer", notes: ""},
-    %{name: "interleave", status: :supported, description: "Interleaves items from collections", notes: ""},
+    %{
+      name: "interleave",
+      status: :supported,
+      description: "Interleaves items from collections",
+      notes: ""
+    },
     %{
       name: "intern",
       status: :not_relevant,
       description: "Creates or returns var in namespace",
       notes: "operates on namespaces"
     },
-    %{name: "interpose", status: :supported, description: "Inserts separator between items", notes: ""},
-    %{name: "into", status: :supported, description: "Conjoins items from source into target", notes: ""},
-    %{name: "into-array", status: :not_relevant, description: "Creates Java array from items", notes: "Java interop"},
-    %{name: "ints", status: :not_relevant, description: "Casts to int array", notes: "Java interop"},
+    %{
+      name: "interpose",
+      status: :supported,
+      description: "Inserts separator between items",
+      notes: ""
+    },
+    %{
+      name: "into",
+      status: :supported,
+      description: "Conjoins items from source into target",
+      notes: ""
+    },
+    %{
+      name: "into-array",
+      status: :not_relevant,
+      description: "Creates Java array from items",
+      notes: "Java interop"
+    },
+    %{
+      name: "ints",
+      status: :not_relevant,
+      description: "Casts to int array",
+      notes: "Java interop"
+    },
     %{
       name: "isa?",
       status: :not_relevant,
@@ -5216,9 +5719,24 @@
       description: "Lazy seq from Java Iterator",
       notes: "creates lazy sequences from Java iterators"
     },
-    %{name: "juxt", status: :supported, description: "Applies multiple functions, collects results", notes: ""},
-    %{name: "keep", status: :supported, description: "Keeps non-nil results of function", notes: ""},
-    %{name: "keep-indexed", status: :supported, description: "Keeps non-nil results with index", notes: ""},
+    %{
+      name: "juxt",
+      status: :supported,
+      description: "Applies multiple functions, collects results",
+      notes: ""
+    },
+    %{
+      name: "keep",
+      status: :supported,
+      description: "Keeps non-nil results of function",
+      notes: ""
+    },
+    %{
+      name: "keep-indexed",
+      status: :supported,
+      description: "Keeps non-nil results with index",
+      notes: ""
+    },
     %{name: "key", status: :supported, description: "Returns key of map entry", notes: ""},
     %{name: "keys", status: :supported, description: "Returns map keys", notes: ""},
     %{name: "keyword", status: :supported, description: "Coerces to keyword", notes: ""},
@@ -5249,9 +5767,24 @@
       description: "Lazy seq of lines from reader",
       notes: "relies on lazy sequences and reader I/O"
     },
-    %{name: "list", status: :candidate, description: "Creates list from items", notes: "pure data structure creation"},
-    %{name: "list*", status: :candidate, description: "Creates list with seq appended", notes: "pure list constructor"},
-    %{name: "list?", status: :candidate, description: "Returns true if list", notes: "pure predicate"},
+    %{
+      name: "list",
+      status: :candidate,
+      description: "Creates list from items",
+      notes: "pure data structure creation"
+    },
+    %{
+      name: "list*",
+      status: :candidate,
+      description: "Creates list with seq appended",
+      notes: "pure list constructor"
+    },
+    %{
+      name: "list?",
+      status: :candidate,
+      description: "Returns true if list",
+      notes: "pure predicate"
+    },
     %{
       name: "load",
       status: :not_relevant,
@@ -5264,7 +5797,12 @@
       description: "Loads Clojure file from path",
       notes: "relies on file I/O"
     },
-    %{name: "load-reader", status: :not_relevant, description: "Loads code from reader", notes: "relies on reader I/O"},
+    %{
+      name: "load-reader",
+      status: :not_relevant,
+      description: "Loads code from reader",
+      notes: "relies on reader I/O"
+    },
     %{
       name: "load-string",
       status: :not_relevant,
@@ -5277,17 +5815,42 @@
       description: "Acquires monitor lock, executes body",
       notes: "concurrency primitive/locking"
     },
-    %{name: "long", status: :candidate, description: "Coerces to long", notes: "type coercion, pure"},
+    %{
+      name: "long",
+      status: :candidate,
+      description: "Coerces to long",
+      notes: "type coercion, pure"
+    },
     %{
       name: "long-array",
       status: :not_relevant,
       description: "Creates long Java array",
       notes: "Java interop/primitive array"
     },
-    %{name: "longs", status: :not_relevant, description: "Casts to long array", notes: "Java interop/primitive array"},
-    %{name: "loop", status: :supported, description: "Loop with recur for tail recursion", notes: ""},
-    %{name: "macroexpand", status: :not_relevant, description: "Recursively expands macro", notes: "macro system"},
-    %{name: "macroexpand-1", status: :not_relevant, description: "Expands macro one level", notes: "macro system"},
+    %{
+      name: "longs",
+      status: :not_relevant,
+      description: "Casts to long array",
+      notes: "Java interop/primitive array"
+    },
+    %{
+      name: "loop",
+      status: :supported,
+      description: "Loop with recur for tail recursion",
+      notes: ""
+    },
+    %{
+      name: "macroexpand",
+      status: :not_relevant,
+      description: "Recursively expands macro",
+      notes: "macro system"
+    },
+    %{
+      name: "macroexpand-1",
+      status: :not_relevant,
+      description: "Expands macro one level",
+      notes: "macro system"
+    },
     %{
       name: "make-array",
       status: :not_relevant,
@@ -5301,13 +5864,38 @@
       notes: "relies on multimethods system"
     },
     %{name: "map", status: :supported, description: "Applies function to each item", notes: ""},
-    %{name: "map-entry?", status: :supported, description: "Returns true if map entry", notes: ""},
-    %{name: "map-indexed", status: :supported, description: "Applies function with index to items", notes: ""},
+    %{
+      name: "map-entry?",
+      status: :supported,
+      description: "Returns true if map entry",
+      notes: ""
+    },
+    %{
+      name: "map-indexed",
+      status: :supported,
+      description: "Applies function with index to items",
+      notes: ""
+    },
     %{name: "map?", status: :supported, description: "Returns true if map", notes: ""},
-    %{name: "mapcat", status: :supported, description: "Maps then concatenates results", notes: ""},
-    %{name: "mapv", status: :supported, description: "Returns vector from mapping function", notes: ""},
+    %{
+      name: "mapcat",
+      status: :supported,
+      description: "Maps then concatenates results",
+      notes: ""
+    },
+    %{
+      name: "mapv",
+      status: :supported,
+      description: "Returns vector from mapping function",
+      notes: ""
+    },
     %{name: "max", status: :supported, description: "Returns greatest number", notes: ""},
-    %{name: "max-key", status: :supported, description: "Returns item with greatest function value", notes: ""},
+    %{
+      name: "max-key",
+      status: :supported,
+      description: "Returns item with greatest function value",
+      notes: ""
+    },
     %{
       name: "memfn",
       status: :not_relevant,
@@ -5321,8 +5909,18 @@
       notes: "relies on mutable state for caching"
     },
     %{name: "merge", status: :supported, description: "Merges maps", notes: ""},
-    %{name: "merge-with", status: :supported, description: "Merges maps with combining function", notes: ""},
-    %{name: "meta", status: :not_relevant, description: "Returns metadata", notes: "relies on metadata support"},
+    %{
+      name: "merge-with",
+      status: :supported,
+      description: "Merges maps with combining function",
+      notes: ""
+    },
+    %{
+      name: "meta",
+      status: :not_relevant,
+      description: "Returns metadata",
+      notes: "relies on metadata support"
+    },
     %{
       name: "methods",
       status: :not_relevant,
@@ -5330,37 +5928,92 @@
       notes: "relies on multimethods"
     },
     %{name: "min", status: :supported, description: "Returns least number", notes: ""},
-    %{name: "min-key", status: :supported, description: "Returns item with least function value", notes: ""},
+    %{
+      name: "min-key",
+      status: :supported,
+      description: "Returns item with least function value",
+      notes: ""
+    },
     %{name: "mod", status: :supported, description: "Returns modulo", notes: ""},
-    %{name: "name", status: :supported, description: "Returns name string of symbol/keyword", notes: ""},
+    %{
+      name: "name",
+      status: :supported,
+      description: "Returns name string of symbol/keyword",
+      notes: ""
+    },
     %{
       name: "namespace",
       status: :not_relevant,
       description: "Returns namespace of symbol/keyword",
       notes: "relies on namespace support"
     },
-    %{name: "nat-int?", status: :supported, description: "Returns true if non-negative integer", notes: ""},
-    %{name: "neg-int?", status: :supported, description: "Returns true if negative integer", notes: ""},
-    %{name: "neg?", status: :supported, description: "Returns true if number negative", notes: ""},
-    %{name: "newline", status: :not_relevant, description: "Writes newline to output", notes: "relies on I/O"},
+    %{
+      name: "nat-int?",
+      status: :supported,
+      description: "Returns true if non-negative integer",
+      notes: ""
+    },
+    %{
+      name: "neg-int?",
+      status: :supported,
+      description: "Returns true if negative integer",
+      notes: ""
+    },
+    %{
+      name: "neg?",
+      status: :supported,
+      description: "Returns true if number negative",
+      notes: ""
+    },
+    %{
+      name: "newline",
+      status: :not_relevant,
+      description: "Writes newline to output",
+      notes: "relies on I/O"
+    },
     %{name: "next", status: :supported, description: "Returns seq after first item", notes: ""},
     %{name: "nfirst", status: :supported, description: "Next of first item", notes: ""},
     %{name: "nil?", status: :supported, description: "Returns true if nil", notes: ""},
     %{name: "nnext", status: :supported, description: "Next of next item", notes: ""},
     %{name: "not", status: :supported, description: "Logical complement", notes: ""},
-    %{name: "not-any?", status: :supported, description: "Returns true if pred false for all", notes: ""},
-    %{name: "not-empty", status: :supported, description: "Returns collection or nil if empty", notes: ""},
-    %{name: "not-every?", status: :supported, description: "Returns true if pred false for some", notes: ""},
+    %{
+      name: "not-any?",
+      status: :supported,
+      description: "Returns true if pred false for all",
+      notes: ""
+    },
+    %{
+      name: "not-empty",
+      status: :supported,
+      description: "Returns collection or nil if empty",
+      notes: ""
+    },
+    %{
+      name: "not-every?",
+      status: :supported,
+      description: "Returns true if pred false for some",
+      notes: ""
+    },
     %{name: "not=", status: :supported, description: "Returns true if not equal", notes: ""},
     %{name: "nth", status: :supported, description: "Returns item at index", notes: ""},
-    %{name: "nthnext", status: :candidate, description: "Returns nth next", notes: "pure list/sequence navigation"},
+    %{
+      name: "nthnext",
+      status: :candidate,
+      description: "Returns nth next",
+      notes: "pure list/sequence navigation"
+    },
     %{
       name: "nthrest",
       status: :candidate,
       description: "Returns rest after nth item",
       notes: "pure list/sequence navigation"
     },
-    %{name: "num", status: :candidate, description: "Coerces to number", notes: "pure numeric coercion"},
+    %{
+      name: "num",
+      status: :candidate,
+      description: "Coerces to number",
+      notes: "pure numeric coercion"
+    },
     %{name: "number?", status: :supported, description: "Returns true if number", notes: ""},
     %{
       name: "numerator",
@@ -5388,7 +6041,12 @@
       description: "Parses string to boolean",
       notes: "pure string-to-data transformation"
     },
-    %{name: "parse-double", status: :supported, description: "Parses string to double", notes: ""},
+    %{
+      name: "parse-double",
+      status: :supported,
+      description: "Parses string to double",
+      notes: ""
+    },
     %{name: "parse-long", status: :supported, description: "Parses string to long", notes: ""},
     %{
       name: "parse-uuid",
@@ -5396,12 +6054,42 @@
       description: "Parses string to UUID",
       notes: "pure string-to-data transformation"
     },
-    %{name: "partial", status: :supported, description: "Fixes supplied arguments to function", notes: ""},
-    %{name: "partition", status: :supported, description: "Partitions items into groups of n", notes: ""},
-    %{name: "partition-all", status: :supported, description: "Partitions without dropping partial group", notes: ""},
-    %{name: "partition-by", status: :supported, description: "Partitions by change in function value", notes: ""},
-    %{name: "pcalls", status: :supported, description: "Parallel calls to zero-arity functions", notes: ""},
-    %{name: "peek", status: :supported, description: "Returns first/last without removing", notes: ""},
+    %{
+      name: "partial",
+      status: :supported,
+      description: "Fixes supplied arguments to function",
+      notes: ""
+    },
+    %{
+      name: "partition",
+      status: :supported,
+      description: "Partitions items into groups of n",
+      notes: ""
+    },
+    %{
+      name: "partition-all",
+      status: :supported,
+      description: "Partitions without dropping partial group",
+      notes: ""
+    },
+    %{
+      name: "partition-by",
+      status: :supported,
+      description: "Partitions by change in function value",
+      notes: ""
+    },
+    %{
+      name: "pcalls",
+      status: :supported,
+      description: "Parallel calls to zero-arity functions",
+      notes: ""
+    },
+    %{
+      name: "peek",
+      status: :supported,
+      description: "Returns first/last without removing",
+      notes: ""
+    },
     %{
       name: "persistent!",
       status: :not_relevant,
@@ -5409,17 +6097,42 @@
       notes: "transients are unsupported"
     },
     %{name: "pmap", status: :supported, description: "Parallel map over collection", notes: ""},
-    %{name: "pop", status: :supported, description: "Returns collection without first/last", notes: ""},
+    %{
+      name: "pop",
+      status: :supported,
+      description: "Returns collection without first/last",
+      notes: ""
+    },
     %{
       name: "pop!",
       status: :not_relevant,
       description: "Removes from transient collection",
       notes: "transients are unsupported"
     },
-    %{name: "pos-int?", status: :supported, description: "Returns true if positive integer", notes: ""},
-    %{name: "pos?", status: :supported, description: "Returns true if number positive", notes: ""},
-    %{name: "pr", status: :not_relevant, description: "Prints value in readable form", notes: "I/O operation"},
-    %{name: "pr-str", status: :supported, description: "Returns readable string of value", notes: ""},
+    %{
+      name: "pos-int?",
+      status: :supported,
+      description: "Returns true if positive integer",
+      notes: ""
+    },
+    %{
+      name: "pos?",
+      status: :supported,
+      description: "Returns true if number positive",
+      notes: ""
+    },
+    %{
+      name: "pr",
+      status: :not_relevant,
+      description: "Prints value in readable form",
+      notes: "I/O operation"
+    },
+    %{
+      name: "pr-str",
+      status: :supported,
+      description: "Returns readable string of value",
+      notes: ""
+    },
     %{
       name: "prefer-method",
       status: :not_relevant,
@@ -5432,17 +6145,37 @@
       description: "Returns multimethod preferences",
       notes: "multimethods are unsupported"
     },
-    %{name: "print", status: :not_relevant, description: "Prints value without quoting", notes: "I/O operation"},
+    %{
+      name: "print",
+      status: :not_relevant,
+      description: "Prints value without quoting",
+      notes: "I/O operation"
+    },
     %{
       name: "print-str",
       status: :not_relevant,
       description: "Returns printed string of value",
       notes: "relies on printing logic/I/O"
     },
-    %{name: "printf", status: :not_relevant, description: "Prints formatted output", notes: "performs stdout I/O"},
+    %{
+      name: "printf",
+      status: :not_relevant,
+      description: "Prints formatted output",
+      notes: "performs stdout I/O"
+    },
     %{name: "println", status: :supported, description: "Prints with newline", notes: ""},
-    %{name: "promise", status: :not_relevant, description: "Creates promise", notes: "concurrency primitive"},
-    %{name: "proxy", status: :not_relevant, description: "Creates proxy implementing interfaces", notes: "Java interop"},
+    %{
+      name: "promise",
+      status: :not_relevant,
+      description: "Creates promise",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "proxy",
+      status: :not_relevant,
+      description: "Creates proxy implementing interfaces",
+      notes: "Java interop"
+    },
     %{
       name: "push-thread-bindings",
       status: :not_relevant,
@@ -5467,7 +6200,12 @@
       description: "Returns true if symbol has namespace",
       notes: "pure predicate for data inspection"
     },
-    %{name: "quot", status: :supported, description: "Returns integer division quotient", notes: ""},
+    %{
+      name: "quot",
+      status: :supported,
+      description: "Returns integer division quotient",
+      notes: ""
+    },
     %{
       name: "quote",
       status: :candidate,
@@ -5506,7 +6244,12 @@
     },
     %{name: "range", status: :supported, description: "Returns sequence of numbers", notes: ""},
     %{name: "ratio?", status: :supported, description: "Returns true if ratio", notes: ""},
-    %{name: "rational?", status: :supported, description: "Returns true if rational number", notes: ""},
+    %{
+      name: "rational?",
+      status: :supported,
+      description: "Returns true if rational number",
+      notes: ""
+    },
     %{
       name: "rationalize",
       status: :candidate,
@@ -5526,8 +6269,18 @@
       description: "Returns matcher for pattern",
       notes: "returns an object maintaining mutable state/matcher position"
     },
-    %{name: "re-matches", status: :supported, description: "Returns full regex match or nil", notes: ""},
-    %{name: "re-pattern", status: :supported, description: "Returns compiled regex pattern", notes: ""},
+    %{
+      name: "re-matches",
+      status: :supported,
+      description: "Returns full regex match or nil",
+      notes: ""
+    },
+    %{
+      name: "re-pattern",
+      status: :supported,
+      description: "Returns compiled regex pattern",
+      notes: ""
+    },
     %{name: "re-seq", status: :supported, description: "Returns seq of regex matches", notes: ""},
     %{
       name: "read",
@@ -5535,7 +6288,12 @@
       description: "Reads next form from reader",
       notes: "implies I/O and interaction with reader contexts"
     },
-    %{name: "read-line", status: :not_relevant, description: "Reads line from input", notes: "I/O operation"},
+    %{
+      name: "read-line",
+      status: :not_relevant,
+      description: "Reads line from input",
+      notes: "I/O operation"
+    },
     %{
       name: "read-string",
       status: :not_relevant,
@@ -5554,9 +6312,24 @@
       description: "Returns true if record",
       notes: "relies on class/type system not supported"
     },
-    %{name: "recur", status: :supported, description: "Rebinds loop vars and jumps to loop start", notes: ""},
-    %{name: "reduce", status: :supported, description: "Reduces collection with function", notes: ""},
-    %{name: "reduce-kv", status: :supported, description: "Reduces map with key-value function", notes: ""},
+    %{
+      name: "recur",
+      status: :supported,
+      description: "Rebinds loop vars and jumps to loop start",
+      notes: ""
+    },
+    %{
+      name: "reduce",
+      status: :supported,
+      description: "Reduces collection with function",
+      notes: ""
+    },
+    %{
+      name: "reduce-kv",
+      status: :supported,
+      description: "Reduces map with key-value function",
+      notes: ""
+    },
     %{
       name: "reduced",
       status: :candidate,
@@ -5594,7 +6367,12 @@
       notes: "relies on protocols and class generation"
     },
     %{name: "rem", status: :supported, description: "Returns remainder of division", notes: ""},
-    %{name: "remove", status: :supported, description: "Returns items where predicate false", notes: ""},
+    %{
+      name: "remove",
+      status: :supported,
+      description: "Returns items where predicate false",
+      notes: ""
+    },
     %{
       name: "remove-all-methods",
       status: :not_relevant,
@@ -5607,7 +6385,12 @@
       description: "Removes multimethod impl",
       notes: "relies on multimethods"
     },
-    %{name: "remove-ns", status: :not_relevant, description: "Removes namespace", notes: "relies on namespaces"},
+    %{
+      name: "remove-ns",
+      status: :not_relevant,
+      description: "Removes namespace",
+      notes: "relies on namespaces"
+    },
     %{
       name: "remove-tap",
       status: :not_relevant,
@@ -5632,7 +6415,12 @@
       description: "Returns seq calling function repeatedly",
       notes: "returns lazy sequences"
     },
-    %{name: "replace", status: :supported, description: "Replaces values by map mapping", notes: ""},
+    %{
+      name: "replace",
+      status: :supported,
+      description: "Replaces values by map mapping",
+      notes: ""
+    },
     %{
       name: "require",
       status: :not_relevant,
@@ -5645,8 +6433,18 @@
       description: "Requires ns and resolves symbol",
       notes: "relies on namespace/load system"
     },
-    %{name: "reset!", status: :not_relevant, description: "Sets atom value", notes: "mutable state (atoms)"},
-    %{name: "reset-meta!", status: :not_relevant, description: "Sets metadata", notes: "metadata manipulation"},
+    %{
+      name: "reset!",
+      status: :not_relevant,
+      description: "Sets atom value",
+      notes: "mutable state (atoms)"
+    },
+    %{
+      name: "reset-meta!",
+      status: :not_relevant,
+      description: "Sets metadata",
+      notes: "metadata manipulation"
+    },
     %{
       name: "reset-vals!",
       status: :not_relevant,
@@ -5667,7 +6465,12 @@
       notes: "concurrency primitives (agents)"
     },
     %{name: "reverse", status: :supported, description: "Reverses order of items", notes: ""},
-    %{name: "reversible?", status: :supported, description: "Returns true if collection reversible", notes: ""},
+    %{
+      name: "reversible?",
+      status: :supported,
+      description: "Returns true if collection reversible",
+      notes: ""
+    },
     %{
       name: "rseq",
       status: :not_relevant,
@@ -5693,7 +6496,12 @@
       notes: "protocol/type system feature"
     },
     %{name: "second", status: :supported, description: "Returns second item", notes: ""},
-    %{name: "select-keys", status: :supported, description: "Returns map with only specified keys", notes: ""},
+    %{
+      name: "select-keys",
+      status: :supported,
+      description: "Returns map with only specified keys",
+      notes: ""
+    },
     %{
       name: "send",
       status: :not_relevant,
@@ -5712,20 +6520,50 @@
       description: "Sends action via executor to agent",
       notes: "relies on agent mutable state"
     },
-    %{name: "seq", status: :supported, description: "Returns sequence or nil if empty", notes: ""},
-    %{name: "seq?", status: :supported, description: "Returns true if value is sequence", notes: ""},
-    %{name: "seqable?", status: :supported, description: "Returns true if implements Seqable", notes: ""},
+    %{
+      name: "seq",
+      status: :supported,
+      description: "Returns sequence or nil if empty",
+      notes: ""
+    },
+    %{
+      name: "seq?",
+      status: :supported,
+      description: "Returns true if value is sequence",
+      notes: ""
+    },
+    %{
+      name: "seqable?",
+      status: :supported,
+      description: "Returns true if implements Seqable",
+      notes: ""
+    },
     %{
       name: "sequence",
       status: :not_relevant,
       description: "Returns seq applying transducer",
       notes: "relies on lazy sequences"
     },
-    %{name: "sequential?", status: :supported, description: "Returns true if sequential", notes: ""},
+    %{
+      name: "sequential?",
+      status: :supported,
+      description: "Returns true if sequential",
+      notes: ""
+    },
     %{name: "set", status: :supported, description: "Creates set from items", notes: ""},
-    %{name: "set!", status: :not_relevant, description: "Sets thread-local var value", notes: "relies on mutable state"},
+    %{
+      name: "set!",
+      status: :not_relevant,
+      description: "Sets thread-local var value",
+      notes: "relies on mutable state"
+    },
     %{name: "set?", status: :supported, description: "Returns true if set", notes: ""},
-    %{name: "short", status: :candidate, description: "Coerces to short", notes: "pure numerical type coercion"},
+    %{
+      name: "short",
+      status: :candidate,
+      description: "Coerces to short",
+      notes: "pure numerical type coercion"
+    },
     %{
       name: "short-array",
       status: :not_relevant,
@@ -5774,13 +6612,38 @@
       description: "Reads entire contents of file/URL",
       notes: "involves file/network I/O"
     },
-    %{name: "some", status: :supported, description: "Returns first truthy result or nil", notes: ""},
-    %{name: "some->", status: :supported, description: "Threads through forms while non-nil", notes: ""},
-    %{name: "some->>", status: :supported, description: "Threads as last arg while non-nil", notes: ""},
-    %{name: "some-fn", status: :supported, description: "Returns pred true if any fn truthy", notes: ""},
+    %{
+      name: "some",
+      status: :supported,
+      description: "Returns first truthy result or nil",
+      notes: ""
+    },
+    %{
+      name: "some->",
+      status: :supported,
+      description: "Threads through forms while non-nil",
+      notes: ""
+    },
+    %{
+      name: "some->>",
+      status: :supported,
+      description: "Threads as last arg while non-nil",
+      notes: ""
+    },
+    %{
+      name: "some-fn",
+      status: :supported,
+      description: "Returns pred true if any fn truthy",
+      notes: ""
+    },
     %{name: "some?", status: :supported, description: "Returns true if not nil", notes: ""},
     %{name: "sort", status: :supported, description: "Returns sorted sequence", notes: ""},
-    %{name: "sort-by", status: :supported, description: "Returns seq sorted by function result", notes: ""},
+    %{
+      name: "sort-by",
+      status: :supported,
+      description: "Returns seq sorted by function result",
+      notes: ""
+    },
     %{
       name: "sorted-map",
       status: :candidate,
@@ -5805,8 +6668,18 @@
       description: "Creates sorted set with comparator",
       notes: "pure collection construction with custom comparator"
     },
-    %{name: "sorted?", status: :supported, description: "Returns true if collection sorted", notes: ""},
-    %{name: "spit", status: :not_relevant, description: "Writes content to file", notes: "file I/O"},
+    %{
+      name: "sorted?",
+      status: :supported,
+      description: "Returns true if collection sorted",
+      notes: ""
+    },
+    %{
+      name: "spit",
+      status: :not_relevant,
+      description: "Writes content to file",
+      notes: "file I/O"
+    },
     %{name: "split-at", status: :supported, description: "Splits seq at index", notes: ""},
     %{name: "split-with", status: :supported, description: "Splits seq by predicate", notes: ""},
     %{name: "str", status: :supported, description: "Converts to string", notes: ""},
@@ -5849,20 +6722,45 @@
       description: "Updates atom, returns [old new]",
       notes: "requires mutable state (atom)"
     },
-    %{name: "symbol", status: :candidate, description: "Coerces to symbol", notes: "pure data coercion"},
+    %{
+      name: "symbol",
+      status: :candidate,
+      description: "Coerces to symbol",
+      notes: "pure data coercion"
+    },
     %{name: "symbol?", status: :supported, description: "Returns true if symbol", notes: ""},
     %{name: "take", status: :supported, description: "Returns first n items", notes: ""},
     %{name: "take-last", status: :supported, description: "Returns last n items", notes: ""},
-    %{name: "take-nth", status: :not_relevant, description: "Returns every nth item", notes: "returns a lazy sequence"},
-    %{name: "take-while", status: :supported, description: "Takes items while predicate true", notes: ""},
-    %{name: "tap>", status: :not_relevant, description: "Sends value to taps", notes: "side-effecting I/O mechanism"},
+    %{
+      name: "take-nth",
+      status: :not_relevant,
+      description: "Returns every nth item",
+      notes: "returns a lazy sequence"
+    },
+    %{
+      name: "take-while",
+      status: :supported,
+      description: "Takes items while predicate true",
+      notes: ""
+    },
+    %{
+      name: "tap>",
+      status: :not_relevant,
+      description: "Sends value to taps",
+      notes: "side-effecting I/O mechanism"
+    },
     %{
       name: "test",
       status: :not_relevant,
       description: "Runs tests for namespace",
       notes: "built-in testing framework/REPL tool"
     },
-    %{name: "throw", status: :not_relevant, description: "Throws exception", notes: "exception handling"},
+    %{
+      name: "throw",
+      status: :not_relevant,
+      description: "Throws exception",
+      notes: "exception handling"
+    },
     %{
       name: "time",
       status: :not_relevant,
@@ -6052,16 +6950,36 @@
       description: "Unsigned right shift",
       notes: "pure bitwise arithmetic operation"
     },
-    %{name: "update", status: :supported, description: "Applies function to map value at key", notes: ""},
-    %{name: "update-in", status: :supported, description: "Applies function to nested map value", notes: ""},
-    %{name: "update-keys", status: :supported, description: "Applies function to map keys", notes: ""},
+    %{
+      name: "update",
+      status: :supported,
+      description: "Applies function to map value at key",
+      notes: ""
+    },
+    %{
+      name: "update-in",
+      status: :supported,
+      description: "Applies function to nested map value",
+      notes: ""
+    },
+    %{
+      name: "update-keys",
+      status: :supported,
+      description: "Applies function to map keys",
+      notes: ""
+    },
     %{
       name: "update-proxy",
       status: :not_relevant,
       description: "Updates proxy method implementations",
       notes: "relies on Java interop/proxy class system"
     },
-    %{name: "update-vals", status: :supported, description: "Applies function to map values", notes: ""},
+    %{
+      name: "update-vals",
+      status: :supported,
+      description: "Applies function to map values",
+      notes: ""
+    },
     %{name: "val", status: :supported, description: "Returns value of map entry", notes: ""},
     %{name: "vals", status: :supported, description: "Returns map values", notes: ""},
     %{
@@ -6103,7 +7021,12 @@
       description: "Returns true if volatile",
       notes: "relies on mutable state"
     },
-    %{name: "vreset!", status: :not_relevant, description: "Sets volatile value", notes: "relies on mutable state"},
+    %{
+      name: "vreset!",
+      status: :not_relevant,
+      description: "Sets volatile value",
+      notes: "relies on mutable state"
+    },
     %{
       name: "vswap!",
       status: :not_relevant,
@@ -6111,10 +7034,30 @@
       notes: "involves mutable state (volatiles)"
     },
     %{name: "when", status: :supported, description: "Evaluates body if test true", notes: ""},
-    %{name: "when-first", status: :supported, description: "Evaluates body if seq non-empty", notes: ""},
-    %{name: "when-let", status: :supported, description: "Binds if truthy, evaluates body", notes: ""},
-    %{name: "when-not", status: :supported, description: "Evaluates body if test false", notes: ""},
-    %{name: "when-some", status: :supported, description: "Binds if not nil, evaluates body", notes: ""},
+    %{
+      name: "when-first",
+      status: :supported,
+      description: "Evaluates body if seq non-empty",
+      notes: ""
+    },
+    %{
+      name: "when-let",
+      status: :supported,
+      description: "Binds if truthy, evaluates body",
+      notes: ""
+    },
+    %{
+      name: "when-not",
+      status: :supported,
+      description: "Evaluates body if test false",
+      notes: ""
+    },
+    %{
+      name: "when-some",
+      status: :supported,
+      description: "Binds if not nil, evaluates body",
+      notes: ""
+    },
     %{
       name: "while",
       status: :not_relevant,
@@ -6161,13 +7104,15 @@
       name: "with-precision",
       status: :not_relevant,
       description: "Sets decimal precision for body",
-      notes: "relies on specific BigDecimal support and dynamic binding context not present in PTC-Lisp"
+      notes:
+        "relies on specific BigDecimal support and dynamic binding context not present in PTC-Lisp"
     },
     %{
       name: "with-redefs",
       status: :not_relevant,
       description: "Redefines vars for body duration",
-      notes: "modifies global var bindings, which is not supported in a functional, immutable sandbox"
+      notes:
+        "modifies global var bindings, which is not supported in a functional, immutable sandbox"
     },
     %{
       name: "xml-seq",
@@ -6175,7 +7120,17 @@
       description: "Lazy seq of XML elements",
       notes: "relies on lazy sequences and I/O-related parsing"
     },
-    %{name: "zero?", status: :supported, description: "Returns true if number is zero", notes: ""},
-    %{name: "zipmap", status: :supported, description: "Creates map from keys and values seqs", notes: ""}
+    %{
+      name: "zero?",
+      status: :supported,
+      description: "Returns true if number is zero",
+      notes: ""
+    },
+    %{
+      name: "zipmap",
+      status: :supported,
+      description: "Creates map from keys and values seqs",
+      notes: ""
+    }
   ]
 }

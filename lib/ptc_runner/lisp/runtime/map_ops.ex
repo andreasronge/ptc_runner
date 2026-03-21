@@ -10,6 +10,30 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
+  @doc """
+  Creates a map from alternating key-value pairs.
+
+  Equivalent to Clojure's `hash-map`. Requires an even number of arguments.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.hash_map([])
+      %{}
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.hash_map([:a, 1, :b, 2])
+      %{a: 1, b: 2}
+  """
+  def hash_map(args) when is_list(args) do
+    if rem(length(args), 2) != 0 do
+      raise ExecutionError,
+        message: "hash-map requires an even number of arguments, got #{length(args)}"
+    end
+
+    args
+    |> Enum.chunk_every(2)
+    |> Enum.into(%{}, fn [k, v] -> {k, v} end)
+  end
+
   def get(m, k) when is_map(m), do: FlexAccess.flex_get(m, k)
   def get(l, k) when is_list(l), do: FlexAccess.flex_get(l, k)
   def get(nil, _k), do: nil

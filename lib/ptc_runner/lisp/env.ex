@@ -345,6 +345,7 @@ defmodule PtcRunner.Lisp.Env do
       {:vec, {:normal, &Runtime.vec/1}},
       {:keyword, {:normal, &Runtime.keyword/1}},
       {:vector, {:collect, &Function.identity/1}},
+      {:"hash-map", {:collect, &Runtime.hash_map/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},
       {:sequential?, {:normal, &Runtime.sequential?/1}},
