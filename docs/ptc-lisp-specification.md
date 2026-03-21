@@ -1626,6 +1626,8 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `filterv` | `(filterv pred coll)` | Same as filter (vectors are the default) |
 | `remove` | `(remove pred coll)` | Remove items where pred is truthy |
 | `keep` | `(keep f coll)` | Non-nil results of (f item). false is kept. |
+| `keep-indexed` | `(keep-indexed f coll)` | Non-nil results of (f index item). false is kept. |
+| `dedupe` | `(dedupe coll)` | Remove consecutive duplicates |
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
@@ -1821,8 +1823,11 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `take-while` | `(take-while pred coll)` | Take while pred is true |
 | `drop-while` | `(drop-while pred coll)` | Drop while pred is true |
 | `distinct` | `(distinct coll)` | Remove duplicates |
+| `split-at` | `(split-at n coll)` | Split into `[(take n coll) (drop n coll)]` |
+| `split-with` | `(split-with pred coll)` | Split into `[(take-while pred coll) (drop-while pred coll)]` |
 | `partition` | `(partition n coll)` | Chunk into groups of n |
 | `partition` | `(partition n step coll)` | Sliding window chunks |
+| `partition-by` | `(partition-by f coll)` | Partition when f's return value changes |
 
 ```clojure
 (first [1 2 3])       ; => 1
@@ -1851,6 +1856,27 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (partition 2 [1 2 3 4 5 6])          ; => [[1 2] [3 4] [5 6]]
 (partition 3 [1 2 3 4 5])            ; => [[1 2 3]] (incomplete discarded)
 (partition 2 1 [1 2 3 4])            ; => [[1 2] [2 3] [3 4]] (sliding window)
+
+;; split-at - split at index
+(split-at 2 [1 2 3 4 5])            ; => [[1 2] [3 4 5]]
+(split-at 0 [1 2 3])                ; => [[] [1 2 3]]
+(split-at -1 [1 2 3])               ; => [[] [1 2 3]] (negative clamps to 0)
+
+;; split-with - split by predicate (takes while true, then rest)
+(split-with pos? [1 2 -1 3])        ; => [[1 2] [-1 3]]
+(split-with even? [2 4 5 6])        ; => [[2 4] [5 6]]
+
+;; partition-by - partition when function value changes
+(partition-by odd? [1 1 2 2 3])     ; => [[1 1] [2 2] [3]]
+(partition-by identity [1 1 2 3 3]) ; => [[1 1] [2] [3 3]]
+
+;; dedupe - remove consecutive duplicates
+(dedupe [1 1 2 3 3 2])              ; => [1 2 3 2]
+(dedupe "aabcc")                    ; => ["a" "b" "c"]
+
+;; keep-indexed - keep non-nil results of (f index item)
+(keep-indexed (fn [i v] (if (odd? i) v)) [:a :b :c :d])  ; => [:b :d]
+(keep-indexed (fn [i v] (when (even? i) v)) [10 20 30])  ; => [10 30]
 ```
 
 **take-while and drop-while with keywords:**
