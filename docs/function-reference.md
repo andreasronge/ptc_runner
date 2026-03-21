@@ -6,6 +6,8 @@
 
 271 functions and special forms.
 
+See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core Audit](clojure-core-audit.md)
+
 ## Table of Contents
 
 - [Definitions & Bindings](#definitions-bindings) (7)

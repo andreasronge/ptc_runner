@@ -6,6 +6,8 @@
 
 Comparison of `clojure.core` vars against PTC-Lisp builtins.
 
+See also: [Function Reference](function-reference.md) | [Conformance Gaps](clojure-conformance-gaps.md)
+
 ## Summary
 
 | Status | Count |
