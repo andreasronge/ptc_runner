@@ -293,6 +293,63 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def type_of(x) when is_function(x), do: :function
   def type_of(_), do: :unknown
 
+  # ============================================================
+  # Type Coercion
+  # ============================================================
+
+  # Only letters, digits, hyphen, underscore, question mark, and exclamation mark.
+  # Excludes operator chars (+, *, <, >, =) that the parser accepts for builtins
+  # but that should not be created at runtime via keyword coercion.
+  @keyword_pattern ~r/\A[a-zA-Z][a-zA-Z0-9\-_?!]*\z/
+
+  @doc """
+  Coerces a string to keyword. Returns keyword unchanged. Returns nil for nil.
+
+  Validates that the string matches PTC-Lisp keyword character set
+  (letters, digits, `-`, `_`, `?`, `!`; must start with a letter).
+  No `/` (per DIV-13), no spaces, no empty strings, no operator chars.
+
+  Uses `String.to_existing_atom/1` to avoid atom table pollution from
+  arbitrary runtime strings. Only keywords already known to the VM
+  (from parsed source or BEAM boot) can be created.
+
+  - `(keyword "foo")` returns `:foo` (if `:foo` already exists)
+  - `(keyword :bar)` returns `:bar`
+  - `(keyword nil)` returns `nil`
+  - `(keyword "")` raises error
+  - `(keyword "foo/bar")` raises error (violates DIV-13)
+  """
+  def keyword(nil), do: nil
+
+  def keyword(k) when is_atom(k) and not is_boolean(k) do
+    if SpecialValues.special?(k) do
+      raise ArgumentError, "cannot coerce special value to keyword: #{inspect(k)}"
+    else
+      k
+    end
+  end
+
+  def keyword(s) when is_binary(s) do
+    unless Regex.match?(@keyword_pattern, s) do
+      raise ArgumentError, "invalid keyword name: #{inspect(s)}"
+    end
+
+    case safe_to_existing_atom(s) do
+      {:ok, atom} -> atom
+      :error -> raise ArgumentError, "keyword not found: #{inspect(s)}"
+    end
+  end
+
+  def keyword(x) do
+    raise ArgumentError, "cannot coerce to keyword: #{inspect(x)}"
+  end
+
+  defp safe_to_existing_atom(s) do
+    {:ok, String.to_existing_atom(s)}
+  rescue
+    ArgumentError -> :error
+  end
+
   @doc "Convert collection to set"
   def set(coll) when is_list(coll), do: MapSet.new(coll)
   def set(%MapSet{} = set), do: set

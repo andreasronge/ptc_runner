@@ -456,6 +456,25 @@ BEAM has no BigDecimal or ratio types. `rational?` returns true only for integer
 
 **Rationale:** Platform difference. BEAM number types are integers and floats only.
 
+### DIV-21: `format` renders nil as empty string
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure
+(format "%s" nil)   ;=> "null"
+
+;; PTC-Lisp
+(format "%s" nil)   ;=> "" (empty string)
+```
+
+PTC-Lisp's `str` converts nil to `""` (not `"nil"` or `"null"`), and `format %s` follows the same convention for consistency.
+
+**Rationale:** Consistency with `(str nil)` → `""`, which is already an established PTC-Lisp convention.
+
 ### GAP-S08: `even?`/`odd?` handle floats gracefully
 
 | Field | Value |

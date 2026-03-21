@@ -861,4 +861,65 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(set? nil)")
     end
   end
+
+  describe "Clojure conformance - format, name, keyword" do
+    @describetag :clojure
+
+    # format
+    test "format with %s" do
+      assert_clojure_equivalent(~S|(format "Hello %s" "world")|)
+    end
+
+    test "format with %d" do
+      assert_clojure_equivalent(~S|(format "%d items" 5)|)
+    end
+
+    test "format with %.2f" do
+      assert_clojure_equivalent(~S|(format "%.2f" 3.14159)|)
+    end
+
+    test "format with multiple specifiers" do
+      assert_clojure_equivalent(~S|(format "%s has %d items" "Alice" 5)|)
+    end
+
+    test "format with %%" do
+      assert_clojure_equivalent(~S|(format "100%%")|)
+    end
+
+    test "format with %x" do
+      assert_clojure_equivalent(~S|(format "%x" 255)|)
+    end
+
+    test "format %s nil diverges from Clojure" do
+      # Clojure: (format "%s" nil) => "null"
+      # PTC-Lisp: (format "%s" nil) => "" (follows str nil convention)
+      {:ok, %{return: ""}} = PtcRunner.Lisp.run(~S|(format "%s" nil)|, context: %{})
+    end
+
+    # name
+    test "name of keyword" do
+      assert_clojure_equivalent(~S|(name :foo)|)
+    end
+
+    test "name of string" do
+      assert_clojure_equivalent(~S|(name "bar")|)
+    end
+
+    # keyword
+    test "keyword from string" do
+      assert_clojure_equivalent(~S|(keyword? (keyword "test"))|)
+    end
+
+    test "keyword from keyword" do
+      assert_clojure_equivalent(~S|(= :bar (keyword :bar))|)
+    end
+
+    test "keyword nil" do
+      assert_clojure_equivalent(~S|(keyword nil)|)
+    end
+
+    test "keyword and name roundtrip" do
+      assert_clojure_equivalent(~S|(= :hello (keyword (name :hello)))|)
+    end
+  end
 end

@@ -506,4 +506,186 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   def parse_double(_), do: nil
+
+  # ============================================================
+  # Format
+  # ============================================================
+
+  @doc """
+  Java-style string formatting with `%s`, `%d`, `%f`, `%e`, `%x`, `%o`, `%%`.
+
+  Extra args are ignored (Clojure behavior). Too few args raises an error.
+
+  - `(format "Hello %s" "world")` returns `"Hello world"`
+  - `(format "%d items" 5)` returns `"5 items"`
+  - `(format "%.2f" 3.14159)` returns `"3.14"`
+  - `(format "100%%")` returns `"100%"`
+  """
+  alias PtcRunner.Lisp.Runtime.SpecialValues
+
+  def format_variadic([fmt | args]) when is_binary(fmt) do
+    {result, _remaining} = format_parse(fmt, args)
+    result
+  end
+
+  def format_variadic([]) do
+    raise ArgumentError, "format requires at least a format string"
+  end
+
+  defp format_parse(fmt, args) do
+    format_parse(fmt, args, [])
+  end
+
+  defp format_parse("", args, acc) do
+    {acc |> Enum.reverse() |> IO.iodata_to_binary(), args}
+  end
+
+  defp format_parse("%" <> rest, args, acc) do
+    {formatted, remaining_fmt, remaining_args} = parse_specifier(rest, args)
+    format_parse(remaining_fmt, remaining_args, [formatted | acc])
+  end
+
+  defp format_parse(<<c::utf8, rest::binary>>, args, acc) do
+    format_parse(rest, args, [<<c::utf8>> | acc])
+  end
+
+  defp parse_specifier("%" <> rest, args) do
+    {"%", rest, args}
+  end
+
+  defp parse_specifier(rest, args) do
+    # Parse optional precision like ".2" before the specifier char
+    {precision, rest} = parse_precision(rest)
+
+    case rest do
+      "s" <> rest2 -> format_s(args, rest2)
+      "d" <> rest2 -> format_d(args, rest2)
+      "f" <> rest2 -> format_f(args, precision, rest2)
+      "e" <> rest2 -> format_e(args, precision, rest2)
+      "x" <> rest2 -> format_x(args, rest2)
+      "o" <> rest2 -> format_o(args, rest2)
+      _ -> raise ArgumentError, "unsupported format specifier in: %#{rest}"
+    end
+  end
+
+  defp parse_precision("." <> rest) do
+    {digits, rest2} = take_digits(rest, [])
+    {String.to_integer(digits), rest2}
+  end
+
+  defp parse_precision(rest), do: {nil, rest}
+
+  defp take_digits(<<c, rest::binary>>, acc) when c in ?0..?9 do
+    take_digits(rest, [<<c>> | acc])
+  end
+
+  defp take_digits(_rest, []) do
+    raise ArgumentError, "expected digits after '.' in format specifier"
+  end
+
+  defp take_digits(rest, acc) do
+    {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
+  end
+
+  defp pop_arg!([arg | rest]), do: {arg, rest}
+  defp pop_arg!([]), do: raise(ArgumentError, "not enough arguments for format string")
+
+  defp format_s(args, rest) do
+    {arg, remaining} = pop_arg!(args)
+    {to_str(arg), rest, remaining}
+  end
+
+  defp format_d(args, rest) do
+    {arg, remaining} = pop_arg!(args)
+
+    cond do
+      is_integer(arg) ->
+        {Integer.to_string(arg), rest, remaining}
+
+      is_float(arg) and arg == Kernel.trunc(arg) ->
+        {Integer.to_string(Kernel.trunc(arg)), rest, remaining}
+
+      true ->
+        raise ArgumentError, "%d expects an integer, got: #{inspect(arg)}"
+    end
+  end
+
+  defp format_f(args, precision, rest) do
+    {arg, remaining} = pop_arg!(args)
+    prec = precision || 6
+
+    cond do
+      SpecialValues.special?(arg) ->
+        {to_str(arg), rest, remaining}
+
+      is_number(arg) ->
+        {:erlang.float_to_binary(arg / 1, decimals: prec) |> format_result(), rest, remaining}
+
+      true ->
+        raise ArgumentError, "%f expects a number, got: #{inspect(arg)}"
+    end
+  end
+
+  defp format_e(args, precision, rest) do
+    {arg, remaining} = pop_arg!(args)
+    prec = precision || 6
+
+    cond do
+      SpecialValues.special?(arg) ->
+        {to_str(arg), rest, remaining}
+
+      is_number(arg) ->
+        {:erlang.float_to_binary(arg / 1, scientific: prec) |> format_result(), rest, remaining}
+
+      true ->
+        raise ArgumentError, "%e expects a number, got: #{inspect(arg)}"
+    end
+  end
+
+  defp format_x(args, rest) do
+    {arg, remaining} = pop_arg!(args)
+
+    if is_integer(arg) do
+      {Integer.to_string(arg, 16) |> String.downcase(), rest, remaining}
+    else
+      raise ArgumentError, "%x expects an integer, got: #{inspect(arg)}"
+    end
+  end
+
+  defp format_o(args, rest) do
+    {arg, remaining} = pop_arg!(args)
+
+    if is_integer(arg) do
+      {Integer.to_string(arg, 8), rest, remaining}
+    else
+      raise ArgumentError, "%o expects an integer, got: #{inspect(arg)}"
+    end
+  end
+
+  defp format_result(s), do: s
+
+  # ============================================================
+  # Name
+  # ============================================================
+
+  @doc """
+  Returns the name string of a keyword or string.
+
+  - `(name :foo)` returns `"foo"`
+  - `(name "bar")` returns `"bar"`
+  - Errors on nil, numbers, booleans, special values.
+  """
+  def name(s) when is_binary(s), do: s
+
+  def name(k) when is_atom(k) and not is_nil(k) and not is_boolean(k) do
+    if SpecialValues.special?(k) do
+      raise ArgumentError, "name not supported on special value: #{inspect(k)}"
+    else
+      Atom.to_string(k)
+    end
+  end
+
+  def name(x) do
+    raise ArgumentError, "name not supported on: #{inspect(x)}"
+  end
 end
