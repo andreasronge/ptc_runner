@@ -143,7 +143,6 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   # Common Clojure/Java functions that don't exist in PTC-Lisp, with alternatives
   @clojure_alternatives %{
     "format" => "use str and arithmetic, e.g. (str (* 100.0 (/ a b)) \"%\")",
-    "keep-indexed" => "use (filter pred (map-indexed vector coll))",
     "re-find" => "use grep for line matching, or (re-pattern \"...\") with re-find",
     "re-seq" => "use (re-seq (re-pattern \"...\") text) — requires compiled regex",
     "printf" => "use println with str",

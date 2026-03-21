@@ -93,6 +93,11 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate partition(n, step, pad, coll), to: Collection
   defdelegate partition_all(n, coll), to: Collection
   defdelegate partition_all(n, step, coll), to: Collection
+  defdelegate split_at(n, coll), to: Collection
+  defdelegate split_with(pred, coll), to: Collection
+  defdelegate partition_by(f, coll), to: Collection
+  defdelegate dedupe(coll), to: Collection
+  defdelegate keep_indexed(f, coll), to: Collection
   defdelegate count(coll), to: Collection
   defdelegate empty?(coll), to: Collection
   defdelegate not_empty(coll), to: Collection

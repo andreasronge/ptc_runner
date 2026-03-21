@@ -134,6 +134,21 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
     |> Enum.map(fn {item, idx} -> Callable.call(f, [idx, item]) end)
   end
 
+  # ── keep_indexed ────────────────────────────────────────────────────
+  # Returns non-nil results of (f index item). Like keep but with index.
+
+  def keep_indexed(f, coll) do
+    Normalize.to_seq(coll)
+    |> Enum.with_index()
+    |> Enum.reduce([], fn {item, idx}, acc ->
+      case Callable.call(f, [idx, item]) do
+        nil -> acc
+        result -> [result | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
   # ── pluck ───────────────────────────────────────────────────────────
 
   def pluck(_key, nil), do: []

@@ -2336,4 +2336,200 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == []
     end
   end
+
+  # ==========================================================================
+  # split-at
+  # ==========================================================================
+
+  describe "split-at" do
+    test "splits vector at index" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-at 2 [1 2 3 4 5])|)
+      assert result == [[1, 2], [3, 4, 5]]
+    end
+
+    test "split-at 0 returns empty left" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-at 0 [1 2 3])|)
+      assert result == [[], [1, 2, 3]]
+    end
+
+    test "split-at beyond length returns empty right" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-at 10 [1 2 3])|)
+      assert result == [[1, 2, 3], []]
+    end
+
+    test "split-at negative n clamps to 0" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-at -1 [1 2 3])|)
+      assert result == [[], [1, 2, 3]]
+    end
+
+    test "split-at nil returns two empty lists" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-at 2 nil)|)
+      assert result == [[], []]
+    end
+
+    test "split-at string returns graphemes" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-at 2 "hello")|)
+      assert result == [["h", "e"], ["l", "l", "o"]]
+    end
+  end
+
+  # ==========================================================================
+  # split-with
+  # ==========================================================================
+
+  describe "split-with" do
+    test "splits by predicate" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-with pos? [1 2 -1 3])|)
+      assert result == [[1, 2], [-1, 3]]
+    end
+
+    test "splits with even?" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-with even? [2 4 5 6])|)
+      assert result == [[2, 4], [5, 6]]
+    end
+
+    test "nothing matches returns empty left" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-with pos? [-1 2 3])|)
+      assert result == [[], [-1, 2, 3]]
+    end
+
+    test "everything matches returns empty right" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-with pos? [1 2 3])|)
+      assert result == [[1, 2, 3], []]
+    end
+
+    test "splits map entries as [k v] pairs" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(split-with (fn [[k v]] (> v 1)) {:a 2 :b 3 :c 0})|)
+
+      # split-while on map: takes while pred true, then rest
+      [left, right] = result
+      assert is_list(left)
+      assert is_list(right)
+      assert length(left) + length(right) == 3
+      assert Enum.all?(left ++ right, fn entry -> is_list(entry) and length(entry) == 2 end)
+    end
+
+    test "keyword pred on string returns empty left" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(split-with :x "abc")|)
+      assert result == [[], ["a", "b", "c"]]
+    end
+  end
+
+  # ==========================================================================
+  # partition-by
+  # ==========================================================================
+
+  describe "partition-by" do
+    test "partitions by predicate result" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(partition-by odd? [1 1 2 2 3])|)
+      assert result == [[1, 1], [2, 2], [3]]
+    end
+
+    test "partitions by identity" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(partition-by identity [1 1 2 3 3])|)
+      assert result == [[1, 1], [2], [3, 3]]
+    end
+
+    test "partitions by key function" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(partition-by count ["a" "b" "ab" "cd"])|)
+
+      assert result == [["a", "b"], ["ab", "cd"]]
+    end
+
+    test "partitions map entries as [k v] pairs" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(partition-by second {:a 1 :b 1 :c 2})|)
+
+      # Result is list of groups, each group is list of [k v] pairs
+      assert is_list(result)
+      assert Enum.all?(result, &is_list/1)
+      flat = List.flatten(result)
+      # Each entry is a [k v] pair — total entries equal map size
+      assert length(flat) == 6
+    end
+  end
+
+  # ==========================================================================
+  # dedupe
+  # ==========================================================================
+
+  describe "dedupe" do
+    test "removes consecutive duplicates" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(dedupe [1 1 2 3 3 2])|)
+      assert result == [1, 2, 3, 2]
+    end
+
+    test "no consecutive duplicates returns same" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(dedupe [1 2 3])|)
+      assert result == [1, 2, 3]
+    end
+
+    test "dedupe nil returns empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(dedupe nil)|)
+      assert result == []
+    end
+
+    test "dedupe string removes consecutive duplicate graphemes" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(dedupe "aabcc")|)
+      assert result == ["a", "b", "c"]
+    end
+
+    test "dedupe on map entries" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(dedupe {:a 1 :b 2})|)
+      assert is_list(result)
+      assert Enum.all?(result, fn entry -> is_list(entry) and length(entry) == 2 end)
+    end
+  end
+
+  # ==========================================================================
+  # keep-indexed
+  # ==========================================================================
+
+  describe "keep-indexed" do
+    test "keeps non-nil results with index" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep-indexed (fn [idx v] (if (odd? idx) v)) [:a :b :c :d])|)
+
+      assert result == [:b, :d]
+    end
+
+    test "returns index-value pairs" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep-indexed (fn [i v] (if (pos? v) [i v])) [-1 0 2 3])|)
+
+      assert result == [[2, 2], [3, 3]]
+    end
+
+    test "keeps by even index using when" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep-indexed (fn [i v] (when (even? i) v)) [10 20 30 40])|)
+
+      assert result == [10, 30]
+    end
+
+    test "preserves false, drops only nil" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep-indexed (fn [i v] v) [false nil true nil])|)
+
+      assert result == [false, true]
+    end
+
+    test "works on string input" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep-indexed (fn [i v] (when (even? i) v)) "abcd")|)
+
+      assert result == ["a", "c"]
+    end
+
+    test "works on map entries" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(keep-indexed (fn [i entry] (when (zero? i) entry)) {:a 1 :b 2})|)
+
+      assert length(result) == 1
+      assert hd(result) |> is_list()
+      assert hd(result) |> length() == 2
+    end
+  end
 end

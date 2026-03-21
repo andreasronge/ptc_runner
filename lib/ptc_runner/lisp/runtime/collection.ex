@@ -42,6 +42,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   defdelegate mapv(f, c1, c2, c3), to: Transform
   defdelegate mapcat(f, coll), to: Transform
   defdelegate keep(f, coll), to: Transform
+  defdelegate keep_indexed(f, coll), to: Transform
   defdelegate map_indexed(f, coll), to: Transform
   defdelegate pluck(key, coll), to: Transform
 
@@ -386,6 +387,36 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     validate_n(n, "partition-all")
     validate_step(step, "partition-all")
     Enum.chunk_every(Normalize.to_seq(coll), n, step)
+  end
+
+  # ============================================================
+  # Split / Partition-by / Dedupe
+  # ============================================================
+
+  def split_at(n, coll) do
+    seq = Normalize.to_seq(coll)
+    clamped = max(n, 0)
+    {left, right} = Enum.split(seq, clamped)
+    [left, right]
+  end
+
+  # Keyword on string: keyword access on graphemes always nil → nothing passes
+  def split_with(pred, coll) when is_atom(pred) and is_binary(coll),
+    do: [[], Normalize.graphemes(coll)]
+
+  def split_with(pred, coll) do
+    pred_fn = Normalize.normalize_pred(pred, :truthy)
+    {left, right} = Enum.split_while(Normalize.to_seq(coll), pred_fn)
+    [left, right]
+  end
+
+  def partition_by(f, coll) do
+    keyfn = Normalize.normalize_keyfn(f)
+    Enum.chunk_by(Normalize.to_seq(coll), keyfn)
+  end
+
+  def dedupe(coll) do
+    Normalize.to_seq(coll) |> Enum.dedup()
   end
 
   # ============================================================

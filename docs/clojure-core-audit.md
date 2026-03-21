@@ -133,7 +133,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `dec'` | 🔲 candidate | Decrements with arbitrary precision | pure arithmetic function |
 | `decimal?` | ✅ supported | Returns true if BigDecimal | always false on BEAM (DIV-20) |
 | `declare` | ❌ not-relevant | Defines var names with no bindings | relies on namespace/var system |
-| `dedupe` | 🔲 candidate | Removes consecutive duplicates | pure collection transformation |
+| `dedupe` | ✅ supported | Removes consecutive duplicates | pure collection transformation |
 | `def` | ✅ supported | Creates and interns global var |  |
 | `definterface` | ❌ not-relevant | Creates Java interface | Java interop |
 | `defmacro` | ❌ not-relevant | Defines macro | macro system |
@@ -271,7 +271,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `iterator-seq` | ❌ not-relevant | Lazy seq from Java Iterator | creates lazy sequences from Java iterators |
 | `juxt` | ✅ supported | Applies multiple functions, collects results |  |
 | `keep` | ✅ supported | Keeps non-nil results of function |  |
-| `keep-indexed` | 🔲 candidate | Keeps non-nil results with index | pure collection transformation |
+| `keep-indexed` | ✅ supported | Keeps non-nil results with index | pure collection transformation |
 | `key` | ✅ supported | Returns key of map entry |  |
 | `keys` | ✅ supported | Returns map keys |  |
 | `keyword` | ✅ supported | Coerces to keyword | single-arity only; uses `to_existing_atom` |
@@ -347,7 +347,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `partial` | ✅ supported | Fixes supplied arguments to function |  |
 | `partition` | ✅ supported | Partitions items into groups of n |  |
 | `partition-all` | ✅ supported | Partitions without dropping partial group |  |
-| `partition-by` | 🔲 candidate | Partitions by change in function value | pure transformation on sequences |
+| `partition-by` | ✅ supported | Partitions by change in function value | pure transformation on sequences |
 | `pcalls` | ✅ supported | Parallel calls to zero-arity functions |  |
 | `peek` | ✅ supported | Returns last element of vector without removing |  |
 | `persistent!` | ❌ not-relevant | Converts transient to persistent | transients are unsupported |
@@ -460,8 +460,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `sorted-set-by` | 🔲 candidate | Creates sorted set with comparator | pure collection construction with custom comparator |
 | `sorted?` | 🔲 candidate | Returns true if collection sorted | pure predicate for collection type |
 | `spit` | ❌ not-relevant | Writes content to file | file I/O |
-| `split-at` | 🔲 candidate | Splits seq at index | pure sequence transformation |
-| `split-with` | 🔲 candidate | Splits seq by predicate | pure sequence transformation |
+| `split-at` | ✅ supported | Splits seq at index | pure sequence transformation |
+| `split-with` | ✅ supported | Splits seq by predicate | pure sequence transformation |
 | `str` | ✅ supported | Converts to string |  |
 | `string?` | ✅ supported | Returns true if string |  |
 | `struct` | ❌ not-relevant | Creates structure instance | legacy structure system, discouraged/deprecated |
