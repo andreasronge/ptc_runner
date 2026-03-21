@@ -517,7 +517,10 @@ defmodule PtcDemo.Agent do
   # --- Private Functions ---
 
   defp build_agent(data_mode, prompt_profile, compression) do
-    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0, plan: nil, thinking: false)
+    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0,
+      plan: nil,
+      thinking: false
+    )
   end
 
   defp build_agent(
@@ -544,9 +547,15 @@ defmodule PtcDemo.Agent do
       thinking: thinking
     ]
 
-    # Add plan only when present
+    # Add plan and enable journaling when plan is present
     base_opts =
-      if plan, do: Keyword.put(base_opts, :plan, plan), else: base_opts
+      if plan do
+        base_opts
+        |> Keyword.put(:plan, plan)
+        |> Keyword.put(:journaling, true)
+      else
+        base_opts
+      end
 
     SubAgent.new(base_opts)
   end
