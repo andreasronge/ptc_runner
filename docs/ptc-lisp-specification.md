@@ -32,7 +32,6 @@ This design enables safe execution in **agentic LLM loops** where programs are g
 ### Non-Goals
 
 - General-purpose programming
-- Turing completeness
 - Full Clojure compatibility
 
 ### Clojure Extensions
