@@ -2427,10 +2427,10 @@ The `seq` function converts a collection to a sequence:
 | `fn?` | Is function? |
 | `false?` | Is exactly `false`? |
 | `true?` | Is exactly `true`? |
-| `symbol?` | Always false (PTC-Lisp uses keywords, not symbols) |
-| `decimal?` | Always false (BEAM has no BigDecimal) |
-| `ratio?` | Always false (BEAM has no ratio type) |
-| `rational?` | Is integer? (integers are the only BEAM rationals) |
+| `symbol?` | Always false — PTC-Lisp uses keywords, not symbols (see [DIV-19](clojure-conformance-gaps.md#div-19-symbol-always-returns-false)) |
+| `decimal?` | Always false — BEAM has no BigDecimal (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
+| `ratio?` | Always false — BEAM has no ratio type (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
+| `rational?` | Is integer? — integers are the only BEAM rationals (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
 | `nat-int?` | Is non-negative integer? (>= 0) |
 | `neg-int?` | Is negative integer? |
 | `pos-int?` | Is positive integer? (> 0) |

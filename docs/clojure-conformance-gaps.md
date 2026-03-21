@@ -414,6 +414,48 @@ No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertio
 
 **Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
 
+### DIV-19: `symbol?` always returns false
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure
+(symbol? 'foo)   ;=> true
+
+;; PTC-Lisp
+(symbol? :foo)   ;=> false (always false)
+```
+
+PTC-Lisp uses keywords where Clojure uses symbols. There is no symbol type.
+
+**Rationale:** Simplicity. Keywords cover all identifier needs in data transformation pipelines.
+
+### DIV-20: `decimal?` and `ratio?` always return false
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure
+(decimal? 1.0M)   ;=> true
+(ratio? 1/3)      ;=> true
+(rational? 1/3)   ;=> true
+
+;; PTC-Lisp
+(decimal? 1.0)    ;=> false (always false)
+(ratio? 1)        ;=> false (always false)
+(rational? 42)    ;=> true  (integers only, no ratios on BEAM)
+```
+
+BEAM has no BigDecimal or ratio types. `rational?` returns true only for integers (the only BEAM rationals).
+
+**Rationale:** Platform difference. BEAM number types are integers and floats only.
+
 ### GAP-S08: `even?`/`odd?` handle floats gracefully
 
 | Field | Value |
