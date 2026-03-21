@@ -266,6 +266,57 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   # PTC-Lisp has no lazy sequences, so this is effectively the same as sequential?
   def seq?(x), do: is_list(x)
 
+  # associative? - maps and vectors support assoc
+  def associative?(x) when is_list(x), do: true
+  def associative?(x) when is_map(x) and not is_struct(x), do: true
+  def associative?(_), do: false
+
+  # counted? - all types where count works (collection.ex)
+  def counted?(x) when is_list(x), do: true
+  def counted?(%MapSet{}), do: true
+  def counted?(x) when is_map(x), do: true
+  def counted?(x) when is_binary(x), do: true
+  def counted?(_), do: false
+
+  # indexed? - vectors and strings support nth
+  def indexed?(x) when is_list(x), do: true
+  def indexed?(x) when is_binary(x), do: true
+  def indexed?(_), do: false
+
+  # reversible? - vectors and strings support reverse
+  def reversible?(x) when is_list(x), do: true
+  def reversible?(x) when is_binary(x), do: true
+  def reversible?(_), do: false
+
+  # sorted? - no sorted collections in PTC-Lisp
+  def sorted?(_), do: false
+
+  # seqable? - anything that can produce a seq
+  def seqable?(nil), do: true
+  def seqable?(x) when is_list(x), do: true
+  def seqable?(%MapSet{}), do: true
+  def seqable?(x) when is_map(x), do: true
+  def seqable?(x) when is_binary(x), do: true
+  def seqable?(_), do: false
+
+  # ifn? - invokable via direct call syntax in apply.ex: functions, keywords, maps, sets
+  # Vectors are NOT invokable (no do_apply_fun clause for lists).
+  # Note: maps and sets are invokable via (my-map :key) but NOT passable to HOFs
+  # like mapv/group-by because Callable.call/2 doesn't dispatch on them.
+  # Wrap in a lambda: (mapv #(my-map %) coll)
+  def ifn?(%MapSet{}), do: true
+  def ifn?(x) when is_map(x) and not is_struct(x), do: true
+  def ifn?(x) when is_atom(x) and not is_nil(x) and not is_boolean(x), do: type_of(x) != :number
+  def ifn?(x), do: type_of(x) == :function
+
+  # map-entry? - no distinct MapEntry type on BEAM
+  def map_entry?(_), do: false
+
+  # distinct? - variadic: true if all args are unique
+  def distinct_args?(args) do
+    MapSet.size(MapSet.new(args)) == length(args)
+  end
+
   @doc "Returns the type of a value as a keyword."
   # credo:disable-for-next-line
   def type_of(nil), do: nil

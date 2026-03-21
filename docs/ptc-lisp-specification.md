@@ -23,7 +23,7 @@ This design enables safe execution in **agentic LLM loops** where programs are g
 ### Design Goals
 
 1. **LLM-friendly**: Easy for language models to generate correctly
-2. **Safe**: No side effects, no unbounded recursion, no system access
+2. **Safe**: No side effects, resource-limited execution, no system access
 3. **Compact**: Minimal syntax, high information density
 4. **Verifiable**: Can be validated against real Clojure for correctness
 5. **Expressive**: Sufficient for common data transformation tasks
@@ -53,6 +53,8 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
 | `float`, `double`, `int` | Type coercion (to float / to integer) |
 | `call` | Tool invocation special form (§9) |
+| `return`, `fail` | Control flow for multi-turn agentic loops (§5.22, §5.23) |
+| `doseq` | Side-effecting iteration (§5.21) |
 | Keyword/string coercion in `where` | `:status = :active` matches `"active"` (§7.6) |
 | Path-based `where` | `(where [:user :role] = :admin)` for nested access (§7.1) |
 
@@ -97,12 +99,16 @@ symbol-rest   = letter | digit | special-rest
 letter        = a-z | A-Z
 digit         = 0-9
 special-initial = + | - | * | / | < | > | = | ? | !
-special-rest    = special-initial | - | _ | /
+special-rest    = special-initial | - | _ | / | . | % | &
 ```
 
-Note: `/` appears in both `special-initial` (for the division operator) and `special-rest` (for namespaced symbols like `data/bar` or `tool/search`).
+Notes:
+- `/` appears in both `special-initial` (for the division operator) and `special-rest` (for namespaced symbols like `data/bar` or `tool/search`)
+- `.` enables Clojure-style multi-level namespaces (e.g., `clojure.string/join`)
+- `%` supports parameter placeholders in `#()` short function syntax (`%1`, `%&`, etc.)
+- `&` supports rest parameter destructuring (`[a & rest]`)
 
-Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `data/bar`, `tool/search`
+Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `data/bar`, `tool/search`, `clojure.string/join`
 
 Reserved symbols (cannot be redefined): `nil`, `true`, `false`
 
@@ -1238,6 +1244,89 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 (def users (task "fetch-users" (tool/get-users {:limit 1000})))
 ```
 
+### 5.21 `doseq` — Side-effecting Iteration
+
+`doseq` iterates over collections for side effects (like `for`, but returns `nil` instead of collecting results). Desugars to `loop`/`recur` at analysis time.
+
+**Syntax:**
+
+```clojure
+(doseq [binding coll] body)
+(doseq [b1 coll1 b2 coll2] body)   ; nested loops
+```
+
+**Semantics:**
+
+- Iterates over each element, executing the body for side effects
+- Supports multiple bindings (nested loops, cartesian product)
+- Supports destructuring in bindings
+- Supports `:when`, `:let`, `:while` modifiers (same as `for`)
+- Always returns `nil`
+
+```clojure
+(doseq [x [1 2 3]] (println x))
+; prints 1, 2, 3
+; => nil
+
+(doseq [x [1 2] y ["a" "b"]] (println x y))
+; prints "1 a", "1 b", "2 a", "2 b"
+; => nil
+
+(doseq [[a b] [[1 2] [3 4]]] (println (+ a b)))
+; prints 3, 7
+; => nil
+```
+
+---
+
+### 5.22 `return` — Signal Successful Completion
+
+`return` immediately terminates execution and returns the given value as the result. Used in multi-turn agentic loops to signal that the agent has completed its task.
+
+**Syntax:**
+
+```clojure
+(return value)
+```
+
+**Semantics:**
+
+- Immediately terminates the current program execution
+- The value becomes the program result, wrapped in a `return_signal`
+- Cannot be used inside `pmap` or `pcalls` (raises an error)
+
+```clojure
+;; Signal completion in a multi-turn loop
+(if (>= (count results) target)
+  (return {:status "complete" :results results})
+  (tool/fetch-more {}))
+```
+
+---
+
+### 5.23 `fail` — Signal Failure
+
+`fail` immediately terminates execution with an error. Used in multi-turn agentic loops to signal that the agent cannot complete the task.
+
+**Syntax:**
+
+```clojure
+(fail error)
+```
+
+**Semantics:**
+
+- Immediately terminates the current program execution
+- The error value becomes the failure reason, wrapped in a `fail_signal`
+- Cannot be used inside `pmap` or `pcalls` (raises an error)
+
+```clojure
+;; Signal failure when a required condition isn't met
+(if (nil? data/input)
+  (fail "No input data provided")
+  (process data/input))
+```
+
 ---
 
 ## 6. Threading Macros
@@ -1825,8 +1914,11 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `distinct` | `(distinct coll)` | Remove duplicates |
 | `split-at` | `(split-at n coll)` | Split into `[(take n coll) (drop n coll)]` |
 | `split-with` | `(split-with pred coll)` | Split into `[(take-while pred coll) (drop-while pred coll)]` |
-| `partition` | `(partition n coll)` | Chunk into groups of n |
-| `partition` | `(partition n step coll)` | Sliding window chunks |
+| `partition` | `(partition n coll)` | Chunk into groups of n (incomplete groups discarded) |
+| `partition` | `(partition n step coll)` | Sliding window chunks (incomplete discarded) |
+| `partition` | `(partition n step pad coll)` | Sliding window with pad collection for incomplete groups |
+| `partition-all` | `(partition-all n coll)` | Chunk into groups of n (incomplete groups included) |
+| `partition-all` | `(partition-all n step coll)` | Sliding window chunks (incomplete included) |
 | `partition-by` | `(partition-by f coll)` | Partition when f's return value changes |
 
 ```clojure
@@ -1852,10 +1944,15 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 (drop 2 [1 2 3 4])    ; => [3 4]
 (distinct [1 2 1 3])  ; => [1 2 3]
 
-;; partition - chunk collection into groups
+;; partition - chunk collection into groups (incomplete discarded)
 (partition 2 [1 2 3 4 5 6])          ; => [[1 2] [3 4] [5 6]]
 (partition 3 [1 2 3 4 5])            ; => [[1 2 3]] (incomplete discarded)
 (partition 2 1 [1 2 3 4])            ; => [[1 2] [2 3] [3 4]] (sliding window)
+(partition 3 3 [0] [1 2 3 4 5])      ; => [[1 2 3] [4 5 0]] (pad incomplete with [0])
+
+;; partition-all - like partition but includes incomplete groups
+(partition-all 2 [1 2 3 4 5])        ; => [[1 2] [3 4] [5]]
+(partition-all 3 [1 2 3 4 5])        ; => [[1 2 3] [4 5]]
 
 ;; split-at - split at index
 (split-at 2 [1 2 3 4 5])            ; => [[1 2] [3 4 5]]
@@ -2112,6 +2209,9 @@ The `seq` function converts a collection to a sequence:
 | `every?` | `(every? :key coll)` | True if all have truthy `:key` |
 | `not-any?` | `(not-any? pred coll)` | True if none match |
 | `not-any?` | `(not-any? :key coll)` | True if none have truthy `:key` |
+| `not-every?` | `(not-every? pred coll)` | True if not all match (complement of `every?`) |
+| `not-every?` | `(not-every? :key coll)` | True if not all have truthy `:key` |
+| `distinct?` | `(distinct? x y ...)` | True if all arguments are distinct |
 | `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, lists) |
 
 ```clojure
@@ -2495,6 +2595,14 @@ The `seq` function converts a collection to a sequence:
 | `coll?` | Is collection? (vectors, maps, or sets) |
 | `sequential?` | Is ordered collection? (vectors only) |
 | `seq?` | Is sequence? (vectors only; same as `sequential?` in PTC-Lisp) |
+| `associative?` | Supports `assoc`? (vectors and maps) |
+| `counted?` | Has O(1) count? (vectors, maps, sets, strings) |
+| `indexed?` | Supports `nth`? (vectors and strings) |
+| `reversible?` | Supports `reverse`? (vectors and strings) |
+| `sorted?` | Always false — no sorted collections in PTC-Lisp |
+| `seqable?` | Can produce a seq? (collections, strings, nil) |
+| `ifn?` | Is invokable via direct call? (functions, keywords, maps, sets — NOT vectors). Note: maps/sets are invokable as `(my-map :key)` but cannot be passed directly to HOFs like `mapv`; wrap in a lambda: `(mapv #(my-map %) coll)` |
+| `map-entry?` | Always false — no MapEntry type on BEAM |
 | `type` | Returns type as keyword: `:nil`, `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function` |
 
 ```clojure
@@ -2553,6 +2661,7 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `some` | ✗ | ✓ | Strings: returns first truthy result of predicate |
 | `every?` | ✗ | ✓ | Strings: true if predicate is truthy for all characters |
 | `not-any?` | ✗ | ✓ | Strings: true if predicate is false for all characters |
+| `not-every?` | ✗ | ✓ | Strings: true if predicate is false for at least one character |
 | `reduce` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |
 | `entries` | ✓ | ✗ | Explicit conversion to list of `[key value]` pairs |
 
@@ -2710,7 +2819,7 @@ Typical usage involves filtering valid parses from potentially invalid input:
      (reduce + 0))  ; => 7
 ```
 
-### 8.10 Function Combinators
+### 8.11 Function Combinators
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -2819,7 +2928,7 @@ The `juxt` combinator creates a function that applies each of its argument funct
 ((some-fn even? pos?) 3)   ; => true (pos? matches)
 ```
 
-### 8.11 Functional Tools: apply
+### 8.12 Functional Tools: apply
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -2854,7 +2963,7 @@ The `apply` function invokes a function `f` with the provided arguments. The las
 - **Non-callable first argument:** Raises a `not-callable` error.
 - **Non-collection last argument:** Raises a `type_error`.
 
-### 8.12 Debugging with println
+### 8.13 Debugging with println
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -2896,7 +3005,7 @@ Programs that call `println` will have their output available in the `prints` li
 
 **Note:** In parallel operations like `pmap` and `pcalls`, `println` output from parallel branches is not captured. This is intentional—parallel branches communicate via return values, not side effects. Use `println` for sequential debugging between turns.
 
-### 8.13 Date and Time (Minimal Java Interop)
+### 8.14 Date and Time (Minimal Java Interop)
 
 PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date`, `java.time.LocalDate`, and `java.lang.System`.
 
@@ -2946,7 +3055,7 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 (< (str d1) (str d2))  ; lexicographical comparison works for YYYY-MM-DD
 ```
 
-### 8.14 String Methods (Java Interop)
+### 8.15 String Methods (Java Interop)
 
 PTC-Lisp supports Java-style string methods for common operations.
 
@@ -3487,9 +3596,10 @@ Errors are represented as tagged tuples: `{:error, {error_type, details}}`. The 
 
 ```elixir
 {:error, {:parse_error, "unexpected token at line 3"}}
-{:error, {:validation_error, "unknown function: foo"}}
+{:error, {:analysis_error, "unknown function: foo"}}
 {:error, {:type_error, "expected number", "got string"}}
-{:error, {:execution_error, "tool 'get-users' failed"}}
+{:error, {:eval_error, "runtime evaluation failed"}}
+{:error, {:tool_error, "get-users", "connection refused"}}
 {:error, {:timeout, 5000}}
 {:error, {:memory_exceeded, 10_000_000}}
 ```
@@ -3498,17 +3608,24 @@ The formatted strings shown below are human-readable renderings for display to u
 
 ### 12.1 Error Types
 
-| Error Type | Cause |
+| Error Type (atom) | Cause |
 |------------|-------|
-| `parse-error` | Invalid syntax |
-| `validation-error` | Invalid program structure |
-| `type-error` | Wrong argument type |
-| `arithmetic-error` | Arithmetic operation error (division by zero) |
-| `arity-error` | Wrong number of arguments |
-| `undefined-error` | Unknown function/symbol |
-| `execution-error` | Runtime error |
-| `timeout` | Execution time exceeded |
-| `memory-exceeded` | Memory limit exceeded |
+| `:parse_error` | Invalid syntax |
+| `:analysis_error` | Invalid program structure (static analysis phase) |
+| `:invalid_arity` | Wrong number of arguments (detected during analysis) |
+| `:type_error` | Wrong argument type |
+| `:arithmetic_error` | Arithmetic operation error (division by zero) |
+| `:arity_error` | Wrong number of arguments (detected at runtime) |
+| `:unbound_var` | Unknown symbol/variable |
+| `:not_callable` | Attempt to call a non-callable value |
+| `:eval_error` | General runtime evaluation error |
+| `:unknown_tool` | Tool not registered |
+| `:tool_error` | Tool execution failed |
+| `:destructure_error` | Destructuring pattern mismatch |
+| `:cannot_shadow_builtin` | Attempt to shadow a built-in function |
+| `:invalid_placeholder` | Invalid placeholder in `#()` syntax |
+| `:timeout` | Execution time exceeded |
+| `:memory_exceeded` | Memory limit exceeded |
 
 ### 12.2 Error Message Format
 
@@ -3671,10 +3788,10 @@ symbol-rest  = letter | digit | special-rest ;
 letter      = "a"-"z" | "A"-"Z" ;
 digit       = "0"-"9" ;
 special-initial = "+" | "-" | "*" | "/" | "<" | ">" | "=" | "?" | "!" ;
-special-rest    = special-initial | "-" | "_" | "/" ;
+special-rest    = special-initial | "-" | "_" | "/" | "." | "%" | "&" ;
 
 keyword     = ":" keyword-char+ ;
-keyword-char = letter | digit | "-" | "_" | "?" | "!" ;  (* no "/" in keywords *)
+keyword-char = letter | digit | "-" | "_" | "?" | "!" | "+" | "*" | "<" | ">" | "=" ;  (* no "/" in keywords *)
 
 vector      = "[" expression* "]" ;
 
@@ -3724,6 +3841,8 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 |----------|---------|-------|
 | Timeout | 1,000 ms | Execution time limit |
 | Max Heap | ~10 MB | Memory limit (1,250,000 words) |
+| Max Tool Calls | 10 | Per-program tool invocation limit |
+| Loop Iterations | 1,000 | Per-loop/recur iteration limit |
 
 *Note: Hosts may configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 
@@ -3972,7 +4091,7 @@ Every execution produces a log entry:
 |-------|---------|-------------|
 | `timeout_ms` | 1,000 | Max execution time per program |
 | `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
-| `max_tool_calls` | 10 | Max tool invocations per program *(planned)* |
+| `max_tool_calls` | 10 | Max tool invocations per program |
 
 *Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 
@@ -4007,10 +4126,11 @@ The LLM receives this error and can generate a corrected program.
 | Concern | Mitigation |
 |---------|------------|
 | Memory exhaustion | Max memory size limit |
-| Infinite loops | Timeout + no recursion |
+| Infinite loops | Timeout + loop iteration limit (default 1000) |
+| Unbounded recursion | Timeout + memory limit |
 | Tool abuse | Per-program tool call limit |
 | Data exfiltration | Tools are host-controlled, audited |
-| Memory pollution | Shallow merge, explicit keys only |
+| Memory pollution | Explicit `def` storage only |
 | Cross-turn attacks | Memory is agent-scoped, not shared |
 
 ---
@@ -4022,16 +4142,16 @@ The LLM receives this error and can generate a corrected program.
 When the interpreter encounters a symbol, it resolves in this order:
 
 1. **Local bindings** — `let`-bound variables in current scope
-2. **Namespaced symbols** — `memory/x`, `data/y`, `tool/z`
+2. **Namespaced symbols** — `data/y`, `tool/z`, `budget/remaining`
 3. **Built-in functions** — `filter`, `map`, `count`, etc.
 
 ### Namespace Symbols
 
 | Pattern | Resolves To |
 |---------|-------------|
-| `memory/foo` | `(get env.memory :foo)` |
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
+| `budget/remaining` | Remaining tool call budget |
 | `foo` | Local binding or built-in |
 
 ### Example
@@ -4039,20 +4159,17 @@ When the interpreter encounters a symbol, it resolves in this order:
 ```clojure
 (let [x 10]                    ; x is local
   (+ x                         ; resolves to local x (10)
-     memory/x                  ; resolves to env.memory[:x]
      data/x))                  ; resolves to env.data[:x]
 ```
 
 ### Whole Map Access
 
-The bare symbols `memory` and `data` are **not accessible** as whole maps. Only namespaced access is allowed:
+The bare symbol `data` is **not accessible** as a whole map. Only namespaced access is allowed:
 
 ```clojure
-memory/foo     ; OK - access :foo key
 data/bar       ; OK - access :bar key
-memory         ; ERROR - cannot access whole memory map
 data           ; ERROR - cannot access whole data map
-(keys memory)  ; ERROR - memory is not a value
+(keys data)    ; ERROR - data is not a value
 ```
 
 This restriction prevents accidental data leakage and simplifies reasoning about what data a program can access.

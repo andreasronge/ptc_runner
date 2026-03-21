@@ -120,6 +120,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate some(pred, coll), to: Collection
   defdelegate every?(pred, coll), to: Collection
   defdelegate not_any?(pred, coll), to: Collection
+  defdelegate not_every?(pred, coll), to: Collection
   defdelegate contains?(coll, val), to: Collection
   defdelegate range(end_val), to: Collection
   defdelegate range(start, end_val), to: Collection
@@ -299,6 +300,15 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate coll?(x), to: Predicates
   defdelegate sequential?(x), to: Predicates
   defdelegate seq?(x), to: Predicates
+  defdelegate associative?(x), to: Predicates
+  defdelegate counted?(x), to: Predicates
+  defdelegate indexed?(x), to: Predicates
+  defdelegate reversible?(x), to: Predicates
+  defdelegate sorted?(x), to: Predicates
+  defdelegate seqable?(x), to: Predicates
+  defdelegate ifn?(x), to: Predicates
+  defdelegate map_entry?(x), to: Predicates
+  defdelegate distinct_args?(args), to: Predicates
   defdelegate type_of(x), to: Predicates
   defdelegate set(coll), to: Predicates
   defdelegate vec(coll), to: Predicates
