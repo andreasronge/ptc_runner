@@ -301,6 +301,7 @@ defmodule PtcRunner.Lisp.Env do
       {:some, {:normal, &Runtime.some/2}},
       {:every?, {:normal, &Runtime.every?/2}},
       {:"not-any?", {:normal, &Runtime.not_any?/2}},
+      {:"not-every?", {:normal, &Runtime.not_every?/2}},
       {:contains?, {:normal, &Runtime.contains?/2}},
       {:range, {:multi_arity, :range, {&Runtime.range/1, &Runtime.range/2, &Runtime.range/3}}},
       {:combinations, {:normal, &Runtime.combinations/2}},
@@ -427,6 +428,15 @@ defmodule PtcRunner.Lisp.Env do
       {:coll?, {:normal, &Runtime.coll?/1}},
       {:sequential?, {:normal, &Runtime.sequential?/1}},
       {:seq?, {:normal, &Runtime.seq?/1}},
+      {:associative?, {:normal, &Runtime.associative?/1}},
+      {:counted?, {:normal, &Runtime.counted?/1}},
+      {:indexed?, {:normal, &Runtime.indexed?/1}},
+      {:reversible?, {:normal, &Runtime.reversible?/1}},
+      {:sorted?, {:normal, &Runtime.sorted?/1}},
+      {:seqable?, {:normal, &Runtime.seqable?/1}},
+      {:ifn?, {:normal, &Runtime.ifn?/1}},
+      {:"map-entry?", {:normal, &Runtime.map_entry?/1}},
+      {:distinct?, {:collect, &Runtime.distinct_args?/1}},
       {:type, {:normal, &Runtime.type_of/1}},
 
       # ============================================================

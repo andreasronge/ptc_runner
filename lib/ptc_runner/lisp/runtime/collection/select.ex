@@ -88,6 +88,17 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
     not Enum.any?(Normalize.to_seq(coll), Normalize.normalize_pred(pred, :truthy))
   end
 
+  # ── not_every? ────────────────────────────────────────────────────────
+
+  def not_every?(pred, coll) when is_map(coll) and not is_struct(coll) do
+    pred_fn = Normalize.normalize_pred(pred, :truthy)
+    not Enum.all?(coll, fn {k, v} -> pred_fn.([k, v]) end)
+  end
+
+  def not_every?(pred, coll) do
+    not Enum.all?(Normalize.to_seq(coll), Normalize.normalize_pred(pred, :truthy))
+  end
+
   # ── take_while ──────────────────────────────────────────────────────
 
   # Map case: use Stream.map to preserve lazy early-stop semantics

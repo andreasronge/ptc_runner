@@ -27,6 +27,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   defdelegate some(pred, coll), to: Select
   defdelegate every?(pred, coll), to: Select
   defdelegate not_any?(pred, coll), to: Select
+  defdelegate not_every?(pred, coll), to: Select
   defdelegate take_while(pred, coll), to: Select
   defdelegate drop_while(pred, coll), to: Select
 

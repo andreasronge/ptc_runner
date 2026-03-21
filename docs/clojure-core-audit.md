@@ -6,8 +6,8 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 
 | Status | Count |
 |--------|-------|
-| ✅ Supported | 195 |
-| 🔲 Candidate | 87 |
+| ✅ Supported | 205 |
+| 🔲 Candidate | 77 |
 | ❌ Not Relevant | 252 |
 | ❓ Unknown | 0 |
 | **Total** | **534** |
@@ -60,7 +60,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `assoc` | ✅ supported | Returns map/vector with added key-value pairs |  |
 | `assoc!` | ❌ not-relevant | Sets value in transient collection | relies on transient collections (mutability) |
 | `assoc-in` | ✅ supported | Associates value in nested structure |  |
-| `associative?` | 🔲 candidate | Returns true if coll implements Associative | pure predicate for collection type |
+| `associative?` | ✅ supported | Returns true if coll implements Associative | vectors and maps |
 | `atom` | ❌ not-relevant | Creates atom with initial value | relies on mutable state |
 | `await` | ❌ not-relevant | Blocks until agent actions complete | relies on agent state |
 | `await-for` | ❌ not-relevant | Blocks with timeout for agent actions | relies on agent state |
@@ -125,7 +125,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `constantly` | ✅ supported | Returns function ignoring args, returning value |  |
 | `contains?` | ✅ supported | Returns true if key present in collection |  |
 | `count` | ✅ supported | Returns number of items in collection |  |
-| `counted?` | 🔲 candidate | Returns true if constant-time count | pure predicate for collection capabilities |
+| `counted?` | ✅ supported | Returns true if constant-time count | vectors, maps, sets, strings |
 | `create-ns` | ❌ not-relevant | Creates or returns namespace | requires namespace system |
 | `create-struct` | ❌ not-relevant | Returns structure basis object | relies on legacy fixed-key structure system |
 | `cycle` | ❌ not-relevant | Returns infinite lazy seq repeating collection | relies on lazy sequences |
@@ -158,7 +158,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `dissoc` | ✅ supported | Returns map with key removed |  |
 | `dissoc!` | ❌ not-relevant | Removes from transient map | relies on transient/mutable data structures |
 | `distinct` | ✅ supported | Returns seq removing duplicates |  |
-| `distinct?` | 🔲 candidate | Returns true if all args distinct | pure predicate |
+| `distinct?` | ✅ supported | Returns true if all args distinct | variadic |
 | `do` | ✅ supported | Evaluates expressions, returns last |  |
 | `doall` | ❌ not-relevant | Realizes entire lazy seq | relies on lazy sequences |
 | `dorun` | ❌ not-relevant | Realizes lazy seq, returns nil | relies on lazy sequences |
@@ -245,12 +245,12 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `if-let` | ✅ supported | Conditional with binding |  |
 | `if-not` | ✅ supported | Negated conditional |  |
 | `if-some` | ✅ supported | Binds if not nil | pure control flow structure |
-| `ifn?` | 🔲 candidate | Returns true if invokable | pure predicate checking if a value is a function |
+| `ifn?` | ✅ supported | Returns true if invokable | functions, keywords, maps, sets (not vectors) |
 | `import` | ❌ not-relevant | Imports Java classes | relies on Java interop |
 | `in-ns` | ❌ not-relevant | Changes current namespace | relies on namespace support |
 | `inc` | ✅ supported | Returns number plus one |  |
 | `inc'` | 🔲 candidate | Increments with arbitrary precision | pure mathematical transformation |
-| `indexed?` | 🔲 candidate | Returns true if supports indexed access | predicate for collection structure |
+| `indexed?` | ✅ supported | Returns true if supports indexed access | vectors and strings |
 | `infinite?` | ✅ supported | Returns true if number infinite |  |
 | `inst-ms` | 🔲 candidate | Milliseconds since epoch for instant | pure data extraction from date object |
 | `inst?` | 🔲 candidate | Returns true if instant | pure type predicate |
@@ -299,7 +299,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `make-array` | ❌ not-relevant | Creates Java array | Java interop/array creation |
 | `make-hierarchy` | ❌ not-relevant | Returns empty hierarchy | relies on multimethods system |
 | `map` | ✅ supported | Applies function to each item |  |
-| `map-entry?` | 🔲 candidate | Returns true if map entry | predicate on data structure, pure |
+| `map-entry?` | ✅ supported | Returns true if map entry | always false — no MapEntry type on BEAM |
 | `map-indexed` | ✅ supported | Applies function with index to items |  |
 | `map?` | ✅ supported | Returns true if map |  |
 | `mapcat` | ✅ supported | Maps then concatenates results |  |
@@ -328,7 +328,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `not` | ✅ supported | Logical complement |  |
 | `not-any?` | ✅ supported | Returns true if pred false for all |  |
 | `not-empty` | ✅ supported | Returns collection or nil if empty |  |
-| `not-every?` | 🔲 candidate | Returns true if pred false for some | pure predicate logic function |
+| `not-every?` | ✅ supported | Returns true if pred false for some | complement of every? |
 | `not=` | ✅ supported | Returns true if not equal |  |
 | `nth` | ✅ supported | Returns item at index |  |
 | `nthnext` | 🔲 candidate | Returns nth next | pure list/sequence navigation |
@@ -420,7 +420,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `rest` | ✅ supported | Returns seq after first item |  |
 | `restart-agent` | ❌ not-relevant | Restarts failed agent | concurrency primitives (agents) |
 | `reverse` | ✅ supported | Reverses order of items |  |
-| `reversible?` | 🔲 candidate | Returns true if collection reversible | predicate checking collection capability |
+| `reversible?` | ✅ supported | Returns true if collection reversible | vectors and strings |
 | `rseq` | ❌ not-relevant | Returns reverse seq of sorted collection | relies on lazy/sorted sequence implementation details |
 | `rsubseq` | ❌ not-relevant | Returns reverse subseq of sorted coll | relies on lazy/sorted sequence implementation details |
 | `run!` | ❌ not-relevant | Runs side effects, returns nil | relies on side effects |
@@ -432,7 +432,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `send-via` | ❌ not-relevant | Sends action via executor to agent | relies on agent mutable state |
 | `seq` | ✅ supported | Returns sequence or nil if empty |  |
 | `seq?` | ✅ supported | Returns true if value is sequence |  |
-| `seqable?` | 🔲 candidate | Returns true if implements Seqable | pure predicate checking collection type |
+| `seqable?` | ✅ supported | Returns true if implements Seqable | collections, strings, nil |
 | `sequence` | ❌ not-relevant | Returns seq applying transducer | relies on lazy sequences |
 | `sequential?` | ✅ supported | Returns true if sequential |  |
 | `set` | ✅ supported | Creates set from items |  |
@@ -458,7 +458,7 @@ Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
 | `sorted-map-by` | 🔲 candidate | Creates sorted map with comparator | pure collection construction with custom comparator |
 | `sorted-set` | 🔲 candidate | Creates sorted set from items | pure collection construction |
 | `sorted-set-by` | 🔲 candidate | Creates sorted set with comparator | pure collection construction with custom comparator |
-| `sorted?` | 🔲 candidate | Returns true if collection sorted | pure predicate for collection type |
+| `sorted?` | ✅ supported | Returns true if collection sorted | always false — no sorted collections |
 | `spit` | ❌ not-relevant | Writes content to file | file I/O |
 | `split-at` | ✅ supported | Splits seq at index | pure sequence transformation |
 | `split-with` | ✅ supported | Splits seq by predicate | pure sequence transformation |

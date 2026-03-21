@@ -860,6 +860,159 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent("(set? {:a 1})")
       assert_clojure_equivalent("(set? nil)")
     end
+
+    # associative?
+    test "associative? on vectors and maps" do
+      assert_clojure_equivalent("(associative? [1 2 3])")
+      assert_clojure_equivalent("(associative? [])")
+      assert_clojure_equivalent("(associative? {:a 1})")
+      assert_clojure_equivalent("(associative? {})")
+    end
+
+    test "associative? on non-associative" do
+      assert_clojure_equivalent(~S|(associative? #{1 2})|)
+      assert_clojure_equivalent("(associative? nil)")
+      assert_clojure_equivalent(~S|(associative? "hello")|)
+      assert_clojure_equivalent("(associative? 42)")
+    end
+
+    # counted?
+    test "counted? on counted types" do
+      assert_clojure_equivalent("(counted? [1 2 3])")
+      assert_clojure_equivalent("(counted? {:a 1})")
+      assert_clojure_equivalent(~S|(counted? #{1 2})|)
+    end
+
+    test "counted? on non-counted" do
+      assert_clojure_equivalent("(counted? nil)")
+      assert_clojure_equivalent("(counted? 42)")
+    end
+
+    # indexed?
+    test "indexed? on indexed types" do
+      assert_clojure_equivalent("(indexed? [1 2 3])")
+      assert_clojure_equivalent("(indexed? [])")
+    end
+
+    test "indexed? on non-indexed" do
+      assert_clojure_equivalent("(indexed? {:a 1})")
+      assert_clojure_equivalent(~S|(indexed? #{1 2})|)
+      assert_clojure_equivalent("(indexed? nil)")
+      assert_clojure_equivalent("(indexed? 42)")
+    end
+
+    # reversible?
+    test "reversible? on reversible types" do
+      assert_clojure_equivalent("(reversible? [1 2 3])")
+      assert_clojure_equivalent("(reversible? [])")
+    end
+
+    test "reversible? on non-reversible" do
+      assert_clojure_equivalent("(reversible? {:a 1})")
+      assert_clojure_equivalent(~S|(reversible? #{1 2})|)
+      assert_clojure_equivalent("(reversible? nil)")
+    end
+
+    # sorted?
+    test "sorted? always false" do
+      assert_clojure_equivalent("(sorted? [1 2 3])")
+      assert_clojure_equivalent("(sorted? {:a 1})")
+      assert_clojure_equivalent(~S|(sorted? #{1 2})|)
+      assert_clojure_equivalent("(sorted? nil)")
+    end
+
+    # seqable?
+    test "seqable? on seqable types" do
+      assert_clojure_equivalent("(seqable? [1 2 3])")
+      assert_clojure_equivalent("(seqable? {:a 1})")
+      assert_clojure_equivalent(~S|(seqable? #{1 2})|)
+      assert_clojure_equivalent(~S|(seqable? "hello")|)
+      assert_clojure_equivalent("(seqable? nil)")
+    end
+
+    test "seqable? on non-seqable" do
+      assert_clojure_equivalent("(seqable? 42)")
+      assert_clojure_equivalent("(seqable? true)")
+      assert_clojure_equivalent("(seqable? :keyword)")
+    end
+
+    # ifn?
+    test "ifn? on invokable types" do
+      assert_clojure_equivalent("(ifn? :keyword)")
+      assert_clojure_equivalent("(ifn? {:a 1})")
+      assert_clojure_equivalent(~S|(ifn? #{1 2})|)
+    end
+
+    test "ifn? on non-invokable" do
+      assert_clojure_equivalent("(ifn? 42)")
+      assert_clojure_equivalent("(ifn? nil)")
+      assert_clojure_equivalent(~S|(ifn? "hello")|)
+      assert_clojure_equivalent("(ifn? true)")
+    end
+
+    # map-entry?
+    test "map-entry? always false" do
+      assert_clojure_equivalent("(map-entry? nil)")
+      assert_clojure_equivalent("(map-entry? [1 2])")
+      assert_clojure_equivalent("(map-entry? {:a 1})")
+    end
+
+    # distinct?
+    test "distinct? with all distinct args" do
+      assert_clojure_equivalent("(distinct? 1 2 3)")
+      assert_clojure_equivalent("(distinct? :a :b :c)")
+    end
+
+    test "distinct? with duplicates" do
+      assert_clojure_equivalent("(distinct? 1 2 1)")
+      assert_clojure_equivalent("(distinct? :a :a)")
+    end
+
+    test "distinct? with single arg" do
+      assert_clojure_equivalent("(distinct? 1)")
+    end
+
+    # not-every?
+    test "not-every? returns false when all match" do
+      assert_clojure_equivalent("(not-every? even? [2 4 6])")
+    end
+
+    test "not-every? returns true when some don't match" do
+      assert_clojure_equivalent("(not-every? even? [2 3 4])")
+    end
+
+    test "not-every? on empty collection" do
+      assert_clojure_equivalent("(not-every? even? [])")
+    end
+
+    test "not-every? with keyword predicate" do
+      assert_clojure_equivalent("(not-every? :active [{:active true} {:active false}])")
+      assert_clojure_equivalent("(not-every? :active [{:active true} {:active true}])")
+    end
+  end
+
+  # PTC-Lisp extends counted?, indexed?, reversible? to strings (Clojure returns false).
+  # These are not conformance tests — they guard PTC-Lisp-specific behavior.
+  describe "PTC-Lisp string extensions for capability predicates" do
+    test "counted? on strings" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(counted? "hello")|)
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(counted? "")|)
+    end
+
+    test "indexed? on strings" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(indexed? "hello")|)
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(indexed? "")|)
+    end
+
+    test "reversible? on strings" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(reversible? "hello")|)
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(reversible? "")|)
+    end
+
+    test "seqable? on strings" do
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(seqable? "hello")|)
+      {:ok, %{return: true}} = PtcRunner.Lisp.run(~S|(seqable? "")|)
+    end
   end
 
   describe "Clojure conformance - format, name, keyword" do
