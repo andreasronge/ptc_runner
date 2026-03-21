@@ -96,7 +96,7 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
     test "str expression as task ID" do
       {:ok, step} =
         Lisp.run(
-          ~S|(def name "bob") (task (str "prepare_" name) 42)|,
+          ~S|(def user-name "bob") (task (str "prepare_" user-name) 42)|,
           journal: %{}
         )
 
@@ -107,7 +107,7 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
     test "str expression with cache hit" do
       {:ok, step} =
         Lisp.run(
-          ~S|(def name "bob") (task (str "prepare_" name) 42)|,
+          ~S|(def user-name "bob") (task (str "prepare_" user-name) 42)|,
           journal: %{"prepare_bob" => "cached"}
         )
 
