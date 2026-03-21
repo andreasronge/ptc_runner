@@ -121,7 +121,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp interactive_repl do
     IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
-    IO.puts("Turn history: *1, *2, *3 reference last 3 results\n")
+    IO.puts("Type :help for commands, :doc <name> for function docs\n")
 
     loop([], %{})
   end
@@ -133,7 +133,7 @@ defmodule Mix.Tasks.Ptc.Repl do
           {:ok, step} ->
             IO.puts("Loaded #{path}")
             IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
-            IO.puts("Turn history: *1, *2, *3 reference last 3 results\n")
+            IO.puts("Type :help for commands, :doc <name> for function docs\n")
             loop([], step.memory)
 
           {:error, step} ->
@@ -207,6 +207,19 @@ defmodule Mix.Tasks.Ptc.Repl do
         IO.puts(format_error(step.fail))
         {history, memory}
     end
+  end
+
+  defp handle_meta("help") do
+    IO.puts("""
+    Commands:
+      :doc <name>      Show documentation for a function
+      :find <pattern>  Search functions by name or description
+      :apropos <pat>   Alias for :find
+      :help            Show this help
+
+    Turn history: *1, *2, *3 reference last 3 results
+    Ctrl+D to exit
+    """)
   end
 
   defp handle_meta("doc " <> name) do
