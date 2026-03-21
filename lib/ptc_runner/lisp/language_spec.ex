@@ -12,8 +12,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   | `:single_shot` | Base + single-shot rules |
   | `:multi_turn` | Base + multi-turn rules (return/fail, memory) |
   | `:multi_turn_journal` | Base + multi-turn + journal (task/step-done) |
-  | `:auto_return` | Base + auto-return rules (println to explore, last expr to answer) |
-  | `:auto_return_journal` | Base + multi-turn + journal (auto-return at loop level) |
+  | `:auto_return` | Base + auto-return rules (println to explore, last expr to answer, no return/fail needed) |
+  | `:auto_return_journal` | Base + multi-turn + journal (plan agents use explicit return; auto-return at loop level) |
 
   ## Raw Snippets
 
@@ -239,8 +239,10 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       {:single_shot, "Base + single-shot rules"},
       {:multi_turn, "Base + multi-turn rules (return/fail, memory)"},
       {:multi_turn_journal, "Base + multi-turn + journal (task/step-done)"},
-      {:auto_return, "Base + auto-return rules (println to explore, last expr to answer)"},
-      {:auto_return_journal, "Base + multi-turn + journal (auto-return at loop level)"}
+      {:auto_return,
+       "Base + auto-return rules (println to explore, last expr to answer, no return/fail needed)"},
+      {:auto_return_journal,
+       "Base + multi-turn + journal (plan agents use explicit return; auto-return at loop level)"}
     ]
 
     snippet_descriptions =
