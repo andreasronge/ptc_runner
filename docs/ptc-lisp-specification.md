@@ -1705,6 +1705,10 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 
 ## 8. Core Functions
 
+> **Complete function list:** See [Function Reference](function-reference.md) for all
+> supported functions with signatures, generated from the canonical registry at `priv/functions.exs`.
+> This section covers semantics, edge cases, and examples.
+
 ### 8.1 Collection Operations
 
 #### Filtering

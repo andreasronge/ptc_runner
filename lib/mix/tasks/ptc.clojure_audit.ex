@@ -21,6 +21,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
   """
   use Mix.Task
 
+  alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
 
   @default_model "openrouter:google/gemini-3.1-flash-lite-preview"
@@ -105,45 +106,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
 
   defp ptc_lisp_builtins do
     builtin_keys = Env.initial() |> Map.keys()
-
-    # Special forms handled by the analyzer/evaluator, not in Env.initial()
-    special_form_list = [
-      :let,
-      :loop,
-      :recur,
-      :fn,
-      :defn,
-      :def,
-      :defonce,
-      :if,
-      :"if-not",
-      :"if-let",
-      :when,
-      :"when-not",
-      :"when-let",
-      :cond,
-      :do,
-      :and,
-      :or,
-      :for,
-      :doseq,
-      :->,
-      :"->>",
-      :apply,
-      :return,
-      :fail,
-      :task,
-      :"task-reset",
-      :"step-done",
-      :where,
-      :"all-of",
-      :"any-of",
-      :"none-of",
-      :juxt,
-      :pmap,
-      :pcalls,
-      :println
-    ]
+    special_form_list = Analyze.supported_forms()
 
     special_forms = MapSet.new(special_form_list)
     all_supported = MapSet.new(builtin_keys ++ special_form_list)

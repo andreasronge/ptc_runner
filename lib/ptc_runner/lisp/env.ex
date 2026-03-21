@@ -115,7 +115,7 @@ defmodule PtcRunner.Lisp.Env do
   @doc """
   Get the list of builtin functions for a category.
 
-  Used to provide helpful error messages when a function is not available.
+  Delegates to `PtcRunner.Lisp.Registry.builtins_by_category/1`.
 
   ## Examples
 
@@ -125,85 +125,12 @@ defmodule PtcRunner.Lisp.Env do
       iex> :set in PtcRunner.Lisp.Env.builtins_by_category(:set)
       true
   """
-  @spec builtins_by_category(atom()) :: [atom()]
-  def builtins_by_category(:string) do
-    [
-      :format,
-      :name,
-      :str,
-      :"pr-str",
-      :subs,
-      :join,
-      :split,
-      :"split-lines",
-      :trim,
-      :replace,
-      :upcase,
-      :"upper-case",
-      :downcase,
-      :"lower-case",
-      :"starts-with?",
-      :"ends-with?",
-      :includes?,
-      :"parse-long",
-      :"parse-int",
-      :"parse-double",
-      :extract,
-      :"extract-int",
-      :"index-of",
-      :"last-index-of"
-    ]
-  end
-
-  def builtins_by_category(:set) do
-    [:set, :set?, :vec, :vector, :contains?, :intersection, :union, :difference, :disj]
-  end
-
-  def builtins_by_category(:regex) do
-    [
-      :"re-pattern",
-      :"re-find",
-      :"re-matches",
-      :"re-split",
-      :"re-seq",
-      :regex?,
-      :extract,
-      :"extract-int"
-    ]
-  end
-
-  def builtins_by_category(:math) do
-    [:sqrt, :pow, :abs, :floor, :ceil, :round, :trunc, :double, :float, :int, :max, :min, :quot]
-  end
-
-  def builtins_by_category(:interop) do
-    [
-      :"java.util.Date.",
-      :".getTime",
-      :".indexOf",
-      :".lastIndexOf",
-      :"System/currentTimeMillis",
-      :"LocalDate/parse",
-      :POSITIVE_INFINITY,
-      :NEGATIVE_INFINITY,
-      :NaN
-    ]
-  end
-
-  def builtins_by_category(:core) do
-    # All other builtins (collection, arithmetic, logic, etc.)
-    excluded =
-      builtins_by_category(:string) ++
-        builtins_by_category(:set) ++
-        builtins_by_category(:regex) ++
-        builtins_by_category(:math) ++
-        builtins_by_category(:interop)
-
-    (Map.keys(initial()) -- excluded) ++ [:doseq, :for]
-  end
+  defdelegate builtins_by_category(category), to: PtcRunner.Lisp.Registry
 
   @doc """
   Get a human-readable name for a category.
+
+  Delegates to `PtcRunner.Lisp.Registry.category_name/1`.
 
   ## Examples
 
@@ -213,13 +140,7 @@ defmodule PtcRunner.Lisp.Env do
       iex> PtcRunner.Lisp.Env.category_name(:core)
       "Core"
   """
-  @spec category_name(atom()) :: String.t()
-  def category_name(:string), do: "String"
-  def category_name(:set), do: "Set"
-  def category_name(:regex), do: "Regex"
-  def category_name(:math), do: "Math"
-  def category_name(:interop), do: "Interop"
-  def category_name(:core), do: "Core"
+  defdelegate category_name(category), to: PtcRunner.Lisp.Registry
 
   defp builtin_bindings do
     [
