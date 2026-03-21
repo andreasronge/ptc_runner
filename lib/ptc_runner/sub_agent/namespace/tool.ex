@@ -64,7 +64,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
       if params != [] do
         args =
           Enum.map_join(params, " ", fn {param_name, _type} ->
-            ":#{param_name} ..."
+            ":#{Renderer.to_lisp_key(param_name)} ..."
           end)
 
         ";; Example: (tool/#{tool.name} {#{args}})"
@@ -101,7 +101,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
   # Shows "name type" format, e.g., "topic string", "articles [{id int}]"
   defp format_param({param_name, type}) do
     type_str = format_return_type(type)
-    "#{param_name} #{type_str}"
+    "#{Renderer.to_lisp_key(param_name)} #{type_str}"
   end
 
   defp parse_signature(nil), do: {[], :any}
@@ -130,6 +130,6 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
   # Format return type without colons for display
   # Converts ":string" -> "string", "[:string]" -> "[string]", "{score :float}" -> "{score float}"
   defp format_return_type(type) do
-    Renderer.render_type(type) |> String.replace(":", "")
+    Renderer.render_type(type, key_style: :lisp_prompt) |> String.replace(":", "")
   end
 end

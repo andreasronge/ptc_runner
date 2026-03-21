@@ -48,13 +48,14 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
   defp format_expected_type(%{parsed_signature: nil}), do: ":any"
 
   defp format_expected_type(%{parsed_signature: {:signature, _, return_type}}) do
-    Signature.Renderer.render_type(return_type)
+    Signature.Renderer.render_type(return_type, key_style: :lisp_prompt)
   end
 
   # Format validation errors as a readable list
   defp format_error_details(errors) do
     Enum.map_join(errors, "\n", fn %{path: path, message: message} ->
-      path_str = if path == [], do: "root", else: "[#{Enum.join(path, ".")}]"
+      kebab_path = Enum.map(path, &Signature.Renderer.to_lisp_key(to_string(&1)))
+      path_str = if path == [], do: "root", else: "[#{Enum.join(kebab_path, ".")}]"
       "- #{path_str}: #{message}"
     end)
   end

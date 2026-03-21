@@ -38,7 +38,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   def generate(nil, _field_descriptions), do: ""
 
   def generate({:signature, _params, return_type}, field_descriptions) do
-    type_str = Renderer.render_type(return_type)
+    type_str = Renderer.render_type(return_type, key_style: :lisp_prompt)
     example_val = generate_return_example_value(return_type)
 
     # Add field descriptions for output fields if available
@@ -78,7 +78,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   defp get_field_description_for_list(name, field_descriptions) do
     case get_field_description(name, field_descriptions) do
       nil -> []
-      desc -> ["  - `#{name}`: #{desc}"]
+      desc -> ["  - `#{Renderer.to_lisp_key(name)}`: #{desc}"]
     end
   end
 
@@ -115,7 +115,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   defp generate_return_example_value({:map, fields}) do
     inner =
       Enum.map_join(fields, ", ", fn {name, type} ->
-        ":#{name} #{generate_return_example_value(type)}"
+        ":#{Renderer.to_lisp_key(name)} #{generate_return_example_value(type)}"
       end)
 
     "{#{inner}}"

@@ -119,6 +119,22 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       assert String.contains?(result, "sample: 42")
     end
 
+    test "renders snake_case tool params as kebab-case" do
+      config = %{
+        tools: %{
+          "fetch" => make_tool("fetch", "(user_id :int) -> :string")
+        }
+      }
+
+      result = Namespace.render(config)
+
+      assert result =~ "user-id",
+             "Expected kebab-case param name 'user-id', got: #{result}"
+
+      refute result =~ "user_id",
+             "Should not contain snake_case param name 'user_id', got: #{result}"
+    end
+
     test "shows map field info in tool signature" do
       # When a tool takes a structured map like %{path: String.t()},
       # the rendered signature should show the required field names

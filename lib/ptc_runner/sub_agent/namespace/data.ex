@@ -98,7 +98,7 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
 
       type ->
         # Use signature type, render without colons
-        Renderer.render_type(type) |> String.replace(":", "")
+        Renderer.render_type(type, key_style: :lisp_prompt) |> String.replace(":", "")
     end
   end
 
