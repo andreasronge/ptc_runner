@@ -98,9 +98,9 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
             {:ok, "```clojure\n[1 2 3 4 5 6 7 8 9 10]\n```"}
 
           2 ->
-            # After turn 1, feedback should NOT contain the list result
+            # After turn 1, feedback should show a truncated result preview
             last_message = List.last(messages)
-            refute last_message.content =~ "[1 2 3"
+            assert last_message.content =~ "user=> [1 2 3"
             # Use println to see output
             {:ok, "```clojure\n(println \"count:\" 42)\n:done\n```"}
 
