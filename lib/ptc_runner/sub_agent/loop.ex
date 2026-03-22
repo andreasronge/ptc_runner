@@ -239,8 +239,8 @@ defmodule PtcRunner.SubAgent.Loop do
     # Normalize tools for Step.tools (used by Debug.print_trace compressed view)
     normalized_tools = normalize_tools_for_step(agent.tools)
 
-    # Build first user message with dynamic context prepended
-    # This includes data inventory, tool schemas, expected output, plus the mission
+    # Build first user message — context goes in user message or system prompt
+    # depending on context_in_system format option
     first_user_message = build_first_user_message(agent, run_opts, expanded_prompt)
 
     initial_state = %State{
@@ -1019,15 +1019,30 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   # System prompt generation - static sections only (cacheable)
-  # Dynamic sections (data inventory, tools, expected output) are in the first user message
+  # When context_in_system is true, dynamic sections (data inventory, tools) are appended here
   defp build_system_prompt(
          agent,
-         _context,
+         context,
          resolution_context,
-         _received_field_descriptions,
+         received_field_descriptions,
          journal
        ) do
     base = SystemPrompt.generate_system(agent, resolution_context: resolution_context)
+
+    # Append context to system prompt when context_in_system is set
+    base =
+      if Keyword.get(agent.format_options, :context_in_system, false) do
+        context_prompt =
+          SystemPrompt.generate_context(agent,
+            context: context,
+            received_field_descriptions: received_field_descriptions,
+            memory: %{}
+          )
+
+        base <> "\n\n" <> context_prompt
+      else
+        base
+      end
 
     # Only append mission log when journaling is enabled on the agent
     if agent.journaling do
@@ -1044,14 +1059,21 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Build the first user message with dynamic context prepended to mission
+  # Build the first user message.
+  # When context_in_system is true, only the mission goes here (context is in system prompt).
   defp build_first_user_message(agent, run_opts, expanded_mission) do
+    context_in_system = Keyword.get(agent.format_options, :context_in_system, false)
+
     context_prompt =
-      SystemPrompt.generate_context(agent,
-        context: run_opts.context,
-        received_field_descriptions: run_opts.received_field_descriptions,
-        memory: run_opts.initial_memory
-      )
+      if context_in_system do
+        ""
+      else
+        SystemPrompt.generate_context(agent,
+          context: run_opts.context,
+          received_field_descriptions: run_opts.received_field_descriptions,
+          memory: run_opts.initial_memory
+        )
+      end
 
     # Initial progress checklist (all pending) if agent has a plan
     initial_progress = TurnFeedback.render_initial_progress(agent)
