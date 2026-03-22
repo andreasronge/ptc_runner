@@ -874,7 +874,7 @@ defmodule PtcRunner.SubAgent.Loop do
   defp should_auto_return?(lisp_step, agent) do
     agent.completion_mode == :auto and
       agent.plan == [] and
-      (lisp_step.prints == [] or lisp_step.prints == nil)
+      lisp_step.prints == []
   end
 
   defp handle_auto_return(code, response, lisp_step, state, agent) do
