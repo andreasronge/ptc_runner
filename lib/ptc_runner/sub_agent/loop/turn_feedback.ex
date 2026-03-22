@@ -10,6 +10,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   - `retry_feedback/0` - Turn info during retry phase
   """
 
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Mustache
   alias PtcRunner.Prompts
   alias PtcRunner.SubAgent.Definition
@@ -190,7 +191,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
           do: "\n... (truncated, use println to see full value)",
           else: ""
 
-      "=> #{text}#{hint}"
+      "user=> #{text}#{hint}"
     end
   end
 
@@ -251,15 +252,15 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     |> Map.new()
   end
 
-  # Truncate a value's inspect representation for preview.
+  # Format a value as Clojure EDN and truncate for preview.
   # Returns {text, was_truncated?}.
   defp truncate_value(value, max_len) do
-    str = inspect(value, limit: 50, printable_limit: 500)
+    {str, format_truncated?} = Format.to_clojure(value, limit: 50)
 
     if String.length(str) > max_len do
       {String.slice(str, 0, max_len) <> " ...", true}
     else
-      {str, false}
+      {str, format_truncated?}
     end
   end
 
