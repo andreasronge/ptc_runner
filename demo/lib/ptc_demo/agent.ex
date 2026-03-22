@@ -555,6 +555,20 @@ defmodule PtcDemo.Agent do
         base_opts
       end
 
+    # Move context to system prompt for repl mode (cleaner per-turn feedback)
+    base_opts =
+      if prompt_profile == :repl do
+        format_opts = Keyword.get(base_opts, :format_options, [])
+
+        Keyword.put(
+          base_opts,
+          :format_options,
+          Keyword.put(format_opts, :context_in_system, true)
+        )
+      else
+        base_opts
+      end
+
     # Add plan and enable journaling when plan is present
     base_opts =
       if plan do
