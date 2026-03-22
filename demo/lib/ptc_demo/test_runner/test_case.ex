@@ -291,7 +291,7 @@ defmodule PtcDemo.TestRunner.TestCase do
             "the one specifically about certification reimbursement (not training budget). " <>
             "Return the document ID.",
         expect: :string,
-        constraint: {:eq, "DOC-021"},
+        constraint: {:eq, "DOC-020"},
         max_turns: 6,
         description: "Decoy: first search result is plausible but wrong, must fetch to verify"
       },

@@ -109,32 +109,11 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   @spec format(Definition.t(), map(), map()) :: {String.t(), boolean()}
   def format(agent, state, lisp_step) do
     max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
+    preview_max = Keyword.get(agent.format_options, :preview_max_chars, 250)
 
-    # Only show println output (no implicit last-expression result)
-    {prints_output, truncated?} =
-      case lisp_step.prints do
-        [_ | _] = prints ->
-          joined = Enum.join(prints, "\n")
-          truncate_prints(joined, max_chars)
-
-        _ ->
-          {nil, false}
-      end
-
-    # Add stored values hint for multi-turn agents (shows def bindings available as symbols)
-    stored_hint =
-      if agent.max_turns > 1 and map_size(lisp_step.memory) > 0 do
-        stored_symbols =
-          lisp_step.memory
-          |> Map.keys()
-          |> Enum.map(&to_string/1)
-          |> Enum.sort()
-          |> Enum.join(", ")
-
-        "Stored (access as symbols): #{stored_symbols}"
-      else
-        nil
-      end
+    {prints_output, truncated?} = format_prints(lisp_step.prints, max_chars)
+    result_preview = format_result_preview(prints_output, agent, lisp_step, preview_max)
+    stored_hint = format_stored_hint(agent, state, lisp_step, preview_max)
 
     # Add truncation hint if needed
     prints_with_hint =
@@ -146,7 +125,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
     # Combine parts
     feedback =
-      [prints_with_hint, stored_hint]
+      [result_preview, prints_with_hint, stored_hint]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("\n\n")
 
@@ -193,9 +172,99 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   # Private helpers
 
+  defp format_prints([_ | _] = prints, max_chars) do
+    joined = Enum.join(prints, "\n")
+    truncate_prints(joined, max_chars)
+  end
+
+  defp format_prints(_, _max_chars), do: {nil, false}
+
+  # Show truncated result preview when no println output and result is not a Var
+  defp format_result_preview(nil = _prints, agent, lisp_step, preview_max)
+       when agent.max_turns > 1 do
+    if lisp_step.return != nil and not var?(lisp_step.return) do
+      {text, was_truncated?} = truncate_value(lisp_step.return, preview_max)
+
+      hint =
+        if was_truncated?,
+          do: "\n... (truncated, use println to see full value)",
+          else: ""
+
+      "=> #{text}#{hint}"
+    end
+  end
+
+  defp format_result_preview(_prints, _agent, _lisp_step, _preview_max), do: nil
+
+  # Show previews of new/changed def bindings
+  defp format_stored_hint(agent, state, lisp_step, preview_max)
+       when agent.max_turns > 1 do
+    if map_size(lisp_step.memory) > 0 do
+      prev_memory = state.memory || %{}
+      changed = changed_vars(prev_memory, lisp_step.memory)
+
+      cond do
+        map_size(changed) > 0 ->
+          {previews, any_truncated?} =
+            changed
+            |> Enum.sort_by(fn {k, _} -> to_string(k) end)
+            |> Enum.map_reduce(false, fn {k, v}, trunc_acc ->
+              {text, was_truncated?} = truncate_value(v, preview_max)
+              {";; #{k} = #{text}", trunc_acc or was_truncated?}
+            end)
+
+          hint =
+            if any_truncated?,
+              do: "\n;; (truncated, use println to see full value)",
+              else: ""
+
+          Enum.join(previews, "\n") <> hint
+
+        map_size(lisp_step.memory) > 0 ->
+          stored_symbols =
+            lisp_step.memory
+            |> Map.keys()
+            |> Enum.map(&to_string/1)
+            |> Enum.sort()
+            |> Enum.join(", ")
+
+          "Stored: #{stored_symbols}"
+
+        true ->
+          nil
+      end
+    end
+  end
+
+  defp format_stored_hint(_agent, _state, _lisp_step, _preview_max), do: nil
+
   defp truncate_prints(str, max_chars) when byte_size(str) > max_chars do
     {String.slice(str, 0, max_chars), true}
   end
 
   defp truncate_prints(str, _max_chars), do: {str, false}
+
+  # Return only vars that are new or changed compared to previous turn
+  defp changed_vars(prev_memory, current_memory) do
+    current_memory
+    |> Enum.filter(fn {k, v} -> Map.get(prev_memory, k) != v end)
+    |> Map.new()
+  end
+
+  # Truncate a value's inspect representation for preview.
+  # Returns {text, was_truncated?}.
+  defp truncate_value(value, max_len) do
+    str = inspect(value, limit: 50, printable_limit: 500)
+
+    if String.length(str) > max_len do
+      {String.slice(str, 0, max_len) <> " ...", true}
+    else
+      {str, false}
+    end
+  end
+
+  defp var?(%{__struct__: mod}) when is_atom(mod),
+    do: mod |> to_string() |> String.ends_with?("Var")
+
+  defp var?(_), do: false
 end

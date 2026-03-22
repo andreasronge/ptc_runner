@@ -74,12 +74,14 @@ defmodule PtcRunner.Prompts do
   @lisp_addon_multi_turn_file Path.join(@prompts_dir, "lisp-addon-multi_turn.md")
   @lisp_addon_journal_file Path.join(@prompts_dir, "lisp-addon-journal.md")
   @lisp_addon_auto_return_file Path.join(@prompts_dir, "lisp-addon-auto_return.md")
+  @lisp_addon_repl_file Path.join(@prompts_dir, "lisp-addon-repl.md")
 
   @external_resource @lisp_base_file
   @external_resource @lisp_addon_single_shot_file
   @external_resource @lisp_addon_multi_turn_file
   @external_resource @lisp_addon_journal_file
   @external_resource @lisp_addon_auto_return_file
+  @external_resource @lisp_addon_repl_file
 
   @lisp_base @lisp_base_file |> File.read!() |> PromptLoader.extract_with_header()
   @lisp_addon_single_shot @lisp_addon_single_shot_file
@@ -94,6 +96,9 @@ defmodule PtcRunner.Prompts do
   @lisp_addon_auto_return @lisp_addon_auto_return_file
                           |> File.read!()
                           |> PromptLoader.extract_with_header()
+  @lisp_addon_repl @lisp_addon_repl_file
+                   |> File.read!()
+                   |> PromptLoader.extract_with_header()
 
   @doc "Core PTC-Lisp language reference (always included)."
   @spec lisp_base() :: String.t()
@@ -134,6 +139,14 @@ defmodule PtcRunner.Prompts do
   @doc "Raw header + content for lisp-addon-auto_return.md."
   @spec lisp_addon_auto_return_with_header() :: {String.t(), String.t()}
   def lisp_addon_auto_return_with_header, do: @lisp_addon_auto_return
+
+  @doc "REPL mode addon (one expression per turn, incremental exploration)."
+  @spec lisp_addon_repl() :: String.t()
+  def lisp_addon_repl, do: elem(@lisp_addon_repl, 1)
+
+  @doc "Raw header + content for lisp-addon-repl.md."
+  @spec lisp_addon_repl_with_header() :: {String.t(), String.t()}
+  def lisp_addon_repl_with_header, do: @lisp_addon_repl
 
   # ============================================================================
   # Text Mode (JSON variant) Templates
@@ -268,6 +281,7 @@ defmodule PtcRunner.Prompts do
       :lisp_addon_multi_turn,
       :lisp_addon_journal,
       :lisp_addon_auto_return,
+      :lisp_addon_repl,
       :json_system,
       :json_user,
       :json_error,
@@ -300,6 +314,7 @@ defmodule PtcRunner.Prompts do
   def get(:lisp_addon_multi_turn), do: lisp_addon_multi_turn()
   def get(:lisp_addon_journal), do: lisp_addon_journal()
   def get(:lisp_addon_auto_return), do: lisp_addon_auto_return()
+  def get(:lisp_addon_repl), do: lisp_addon_repl()
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()

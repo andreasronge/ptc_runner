@@ -234,12 +234,24 @@ defmodule PtcDemo.SampleData do
         department: "IT",
         content: "Policy for using personal devices for work purposes."
       },
-      # Training and development
+      # Training and development — DOC-018 is an intentional decoy for DOC-020.
+      # Both match "reimbursement certification" searches but only DOC-020 is
+      # specifically about certification reimbursement. The model must fetch and
+      # compare content to distinguish them.
       %{
-        title: "Training Budget Allocation",
-        topics: ["training", "budget", "professional development", "courses"],
+        title: "Training and Certification Budget",
+        topics: [
+          "training",
+          "certification",
+          "reimbursement",
+          "professional development",
+          "courses"
+        ],
         department: "HR",
-        content: "Annual training budget and how to request funding for courses."
+        content:
+          "Annual training budget allocation and course funding. " <>
+            "Covers tuition reimbursement for degree programs and training courses only. " <>
+            "For professional certification exam fees, see the dedicated certification policy."
       },
       %{
         title: "Conference Attendance Policy",
@@ -251,7 +263,10 @@ defmodule PtcDemo.SampleData do
         title: "Certification Reimbursement",
         topics: ["certification", "expense reimbursement", "professional", "training"],
         department: "HR",
-        content: "Reimbursement policy for professional certifications."
+        content:
+          "Reimbursement policy for professional certification exam fees. " <>
+            "Employees are eligible for full reimbursement of certification fees " <>
+            "upon passing. Submit receipts within 30 days of the exam date."
       },
       # Compliance
       %{
