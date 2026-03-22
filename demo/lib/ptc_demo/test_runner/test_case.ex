@@ -274,6 +274,77 @@ defmodule PtcDemo.TestRunner.TestCase do
         max_turns: 5,
         description:
           "Budget optimization: greedy selection by value ratio with constraint checking"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # EXPLORATION-HEAVY: Tests requiring tool output inspection before answering
+      # These are specifically designed to test premature-answer resistance.
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # Decoy first result: the first search result for "training" is NOT the right answer.
+      # The correct document is about certification reimbursement, not training budget.
+      # The model must fetch content to distinguish them.
+      %{
+        query:
+          "Find the policy document about reimbursement for professional certifications. " <>
+            "Search for relevant documents, then fetch the content of candidates to find " <>
+            "the one specifically about certification reimbursement (not training budget). " <>
+            "Return the document ID.",
+        expect: :string,
+        constraint: {:eq, "DOC-021"},
+        max_turns: 6,
+        description: "Decoy: first search result is plausible but wrong, must fetch to verify"
+      },
+
+      # Multi-document intersection: find the department that appears in BOTH
+      # security AND compliance documents. Must search twice and intersect.
+      %{
+        query:
+          "Search for documents about 'security', then search for documents about 'compliance'. " <>
+            "Find which department has documents in BOTH categories. " <>
+            "Return the department name.",
+        expect: :string,
+        constraint: {:one_of, ["IT", "Legal"]},
+        max_turns: 6,
+        description: "Multi-search intersection: two searches, find overlapping department"
+      },
+
+      # Required query refinement: search for "leave" returns multiple types
+      # (PTO, parental, sabbatical). Must narrow to find the one about sabbatical eligibility.
+      %{
+        query:
+          "Search for policies about 'leave'. Multiple types will come back. " <>
+            "Find the one specifically about sabbatical leave and return its title.",
+        expect: :string,
+        constraint: {:eq, "Sabbatical Leave Program"},
+        max_turns: 6,
+        description: "Query refinement: broad search returns multiple hits, must narrow"
+      },
+
+      # Must inspect tool output: fetch two documents and compare their content
+      # to answer a question that can't be answered from titles/topics alone.
+      %{
+        query:
+          "Fetch documents DOC-001 and DOC-002. Compare their content. " <>
+            "Which one mentions 'ergonomics'? Return its document ID.",
+        expect: :string,
+        constraint: {:eq, "DOC-002"},
+        max_turns: 4,
+        description: "Must-inspect: answer requires reading fetched document content"
+      },
+
+      # Cross-dataset verification: the model must check employee data AND
+      # expense data to verify a claim. Can't answer from one dataset alone.
+      %{
+        query:
+          "Find the department with the most rejected expense claims. " <>
+            "You need to: 1) get all rejected expenses, 2) join with employees to get departments, " <>
+            "3) count per department. Return a map with :department and :count.",
+        expect: :map,
+        signature: "(question :string) -> {department :string, count :int}",
+        constraint: {:has_keys, [:department, :count]},
+        max_turns: 4,
+        description: "Cross-dataset: must join expenses→employees and aggregate, can't guess"
       }
 
       # ═══════════════════════════════════════════════════════════════════════════
