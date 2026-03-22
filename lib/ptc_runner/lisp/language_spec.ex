@@ -55,7 +55,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     multi_turn: [:base, :addon_multi_turn],
     multi_turn_journal: [:base, :addon_multi_turn, :addon_journal],
     auto_return: [:base, :addon_auto_return],
-    auto_return_journal: [:base, :addon_multi_turn, :addon_journal]
+    auto_return_journal: [:base, :addon_multi_turn, :addon_journal],
+    repl: [:addon_repl]
   }
 
   # Snippet keys mapped to Prompts module functions
@@ -64,7 +65,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     addon_single_shot: :lisp_addon_single_shot,
     addon_multi_turn: :lisp_addon_multi_turn,
     addon_journal: :lisp_addon_journal,
-    addon_auto_return: :lisp_addon_auto_return
+    addon_auto_return: :lisp_addon_auto_return,
+    addon_repl: :lisp_addon_repl
   }
 
   # Parse metadata from file header
@@ -242,7 +244,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       {:auto_return,
        "Base + auto-return rules (println to explore, last expr to answer, no return/fail needed)"},
       {:auto_return_journal,
-       "Base + multi-turn + journal (plan agents use explicit return; auto-return at loop level)"}
+       "Base + multi-turn + journal (plan agents use explicit return; auto-return at loop level)"},
+      {:repl, "Base + REPL mode (one expression per turn, incremental exploration, return/fail)"}
     ]
 
     snippet_descriptions =
