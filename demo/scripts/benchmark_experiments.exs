@@ -69,10 +69,15 @@ defmodule FailureTaxonomy do
   @doc "Classify a failed test result into a failure category."
   def classify(result) do
     error = result[:error] || ""
-    trace = result[:trace]
-    all_programs = result[:all_programs] || []
+    attempts = result[:attempts] || 0
 
     cond do
+      # Premature answer: model answered on first attempt with wrong value
+      # (not a runtime error, not a type mismatch — just wrong answer on turn 1)
+      # This is the key metric for auto-return: did it stop before exploring enough?
+      premature_answer?(result) ->
+        :premature_answer
+
       # Parse/syntax errors
       String.contains?(error, "parse") or String.contains?(error, "Parse") or
           String.contains?(error, "syntax") ->
@@ -130,14 +135,34 @@ defmodule FailureTaxonomy do
     end
   end
 
+  # A premature answer is when the model:
+  # 1. Answered on turn 1 (attempts == 1)
+  # 2. Got the wrong value (not a runtime error or type mismatch)
+  # 3. The test required multiple turns (exploration-heavy)
+  # This indicates the model answered without inspecting tool output.
+  defp premature_answer?(result) do
+    error = result[:error] || ""
+    attempts = result[:attempts] || 0
+
+    wrong_value =
+      (String.contains?(error, "Expected") and String.contains?(error, "got")) or
+        (String.contains?(error, "Expected keys") and String.contains?(error, "missing"))
+
+    not_runtime = not String.contains?(error, "Error:")
+    first_attempt = attempts == 1
+
+    wrong_value and not_runtime and first_attempt
+  end
+
   @doc "Human-readable label for a failure category."
+  def label(:premature_answer), do: "PREMATURE ANSWER (wrong on turn 1)"
   def label(:parse_error), do: "Parse/syntax error"
   def label(:max_turns_exceeded), do: "Max turns exceeded"
   def label(:control_flow), do: "Control flow (return+println)"
   def label(:shadow_builtin), do: "Cannot shadow builtin"
   def label(:runtime_error), do: "Runtime error in generated code"
   def label(:wrong_keys), do: "Wrong map keys"
-  def label(:wrong_value), do: "Wrong value/threshold"
+  def label(:wrong_value), do: "Wrong value (after exploration)"
   def label(:timeout), do: "Timeout"
   def label(:type_mismatch), do: "Type mismatch"
   def label(:no_result), do: "No result returned"
