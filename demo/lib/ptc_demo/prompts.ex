@@ -13,8 +13,9 @@ defmodule PtcDemo.Prompts do
   | `:auto_return` | Reference + multi-turn + auto return |
   | `:explicit_journal` | Reference + multi-turn + explicit return + journal |
   | `:repl` | REPL mode (standalone) |
-  | `:explicit_return_lite` | Multi-turn + explicit return (no reference) |
-  | `:auto_return_lite` | Multi-turn + auto return (no reference) |
+
+
+  Use `{:profile, behavior, reference: :full}` to add the language reference for weaker models.
 
   ## Usage
 
@@ -55,11 +56,8 @@ defmodule PtcDemo.Prompts do
   def get(profile)
       when profile in [
              :single_shot,
-             :single_shot_lite,
              :explicit_return,
-             :explicit_return_lite,
              :auto_return,
-             :auto_return_lite,
              :explicit_journal,
              :repl,
              :reference
@@ -84,13 +82,11 @@ defmodule PtcDemo.Prompts do
   @spec list() :: [{atom(), String.t()}]
   def list do
     [
-      {:single_shot, "Reference + single-shot (last expr = answer)"},
-      {:explicit_return, "Reference + multi-turn + explicit return (return/fail required)"},
-      {:auto_return, "Reference + multi-turn + auto return (println to explore)"},
-      {:explicit_journal, "Reference + multi-turn + explicit return + journal"},
-      {:repl, "REPL mode (one expression per turn, incremental exploration)"},
-      {:explicit_return_lite, "Multi-turn + explicit return (no reference)"},
-      {:auto_return_lite, "Multi-turn + auto return (no reference)"}
+      {:single_shot, "Single-shot (last expr = answer)"},
+      {:explicit_return, "Multi-turn + explicit return (return/fail required)"},
+      {:auto_return, "Multi-turn + auto return (println to explore)"},
+      {:explicit_journal, "Multi-turn + explicit return + journal"},
+      {:repl, "REPL mode (one expression per turn, incremental exploration)"}
     ]
   end
 
@@ -117,7 +113,7 @@ defmodule PtcDemo.Prompts do
       {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, auto_return, explicit_journal, repl, explicit_return_lite, auto_return_lite"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, auto_return, explicit_journal, repl"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}

@@ -109,7 +109,7 @@ mix ablation --variants=baseline,repl_full --runs=30 --tests=20,23
 
 | Name | Routing |
 |------|---------|
-| `auto` | Current default: single_shot / multi_turn per test |
+| `auto` | Current default: single_shot / explicit_return per test |
 | `smart_auto` | single_shot for single-turn, repl for multi-turn |
 
 **Mechanism variants** (forced 6-turn budget, agent-level overrides):

@@ -15,7 +15,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.starts_with?(prompt, "You are an expert analyst.")
-      assert prompt =~ "<role>"
+      assert prompt =~ "<return_rules>"
       assert prompt =~ "data/data"
     end
 
@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{data: [1, 2, 3]})
 
       assert String.ends_with?(prompt, "Always explain your reasoning.")
-      assert prompt =~ "<role>"
+      assert prompt =~ "<return_rules>"
       assert prompt =~ "data/data"
     end
 
@@ -73,7 +73,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
         )
 
       prompt = SystemPrompt.generate(agent, context: %{})
-      assert prompt =~ "<language_reference>"
+      assert prompt =~ "<single_shot>"
       # single_shot should not have memory docs
       refute prompt =~ "Memory: Persisting Data Between Turns"
     end
@@ -126,7 +126,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{})
 
       assert prompt == String.upcase(prompt)
-      assert prompt =~ "<ROLE>"
+      assert prompt =~ "<RETURN_RULES>"
     end
 
     test "string override bypasses generation entirely" do
@@ -141,7 +141,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
       prompt = SystemPrompt.generate(agent, context: %{data: 123})
 
       assert prompt == override
-      refute prompt =~ "<role>"
+      refute prompt =~ "<return_rules>"
     end
 
     test "nil system_prompt uses default generation" do
@@ -149,7 +149,7 @@ defmodule PtcRunner.SubAgent.PromptCustomizationTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      assert prompt =~ "<role>"
+      assert prompt =~ "<return_rules>"
       refute prompt =~ "thinking:"
     end
 

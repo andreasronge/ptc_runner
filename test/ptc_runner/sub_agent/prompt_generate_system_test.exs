@@ -11,7 +11,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateSystemTest do
       system = SystemPrompt.generate_system(agent)
 
       # Should have static sections
-      assert system =~ "<role>"
+      assert system =~ "<return_rules>"
       assert system =~ "<output_format>"
 
       # Should NOT have dynamic sections

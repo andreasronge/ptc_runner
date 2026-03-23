@@ -39,7 +39,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       iex> agent = PtcRunner.SubAgent.new(prompt: "Add {{x}} and {{y}}")
       iex> context = %{x: 5, y: 3}
       iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: context)
-      iex> prompt =~ "<role>"
+      iex> prompt =~ "<return_rules>"
       true
       iex> prompt =~ "data/x"
       true
@@ -91,7 +91,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Process data")
       iex> prompt = PtcRunner.SubAgent.SystemPrompt.generate(agent, context: %{user: "Alice"})
-      iex> prompt =~ "<role>" and prompt =~ "<output_format>"
+      iex> prompt =~ "<return_rules>" and prompt =~ "<output_format>"
       true
 
   """
@@ -138,7 +138,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
       iex> agent = PtcRunner.SubAgent.new(prompt: "Test")
       iex> system = PtcRunner.SubAgent.SystemPrompt.generate_system(agent)
-      iex> system =~ "<role>" and system =~ "<output_format>"
+      iex> system =~ "<return_rules>" and system =~ "<output_format>"
       true
       iex> system =~ "# Data Inventory"
       false
@@ -245,7 +245,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       "custom prompt"
 
       iex> spec = PtcRunner.SubAgent.SystemPrompt.resolve_language_spec(:single_shot, %{})
-      iex> is_binary(spec) and String.contains?(spec, "<role>")
+      iex> is_binary(spec) and String.contains?(spec, "<single_shot>")
       true
 
       iex> callback = fn ctx -> if ctx.turn > 1, do: "multi", else: "single" end

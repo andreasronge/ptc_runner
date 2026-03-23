@@ -17,7 +17,7 @@ defmodule PtcRunner.SubAgent.DebugTest do
       preview = SubAgent.preview_prompt(agent, context: %{user: "alice"})
 
       assert is_binary(preview.system)
-      assert preview.system =~ "<language_reference>"
+      assert preview.system =~ "<return_rules>"
       # System prompt is cacheable - does NOT include mission
       refute preview.system =~ "<mission>"
       # User message includes context sections + mission

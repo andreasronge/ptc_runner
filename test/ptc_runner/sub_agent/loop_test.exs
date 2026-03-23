@@ -399,7 +399,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn %{system: system} ->
         assert is_binary(system)
-        assert system =~ "<language_reference>"
+        assert system =~ "<return_rules>"
         {:ok, ~S|```clojure
 (return {:value 42})
 ```|}

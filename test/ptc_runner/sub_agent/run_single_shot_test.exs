@@ -21,8 +21,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       system_prompt = input.system
 
       # Single-shot mode should now use full SystemPrompt.generate, which includes:
-      assert system_prompt =~ "<role>"
-      assert system_prompt =~ "Write one program that accomplish the user's mission"
+      assert system_prompt =~ "<single_shot>"
       refute system_prompt =~ "thinking:"
       assert system_prompt =~ ";; === data/ ==="
       assert system_prompt =~ "data/x"
@@ -50,8 +49,8 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert_received {:llm_input, input}
       system_prompt = input.system
 
-      # Should use single_shot (base) language spec
-      assert system_prompt =~ "<language_reference>"
+      # Should use single_shot language spec
+      assert system_prompt =~ "<single_shot>"
       # single_shot should NOT have memory docs
       refute system_prompt =~ "Memory: Persisting Data Between Turns"
     end
@@ -170,7 +169,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       SubAgent.run(agent, llm: llm, context: %{item: "treasure"})
 
       assert_received {:llm_input, ^received_input, input}
-      assert input.system =~ "<language_reference>"
+      assert input.system =~ "<single_shot>"
       assert [%{role: :user, content: "Find treasure"}] = input.messages
     end
 
@@ -219,7 +218,7 @@ defmodule PtcRunner.SubAgent.RunSingleShotTest do
       assert roles == [:system, :user, :assistant]
 
       [system, user, assistant] = step.messages
-      assert system.content =~ "<language_reference>"
+      assert system.content =~ "<single_shot>"
       assert user.content == "Calculate 2 + 3"
       assert assistant.content =~ "(+ 2 3)"
     end

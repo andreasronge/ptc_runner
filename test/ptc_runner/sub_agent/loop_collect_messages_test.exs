@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.LoopCollectMessagesTest do
       # First message is system prompt
       [system_msg, user_msg, assistant_msg] = step.messages
       assert system_msg.role == :system
-      assert system_msg.content =~ "<language_reference>"
+      assert system_msg.content =~ "<return_rules>"
 
       # Second is user (prompt)
       assert user_msg.role == :user

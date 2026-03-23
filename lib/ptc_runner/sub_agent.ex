@@ -1041,7 +1041,7 @@ defmodule PtcRunner.SubAgent do
       true
       iex> preview.user =~ "<mission>"
       true
-      iex> preview.system =~ "<language_reference>"
+      iex> preview.system =~ "<return_rules>"
       true
       iex> preview.system =~ "<mission>"
       false

@@ -17,8 +17,6 @@ defmodule Mix.Tasks.Ablation do
       - `baseline` - auto_return prompt, 6 turns
       - `repl_only` - repl prompt, no format_options override
       - `repl_full` - repl prompt with context_in_system + minimal_turn_info
-      - `explicit_no_ref` - explicit_return without reference, 6 turns
-      - `auto_no_ref` - auto_return without reference, 6 turns
     * `--tests` - Comma-separated test indices (required)
     * `--runs` - Number of runs per test per variant (default: 5)
     * `--model` - Model to use (default: from PTC_DEMO_MODEL env)
@@ -60,14 +58,6 @@ defmodule Mix.Tasks.Ablation do
         max_turns: 6,
         format_options: [context_in_system: true, minimal_turn_info: true]
       ]
-    },
-    "explicit_no_ref" => %{
-      name: "explicit_no_ref",
-      agent_overrides: [prompt_profile: :explicit_return_lite, max_turns: 6]
-    },
-    "auto_no_ref" => %{
-      name: "auto_no_ref",
-      agent_overrides: [prompt_profile: :auto_return_lite, max_turns: 6]
     }
   }
 
