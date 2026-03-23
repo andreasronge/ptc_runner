@@ -618,6 +618,14 @@ defmodule PtcDemo.Agent do
     end
   end
 
+  defp build_system_prompt(:repl, _max_turns) do
+    %{
+      prefix: "",
+      language_spec: PtcDemo.Prompts.get(:repl),
+      output_format: ""
+    }
+  end
+
   defp build_system_prompt(prompt_profile, _max_turns) do
     %{
       prefix: @role_prefix,
