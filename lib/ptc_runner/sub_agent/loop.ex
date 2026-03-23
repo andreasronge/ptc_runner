@@ -483,6 +483,7 @@ defmodule PtcRunner.SubAgent.Loop do
         state.context,
         resolution_context,
         state.received_field_descriptions,
+        state.memory,
         state.journal
       )
 
@@ -1025,6 +1026,7 @@ defmodule PtcRunner.SubAgent.Loop do
          context,
          resolution_context,
          received_field_descriptions,
+         memory,
          journal
        ) do
     base = SystemPrompt.generate_system(agent, resolution_context: resolution_context)
@@ -1036,7 +1038,7 @@ defmodule PtcRunner.SubAgent.Loop do
           SystemPrompt.generate_context(agent,
             context: context,
             received_field_descriptions: received_field_descriptions,
-            memory: %{}
+            memory: memory
           )
 
         base <> "\n\n" <> context_prompt
