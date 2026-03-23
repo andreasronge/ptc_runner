@@ -555,16 +555,15 @@ defmodule PtcDemo.Agent do
         base_opts
       end
 
-    # Move context to system prompt for repl mode (cleaner per-turn feedback)
+    # REPL mode: move context to system prompt, skip turn metadata
     base_opts =
       if prompt_profile == :repl do
-        format_opts = Keyword.get(base_opts, :format_options, [])
+        format_opts =
+          Keyword.get(base_opts, :format_options, [])
+          |> Keyword.put(:context_in_system, true)
+          |> Keyword.put(:minimal_turn_info, true)
 
-        Keyword.put(
-          base_opts,
-          :format_options,
-          Keyword.put(format_opts, :context_in_system, true)
-        )
+        Keyword.put(base_opts, :format_options, format_opts)
       else
         base_opts
       end
