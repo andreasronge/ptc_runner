@@ -229,9 +229,9 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 ### Reference
 
 - **[Signature Syntax](docs/signature-syntax.md)** - Input/output type contracts
-- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write
-- **[Function Reference](docs/function-reference.md)** - All built-in functions with signatures
-- **[Clojure Core Audit](docs/clojure-core-audit.md)** - PTC-Lisp coverage of `clojure.core` functions
+- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write (a Clojure subset: 211 of 534 `clojure.core` vars, plus `clojure.string`, `clojure.set`, and `java.lang.Math`)
+- **[Function Reference](docs/function-reference.md)** - All 272 built-in functions with signatures
+- **Clojure Conformance** - [Core](docs/clojure-core-audit.md) | [String](docs/clojure-string-audit.md) | [Set](docs/clojure-set-audit.md) | [Math](docs/java-math-audit.md) | [Java Interop](docs/java-interop.md)
 - **[Benchmark Evaluation](docs/benchmark-eval.md)** - LLM accuracy by model
 
 ### Interactive
