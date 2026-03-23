@@ -607,6 +607,7 @@ defmodule PtcRunner.SubAgent.Loop do
       {:error, {:multiple_code_blocks, count}} ->
         handle_error_with_budget(
           response,
+          :multiple_code_blocks,
           "Error: Found #{count} code blocks in your response, but exactly ONE is required. Combine all your code into a single ```clojure block. Variables defined in separate blocks are NOT shared.",
           nil,
           state,
@@ -628,6 +629,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Handle error using unified budget model - returns signal
         handle_error_with_budget(
           response,
+          :no_code_found,
           "Error: No valid PTC-Lisp code found in response. Please provide code in a ```clojure or ```lisp code block, or as a raw s-expression starting with '('.",
           nil,
           state,
@@ -641,17 +643,18 @@ defmodule PtcRunner.SubAgent.Loop do
   # Returns {:continue, new_state, turn} for the driver_loop to process
   @spec handle_error_with_budget(
           String.t(),
+          atom(),
           String.t(),
           Turn.t() | nil,
           State.t(),
           Definition.t()
         ) ::
           {:continue, State.t(), Turn.t()}
-  defp handle_error_with_budget(response, error_message, turn_or_nil, state, agent) do
+  defp handle_error_with_budget(response, reason, error_message, turn_or_nil, state, agent) do
     # Build Turn struct if not provided
     turn =
       turn_or_nil ||
-        Metrics.build_turn(state, response, nil, %{reason: :parse_error, message: error_message},
+        Metrics.build_turn(state, response, nil, %{reason: reason, message: error_message},
           success?: false,
           type: state.current_turn_type
         )

@@ -41,6 +41,7 @@ defmodule PtcDemo.Agent do
     :datasets,
     :last_program,
     :last_result,
+    :last_step,
     :last_trace_path,
     :last_retry_count,
     :memory,
@@ -103,6 +104,14 @@ defmodule PtcDemo.Agent do
   """
   def last_retry_count do
     GenServer.call(__MODULE__, :last_retry_count)
+  end
+
+  @doc """
+  Get the full Step struct from the last execution.
+  Returns the Step for both success and error cases, or nil if no execution yet.
+  """
+  def last_step do
+    GenServer.call(__MODULE__, :last_step)
   end
 
   def list_datasets do
@@ -291,17 +300,24 @@ defmodule PtcDemo.Agent do
     signature = Keyword.get(opts, :signature) || infer_signature(Keyword.get(opts, :expect))
     plan = Keyword.get(opts, :plan)
 
+    # Per-run overrides for ablation experiments
+    prompt_profile = Keyword.get(opts, :prompt_profile, state.prompt_profile)
+    format_options = Keyword.get(opts, :format_options)
+    completion_mode = Keyword.get(opts, :completion_mode)
+
     # Build the SubAgent with requested max_turns, signature, compression, and retry_turns
     agent =
       build_agent(
         state.data_mode,
-        state.prompt_profile,
+        prompt_profile,
         state.compression,
         max_turns,
         signature,
         retry_turns,
         plan: plan,
-        thinking: state.thinking
+        thinking: state.thinking,
+        format_options: format_options,
+        completion_mode: completion_mode
       )
 
     # Build context with datasets (memory is handled internally by SubAgent)
@@ -357,6 +373,7 @@ defmodule PtcDemo.Agent do
            state
            | last_program: program,
              last_result: result,
+             last_step: step,
              last_trace_path: trace_path,
              last_retry_count: retry_count,
              memory: new_memory,
@@ -387,6 +404,7 @@ defmodule PtcDemo.Agent do
            | usage: new_usage,
              programs_history: new_programs,
              last_program: program,
+             last_step: step,
              last_trace_path: trace_path,
              last_retry_count: retry_count
          }}
@@ -401,6 +419,7 @@ defmodule PtcDemo.Agent do
        | data_mode: :schema,
          last_program: nil,
          last_result: nil,
+         last_step: nil,
          last_trace_path: nil,
          last_retry_count: 0,
          memory: %{},
@@ -432,6 +451,11 @@ defmodule PtcDemo.Agent do
   @impl true
   def handle_call(:last_retry_count, _from, state) do
     {:reply, state.last_retry_count, state}
+  end
+
+  @impl true
+  def handle_call(:last_step, _from, state) do
+    {:reply, state.last_step, state}
   end
 
   @impl true
@@ -534,6 +558,8 @@ defmodule PtcDemo.Agent do
        ) do
     plan = Keyword.get(extra_opts, :plan)
     thinking = Keyword.get(extra_opts, :thinking, false)
+    override_format_options = Keyword.get(extra_opts, :format_options)
+    override_completion_mode = Keyword.get(extra_opts, :completion_mode)
 
     base_opts = [
       prompt: "{{question}}",
@@ -547,25 +573,35 @@ defmodule PtcDemo.Agent do
       thinking: thinking
     ]
 
-    # Add completion_mode for auto_return prompt profile
+    # Add completion_mode for auto_return prompt profile (overridable)
     base_opts =
-      if prompt_profile == :auto_return do
-        Keyword.put(base_opts, :completion_mode, :auto)
-      else
-        base_opts
+      case override_completion_mode do
+        nil ->
+          if prompt_profile == :auto_return,
+            do: Keyword.put(base_opts, :completion_mode, :auto),
+            else: base_opts
+
+        mode ->
+          Keyword.put(base_opts, :completion_mode, mode)
       end
 
-    # REPL mode: move context to system prompt, skip turn metadata
+    # REPL mode: move context to system prompt, skip turn metadata (overridable)
     base_opts =
-      if prompt_profile == :repl do
-        format_opts =
-          Keyword.get(base_opts, :format_options, [])
-          |> Keyword.put(:context_in_system, true)
-          |> Keyword.put(:minimal_turn_info, true)
+      case override_format_options do
+        nil ->
+          if prompt_profile == :repl do
+            format_opts =
+              Keyword.get(base_opts, :format_options, [])
+              |> Keyword.put(:context_in_system, true)
+              |> Keyword.put(:minimal_turn_info, true)
 
-        Keyword.put(base_opts, :format_options, format_opts)
-      else
-        base_opts
+            Keyword.put(base_opts, :format_options, format_opts)
+          else
+            base_opts
+          end
+
+        format_opts ->
+          Keyword.put(base_opts, :format_options, format_opts)
       end
 
     # Add plan and enable journaling when plan is present
@@ -603,6 +639,15 @@ defmodule PtcDemo.Agent do
 
   @role_prefix "You are a data analyst answering questions about datasets."
 
+  # REPL mode: stripped system prompt for any turn count
+  defp build_system_prompt(:repl, _max_turns) do
+    %{
+      prefix: "",
+      language_spec: PtcDemo.Prompts.get(:repl),
+      output_format: ""
+    }
+  end
+
   # For single-shot (max_turns == 1), strip the Tools section that mentions return/fail
   defp build_system_prompt(prompt_profile, 1) do
     fn base_prompt ->
@@ -616,14 +661,6 @@ defmodule PtcDemo.Agent do
       [@role_prefix, stripped, language_spec]
       |> Enum.join("\n\n")
     end
-  end
-
-  defp build_system_prompt(:repl, _max_turns) do
-    %{
-      prefix: "",
-      language_spec: PtcDemo.Prompts.get(:repl),
-      output_format: ""
-    }
   end
 
   defp build_system_prompt(prompt_profile, _max_turns) do

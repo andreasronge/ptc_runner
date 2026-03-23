@@ -1,0 +1,20 @@
+{
+  "skill_name": "llm-benchmark",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I ran my prompt experiment 30 times for each variant and got 40% vs 53% pass rate. Is the new prompt better?",
+      "expected_output": "Should explain that 40% vs 53% at n=30 is not statistically significant, calculate approximate p-value, recommend larger sample size, and suggest looking at per-turn metrics instead of just pass rate."
+    },
+    {
+      "id": 2,
+      "prompt": "I want to benchmark whether adding 'think step by step' to my LLM prompt helps. How should I set up the experiment?",
+      "expected_output": "Should recommend mechanism benchmark (equal conditions), suggest sample size based on expected effect, warn about confounding variables, mention per-turn metrics beyond pass/fail, and emphasize checking for regressions on simple tasks."
+    },
+    {
+      "id": 3,
+      "prompt": "My system prompt includes examples like 'find document DOC-020 about certification reimbursement' and my test suite checks if the model returns DOC-020. The model gets 95% pass rate. Is this a good prompt?",
+      "expected_output": "Should flag this as data leakage — the test answer is in the prompt. The 95% rate is meaningless. Should recommend removing test-specific data from prompts and using domain-blind examples."
+    }
+  ]
+}

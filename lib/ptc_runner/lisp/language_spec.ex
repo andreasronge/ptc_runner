@@ -56,7 +56,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     multi_turn_journal: [:base, :addon_multi_turn, :addon_journal],
     auto_return: [:base, :addon_auto_return],
     auto_return_journal: [:base, :addon_multi_turn, :addon_journal],
-    repl: [:addon_repl]
+    repl: [:addon_repl],
+    single_shot_lite: [:addon_single_shot]
   }
 
   # Snippet keys mapped to Prompts module functions
