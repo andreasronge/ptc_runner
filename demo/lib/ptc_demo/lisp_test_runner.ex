@@ -530,7 +530,7 @@ defmodule PtcDemo.LispTestRunner do
   end
 
   defp prompt_for_test(test_case, :smart_auto) do
-    if Map.get(test_case, :max_turns, 1) > 1, do: :repl, else: :single_shot
+    if Map.get(test_case, :max_turns, 1) > 1, do: :minimal, else: :single_shot
   end
 
   defp prompt_for_test(_test_case, explicit_profile), do: explicit_profile
@@ -606,6 +606,9 @@ defmodule PtcDemo.LispTestRunner do
     ask_opts = [max_turns: max_turns, expect: expect, debug: debug]
     ask_opts = if signature, do: Keyword.put(ask_opts, :signature, signature), else: ask_opts
     ask_opts = if plan, do: Keyword.put(ask_opts, :plan, plan), else: ask_opts
+    # Add trace label from test description for identifiable trace files
+    trace_label = Map.get(test_case, :description, query)
+    ask_opts = Keyword.put(ask_opts, :trace_label, trace_label)
     # Merge per-run overrides (format_options, completion_mode, prompt_profile, etc.)
     ask_opts = Keyword.merge(ask_opts, agent_overrides)
 

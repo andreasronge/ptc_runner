@@ -11,6 +11,8 @@ Shared rules for multi-turn execution. Combined with a return-mode fragment (exp
 <multi_turn_rules>
 Respond with EXACTLY ONE ```clojure code block per turn — no text before or after the block. Put reasoning in `;; comments` inside the code block.
 
+Tool calls require named arguments: `(tool/name {:key value})`, never `(tool/name value)`.
+
 Don't echo data in code from your context. You already know the data, no need to print it again. No need to print the result before returning.
 
 Keep programs very short. Small programs are less likely to fail. You can always reuse and combine the programs in future turns.

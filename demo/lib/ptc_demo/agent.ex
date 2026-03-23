@@ -314,6 +314,7 @@ defmodule PtcDemo.Agent do
         max_turns,
         signature,
         retry_turns,
+        question,
         plan: plan,
         thinking: state.thinking,
         format_options: format_options,
@@ -321,12 +322,13 @@ defmodule PtcDemo.Agent do
       )
 
     # Build context with datasets (memory is handled internally by SubAgent)
-    context = Map.merge(state.datasets, %{"question" => question})
+    context = state.datasets
 
     if verbose, do: IO.puts("\n   [Agent] Generating response...")
 
     # Generate unique trace file path
-    trace_path = trace_file_path()
+    trace_label = Keyword.get(opts, :trace_label)
+    trace_path = trace_file_path(trace_label)
 
     # Run with TraceLog to capture execution trace
     {:ok, run_result, _path} =
@@ -541,7 +543,7 @@ defmodule PtcDemo.Agent do
   # --- Private Functions ---
 
   defp build_agent(data_mode, prompt_profile, compression) do
-    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0,
+    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0, "{{question}}",
       plan: nil,
       thinking: false
     )
@@ -554,6 +556,7 @@ defmodule PtcDemo.Agent do
          max_turns,
          signature,
          retry_turns,
+         question,
          extra_opts
        ) do
     plan = Keyword.get(extra_opts, :plan)
@@ -562,7 +565,7 @@ defmodule PtcDemo.Agent do
     override_completion_mode = Keyword.get(extra_opts, :completion_mode)
 
     base_opts = [
-      prompt: "{{question}}",
+      prompt: question,
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
       retry_turns: retry_turns,
@@ -585,11 +588,11 @@ defmodule PtcDemo.Agent do
           Keyword.put(base_opts, :completion_mode, mode)
       end
 
-    # REPL mode: move context to system prompt, skip turn metadata (overridable)
+    # Minimal mode: move context to system prompt, skip turn metadata (overridable)
     base_opts =
       case override_format_options do
         nil ->
-          if prompt_profile == :repl do
+          if prompt_profile == :minimal do
             format_opts =
               Keyword.get(base_opts, :format_options, [])
               |> Keyword.put(:context_in_system, true)
@@ -639,11 +642,11 @@ defmodule PtcDemo.Agent do
 
   @role_prefix "You are a data analyst answering questions about datasets."
 
-  # REPL mode: stripped system prompt for any turn count
-  defp build_system_prompt(:repl, _max_turns) do
+  # Minimal mode: stripped system prompt for any turn count
+  defp build_system_prompt(:minimal, _max_turns) do
     %{
       prefix: "",
-      language_spec: PtcDemo.Prompts.get(:repl),
+      language_spec: PtcDemo.Prompts.get(:minimal),
       output_format: ""
     }
   end
@@ -781,10 +784,22 @@ defmodule PtcDemo.Agent do
 
   @trace_dir "traces"
 
-  defp trace_file_path do
+  defp trace_file_path(label) do
     File.mkdir_p!(@trace_dir)
-    timestamp = System.system_time(:millisecond)
+    now = DateTime.utc_now()
+    datetime = Calendar.strftime(now, "%Y%m%d_%H%M%S")
     unique_id = :erlang.unique_integer([:positive])
-    Path.join(@trace_dir, "agent_trace_#{timestamp}_#{unique_id}.jsonl")
+
+    name =
+      if label do
+        sanitized =
+          label |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "_") |> String.trim("_")
+
+        "trace_#{datetime}_#{sanitized}_#{unique_id}.jsonl"
+      else
+        "trace_#{datetime}_#{unique_id}.jsonl"
+      end
+
+    Path.join(@trace_dir, name)
   end
 end
