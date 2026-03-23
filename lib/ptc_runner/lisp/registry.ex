@@ -50,6 +50,54 @@ defmodule PtcRunner.Lisp.Registry do
   def clojure_core_audit, do: @registry.clojure_core_audit
 
   @doc """
+  Returns all clojure.string audit entries.
+
+  ## Examples
+
+      iex> entries = PtcRunner.Lisp.Registry.clojure_string_audit()
+      iex> is_list(entries) and length(entries) > 15
+      true
+  """
+  @spec clojure_string_audit() :: [map()]
+  def clojure_string_audit, do: @registry.clojure_string_audit
+
+  @doc """
+  Returns all clojure.set audit entries.
+
+  ## Examples
+
+      iex> entries = PtcRunner.Lisp.Registry.clojure_set_audit()
+      iex> is_list(entries) and length(entries) > 8
+      true
+  """
+  @spec clojure_set_audit() :: [map()]
+  def clojure_set_audit, do: @registry.clojure_set_audit
+
+  @doc """
+  Returns all java.lang.Math audit entries.
+
+  ## Examples
+
+      iex> entries = PtcRunner.Lisp.Registry.java_math_audit()
+      iex> is_list(entries) and length(entries) > 30
+      true
+  """
+  @spec java_math_audit() :: [map()]
+  def java_math_audit, do: @registry.java_math_audit
+
+  @doc """
+  Returns all Java interop entries.
+
+  ## Examples
+
+      iex> entries = PtcRunner.Lisp.Registry.java_interop()
+      iex> is_list(entries) and length(entries) > 5
+      true
+  """
+  @spec java_interop() :: [map()]
+  def java_interop, do: @registry.java_interop
+
+  @doc """
   Returns env-dispatched builtin names for the given category.
 
   ## Examples
@@ -89,24 +137,39 @@ defmodule PtcRunner.Lisp.Registry do
   @doc """
   Looks up documentation for a function by exact name.
 
+  Handles namespace-qualified names (e.g., `"LocalDate/parse"` → `"parse"`,
+  `"System/currentTimeMillis"` → `"currentTimeMillis"`).
+
   ## Examples
 
       iex> entry = PtcRunner.Lisp.Registry.doc("filter")
       iex> entry.name
       "filter"
+
+      iex> entry = PtcRunner.Lisp.Registry.doc("LocalDate/parse")
+      iex> entry.name
+      "parse"
   """
   @spec doc(String.t()) :: map() | nil
   def doc(name) do
-    Enum.find(implemented(), &(&1.name == name))
+    Enum.find(implemented(), &(&1.name == name)) ||
+      case String.split(name, "/", parts: 2) do
+        [_ns, func] -> Enum.find(implemented(), &(&1.name == func))
+        _ -> nil
+      end
   end
 
   @doc """
-  Searches functions by name or description pattern.
+  Searches functions by name, description, or section pattern.
 
   ## Examples
 
       iex> results = PtcRunner.Lisp.Registry.find_doc("sort")
       iex> Enum.any?(results, & &1.name == "sort")
+      true
+
+      iex> results = PtcRunner.Lisp.Registry.find_doc("interop")
+      iex> Enum.all?(results, & &1.section == "Interop")
       true
   """
   @spec find_doc(String.t()) :: [map()]
@@ -114,16 +177,17 @@ defmodule PtcRunner.Lisp.Registry do
     case Regex.compile(pattern, "i") do
       {:ok, regex} ->
         Enum.filter(implemented(), fn entry ->
-          Regex.match?(regex, entry.name) or Regex.match?(regex, entry.description)
+          Regex.match?(regex, entry.name) or Regex.match?(regex, entry.description) or
+            Regex.match?(regex, entry.section)
         end)
 
       {:error, _} ->
-        # Fall back to literal substring match for invalid regex
         lower = String.downcase(pattern)
 
         Enum.filter(implemented(), fn entry ->
           String.contains?(String.downcase(entry.name), lower) or
-            String.contains?(String.downcase(entry.description), lower)
+            String.contains?(String.downcase(entry.description), lower) or
+            String.contains?(String.downcase(entry.section), lower)
         end)
     end
   end

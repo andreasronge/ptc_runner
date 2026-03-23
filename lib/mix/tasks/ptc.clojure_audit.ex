@@ -1,21 +1,31 @@
 defmodule Mix.Tasks.Ptc.ClojureAudit do
-  @shortdoc "Audit PTC-Lisp coverage of clojure.core vars"
+  @shortdoc "Audit PTC-Lisp coverage of Clojure/Java namespaces"
   @moduledoc """
-  Generates a markdown report comparing PTC-Lisp builtins against clojure.core.
+  Generates markdown reports comparing PTC-Lisp builtins against Clojure and Java namespaces.
 
   ## Usage
 
-      mix ptc.clojure_audit                    # Generate report (classifies with LLM)
-      mix ptc.clojure_audit --skip-llm         # Skip LLM classification, mark unmatched as "unknown"
-      mix ptc.clojure_audit --model MODEL_ID   # Use a specific model (default: openrouter:google/gemini-2.5-flash-lite-preview)
-      mix ptc.clojure_audit --chunk-size N      # Vars per LLM request (default: 10)
-      mix ptc.clojure_audit --limit N            # Only classify first N unmatched vars (for testing)
+      mix ptc.clojure_audit                    # Audit all namespaces
+      mix ptc.clojure_audit --namespace core   # Audit only clojure.core
+      mix ptc.clojure_audit --namespace string # Audit only clojure.string
+      mix ptc.clojure_audit --namespace set    # Audit only clojure.set
+      mix ptc.clojure_audit --namespace math   # Audit only java.lang.Math
+      mix ptc.clojure_audit --skip-llm         # Skip LLM classification
+      mix ptc.clojure_audit --model MODEL_ID   # Use a specific model
+      mix ptc.clojure_audit --chunk-size N     # Vars per LLM request (default: 10)
+      mix ptc.clojure_audit --limit N          # Only classify first N unmatched vars
 
   ## Output
 
-  Writes `docs/clojure-core-audit.md` with a table of all clojure.core vars and their status:
+  Writes audit markdown files:
+  - `docs/clojure-core-audit.md` — clojure.core vars
+  - `docs/clojure-string-audit.md` — clojure.string vars
+  - `docs/clojure-set-audit.md` — clojure.set vars
+  - `docs/java-math-audit.md` — java.lang.Math methods
+
+  Status legend:
   - ✅ supported — implemented in PTC-Lisp
-  - ❌ not-relevant — not applicable (lazy seqs, Java interop, concurrency, REPL, etc.)
+  - ❌ not-relevant — not applicable (lazy seqs, Java interop, concurrency, etc.)
   - 🔲 candidate — could be useful to implement
   - ❓ unknown — not yet classified
   """
@@ -26,14 +36,50 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
 
   @default_model "openrouter:google/gemini-3.1-flash-lite-preview"
   @default_chunk_size 10
-  @output_path "docs/clojure-core-audit.md"
+
+  @namespace_configs %{
+    "core" => %{
+      output: "docs/clojure-core-audit.md",
+      title: "Clojure Core Audit for PTC-Lisp",
+      description: "Comparison of `clojure.core` vars against PTC-Lisp builtins.",
+      vars_fn: :clojure_core_vars,
+      match_fn: :match_core
+    },
+    "string" => %{
+      output: "docs/clojure-string-audit.md",
+      title: "Clojure String Audit for PTC-Lisp",
+      description: "Comparison of `clojure.string` vars against PTC-Lisp builtins.",
+      vars_fn: :clojure_string_vars,
+      match_fn: :match_by_category
+    },
+    "set" => %{
+      output: "docs/clojure-set-audit.md",
+      title: "Clojure Set Audit for PTC-Lisp",
+      description: "Comparison of `clojure.set` vars against PTC-Lisp builtins.",
+      vars_fn: :clojure_set_vars,
+      match_fn: :match_by_category
+    },
+    "math" => %{
+      output: "docs/java-math-audit.md",
+      title: "Java Math Audit for PTC-Lisp",
+      description: "Comparison of `java.lang.Math` methods against PTC-Lisp builtins.",
+      vars_fn: :java_math_vars,
+      match_fn: :match_by_category
+    }
+  }
 
   @impl Mix.Task
   def run(args) do
     {opts, _, _} =
       OptionParser.parse(args,
-        switches: [skip_llm: :boolean, model: :string, chunk_size: :integer, limit: :integer],
-        aliases: [s: :skip_llm, m: :model, c: :chunk_size, l: :limit]
+        switches: [
+          skip_llm: :boolean,
+          model: :string,
+          chunk_size: :integer,
+          limit: :integer,
+          namespace: :string
+        ],
+        aliases: [s: :skip_llm, m: :model, c: :chunk_size, l: :limit, n: :namespace]
       )
 
     model = opts[:model] || @default_model
@@ -41,29 +87,35 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
     skip_llm = opts[:skip_llm] || false
     limit = opts[:limit]
 
-    # Start required apps for LLM calls
+    namespaces =
+      case opts[:namespace] do
+        nil -> Map.keys(@namespace_configs)
+        ns when is_map_key(@namespace_configs, ns) -> [ns]
+        other -> Mix.raise("Unknown namespace: #{other}. Use: core, string, set, math")
+      end
+
     unless skip_llm do
       Mix.Task.run("app.start")
     end
 
-    clojure_vars = clojure_core_vars()
-    {supported, special_forms} = ptc_lisp_builtins()
+    Enum.each(namespaces, fn ns ->
+      config = @namespace_configs[ns]
+      Mix.shell().info("\n=== Auditing #{config.title} ===")
+      audit_namespace(config, model, chunk_size, skip_llm, limit)
+    end)
+  end
 
-    Mix.shell().info("Clojure core vars: #{length(clojure_vars)}")
-    Mix.shell().info("PTC-Lisp builtins: #{MapSet.size(supported)}")
-    Mix.shell().info("PTC-Lisp special forms: #{MapSet.size(special_forms)}")
+  defp audit_namespace(config, model, chunk_size, skip_llm, limit) do
+    vars = apply(__MODULE__, config.vars_fn, [])
+    supported = apply(__MODULE__, config.match_fn, [vars])
 
-    # Phase 1: Auto-match
     {matched, unmatched} =
-      Enum.split_with(clojure_vars, fn {name, _desc} ->
-        atom_name = String.to_atom(name)
-        MapSet.member?(supported, atom_name) or MapSet.member?(special_forms, atom_name)
-      end)
+      Enum.split_with(vars, fn {name, _desc} -> MapSet.member?(supported, name) end)
 
+    Mix.shell().info("Total vars: #{length(vars)}")
     Mix.shell().info("Auto-matched: #{length(matched)}")
     Mix.shell().info("Unmatched: #{length(unmatched)}")
 
-    # Phase 2: Classify unmatched vars
     {to_classify, skipped} =
       if limit do
         Mix.shell().info("Limiting to first #{limit} unmatched vars")
@@ -82,7 +134,6 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
     skipped_entries =
       Enum.map(skipped, fn {name, desc} -> {name, desc, "unknown", ""} end)
 
-    # Phase 3: Generate markdown
     matched_entries =
       Enum.map(matched, fn {name, desc} -> {name, desc, "supported", ""} end)
 
@@ -90,10 +141,9 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       (matched_entries ++ classified ++ skipped_entries)
       |> Enum.sort_by(fn {name, _, _, _} -> name end)
 
-    markdown = generate_markdown(all_entries)
-    File.write!(@output_path, markdown)
+    markdown = generate_markdown(all_entries, config)
+    File.write!(config.output, markdown)
 
-    # Summary
     counts = Enum.frequencies_by(all_entries, fn {_, _, status, _} -> status end)
 
     Mix.shell().info("\n--- Summary ---")
@@ -101,17 +151,26 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
     Mix.shell().info("🔲 candidate:     #{counts["candidate"] || 0}")
     Mix.shell().info("❌ not-relevant:  #{counts["not-relevant"] || 0}")
     Mix.shell().info("❓ unknown:       #{counts["unknown"] || 0}")
-    Mix.shell().info("\nReport written to #{@output_path}")
+    Mix.shell().info("\nReport written to #{config.output}")
   end
 
-  defp ptc_lisp_builtins do
+  @doc false
+  def match_core(_vars) do
     builtin_keys = Env.initial() |> Map.keys()
     special_form_list = Analyze.supported_forms()
+    all = builtin_keys ++ special_form_list
+    MapSet.new(Enum.map(all, &to_string/1))
+  end
 
-    special_forms = MapSet.new(special_form_list)
-    all_supported = MapSet.new(builtin_keys ++ special_form_list)
+  @doc false
+  def match_by_category(vars) do
+    implemented = PtcRunner.Lisp.Registry.implemented()
+    var_names = MapSet.new(Enum.map(vars, fn {name, _} -> name end))
 
-    {all_supported, special_forms}
+    implemented
+    |> Enum.filter(fn entry -> MapSet.member?(var_names, entry.name) end)
+    |> Enum.map(& &1.name)
+    |> MapSet.new()
   end
 
   defp classify_with_llm(vars, model, chunk_size) do
@@ -135,7 +194,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       end)
 
     system = """
-    You are classifying Clojure core functions for relevance to PTC-Lisp, a sandboxed Lisp for LLM tool orchestration running on the BEAM (Erlang VM).
+    You are classifying Clojure/Java functions for relevance to PTC-Lisp, a sandboxed Lisp for LLM tool orchestration running on the BEAM (Erlang VM).
 
     PTC-Lisp supports: pure data transformations, collection operations, map/filter/reduce, string manipulation, math, predicates, destructuring, loop/recur, threading macros, and tool calling.
 
@@ -146,30 +205,9 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
     - `candidate` — pure function operating on data that would be useful in PTC-Lisp
 
     Respond with ONLY a JSON array. Each element: {"name": "var-name", "status": "not-relevant" or "candidate", "reason": "brief reason"}
-
-    Examples:
-    - `zipmap` → candidate (pure function creating map from two seqs)
-    - `comp` → candidate (function composition, pure)
-    - `partial` → candidate (partial application, pure)
-    - `constantly` → candidate (returns constant function, pure)
-    - `atom` → not-relevant (mutable state)
-    - `lazy-seq` → not-relevant (lazy evaluation)
-    - `future` → not-relevant (concurrency primitive)
-    - `slurp` → not-relevant (file I/O)
-    - `defmacro` → not-relevant (macro system)
-    - `meta` → not-relevant (metadata)
-    - `proxy` → not-relevant (Java interop)
-    - `case` → candidate (constant-time dispatch, pure control flow)
-    - `condp` → candidate (predicate dispatch, pure control flow)
-    - `complement` → candidate (function complement, pure)
-    - `dedupe` → candidate (removes consecutive duplicates, pure transformation)
-    - `every-pred` → candidate (predicate combinator, pure)
-    - `memoize` → not-relevant (mutable cache state)
-    - `trampoline` → candidate (mutual recursion without stack overflow, pure)
-    - `format` → candidate (string formatting, pure)
     """
 
-    messages = [%{role: :user, content: "Classify these clojure.core vars:\n\n#{var_list}"}]
+    messages = [%{role: :user, content: "Classify these vars:\n\n#{var_list}"}]
 
     case PtcRunner.LLM.call(model, %{system: system, messages: messages}) do
       {:ok, %{content: content}} ->
@@ -182,7 +220,6 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
   end
 
   defp parse_classification(content, vars) do
-    # Extract JSON from response (may be wrapped in ```json ... ```)
     json_str =
       content
       |> String.replace(~r/```json\s*/, "")
@@ -207,13 +244,13 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
     end
   end
 
-  defp generate_markdown(entries) do
+  defp generate_markdown(entries, config) do
     counts = Enum.frequencies_by(entries, fn {_, _, status, _} -> status end)
 
     header = """
-    # Clojure Core Audit for PTC-Lisp
+    # #{config.title}
 
-    Auto-generated comparison of `clojure.core` vars against PTC-Lisp builtins.
+    Auto-generated #{config.description}
 
     ## Summary
 
@@ -245,9 +282,10 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
   defp status_icon("not-relevant"), do: "❌"
   defp status_icon(_), do: "❓"
 
-  # Complete list of clojure.core public vars with descriptions.
-  # Source: https://clojuredocs.org/clojure.core
-  defp clojure_core_vars do
+  # ── Namespace var lists ──────────────────────────────────────────────
+
+  @doc false
+  def clojure_core_vars do
     [
       {"*", "Multiplies numbers; returns 1 with no args"},
       {"*'", "Multiplies numbers with arbitrary precision"},
@@ -783,6 +821,106 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       {"xml-seq", "Lazy seq of XML elements"},
       {"zero?", "Returns true if number is zero"},
       {"zipmap", "Creates map from keys and values seqs"}
+    ]
+  end
+
+  @doc false
+  def clojure_string_vars do
+    [
+      {"blank?", "True if s is nil, empty, or contains only whitespace"},
+      {"capitalize", "Converts first character to upper-case, rest to lower-case"},
+      {"ends-with?", "True if s ends with substr"},
+      {"escape", "Return a new string applying cmap to each character"},
+      {"includes?", "True if s includes substr"},
+      {"index-of", "Return index of value in string"},
+      {"join", "Returns a string of elements joined by separator"},
+      {"last-index-of", "Return last index of value in string"},
+      {"lower-case", "Converts string to all lower-case"},
+      {"re-quote-replacement", "Escapes special characters in replacement string"},
+      {"replace", "Replaces all instances of match in s"},
+      {"replace-first", "Replaces first instance of match in s"},
+      {"reverse", "Returns s with characters reversed"},
+      {"split", "Splits string on regex or string"},
+      {"split-lines", "Splits string on \\n or \\r\\n"},
+      {"starts-with?", "True if s starts with substr"},
+      {"trim", "Removes whitespace from both ends of string"},
+      {"trim-newline", "Removes all trailing newline or return characters"},
+      {"triml", "Removes whitespace from the left side of string"},
+      {"trimr", "Removes whitespace from the right side of string"},
+      {"upper-case", "Converts string to all upper-case"}
+    ]
+  end
+
+  @doc false
+  def clojure_set_vars do
+    [
+      {"difference", "Return a set that is the first set without elements of the remaining sets"},
+      {"index", "Returns a map of the distinct values of ks mapped to sets of maps"},
+      {"intersection", "Return a set that is the intersection of the input sets"},
+      {"join", "When passed 2 rels, returns the rel corresponding to the natural join"},
+      {"map-invert", "Returns the map with vals mapped to keys"},
+      {"project", "Returns a rel of the elements of xrel with only the keys in ks"},
+      {"rename", "Returns a rel with the keys in kmap renamed"},
+      {"rename-keys", "Returns the map with keys renamed according to kmap"},
+      {"select", "Returns a set of the elements for which pred is true"},
+      {"subset?", "Is set1 a subset of set2?"},
+      {"superset?", "Is set1 a superset of set2?"},
+      {"union", "Return a set that is the union of the input sets"}
+    ]
+  end
+
+  @doc false
+  def java_math_vars do
+    [
+      {"abs", "Returns the absolute value"},
+      {"acos", "Returns the arc cosine of a value"},
+      {"addExact", "Returns sum, throwing on overflow"},
+      {"asin", "Returns the arc sine of a value"},
+      {"atan", "Returns the arc tangent of a value"},
+      {"atan2", "Returns angle theta from (x,y) to polar (r,theta)"},
+      {"cbrt", "Returns the cube root of a value"},
+      {"ceil", "Returns the smallest integer >= argument"},
+      {"copySign", "Returns first arg with sign of second arg"},
+      {"cos", "Returns the trigonometric cosine of an angle"},
+      {"cosh", "Returns the hyperbolic cosine of a value"},
+      {"decrementExact", "Returns argument decremented by one, throwing on overflow"},
+      {"exp", "Returns Euler's number e raised to the power of a"},
+      {"expm1", "Returns e^x - 1"},
+      {"floor", "Returns the largest integer <= argument"},
+      {"floorDiv", "Returns floor of integer division"},
+      {"floorMod", "Returns floor modulus of arguments"},
+      {"fma", "Fused multiply-add"},
+      {"getExponent", "Returns unbiased exponent of a float/double"},
+      {"hypot", "Returns sqrt(x^2 + y^2) without intermediate overflow"},
+      {"IEEEremainder", "Returns IEEE 754 remainder"},
+      {"incrementExact", "Returns argument incremented by one, throwing on overflow"},
+      {"log", "Returns the natural logarithm (base e) of a value"},
+      {"log10", "Returns the base 10 logarithm of a value"},
+      {"log1p", "Returns ln(1 + x)"},
+      {"max", "Returns the greater of two values"},
+      {"min", "Returns the smaller of two values"},
+      {"multiplyExact", "Returns product, throwing on overflow"},
+      {"multiplyHigh", "Returns high 64 bits of 128-bit product"},
+      {"negateExact", "Returns negation, throwing on overflow"},
+      {"nextAfter", "Returns adjacent floating-point value"},
+      {"nextDown", "Returns adjacent floating-point value towards negative infinity"},
+      {"nextUp", "Returns adjacent floating-point value towards positive infinity"},
+      {"pow", "Returns the value of a raised to the power of b"},
+      {"random", "Returns a pseudorandom double between 0.0 and 1.0"},
+      {"rint", "Returns closest double to argument that is a mathematical integer"},
+      {"round", "Returns the closest long/int to the argument"},
+      {"scalb", "Returns d × 2^scaleFactor"},
+      {"signum", "Returns the signum function of the argument"},
+      {"sin", "Returns the trigonometric sine of an angle"},
+      {"sinh", "Returns the hyperbolic sine of a value"},
+      {"sqrt", "Returns the positive square root of a value"},
+      {"subtractExact", "Returns difference, throwing on overflow"},
+      {"tan", "Returns the trigonometric tangent of an angle"},
+      {"tanh", "Returns the hyperbolic tangent of a value"},
+      {"toDegrees", "Converts an angle from radians to degrees"},
+      {"toIntExact", "Returns long narrowed to int, throwing on overflow"},
+      {"toRadians", "Converts an angle from degrees to radians"},
+      {"ulp", "Returns size of an ulp of the argument"}
     ]
   end
 end

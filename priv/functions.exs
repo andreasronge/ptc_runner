@@ -7132,5 +7132,568 @@
       description: "Creates map from keys and values seqs",
       notes: ""
     }
+  ],
+  clojure_string_audit: [
+    %{
+      name: "blank?",
+      status: :candidate,
+      description: "True if s is nil, empty, or contains only whitespace",
+      notes: "pure string predicate"
+    },
+    %{
+      name: "capitalize",
+      status: :candidate,
+      description: "Converts first character to upper-case, rest to lower-case",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "ends-with?",
+      status: :supported,
+      description: "True if s ends with substr",
+      notes: ""
+    },
+    %{
+      name: "escape",
+      status: :candidate,
+      description: "Return a new string applying cmap to each character",
+      notes: "pure character mapping"
+    },
+    %{name: "includes?", status: :supported, description: "True if s includes substr", notes: ""},
+    %{
+      name: "index-of",
+      status: :supported,
+      description: "Return index of value in string",
+      notes: ""
+    },
+    %{
+      name: "join",
+      status: :supported,
+      description: "Returns a string of elements joined by separator",
+      notes: ""
+    },
+    %{
+      name: "last-index-of",
+      status: :supported,
+      description: "Return last index of value in string",
+      notes: ""
+    },
+    %{
+      name: "lower-case",
+      status: :supported,
+      description: "Converts string to all lower-case",
+      notes: ""
+    },
+    %{
+      name: "re-quote-replacement",
+      status: :not_relevant,
+      description: "Escapes special characters in replacement string",
+      notes: "Java regex-specific utility"
+    },
+    %{
+      name: "replace",
+      status: :supported,
+      description: "Replaces all instances of match in s",
+      notes: ""
+    },
+    %{
+      name: "replace-first",
+      status: :candidate,
+      description: "Replaces first instance of match in s",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "reverse",
+      status: :candidate,
+      description: "Returns s with characters reversed",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "split",
+      status: :supported,
+      description: "Splits string on regex or string",
+      notes: ""
+    },
+    %{
+      name: "split-lines",
+      status: :supported,
+      description: "Splits string on \\n or \\r\\n",
+      notes: ""
+    },
+    %{
+      name: "starts-with?",
+      status: :supported,
+      description: "True if s starts with substr",
+      notes: ""
+    },
+    %{
+      name: "trim",
+      status: :supported,
+      description: "Removes whitespace from both ends of string",
+      notes: ""
+    },
+    %{
+      name: "trim-newline",
+      status: :candidate,
+      description: "Removes all trailing newline or return characters",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "triml",
+      status: :candidate,
+      description: "Removes whitespace from the left side of string",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "trimr",
+      status: :candidate,
+      description: "Removes whitespace from the right side of string",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "upper-case",
+      status: :supported,
+      description: "Converts string to all upper-case",
+      notes: ""
+    }
+  ],
+  clojure_set_audit: [
+    %{
+      name: "difference",
+      status: :supported,
+      description: "Return a set that is the first set without elements of the remaining sets",
+      notes: ""
+    },
+    %{
+      name: "index",
+      status: :candidate,
+      description: "Returns a map of the distinct values of ks mapped to sets of maps",
+      notes: "pure set/map operation"
+    },
+    %{
+      name: "intersection",
+      status: :supported,
+      description: "Return a set that is the intersection of the input sets",
+      notes: ""
+    },
+    %{
+      name: "join",
+      status: :candidate,
+      description: "When passed 2 rels, returns the rel corresponding to the natural join",
+      notes: "relational algebra operation"
+    },
+    %{
+      name: "map-invert",
+      status: :candidate,
+      description: "Returns the map with vals mapped to keys",
+      notes: "pure map transformation"
+    },
+    %{
+      name: "project",
+      status: :candidate,
+      description: "Returns a rel of the elements of xrel with only the keys in ks",
+      notes: "relational algebra operation"
+    },
+    %{
+      name: "rename",
+      status: :candidate,
+      description: "Returns a rel with the keys in kmap renamed",
+      notes: "relational algebra operation"
+    },
+    %{
+      name: "rename-keys",
+      status: :candidate,
+      description: "Returns the map with keys renamed according to kmap",
+      notes: "pure map transformation"
+    },
+    %{
+      name: "select",
+      status: :candidate,
+      description: "Returns a set of the elements for which pred is true",
+      notes: "pure set filtering"
+    },
+    %{
+      name: "subset?",
+      status: :candidate,
+      description: "Is set1 a subset of set2?",
+      notes: "pure set predicate"
+    },
+    %{
+      name: "superset?",
+      status: :candidate,
+      description: "Is set1 a superset of set2?",
+      notes: "pure set predicate"
+    },
+    %{
+      name: "union",
+      status: :supported,
+      description: "Return a set that is the union of the input sets",
+      notes: ""
+    }
+  ],
+  java_math_audit: [
+    %{name: "abs", status: :supported, description: "Returns the absolute value", notes: ""},
+    %{
+      name: "acos",
+      status: :candidate,
+      description: "Returns the arc cosine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "addExact",
+      status: :not_relevant,
+      description: "Returns sum, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "asin",
+      status: :candidate,
+      description: "Returns the arc sine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "atan",
+      status: :candidate,
+      description: "Returns the arc tangent of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "atan2",
+      status: :candidate,
+      description: "Returns angle theta from (x,y) to polar (r,theta)",
+      notes: "pure math"
+    },
+    %{
+      name: "cbrt",
+      status: :candidate,
+      description: "Returns the cube root of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "ceil",
+      status: :supported,
+      description: "Returns the smallest integer >= argument",
+      notes: ""
+    },
+    %{
+      name: "copySign",
+      status: :not_relevant,
+      description: "Returns first arg with sign of second arg",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "cos",
+      status: :candidate,
+      description: "Returns the trigonometric cosine of an angle",
+      notes: "pure math"
+    },
+    %{
+      name: "cosh",
+      status: :candidate,
+      description: "Returns the hyperbolic cosine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "decrementExact",
+      status: :not_relevant,
+      description: "Returns argument decremented by one, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "exp",
+      status: :candidate,
+      description: "Returns Euler's number e raised to the power of a",
+      notes: "pure math"
+    },
+    %{
+      name: "expm1",
+      status: :not_relevant,
+      description: "Returns e^x - 1",
+      notes: "specialized numerical precision, low demand"
+    },
+    %{
+      name: "floor",
+      status: :supported,
+      description: "Returns the largest integer <= argument",
+      notes: ""
+    },
+    %{
+      name: "floorDiv",
+      status: :not_relevant,
+      description: "Returns floor of integer division",
+      notes: "Java integer division semantics; use quot + floor"
+    },
+    %{
+      name: "floorMod",
+      status: :not_relevant,
+      description: "Returns floor modulus of arguments",
+      notes: "Java integer semantics; use mod"
+    },
+    %{
+      name: "fma",
+      status: :not_relevant,
+      description: "Fused multiply-add",
+      notes: "specialized numerical precision"
+    },
+    %{
+      name: "getExponent",
+      status: :not_relevant,
+      description: "Returns unbiased exponent of a float/double",
+      notes: "low-level IEEE 754 inspection"
+    },
+    %{
+      name: "hypot",
+      status: :candidate,
+      description: "Returns sqrt(x^2 + y^2) without intermediate overflow",
+      notes: "pure math"
+    },
+    %{
+      name: "IEEEremainder",
+      status: :not_relevant,
+      description: "Returns IEEE 754 remainder",
+      notes: "low-level IEEE 754 semantics; use rem/mod"
+    },
+    %{
+      name: "incrementExact",
+      status: :not_relevant,
+      description: "Returns argument incremented by one, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "log",
+      status: :candidate,
+      description: "Returns the natural logarithm (base e) of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "log10",
+      status: :candidate,
+      description: "Returns the base 10 logarithm of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "log1p",
+      status: :not_relevant,
+      description: "Returns ln(1 + x)",
+      notes: "specialized numerical precision, low demand"
+    },
+    %{
+      name: "max",
+      status: :supported,
+      description: "Returns the greater of two values",
+      notes: ""
+    },
+    %{
+      name: "min",
+      status: :supported,
+      description: "Returns the smaller of two values",
+      notes: ""
+    },
+    %{
+      name: "multiplyExact",
+      status: :not_relevant,
+      description: "Returns product, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "multiplyHigh",
+      status: :not_relevant,
+      description: "Returns high 64 bits of 128-bit product",
+      notes: "low-level 64-bit arithmetic"
+    },
+    %{
+      name: "negateExact",
+      status: :not_relevant,
+      description: "Returns negation, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "nextAfter",
+      status: :not_relevant,
+      description: "Returns adjacent floating-point value",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "nextDown",
+      status: :not_relevant,
+      description: "Returns adjacent floating-point value towards negative infinity",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "nextUp",
+      status: :not_relevant,
+      description: "Returns adjacent floating-point value towards positive infinity",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "pow",
+      status: :supported,
+      description: "Returns the value of a raised to the power of b",
+      notes: ""
+    },
+    %{
+      name: "random",
+      status: :candidate,
+      description: "Returns a pseudorandom double between 0.0 and 1.0",
+      notes: "pure (non-deterministic but side-effect free)"
+    },
+    %{
+      name: "rint",
+      status: :not_relevant,
+      description: "Returns closest double to argument that is a mathematical integer",
+      notes: "use round instead"
+    },
+    %{
+      name: "round",
+      status: :supported,
+      description: "Returns the closest long/int to the argument",
+      notes: ""
+    },
+    %{
+      name: "scalb",
+      status: :not_relevant,
+      description: "Returns d × 2^scaleFactor",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "signum",
+      status: :candidate,
+      description: "Returns the signum function of the argument",
+      notes: "pure math"
+    },
+    %{
+      name: "sin",
+      status: :candidate,
+      description: "Returns the trigonometric sine of an angle",
+      notes: "pure math"
+    },
+    %{
+      name: "sinh",
+      status: :candidate,
+      description: "Returns the hyperbolic sine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "sqrt",
+      status: :supported,
+      description: "Returns the positive square root of a value",
+      notes: ""
+    },
+    %{
+      name: "subtractExact",
+      status: :not_relevant,
+      description: "Returns difference, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "tan",
+      status: :candidate,
+      description: "Returns the trigonometric tangent of an angle",
+      notes: "pure math"
+    },
+    %{
+      name: "tanh",
+      status: :candidate,
+      description: "Returns the hyperbolic tangent of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "toDegrees",
+      status: :candidate,
+      description: "Converts an angle from radians to degrees",
+      notes: "pure math"
+    },
+    %{
+      name: "toIntExact",
+      status: :not_relevant,
+      description: "Returns long narrowed to int, throwing on overflow",
+      notes: "Java type narrowing not applicable on BEAM"
+    },
+    %{
+      name: "toRadians",
+      status: :candidate,
+      description: "Converts an angle from degrees to radians",
+      notes: "pure math"
+    },
+    %{
+      name: "ulp",
+      status: :not_relevant,
+      description: "Returns size of an ulp of the argument",
+      notes: "low-level IEEE 754 inspection"
+    }
+  ],
+  java_interop: [
+    %{
+      name: "java.util.Date.",
+      class: "java.util.Date",
+      kind: :constructor,
+      description: "Construct current UTC time or from timestamp/ISO-8601/RFC-2822 string",
+      signatures: ["(java.util.Date.)", "(java.util.Date. timestamp-or-string)"],
+      notes:
+        "Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601, RFC 2822."
+    },
+    %{
+      name: ".getTime",
+      class: "java.util.Date",
+      kind: :method,
+      description: "Return Unix timestamp in milliseconds from DateTime",
+      signatures: ["(.getTime date)"],
+      notes: ""
+    },
+    %{
+      name: "LocalDate/parse",
+      class: "java.time.LocalDate",
+      kind: :static,
+      description: "Parse ISO-8601 date string (YYYY-MM-DD) to Date",
+      signatures: ["(LocalDate/parse date-string)"],
+      notes: "Returns Elixir Date. Only supports ISO-8601 YYYY-MM-DD format."
+    },
+    %{
+      name: "System/currentTimeMillis",
+      class: "java.lang.System",
+      kind: :static,
+      description: "Return current time in milliseconds since Unix epoch",
+      signatures: ["(System/currentTimeMillis)", "(currentTimeMillis)"],
+      notes: ""
+    },
+    %{
+      name: "Double/POSITIVE_INFINITY",
+      class: "java.lang.Double",
+      kind: :constant,
+      description: "Positive infinity constant (##Inf)",
+      signatures: ["Double/POSITIVE_INFINITY", "POSITIVE_INFINITY"],
+      notes: ""
+    },
+    %{
+      name: "Double/NEGATIVE_INFINITY",
+      class: "java.lang.Double",
+      kind: :constant,
+      description: "Negative infinity constant (##-Inf)",
+      signatures: ["Double/NEGATIVE_INFINITY", "NEGATIVE_INFINITY"],
+      notes: ""
+    },
+    %{
+      name: "Double/NaN",
+      class: "java.lang.Double",
+      kind: :constant,
+      description: "Not-a-Number constant (##NaN)",
+      signatures: ["Double/NaN", "NaN"],
+      notes: ""
+    },
+    %{
+      name: ".indexOf",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Index of first occurrence of substring, or -1 if not found",
+      signatures: ["(.indexOf s substr)", "(.indexOf s substr from-index)"],
+      notes: "Uses grapheme indices (not byte offsets)."
+    },
+    %{
+      name: ".lastIndexOf",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Index of last occurrence of substring, or -1 if not found",
+      signatures: ["(.lastIndexOf s substr)"],
+      notes: "Uses grapheme indices (not byte offsets)."
+    }
   ]
 }
