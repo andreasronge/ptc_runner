@@ -12,11 +12,11 @@ defmodule Mix.Tasks.Ablation do
     * `--variants` - Comma-separated variant names (required). Available:
       Policy variants (natural turn budgets per test):
       - `auto` - current default routing (single_shot/multi_turn)
-      - `smart_auto` - single_shot for single-turn, repl for multi-turn
+      - `smart_auto` - single_shot for single-turn, minimal for multi-turn
       Mechanism variants (forced 6-turn budget):
       - `baseline` - auto_return prompt, 6 turns
-      - `repl_only` - repl prompt, no format_options override
-      - `repl_full` - repl prompt with context_in_system + minimal_turn_info
+      - `repl_only` - minimal prompt, no format_options override
+      - `repl_full` - minimal prompt with context_in_system + minimal_turn_info
     * `--tests` - Comma-separated test indices (required)
     * `--runs` - Number of runs per test per variant (default: 5)
     * `--model` - Model to use (default: from PTC_DEMO_MODEL env)
@@ -49,12 +49,12 @@ defmodule Mix.Tasks.Ablation do
     },
     "repl_only" => %{
       name: "repl_only",
-      agent_overrides: [prompt_profile: :repl, max_turns: 6, format_options: []]
+      agent_overrides: [prompt_profile: :minimal, max_turns: 6, format_options: []]
     },
     "repl_full" => %{
       name: "repl_full",
       agent_overrides: [
-        prompt_profile: :repl,
+        prompt_profile: :minimal,
         max_turns: 6,
         format_options: [context_in_system: true, minimal_turn_info: true]
       ]

@@ -236,7 +236,7 @@ Prompts are composable — the language reference is **not** included by default
 | `:explicit_return` | Multi-turn + explicit return (return/fail required) |
 | `:auto_return` | Multi-turn + auto return (println to explore) |
 | `:explicit_journal` | Multi-turn + explicit return + journal |
-| `:repl` | REPL mode (standalone, one expression per turn) |
+| `:minimal` | Minimal multi-turn for capable models |
 | `:auto` | Auto-select per test: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
 
 Add the language reference for weaker models via structured profiles:
@@ -476,18 +476,33 @@ mix ablation --variants=auto,baseline --tests=1,2,3,5,8 --runs=10 \
 | Name | Routing |
 |------|---------|
 | `auto` | Current default: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
-| `smart_auto` | `:single_shot` for single-turn, `:repl` for multi-turn |
+| `smart_auto` | `:single_shot` for single-turn, `:minimal` for multi-turn |
 
 **Mechanism variants** force a 6-turn budget to isolate prompt effects:
 
 | Name | Prompt | Notes |
 |------|--------|-------|
 | `baseline` | `:auto_return` | Auto-return with reference |
-| `repl_only` | `:repl` | Standalone REPL prompt |
-| `repl_full` | `:repl` | REPL + context_in_system + minimal_turn_info |
+| `repl_only` | `:minimal` | Minimal prompt only |
+| `repl_full` | `:minimal` | Minimal + context_in_system + minimal_turn_info |
 **Output includes** pass rate with 95% confidence intervals, first-turn validity, parse/no-code rates, mean turns, budget exhaustion, salvage rate, token costs, and Fisher exact p-values for statistical comparison.
 
 For detailed guidance on experimental design, sample sizes, and interpreting results, see [Benchmark Analysis](../docs/guides/benchmark-analysis.md).
+
+### Inspecting Benchmark Traces
+
+Every benchmark run generates `.jsonl` trace files in `traces/`. Use the trace viewer to inspect the exact system prompt, LLM conversation, generated programs, and tool calls for each test:
+
+```bash
+# Clear old traces, run a benchmark, then view
+rm -f traces/*.jsonl
+mix ablation --variants=auto --tests=1,20 --runs=1 --model=haiku
+
+# From the ptc_runner root directory
+mix ptc.viewer --trace-dir demo/traces
+```
+
+The viewer shows turn-by-turn details: system prompt (to verify which composed prompt was used), the LLM's response, PTC-Lisp programs with syntax highlighting, tool call arguments/results, and execution output. See [PTC Viewer](../ptc_viewer/README.md) for more.
 
 ### Clojure Validation (Lisp only)
 
@@ -518,14 +533,80 @@ This downloads the appropriate binary for your platform (macOS/Linux) and instal
 
 ### Test Suite Structure
 
-| Level | Tests | Description |
-|-------|-------|-------------|
-| **Level 1: Basic** | 4 | Simple count, filtered count, sum, average |
-| **Level 2: Intermediate** | 4 | Boolean fields, numeric comparisons, AND logic, find extremes |
-| **Level 3: Advanced** | 5 | Top-N sorting, OR logic, multi-step aggregation, cross-dataset join |
-| **Lisp-only** | 1 | group-by + map with destructuring, multiple aggregations |
-| **Multi-turn** | 2 | Memory persistence between queries |
-| **Total** | **16** | |
+30 tests organized into 5 groups, testing progressively harder interaction patterns:
+
+**Single-shot tests (1-13)** — `max_turns: 1`, no tools, `:single_shot` prompt
+
+These test pure data computation. The LLM writes one program against in-memory datasets (products, orders, employees, expenses). No recovery from errors.
+
+| # | What it tests | Skill |
+|---|--------------|-------|
+| 1 | Count all products | Simple count |
+| 2 | Count delivered orders | Filter by string equality |
+| 3 | Total order revenue | Sum aggregation |
+| 4 | Average product rating | Average aggregation |
+| 5 | Remote employees | Boolean field filter |
+| 6 | Products over $500 | Numeric comparison |
+| 7 | Orders > $1000 by credit card | AND conditions |
+| 8 | Cheapest product name | Find min + extract field |
+| 9 | 3 most expensive products | Top-N sort + extract |
+| 10 | Cancelled or refunded orders | OR conditions |
+| 11 | Average senior salary | Two-step filter + aggregate |
+| 12 | Unique products ordered | Distinct + count (cross-dataset) |
+| 13 | Engineering dept expenses | Cross-dataset join + sum |
+
+**Lisp-specific tests (14-15)** — `max_turns: 3`, no tools
+
+Tests PTC-Lisp features not available in simpler DSLs (group-by with destructuring, multiple aggregations).
+
+| # | What it tests | Skill |
+|---|--------------|-------|
+| 14 | Expense category stats | group-by + map destructuring |
+| 15 | Employee with most rejected claims | Group, filter, find max |
+
+**Multi-turn tool tests (16-23)** — `max_turns: 2-6`, with search/fetch tools
+
+These test multi-turn exploration with tool calls against a 40-document policy corpus. The LLM must search, fetch, inspect output, and reason before answering.
+
+| # | What it tests | max_turns | Skill |
+|---|--------------|-----------|-------|
+| 16 | Search + parallel fetch | 2 | pmap with tool calls |
+| 17 | Find document covering two topics | 6 | Query refinement |
+| 18 | Month with highest order growth | 4 | Temporal trend analysis |
+| 19 | Budget-constrained product selection | 5 | Greedy optimization |
+| 20 | Find certification reimbursement doc | 6 | Decoy resistance (must fetch to verify) |
+| 21 | Department in both security & compliance | 6 | Multi-search intersection |
+| 22 | Find sabbatical leave policy | 6 | Query refinement from broad results |
+| 23 | Which doc mentions 'ergonomics'? | 4 | Must inspect fetched content |
+
+**Cross-dataset verification (24)** — `max_turns: 4`, no tools
+
+| # | What it tests | Skill |
+|---|--------------|-------|
+| 24 | Department with most rejected expenses | Cross-dataset join + aggregate |
+
+**Plan-mode tests (25-30)** — `max_turns: 6-16`, with explicit plan steps
+
+These test sequential multi-step analysis where the LLM receives an explicit plan and tracks progress via `step-done`.
+
+| # | What it tests | max_turns | Skill |
+|---|--------------|-----------|-------|
+| 25 | Customer value report (tiers) | 6 | ETL pipeline: aggregate → segment → count |
+| 26 | Q1 vs Q2 order comparison | 6 | Comparative period analysis |
+| 27 | Remote vs office expense comparison | 6 | Cross-dataset join + group averages |
+| 28 | 6-department stats | 16 | Independent sub-tasks combined |
+| 29 | Top 3 categories by revenue + employees | 10 | 5-hop cross-dataset pipeline |
+| 30 | Departments with high remote salaries | 10 | Threshold search with early exit |
+
+**Summary:**
+
+| Group | Tests | max_turns | Tools | Prompt |
+|-------|-------|-----------|-------|--------|
+| Single-shot | 1-13 | 1 | No | `:single_shot` |
+| Lisp-specific | 14-15 | 3 | No | `:explicit_return` |
+| Multi-turn tool | 16-23 | 2-6 | Yes | `:explicit_return` |
+| Cross-dataset | 24 | 4 | No | `:explicit_return` |
+| Plan-mode | 25-30 | 6-16 | No | `:explicit_journal` |
 
 ### Test Runner Internals
 

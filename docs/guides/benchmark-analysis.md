@@ -117,8 +117,8 @@ mix ablation --variants=baseline,repl_full --runs=30 --tests=20,23
 | Name | Prompt | Format Options |
 |------|--------|----------------|
 | `baseline` | `:auto_return` | default |
-| `repl_only` | `:repl` | none |
-| `repl_full` | `:repl` | context_in_system + minimal_turn_info |
+| `repl_only` | `:minimal` | none |
+| `repl_full` | `:minimal` | context_in_system + minimal_turn_info |
 
 ### Programmatic Usage
 
@@ -135,7 +135,7 @@ variants = [
 variants = [
   %{name: "baseline", agent_overrides: [prompt_profile: :auto_return, max_turns: 6]},
   %{name: "repl_full", agent_overrides: [
-    prompt_profile: :repl, max_turns: 6,
+    prompt_profile: :minimal, max_turns: 6,
     format_options: [context_in_system: true, minimal_turn_info: true]
   ]}
 ]
@@ -169,7 +169,7 @@ Overrides are per-run, not conversational state. They flow through `Agent.ask/2`
 ```elixir
 # These override the prompt_profile defaults for a single run
 Agent.ask(query,
-  prompt_profile: :repl,
+  prompt_profile: :minimal,
   format_options: [context_in_system: true],
   completion_mode: :auto,
   max_turns: 6

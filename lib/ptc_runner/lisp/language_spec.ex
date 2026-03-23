@@ -19,7 +19,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   | `:explicit_return` | Multi-turn, must call `(return ...)`/`(fail ...)` |
   | `:auto_return` | Multi-turn, println = continue, no println = answer |
   | `:explicit_journal` | Explicit return + journal (task/step-done) |
-  | `:repl` | REPL mode (standalone, one expression per turn) |
+  | `:minimal` | Minimal multi-turn for capable models |
 
   ## Structured Profiles
 
@@ -57,7 +57,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       :behavior_return_explicit,
       :capability_journal
     ]
-    # Note: :repl is a direct snippet, not a composition (no composition entry needed)
+    # Note: :minimal is a direct snippet, not a composition (no composition entry needed)
   }
 
   # Snippet keys mapped to Prompts module functions
@@ -68,7 +68,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     behavior_return_explicit: :behavior_return_explicit,
     behavior_return_auto: :behavior_return_auto,
     capability_journal: :capability_journal,
-    repl: :repl
+    minimal: :minimal
   }
 
   # Parse metadata from file header

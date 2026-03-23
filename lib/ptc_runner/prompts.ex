@@ -17,7 +17,7 @@ defmodule PtcRunner.Prompts do
   | Return mode | `behavior-return-explicit.md` | `behavior_return_explicit/0` |
   | Return mode | `behavior-return-auto.md` | `behavior_return_auto/0` |
   | Capability | `capability-journal.md` | `capability_journal/0` |
-  | Standalone | `lisp-addon-repl.md` | `repl/0` |
+  | Minimal | `behavior-minimal.md` | `minimal/0` |
 
   ## Other Prompt Files
 
@@ -159,20 +159,20 @@ defmodule PtcRunner.Prompts do
   def capability_journal_with_header, do: @capability_journal
 
   # ============================================================================
-  # PTC-Lisp REPL Mode (standalone, not part of 2-axis composition)
+  # PTC-Lisp Minimal Behavior (compact multi-turn for capable models)
   # ============================================================================
 
-  @repl_file Path.join(@prompts_dir, "lisp-addon-repl.md")
-  @external_resource @repl_file
-  @repl @repl_file |> File.read!() |> PromptLoader.extract_with_header()
+  @minimal_file Path.join(@prompts_dir, "behavior-minimal.md")
+  @external_resource @minimal_file
+  @minimal @minimal_file |> File.read!() |> PromptLoader.extract_with_header()
 
-  @doc "REPL mode (one expression per turn, incremental exploration)."
-  @spec repl() :: String.t()
-  def repl, do: elem(@repl, 1)
+  @doc "Minimal multi-turn prompt for capable models."
+  @spec minimal() :: String.t()
+  def minimal, do: elem(@minimal, 1)
 
-  @doc "Raw header + content for lisp-addon-repl.md."
-  @spec repl_with_header() :: {String.t(), String.t()}
-  def repl_with_header, do: @repl
+  @doc "Raw header + content for behavior-minimal.md."
+  @spec minimal_with_header() :: {String.t(), String.t()}
+  def minimal_with_header, do: @minimal
 
   # ============================================================================
   # Text Mode (JSON variant) Templates
@@ -308,7 +308,7 @@ defmodule PtcRunner.Prompts do
       :behavior_return_explicit,
       :behavior_return_auto,
       :capability_journal,
-      :repl,
+      :minimal,
       :json_system,
       :json_user,
       :json_error,
@@ -342,7 +342,7 @@ defmodule PtcRunner.Prompts do
   def get(:behavior_return_explicit), do: behavior_return_explicit()
   def get(:behavior_return_auto), do: behavior_return_auto()
   def get(:capability_journal), do: capability_journal()
-  def get(:repl), do: repl()
+  def get(:minimal), do: minimal()
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()

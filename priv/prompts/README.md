@@ -15,7 +15,6 @@ Files use **kebab-case** with a **category prefix** that groups related prompts:
 | `turn-feedback-` | Turn feedback (warnings, retry info) | `TurnFeedback` |
 | `verification-predicate-` | Verification predicate guides | `MetaPlanner` |
 | `tool-calling-` | Tool calling mode | `ToolCallingMode` |
-| `lisp-addon-` | Standalone Lisp mode addons | `SubAgent` |
 | *(none)* | Top-level shared prompts | Various |
 
 Unprefixed files: `reference.md` (language reference), `planning-examples.md`, `signature-guide.md`.
@@ -33,7 +32,7 @@ The filename maps to a function in `PtcRunner.Prompts` by replacing hyphens with
 | `behavior-return-explicit.md` | `behavior_return_explicit/0` |
 | `behavior-return-auto.md` | `behavior_return_auto/0` |
 | `capability-journal.md` | `capability_journal/0` |
-| `lisp-addon-repl.md` | `repl/0` |
+| `behavior-minimal.md` | `minimal/0` |
 | `json-system.md` | `json_system/0` |
 | `json-user.md` | `json_user/0` |
 | `json-error.md` | `json_error/0` |

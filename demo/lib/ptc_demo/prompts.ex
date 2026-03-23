@@ -12,7 +12,7 @@ defmodule PtcDemo.Prompts do
   | `:explicit_return` | Reference + multi-turn + explicit return |
   | `:auto_return` | Reference + multi-turn + auto return |
   | `:explicit_journal` | Reference + multi-turn + explicit return + journal |
-  | `:repl` | REPL mode (standalone) |
+  | `:minimal` | Minimal multi-turn (standalone) |
 
 
   Use `{:profile, behavior, reference: :full}` to add the language reference for weaker models.
@@ -59,7 +59,7 @@ defmodule PtcDemo.Prompts do
              :explicit_return,
              :auto_return,
              :explicit_journal,
-             :repl,
+             :minimal,
              :reference
            ] do
     LibLanguageSpec.get(profile)
@@ -86,7 +86,7 @@ defmodule PtcDemo.Prompts do
       {:explicit_return, "Multi-turn + explicit return (return/fail required)"},
       {:auto_return, "Multi-turn + auto return (println to explore)"},
       {:explicit_journal, "Multi-turn + explicit return + journal"},
-      {:repl, "REPL mode (one expression per turn, incremental exploration)"}
+      {:minimal, "Minimal multi-turn (one expression per turn, incremental exploration)"}
     ]
   end
 
