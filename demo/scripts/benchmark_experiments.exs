@@ -172,7 +172,7 @@ end
 
 # --- Run benchmarks ---
 
-prompts = [:multi_turn, :auto_return]
+prompts = [:explicit_return, :auto_return]
 
 all_results =
   Enum.map(prompts, fn prompt ->

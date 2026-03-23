@@ -2,38 +2,35 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @moduledoc """
   Language specification compositions for PTC-Lisp.
 
-  Provides pre-composed language specs for common use cases. Raw prompts are
-  loaded via `PtcRunner.Prompts`.
+  Provides pre-composed language specs built from two axes plus optional capabilities:
 
-  ## Available Specs
+  - **Behavior axis**: `:single_shot`, `:explicit_return`, `:auto_return`
+  - **Reference axis**: `:full` (includes language reference) or `:none` (behavior only)
+  - **Capabilities**: `:journal` (task caching, semantic progress)
+
+  ## Canonical Compositions
+
+  | Key | Components | Description |
+  |-----|------------|-------------|
+  | `:single_shot` | reference + single-shot | Last expr = answer, one turn |
+  | `:explicit_return` | reference + multi-turn + explicit return | Must call (return ...)/(fail ...) |
+  | `:auto_return` | reference + multi-turn + auto return | println=continue, no println=answer |
+  | `:explicit_journal` | reference + multi-turn + explicit return + journal | With task caching |
+  | `:repl` | REPL addon (standalone) | One expression per turn |
+
+  ## Lite Variants (no language reference)
 
   | Key | Description |
   |-----|-------------|
-  | `:single_shot` | Base + single-shot rules |
-  | `:multi_turn` | Base + multi-turn rules (return/fail, memory) |
-  | `:multi_turn_journal` | Base + multi-turn + journal (task/step-done) |
-  | `:auto_return` | Base + auto-return rules (println to explore, last expr to answer, no return/fail needed) |
-  | `:auto_return_journal` | Base + multi-turn + journal (plan agents use explicit return; auto-return at loop level) |
+  | `:single_shot_lite` | Single-shot without reference |
+  | `:explicit_return_lite` | Explicit return without reference |
+  | `:auto_return_lite` | Auto-return without reference |
 
-  ## Raw Snippets
+  ## Structured Profiles
 
-  | Key | Description |
-  |-----|-------------|
-  | `:base` | Core language reference |
-  | `:addon_single_shot` | Single-shot mode rules |
-  | `:addon_multi_turn` | Multi-turn mode rules |
-  | `:addon_journal` | Journal, task caching, semantic progress |
-  | `:addon_auto_return` | Auto-return mode rules |
+  For programmatic composition, use `resolve_profile/1` with a tuple:
 
-  ## Version Metadata
-
-  Spec files include metadata headers:
-
-      <!-- version: 2 -->
-      <!-- date: 2025-01-15 -->
-      <!-- changes: Removed threading examples -->
-
-  Access metadata via `version/1` and `metadata/1`.
+      LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none, journal: true})
 
   ## Usage
 
@@ -41,33 +38,41 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       PtcRunner.Lisp.LanguageSpec.get(:single_shot)
 
       # For multi-turn conversations
-      PtcRunner.Lisp.LanguageSpec.get(:multi_turn)
+      PtcRunner.Lisp.LanguageSpec.get(:explicit_return)
 
       # Raw snippets for custom compositions
-      PtcRunner.Lisp.LanguageSpec.get(:base) <> my_custom_addon
+      PtcRunner.Lisp.LanguageSpec.get(:reference) <> my_custom_addon
   """
 
   alias PtcRunner.Prompts
 
   # Compositions: predefined combinations of snippets
   @compositions %{
-    single_shot: [:base, :addon_single_shot],
-    multi_turn: [:base, :addon_multi_turn],
-    multi_turn_journal: [:base, :addon_multi_turn, :addon_journal],
-    auto_return: [:base, :addon_auto_return],
-    auto_return_journal: [:base, :addon_multi_turn, :addon_journal],
-    repl: [:addon_repl],
-    single_shot_lite: [:addon_single_shot]
+    single_shot: [:reference, :behavior_single_shot],
+    explicit_return: [:reference, :behavior_multi_turn, :behavior_return_explicit],
+    auto_return: [:reference, :behavior_multi_turn, :behavior_return_auto],
+    explicit_journal: [
+      :reference,
+      :behavior_multi_turn,
+      :behavior_return_explicit,
+      :capability_journal
+    ],
+    # Note: :repl is a direct snippet, not a composition (no composition entry needed)
+    # Lite variants (no reference)
+    single_shot_lite: [:behavior_single_shot],
+    explicit_return_lite: [:behavior_multi_turn, :behavior_return_explicit],
+    auto_return_lite: [:behavior_multi_turn, :behavior_return_auto]
   }
 
   # Snippet keys mapped to Prompts module functions
   @snippets %{
-    base: :lisp_base,
-    addon_single_shot: :lisp_addon_single_shot,
-    addon_multi_turn: :lisp_addon_multi_turn,
-    addon_journal: :lisp_addon_journal,
-    addon_auto_return: :lisp_addon_auto_return,
-    addon_repl: :lisp_addon_repl
+    reference: :reference,
+    behavior_single_shot: :behavior_single_shot,
+    behavior_multi_turn: :behavior_multi_turn,
+    behavior_return_explicit: :behavior_return_explicit,
+    behavior_return_auto: :behavior_return_auto,
+    capability_journal: :capability_journal,
+    repl: :repl
   }
 
   # Parse metadata from file header
@@ -96,8 +101,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @doc """
   Get a prompt by key.
 
-  Supports both raw snippets (`:base`, `:addon_single_shot`) and compositions
-  (`:single_shot`, `:multi_turn`).
+  Supports both raw snippets (`:reference`, `:behavior_multi_turn`) and compositions
+  (`:single_shot`, `:explicit_return`).
 
   ## Examples
 
@@ -105,7 +110,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       iex> is_binary(prompt)
       true
 
-      iex> prompt = PtcRunner.Lisp.LanguageSpec.get(:multi_turn)
+      iex> prompt = PtcRunner.Lisp.LanguageSpec.get(:explicit_return)
       iex> String.contains?(prompt, "<state>")
       true
 
@@ -148,6 +153,93 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   end
 
   @doc """
+  Resolve a structured prompt profile to a composed prompt string.
+
+  Accepts either an atom (delegates to `get!/1`) or a tuple for structured composition:
+
+      # Atom form (existing)
+      resolve_profile(:explicit_return)
+
+      # Tuple form with options
+      resolve_profile({:profile, :explicit_return, reference: :full, journal: true})
+
+      # Tuple form with defaults (reference: :full, journal: false)
+      resolve_profile({:profile, :auto_return})
+
+  ## Options
+
+  - `:reference` - `:full` (default) or `:none`
+  - `:journal` - `true` or `false` (default)
+
+  ## Validation
+
+  Raises `ArgumentError` for:
+  - Unknown behavior (must be `:single_shot`, `:explicit_return`, or `:auto_return`)
+  - `journal: true` with `:single_shot` (single-shot skips the loop)
+  - Unknown reference value (must be `:full` or `:none`)
+  - Unknown option keys
+  """
+  @spec resolve_profile(atom() | {:profile, atom()} | {:profile, atom(), keyword()}) ::
+          String.t()
+  def resolve_profile(profile) when is_atom(profile), do: get!(profile)
+
+  def resolve_profile({:profile, behavior}) do
+    resolve_profile({:profile, behavior, []})
+  end
+
+  def resolve_profile({:profile, behavior, opts}) do
+    validate_profile!(behavior, opts)
+
+    reference = Keyword.get(opts, :reference, :full)
+    journal? = Keyword.get(opts, :journal, false)
+
+    parts = if reference == :full, do: [:reference], else: []
+
+    parts =
+      parts ++
+        case behavior do
+          :single_shot -> [:behavior_single_shot]
+          :explicit_return -> [:behavior_multi_turn, :behavior_return_explicit]
+          :auto_return -> [:behavior_multi_turn, :behavior_return_auto]
+        end
+
+    parts = if journal?, do: parts ++ [:capability_journal], else: parts
+
+    parts
+    |> Enum.map(&get/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n\n")
+  end
+
+  defp validate_profile!(behavior, opts) do
+    unless behavior in [:single_shot, :explicit_return, :auto_return] do
+      raise ArgumentError,
+            "Unknown behavior: #{inspect(behavior)}. " <>
+              "Expected :single_shot, :explicit_return, or :auto_return"
+    end
+
+    if behavior == :single_shot and Keyword.get(opts, :journal, false) do
+      raise ArgumentError,
+            "journal: true is not compatible with :single_shot behavior (single-shot skips the loop)"
+    end
+
+    reference = Keyword.get(opts, :reference, :full)
+
+    unless reference in [:full, :none] do
+      raise ArgumentError,
+            "Unknown reference: #{inspect(reference)}. Expected :full or :none"
+    end
+
+    allowed_keys = [:reference, :journal]
+    unknown = Keyword.keys(opts) -- allowed_keys
+
+    unless unknown == [] do
+      raise ArgumentError,
+            "Unknown profile options: #{inspect(unknown)}. Allowed: #{inspect(allowed_keys)}"
+    end
+  end
+
+  @doc """
   Get the version number for a prompt.
 
   Returns the version from the prompt's metadata, or 1 if not specified.
@@ -181,7 +273,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
   ## Examples
 
-      iex> meta = PtcRunner.Lisp.LanguageSpec.metadata(:base)
+      iex> meta = PtcRunner.Lisp.LanguageSpec.metadata(:reference)
       iex> is_map(meta)
       true
 
@@ -213,7 +305,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       iex> keys = PtcRunner.Lisp.LanguageSpec.list()
       iex> :single_shot in keys
       true
-      iex> :multi_turn in keys
+      iex> :explicit_return in keys
       true
 
   """
@@ -239,18 +331,23 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @spec list_with_descriptions() :: [{atom(), String.t()}]
   def list_with_descriptions do
     composition_descriptions = [
-      {:single_shot, "Base + single-shot rules"},
-      {:multi_turn, "Base + multi-turn rules (return/fail, memory)"},
-      {:multi_turn_journal, "Base + multi-turn + journal (task/step-done)"},
+      {:single_shot, "Reference + single-shot (last expr = answer)"},
+      {:explicit_return, "Reference + multi-turn + explicit return (return/fail required)"},
       {:auto_return,
-       "Base + auto-return rules (println to explore, last expr to answer, no return/fail needed)"},
-      {:auto_return_journal,
-       "Base + multi-turn + journal (plan agents use explicit return; auto-return at loop level)"},
-      {:repl, "Base + REPL mode (one expression per turn, incremental exploration, return/fail)"}
+       "Reference + multi-turn + auto return (println to explore, last expr to answer)"},
+      {:explicit_journal, "Reference + multi-turn + explicit return + journal (task/step-done)"},
+      {:single_shot_lite, "Single-shot without reference"},
+      {:explicit_return_lite, "Multi-turn + explicit return without reference"},
+      {:auto_return_lite, "Multi-turn + auto return without reference"}
     ]
 
+    # Snippets that are not also compositions get auto-described from content
+    composition_keys = Map.keys(@compositions)
+
     snippet_descriptions =
-      Enum.map(@snippets, fn {key, prompts_key} ->
+      @snippets
+      |> Enum.reject(fn {key, _} -> key in composition_keys end)
+      |> Enum.map(fn {key, prompts_key} ->
         content = apply(Prompts, prompts_key, [])
 
         desc =

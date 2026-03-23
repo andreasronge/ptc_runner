@@ -5,45 +5,238 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
 
   doctest LanguageSpec
 
-  describe "get/1" do
-    test "returns single_shot prompt (base + single_shot addon)" do
+  # ============================================================================
+  # Canonical compositions
+  # ============================================================================
+
+  describe "canonical compositions" do
+    test ":single_shot contains reference + single-shot, not multi-turn content" do
       prompt = LanguageSpec.get(:single_shot)
       assert is_binary(prompt)
+      # Reference content
       assert String.contains?(prompt, "<role>")
+      assert String.contains?(prompt, "<language_reference>")
+      # Single-shot content
       assert String.contains?(prompt, "<single_shot>")
+      # Must NOT contain multi-turn content
+      refute String.contains?(prompt, "<state>")
+      refute String.contains?(prompt, "<return_rules>")
+      refute String.contains?(prompt, "<journaled_tasks>")
     end
 
-    test "returns multi_turn prompt (base + multi_turn addon)" do
-      prompt = LanguageSpec.get(:multi_turn)
+    test ":explicit_return contains reference + multi-turn + explicit return" do
+      prompt = LanguageSpec.get(:explicit_return)
       assert is_binary(prompt)
+      # Reference content
       assert String.contains?(prompt, "<role>")
+      # Multi-turn core
       assert String.contains?(prompt, "<multi_turn_rules>")
-      # multi_turn is longer than single_shot
-      assert String.length(prompt) > String.length(LanguageSpec.get(:single_shot))
+      assert String.contains?(prompt, "<state>")
+      # Explicit return content
+      assert String.contains?(prompt, "<return_rules>")
+      assert String.contains?(prompt, "(return answer)")
+      # Must NOT contain auto-return or journal content
+      refute String.contains?(prompt, "exploration turn")
+      refute String.contains?(prompt, "<journaled_tasks>")
     end
 
-    test "returns base snippet" do
-      prompt = LanguageSpec.get(:base)
+    test ":auto_return contains reference + multi-turn + auto return" do
+      prompt = LanguageSpec.get(:auto_return)
+      assert is_binary(prompt)
+      # Reference content
+      assert String.contains?(prompt, "<role>")
+      # Multi-turn core
+      assert String.contains?(prompt, "<multi_turn_rules>")
+      assert String.contains?(prompt, "<state>")
+      # Auto-return content
+      assert String.contains?(prompt, "<return_rules>")
+      assert String.contains?(prompt, "exploration turn")
+      # Must NOT contain explicit return or journal content
+      refute String.contains?(prompt, "(return answer)")
+      refute String.contains?(prompt, "<journaled_tasks>")
+    end
+
+    test ":explicit_journal contains reference + multi-turn + explicit return + journal" do
+      prompt = LanguageSpec.get(:explicit_journal)
       assert is_binary(prompt)
       assert String.contains?(prompt, "<role>")
-    end
-
-    test "returns addon_single_shot snippet" do
-      prompt = LanguageSpec.get(:addon_single_shot)
-      assert is_binary(prompt)
-      assert String.contains?(prompt, "<single_shot>")
-    end
-
-    test "returns addon_multi_turn snippet" do
-      prompt = LanguageSpec.get(:addon_multi_turn)
-      assert is_binary(prompt)
       assert String.contains?(prompt, "<state>")
+      assert String.contains?(prompt, "(return answer)")
+      assert String.contains?(prompt, "<journaled_tasks>")
+      assert String.contains?(prompt, "<semantic_progress>")
+    end
+
+    test ":repl is standalone (no reference, no multi-turn)" do
+      prompt = LanguageSpec.get(:repl)
+      assert is_binary(prompt)
+      assert String.contains?(prompt, "REPL")
+      refute String.contains?(prompt, "<role>")
+      refute String.contains?(prompt, "<state>")
+    end
+  end
+
+  # ============================================================================
+  # Lite variants
+  # ============================================================================
+
+  describe "lite variants" do
+    test ":single_shot_lite has no reference" do
+      prompt = LanguageSpec.get(:single_shot_lite)
+      assert String.contains?(prompt, "<single_shot>")
+      refute String.contains?(prompt, "<role>")
+    end
+
+    test ":explicit_return_lite has no reference" do
+      prompt = LanguageSpec.get(:explicit_return_lite)
+      assert String.contains?(prompt, "<state>")
+      assert String.contains?(prompt, "(return answer)")
+      refute String.contains?(prompt, "<role>")
+    end
+
+    test ":auto_return_lite has no reference" do
+      prompt = LanguageSpec.get(:auto_return_lite)
+      assert String.contains?(prompt, "<state>")
+      assert String.contains?(prompt, "exploration turn")
+      refute String.contains?(prompt, "<role>")
+    end
+  end
+
+  # ============================================================================
+  # Snippet access
+  # ============================================================================
+
+  describe "snippet access" do
+    test "all snippet keys return content" do
+      for key <- [
+            :reference,
+            :behavior_single_shot,
+            :behavior_multi_turn,
+            :behavior_return_explicit,
+            :behavior_return_auto,
+            :capability_journal,
+            :repl
+          ] do
+        content = LanguageSpec.get(key)
+        assert is_binary(content), "Expected #{key} to return binary, got nil"
+        assert String.length(content) > 0, "Expected #{key} to have content"
+      end
     end
 
     test "returns nil for unknown prompt" do
       assert LanguageSpec.get(:nonexistent) == nil
     end
   end
+
+  # ============================================================================
+  # Compositions build correctly from parts
+  # ============================================================================
+
+  describe "composition structure" do
+    test "single_shot equals reference + behavior_single_shot" do
+      ref = LanguageSpec.get(:reference)
+      behavior = LanguageSpec.get(:behavior_single_shot)
+      expected = ref <> "\n\n" <> behavior
+
+      assert LanguageSpec.get(:single_shot) == expected
+    end
+
+    test "explicit_return equals reference + behavior_multi_turn + behavior_return_explicit" do
+      ref = LanguageSpec.get(:reference)
+      mt = LanguageSpec.get(:behavior_multi_turn)
+      ret = LanguageSpec.get(:behavior_return_explicit)
+      expected = ref <> "\n\n" <> mt <> "\n\n" <> ret
+
+      assert LanguageSpec.get(:explicit_return) == expected
+    end
+
+    test "explicit_journal includes all four parts" do
+      ref = LanguageSpec.get(:reference)
+      mt = LanguageSpec.get(:behavior_multi_turn)
+      ret = LanguageSpec.get(:behavior_return_explicit)
+      journal = LanguageSpec.get(:capability_journal)
+      expected = ref <> "\n\n" <> mt <> "\n\n" <> ret <> "\n\n" <> journal
+
+      assert LanguageSpec.get(:explicit_journal) == expected
+    end
+  end
+
+  # ============================================================================
+  # resolve_profile/1
+  # ============================================================================
+
+  describe "resolve_profile/1" do
+    test "atom delegates to get!/1" do
+      assert LanguageSpec.resolve_profile(:single_shot) == LanguageSpec.get!(:single_shot)
+    end
+
+    test "tuple with reference: :full includes reference" do
+      result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
+      assert String.contains?(result, "<role>")
+      assert String.contains?(result, "(return answer)")
+    end
+
+    test "tuple with reference: :none omits reference" do
+      result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none})
+      refute String.contains?(result, "<role>")
+      assert String.contains?(result, "(return answer)")
+    end
+
+    test "tuple with journal: true includes journal" do
+      result = LanguageSpec.resolve_profile({:profile, :explicit_return, journal: true})
+      assert String.contains?(result, "<journaled_tasks>")
+    end
+
+    test "short form defaults to reference: :full, journal: false" do
+      short = LanguageSpec.resolve_profile({:profile, :explicit_return})
+
+      full =
+        LanguageSpec.resolve_profile(
+          {:profile, :explicit_return, reference: :full, journal: false}
+        )
+
+      assert short == full
+    end
+
+    test "auto_return behavior uses auto-return content" do
+      result = LanguageSpec.resolve_profile({:profile, :auto_return})
+      assert String.contains?(result, "exploration turn")
+      refute String.contains?(result, "(return answer)")
+    end
+
+    test "single_shot behavior uses single-shot content" do
+      result = LanguageSpec.resolve_profile({:profile, :single_shot})
+      assert String.contains?(result, "<single_shot>")
+      refute String.contains?(result, "<state>")
+    end
+
+    test "rejects single_shot + journal" do
+      assert_raise ArgumentError, ~r/journal: true is not compatible/, fn ->
+        LanguageSpec.resolve_profile({:profile, :single_shot, journal: true})
+      end
+    end
+
+    test "rejects unknown behavior" do
+      assert_raise ArgumentError, ~r/Unknown behavior/, fn ->
+        LanguageSpec.resolve_profile({:profile, :unknown_behavior})
+      end
+    end
+
+    test "rejects invalid reference value" do
+      assert_raise ArgumentError, ~r/Unknown reference/, fn ->
+        LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :invalid})
+      end
+    end
+
+    test "rejects unknown option keys" do
+      assert_raise ArgumentError, ~r/Unknown profile options/, fn ->
+        LanguageSpec.resolve_profile({:profile, :explicit_return, unknown_key: true})
+      end
+    end
+  end
+
+  # ============================================================================
+  # get!/1
+  # ============================================================================
 
   describe "get!/1" do
     test "returns prompt for valid key" do
@@ -58,97 +251,41 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     end
   end
 
-  describe "compositions" do
-    test "single_shot equals base + addon_single_shot" do
-      base = LanguageSpec.get(:base)
-      addon = LanguageSpec.get(:addon_single_shot)
-      expected = base <> "\n\n" <> addon
-
-      assert LanguageSpec.get(:single_shot) == expected
-    end
-
-    test "multi_turn equals base + addon_multi_turn" do
-      base = LanguageSpec.get(:base)
-      addon = LanguageSpec.get(:addon_multi_turn)
-      expected = base <> "\n\n" <> addon
-
-      assert LanguageSpec.get(:multi_turn) == expected
-    end
-
-    test "multi_turn_journal equals base + addon_multi_turn + addon_journal" do
-      base = LanguageSpec.get(:base)
-      addon_mt = LanguageSpec.get(:addon_multi_turn)
-      addon_j = LanguageSpec.get(:addon_journal)
-      expected = base <> "\n\n" <> addon_mt <> "\n\n" <> addon_j
-
-      assert LanguageSpec.get(:multi_turn_journal) == expected
-    end
-
-    test "multi_turn does not include journal sections" do
-      prompt = LanguageSpec.get(:multi_turn)
-      refute String.contains?(prompt, "<journaled_tasks>")
-      refute String.contains?(prompt, "<semantic_progress>")
-    end
-
-    test "multi_turn_journal includes journal sections" do
-      prompt = LanguageSpec.get(:multi_turn_journal)
-      assert String.contains?(prompt, "<journaled_tasks>")
-      assert String.contains?(prompt, "<semantic_progress>")
-    end
-
-    test "auto_return equals base + addon_auto_return" do
-      base = LanguageSpec.get(:base)
-      addon = LanguageSpec.get(:addon_auto_return)
-      expected = base <> "\n\n" <> addon
-
-      assert LanguageSpec.get(:auto_return) == expected
-    end
-
-    test "auto_return contains expected content" do
-      prompt = LanguageSpec.get(:auto_return)
-      assert is_binary(prompt)
-      assert String.contains?(prompt, "println")
-      assert String.contains?(prompt, "exploration turn")
-    end
-
-    test "auto_return_journal equals base + addon_multi_turn + addon_journal" do
-      base = LanguageSpec.get(:base)
-      addon_mt = LanguageSpec.get(:addon_multi_turn)
-      addon_j = LanguageSpec.get(:addon_journal)
-      expected = base <> "\n\n" <> addon_mt <> "\n\n" <> addon_j
-
-      assert LanguageSpec.get(:auto_return_journal) == expected
-    end
-
-    test "auto_return_journal uses multi-turn rules, not auto-return rules" do
-      prompt = LanguageSpec.get(:auto_return_journal)
-      assert String.contains?(prompt, "<journaled_tasks>")
-      assert String.contains?(prompt, "<semantic_progress>")
-      # Uses multi-turn rules (return/fail), not auto-return
-      assert String.contains?(prompt, "(return answer)")
-      refute String.contains?(prompt, "exploration turn")
-    end
-
-    test "auto_return does not include journal sections" do
-      prompt = LanguageSpec.get(:auto_return)
-      refute String.contains?(prompt, "<journaled_tasks>")
-      refute String.contains?(prompt, "<semantic_progress>")
-    end
-  end
+  # ============================================================================
+  # list/0 and list_with_descriptions/0
+  # ============================================================================
 
   describe "list/0" do
-    test "returns list of available prompts" do
+    test "includes canonical compositions" do
       keys = LanguageSpec.list()
-      assert :single_shot in keys
-      assert :multi_turn in keys
-      assert :base in keys
-      assert :addon_single_shot in keys
-      assert :addon_multi_turn in keys
-      assert :addon_journal in keys
-      assert :multi_turn_journal in keys
-      assert :auto_return in keys
-      assert :auto_return_journal in keys
-      assert :addon_auto_return in keys
+
+      for key <- [:single_shot, :explicit_return, :auto_return, :explicit_journal, :repl] do
+        assert key in keys, "Expected #{key} in list"
+      end
+    end
+
+    test "includes lite variants" do
+      keys = LanguageSpec.list()
+
+      for key <- [:single_shot_lite, :explicit_return_lite, :auto_return_lite] do
+        assert key in keys, "Expected #{key} in list"
+      end
+    end
+
+    test "includes snippet keys" do
+      keys = LanguageSpec.list()
+
+      for key <- [
+            :reference,
+            :behavior_single_shot,
+            :behavior_multi_turn,
+            :behavior_return_explicit,
+            :behavior_return_auto,
+            :capability_journal,
+            :repl
+          ] do
+        assert key in keys, "Expected #{key} in list"
+      end
     end
   end
 
@@ -157,29 +294,31 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       items = LanguageSpec.list_with_descriptions()
       assert is_list(items)
 
-      # Check structure
       for {key, desc} <- items do
         assert is_atom(key)
         assert is_binary(desc)
       end
 
-      # Check compositions are included
       assert Enum.any?(items, fn {key, _} -> key == :single_shot end)
-      assert Enum.any?(items, fn {key, _} -> key == :multi_turn end)
+      assert Enum.any?(items, fn {key, _} -> key == :explicit_return end)
     end
   end
 
+  # ============================================================================
+  # version/1 and metadata/1
+  # ============================================================================
+
   describe "version/1" do
-    test "returns a positive integer for base" do
-      version = LanguageSpec.version(:base)
+    test "returns a positive integer for reference" do
+      version = LanguageSpec.version(:reference)
       assert is_integer(version)
       assert version >= 1
     end
 
-    test "compositions return the same version as their base snippet" do
-      base_v = LanguageSpec.version(:base)
-      assert LanguageSpec.version(:single_shot) == base_v
-      assert LanguageSpec.version(:multi_turn) == base_v
+    test "canonical compositions return version of their first component" do
+      ref_v = LanguageSpec.version(:reference)
+      assert LanguageSpec.version(:single_shot) == ref_v
+      assert LanguageSpec.version(:explicit_return) == ref_v
     end
 
     test "raises for unknown prompt" do
@@ -190,13 +329,8 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
   end
 
   describe "metadata/1" do
-    test "returns metadata for single_shot (from base)" do
-      meta = LanguageSpec.metadata(:single_shot)
-      assert is_map(meta)
-    end
-
-    test "returns metadata for base" do
-      meta = LanguageSpec.metadata(:base)
+    test "returns metadata for reference" do
+      meta = LanguageSpec.metadata(:reference)
       assert is_map(meta)
     end
 

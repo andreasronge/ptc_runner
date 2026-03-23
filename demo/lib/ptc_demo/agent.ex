@@ -577,7 +577,7 @@ defmodule PtcDemo.Agent do
     base_opts =
       case override_completion_mode do
         nil ->
-          if prompt_profile == :auto_return,
+          if prompt_profile in [:auto_return, :auto_return_lite],
             do: Keyword.put(base_opts, :completion_mode, :auto),
             else: base_opts
 

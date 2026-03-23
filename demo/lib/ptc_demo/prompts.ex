@@ -4,18 +4,17 @@ defmodule PtcDemo.Prompts do
 
   This module delegates to `PtcRunner.Lisp.LanguageSpec` for standard language specs.
 
-  Different prompts can be useful for:
-  - Testing model capabilities with varying levels of detail
-  - Benchmarking token usage vs accuracy tradeoffs
-  - Single-shot queries vs multi-turn conversations
-  - Model-specific optimizations (some models need more/less detail)
-
   ## Available Profiles
 
-  | Profile | Description | Use Case |
-  |---------|-------------|----------|
-  | `:single_shot` | Base language reference | Quick lookups, no memory |
-  | `:multi_turn` | Base + memory addon | Conversational analysis |
+  | Profile | Description |
+  |---------|-------------|
+  | `:single_shot` | Reference + single-shot (last expr = answer) |
+  | `:explicit_return` | Reference + multi-turn + explicit return |
+  | `:auto_return` | Reference + multi-turn + auto return |
+  | `:explicit_journal` | Reference + multi-turn + explicit return + journal |
+  | `:repl` | REPL mode (standalone) |
+  | `:explicit_return_lite` | Multi-turn + explicit return (no reference) |
+  | `:auto_return_lite` | Multi-turn + auto return (no reference) |
 
   ## Usage
 
@@ -23,7 +22,7 @@ defmodule PtcDemo.Prompts do
       PtcDemo.LispTestRunner.run_all(prompt: :single_shot)
 
       # In agent
-      PtcDemo.Agent.start_link(prompt: :multi_turn)
+      PtcDemo.Agent.start_link(prompt: :explicit_return)
 
       # List available profiles
       PtcDemo.Prompts.list()
@@ -45,7 +44,7 @@ defmodule PtcDemo.Prompts do
   ## Examples
 
       iex> prompt = PtcDemo.Prompts.get(:single_shot)
-      iex> String.contains?(prompt, "PTC-Lisp")
+      iex> String.contains?(prompt, "<role>")
       true
 
   """
@@ -57,11 +56,13 @@ defmodule PtcDemo.Prompts do
       when profile in [
              :single_shot,
              :single_shot_lite,
-             :multi_turn,
+             :explicit_return,
+             :explicit_return_lite,
              :auto_return,
+             :auto_return_lite,
+             :explicit_journal,
              :repl,
-             :base,
-             :addon_memory
+             :reference
            ] do
     LibLanguageSpec.get(profile)
   end
@@ -77,16 +78,19 @@ defmodule PtcDemo.Prompts do
 
       iex> profiles = PtcDemo.Prompts.list()
       iex> Enum.find(profiles, fn {name, _} -> name == :single_shot end)
-      {:single_shot, "Base language reference for single-turn queries"}
+      {:single_shot, "Reference + single-shot (last expr = answer)"}
 
   """
   @spec list() :: [{atom(), String.t()}]
   def list do
     [
-      {:single_shot, "Base language reference for single-turn queries"},
-      {:multi_turn, "Base + memory addon for multi-turn conversations"},
-      {:auto_return, "Base + auto-return (println to explore, last expr to answer)"},
-      {:repl, "Base + REPL mode (one expression per turn, incremental exploration)"}
+      {:single_shot, "Reference + single-shot (last expr = answer)"},
+      {:explicit_return, "Reference + multi-turn + explicit return (return/fail required)"},
+      {:auto_return, "Reference + multi-turn + auto return (println to explore)"},
+      {:explicit_journal, "Reference + multi-turn + explicit return + journal"},
+      {:repl, "REPL mode (one expression per turn, incremental exploration)"},
+      {:explicit_return_lite, "Multi-turn + explicit return (no reference)"},
+      {:auto_return_lite, "Multi-turn + auto return (no reference)"}
     ]
   end
 
@@ -113,7 +117,7 @@ defmodule PtcDemo.Prompts do
       {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, multi_turn, auto_return, repl"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, auto_return, explicit_journal, repl, explicit_return_lite, auto_return_lite"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}
@@ -136,7 +140,7 @@ defmodule PtcDemo.Prompts do
   ## Examples
 
       iex> PtcDemo.Prompts.version(:single_shot)
-      10
+      1
 
   """
   @spec version(atom()) :: pos_integer()

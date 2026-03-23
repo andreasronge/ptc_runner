@@ -32,7 +32,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   - **String** - Used as-is
   - **Callback** - `fn ctx -> "prompt" end`
 
-  Default: `:single_shot` for `max_turns: 1`, `:multi_turn` otherwise.
+  Default: `:single_shot` for `max_turns: 1`, `:explicit_return` otherwise.
 
   ## Examples
 
@@ -253,13 +253,28 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       "single"
 
   """
-  @spec resolve_language_spec(String.t() | atom() | (map() -> String.t()), map()) :: String.t()
+  @spec resolve_language_spec(
+          String.t()
+          | atom()
+          | {:profile, atom()}
+          | {:profile, atom(), keyword()}
+          | (map() -> String.t()),
+          map()
+        ) :: String.t()
   def resolve_language_spec(spec, context)
 
   def resolve_language_spec(spec, _context) when is_binary(spec), do: spec
 
   def resolve_language_spec(spec, _context) when is_atom(spec) do
     LanguageSpec.get!(spec)
+  end
+
+  def resolve_language_spec({:profile, _} = spec, _context) do
+    LanguageSpec.resolve_profile(spec)
+  end
+
+  def resolve_language_spec({:profile, _, _} = spec, _context) do
+    LanguageSpec.resolve_profile(spec)
   end
 
   def resolve_language_spec(spec, context) when is_function(spec, 1) do
@@ -463,15 +478,31 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   # Resolve language_ref and output_fmt from agent config
   defp resolve_static_sections(agent, resolution_context) do
-    # Default language_spec: :multi_turn for loop mode, :single_shot for single-shot
-    # When journal is enabled, use :multi_turn_journal instead of :multi_turn
+    # Default language_spec selection based on agent config.
+    #
+    # When completion_mode == :auto AND a plan is present, the runtime disables
+    # auto-return (should_auto_return? checks plan == []), so we use explicit_journal.
+    # When auto without a plan, auto-return is active at runtime → use auto_return prompt.
+    # Journaling adds journal capability docs (task/step-done) when enabled.
     default_spec =
       cond do
-        agent.max_turns <= 1 -> :single_shot
-        agent.completion_mode == :auto and agent.journaling -> :auto_return_journal
-        agent.completion_mode == :auto -> :auto_return
-        agent.journaling -> :multi_turn_journal
-        true -> :multi_turn
+        agent.max_turns <= 1 ->
+          :single_shot
+
+        agent.completion_mode == :auto and agent.plan != [] ->
+          :explicit_journal
+
+        agent.completion_mode == :auto and agent.journaling ->
+          {:profile, :auto_return, journal: true}
+
+        agent.completion_mode == :auto ->
+          :auto_return
+
+        agent.journaling ->
+          :explicit_journal
+
+        true ->
+          :explicit_return
       end
 
     default_output = if agent.thinking, do: @output_format_thinking, else: @output_format

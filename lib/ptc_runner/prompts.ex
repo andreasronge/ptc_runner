@@ -5,14 +5,24 @@ defmodule PtcRunner.Prompts do
   All prompt templates are loaded from `priv/prompts/` at compile time and
   exposed through this module. Changes to prompt files trigger recompilation.
 
-  ## Prompt Files
+  ## Prompt Files (2-Axis Architecture)
+
+  Language specs are composed from two axes plus optional capabilities:
+
+  | Axis | File | Function |
+  |------|------|----------|
+  | Reference | `reference.md` | `reference/0` |
+  | Behavior | `behavior-single-shot.md` | `behavior_single_shot/0` |
+  | Behavior | `behavior-multi-turn.md` | `behavior_multi_turn/0` |
+  | Return mode | `behavior-return-explicit.md` | `behavior_return_explicit/0` |
+  | Return mode | `behavior-return-auto.md` | `behavior_return_auto/0` |
+  | Capability | `capability-journal.md` | `capability_journal/0` |
+  | Standalone | `lisp-addon-repl.md` | `repl/0` |
+
+  ## Other Prompt Files
 
   | File | Function | Used By |
   |------|----------|---------|
-  | `lisp-base.md` | `lisp_base/0` | `LanguageSpec` |
-  | `lisp-addon-single_shot.md` | `lisp_addon_single_shot/0` | `LanguageSpec` |
-  | `lisp-addon-multi_turn.md` | `lisp_addon_multi_turn/0` | `LanguageSpec` |
-  | `lisp-addon-auto_return.md` | `lisp_addon_auto_return/0` | `LanguageSpec` |
   | `json-system.md` | `json_system/0` | `JsonMode` |
   | `json-user.md` | `json_user/0` | `JsonMode` |
   | `json-error.md` | `json_error/0` | `JsonMode` |
@@ -66,87 +76,103 @@ defmodule PtcRunner.Prompts do
   @prompts_dir Path.join(:code.priv_dir(:ptc_runner), "prompts")
 
   # ============================================================================
-  # PTC-Lisp Language Specs
+  # PTC-Lisp Language Specs — New 2-Axis Components
   # ============================================================================
 
-  @lisp_base_file Path.join(@prompts_dir, "lisp-base.md")
-  @lisp_addon_single_shot_file Path.join(@prompts_dir, "lisp-addon-single_shot.md")
-  @lisp_addon_multi_turn_file Path.join(@prompts_dir, "lisp-addon-multi_turn.md")
-  @lisp_addon_journal_file Path.join(@prompts_dir, "lisp-addon-journal.md")
-  @lisp_addon_auto_return_file Path.join(@prompts_dir, "lisp-addon-auto_return.md")
-  @lisp_addon_repl_file Path.join(@prompts_dir, "lisp-addon-repl.md")
+  @reference_file Path.join(@prompts_dir, "reference.md")
+  @behavior_single_shot_file Path.join(@prompts_dir, "behavior-single-shot.md")
+  @behavior_multi_turn_file Path.join(@prompts_dir, "behavior-multi-turn.md")
+  @behavior_return_explicit_file Path.join(@prompts_dir, "behavior-return-explicit.md")
+  @behavior_return_auto_file Path.join(@prompts_dir, "behavior-return-auto.md")
+  @capability_journal_file Path.join(@prompts_dir, "capability-journal.md")
 
-  @external_resource @lisp_base_file
-  @external_resource @lisp_addon_single_shot_file
-  @external_resource @lisp_addon_multi_turn_file
-  @external_resource @lisp_addon_journal_file
-  @external_resource @lisp_addon_auto_return_file
-  @external_resource @lisp_addon_repl_file
+  @external_resource @reference_file
+  @external_resource @behavior_single_shot_file
+  @external_resource @behavior_multi_turn_file
+  @external_resource @behavior_return_explicit_file
+  @external_resource @behavior_return_auto_file
+  @external_resource @capability_journal_file
 
-  @lisp_base @lisp_base_file |> File.read!() |> PromptLoader.extract_with_header()
-  @lisp_addon_single_shot @lisp_addon_single_shot_file
-                          |> File.read!()
-                          |> PromptLoader.extract_with_header()
-  @lisp_addon_multi_turn @lisp_addon_multi_turn_file
-                         |> File.read!()
-                         |> PromptLoader.extract_with_header()
-  @lisp_addon_journal @lisp_addon_journal_file
+  @reference @reference_file |> File.read!() |> PromptLoader.extract_with_header()
+  @behavior_single_shot @behavior_single_shot_file
+                        |> File.read!()
+                        |> PromptLoader.extract_with_header()
+  @behavior_multi_turn @behavior_multi_turn_file
+                       |> File.read!()
+                       |> PromptLoader.extract_with_header()
+  @behavior_return_explicit @behavior_return_explicit_file
+                            |> File.read!()
+                            |> PromptLoader.extract_with_header()
+  @behavior_return_auto @behavior_return_auto_file
+                        |> File.read!()
+                        |> PromptLoader.extract_with_header()
+  @capability_journal @capability_journal_file
                       |> File.read!()
                       |> PromptLoader.extract_with_header()
-  @lisp_addon_auto_return @lisp_addon_auto_return_file
-                          |> File.read!()
-                          |> PromptLoader.extract_with_header()
-  @lisp_addon_repl @lisp_addon_repl_file
-                   |> File.read!()
-                   |> PromptLoader.extract_with_header()
 
-  @doc "Core PTC-Lisp language reference (always included)."
-  @spec lisp_base() :: String.t()
-  def lisp_base, do: elem(@lisp_base, 1)
+  @doc "Language reference: tool syntax, Java interop, restrictions."
+  @spec reference() :: String.t()
+  def reference, do: elem(@reference, 1)
 
-  @doc "Single-shot mode addon (no memory, no return/fail)."
-  @spec lisp_addon_single_shot() :: String.t()
-  def lisp_addon_single_shot, do: elem(@lisp_addon_single_shot, 1)
+  @doc "Raw header + content for reference.md."
+  @spec reference_with_header() :: {String.t(), String.t()}
+  def reference_with_header, do: @reference
 
-  @doc "Multi-turn mode addon (memory, return/fail, println)."
-  @spec lisp_addon_multi_turn() :: String.t()
-  def lisp_addon_multi_turn, do: elem(@lisp_addon_multi_turn, 1)
+  @doc "Single-shot behavior: last expression is the answer, one turn."
+  @spec behavior_single_shot() :: String.t()
+  def behavior_single_shot, do: elem(@behavior_single_shot, 1)
 
-  @doc "Journal addon (task caching, step-done, semantic progress)."
-  @spec lisp_addon_journal() :: String.t()
-  def lisp_addon_journal, do: elem(@lisp_addon_journal, 1)
+  @doc "Raw header + content for behavior-single-shot.md."
+  @spec behavior_single_shot_with_header() :: {String.t(), String.t()}
+  def behavior_single_shot_with_header, do: @behavior_single_shot
 
-  @doc "Raw header + content for lisp-base.md (for metadata parsing)."
-  @spec lisp_base_with_header() :: {String.t(), String.t()}
-  def lisp_base_with_header, do: @lisp_base
+  @doc "Shared multi-turn core: one code block per turn, state, short programs."
+  @spec behavior_multi_turn() :: String.t()
+  def behavior_multi_turn, do: elem(@behavior_multi_turn, 1)
 
-  @doc "Raw header + content for lisp-addon-single_shot.md."
-  @spec lisp_addon_single_shot_with_header() :: {String.t(), String.t()}
-  def lisp_addon_single_shot_with_header, do: @lisp_addon_single_shot
+  @doc "Raw header + content for behavior-multi-turn.md."
+  @spec behavior_multi_turn_with_header() :: {String.t(), String.t()}
+  def behavior_multi_turn_with_header, do: @behavior_multi_turn
 
-  @doc "Raw header + content for lisp-addon-multi_turn.md."
-  @spec lisp_addon_multi_turn_with_header() :: {String.t(), String.t()}
-  def lisp_addon_multi_turn_with_header, do: @lisp_addon_multi_turn
+  @doc "Explicit return fragment: use (return ...) / (fail ...)."
+  @spec behavior_return_explicit() :: String.t()
+  def behavior_return_explicit, do: elem(@behavior_return_explicit, 1)
 
-  @doc "Raw header + content for lisp-addon-journal.md."
-  @spec lisp_addon_journal_with_header() :: {String.t(), String.t()}
-  def lisp_addon_journal_with_header, do: @lisp_addon_journal
+  @doc "Raw header + content for behavior-return-explicit.md."
+  @spec behavior_return_explicit_with_header() :: {String.t(), String.t()}
+  def behavior_return_explicit_with_header, do: @behavior_return_explicit
 
-  @doc "Auto-return mode addon (println to explore, last expr to answer)."
-  @spec lisp_addon_auto_return() :: String.t()
-  def lisp_addon_auto_return, do: elem(@lisp_addon_auto_return, 1)
+  @doc "Auto-return fragment: println=continue, no println=answer."
+  @spec behavior_return_auto() :: String.t()
+  def behavior_return_auto, do: elem(@behavior_return_auto, 1)
 
-  @doc "Raw header + content for lisp-addon-auto_return.md."
-  @spec lisp_addon_auto_return_with_header() :: {String.t(), String.t()}
-  def lisp_addon_auto_return_with_header, do: @lisp_addon_auto_return
+  @doc "Raw header + content for behavior-return-auto.md."
+  @spec behavior_return_auto_with_header() :: {String.t(), String.t()}
+  def behavior_return_auto_with_header, do: @behavior_return_auto
 
-  @doc "REPL mode addon (one expression per turn, incremental exploration)."
-  @spec lisp_addon_repl() :: String.t()
-  def lisp_addon_repl, do: elem(@lisp_addon_repl, 1)
+  @doc "Journal capability: task caching, step-done, semantic progress."
+  @spec capability_journal() :: String.t()
+  def capability_journal, do: elem(@capability_journal, 1)
+
+  @doc "Raw header + content for capability-journal.md."
+  @spec capability_journal_with_header() :: {String.t(), String.t()}
+  def capability_journal_with_header, do: @capability_journal
+
+  # ============================================================================
+  # PTC-Lisp REPL Mode (standalone, not part of 2-axis composition)
+  # ============================================================================
+
+  @repl_file Path.join(@prompts_dir, "lisp-addon-repl.md")
+  @external_resource @repl_file
+  @repl @repl_file |> File.read!() |> PromptLoader.extract_with_header()
+
+  @doc "REPL mode (one expression per turn, incremental exploration)."
+  @spec repl() :: String.t()
+  def repl, do: elem(@repl, 1)
 
   @doc "Raw header + content for lisp-addon-repl.md."
-  @spec lisp_addon_repl_with_header() :: {String.t(), String.t()}
-  def lisp_addon_repl_with_header, do: @lisp_addon_repl
+  @spec repl_with_header() :: {String.t(), String.t()}
+  def repl_with_header, do: @repl
 
   # ============================================================================
   # Text Mode (JSON variant) Templates
@@ -269,19 +295,20 @@ defmodule PtcRunner.Prompts do
   ## Examples
 
       iex> keys = PtcRunner.Prompts.list()
-      iex> :lisp_base in keys
+      iex> :reference in keys
       true
 
   """
   @spec list() :: [atom()]
   def list do
     [
-      :lisp_base,
-      :lisp_addon_single_shot,
-      :lisp_addon_multi_turn,
-      :lisp_addon_journal,
-      :lisp_addon_auto_return,
-      :lisp_addon_repl,
+      :reference,
+      :behavior_single_shot,
+      :behavior_multi_turn,
+      :behavior_return_explicit,
+      :behavior_return_auto,
+      :capability_journal,
+      :repl,
       :json_system,
       :json_user,
       :json_error,
@@ -300,7 +327,7 @@ defmodule PtcRunner.Prompts do
 
   ## Examples
 
-      iex> prompt = PtcRunner.Prompts.get(:lisp_base)
+      iex> prompt = PtcRunner.Prompts.get(:reference)
       iex> String.contains?(prompt, "<role>")
       true
 
@@ -309,12 +336,13 @@ defmodule PtcRunner.Prompts do
 
   """
   @spec get(atom()) :: String.t() | nil
-  def get(:lisp_base), do: lisp_base()
-  def get(:lisp_addon_single_shot), do: lisp_addon_single_shot()
-  def get(:lisp_addon_multi_turn), do: lisp_addon_multi_turn()
-  def get(:lisp_addon_journal), do: lisp_addon_journal()
-  def get(:lisp_addon_auto_return), do: lisp_addon_auto_return()
-  def get(:lisp_addon_repl), do: lisp_addon_repl()
+  def get(:reference), do: reference()
+  def get(:behavior_single_shot), do: behavior_single_shot()
+  def get(:behavior_multi_turn), do: behavior_multi_turn()
+  def get(:behavior_return_explicit), do: behavior_return_explicit()
+  def get(:behavior_return_auto), do: behavior_return_auto()
+  def get(:capability_journal), do: capability_journal()
+  def get(:repl), do: repl()
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()
