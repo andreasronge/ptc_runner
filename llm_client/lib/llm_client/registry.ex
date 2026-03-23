@@ -92,6 +92,12 @@ defmodule LLMClient.Registry do
         # Not available on Bedrock
       }
     },
+    "gemini-flash-lite" => %{
+      description: "Gemini 3.1 Flash Lite Preview - Google's lightweight model",
+      providers: %{
+        openrouter: "google/gemini-3.1-flash-lite-preview"
+      }
+    },
     "deepseek" => %{
       description: "DeepSeek Chat V3 - Cost-effective reasoning",
       providers: %{
