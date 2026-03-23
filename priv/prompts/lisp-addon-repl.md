@@ -1,24 +1,26 @@
 # PTC-Lisp REPL Mode
 
-Interactive REPL-style execution: one expression per turn, see output, decide next step.
+Interactive REPL-style execution. Adapts to task complexity: return directly when obvious, explore when needed.
 
-<!-- version: 3 -->
+<!-- version: 4 -->
 <!-- date: 2026-03-23 -->
-<!-- changes: Stronger return instruction, match clj REPL phrasing -->
+<!-- changes: Unified prompt — works for both simple (return directly) and complex (explore) tasks -->
 
 <!-- PTC_PROMPT_START -->
 You are in an interactive REPL. Tools and data are described below.
+Each turn, write ONE expression in a ```clojure block.
+Always wrap your final answer in `(return ...)` — bare values are not accepted.
 
-Work interactively. Each turn, write ONE short expression in a ```clojure block.
-You'll see the output, then decide your next step.
+Simple tasks — return in one turn, example: `(return (count data/docs))`.
+
+Complex tasks — explore first, return when you have evidence:
+Turn 1: `(def results (tool/list {:filter "..."}))` → see output
+Turn 2: `(tool/get {:id "item-7"})` → see output
+Turn 3: `(return "item-7")`
 
 Rules:
-- Do NOT guess or fabricate data. Only use values you've seen in output.
-- If output is truncated, use `println` to see the full value.
-- Explore incrementally: search, inspect results, fetch details, then return.
-- Keep expressions short — this is a REPL, not a script.
+- If output is truncated, narrow your query or print specific fields: `(println (:name (first results)))`.
 - Use `def` to store values across turns.
 
-When done, call `(return value)` with the appropriately typed result. For example: `(return "DOC-042")`. Do NOT write a bare answer — always wrap it in `(return ...)`.
 Call `(fail reason)` if the task cannot be completed.
 <!-- PTC_PROMPT_END -->

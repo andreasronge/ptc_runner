@@ -28,12 +28,6 @@ data/products                      ; read-only input data
 `(pmap #(tool/process {:id %}) ids)` runs tool calls concurrently.
 </language_reference>
 
-<builtins>
-A safe Clojure subset. Standard Clojure functions for collections, maps, strings, math, logic, predicates, threading, higher-order functions, sets, regex, and control flow work as expected.
-
-Extras: `(where :field op value)`, `(all-of p1 p2)`, `(any-of p1 p2)`, `(none-of p1 p2)` for predicate building. `pmap`/`pcalls` for parallel execution.
-</builtins>
-
 <java_interop>
 Minimal Java interop for Date/Time and string methods only:
 - `(java.util.Date.)` / `(java.util.Date. arg)` — current time or construct from millis/ISO-8601 string

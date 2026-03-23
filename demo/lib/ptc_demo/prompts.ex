@@ -54,7 +54,15 @@ defmodule PtcDemo.Prompts do
 
   # Delegate standard prompts to the library
   def get(profile)
-      when profile in [:single_shot, :multi_turn, :auto_return, :repl, :base, :addon_memory] do
+      when profile in [
+             :single_shot,
+             :single_shot_lite,
+             :multi_turn,
+             :auto_return,
+             :repl,
+             :base,
+             :addon_memory
+           ] do
     LibLanguageSpec.get(profile)
   end
 

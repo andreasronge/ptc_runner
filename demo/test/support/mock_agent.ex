@@ -56,6 +56,11 @@ defmodule PtcDemo.MockAgent do
     0
   end
 
+  def last_step do
+    # Mock agents don't track steps
+    nil
+  end
+
   def list_datasets do
     SampleData.available_datasets()
   end

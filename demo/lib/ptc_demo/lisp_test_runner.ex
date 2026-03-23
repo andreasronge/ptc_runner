@@ -177,6 +177,7 @@ defmodule PtcDemo.LispTestRunner do
     thinking = Keyword.get(opts, :thinking, false)
     filter = Keyword.get(opts, :filter, :all)
     retry_turns = Keyword.get(opts, :retry_turns, 0)
+    agent_overrides = Keyword.get(opts, :agent_overrides, [])
 
     # Check Babashka availability if Clojure validation requested
     clojure_available = check_clojure_validation(validate_clojure)
@@ -245,7 +246,8 @@ defmodule PtcDemo.LispTestRunner do
           agent_mod,
           current_model,
           clojure_available,
-          retry_turns
+          retry_turns,
+          agent_overrides
         )
       end
 
@@ -287,7 +289,8 @@ defmodule PtcDemo.LispTestRunner do
          agent_mod,
          current_model,
          clojure_available,
-         retry_turns
+         retry_turns,
+         agent_overrides
        ) do
     if total_runs > 1 do
       IO.puts("\n--- Run #{run_num}/#{total_runs} ---")
@@ -315,7 +318,8 @@ defmodule PtcDemo.LispTestRunner do
           verbose,
           false,
           agent_mod,
-          clojure_available
+          clojure_available,
+          agent_overrides
         )
       end)
 
@@ -388,6 +392,7 @@ defmodule PtcDemo.LispTestRunner do
       compression = Keyword.get(opts, :compression, false)
       thinking = Keyword.get(opts, :thinking, false)
       retry_turns = Keyword.get(opts, :retry_turns, 0)
+      agent_overrides = Keyword.get(opts, :agent_overrides, [])
 
       test_case = Enum.at(cases, index - 1)
 
@@ -436,7 +441,8 @@ defmodule PtcDemo.LispTestRunner do
               verbose,
               debug,
               agent_mod,
-              clojure_available
+              clojure_available,
+              agent_overrides
             )
 
           stats = agent_mod.stats()
@@ -523,6 +529,10 @@ defmodule PtcDemo.LispTestRunner do
     if Map.get(test_case, :max_turns, 1) > 1, do: :multi_turn, else: :single_shot
   end
 
+  defp prompt_for_test(test_case, :smart_auto) do
+    if Map.get(test_case, :max_turns, 1) > 1, do: :repl, else: :single_shot
+  end
+
   defp prompt_for_test(_test_case, explicit_profile), do: explicit_profile
 
   defp ensure_agent_started(data_mode, prompt_profile, compression, thinking, agent_mod) do
@@ -559,7 +569,16 @@ defmodule PtcDemo.LispTestRunner do
     end
   end
 
-  defp run_test(test_case, index, total, verbose, debug, agent_mod, clojure_available) do
+  defp run_test(
+         test_case,
+         index,
+         total,
+         verbose,
+         debug,
+         agent_mod,
+         clojure_available,
+         agent_overrides
+       ) do
     query = test_case.query
     max_turns = Map.get(test_case, :max_turns, 1)
     expect = Map.get(test_case, :expect)
@@ -587,6 +606,8 @@ defmodule PtcDemo.LispTestRunner do
     ask_opts = [max_turns: max_turns, expect: expect, debug: debug]
     ask_opts = if signature, do: Keyword.put(ask_opts, :signature, signature), else: ask_opts
     ask_opts = if plan, do: Keyword.put(ask_opts, :plan, plan), else: ask_opts
+    # Merge per-run overrides (format_options, completion_mode, prompt_profile, etc.)
+    ask_opts = Keyword.merge(ask_opts, agent_overrides)
 
     result =
       case agent_mod.ask(query, ask_opts) do
@@ -650,7 +671,8 @@ defmodule PtcDemo.LispTestRunner do
         query: query,
         index: index,
         description: test_case.description,
-        constraint: test_case.constraint
+        constraint: test_case.constraint,
+        step: agent_mod.last_step()
       })
 
     if verbose do

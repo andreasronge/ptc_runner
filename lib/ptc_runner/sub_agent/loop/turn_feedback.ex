@@ -39,14 +39,21 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     end
   end
 
-  # Minimal turn info — only show warning when ≤2 turns remain
+  # Minimal turn info — only show warning when running low on turns
+  # During retry phase, work_turns_remaining is 0 so we use retry_turns_remaining
   defp append_minimal_turn_info(message, state, _agent) do
-    turns_after_this = state.work_turns_remaining - 1
-
-    if turns_after_this <= 2 do
-      message <> "\n\n;; #{turns_after_this} turns remaining — call (return value) soon"
+    if state.retry_turns_remaining > 0 and state.work_turns_remaining <= 0 do
+      # In retry phase — always warn since retries are limited
+      message <>
+        "\n\n;; #{state.retry_turns_remaining} retry turns remaining — call (return value) now"
     else
-      message
+      turns_after_this = max(state.work_turns_remaining - 1, 0)
+
+      if turns_after_this <= 2 do
+        message <> "\n\n;; #{turns_after_this} turns remaining — call (return value) soon"
+      else
+        message
+      end
     end
   end
 
@@ -138,7 +145,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     # Add truncation hint if needed
     prints_with_hint =
       if truncated? do
-        prints_output <> "\n... (truncated, use println selectively)"
+        prints_output <> "\n... (truncated, print specific fields instead)"
       else
         prints_output
       end
@@ -207,7 +214,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
       hint =
         if was_truncated?,
-          do: "\n... (truncated, use println to see full value)",
+          do: "\n... (truncated, use println on specific fields)",
           else: ""
 
       "user=> #{text}#{hint}"
@@ -235,7 +242,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
           hint =
             if any_truncated?,
-              do: "\n;; (truncated, use println to see full value)",
+              do: "\n;; (truncated, use println on specific fields)",
               else: ""
 
           Enum.join(previews, "\n") <> hint
