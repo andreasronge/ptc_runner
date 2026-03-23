@@ -1,10 +1,10 @@
-# PTC-Lisp Journal Addon
+# PTC-Lisp Journal Capability
 
 Journal, task caching, and semantic progress for multi-turn mode.
 
 <!-- version: 1 -->
-<!-- date: 2026-02-20 -->
-<!-- changes: Extracted from lisp-base.md and lisp-addon-multi_turn.md -->
+<!-- date: 2026-03-23 -->
+<!-- changes: Renamed from lisp-addon-journal.md as part of 2-axis prompt refactor -->
 
 <!-- PTC_PROMPT_START -->
 

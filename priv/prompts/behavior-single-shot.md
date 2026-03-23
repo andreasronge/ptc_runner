@@ -1,10 +1,10 @@
-# PTC-Lisp Single-Shot Mode
+# PTC-Lisp Single-Shot Behavior
 
 Rules for single-shot execution (one turn, no memory).
 
-<!-- version: 7 -->
-<!-- date: 2026-02-18 -->
-<!-- changes: Wrap in XML tag -->
+<!-- version: 1 -->
+<!-- date: 2026-03-23 -->
+<!-- changes: Renamed from lisp-addon-single_shot.md as part of 2-axis prompt refactor -->
 
 <!-- PTC_PROMPT_START -->
 

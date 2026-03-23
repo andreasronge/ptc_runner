@@ -1,10 +1,10 @@
-# PTC-Lisp Base Language Reference
+# PTC-Lisp Language Reference
 
-Core language reference for PTC-Lisp. Always included.
+Core language reference for PTC-Lisp. Optional — included by default, can be omitted for capable models.
 
-<!-- version: 35 -->
-<!-- date: 2026-03-21 -->
-<!-- changes: Simplify to overview style, remove full builtins listing, add Java interop summary -->
+<!-- version: 1 -->
+<!-- date: 2026-03-23 -->
+<!-- changes: Renamed from lisp-base.md as part of 2-axis prompt refactor -->
 
 <!-- PTC_PROMPT_START -->
 
@@ -34,7 +34,8 @@ Minimal Java interop for Date/Time and string methods only:
 - `(java.time.LocalDate/parse "2026-01-15")` — parse ISO-8601 date
 - `(.getTime date)` — Unix millis from Date object
 - `(System/currentTimeMillis)` — current time in millis
-- String methods: `.indexOf`, `.lastIndexOf`, `.startsWith`, `.endsWith`, `.contains`, `.substring`, `.replace`, `.replaceAll`, `.matches`, `.toLowerCase`, `.toUpperCase`, `.trim`, `.length`, `.charAt`, `.split`
+- String methods: `.indexOf`, `.lastIndexOf`, `.startsWith`, `.endsWith`, `.substring`, `.replace`, `.replaceAll`, `.matches`, `.toLowerCase`, `.toUpperCase`, `.trim`, `.length`, `.charAt`, `.split`
+- For substring checking use `(str/includes? s "text")` instead of `.contains`
 
 No other Java interop is supported.
 </java_interop>

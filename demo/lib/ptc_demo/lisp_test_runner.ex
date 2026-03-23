@@ -55,11 +55,11 @@ defmodule PtcDemo.LispTestRunner do
 
   ## Examples
 
-      # Compare single_shot vs multi_turn prompts
-      PtcDemo.LispTestRunner.run_comparison([:single_shot, :multi_turn])
+      # Compare single_shot vs explicit_return prompts
+      PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return])
 
       # Compare with compression enabled
-      PtcDemo.LispTestRunner.run_comparison([:single_shot, :multi_turn], compression: true)
+      PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return], compression: true)
   """
   def run_comparison(prompts, opts \\ []) when is_list(prompts) do
     CLIBase.load_dotenv()
@@ -526,7 +526,7 @@ defmodule PtcDemo.LispTestRunner do
 
   # Select appropriate prompt for test type
   defp prompt_for_test(test_case, :auto) do
-    if Map.get(test_case, :max_turns, 1) > 1, do: :multi_turn, else: :single_shot
+    if Map.get(test_case, :max_turns, 1) > 1, do: :explicit_return, else: :single_shot
   end
 
   defp prompt_for_test(test_case, :smart_auto) do

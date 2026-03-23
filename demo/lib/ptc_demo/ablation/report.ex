@@ -131,7 +131,7 @@ defmodule PtcDemo.Ablation.Report do
 
         %{
           name: v.name,
-          agent_overrides: inspect(v.agent_overrides),
+          agent_overrides: inspect(Map.get(v, :agent_overrides)),
           total_runs: total,
           passed: passed,
           failed: total - passed,

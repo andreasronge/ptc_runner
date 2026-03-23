@@ -6,10 +6,16 @@ defmodule PtcRunner.SubAgent.Definition do
 
   Can be:
   - String: used as-is
-  - Atom: resolved via `PtcRunner.Lisp.LanguageSpec.get!/1` (e.g., `:minimal`, `:default`)
+  - Atom: resolved via `PtcRunner.Lisp.LanguageSpec.get!/1` (e.g., `:explicit_return`, `:single_shot`)
+  - Tuple: structured profile `{:profile, behavior, opts}` — see `PtcRunner.Lisp.LanguageSpec.resolve_profile/1`
   - Function: callback receiving context map with `:turn`, `:model`, `:memory`, `:messages`
   """
-  @type language_spec :: String.t() | atom() | (map() -> String.t())
+  @type language_spec ::
+          String.t()
+          | atom()
+          | {:profile, atom()}
+          | {:profile, atom(), keyword()}
+          | (map() -> String.t())
 
   @type system_prompt_opts ::
           %{
