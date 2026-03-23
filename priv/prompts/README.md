@@ -32,7 +32,6 @@ The filename maps to a function in `PtcRunner.Prompts` by replacing hyphens with
 | `behavior-return-explicit.md` | `behavior_return_explicit/0` |
 | `behavior-return-auto.md` | `behavior_return_auto/0` |
 | `capability-journal.md` | `capability_journal/0` |
-| `behavior-minimal.md` | `minimal/0` |
 | `json-system.md` | `json_system/0` |
 | `json-user.md` | `json_user/0` |
 | `json-error.md` | `json_error/0` |

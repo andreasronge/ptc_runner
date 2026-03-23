@@ -236,7 +236,7 @@ Prompts are composable — the language reference is **not** included by default
 | `:explicit_return` | Multi-turn + explicit return (return/fail required) |
 | `:auto_return` | Multi-turn + auto return (println to explore) |
 | `:explicit_journal` | Multi-turn + explicit return + journal |
-| `:minimal` | Minimal multi-turn for capable models |
+
 | `:auto` | Auto-select per test: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
 
 Add the language reference for weaker models via structured profiles:
@@ -453,7 +453,7 @@ Compare prompt variants with statistical analysis using `mix ablation`. This run
 mix ablation --variants=auto,explicit_no_ref --tests=1,2,3,20,23 --runs=10
 
 # Compare mechanism variants (forced 6-turn budget)
-mix ablation --variants=baseline,repl_only,repl_full --tests=20,23 --runs=30
+mix ablation --variants=auto,baseline --tests=20,23 --runs=30
 
 # With specific model and JSON export
 mix ablation --variants=auto,baseline --tests=1,2,3,5,8 --runs=10 \
@@ -476,15 +476,13 @@ mix ablation --variants=auto,baseline --tests=1,2,3,5,8 --runs=10 \
 | Name | Routing |
 |------|---------|
 | `auto` | Current default: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
-| `smart_auto` | `:single_shot` for single-turn, `:minimal` for multi-turn |
 
 **Mechanism variants** force a 6-turn budget to isolate prompt effects:
 
 | Name | Prompt | Notes |
 |------|--------|-------|
 | `baseline` | `:auto_return` | Auto-return with reference |
-| `repl_only` | `:minimal` | Minimal prompt only |
-| `repl_full` | `:minimal` | Minimal + context_in_system + minimal_turn_info |
+| `explicit` | `:explicit_return` | Explicit return, 6 turns |
 **Output includes** pass rate with 95% confidence intervals, first-turn validity, parse/no-code rates, mean turns, budget exhaustion, salvage rate, token costs, and Fisher exact p-values for statistical comparison.
 
 For detailed guidance on experimental design, sample sizes, and interpreting results, see [Benchmark Analysis](../docs/guides/benchmark-analysis.md).

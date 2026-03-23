@@ -17,7 +17,6 @@ defmodule PtcRunner.Prompts do
   | Return mode | `behavior-return-explicit.md` | `behavior_return_explicit/0` |
   | Return mode | `behavior-return-auto.md` | `behavior_return_auto/0` |
   | Capability | `capability-journal.md` | `capability_journal/0` |
-  | Minimal | `behavior-minimal.md` | `minimal/0` |
 
   ## Other Prompt Files
 
@@ -159,22 +158,6 @@ defmodule PtcRunner.Prompts do
   def capability_journal_with_header, do: @capability_journal
 
   # ============================================================================
-  # PTC-Lisp Minimal Behavior (compact multi-turn for capable models)
-  # ============================================================================
-
-  @minimal_file Path.join(@prompts_dir, "behavior-minimal.md")
-  @external_resource @minimal_file
-  @minimal @minimal_file |> File.read!() |> PromptLoader.extract_with_header()
-
-  @doc "Minimal multi-turn prompt for capable models."
-  @spec minimal() :: String.t()
-  def minimal, do: elem(@minimal, 1)
-
-  @doc "Raw header + content for behavior-minimal.md."
-  @spec minimal_with_header() :: {String.t(), String.t()}
-  def minimal_with_header, do: @minimal
-
-  # ============================================================================
   # Text Mode (JSON variant) Templates
   # ============================================================================
 
@@ -308,7 +291,6 @@ defmodule PtcRunner.Prompts do
       :behavior_return_explicit,
       :behavior_return_auto,
       :capability_journal,
-      :minimal,
       :json_system,
       :json_user,
       :json_error,
@@ -342,7 +324,6 @@ defmodule PtcRunner.Prompts do
   def get(:behavior_return_explicit), do: behavior_return_explicit()
   def get(:behavior_return_auto), do: behavior_return_auto()
   def get(:capability_journal), do: capability_journal()
-  def get(:minimal), do: minimal()
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()

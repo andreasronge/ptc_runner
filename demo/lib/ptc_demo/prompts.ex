@@ -12,7 +12,6 @@ defmodule PtcDemo.Prompts do
   | `:explicit_return` | Reference + multi-turn + explicit return |
   | `:auto_return` | Reference + multi-turn + auto return |
   | `:explicit_journal` | Reference + multi-turn + explicit return + journal |
-  | `:minimal` | Minimal multi-turn (standalone) |
 
 
   Use `{:profile, behavior, reference: :full}` to add the language reference for weaker models.
@@ -59,7 +58,6 @@ defmodule PtcDemo.Prompts do
              :explicit_return,
              :auto_return,
              :explicit_journal,
-             :minimal,
              :reference
            ] do
     LibLanguageSpec.get(profile)
@@ -85,8 +83,7 @@ defmodule PtcDemo.Prompts do
       {:single_shot, "Single-shot (last expr = answer)"},
       {:explicit_return, "Multi-turn + explicit return (return/fail required)"},
       {:auto_return, "Multi-turn + auto return (println to explore)"},
-      {:explicit_journal, "Multi-turn + explicit return + journal"},
-      {:minimal, "Minimal multi-turn (one expression per turn, incremental exploration)"}
+      {:explicit_journal, "Multi-turn + explicit return + journal"}
     ]
   end
 
@@ -113,7 +110,7 @@ defmodule PtcDemo.Prompts do
       {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, auto_return, explicit_journal, repl"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, auto_return, explicit_journal"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}

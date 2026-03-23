@@ -48,7 +48,6 @@ Pre-composed specs available via `system_prompt: %{language_spec: atom}`:
 | `:explicit_return` | reference + multi-turn + explicit return | Must call `(return ...)`/`(fail ...)` |
 | `:auto_return` | reference + multi-turn + auto return | println = continue, no println = answer |
 | `:explicit_journal` | multi-turn + explicit return + journal | With task caching |
-| `:minimal` | Compact multi-turn prompt | Capable models |
 
 The language reference is not included by default. Use `reference: :full` in a structured profile to add it.
 
