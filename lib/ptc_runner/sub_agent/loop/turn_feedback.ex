@@ -24,10 +24,29 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
   @spec append_turn_info(String.t(), Definition.t(), map()) :: String.t()
   def append_turn_info(message, agent, state) do
-    if agent.max_turns <= 1 do
-      message
+    minimal? = Keyword.get(agent.format_options, :minimal_turn_info, false)
+
+    cond do
+      agent.max_turns <= 1 ->
+        message
+
+      minimal? ->
+        # Only show warnings when running low on turns
+        append_minimal_turn_info(message, state, agent)
+
+      true ->
+        append_budget_info(message, state, agent)
+    end
+  end
+
+  # Minimal turn info — only show warning when ≤2 turns remain
+  defp append_minimal_turn_info(message, state, _agent) do
+    turns_after_this = state.work_turns_remaining - 1
+
+    if turns_after_this <= 2 do
+      message <> "\n\n;; #{turns_after_this} turns remaining — call (return value) soon"
     else
-      append_budget_info(message, state, agent)
+      message
     end
   end
 
