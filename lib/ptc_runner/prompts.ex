@@ -27,8 +27,8 @@ defmodule PtcRunner.Prompts do
   | `json-user.md` | `json_user/0` | `JsonMode` |
   | `json-error.md` | `json_error/0` | `JsonMode` |
   | `tool-calling-system.md` | `tool_calling_system/0` | `ToolCallingMode` |
-  | `must_return_warning.md` | `must_return_warning/0` | `TurnFeedback` |
-  | `retry_feedback.md` | `retry_feedback/0` | `TurnFeedback` |
+  | `turn-feedback-must-return.md` | `must_return_warning/0` | `TurnFeedback` |
+  | `turn-feedback-retry.md` | `retry_feedback/0` | `TurnFeedback` |
   | `planning-examples.md` | `planning_examples/0` | `MetaPlanner` |
   | `verification-predicate-guide.md` | `verification_guide/0` | `MetaPlanner` |
   | `verification-predicate-reminder.md` | `verification_reminder/0` | `MetaPlanner` |
@@ -52,7 +52,7 @@ defmodule PtcRunner.Prompts do
 
   ## Mustache Templates
 
-  Some prompts use Mustache templating (e.g., `must_return_warning.md`):
+  Some prompts use Mustache templating (e.g., `turn-feedback-must-return.md`):
 
   - `{{variable}}` - Simple substitution
   - `{{#section}}...{{/section}}` - Conditional/iteration
@@ -220,8 +220,8 @@ defmodule PtcRunner.Prompts do
   # Turn Feedback Templates
   # ============================================================================
 
-  @must_return_warning_file Path.join(@prompts_dir, "must_return_warning.md")
-  @retry_feedback_file Path.join(@prompts_dir, "retry_feedback.md")
+  @must_return_warning_file Path.join(@prompts_dir, "turn-feedback-must-return.md")
+  @retry_feedback_file Path.join(@prompts_dir, "turn-feedback-retry.md")
 
   @external_resource @must_return_warning_file
   @external_resource @retry_feedback_file
