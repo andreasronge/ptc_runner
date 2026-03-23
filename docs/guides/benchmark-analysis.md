@@ -92,15 +92,15 @@ Runs a controlled experiment: variant x test x N matrix.
 **Policy benchmarks** answer "should default behavior change?" Each test keeps its natural turn budget.
 
 ```bash
-# Policy: current routing vs smart REPL routing across all tests
-mix ablation --variants=auto,smart_auto --runs=30 --tests=1,2,3,4,5,6,7,8,9,10,20,21,22,23
+# Policy: run default routing across all test types
+mix ablation --variants=auto --runs=30 --tests=1,2,3,4,5,6,7,8,9,10,20,21,22,23
 ```
 
-**Mechanism benchmarks** answer "does REPL framing improve interaction quality?" Both variants get the same forced turn budget.
+**Mechanism benchmarks** answer "does the prompt variant improve interaction quality?" Both variants get the same forced turn budget.
 
 ```bash
-# Mechanism: isolate REPL effect at equal 6-turn budget
-mix ablation --variants=baseline,repl_full --runs=30 --tests=20,23
+# Mechanism: compare auto_return vs explicit_return at equal 6-turn budget
+mix ablation --variants=baseline,explicit --runs=30 --tests=20,23
 ```
 
 ### Predefined Variants
@@ -110,15 +110,13 @@ mix ablation --variants=baseline,repl_full --runs=30 --tests=20,23
 | Name | Routing |
 |------|---------|
 | `auto` | Current default: single_shot / explicit_return per test |
-| `smart_auto` | single_shot for single-turn, repl for multi-turn |
 
 **Mechanism variants** (forced 6-turn budget, agent-level overrides):
 
-| Name | Prompt | Format Options |
-|------|--------|----------------|
-| `baseline` | `:auto_return` | default |
-| `repl_only` | `:minimal` | none |
-| `repl_full` | `:minimal` | context_in_system + minimal_turn_info |
+| Name | Prompt |
+|------|--------|
+| `baseline` | `:auto_return` |
+| `explicit` | `:explicit_return` |
 
 ### Programmatic Usage
 
@@ -127,17 +125,13 @@ alias PtcDemo.Ablation.{Runner, Report}
 
 # Policy benchmark
 variants = [
-  %{name: "auto", prompt: :auto},
-  %{name: "smart_auto", prompt: :smart_auto}
+  %{name: "auto", prompt: :auto}
 ]
 
 # Mechanism benchmark
 variants = [
   %{name: "baseline", agent_overrides: [prompt_profile: :auto_return, max_turns: 6]},
-  %{name: "repl_full", agent_overrides: [
-    prompt_profile: :minimal, max_turns: 6,
-    format_options: [context_in_system: true, minimal_turn_info: true]
-  ]}
+  %{name: "explicit", agent_overrides: [prompt_profile: :explicit_return, max_turns: 6]}
 ]
 
 results = Runner.run(variants, runs: 30, tests: [20, 23])
@@ -147,7 +141,7 @@ Report.print_summary(results, variants)
 ### Console Output
 
 ```
-                        baseline      repl_full
+                        baseline      explicit
 --------------------------------------------
 Pass rate                 40.0%         86.7%
   95% CI           [27%, 55%]    [74%, 94%]
@@ -158,7 +152,7 @@ Budget exhausted           6.7%          3.3%
 Salvage rate              33.3%         80.0%
 
 Statistical comparison (vs baseline):
-  repl_full: p=0.001*
+  explicit: p=0.001*
   Recommended N to detect 5pp difference: 384 per variant
 ```
 
@@ -169,8 +163,7 @@ Overrides are per-run, not conversational state. They flow through `Agent.ask/2`
 ```elixir
 # These override the prompt_profile defaults for a single run
 Agent.ask(query,
-  prompt_profile: :minimal,
-  format_options: [context_in_system: true],
+  prompt_profile: :explicit_return,
   completion_mode: :auto,
   max_turns: 6
 )
@@ -257,32 +250,17 @@ Pass rate alone is too noisy at practical sample sizes. Per-turn metrics give mo
 
 ```bash
 # Run across ALL test types with natural turn budgets
-mix ablation --variants=auto,smart_auto --runs=30 \
+mix ablation --variants=auto --runs=30 \
   --tests=1,2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23
 ```
 
-Stop conditions for rejecting `smart_auto` as default:
-- Lower pass rate beyond CI overlap on any test class
-- Materially higher mean turns on single-turn tasks
-- Materially higher tokens/pass
-
-**Step 2: Mechanism benchmark** — does REPL framing itself help?
+**Step 2: Mechanism benchmark** — does the prompt variant help?
 
 ```bash
 # Equal 6-turn budget, multi-turn tests only
-mix ablation --variants=baseline,repl_only,repl_full --runs=30 --tests=20,21,22,23
+mix ablation --variants=baseline,explicit --runs=30 --tests=20,21,22,23
 ```
 
-This isolates whether REPL framing, feedback formatting, or context placement drive the improvement.
+This isolates whether explicit_return vs auto_return framing drives improvement.
 
-**Step 3: Cross-model check** — run at least one non-Gemini model early, even at smaller N, to catch obvious inversions.
-
-### Decision Rules
-
-| Outcome | Action |
-|---------|--------|
-| `smart_auto` hurts single-turn tasks | Keep REPL as opt-in |
-| `smart_auto` neutral on simple, better on multi-turn | Make `smart_auto` the new `:auto` |
-| Results vary by model family | Keep opt-in, document which models benefit |
-| REPL bundle beats partial variants consistently | Consolidate into single mode |
-| Individual knobs help independently | Keep knobs separate |
+**Step 3: Cross-model check** — run at least one additional model early, even at smaller N, to catch obvious inversions.

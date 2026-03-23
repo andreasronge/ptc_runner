@@ -4,19 +4,17 @@ defmodule Mix.Tasks.Ablation do
 
   ## Usage
 
-      mix ablation --variants=baseline,repl_full --runs=30 --tests=20,23
-      mix ablation --variants=baseline,repl_only,repl_full --runs=10 --tests=1,2,3
+      mix ablation --variants=auto,baseline --runs=30 --tests=20,23
+      mix ablation --variants=auto,explicit --runs=10 --tests=1,2,3
 
   ## Options
 
     * `--variants` - Comma-separated variant names (required). Available:
       Policy variants (natural turn budgets per test):
-      - `auto` - current default routing (single_shot/multi_turn)
-      - `smart_auto` - single_shot for single-turn, minimal for multi-turn
+      - `auto` - current default routing (single_shot/explicit_return)
       Mechanism variants (forced 6-turn budget):
       - `baseline` - auto_return prompt, 6 turns
-      - `repl_only` - minimal prompt, no format_options override
-      - `repl_full` - minimal prompt with context_in_system + minimal_turn_info
+      - `explicit` - explicit_return prompt, 6 turns
     * `--tests` - Comma-separated test indices (required)
     * `--runs` - Number of runs per test per variant (default: 5)
     * `--model` - Model to use (default: from PTC_DEMO_MODEL env)
@@ -29,35 +27,19 @@ defmodule Mix.Tasks.Ablation do
   # Policy variants: use runner-level prompt routing, natural turn budgets per test
   # Mechanism variants: force specific prompt + turn budget via agent_overrides
   @variant_presets %{
-    # Policy variants
+    # Policy variants: use runner-level prompt routing, natural turn budgets per test
     "auto" => %{
       name: "auto",
       prompt: :auto
     },
-    "smart_auto" => %{
-      name: "smart_auto",
-      prompt: :smart_auto
-    },
-    # Mechanism variants
-    "single_shot_lite" => %{
-      name: "single_shot_lite",
-      prompt: :single_shot_lite
-    },
+    # Mechanism variants: force specific prompt + turn budget via agent_overrides
     "baseline" => %{
       name: "baseline",
       agent_overrides: [prompt_profile: :auto_return, max_turns: 6]
     },
-    "repl_only" => %{
-      name: "repl_only",
-      agent_overrides: [prompt_profile: :minimal, max_turns: 6, format_options: []]
-    },
-    "repl_full" => %{
-      name: "repl_full",
-      agent_overrides: [
-        prompt_profile: :minimal,
-        max_turns: 6,
-        format_options: [context_in_system: true, minimal_turn_info: true]
-      ]
+    "explicit" => %{
+      name: "explicit",
+      agent_overrides: [prompt_profile: :explicit_return, max_turns: 6]
     }
   }
 

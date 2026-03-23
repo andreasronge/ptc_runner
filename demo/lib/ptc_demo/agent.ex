@@ -588,20 +588,11 @@ defmodule PtcDemo.Agent do
           Keyword.put(base_opts, :completion_mode, mode)
       end
 
-    # Minimal mode: move context to system prompt, skip turn metadata (overridable)
+    # Allow per-run override of format_options (for ablation experiments)
     base_opts =
       case override_format_options do
         nil ->
-          if prompt_profile == :minimal do
-            format_opts =
-              Keyword.get(base_opts, :format_options, [])
-              |> Keyword.put(:context_in_system, true)
-              |> Keyword.put(:minimal_turn_info, true)
-
-            Keyword.put(base_opts, :format_options, format_opts)
-          else
-            base_opts
-          end
+          base_opts
 
         format_opts ->
           Keyword.put(base_opts, :format_options, format_opts)
@@ -641,15 +632,6 @@ defmodule PtcDemo.Agent do
   end
 
   @role_prefix "You are a data analyst answering questions about datasets."
-
-  # Minimal mode: stripped system prompt for any turn count
-  defp build_system_prompt(:minimal, _max_turns) do
-    %{
-      prefix: "",
-      language_spec: PtcDemo.Prompts.get(:minimal),
-      output_format: ""
-    }
-  end
 
   # For single-shot (max_turns == 1), strip the Tools section that mentions return/fail
   defp build_system_prompt(prompt_profile, 1) do

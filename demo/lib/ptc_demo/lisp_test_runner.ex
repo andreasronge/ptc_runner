@@ -529,10 +529,6 @@ defmodule PtcDemo.LispTestRunner do
     if Map.get(test_case, :max_turns, 1) > 1, do: :explicit_return, else: :single_shot
   end
 
-  defp prompt_for_test(test_case, :smart_auto) do
-    if Map.get(test_case, :max_turns, 1) > 1, do: :minimal, else: :single_shot
-  end
-
   defp prompt_for_test(_test_case, explicit_profile), do: explicit_profile
 
   defp ensure_agent_started(data_mode, prompt_profile, compression, thinking, agent_mod) do

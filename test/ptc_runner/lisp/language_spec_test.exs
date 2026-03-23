@@ -55,14 +55,6 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       assert String.contains?(prompt, "<semantic_progress>")
       refute String.contains?(prompt, "<role>")
     end
-
-    test ":minimal is standalone compact prompt" do
-      prompt = LanguageSpec.get(:minimal)
-      assert is_binary(prompt)
-      assert String.contains?(prompt, "(return")
-      refute String.contains?(prompt, "<role>")
-      refute String.contains?(prompt, "<state>")
-    end
   end
 
   # ============================================================================
@@ -96,8 +88,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
             :behavior_multi_turn,
             :behavior_return_explicit,
             :behavior_return_auto,
-            :capability_journal,
-            :minimal
+            :capability_journal
           ] do
         content = LanguageSpec.get(key)
         assert is_binary(content), "Expected #{key} to return binary, got nil"
@@ -236,7 +227,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     test "includes canonical compositions" do
       keys = LanguageSpec.list()
 
-      for key <- [:single_shot, :explicit_return, :auto_return, :explicit_journal, :minimal] do
+      for key <- [:single_shot, :explicit_return, :auto_return, :explicit_journal] do
         assert key in keys, "Expected #{key} in list"
       end
     end
@@ -250,8 +241,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
             :behavior_multi_turn,
             :behavior_return_explicit,
             :behavior_return_auto,
-            :capability_journal,
-            :minimal
+            :capability_journal
           ] do
         assert key in keys, "Expected #{key} in list"
       end
