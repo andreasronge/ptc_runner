@@ -14,12 +14,10 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       prompt = SystemPrompt.generate(agent, context: context)
 
       # Check all major sections are present
-      assert prompt =~ "<role>"
-      assert prompt =~ "Write one program that accomplish the user's mission"
+      assert prompt =~ "<return_rules>"
       refute prompt =~ "thinking:"
       assert prompt =~ ";; === data/ ==="
       assert prompt =~ ";; === tools ==="
-      assert prompt =~ "<language_reference>"
       assert prompt =~ "<output_format>"
       assert prompt =~ "<mission>"
     end
@@ -68,7 +66,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{})
 
-      assert prompt =~ "<role>"
+      assert prompt =~ "<return_rules>"
       assert prompt =~ "Simple task"
     end
   end
@@ -100,7 +98,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: %{}, error_context: error)
 
-      assert prompt =~ "<role>"
+      assert prompt =~ "<return_rules>"
       assert prompt =~ "<previous_error>"
       assert prompt =~ "Bad syntax"
     end
@@ -186,8 +184,8 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
 
       prompt = SystemPrompt.generate(agent, context: context)
 
-      # Role section
-      assert prompt =~ "<role>"
+      # Language spec
+      assert prompt =~ "<return_rules>"
 
       # Data inventory
       assert prompt =~ "data/user"

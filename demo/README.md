@@ -196,8 +196,8 @@ mix lisp --help        # Show all available options
 | `--help`, `-h` | Show all available options and examples |
 | `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
-| `--prompt=<name>` | Set prompt profile (single_shot, multi_turn, or auto) |
-| `--prompt=a,b` | Compare multiple prompts (e.g., `--prompt=single_shot,multi_turn`) |
+| `--prompt=<name>` | Set prompt profile (single_shot, explicit_return, auto_return, repl, or auto) |
+| `--prompt=a,b` | Compare multiple prompts (e.g., `--prompt=single_shot,explicit_return`) |
 | `--list-prompts` | Show available prompt profiles and exit |
 | `--show-prompt` | Show system prompt and exit |
 | `--explore` | Start in explore mode (LLM discovers schema) |
@@ -228,23 +228,30 @@ mix lisp --test --filter=multi_turn --compression  # Multi-turn tests with compr
 
 ## Prompt Profiles
 
-Two prompts are available, automatically selected based on test type:
+Prompts are composable — the language reference is **not** included by default (most models don't need it):
 
 | Profile | Description |
 |---------|-------------|
-| `:single_shot` | Base language reference - for single-turn queries |
-| `:multi_turn` | Base + memory addon - for conversational analysis |
-| `:auto` | Auto-select based on test type (default) |
+| `:single_shot` | Single-shot (last expression = answer) |
+| `:explicit_return` | Multi-turn + explicit return (return/fail required) |
+| `:auto_return` | Multi-turn + auto return (println to explore) |
+| `:explicit_journal` | Multi-turn + explicit return + journal |
+| `:repl` | REPL mode (standalone, one expression per turn) |
+| `:auto` | Auto-select per test: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
 
-The test runner uses `:auto` by default, selecting `:single_shot` for single-query tests and `:multi_turn` for tests with multiple queries.
+Add the language reference for weaker models via structured profiles:
+
+```elixir
+system_prompt: %{language_spec: {:profile, :explicit_return, reference: :full}}
+```
 
 ```bash
 # Explicit prompt selection
 mix lisp --prompt=single_shot
-mix lisp --prompt=multi_turn
+mix lisp --prompt=explicit_return
 
 # Compare prompt performance
-mix lisp --test --prompt=single_shot,multi_turn
+mix lisp --test --prompt=single_shot,explicit_return
 
 # See available profiles
 mix lisp --list-prompts
@@ -255,7 +262,7 @@ mix lisp --list-prompts
 Compare multiple prompts in a single test run:
 
 ```bash
-mix lisp --test --prompt=single_shot,multi_turn
+mix lisp --test --prompt=single_shot,explicit_return
 ```
 
 Output:
@@ -267,12 +274,12 @@ PROMPT COMPARISON
 Prompt             Pass    Rate    Tokens      Time
 ---------------------------------------------------
 single_shot       14/15   93.3%      1200      18.2s
-multi_turn        14/15   93.3%      1400      19.1s
+explicit_return   14/15   93.3%      1400      19.1s
 ```
 
 Or programmatically:
 ```elixir
-PtcDemo.LispTestRunner.run_comparison([:single_shot, :multi_turn])
+PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return])
 ```
 
 ## Interactive Commands
@@ -437,6 +444,51 @@ Per-run results:
   Run 3: 13/14 (FAIL)
 ```
 
+### Ablation Testing (Variant Comparison)
+
+Compare prompt variants with statistical analysis using `mix ablation`. This runs a controlled experiment: variant x test x N matrix with per-turn metrics and Fisher exact tests.
+
+```bash
+# Compare current default routing vs no-reference variant
+mix ablation --variants=auto,explicit_no_ref --tests=1,2,3,20,23 --runs=10
+
+# Compare mechanism variants (forced 6-turn budget)
+mix ablation --variants=baseline,repl_only,repl_full --tests=20,23 --runs=30
+
+# With specific model and JSON export
+mix ablation --variants=auto,baseline --tests=1,2,3,5,8 --runs=10 \
+  --model=gemini --json
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--variants` | Comma-separated variant names (required) |
+| `--tests` | Comma-separated test indices (required) |
+| `--runs` | Runs per test per variant (default: 5) |
+| `--model` | Model to use (default: from `PTC_DEMO_MODEL` env) |
+| `--json` | Write JSON report to `demo/reports/` |
+| `--verbose` | Show detailed output |
+
+**Policy variants** use natural turn budgets per test (same as normal test runs):
+
+| Name | Routing |
+|------|---------|
+| `auto` | Current default: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
+| `smart_auto` | `:single_shot` for single-turn, `:repl` for multi-turn |
+
+**Mechanism variants** force a 6-turn budget to isolate prompt effects:
+
+| Name | Prompt | Notes |
+|------|--------|-------|
+| `baseline` | `:auto_return` | Auto-return with reference |
+| `repl_only` | `:repl` | Standalone REPL prompt |
+| `repl_full` | `:repl` | REPL + context_in_system + minimal_turn_info |
+**Output includes** pass rate with 95% confidence intervals, first-turn validity, parse/no-code rates, mean turns, budget exhaustion, salvage rate, token costs, and Fisher exact p-values for statistical comparison.
+
+For detailed guidance on experimental design, sample sizes, and interpreting results, see [Benchmark Analysis](../docs/guides/benchmark-analysis.md).
+
 ### Clojure Validation (Lisp only)
 
 The `--validate-clojure` flag executes generated programs in Babashka and compares results with PTC-Lisp:
@@ -578,7 +630,7 @@ Each trace captures run timing, per-turn timing with token counts, and LLM API c
 **Solution:** Use `--debug` or `-d` to enable debug mode, then inspect the trace:
 
 ```bash
-mix lisp --debug --prompt=multi_turn
+mix lisp --debug --prompt=explicit_return
 ```
 
 After an error, use `SubAgent.Debug.print_trace(step, raw: true)` to see:

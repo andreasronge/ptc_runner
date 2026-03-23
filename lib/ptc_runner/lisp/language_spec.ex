@@ -5,32 +5,31 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   Provides pre-composed language specs built from two axes plus optional capabilities:
 
   - **Behavior axis**: `:single_shot`, `:explicit_return`, `:auto_return`
-  - **Reference axis**: `:full` (includes language reference) or `:none` (behavior only)
+  - **Reference**: Optional language reference (tool syntax, Java interop, restrictions)
   - **Capabilities**: `:journal` (task caching, semantic progress)
 
-  ## Canonical Compositions
+  Compositions do **not** include the language reference by default. Use
+  `{:profile, behavior, reference: :full}` to add it for weaker models.
 
-  | Key | Components | Description |
-  |-----|------------|-------------|
-  | `:single_shot` | reference + single-shot | Last expr = answer, one turn |
-  | `:explicit_return` | reference + multi-turn + explicit return | Must call (return ...)/(fail ...) |
-  | `:auto_return` | reference + multi-turn + auto return | println=continue, no println=answer |
-  | `:explicit_journal` | reference + multi-turn + explicit return + journal | With task caching |
-  | `:repl` | REPL addon (standalone) | One expression per turn |
-
-  ## Lite Variants (no language reference)
+  ## Compositions
 
   | Key | Description |
   |-----|-------------|
-  | `:single_shot_lite` | Single-shot without reference |
-  | `:explicit_return_lite` | Explicit return without reference |
-  | `:auto_return_lite` | Auto-return without reference |
+  | `:single_shot` | Last expr = answer, one turn |
+  | `:explicit_return` | Multi-turn, must call `(return ...)`/`(fail ...)` |
+  | `:auto_return` | Multi-turn, println = continue, no println = answer |
+  | `:explicit_journal` | Explicit return + journal (task/step-done) |
+  | `:repl` | REPL mode (standalone, one expression per turn) |
 
   ## Structured Profiles
 
   For programmatic composition, use `resolve_profile/1` with a tuple:
 
-      LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none, journal: true})
+      # Add language reference for weaker models
+      LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
+
+      # Add journal capability
+      LanguageSpec.resolve_profile({:profile, :explicit_return, journal: true})
 
   ## Usage
 
@@ -47,21 +46,18 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   alias PtcRunner.Prompts
 
   # Compositions: predefined combinations of snippets
+  # Default compositions do NOT include the language reference.
+  # Use {:profile, behavior, reference: :full} to add it for weaker models.
   @compositions %{
-    single_shot: [:reference, :behavior_single_shot],
-    explicit_return: [:reference, :behavior_multi_turn, :behavior_return_explicit],
-    auto_return: [:reference, :behavior_multi_turn, :behavior_return_auto],
+    single_shot: [:behavior_single_shot],
+    explicit_return: [:behavior_multi_turn, :behavior_return_explicit],
+    auto_return: [:behavior_multi_turn, :behavior_return_auto],
     explicit_journal: [
-      :reference,
       :behavior_multi_turn,
       :behavior_return_explicit,
       :capability_journal
-    ],
+    ]
     # Note: :repl is a direct snippet, not a composition (no composition entry needed)
-    # Lite variants (no reference)
-    single_shot_lite: [:behavior_single_shot],
-    explicit_return_lite: [:behavior_multi_turn, :behavior_return_explicit],
-    auto_return_lite: [:behavior_multi_turn, :behavior_return_auto]
   }
 
   # Snippet keys mapped to Prompts module functions
@@ -163,12 +159,12 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       # Tuple form with options
       resolve_profile({:profile, :explicit_return, reference: :full, journal: true})
 
-      # Tuple form with defaults (reference: :full, journal: false)
+      # Tuple form with defaults (reference: :none, journal: false)
       resolve_profile({:profile, :auto_return})
 
   ## Options
 
-  - `:reference` - `:full` (default) or `:none`
+  - `:reference` - `:none` (default) or `:full`
   - `:journal` - `true` or `false` (default)
 
   ## Validation
@@ -190,7 +186,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   def resolve_profile({:profile, behavior, opts}) do
     validate_profile!(behavior, opts)
 
-    reference = Keyword.get(opts, :reference, :full)
+    reference = Keyword.get(opts, :reference, :none)
     journal? = Keyword.get(opts, :journal, false)
 
     parts = if reference == :full, do: [:reference], else: []
@@ -223,7 +219,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
             "journal: true is not compatible with :single_shot behavior (single-shot skips the loop)"
     end
 
-    reference = Keyword.get(opts, :reference, :full)
+    reference = Keyword.get(opts, :reference, :none)
 
     unless reference in [:full, :none] do
       raise ArgumentError,
@@ -331,14 +327,10 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @spec list_with_descriptions() :: [{atom(), String.t()}]
   def list_with_descriptions do
     composition_descriptions = [
-      {:single_shot, "Reference + single-shot (last expr = answer)"},
-      {:explicit_return, "Reference + multi-turn + explicit return (return/fail required)"},
-      {:auto_return,
-       "Reference + multi-turn + auto return (println to explore, last expr to answer)"},
-      {:explicit_journal, "Reference + multi-turn + explicit return + journal (task/step-done)"},
-      {:single_shot_lite, "Single-shot without reference"},
-      {:explicit_return_lite, "Multi-turn + explicit return without reference"},
-      {:auto_return_lite, "Multi-turn + auto return without reference"}
+      {:single_shot, "Single-shot (last expr = answer)"},
+      {:explicit_return, "Multi-turn + explicit return (return/fail required)"},
+      {:auto_return, "Multi-turn + auto return (println to explore, last expr to answer)"},
+      {:explicit_journal, "Multi-turn + explicit return + journal (task/step-done)"}
     ]
 
     # Snippets that are not also compositions get auto-described from content
