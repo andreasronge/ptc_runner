@@ -47,7 +47,7 @@ defmodule PtcRunner.Tracer do
   secure random bytes. No external dependencies required.
 
   See the [Observability Guide](subagent-observability.md) for how Tracer relates to
-  `PtcRunner.TraceLog` and `PtcRunner.PlanTracer`.
+  `PtcRunner.TraceLog`.
   """
 
   defstruct [

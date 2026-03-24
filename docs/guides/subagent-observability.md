@@ -10,16 +10,13 @@ PtcRunner provides three complementary tracing layers. Each serves a different w
 |-----------|----------|--------|
 | `PtcRunner.Tracer.new/1` | Aggregate usage stats, inspect traces in code | In-memory struct on `Step` |
 | `PtcRunner.TraceLog.with_trace/2` | Offline debugging, performance analysis, Chrome DevTools | JSONL files |
-| `PtcRunner.PlanTracer.log_event/1` | Watch PlanExecutor runs in the terminal | ANSI-colored terminal output |
 
 **Data flow:**
 
 ```
 SubAgent.Loop
   ├── emits :telemetry events ──► TraceLog.Handler ──► Collector ──► .jsonl file
-  ├── builds Tracer struct ────► entries stored on Step.tracer
-  └── (via PlanExecutor)
-        └── fires on_event callbacks ──► PlanTracer ──► terminal output
+  └── builds Tracer struct ────► entries stored on Step.tracer
 ```
 
 Tracer and TraceLog operate independently — you can use both, either, or neither.
@@ -247,52 +244,6 @@ end)
 
 > **Full API:** See `PtcRunner.TraceLog.with_trace/2`, `PtcRunner.TraceLog.Analyzer.summary/1`, and `PtcRunner.TraceLog.Analyzer.export_chrome_trace/2`.
 
-## PlanTracer
-
-Real-time terminal visualization of `PtcRunner.PlanExecutor` runs. Use during development to see task progress with colored, hierarchical output.
-
-### Quick Usage
-
-For stateless logging via `Logger`:
-
-```elixir
-PlanExecutor.execute(plan, mission,
-  llm: my_llm,
-  on_event: &PlanTracer.log_event/1
-)
-```
-
-For a stateful tree view with indentation and replan tracking:
-
-```elixir
-{:ok, tracer} = PlanTracer.start(output: :io)
-
-PlanExecutor.execute(plan, mission,
-  llm: my_llm,
-  on_event: PlanTracer.handler(tracer)
-)
-
-PlanTracer.stop(tracer)
-```
-
-### Example Output
-
-```
-Mission: Research stock prices
-  [START] fetch_symbols
-  [✓] fetch_symbols (150ms)
-  [START] fetch_prices
-  [!] fetch_prices - Verification failed: "Count < 5"
-REPLAN #1 (fetch_prices: "Count < 5")
-  Repair plan: 2 tasks
-  [✓] fetch_prices (400ms)
-Execution finished: ok (1250ms)
-```
-
-Colors: green (success), yellow (verification failure/replan), red (error), cyan (skipped).
-
-> **Full API:** See `PtcRunner.PlanTracer.start/1`, `PtcRunner.PlanTracer.handler/1`, and `PtcRunner.PlanTracer.log_event/1`.
-
 ## Telemetry Events
 
 SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetry, or custom handlers:
@@ -321,26 +272,12 @@ SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetr
 | `llm:start/stop` | duration, tokens | LLM latency, cost tracking |
 | `tool:start/stop/exception` | duration | Tool performance |
 
-**PlanExecutor events** (prefix: `[:ptc_runner, :plan_executor, ...]`):
-
-| Event | Measurements | Metadata |
-|-------|--------------|----------|
-| `plan:generated` | system_time | plan, mission, task_count |
-| `execution:start` | system_time | plan, mission, task_count, phases, attempt |
-| `execution:stop` | duration | status, results, replan_count, total_tasks |
-| `task:start` | system_time | task_id, task, attempt |
-| `task:stop` | duration | task_id, status, result |
-| `replan:start` | system_time | task_id, diagnosis, attempt |
-| `replan:stop` | — | new_task_count (or status, reason on error) |
-| `quality_gate:start` | system_time | task_id |
-| `quality_gate:stop` | duration | task_id, status, evidence/missing/reason |
-
 Duration is in native time units. Convert with:
 ```elixir
 System.convert_time_unit(duration, :native, :millisecond)
 ```
 
-> **Full event tables:** See `PtcRunner.SubAgent.Telemetry.span/3` and the `PtcRunner.PlanExecutor` moduledoc.
+> **Full event tables:** See `PtcRunner.SubAgent.Telemetry.span/3`.
 
 ## Production Tips
 
@@ -358,5 +295,3 @@ System.convert_time_unit(duration, :native, :millisecond)
 - `PtcRunner.TraceLog.Analyzer.summary/1` - Offline trace analysis
 - `PtcRunner.SubAgent.Telemetry.span/3` - Telemetry module with event reference
 - `PtcRunner.SubAgent.Debug.print_trace/2` - Trace inspection API
-- `PtcRunner.PlanTracer.start/1` - Real-time terminal visualization for PlanExecutor
-- `PtcRunner.PlanTracer.handler/1` - Create bound event handler for PlanTracer

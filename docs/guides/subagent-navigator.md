@@ -1,4 +1,6 @@
-# Navigator Pattern: Journaled Tasks
+# Navigator Pattern: Journaled Tasks (Advanced)
+
+> **For most use cases**, plain tool calls with [Composition Patterns](subagent-patterns.md) (chains, parallel execution, subagents-as-tools) are simpler and recommended. Use the Navigator pattern only when you need crash-safe, idempotent checkpoints for side effects across re-invocations.
 
 Use the Navigator pattern to build crash-safe, resumable workflows. Instead of keeping an agent process alive, re-invoke the agent with a journal that records what's already done.
 
@@ -271,7 +273,6 @@ This differs from in-process checkpointing (LangGraph's state snapshots) — Ptc
 
 ## See Also
 
-- [Meta Planner](subagent-meta-planner.md) — Autonomous planning with self-correction
 - [Composition Patterns](subagent-patterns.md) — Chaining, parallel execution, orchestration
 - [Wire Transfer Example](../../examples/wire_transfer/README.md) — Full human-in-the-loop workflow
 - [PTC-Lisp Specification](../ptc-lisp-specification.md) — Sections 5.13–5.15: `task`, `step-done`, `task-reset`

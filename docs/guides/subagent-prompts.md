@@ -33,7 +33,7 @@ SubAgent automatically selects a prompt based on configuration:
 | `journaling: true` | `:explicit_journal` |
 | Otherwise | `:explicit_return` |
 
-**Note:** Providing a non-empty `plan` auto-enables `journaling: true`, so agents with a plan always get journal capabilities.
+**Note:** `plan:` provides display-only progress labels and does not affect language spec selection. To enable journal capabilities (`task`, `step-done`), set `journaling: true` explicitly.
 
 You rarely need to set this manually — the defaults match the runtime behavior.
 

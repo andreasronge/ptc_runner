@@ -1135,6 +1135,8 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ### 5.18 `task` — Journaled Task Execution
 
+> **Advanced.** Most agents use `plan:` labels for progress visibility and let the application own idempotency. These forms are for explicit crash-safe caching when the application needs resumability across re-invocations. Requires `journaling: true`.
+
 `task` executes an expression with caching and idempotency semantics. When a journal is available, tasks are memoized by ID, enabling safe retry loops in agentic execution.
 
 **Syntax:**

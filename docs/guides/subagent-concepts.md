@@ -180,7 +180,7 @@ From your perspective as a library user:
 
 The LLM handles state internally to cache tool results, track progress, and avoid redundant work.
 
-For structured progress tracking, use the `plan:` option to define steps. The LLM reports completion with `(step-done "id" "summary")`, and a progress checklist is rendered between turns. See [Navigator Pattern](subagent-navigator.md#semantic-progress-with-plans).
+For progress visibility, use the `plan:` option to define step labels. A progress checklist is rendered between turns. Optionally, the LLM can mark steps complete with `(step-done "id" "summary")`. See [Navigator Pattern](subagent-navigator.md#semantic-progress-with-plans).
 
 ## Defaults
 

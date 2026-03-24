@@ -54,12 +54,12 @@ defmodule PtcRunner.SubAgent.ProgressRendererTest do
   end
 
   describe "instruction text" do
-    test "shows step-done instruction" do
+    test "shows step-done instruction as optional" do
       plan = [{"1", "Step one"}, {"2", "Step two"}]
       result = ProgressRenderer.render(plan, %{})
 
       assert result =~ "step-done"
-      assert result =~ "Batch independent steps"
+      assert result =~ "optional"
     end
   end
 end

@@ -171,15 +171,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
   @spec render_initial_progress(Definition.t()) :: String.t()
   def render_initial_progress(%Definition{plan: []} = _agent), do: ""
-  def render_initial_progress(%Definition{journaling: false} = _agent), do: ""
 
   def render_initial_progress(%Definition{plan: plan}) do
     ProgressRenderer.render(plan, %{})
   end
 
-  # Append progress checklist if agent has a plan and journal is enabled
+  # Append progress checklist if agent has a plan
   defp append_progress(feedback, %Definition{plan: []}, _state, _lisp_step), do: feedback
-  defp append_progress(feedback, %Definition{journaling: false}, _state, _lisp_step), do: feedback
 
   defp append_progress(feedback, agent, state, lisp_step) do
     # Merge current turn's summaries so they appear in the next turn's prompt.

@@ -34,17 +34,7 @@ defmodule PtcRunner.TraceLog.Handler do
     [:ptc_runner, :sub_agent, :pcalls, :stop],
     [:ptc_runner, :sub_agent, :compiled, :execute, :start],
     [:ptc_runner, :sub_agent, :compiled, :execute, :stop],
-    [:ptc_runner, :sub_agent, :compiled, :execute, :exception],
-    # PlanExecutor events
-    [:ptc_runner, :plan_executor, :plan, :generated],
-    [:ptc_runner, :plan_executor, :execution, :start],
-    [:ptc_runner, :plan_executor, :execution, :stop],
-    [:ptc_runner, :plan_executor, :task, :start],
-    [:ptc_runner, :plan_executor, :task, :stop],
-    [:ptc_runner, :plan_executor, :replan, :start],
-    [:ptc_runner, :plan_executor, :replan, :stop],
-    [:ptc_runner, :plan_executor, :quality_gate, :start],
-    [:ptc_runner, :plan_executor, :quality_gate, :stop]
+    [:ptc_runner, :sub_agent, :compiled, :execute, :exception]
   ]
 
   @doc """

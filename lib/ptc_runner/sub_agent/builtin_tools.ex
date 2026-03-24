@@ -13,8 +13,8 @@ defmodule PtcRunner.SubAgent.BuiltinTools do
   @doc """
   Expands a list of builtin tool family atoms to `[{name, sentinel}]` pairs.
 
-  Useful for external modules (e.g., PlanExecutor) that need to generate
-  tool descriptions for builtins without reaching into SubAgent internals.
+  Useful for external modules that need to generate tool descriptions
+  for builtins without reaching into SubAgent internals.
 
   ## Examples
 

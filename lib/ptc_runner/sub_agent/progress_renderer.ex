@@ -4,20 +4,9 @@ defmodule PtcRunner.SubAgent.ProgressRenderer do
 
   Used to show the LLM its progress through a plan as user feedback messages.
 
-  ## Rendering
-
-  Steps are checked off only when `step-done` has been called with the
-  matching ID. The journal (task cache) is not consulted — caching and
-  progress tracking are independent concerns.
-
-  ## Visibility
-
-  `TurnFeedback.format/3` merges the current turn's summaries before
-  rendering, so `step-done` calls appear in the checklist on the
-  *next* turn's prompt (i.e., the feedback message for the current turn).
-  If the current turn errors, its summaries are discarded by the loop
-  and never reach the renderer.
-  See `PtcRunner.SubAgent.Loop.TurnFeedback` for the call site.
+  Plan steps render as pending by default. Steps are checked off when
+  `(step-done "id" "summary")` is called with a matching ID. This is
+  optional — plans work as display-only labels without any step-done calls.
 
   Step-done entries whose IDs don't appear in the plan are collected
   under an "Out-of-Plan Steps" section.
@@ -61,7 +50,7 @@ defmodule PtcRunner.SubAgent.ProgressRenderer do
 
     sections = [
       "## Progress\n",
-      "Batch independent steps in the same turn. Use `(step-done \"id\" \"summary\")` for each completed step.\n\n",
+      "Use `(step-done \"id\" \"summary\")` to mark steps complete (optional).\n\n",
       Enum.join(plan_lines, "\n")
     ]
 
