@@ -303,8 +303,6 @@ defmodule PtcDemo.Agent do
     # Per-run overrides for ablation experiments
     prompt_profile = Keyword.get(opts, :prompt_profile, state.prompt_profile)
     format_options = Keyword.get(opts, :format_options)
-    completion_mode = Keyword.get(opts, :completion_mode)
-
     # Build the SubAgent with requested max_turns, signature, compression, and retry_turns
     agent =
       build_agent(
@@ -317,8 +315,7 @@ defmodule PtcDemo.Agent do
         question,
         plan: plan,
         thinking: state.thinking,
-        format_options: format_options,
-        completion_mode: completion_mode
+        format_options: format_options
       )
 
     # Build context with datasets (memory is handled internally by SubAgent)
@@ -340,7 +337,6 @@ defmodule PtcDemo.Agent do
       retry_turns: retry_turns,
       compression: inspect(state.compression),
       thinking: state.thinking,
-      completion_mode: completion_mode,
       signature: signature
     }
 
@@ -577,8 +573,6 @@ defmodule PtcDemo.Agent do
     plan = Keyword.get(extra_opts, :plan)
     thinking = Keyword.get(extra_opts, :thinking, false)
     override_format_options = Keyword.get(extra_opts, :format_options)
-    override_completion_mode = Keyword.get(extra_opts, :completion_mode)
-
     name = Keyword.get(extra_opts, :name, "demo_#{prompt_profile}")
 
     base_opts = [
@@ -593,18 +587,6 @@ defmodule PtcDemo.Agent do
       compression: compression,
       thinking: thinking
     ]
-
-    # Add completion_mode for auto_return prompt profile (overridable)
-    base_opts =
-      case override_completion_mode do
-        nil ->
-          if prompt_profile == :auto_return,
-            do: Keyword.put(base_opts, :completion_mode, :auto),
-            else: base_opts
-
-        mode ->
-          Keyword.put(base_opts, :completion_mode, mode)
-      end
 
     # Allow per-run override of format_options (for ablation experiments)
     base_opts =

@@ -4,7 +4,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
   Provides pre-composed language specs built from two axes plus optional capabilities:
 
-  - **Behavior axis**: `:single_shot`, `:explicit_return`, `:auto_return`
+  - **Behavior axis**: `:single_shot`, `:explicit_return`
   - **Reference**: Optional language reference (tool syntax, Java interop, restrictions)
   - **Capabilities**: `:journal` (task caching, semantic progress)
 
@@ -17,7 +17,6 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   |-----|-------------|
   | `:single_shot` | Last expr = answer, one turn |
   | `:explicit_return` | Multi-turn, must call `(return ...)`/`(fail ...)` |
-  | `:auto_return` | Multi-turn, println = continue, no println = answer |
   | `:explicit_journal` | Explicit return + journal (task/step-done) |
 
   ## Structured Profiles
@@ -50,7 +49,6 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   @compositions %{
     single_shot: [:behavior_single_shot],
     explicit_return: [:behavior_multi_turn, :behavior_return_explicit],
-    auto_return: [:behavior_multi_turn, :behavior_return_auto],
     explicit_journal: [
       :behavior_multi_turn,
       :behavior_return_explicit,
@@ -64,7 +62,6 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     behavior_single_shot: :behavior_single_shot,
     behavior_multi_turn: :behavior_multi_turn,
     behavior_return_explicit: :behavior_return_explicit,
-    behavior_return_auto: :behavior_return_auto,
     capability_journal: :capability_journal
   }
 
@@ -156,9 +153,6 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       # Tuple form with options
       resolve_profile({:profile, :explicit_return, reference: :full, journal: true})
 
-      # Tuple form with defaults (reference: :none, journal: false)
-      resolve_profile({:profile, :auto_return})
-
   ## Options
 
   - `:reference` - `:none` (default) or `:full`
@@ -167,7 +161,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   ## Validation
 
   Raises `ArgumentError` for:
-  - Unknown behavior (must be `:single_shot`, `:explicit_return`, or `:auto_return`)
+  - Unknown behavior (must be `:single_shot` or `:explicit_return`)
   - `journal: true` with `:single_shot` (single-shot skips the loop)
   - Unknown reference value (must be `:full` or `:none`)
   - Unknown option keys
@@ -193,7 +187,6 @@ defmodule PtcRunner.Lisp.LanguageSpec do
         case behavior do
           :single_shot -> [:behavior_single_shot]
           :explicit_return -> [:behavior_multi_turn, :behavior_return_explicit]
-          :auto_return -> [:behavior_multi_turn, :behavior_return_auto]
         end
 
     parts = if journal?, do: parts ++ [:capability_journal], else: parts
@@ -205,10 +198,10 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   end
 
   defp validate_profile!(behavior, opts) do
-    unless behavior in [:single_shot, :explicit_return, :auto_return] do
+    unless behavior in [:single_shot, :explicit_return] do
       raise ArgumentError,
             "Unknown behavior: #{inspect(behavior)}. " <>
-              "Expected :single_shot, :explicit_return, or :auto_return"
+              "Expected :single_shot or :explicit_return"
     end
 
     if behavior == :single_shot and Keyword.get(opts, :journal, false) do
@@ -326,7 +319,6 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     composition_descriptions = [
       {:single_shot, "Single-shot (last expr = answer)"},
       {:explicit_return, "Multi-turn + explicit return (return/fail required)"},
-      {:auto_return, "Multi-turn + auto return (println to explore, last expr to answer)"},
       {:explicit_journal, "Multi-turn + explicit return + journal (task/step-done)"}
     ]
 

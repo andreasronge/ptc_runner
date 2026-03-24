@@ -12,7 +12,6 @@ SubAgent prompts are built from a 2-axis architecture:
 |----------|-------------|-------------|
 | `:single_shot` | Last expression IS the answer | `max_turns: 1`, simple queries |
 | `:explicit_return` | Must call `(return ...)` or `(fail ...)` | Multi-turn exploration with tools |
-| `:auto_return` | `println` = continue, no `println` = answer | When you want simpler completion semantics |
 
 **Reference** — optional language documentation (tool syntax, Java interop, restrictions):
 
@@ -31,10 +30,10 @@ SubAgent automatically selects a prompt based on configuration:
 | Condition | Default Language Spec |
 |-----------|----------------------|
 | `max_turns <= 1` | `:single_shot` |
-| `completion_mode: :auto` + plan | `:explicit_journal` |
-| `completion_mode: :auto` | `:auto_return` |
 | `journaling: true` | `:explicit_journal` |
 | Otherwise | `:explicit_return` |
+
+**Note:** Providing a non-empty `plan` auto-enables `journaling: true`, so agents with a plan always get journal capabilities.
 
 You rarely need to set this manually — the defaults match the runtime behavior.
 
@@ -46,7 +45,6 @@ Pre-composed specs available via `system_prompt: %{language_spec: atom}`:
 |------|------------|-------------|
 | `:single_shot` | reference + single-shot | Last expr = answer, one turn |
 | `:explicit_return` | reference + multi-turn + explicit return | Must call `(return ...)`/`(fail ...)` |
-| `:auto_return` | reference + multi-turn + auto return | println = continue, no println = answer |
 | `:explicit_journal` | multi-turn + explicit return + journal | With task caching |
 
 The language reference is not included by default. Use `reference: :full` in a structured profile to add it.
@@ -62,14 +60,6 @@ SubAgent.new(
 SubAgent.new(
   prompt: "Analyze sales trends",
   max_turns: 5
-)
-
-# Explicit override: use auto-return mode
-SubAgent.new(
-  prompt: "Explore the data",
-  max_turns: 5,
-  completion_mode: :auto,
-  system_prompt: %{language_spec: :auto_return}
 )
 
 # Add language reference for weaker models

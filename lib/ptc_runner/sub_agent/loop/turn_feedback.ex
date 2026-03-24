@@ -89,8 +89,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
         turns_after_this == 1 ->
           context = %{
             has_retries: retry_left > 0,
-            retry_count: retry_left,
-            auto_return: agent.completion_mode == :auto
+            retry_count: retry_left
           }
 
           {:ok, rendered} = Mustache.render(Prompts.must_return_warning(), context)

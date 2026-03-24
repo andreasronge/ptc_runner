@@ -15,7 +15,6 @@ defmodule PtcRunner.Prompts do
   | Behavior | `behavior-single-shot.md` | `behavior_single_shot/0` |
   | Behavior | `behavior-multi-turn.md` | `behavior_multi_turn/0` |
   | Return mode | `behavior-return-explicit.md` | `behavior_return_explicit/0` |
-  | Return mode | `behavior-return-auto.md` | `behavior_return_auto/0` |
   | Capability | `capability-journal.md` | `capability_journal/0` |
 
   ## Other Prompt Files
@@ -82,14 +81,12 @@ defmodule PtcRunner.Prompts do
   @behavior_single_shot_file Path.join(@prompts_dir, "behavior-single-shot.md")
   @behavior_multi_turn_file Path.join(@prompts_dir, "behavior-multi-turn.md")
   @behavior_return_explicit_file Path.join(@prompts_dir, "behavior-return-explicit.md")
-  @behavior_return_auto_file Path.join(@prompts_dir, "behavior-return-auto.md")
   @capability_journal_file Path.join(@prompts_dir, "capability-journal.md")
 
   @external_resource @reference_file
   @external_resource @behavior_single_shot_file
   @external_resource @behavior_multi_turn_file
   @external_resource @behavior_return_explicit_file
-  @external_resource @behavior_return_auto_file
   @external_resource @capability_journal_file
 
   @reference @reference_file |> File.read!() |> PromptLoader.extract_with_header()
@@ -102,9 +99,6 @@ defmodule PtcRunner.Prompts do
   @behavior_return_explicit @behavior_return_explicit_file
                             |> File.read!()
                             |> PromptLoader.extract_with_header()
-  @behavior_return_auto @behavior_return_auto_file
-                        |> File.read!()
-                        |> PromptLoader.extract_with_header()
   @capability_journal @capability_journal_file
                       |> File.read!()
                       |> PromptLoader.extract_with_header()
@@ -140,14 +134,6 @@ defmodule PtcRunner.Prompts do
   @doc "Raw header + content for behavior-return-explicit.md."
   @spec behavior_return_explicit_with_header() :: {String.t(), String.t()}
   def behavior_return_explicit_with_header, do: @behavior_return_explicit
-
-  @doc "Auto-return fragment: println=continue, no println=answer."
-  @spec behavior_return_auto() :: String.t()
-  def behavior_return_auto, do: elem(@behavior_return_auto, 1)
-
-  @doc "Raw header + content for behavior-return-auto.md."
-  @spec behavior_return_auto_with_header() :: {String.t(), String.t()}
-  def behavior_return_auto_with_header, do: @behavior_return_auto
 
   @doc "Journal capability: task caching, step-done, semantic progress."
   @spec capability_journal() :: String.t()
@@ -289,7 +275,6 @@ defmodule PtcRunner.Prompts do
       :behavior_single_shot,
       :behavior_multi_turn,
       :behavior_return_explicit,
-      :behavior_return_auto,
       :capability_journal,
       :json_system,
       :json_user,
@@ -322,7 +307,6 @@ defmodule PtcRunner.Prompts do
   def get(:behavior_single_shot), do: behavior_single_shot()
   def get(:behavior_multi_turn), do: behavior_multi_turn()
   def get(:behavior_return_explicit), do: behavior_return_explicit()
-  def get(:behavior_return_auto), do: behavior_return_auto()
   def get(:capability_journal), do: capability_journal()
   def get(:json_system), do: json_system()
   def get(:json_user), do: json_user()

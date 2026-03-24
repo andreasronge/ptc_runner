@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Ablation do
       Policy variants (natural turn budgets per test):
       - `auto` - current default routing (single_shot/explicit_return)
       Mechanism variants (forced 6-turn budget):
-      - `baseline` - auto_return prompt, 6 turns
+      - `baseline` - explicit_return prompt, 6 turns
       - `explicit` - explicit_return prompt, 6 turns
     * `--tests` - Comma-separated test indices (required)
     * `--runs` - Number of runs per test per variant (default: 5)
@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Ablation do
     # Mechanism variants: force specific prompt + turn budget via agent_overrides
     "baseline" => %{
       name: "baseline",
-      agent_overrides: [prompt_profile: :auto_return, max_turns: 6]
+      agent_overrides: [prompt_profile: :explicit_return, max_turns: 6]
     },
     "explicit" => %{
       name: "explicit",

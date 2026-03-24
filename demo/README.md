@@ -196,7 +196,7 @@ mix lisp --help        # Show all available options
 | `--help`, `-h` | Show all available options and examples |
 | `--model=<name>` | Set model (alias or full model ID) |
 | `--list-models` | Show available models and exit |
-| `--prompt=<name>` | Set prompt profile (single_shot, explicit_return, auto_return, repl, or auto) |
+| `--prompt=<name>` | Set prompt profile (single_shot, explicit_return, or auto) |
 | `--prompt=a,b` | Compare multiple prompts (e.g., `--prompt=single_shot,explicit_return`) |
 | `--list-prompts` | Show available prompt profiles and exit |
 | `--show-prompt` | Show system prompt and exit |
@@ -234,7 +234,6 @@ Prompts are composable — the language reference is **not** included by default
 |---------|-------------|
 | `:single_shot` | Single-shot (last expression = answer) |
 | `:explicit_return` | Multi-turn + explicit return (return/fail required) |
-| `:auto_return` | Multi-turn + auto return (println to explore) |
 | `:explicit_journal` | Multi-turn + explicit return + journal |
 
 | `:auto` | Auto-select per test: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
@@ -481,7 +480,7 @@ mix ablation --variants=auto,baseline --tests=1,2,3,5,8 --runs=10 \
 
 | Name | Prompt | Notes |
 |------|--------|-------|
-| `baseline` | `:auto_return` | Auto-return with reference |
+| `baseline` | `:explicit_return` | Explicit return, 6 turns |
 | `explicit` | `:explicit_return` | Explicit return, 6 turns |
 **Output includes** pass rate with 95% confidence intervals, first-turn validity, parse/no-code rates, mean turns, budget exhaustion, salvage rate, token costs, and Fisher exact p-values for statistical comparison.
 

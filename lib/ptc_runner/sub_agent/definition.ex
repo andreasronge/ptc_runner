@@ -142,7 +142,7 @@ defmodule PtcRunner.SubAgent.Definition do
           memory_strategy: :strict | :rollback,
           plan: [plan_step()],
           journaling: boolean(),
-          completion_mode: :explicit | :auto
+          completion_mode: :explicit
         }
 
   @default_format_options [

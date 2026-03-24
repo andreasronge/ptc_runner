@@ -858,48 +858,14 @@ defmodule PtcRunner.SubAgent.Loop do
     {:stop, {:error, final_step}, turn, state.turn_tokens}
   end
 
-  # Head 4: Normal continuation — check memory limits, auto-return, or continue
+  # Head 4: Normal continuation — check memory limits or continue
   defp handle_successful_execution(code, response, lisp_step, state, agent) do
     case check_memory_limit(lisp_step.memory, agent.memory_limit) do
       {:ok, _size} ->
-        if should_auto_return?(lisp_step, agent) do
-          handle_auto_return(code, response, lisp_step, state, agent)
-        else
-          handle_normal_continuation(code, response, lisp_step, state, agent)
-        end
+        handle_normal_continuation(code, response, lisp_step, state, agent)
 
       {:error, :memory_limit_exceeded, actual_size} ->
         handle_memory_limit_exceeded(code, response, lisp_step, state, agent, actual_size)
-    end
-  end
-
-  # Auto-return is disabled when a plan is present — plan-mode agents use the
-  # regular multi_turn_journal prompt with explicit return/step-done semantics.
-  defp should_auto_return?(lisp_step, agent) do
-    agent.completion_mode == :auto and
-      agent.plan == [] and
-      lisp_step.prints == []
-  end
-
-  defp handle_auto_return(code, response, lisp_step, state, agent) do
-    normalized_value = KeyNormalizer.normalize_keys(lisp_step.return)
-    normalized_step = %{lisp_step | return: normalized_value}
-
-    case ReturnValidation.validate(agent, normalized_value) do
-      :ok ->
-        turn = build_success_turn(code, response, normalized_step, state)
-        {:ok, step} = build_success_step(code, response, normalized_step, state, agent)
-        {:stop, {:ok, step}, turn, state.turn_tokens}
-
-      {:error, validation_errors} ->
-        handle_return_validation_error(
-          code,
-          response,
-          normalized_step,
-          state,
-          agent,
-          validation_errors
-        )
     end
   end
 
@@ -1244,8 +1210,7 @@ defmodule PtcRunner.SubAgent.Loop do
       ReturnValidation.format_error_for_llm(
         agent,
         lisp_step.return,
-        errors,
-        agent.completion_mode
+        errors
       )
 
     # Build validation error info for the turn (so compression can show the actual error)

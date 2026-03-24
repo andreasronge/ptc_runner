@@ -10,7 +10,6 @@ defmodule PtcDemo.Prompts do
   |---------|-------------|
   | `:single_shot` | Reference + single-shot (last expr = answer) |
   | `:explicit_return` | Reference + multi-turn + explicit return |
-  | `:auto_return` | Reference + multi-turn + auto return |
   | `:explicit_journal` | Reference + multi-turn + explicit return + journal |
 
 
@@ -56,7 +55,6 @@ defmodule PtcDemo.Prompts do
       when profile in [
              :single_shot,
              :explicit_return,
-             :auto_return,
              :explicit_journal,
              :reference
            ] do
@@ -82,7 +80,6 @@ defmodule PtcDemo.Prompts do
     [
       {:single_shot, "Single-shot (last expr = answer)"},
       {:explicit_return, "Multi-turn + explicit return (return/fail required)"},
-      {:auto_return, "Multi-turn + auto return (println to explore)"},
       {:explicit_journal, "Multi-turn + explicit return + journal"}
     ]
   end
@@ -110,7 +107,7 @@ defmodule PtcDemo.Prompts do
       {:ok, :single_shot}
 
       iex> PtcDemo.Prompts.validate_profile("invalid")
-      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, auto_return, explicit_journal"}
+      {:error, "Unknown prompt profile 'invalid'. Valid: single_shot, explicit_return, explicit_journal"}
 
   """
   @spec validate_profile(String.t()) :: {:ok, atom()} | {:error, String.t()}
