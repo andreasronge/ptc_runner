@@ -578,4 +578,15 @@ defmodule PtcDemo.TestRunner.TestCase do
       }
     ]
   end
+
+  @doc """
+  Returns 1-based indices of plan cases within the full test suite.
+  """
+  @spec plan_case_indices() :: [pos_integer()]
+  def plan_case_indices do
+    offset =
+      length(common_test_cases()) + length(lisp_specific_cases()) + length(multi_turn_cases())
+
+    Enum.to_list((offset + 1)..(offset + length(plan_cases())))
+  end
 end
