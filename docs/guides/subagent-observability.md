@@ -185,17 +185,16 @@ The flame chart shows execution timing with nested spans. Click any span to see 
 
 ### Interactive Trace Viewer
 
-Launch the web-based trace viewer to browse traces with DAG visualization and turn-by-turn drill-down:
+Launch the web-based trace viewer to browse traces with turn-by-turn drill-down:
 
 ```bash
-mix ptc.viewer --trace-dir traces --plan-dir data
+mix ptc.viewer --trace-dir traces
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port` | 4123 | Port to listen on |
 | `--trace-dir` | `traces` | Directory containing `.jsonl` trace files |
-| `--plan-dir` | `data` | Directory containing `.json` plan files |
 | `--no-open` | false | Don't auto-open browser |
 
 The viewer is a separate package (`ptc_viewer`). See its README for architecture and drag-and-drop usage.

@@ -27,18 +27,6 @@ defmodule PtcViewer.Router do
     end
   end
 
-  get "/api/plans" do
-    plans = PtcViewer.Api.list_plans()
-    send_json(conn, plans)
-  end
-
-  get "/api/plans/:filename" do
-    case PtcViewer.Api.get_plan(filename) do
-      {:ok, content} -> send_json_raw(conn, content)
-      {:error, :not_found} -> send_resp(conn, 404, "Not found")
-    end
-  end
-
   match _ do
     # SPA fallback - serve index.html
     index_path = Application.app_dir(:ptc_viewer, "priv/static/index.html")
@@ -58,11 +46,5 @@ defmodule PtcViewer.Router do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(200, Jason.encode!(data))
-  end
-
-  defp send_json_raw(conn, content) do
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, content)
   end
 end

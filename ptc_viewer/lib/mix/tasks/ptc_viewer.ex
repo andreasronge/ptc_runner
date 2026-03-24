@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Ptc.Viewer do
   def run(args) do
     {opts, _, _} =
       OptionParser.parse(args,
-        strict: [port: :integer, trace_dir: :string, plan_dir: :string, no_open: :boolean]
+        strict: [port: :integer, trace_dir: :string, no_open: :boolean]
       )
 
     Mix.Task.run("app.start")
@@ -17,7 +17,6 @@ defmodule Mix.Tasks.Ptc.Viewer do
       []
       |> maybe_add(:port, opts[:port])
       |> maybe_add(:trace_dir, opts[:trace_dir])
-      |> maybe_add(:plan_dir, opts[:plan_dir])
       |> maybe_add(:open, if(opts[:no_open], do: false, else: true))
 
     case PtcViewer.start(viewer_opts) do

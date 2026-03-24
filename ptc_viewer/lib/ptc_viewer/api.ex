@@ -1,5 +1,5 @@
 defmodule PtcViewer.Api do
-  @moduledoc "File-based API for reading traces and plans from disk."
+  @moduledoc "File-based API for reading traces from disk."
 
   def list_traces do
     list_files(trace_dir(), ".jsonl")
@@ -9,20 +9,8 @@ defmodule PtcViewer.Api do
     get_file(trace_dir(), filename)
   end
 
-  def list_plans do
-    list_files(plan_dir(), ".json")
-  end
-
-  def get_plan(filename) do
-    get_file(plan_dir(), filename)
-  end
-
   defp trace_dir do
     Application.get_env(:ptc_viewer, :trace_dir, "traces")
-  end
-
-  defp plan_dir do
-    Application.get_env(:ptc_viewer, :plan_dir, "data")
   end
 
   defp list_files(dir, extension) do
