@@ -141,6 +141,7 @@ defmodule PtcRunner.SubAgent.Definition do
           pmap_max_concurrency: pos_integer(),
           memory_strategy: :strict | :rollback,
           plan: [plan_step()],
+          progress_fn: (map(), term() -> {String.t(), term()}) | nil,
           journaling: boolean(),
           completion_mode: :explicit
         }
@@ -188,6 +189,7 @@ defmodule PtcRunner.SubAgent.Definition do
     output: :ptc_lisp,
     memory_strategy: :strict,
     plan: [],
+    progress_fn: nil,
     journaling: false,
     completion_mode: :explicit
   ]

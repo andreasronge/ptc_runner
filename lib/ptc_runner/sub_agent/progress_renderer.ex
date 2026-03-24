@@ -3,6 +3,9 @@ defmodule PtcRunner.SubAgent.ProgressRenderer do
   Renders a markdown checklist from plan steps and summaries.
 
   Used to show the LLM its progress through a plan as user feedback messages.
+  This is the default progress renderer used when no custom `progress_fn` is
+  set on the agent definition. Custom `progress_fn` implementations can call
+  `render/2` directly if they want to include the checklist as part of their output.
 
   Plan steps render as pending by default. Steps are checked off when
   `(step-done "id" "summary")` is called with a matching ID. This is

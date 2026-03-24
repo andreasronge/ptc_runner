@@ -241,7 +241,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
     # Build first user message — context goes in user message or system prompt
     # depending on context_in_system format option
-    first_user_message = build_first_user_message(agent, run_opts, expanded_prompt)
+    {first_user_message, initial_progress_state} =
+      build_first_user_message(agent, run_opts, expanded_prompt)
 
     initial_state = %State{
       llm: run_opts.llm,
@@ -275,7 +276,8 @@ defmodule PtcRunner.SubAgent.Loop do
       tool_cache: run_opts.tool_cache,
       agent_name: agent.name,
       on_chunk: run_opts.on_chunk,
-      initial_messages: run_opts.initial_messages
+      initial_messages: run_opts.initial_messages,
+      progress_state: initial_progress_state
     }
 
     # Route to appropriate execution mode based on agent.output
@@ -366,6 +368,7 @@ defmodule PtcRunner.SubAgent.Loop do
         turn_history: Keyword.get(opts, :turn_history, state.turn_history),
         tool_cache: Keyword.get(opts, :tool_cache, state.tool_cache),
         child_steps: Keyword.get(opts, :child_steps, state.child_steps),
+        progress_state: Keyword.get(opts, :progress_state, state.progress_state),
         # Preserve turn_tokens from the LLM call (for telemetry)
         turn_tokens: state.turn_tokens
     }
@@ -871,7 +874,8 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Normal execution continuation — calculate feedback and continue loop
   defp handle_normal_continuation(code, response, lisp_step, state, agent) do
-    {execution_result, _feedback_truncated} = TurnFeedback.format(agent, state, lisp_step)
+    {execution_result, _feedback_truncated, new_progress_state} =
+      TurnFeedback.format(agent, state, lisp_step)
 
     # Build Turn struct (success turn - loop continues) with turn type
     turn =
@@ -894,7 +898,8 @@ defmodule PtcRunner.SubAgent.Loop do
         tool_cache: lisp_step.tool_cache,
         child_steps: state.child_steps ++ lisp_step.child_steps,
         summaries: Map.merge(state.summaries, lisp_step.summaries),
-        turn_history: updated_history
+        turn_history: updated_history,
+        progress_state: new_progress_state
       )
 
     {:continue, new_state, turn}
@@ -1046,13 +1051,16 @@ defmodule PtcRunner.SubAgent.Loop do
         )
       end
 
-    # Initial progress checklist (all pending) if agent has a plan
-    initial_progress = TurnFeedback.render_initial_progress(agent)
+    # Initial progress via progress_fn (default: checklist from plan)
+    {initial_progress, initial_progress_state} = TurnFeedback.render_initial_progress(agent)
 
     # Combine context sections with mission
-    [context_prompt, "<mission>\n#{expanded_mission}\n</mission>", initial_progress]
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
+    message =
+      [context_prompt, "<mission>\n#{expanded_mission}\n</mission>", initial_progress]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    {message, initial_progress_state}
   end
 
   # Build messages for LLM input

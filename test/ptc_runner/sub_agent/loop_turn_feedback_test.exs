@@ -229,4 +229,122 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert step.return == 42
     end
   end
+
+  describe "custom progress_fn" do
+    test "receives initial and continuation calls, threads state across turns" do
+      {:ok, calls} = Agent.start_link(fn -> [] end)
+
+      progress_fn = fn input, state ->
+        count = (state || 0) + 1
+        Agent.update(calls, &[{count, input} | &1])
+        {"Turn progress ##{count}", count}
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "Multi-turn task",
+          tools: %{},
+          max_turns: 3,
+          plan: [{"a", "Step A"}],
+          progress_fn: progress_fn
+        )
+
+      llm = fn %{turn: turn, messages: messages} ->
+        case turn do
+          1 ->
+            # First user message should contain initial progress
+            first_msg = hd(messages)
+            assert first_msg.content =~ "Turn progress #1"
+            {:ok, "```clojure\n(+ 1 2)\n```"}
+
+          2 ->
+            # Feedback should contain continuation progress with state=2
+            last_msg = List.last(messages)
+            assert last_msg.content =~ "Turn progress #2"
+            {:ok, "```clojure\n(return :done)\n```"}
+
+          _ ->
+            {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+      assert step.return == :done
+
+      all_calls = Agent.get(calls, & &1) |> Enum.reverse()
+      assert length(all_calls) == 2
+
+      # Initial call
+      {1, initial} = Enum.at(all_calls, 0)
+      assert initial.phase == :initial
+      assert initial.turn == 0
+      assert initial.plan == [{"a", "Step A"}]
+      assert initial.summaries == %{}
+      assert initial.tool_calls == []
+
+      # Continuation call
+      {2, continuation} = Enum.at(all_calls, 1)
+      assert continuation.phase == :continuation
+      assert continuation.turn == 1
+      assert continuation.plan == [{"a", "Step A"}]
+    end
+
+    test "continuation receives tool_calls from execution" do
+      {:ok, calls} = Agent.start_link(fn -> [] end)
+
+      progress_fn = fn input, state ->
+        Agent.update(calls, &[input | &1])
+        {"", state}
+      end
+
+      greeting_tool = fn %{"name" => name} -> {:ok, "Hello #{name}"} end
+
+      agent =
+        SubAgent.new(
+          prompt: "Use tools",
+          tools: %{"greet" => greeting_tool},
+          max_turns: 3,
+          progress_fn: progress_fn
+        )
+
+      llm = fn %{turn: turn} ->
+        case turn do
+          1 -> {:ok, ~S|```clojure
+(tool/greet {:name "world"})
+```|}
+          2 -> {:ok, "```clojure\n(return :done)\n```"}
+          _ -> {:ok, "```clojure\n(return :done)\n```"}
+        end
+      end
+
+      {:ok, _step} = Loop.run(agent, llm: llm, context: %{})
+
+      all_calls = Agent.get(calls, & &1) |> Enum.reverse()
+      # Initial (no tool_calls) + continuation (with tool_calls from turn 1)
+      assert length(all_calls) == 2
+
+      continuation = Enum.at(all_calls, 1)
+      assert continuation.phase == :continuation
+      assert continuation.tool_calls != []
+      assert hd(continuation.tool_calls).name == "greet"
+    end
+
+    test "invalid progress_fn return raises ArgumentError" do
+      bad_fn = fn _input, _state -> "not a tuple" end
+
+      agent =
+        SubAgent.new(
+          prompt: "Task",
+          tools: %{},
+          max_turns: 2,
+          progress_fn: bad_fn
+        )
+
+      llm = fn _ -> {:ok, "```clojure\n(return :done)\n```"} end
+
+      assert_raise ArgumentError, ~r/progress_fn must return/, fn ->
+        Loop.run(agent, llm: llm, context: %{})
+      end
+    end
+  end
 end

@@ -54,6 +54,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_memory_strategy!(opts)
     validate_max_tool_calls!(opts)
     validate_journaling!(opts)
+    validate_progress_fn!(opts)
     validate_completion_mode!(opts)
     validate_self_tool_requires_signature!(opts)
   end
@@ -641,6 +642,15 @@ defmodule PtcRunner.SubAgent.Validator do
     case Keyword.fetch(opts, :journaling) do
       {:ok, val} when is_boolean(val) -> :ok
       {:ok, _} -> raise ArgumentError, "journaling must be a boolean"
+      :error -> :ok
+    end
+  end
+
+  defp validate_progress_fn!(opts) do
+    case Keyword.fetch(opts, :progress_fn) do
+      {:ok, fun} when is_function(fun, 2) -> :ok
+      {:ok, nil} -> :ok
+      {:ok, _} -> raise ArgumentError, "progress_fn must be a 2-arity function or nil"
       :error -> :ok
     end
   end
