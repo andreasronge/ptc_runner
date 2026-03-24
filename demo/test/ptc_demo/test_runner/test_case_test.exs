@@ -294,7 +294,8 @@ defmodule PtcDemo.TestRunner.TestCaseTest do
             :length,
             :gt_length,
             :starts_with,
-            :has_keys
+            :has_keys,
+            :one_of
           ]
 
           assert constraint_type in valid_types

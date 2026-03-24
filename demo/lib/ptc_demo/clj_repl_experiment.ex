@@ -249,8 +249,6 @@ defmodule PtcDemo.CljReplExperiment do
     |> String.trim()
   end
 
-  @feedback_max_chars 250
-
   defp truncate_feedback(text, max_chars) do
     if String.length(text) > max_chars do
       String.slice(text, 0, max_chars) <>
