@@ -330,6 +330,20 @@ defmodule PtcDemo.Agent do
     trace_label = Keyword.get(opts, :trace_label)
     trace_path = trace_file_path(trace_label)
 
+    # Build trace metadata from run parameters
+    trace_meta = %{
+      model: state.model,
+      agent_name: agent.name,
+      prompt_profile: prompt_profile,
+      data_mode: state.data_mode,
+      max_turns: max_turns,
+      retry_turns: retry_turns,
+      compression: inspect(state.compression),
+      thinking: state.thinking,
+      completion_mode: completion_mode,
+      signature: signature
+    }
+
     # Run with TraceLog to capture execution trace
     {:ok, run_result, _path} =
       TraceLog.with_trace(
@@ -341,7 +355,8 @@ defmodule PtcDemo.Agent do
             debug: debug
           )
         end,
-        path: trace_path
+        path: trace_path,
+        meta: trace_meta
       )
 
     case run_result do
@@ -564,7 +579,10 @@ defmodule PtcDemo.Agent do
     override_format_options = Keyword.get(extra_opts, :format_options)
     override_completion_mode = Keyword.get(extra_opts, :completion_mode)
 
+    name = Keyword.get(extra_opts, :name, "demo_#{prompt_profile}")
+
     base_opts = [
+      name: name,
       prompt: question,
       signature: signature || "(question :string) -> :any",
       max_turns: max_turns,
@@ -766,22 +784,12 @@ defmodule PtcDemo.Agent do
 
   @trace_dir "traces"
 
-  defp trace_file_path(label) do
+  defp trace_file_path(_label) do
     File.mkdir_p!(@trace_dir)
     now = DateTime.utc_now()
     datetime = Calendar.strftime(now, "%Y%m%d_%H%M%S")
     unique_id = :erlang.unique_integer([:positive])
 
-    name =
-      if label do
-        sanitized =
-          label |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "_") |> String.trim("_")
-
-        "trace_#{datetime}_#{sanitized}_#{unique_id}.jsonl"
-      else
-        "trace_#{datetime}_#{unique_id}.jsonl"
-      end
-
-    Path.join(@trace_dir, name)
+    Path.join(@trace_dir, "trace_#{datetime}_#{unique_id}.jsonl")
   end
 end
