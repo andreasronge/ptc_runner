@@ -247,6 +247,39 @@ Most frameworks inject the full plan into the system prompt. PtcRunner renders a
 | LangGraph | Executor receives current step + query |
 | PtcRunner | Checklist in feedback messages (cacheable) |
 
+### Custom Progress Rendering
+
+The default checklist can be replaced with a custom `progress_fn` for alternative feedback strategies (e.g., tool activity summaries, domain-specific renderers, or no-op):
+
+```elixir
+SubAgent.new(
+  prompt: "Analyze data",
+  plan: [{"fetch", "Fetch records"}, {"analyze", "Run analysis"}],
+  progress_fn: fn input, state ->
+    tool_summary =
+      case input.tool_calls do
+        [] -> ""
+        calls -> "Tools used: #{Enum.map_join(calls, ", ", & &1.name)}"
+      end
+
+    checklist = PtcRunner.SubAgent.ProgressRenderer.render(input.plan, input.summaries)
+    {checklist <> "\n" <> tool_summary, state}
+  end
+)
+```
+
+The function receives a `progress_input` map and opaque `progress_state`, returns `{text, new_state}`:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `plan` | `[{id, description}]` | From `Definition.plan` |
+| `summaries` | `%{id => summary}` | Accumulated `step-done` calls |
+| `tool_calls` | `[map()]` | Tool calls from the current turn (`[]` on initial) |
+| `turn` | `non_neg_integer()` | `0` for initial render, `1+` for continuation |
+| `phase` | `:initial \| :continuation` | Whether this is the first message or between turns |
+
+The `progress_state` is renderer-owned opaque state, threaded across turns. Keep it small. The default renderer (`progress_fn: nil`) uses `PtcRunner.SubAgent.ProgressRenderer.render/2` with no state.
+
 ### Caching vs Reporting
 
 PtcRunner separates two concerns that most frameworks conflate:

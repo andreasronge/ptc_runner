@@ -390,4 +390,29 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.journaling == true
     end
   end
+
+  describe "progress_fn validation" do
+    test "accepts nil progress_fn (default)" do
+      agent = SubAgent.new(prompt: "test")
+      assert agent.progress_fn == nil
+    end
+
+    test "accepts 2-arity function" do
+      fun = fn _input, state -> {"", state} end
+      agent = SubAgent.new(prompt: "test", progress_fn: fun)
+      assert is_function(agent.progress_fn, 2)
+    end
+
+    test "rejects non-function progress_fn" do
+      assert_raise ArgumentError, ~r/progress_fn must be a 2-arity function/, fn ->
+        SubAgent.new(prompt: "test", progress_fn: "not a function")
+      end
+    end
+
+    test "rejects 1-arity function" do
+      assert_raise ArgumentError, ~r/progress_fn must be a 2-arity function/, fn ->
+        SubAgent.new(prompt: "test", progress_fn: fn _input -> "" end)
+      end
+    end
+  end
 end

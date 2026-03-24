@@ -158,39 +158,78 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     # Add turn info for multi-turn agents
     feedback = append_turn_info(feedback, agent, state)
 
-    # Append progress checklist if agent has a plan
-    feedback = append_progress(feedback, agent, state, lisp_step)
+    # Append progress via progress_fn (default: checklist from plan + summaries)
+    {feedback, new_progress_state} = append_progress(feedback, agent, state, lisp_step)
 
-    {feedback, truncated?}
+    {feedback, truncated?, new_progress_state}
   end
 
   @doc """
-  Render initial progress checklist (all pending) for the first user message.
+  Render initial progress for the first user message.
 
-  Returns empty string if agent has no plan.
+  Returns `{text, progress_state}`. Uses `progress_fn` if set, otherwise
+  renders the default checklist from `plan`. Returns `{"", nil}` if no plan
+  and no custom `progress_fn`.
   """
-  @spec render_initial_progress(Definition.t()) :: String.t()
-  def render_initial_progress(%Definition{plan: []} = _agent), do: ""
+  @spec render_initial_progress(Definition.t(), term()) :: {String.t(), term()}
+  def render_initial_progress(agent, progress_state \\ nil) do
+    input = %{
+      plan: agent.plan,
+      summaries: %{},
+      tool_calls: [],
+      turn: 0,
+      phase: :initial
+    }
 
-  def render_initial_progress(%Definition{plan: plan}) do
-    ProgressRenderer.render(plan, %{})
+    call_progress_fn(agent, input, progress_state)
   end
 
-  # Append progress checklist if agent has a plan
-  defp append_progress(feedback, %Definition{plan: []}, _state, _lisp_step), do: feedback
-
   defp append_progress(feedback, agent, state, lisp_step) do
-    # Merge current turn's summaries so they appear in the next turn's prompt.
-    # The loop calls format() before merging into state, so we merge here.
     merged_summaries = Map.merge(state.summaries, lisp_step.summaries || %{})
 
-    checklist =
-      ProgressRenderer.render(agent.plan, merged_summaries)
+    input = %{
+      plan: agent.plan,
+      summaries: merged_summaries,
+      tool_calls: lisp_step.tool_calls || [],
+      turn: state.turn,
+      phase: :continuation
+    }
 
-    if checklist == "" do
-      feedback
-    else
-      feedback <> "\n\n" <> checklist
+    {progress_text, new_progress_state} = call_progress_fn(agent, input, state.progress_state)
+
+    new_feedback =
+      if progress_text == "" do
+        feedback
+      else
+        feedback <> "\n\n" <> progress_text
+      end
+
+    {new_feedback, new_progress_state}
+  end
+
+  # Default: no custom progress_fn, empty plan → no-op
+  defp call_progress_fn(%Definition{progress_fn: nil}, %{plan: []}, progress_state) do
+    {"", progress_state}
+  end
+
+  # Default: no custom progress_fn → use ProgressRenderer
+  defp call_progress_fn(
+         %Definition{progress_fn: nil, plan: plan},
+         %{summaries: summaries},
+         progress_state
+       ) do
+    {ProgressRenderer.render(plan, summaries), progress_state}
+  end
+
+  # Custom: delegate to user function, validate return shape
+  defp call_progress_fn(%Definition{progress_fn: fun}, input, progress_state) do
+    case fun.(input, progress_state) do
+      {text, new_state} when is_binary(text) ->
+        {text, new_state}
+
+      other ->
+        raise ArgumentError,
+              "progress_fn must return {String.t(), term()}, got: #{inspect(other)}"
     end
   end
 

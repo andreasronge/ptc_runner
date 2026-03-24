@@ -95,6 +95,9 @@ defmodule PtcRunner.SubAgent.Loop.State do
     summaries: %{},
     tool_cache: nil,
 
+    # Pluggable progress renderer state (opaque, owned by progress_fn)
+    progress_state: nil,
+
     # Child steps for TraceTree
     child_steps: [],
 
@@ -176,6 +179,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
           journal: map() | nil,
           summaries: map(),
           tool_cache: map() | nil,
+          # Pluggable progress renderer state
+          progress_state: term(),
           # Child steps
           child_steps: [map()],
           # Agent name
