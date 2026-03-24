@@ -479,24 +479,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   # Resolve language_ref and output_fmt from agent config
   defp resolve_static_sections(agent, resolution_context) do
     # Default language_spec selection based on agent config.
-    #
-    # When completion_mode == :auto AND a plan is present, the runtime disables
-    # auto-return (should_auto_return? checks plan == []), so we use explicit_journal.
-    # When auto without a plan, auto-return is active at runtime → use auto_return prompt.
     # Journaling adds journal capability docs (task/step-done) when enabled.
     default_spec =
       cond do
         agent.max_turns <= 1 ->
           :single_shot
-
-        agent.completion_mode == :auto and agent.plan != [] ->
-          :explicit_journal
-
-        agent.completion_mode == :auto and agent.journaling ->
-          {:profile, :auto_return, journal: true}
-
-        agent.completion_mode == :auto ->
-          :auto_return
 
         agent.journaling ->
           :explicit_journal

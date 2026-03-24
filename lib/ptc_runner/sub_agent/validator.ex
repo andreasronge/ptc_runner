@@ -647,8 +647,8 @@ defmodule PtcRunner.SubAgent.Validator do
 
   defp validate_completion_mode!(opts) do
     case Keyword.fetch(opts, :completion_mode) do
-      {:ok, mode} when mode in [:explicit, :auto] -> :ok
-      {:ok, _} -> raise ArgumentError, "completion_mode must be :explicit or :auto"
+      {:ok, :explicit} -> :ok
+      {:ok, _} -> raise ArgumentError, "completion_mode must be :explicit"
       :error -> :ok
     end
   end

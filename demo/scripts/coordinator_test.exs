@@ -4,7 +4,6 @@
 # It must: 1) decide what to ask, 2) call the analyst, 3) inspect results,
 # 4) decide if more info is needed or assemble the answer.
 #
-# Uses completion_mode: :auto — println means "exploring", no println means "done".
 #
 # Usage:
 #   cd demo && mix run scripts/coordinator_test.exs
@@ -20,7 +19,7 @@ CLIBase.ensure_api_key!()
 model = System.get_env("COORDINATOR_MODEL") || "openrouter:google/gemini-3.1-flash-lite-preview"
 timeout = 60_000
 
-IO.puts("=== Coordinator + Worker Test (auto-return) ===")
+IO.puts("=== Coordinator + Worker Test ===")
 IO.puts("Model: #{model}\n")
 
 # --- LLM callback ---
@@ -73,13 +72,12 @@ analyst_tool = fn %{"question" => question} ->
   end
 end
 
-# --- Coordinator: auto-return mode, no data, only the analyst tool ---
+# --- Coordinator: no data, only the analyst tool ---
 
 coordinator =
   SubAgent.new(
     prompt: "{{mission}}",
     signature: "(mission :string) -> :map",
-    completion_mode: :auto,
     tools: %{
       "analyst" =>
         {analyst_tool,
@@ -98,7 +96,7 @@ coordinator =
       Use the analyst tool to query datasets. Use println to inspect results.
       When you have all the data you need, write your final answer as the last expression (no println).
       """,
-      language_spec: :auto_return
+      language_spec: :explicit_return
     },
     max_turns: 6,
     timeout: 120_000,

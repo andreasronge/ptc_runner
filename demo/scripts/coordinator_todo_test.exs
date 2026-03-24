@@ -1,7 +1,7 @@
 # Coordinator + Worker + Todo test (Claude Code style)
 #
 # The coordinator manages its own task list via a todo tool,
-# delegates work to an analyst tool, and auto-returns when done.
+# delegates work to an analyst tool, and returns when done.
 #
 # Usage:
 #   cd demo && mix run scripts/coordinator_todo_test.exs
@@ -134,7 +134,6 @@ coordinator =
   SubAgent.new(
     prompt: "{{mission}}",
     signature: "(mission :string) -> :map",
-    completion_mode: :auto,
     tools: %{
       "analyst" =>
         {analyst_tool,
@@ -165,7 +164,7 @@ coordinator =
       4. Mark tasks done with the todo tool as you complete them
       5. When all tasks are done, write your final answer (no println)
       """,
-      language_spec: :auto_return
+      language_spec: :explicit_return
     },
     max_turns: 8,
     timeout: 120_000,

@@ -369,32 +369,24 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.completion_mode == :explicit
     end
 
-    test "accepts :auto" do
-      agent = SubAgent.new(prompt: "test", completion_mode: :auto)
-      assert agent.completion_mode == :auto
-    end
-
     test "accepts :explicit" do
       agent = SubAgent.new(prompt: "test", completion_mode: :explicit)
       assert agent.completion_mode == :explicit
     end
 
     test "rejects invalid values" do
-      assert_raise ArgumentError, ~r/completion_mode must be :explicit or :auto/, fn ->
+      assert_raise ArgumentError, ~r/completion_mode must be :explicit/, fn ->
         SubAgent.new(prompt: "test", completion_mode: :invalid)
       end
     end
 
-    test "plan auto-enables journaling regardless of completion_mode" do
-      agent_auto = SubAgent.new(prompt: "test", completion_mode: :auto, plan: ["step1"])
-      assert agent_auto.journaling == true
-
-      agent_explicit = SubAgent.new(prompt: "test", completion_mode: :explicit, plan: ["step1"])
-      assert agent_explicit.journaling == true
+    test "plan auto-enables journaling" do
+      agent = SubAgent.new(prompt: "test", plan: ["step1"])
+      assert agent.journaling == true
     end
 
     test "no plan does not auto-enable journaling" do
-      agent = SubAgent.new(prompt: "test", completion_mode: :auto)
+      agent = SubAgent.new(prompt: "test")
       assert agent.journaling == false
     end
 

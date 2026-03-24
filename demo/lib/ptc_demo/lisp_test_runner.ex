@@ -605,7 +605,7 @@ defmodule PtcDemo.LispTestRunner do
     # Add trace label from test description for identifiable trace files
     trace_label = Map.get(test_case, :description, query)
     ask_opts = Keyword.put(ask_opts, :trace_label, trace_label)
-    # Merge per-run overrides (format_options, completion_mode, prompt_profile, etc.)
+    # Merge per-run overrides (format_options, prompt_profile, etc.)
     ask_opts = Keyword.merge(ask_opts, agent_overrides)
 
     result =

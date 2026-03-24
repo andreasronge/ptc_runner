@@ -99,7 +99,7 @@ mix ablation --variants=auto --runs=30 --tests=1,2,3,4,5,6,7,8,9,10,20,21,22,23
 **Mechanism benchmarks** answer "does the prompt variant improve interaction quality?" Both variants get the same forced turn budget.
 
 ```bash
-# Mechanism: compare auto_return vs explicit_return at equal 6-turn budget
+# Mechanism: compare prompt variants at equal 6-turn budget
 mix ablation --variants=baseline,explicit --runs=30 --tests=20,23
 ```
 
@@ -115,7 +115,6 @@ mix ablation --variants=baseline,explicit --runs=30 --tests=20,23
 
 | Name | Prompt |
 |------|--------|
-| `baseline` | `:auto_return` |
 | `explicit` | `:explicit_return` |
 
 ### Programmatic Usage
@@ -130,7 +129,6 @@ variants = [
 
 # Mechanism benchmark
 variants = [
-  %{name: "baseline", agent_overrides: [prompt_profile: :auto_return, max_turns: 6]},
   %{name: "explicit", agent_overrides: [prompt_profile: :explicit_return, max_turns: 6]}
 ]
 
@@ -164,7 +162,6 @@ Overrides are per-run, not conversational state. They flow through `Agent.ask/2`
 # These override the prompt_profile defaults for a single run
 Agent.ask(query,
   prompt_profile: :explicit_return,
-  completion_mode: :auto,
   max_turns: 6
 )
 ```
@@ -261,6 +258,6 @@ mix ablation --variants=auto --runs=30 \
 mix ablation --variants=baseline,explicit --runs=30 --tests=20,21,22,23
 ```
 
-This isolates whether explicit_return vs auto_return framing drives improvement.
+This isolates whether the prompt variant drives improvement.
 
 **Step 3: Cross-model check** — run at least one additional model early, even at smaller N, to catch obvious inversions.
