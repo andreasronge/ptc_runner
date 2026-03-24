@@ -25,22 +25,6 @@ export function hideTooltip() {
   if (tooltipEl) tooltipEl.style.display = 'none';
 }
 
-export function tooltipForDagNode(task, gateTaskIds) {
-  let html = `<div class="tt-label">Task</div><div class="tt-value" style="font-weight:600;">${escapeHtml(task.id)}</div>`;
-  html += `<div class="tt-label">Agent</div><div class="tt-value">${escapeHtml(task.agent)}</div>`;
-  html += `<div class="tt-label">Status</div><div class="tt-value">${task.status}</div>`;
-  if (task.durationMs > 0) html += `<div class="tt-label">Duration</div><div class="tt-value">${formatDuration(task.durationMs)}</div>`;
-  if (task.input) html += `<div class="tt-label">Input</div><div class="tt-value" style="font-size:11px;">${escapeHtml(truncate(task.input, 120))}</div>`;
-  if (task.dependsOn && task.dependsOn.length > 0) html += `<div class="tt-label">Depends on</div><div class="tt-value">${task.dependsOn.map(d => escapeHtml(d)).join(', ')}</div>`;
-  if (task.signature) html += `<div class="tt-label">Signature</div><div class="tt-value" style="font-family: monospace; font-size: 11px;">${escapeHtml(task.signature)}</div>`;
-  const hasGate = task.qualityGate === true || (gateTaskIds && gateTaskIds.has(task.id));
-  if (hasGate) {
-    const gateSource = task.qualityGate === true ? 'per-task' : 'global';
-    html += `<div class="tt-label">Quality Gate</div><div class="tt-value" style="color:#6a9955;">enabled (${gateSource})</div>`;
-  }
-  return html;
-}
-
 export function tooltipForTurnPill(turn) {
   let html = `<div class="tt-label">Turn</div><div class="tt-value" style="font-weight:600;">${turn.turn || '?'}</div>`;
   if (turn.duration) html += `<div class="tt-label">Duration</div><div class="tt-value">${formatDuration(turn.duration)}</div>`;

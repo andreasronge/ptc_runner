@@ -8,7 +8,7 @@ export function renderTimeline(container, paired, totalDurationMs) {
   const startTs = getEarliestTimestamp(paired);
 
   for (const pair of paired) {
-    if (!['llm', 'tool', 'pmap', 'pcalls', 'task'].includes(pair.type)) continue;
+    if (!['llm', 'tool', 'pmap', 'pcalls'].includes(pair.type)) continue;
     const duration = pair.stop?.duration_ms || 0;
     if (duration === 0) continue;
 

@@ -1,5 +1,4 @@
-import { parseJsonl, extractTraceId, detectTraceType, extractChildTraceIds } from './parser.js';
-import { renderOverview } from './overview.js';
+import { parseJsonl, extractTraceId, extractChildTraceIds } from './parser.js';
 import { renderAgentView } from './agent-view.js';
 import { initTooltip } from './tooltip.js';
 
@@ -12,7 +11,6 @@ function formatDate(isoString) {
 // Global state
 const state = {
   files: new Map(),        // filename -> { events, traceId, filename }
-  plans: new Map(),        // filename -> plan data
   navStack: [],            // [{type, label, data}]
   currentFilename: null,
   selectedTurn: null
@@ -60,9 +58,7 @@ function render() {
   if (picker) picker.classList.add('collapsed');
 
   const current = state.navStack[state.navStack.length - 1];
-  if (current.type === 'overview') {
-    renderOverview(container, state, current.data);
-  } else if (current.type === 'agent') {
+  if (current.type === 'agent') {
     renderAgentView(container, state, current.data);
   }
 
@@ -144,12 +140,7 @@ function autoNavigate() {
   state.currentFilename = filename;
 
   state.navStack = [];
-  const traceType = detectTraceType(data.events);
-  if (traceType === 'plan') {
-    navigateTo({ type: 'overview', label: filename, data });
-  } else {
-    navigateTo({ type: 'agent', label: filename, data });
-  }
+  navigateTo({ type: 'agent', label: filename, data });
 }
 
 async function tryLoadFromApi() {
@@ -242,13 +233,8 @@ async function loadTraceFromApi(filename) {
 
   highlightActiveTrace(filename);
 
-  const traceType = detectTraceType(events);
   state.navStack = [];
-  if (traceType === 'plan') {
-    navigateTo({ type: 'overview', label: filename, data: state.files.get(filename) });
-  } else {
-    navigateTo({ type: 'agent', label: filename, data: state.files.get(filename) });
-  }
+  navigateTo({ type: 'agent', label: filename, data: state.files.get(filename) });
 }
 
 // Export for other modules
