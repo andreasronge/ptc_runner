@@ -65,6 +65,22 @@
       divergences: nil
     },
     %{
+      name: ".contains",
+      description: "Returns true if string contains substring",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.contains s substr)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: nil,
+      see_also: [],
+      clojure_var: ".contains",
+      divergences: nil
+    },
+    %{
       name: ".indexOf",
       description: "Index of first occurrence starting from position",
       binding: :multi_arity,
@@ -7677,6 +7693,14 @@
       kind: :constant,
       description: "Not-a-Number constant (##NaN)",
       signatures: ["Double/NaN", "NaN"],
+      notes: ""
+    },
+    %{
+      name: ".contains",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Returns true if string contains substring",
+      signatures: ["(.contains s substr)"],
       notes: ""
     },
     %{

@@ -174,6 +174,18 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   end
 
   @doc """
+  Simulates .contains method on strings.
+  Delegates to `String.contains?/2`.
+  """
+  def dot_contains(s, substring) when is_binary(s) and is_binary(substring) do
+    String.contains?(s, substring)
+  end
+
+  def dot_contains(s, _substring) do
+    raise ".contains: expected string, got #{type_name(s)}"
+  end
+
+  @doc """
   Simulates .lastIndexOf method on strings.
   Delegates to `Runtime.String.last_index_of/2` and converts `nil` to `-1`.
   """

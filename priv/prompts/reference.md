@@ -34,8 +34,7 @@ Minimal Java interop for Date/Time and string methods only:
 - `(java.time.LocalDate/parse "2026-01-15")` — parse ISO-8601 date
 - `(.getTime date)` — Unix millis from Date object
 - `(System/currentTimeMillis)` — current time in millis
-- String methods: `.indexOf`, `.lastIndexOf`, `.startsWith`, `.endsWith`, `.substring`, `.replace`, `.replaceAll`, `.matches`, `.toLowerCase`, `.toUpperCase`, `.trim`, `.length`, `.charAt`, `.split`
-- For substring checking use `(str/includes? s "text")` instead of `.contains`
+- String methods: `.contains`, `.indexOf`, `.lastIndexOf`, `.startsWith`, `.endsWith`, `.substring`, `.replace`, `.replaceAll`, `.matches`, `.toLowerCase`, `.toUpperCase`, `.trim`, `.length`, `.charAt`, `.split`
 
 No other Java interop is supported.
 </java_interop>
