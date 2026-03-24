@@ -428,6 +428,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"java.util.Date.",
        {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
       {:".getTime", {:normal, &Runtime.dot_get_time/1}},
+      {:".contains", {:normal, &Runtime.dot_contains/2}},
       {:".indexOf",
        {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},
       {:".lastIndexOf", {:normal, &Runtime.dot_last_index_of/2}},

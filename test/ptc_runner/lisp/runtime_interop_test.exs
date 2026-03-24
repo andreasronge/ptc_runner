@@ -140,6 +140,23 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     end
   end
 
+  describe ".contains" do
+    test "returns true when substring found" do
+      assert {:ok, step} = Lisp.run(~s|(.contains "hello world" "world")|)
+      assert step.return == true
+    end
+
+    test "returns false when substring not found" do
+      assert {:ok, step} = Lisp.run(~s|(.contains "hello" "xyz")|)
+      assert step.return == false
+    end
+
+    test "error on non-string" do
+      assert {:error, step} = Lisp.run("(.contains 123 \"x\")")
+      assert step.fail.message =~ ".contains: expected string, got integer"
+    end
+  end
+
   describe ".indexOf" do
     test "finds substring" do
       assert {:ok, step} = Lisp.run(~s|(.indexOf "hello" "ll")|)
