@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **MetaPlanner, PlanExecutor, PlanRunner, PlanTracer, PlanCritic** — The autonomous planning system with JSON task graphs, verification predicates, and replanning has been removed. Use [Composition Patterns](docs/guides/subagent-patterns.md) (`with` chains, `Task.async_stream`, subagents-as-tools) for orchestration instead.
+- Planning prompt templates (`planning-examples.md`, `verification-predicate-guide.md`, `verification-predicate-reminder.md`, `signature-guide.md`)
+- PlanExecutor telemetry events
+
+### Changed
+
+- **`plan:` no longer auto-enables `journaling: true`** — Plans are now display-only labels for progress visibility. To use journaled task caching, set `journaling: true` explicitly.
+- Progress checklist renders for any agent with a `plan:`, regardless of `journaling:` setting
+- `step-done` instruction text updated to reflect it is optional
+
 ## [0.9.0] - 2026-02-27
 
 ### Added

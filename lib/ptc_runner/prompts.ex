@@ -27,9 +27,6 @@ defmodule PtcRunner.Prompts do
   | `tool-calling-system.md` | `tool_calling_system/0` | `ToolCallingMode` |
   | `turn-feedback-must-return.md` | `must_return_warning/0` | `TurnFeedback` |
   | `turn-feedback-retry.md` | `retry_feedback/0` | `TurnFeedback` |
-  | `planning-examples.md` | `planning_examples/0` | `MetaPlanner` |
-  | `verification-predicate-guide.md` | `verification_guide/0` | `MetaPlanner` |
-  | `verification-predicate-reminder.md` | `verification_reminder/0` | `MetaPlanner` |
 
   ## File Format
 
@@ -218,43 +215,6 @@ defmodule PtcRunner.Prompts do
   def retry_feedback, do: @retry_feedback
 
   # ============================================================================
-  # MetaPlanner Templates
-  # ============================================================================
-
-  @planning_examples_file Path.join(@prompts_dir, "planning-examples.md")
-  @verification_guide_file Path.join(@prompts_dir, "verification-predicate-guide.md")
-  @verification_reminder_file Path.join(@prompts_dir, "verification-predicate-reminder.md")
-  @signature_guide_file Path.join(@prompts_dir, "signature-guide.md")
-
-  @external_resource @planning_examples_file
-  @external_resource @verification_guide_file
-  @external_resource @verification_reminder_file
-  @external_resource @signature_guide_file
-
-  @planning_examples @planning_examples_file |> File.read!() |> PromptLoader.extract_content()
-  @verification_guide @verification_guide_file |> File.read!() |> PromptLoader.extract_content()
-  @verification_reminder @verification_reminder_file
-                         |> File.read!()
-                         |> PromptLoader.extract_content()
-  @signature_guide @signature_guide_file |> File.read!() |> PromptLoader.extract_content()
-
-  @doc "Example plan structure for MetaPlanner."
-  @spec planning_examples() :: String.t()
-  def planning_examples, do: @planning_examples
-
-  @doc "Comprehensive guide for writing verification predicates."
-  @spec verification_guide() :: String.t()
-  def verification_guide, do: @verification_guide
-
-  @doc "Quick reference reminder for verification predicates."
-  @spec verification_reminder() :: String.t()
-  def verification_reminder, do: @verification_reminder
-
-  @doc "Guide for writing task signatures."
-  @spec signature_guide() :: String.t()
-  def signature_guide, do: @signature_guide
-
-  # ============================================================================
   # Utility
   # ============================================================================
 
@@ -281,11 +241,7 @@ defmodule PtcRunner.Prompts do
       :json_error,
       :tool_calling_system,
       :must_return_warning,
-      :retry_feedback,
-      :planning_examples,
-      :verification_guide,
-      :verification_reminder,
-      :signature_guide
+      :retry_feedback
     ]
   end
 
@@ -314,9 +270,5 @@ defmodule PtcRunner.Prompts do
   def get(:tool_calling_system), do: tool_calling_system()
   def get(:must_return_warning), do: must_return_warning()
   def get(:retry_feedback), do: retry_feedback()
-  def get(:planning_examples), do: planning_examples()
-  def get(:verification_guide), do: verification_guide()
-  def get(:verification_reminder), do: verification_reminder()
-  def get(:signature_guide), do: signature_guide()
   def get(_), do: nil
 end

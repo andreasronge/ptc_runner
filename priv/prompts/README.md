@@ -13,11 +13,10 @@ Files use **kebab-case** with a **category prefix** that groups related prompts:
 | `capability-` | Optional composable capabilities | `LanguageSpec` |
 | `json-` | JSON/text mode prompts (system, user, error) | `JsonMode` |
 | `turn-feedback-` | Turn feedback (warnings, retry info) | `TurnFeedback` |
-| `verification-predicate-` | Verification predicate guides | `MetaPlanner` |
 | `tool-calling-` | Tool calling mode | `ToolCallingMode` |
 | *(none)* | Top-level shared prompts | Various |
 
-Unprefixed files: `reference.md` (language reference), `planning-examples.md`, `signature-guide.md`.
+Unprefixed files: `reference.md` (language reference).
 
 ## File → Function Mapping
 
@@ -38,10 +37,6 @@ The filename maps to a function in `PtcRunner.Prompts` by replacing hyphens with
 | `tool-calling-system.md` | `tool_calling_system/0` |
 | `turn-feedback-must-return.md` | `must_return_warning/0` |
 | `turn-feedback-retry.md` | `retry_feedback/0` |
-| `planning-examples.md` | `planning_examples/0` |
-| `verification-predicate-guide.md` | `verification_guide/0` |
-| `verification-predicate-reminder.md` | `verification_reminder/0` |
-| `signature-guide.md` | `signature_guide/0` |
 
 ## File Format
 

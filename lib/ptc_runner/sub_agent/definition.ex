@@ -244,17 +244,6 @@ defmodule PtcRunner.SubAgent.Definition do
           opts
       end
 
-    # Auto-enable journaling when a plan is present, regardless of completion_mode.
-    # The plan progress checklist and step-done tracking require journaling to
-    # render in turn feedback. Without it, the LLM never sees the checklist.
-    # This overrides an explicit journaling: false when a non-empty plan is given.
-    opts =
-      if Keyword.get(opts, :plan, []) != [] do
-        Keyword.put(opts, :journaling, true)
-      else
-        opts
-      end
-
     struct(__MODULE__, opts)
   end
 

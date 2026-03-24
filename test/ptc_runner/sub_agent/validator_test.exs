@@ -380,22 +380,12 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       end
     end
 
-    test "plan auto-enables journaling" do
+    test "plan does not auto-enable journaling" do
       agent = SubAgent.new(prompt: "test", plan: ["step1"])
-      assert agent.journaling == true
-    end
-
-    test "no plan does not auto-enable journaling" do
-      agent = SubAgent.new(prompt: "test")
       assert agent.journaling == false
     end
 
-    test "plan overrides explicit journaling: false" do
-      agent = SubAgent.new(prompt: "test", plan: ["step1"], journaling: false)
-      assert agent.journaling == true
-    end
-
-    test "preserves journaling: true when already set with plan" do
+    test "plan with explicit journaling: true" do
       agent = SubAgent.new(prompt: "test", plan: ["step1"], journaling: true)
       assert agent.journaling == true
     end

@@ -46,7 +46,7 @@ defmodule PtcRunner.TraceLog do
 
   ### Cross-Process Tracing
 
-  When execution spans multiple processes (e.g., PlanRunner parallel tasks), use
+  When execution spans multiple processes (e.g., parallel tasks), use
   `join/2` to propagate trace context to child processes:
 
       collectors = TraceLog.active_collectors()
@@ -57,8 +57,6 @@ defmodule PtcRunner.TraceLog do
         # Events from this process are now captured AND linked to parent
       end)
 
-  PlanRunner automatically propagates trace context to parallel task workers.
-
   **Note:** The sandbox process inherits trace collectors via `join/2`, so tool
   telemetry events (`tool.start`, `tool.stop`) emitted inside the sandbox are
   captured directly by the trace handler.
@@ -68,7 +66,7 @@ defmodule PtcRunner.TraceLog do
   - `PtcRunner.TraceLog.Analyzer` - Load and analyze trace files
   - `PtcRunner.TraceLog.Collector` - Low-level file writing
   - `PtcRunner.TraceLog.Handler` - Telemetry handler
-  - [Observability Guide](subagent-observability.md) - How TraceLog relates to `PtcRunner.Tracer` and `PtcRunner.PlanTracer`
+  - [Observability Guide](subagent-observability.md) - How TraceLog relates to `PtcRunner.Tracer`
   """
 
   alias PtcRunner.SubAgent.Telemetry

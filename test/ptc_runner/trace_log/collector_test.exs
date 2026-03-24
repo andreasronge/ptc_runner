@@ -317,7 +317,7 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       path = Path.join(dir, "test.jsonl")
       test_pid = self()
 
-      # Simulate PlanRunner's Task.async_stream with on_timeout: :kill_task.
+      # Simulate Task.async_stream with on_timeout: :kill_task.
       # The task spawns a Collector via start_link, then gets killed by the stream timeout.
       # Before the fix, this caused:
       #   GenServer #PID<...> terminating

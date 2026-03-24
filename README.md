@@ -239,7 +239,7 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **`mix ptc.repl`** - Interactive REPL for testing PTC-Lisp expressions
 - **[Playground Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)** - Try PTC-Lisp interactively
 - **[LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd)** - Build an agent end-to-end
-- **[Examples](https://github.com/andreasronge/ptc_runner/tree/main/examples)** - Runnable example applications including [PageIndex](https://github.com/andreasronge/ptc_runner/tree/main/examples/page_index) (agentic RAG over PDFs using MetaPlanner)
+- **[Examples](https://github.com/andreasronge/ptc_runner/tree/main/examples)** - Runnable example applications including [Wire Transfer](https://github.com/andreasronge/ptc_runner/tree/main/examples/wire_transfer) (human-in-the-loop workflow)
 - **[Blog](https://andreasronge.github.io/ptc_runner/)** - Articles and updates
 
 ## Low-Level API
