@@ -183,16 +183,6 @@ Auto-extraction from `@spec` means you can define tools as regular Elixir functi
 
 See [Signature Syntax](docs/signature-syntax.md) for the full type reference.
 
-### Meta Planner
-
-The meta planner decomposes a mission into a dependency graph of tasks, assigns each to a specialized SubAgent, and executes them in parallel phases. The Trace Viewer provides interactive visualization of the full execution — from the high-level DAG down to individual agent turns with thinking, programs, and tool output.
-
-![Planner overview showing task execution DAG with phases and status](images/planner_view.png)
-
-```bash
-mix ptc.viewer --trace-dir path/to/traces
-```
-
 ## Installation
 
 ```elixir
@@ -241,6 +231,16 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[LLM Agent Livebook](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fandreasronge%2Fptc_runner%2Fblob%2Fmain%2Flivebooks%2Fptc_runner_llm_agent.livemd)** - Build an agent end-to-end
 - **[Examples](https://github.com/andreasronge/ptc_runner/tree/main/examples)** - Runnable example applications including [Wire Transfer](https://github.com/andreasronge/ptc_runner/tree/main/examples/wire_transfer) (human-in-the-loop workflow)
 - **[Blog](https://andreasronge.github.io/ptc_runner/)** - Articles and updates
+
+## Trace Viewer
+
+A built-in web UI for browsing execution traces with turn-by-turn drill-down:
+
+```bash
+mix ptc.viewer --trace-dir traces
+```
+
+See [Observability Guide](docs/guides/subagent-observability.md#interactive-trace-viewer) for details.
 
 ## Low-Level API
 
