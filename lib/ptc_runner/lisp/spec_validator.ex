@@ -190,18 +190,16 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
       [
         {"lazy-seq", "(lazy-seq [1])", :unbound_var},
-        {"partial", "(partial + 1)", :unbound_var},
+        {"eval", "(eval (+ 1 2))", :unbound_var},
         ...
       ]
   """
   @spec negative_tests() :: [tuple()]
   def negative_tests do
-    # Only features that remain unsupported per Section 13.1
-    # Removed: def, defn, #(), loop/recur, str, println (now supported)
+    # Only features that remain unsupported per Section 13
+    # Removed: def, defn, #(), loop/recur, str, println, partial, comp (now supported)
     [
       {"lazy-seq", "(lazy-seq [1])", :unbound_var},
-      {"partial", "(partial + 1)", :unbound_var},
-      {"comp", "(comp inc inc)", :unbound_var},
       {"eval", "(eval (+ 1 2))", :unbound_var},
       {"read-string", "(read-string \"(+ 1 2)\")", :unbound_var},
       {"try", "(try 1)", :unbound_var}
