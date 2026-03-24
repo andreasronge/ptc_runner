@@ -53,8 +53,8 @@ defmodule PtcDemo.LispTestRunnerTest do
       {result, _} =
         with_io(fn -> LispTestRunner.run_all(agent: mock_agent, verbose: false) end)
 
-      # LispTestRunner: 25 test cases in common_test_cases
-      assert result.total == 25
+      # LispTestRunner: 30 test cases in common_test_cases
+      assert result.total == 30
     end
   end
 
