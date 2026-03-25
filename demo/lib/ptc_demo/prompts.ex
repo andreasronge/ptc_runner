@@ -13,7 +13,7 @@ defmodule PtcDemo.Prompts do
   | `:explicit_journal` | Reference + multi-turn + explicit return + journal |
 
 
-  Use `{:profile, behavior, reference: :full}` to add the language reference for weaker models.
+  The language reference is included by default. Use `{:profile, behavior, reference: :none}` to omit it for capable models.
 
   ## Usage
 

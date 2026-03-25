@@ -13,9 +13,9 @@ SubAgent prompts are built from a 2-axis architecture:
 | `:single_shot` | Last expression IS the answer | `max_turns: 1`, simple queries |
 | `:explicit_return` | Must call `(return ...)` or `(fail ...)` | Multi-turn exploration with tools |
 
-**Reference** — optional language documentation (tool syntax, Java interop, restrictions):
+**Reference** — language documentation (tool syntax, Java interop, restrictions):
 
-The language reference is **not** included by default. Add it with `reference: :full` for weaker models that need syntax guidance.
+The language reference is included by default. Use `reference: :none` to omit it for capable models that don't need syntax guidance.
 
 **Additive capabilities:**
 
@@ -45,9 +45,9 @@ Pre-composed specs available via `system_prompt: %{language_spec: atom}`:
 |------|------------|-------------|
 | `:single_shot` | reference + single-shot | Last expr = answer, one turn |
 | `:explicit_return` | reference + multi-turn + explicit return | Must call `(return ...)`/`(fail ...)` |
-| `:explicit_journal` | multi-turn + explicit return + journal | With task caching |
+| `:explicit_journal` | reference + multi-turn + explicit return + journal | With task caching |
 
-The language reference is not included by default. Use `reference: :full` in a structured profile to add it.
+The language reference is included by default. Use `reference: :none` in a structured profile to omit it.
 
 ```elixir
 # Single-turn query (default for max_turns: 1)
@@ -62,11 +62,11 @@ SubAgent.new(
   max_turns: 5
 )
 
-# Add language reference for weaker models
+# Omit language reference for capable models
 SubAgent.new(
   prompt: "Count items",
   max_turns: 1,
-  system_prompt: %{language_spec: {:profile, :single_shot, reference: :full}}
+  system_prompt: %{language_spec: {:profile, :single_shot, reference: :none}}
 )
 ```
 
@@ -75,11 +75,11 @@ SubAgent.new(
 For programmatic composition, use the `{:profile, behavior, opts}` tuple:
 
 ```elixir
-# Add language reference for a weaker model
+# Omit language reference for a capable model
 SubAgent.new(
   prompt: "Execute the plan",
   system_prompt: %{
-    language_spec: {:profile, :explicit_return, reference: :full}
+    language_spec: {:profile, :explicit_return, reference: :none}
   }
 )
 
@@ -91,10 +91,10 @@ SubAgent.new(
   }
 )
 
-# Both reference and journal
-system_prompt: %{language_spec: {:profile, :explicit_return, reference: :full, journal: true}}
+# Both reference (default) and journal
+system_prompt: %{language_spec: {:profile, :explicit_return, journal: true}}
 
-# Short form (defaults: reference: :none, journal: false)
+# Short form (defaults: reference: :full, journal: false)
 system_prompt: %{language_spec: {:profile, :explicit_return}}
 ```
 
@@ -102,7 +102,7 @@ system_prompt: %{language_spec: {:profile, :explicit_return}}
 
 | Option | Values | Default |
 |--------|--------|---------|
-| `:reference` | `:none` or `:full` | `:none` |
+| `:reference` | `:full` or `:none` | `:full` |
 | `:journal` | `true` or `false` | `false` |
 
 **Validation:** Raises `ArgumentError` for invalid combinations (e.g., `single_shot + journal`).
@@ -166,7 +166,7 @@ The callback receives:
 
 ## LLM-Specific Prompts
 
-Different models may need different prompt styles. Benchmark results show weaker models benefit from the language reference while capable models work fine without it:
+Different models may need different prompt styles. Capable models may work fine without the language reference, saving tokens:
 
 ```elixir
 defmodule MyApp.Prompts do
@@ -174,12 +174,12 @@ defmodule MyApp.Prompts do
 
   def for_model(ctx) do
     case ctx.model do
-      model when model in [:haiku, :gemini] ->
-        # Weaker models: add language reference
-        LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
+      model when model in [:sonnet, :gpt4o] ->
+        # Capable models: omit language reference to save tokens
+        LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none})
 
       _ ->
-        # Capable models: default (no reference)
+        # Default: include language reference
         LanguageSpec.get(:explicit_return)
     end
   end

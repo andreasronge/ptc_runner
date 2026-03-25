@@ -17,7 +17,7 @@ Don't echo data in code from your context. You already know the data, no need to
 
 Keep programs very short. Small programs are less likely to fail. You can always reuse and combine the programs in future turns.
 
-Multiple tool calls per turn. You can call several tools in one program to gather data efficiently:
+You can call several tools in one program to gather data efficiently:
 
 ```clojure
 (def users (tool/get-users {:role "admin"}))
@@ -26,8 +26,7 @@ Multiple tool calls per turn. You can call several tools in one program to gathe
 ```
 
 Keep output concise — truncated at ~512 chars. Avoid decorative formatting.
-
-Parallel branches communicate via return values. Use `println` between turns for debugging, and `doseq` for iterating with side effects.
+Use `println` between turns for debugging.
 </multi_turn_rules>
 
 <state>
@@ -36,15 +35,6 @@ Parallel branches communicate via return values. Use `println` between turns for
 results                                     ; access in later turns
 ```
 
-Use `def` to store values you need to reference later. Use `defonce` to initialize, `def` to update:
-```clojure
-(defonce counter 0)                ; turn 1 → binds 0; turn 2+ → no-op
-(def counter (inc counter))        ; safe increment every turn
-;; ✗ (def counter (inc (or counter 0))) — or never runs; unbound var is an error
-```
-
 `(budget/remaining)` returns turns, depth, and token usage for adaptive strategies.
-
-Avoid Clojure features not in PTC-Lisp. Syntax errors waste a turn. Simpler, shorter programs are safer. You can always build on them in future turns.
 </state>
 <!-- PTC_PROMPT_END -->

@@ -10,54 +10,54 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
   # ============================================================================
 
   describe "canonical compositions" do
-    test ":single_shot contains single-shot behavior only" do
+    test ":single_shot contains reference + single-shot behavior" do
       prompt = LanguageSpec.get(:single_shot)
       assert is_binary(prompt)
       assert String.contains?(prompt, "<single_shot>")
-      # No reference, no multi-turn content
-      refute String.contains?(prompt, "<role>")
+      assert String.contains?(prompt, "<restrictions>")
+      # No multi-turn content
       refute String.contains?(prompt, "<state>")
       refute String.contains?(prompt, "<return_rules>")
     end
 
-    test ":explicit_return contains multi-turn + explicit return" do
+    test ":explicit_return contains reference + multi-turn + explicit return" do
       prompt = LanguageSpec.get(:explicit_return)
       assert is_binary(prompt)
+      assert String.contains?(prompt, "<restrictions>")
       assert String.contains?(prompt, "<multi_turn_rules>")
       assert String.contains?(prompt, "<state>")
       assert String.contains?(prompt, "<return_rules>")
       assert String.contains?(prompt, "(return answer)")
-      # No reference, no journal
-      refute String.contains?(prompt, "<role>")
+      # No journal
       refute String.contains?(prompt, "<journaled_tasks>")
     end
 
-    test ":explicit_journal contains multi-turn + explicit return + journal" do
+    test ":explicit_journal contains reference + multi-turn + explicit return + journal" do
       prompt = LanguageSpec.get(:explicit_journal)
       assert is_binary(prompt)
+      assert String.contains?(prompt, "<restrictions>")
       assert String.contains?(prompt, "<state>")
       assert String.contains?(prompt, "(return answer)")
       assert String.contains?(prompt, "<journaled_tasks>")
       assert String.contains?(prompt, "<semantic_progress>")
-      refute String.contains?(prompt, "<role>")
     end
   end
 
   # ============================================================================
-  # Reference is opt-in (not included by default)
+  # Reference is included by default, opt-out with reference: :none
   # ============================================================================
 
-  describe "default compositions omit reference" do
-    test "canonical compositions do not include reference" do
+  describe "default compositions include reference" do
+    test "canonical compositions include reference" do
       for key <- [:single_shot, :explicit_return, :explicit_journal] do
         prompt = LanguageSpec.get(key)
-        refute String.contains?(prompt, "<role>"), "#{key} should not contain reference"
+        assert String.contains?(prompt, "<restrictions>"), "#{key} should contain reference"
       end
     end
 
-    test "reference can be added via profile" do
-      result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
-      assert String.contains?(result, "<role>")
+    test "reference can be omitted via profile" do
+      result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none})
+      refute String.contains?(result, "<restrictions>")
       assert String.contains?(result, "(return answer)")
     end
   end
@@ -91,23 +91,27 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
   # ============================================================================
 
   describe "composition structure" do
-    test "single_shot equals behavior_single_shot" do
-      assert LanguageSpec.get(:single_shot) == LanguageSpec.get(:behavior_single_shot)
+    test "single_shot equals reference + behavior_single_shot" do
+      ref = LanguageSpec.get(:reference)
+      ss = LanguageSpec.get(:behavior_single_shot)
+      assert LanguageSpec.get(:single_shot) == ref <> "\n\n" <> ss
     end
 
-    test "explicit_return equals behavior_multi_turn + behavior_return_explicit" do
+    test "explicit_return equals reference + behavior_multi_turn + behavior_return_explicit" do
+      ref = LanguageSpec.get(:reference)
       mt = LanguageSpec.get(:behavior_multi_turn)
       ret = LanguageSpec.get(:behavior_return_explicit)
-      expected = mt <> "\n\n" <> ret
+      expected = ref <> "\n\n" <> mt <> "\n\n" <> ret
 
       assert LanguageSpec.get(:explicit_return) == expected
     end
 
-    test "explicit_journal includes three parts" do
+    test "explicit_journal includes four parts" do
+      ref = LanguageSpec.get(:reference)
       mt = LanguageSpec.get(:behavior_multi_turn)
       ret = LanguageSpec.get(:behavior_return_explicit)
       journal = LanguageSpec.get(:capability_journal)
-      expected = mt <> "\n\n" <> ret <> "\n\n" <> journal
+      expected = ref <> "\n\n" <> mt <> "\n\n" <> ret <> "\n\n" <> journal
 
       assert LanguageSpec.get(:explicit_journal) == expected
     end
@@ -124,7 +128,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
 
     test "tuple with reference: :full includes reference" do
       result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
-      assert String.contains?(result, "<role>")
+      assert String.contains?(result, "<restrictions>")
       assert String.contains?(result, "(return answer)")
     end
 
@@ -139,12 +143,12 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       assert String.contains?(result, "<journaled_tasks>")
     end
 
-    test "short form defaults to reference: :none, journal: false" do
+    test "short form defaults to reference: :full, journal: false" do
       short = LanguageSpec.resolve_profile({:profile, :explicit_return})
 
       explicit =
         LanguageSpec.resolve_profile(
-          {:profile, :explicit_return, reference: :none, journal: false}
+          {:profile, :explicit_return, reference: :full, journal: false}
         )
 
       assert short == explicit
@@ -252,11 +256,10 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       assert version >= 1
     end
 
-    test "canonical compositions return version of their first component" do
-      ss_v = LanguageSpec.version(:behavior_single_shot)
-      mt_v = LanguageSpec.version(:behavior_multi_turn)
-      assert LanguageSpec.version(:single_shot) == ss_v
-      assert LanguageSpec.version(:explicit_return) == mt_v
+    test "canonical compositions return version of their first component (reference)" do
+      ref_v = LanguageSpec.version(:reference)
+      assert LanguageSpec.version(:single_shot) == ref_v
+      assert LanguageSpec.version(:explicit_return) == ref_v
     end
 
     test "raises for unknown prompt" do
