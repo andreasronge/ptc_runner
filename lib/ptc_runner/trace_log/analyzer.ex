@@ -810,18 +810,21 @@ defmodule PtcRunner.TraceLog.Analyzer do
 
   # Extract program code from LLM response (handles various formats)
   defp extract_program_from_response(response) when is_binary(response) do
-    cond do
-      # Look for clojure code block
-      match = Regex.run(~r/```clojure\n(.*?)```/s, response) ->
-        match |> Enum.at(1) |> String.trim()
+    alias PtcRunner.SubAgent.Loop.ResponseHandler
 
-      # Look for code after common markers
-      match = Regex.run(~r/(?:code:|program:)\s*\n?(.*)/si, response) ->
-        match |> Enum.at(1) |> String.trim() |> truncate_string(500)
+    blocks = ResponseHandler.extract_fenced_blocks(response)
+    tagged = Enum.filter(blocks, fn {lang, _} -> lang in ["clojure", "lisp"] end)
 
-      # Just return first part of response
-      true ->
-        truncate_string(response, 300)
+    case tagged do
+      [{_, code}] ->
+        String.trim(code)
+
+      _ ->
+        # Look for code after common markers
+        case Regex.run(~r/(?:code:|program:)\s*\n?(.*)/si, response) do
+          [_, match] -> match |> String.trim() |> truncate_string(500)
+          nil -> truncate_string(response, 300)
+        end
     end
   end
 

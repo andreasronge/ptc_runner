@@ -104,11 +104,26 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
     end
   end
 
-  # Line-by-line fence parser. Only treats a line as a fence when its trimmed
-  # content is exactly ``` (closing) or starts with ``` at column 0-ish
-  # (opening). Fences that appear mid-line inside string literals are ignored.
+  @doc """
+  Extract fenced code blocks from a Markdown response using line-by-line parsing.
+
+  Unlike regex-based extraction, this correctly handles backtick fences that
+  appear inside string literals (mid-line). Only lines whose trimmed content
+  matches the fence pattern are treated as fences.
+
+  Returns a list of `{language_tag, content}` tuples.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.extract_fenced_blocks("```clojure\\n(+ 1 2)\\n```")
+      [{"clojure", "(+ 1 2)"}]
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.extract_fenced_blocks("no code here")
+      []
+
+  """
   @spec extract_fenced_blocks(String.t()) :: [{String.t(), String.t()}]
-  defp extract_fenced_blocks(response) do
+  def extract_fenced_blocks(response) do
     lines = String.split(response, "\n")
     do_extract_blocks(lines, nil, nil, [], [])
   end
