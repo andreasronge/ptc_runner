@@ -814,23 +814,15 @@ defmodule PtcRunner.SubAgent do
     result
   end
 
-  # Extract PTC-Lisp code from LLM response
+  # Extract PTC-Lisp code from LLM response.
+  # Delegates to ResponseHandler.parse/1 which uses a line-by-line fence parser
+  # that correctly handles backtick fences inside string literals.
   defp extract_code(text) do
-    # Try extracting from markdown code block (lisp, clojure, or unmarked)
-    case Regex.run(~r/```(?:lisp|clojure)?\s*([\s\S]+?)\s*```/, text) do
-      [_, content] ->
-        {:ok, String.trim(content)}
+    alias PtcRunner.SubAgent.Loop.ResponseHandler
 
-      nil ->
-        # Try finding a bare S-expression (starts with paren)
-        # Match expressions like (+ 40 2) or more complex ones
-        trimmed = String.trim(text)
-
-        if String.starts_with?(trimmed, "(") do
-          {:ok, trimmed}
-        else
-          :none
-        end
+    case ResponseHandler.parse(text) do
+      {:ok, _code} = ok -> ok
+      {:error, _} -> :none
     end
   end
 

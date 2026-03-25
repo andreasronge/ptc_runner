@@ -70,28 +70,13 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
       IO.puts("=== END RAW RESPONSE ===\n")
     end
 
-    # Try extracting from code blocks - prefer clojure/lisp tagged blocks
-    # Allow optional whitespace/newline after language tag
-    # Also handle XML-style closers like </clojure> that LLMs sometimes produce
-    case Regex.scan(~r/```(?:clojure|lisp)[ \t]*\n?(.*?)(?:```|<\/(?:clojure|lisp)>)/s, response) do
-      [] ->
-        # Try any code blocks (skip optional language tag, then capture content)
-        # Regex: ``` followed by optional non-newline chars (language tag), optional whitespace/newline, then content
-        case Regex.scan(~r/```[^\n]*[ \t]*\n?(.*?)```/s, response) do
-          [] ->
-            try_xml_blocks(response)
+    blocks = extract_fenced_blocks(response)
 
-          blocks ->
-            # Filter blocks that look like Lisp code (start with parenthesis after trimming)
-            lisp_blocks =
-              blocks
-              |> Enum.map(fn [_, code] -> String.trim(code) end)
-              |> Enum.filter(&String.starts_with?(&1, "("))
+    # Prefer clojure/lisp tagged blocks
+    tagged = Enum.filter(blocks, fn {lang, _} -> lang in ["clojure", "lisp"] end)
 
-            process_lisp_blocks(lisp_blocks, response)
-        end
-
-      [[_, code]] ->
+    case tagged do
+      [{_, code}] ->
         result = code |> String.trim() |> sanitize_code()
 
         if System.get_env("DEBUG_PARSE"),
@@ -102,9 +87,81 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
 
         {:ok, result}
 
-      blocks ->
-        {:error, {:multiple_code_blocks, length(blocks)}}
+      [_ | _] ->
+        {:error, {:multiple_code_blocks, length(tagged)}}
+
+      [] ->
+        # Try any fenced blocks that contain Lisp code
+        lisp_blocks =
+          blocks
+          |> Enum.map(fn {_, code} -> String.trim(code) end)
+          |> Enum.filter(&String.starts_with?(&1, "("))
+
+        case lisp_blocks do
+          [] -> try_xml_blocks(response)
+          _ -> process_lisp_blocks(lisp_blocks, response)
+        end
     end
+  end
+
+  # Line-by-line fence parser. Only treats a line as a fence when its trimmed
+  # content is exactly ``` (closing) or starts with ``` at column 0-ish
+  # (opening). Fences that appear mid-line inside string literals are ignored.
+  @spec extract_fenced_blocks(String.t()) :: [{String.t(), String.t()}]
+  defp extract_fenced_blocks(response) do
+    lines = String.split(response, "\n")
+    do_extract_blocks(lines, nil, nil, [], [])
+  end
+
+  # Not inside a block — look for opening fence
+  defp do_extract_blocks([], _lang, _acc_lines, _acc_lines_list, blocks),
+    do: Enum.reverse(blocks)
+
+  defp do_extract_blocks([line | rest], nil, nil, [], blocks) do
+    trimmed = String.trim(line)
+
+    case parse_opening_fence(trimmed) do
+      {:ok, lang} ->
+        do_extract_blocks(rest, lang, [], [], blocks)
+
+      :not_fence ->
+        do_extract_blocks(rest, nil, nil, [], blocks)
+    end
+  end
+
+  # Inside a block — look for closing fence
+  defp do_extract_blocks([line | rest], lang, acc_lines, _acc_lines_list, blocks) do
+    trimmed = String.trim(line)
+
+    if closing_fence?(trimmed) do
+      content = acc_lines |> Enum.reverse() |> Enum.join("\n")
+      do_extract_blocks(rest, nil, nil, [], [{lang, content} | blocks])
+    else
+      do_extract_blocks(rest, lang, [line | acc_lines], [], blocks)
+    end
+  end
+
+  # A line is an opening fence if trimmed it starts with ``` and is not just
+  # backticks embedded in prose. We require the line to start with ```.
+  defp parse_opening_fence(trimmed) do
+    cond do
+      # ```clojure, ```lisp, ```clj etc.
+      Regex.match?(~r/^```(clojure|lisp)\s*$/, trimmed) ->
+        [_, lang] = Regex.run(~r/^```(clojure|lisp)\s*$/, trimmed)
+        {:ok, lang}
+
+      # ``` with any other language tag or bare ```
+      Regex.match?(~r/^```[^\s]*\s*$/, trimmed) ->
+        {:ok, ""}
+
+      true ->
+        :not_fence
+    end
+  end
+
+  # A closing fence is ``` or an XML-style </clojure> / </lisp> closer
+  defp closing_fence?(trimmed) do
+    trimmed == "```" or Regex.match?(~r/^<\/(clojure|lisp)>$/, trimmed)
   end
 
   # Process filtered lisp blocks, falling back to raw s-expression if none found
@@ -281,9 +338,12 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   """
   @spec strip_thinking(String.t()) :: String.t()
   def strip_thinking(response) do
-    case Regex.run(~r/(```(?:clojure|lisp).*```)/s, response) do
-      [_, code_block] -> code_block
-      nil -> response
+    blocks = extract_fenced_blocks(response)
+    tagged = Enum.filter(blocks, fn {lang, _} -> lang in ["clojure", "lisp"] end)
+
+    case tagged do
+      [{lang, content}] -> "```#{lang}\n#{content}\n```"
+      _ -> response
     end
   end
 

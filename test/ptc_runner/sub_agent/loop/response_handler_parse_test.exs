@@ -243,6 +243,38 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandlerParseTest do
     end
   end
 
+  describe "parse/1 with fences inside string literals" do
+    test "backticks inside a string do not close the code block" do
+      # LLM generates code where a string literal contains ```clojure (e.g. evidence text)
+      response = """
+      ```clojure
+      (return {
+        :status "error"
+        :evidence "LLM response: '```clojure\\n;; sum the total field\\n```'"
+        :severity "critical"
+      })
+      ```
+      """
+
+      assert {:ok, code} = ResponseHandler.parse(response)
+      assert String.contains?(code, ":severity")
+    end
+
+    test "generic fence inside string does not close the block" do
+      response = """
+      ```
+      (return {
+        :note "see ```example``` in docs"
+        :value 42
+      })
+      ```
+      """
+
+      assert {:ok, code} = ResponseHandler.parse(response)
+      assert String.contains?(code, ":value 42")
+    end
+  end
+
   describe "XML-style code blocks" do
     test "extracts code from ```clojure with </clojure> closer" do
       response = "```clojure\n(+ 1 2)\n</clojure>"
