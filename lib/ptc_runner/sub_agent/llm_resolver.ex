@@ -59,8 +59,9 @@ defmodule PtcRunner.SubAgent.LLMResolver do
   @spec resolve(String.t() | atom() | (map() -> {:ok, term()} | {:error, term()}), map(), map()) ::
           {:ok, normalized_response()} | {:error, term()}
   def resolve(llm, input, _registry) when is_binary(llm) do
-    # Resolve model string to callback via PtcRunner.LLM
-    callback = PtcRunner.LLM.callback(llm)
+    # Resolve alias to full provider:model string, then create callback
+    model = PtcRunner.LLM.Registry.resolve!(llm)
+    callback = PtcRunner.LLM.callback(model)
 
     case callback.(input) do
       {:ok, response} -> {:ok, normalize_response(response)}

@@ -16,8 +16,11 @@ defmodule PtcRunner.LLM do
 
   ## Usage
 
-      # Create a SubAgent-compatible callback
-      llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+      # Pass model aliases directly to SubAgent (recommended)
+      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: "haiku")
+
+      # Or create a callback with a full provider:model string
+      llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5", cache: true)
       {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
 
       # Stream responses through SubAgent for real-time chat UX
@@ -25,7 +28,7 @@ defmodule PtcRunner.LLM do
       {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, on_chunk: on_chunk)
 
       # Stream responses directly (without SubAgent)
-      {:ok, stream} = PtcRunner.LLM.stream("bedrock:haiku", %{system: "...", messages: [...]})
+      {:ok, stream} = PtcRunner.LLM.stream("openrouter:anthropic/claude-haiku-4.5", %{system: "...", messages: [...]})
       stream |> Stream.each(fn
         %{delta: text} -> send_chunk(text)
         %{done: true, tokens: t} -> track_usage(t)
@@ -102,8 +105,10 @@ defmodule PtcRunner.LLM do
   @doc """
   Create a SubAgent-compatible callback function for a model.
 
-  Accepts model aliases (e.g., "haiku") which are resolved via
-  `PtcRunner.LLM.Registry.resolve!/1` before creating the callback.
+  Passes the model string directly to the configured adapter. For model alias
+  resolution (e.g., "haiku" -> "openrouter:anthropic/claude-haiku-4.5"),
+  use `SubAgent.run(agent, llm: "haiku")` which resolves via
+  `PtcRunner.LLM.Registry` before calling this function.
 
   When the request map contains a `:stream` key with a callback function,
   the callback will use `adapter.stream/2` (if available) and pipe chunks
@@ -116,20 +121,15 @@ defmodule PtcRunner.LLM do
 
   ## Examples
 
-      # Using model alias
-      llm = PtcRunner.LLM.callback("haiku", cache: true)
+      # Using provider:model format (passed directly to adapter)
+      llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
       {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
-
-      # Using provider:alias
-      llm = PtcRunner.LLM.callback("bedrock:haiku")
 
       # Using full model ID
       llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
-  def callback(model_or_alias, opts \\ []) do
-    # Resolve alias to full model ID
-    model = PtcRunner.LLM.Registry.resolve!(model_or_alias)
+  def callback(model, opts \\ []) do
     adapter = adapter!()
     merged_opts = Map.new(opts)
 
@@ -174,7 +174,7 @@ defmodule PtcRunner.LLM do
 
   ## Examples
 
-      {:ok, response} = PtcRunner.LLM.call("bedrock:haiku", %{
+      {:ok, response} = PtcRunner.LLM.call("amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0", %{
         system: "You are helpful.",
         messages: [%{role: :user, content: "Hello"}]
       })
@@ -191,7 +191,7 @@ defmodule PtcRunner.LLM do
 
   ## Examples
 
-      {:ok, stream} = PtcRunner.LLM.stream("bedrock:haiku", %{
+      {:ok, stream} = PtcRunner.LLM.stream("openrouter:anthropic/claude-haiku-4.5", %{
         system: "You are helpful.",
         messages: [%{role: :user, content: "Tell me a story"}]
       })

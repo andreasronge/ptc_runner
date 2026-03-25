@@ -86,8 +86,23 @@ defmodule MyApp.ModelRegistry do
   def resolve("smart"), do: {:ok, "anthropic:claude-sonnet-4-5-20250929"}
   def resolve(name), do: PtcRunner.LLM.DefaultRegistry.resolve(name)
 
+  @impl true
+  def resolve!(name) do
+    case resolve(name) do
+      {:ok, model_id} -> model_id
+      {:error, reason} -> raise ArgumentError, reason
+    end
+  end
+
+  @impl true
+  def validate(model_string) do
+    case resolve(model_string) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   # Delegate remaining callbacks to DefaultRegistry
-  defdelegate resolve!(name), to: PtcRunner.LLM.DefaultRegistry
   defdelegate default_model(), to: PtcRunner.LLM.DefaultRegistry
   defdelegate default_provider(), to: PtcRunner.LLM.DefaultRegistry
   defdelegate aliases(), to: PtcRunner.LLM.DefaultRegistry
@@ -95,7 +110,6 @@ defmodule MyApp.ModelRegistry do
   defdelegate preset_models(provider), to: PtcRunner.LLM.DefaultRegistry
   defdelegate available_providers(), to: PtcRunner.LLM.DefaultRegistry
   defdelegate provider_from_model(model), to: PtcRunner.LLM.DefaultRegistry
-  defdelegate validate(model_string), to: PtcRunner.LLM.DefaultRegistry
 end
 ```
 
@@ -115,7 +129,13 @@ Now you can use your custom aliases:
 ## Built-in Adapter
 
 `PtcRunner.LLM.callback/2` creates a SubAgent-compatible callback using the built-in
-`PtcRunner.LLM.ReqLLMAdapter`, which routes by model prefix:
+`PtcRunner.LLM.ReqLLMAdapter`. It accepts `provider:model` strings and passes them
+directly to the adapter — it does **not** resolve aliases. For alias resolution
+(e.g., `"haiku"` → `"openrouter:anthropic/claude-haiku-4.5"`), pass the string
+directly to `SubAgent.run(agent, llm: "haiku")`, which resolves via
+`PtcRunner.LLM.Registry` before creating the callback.
+
+Supported provider prefixes:
 
 | Prefix | Provider | API Key Env Var |
 |--------|----------|-----------------|
@@ -129,10 +149,10 @@ Now you can use your custom aliases:
 | `openai-compat:` | Any OpenAI-compatible | (varies) |
 
 ```elixir
-# Cloud providers
+# Cloud providers (use provider:model format)
 PtcRunner.LLM.callback("openrouter:anthropic/claude-sonnet-4")
 PtcRunner.LLM.callback("anthropic:claude-haiku-4-5-20251001")
-PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+PtcRunner.LLM.callback("amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0", cache: true)
 PtcRunner.LLM.callback("google:gemini-2.5-flash")
 
 # Local providers
@@ -146,7 +166,7 @@ Pass `cache: true` to enable prompt caching on supported providers (Anthropic, B
 Claude, OpenRouter with Anthropic models):
 
 ```elixir
-llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+llm = PtcRunner.LLM.callback("anthropic:claude-haiku-4-5-20251001", cache: true)
 ```
 
 ### Bedrock Region
