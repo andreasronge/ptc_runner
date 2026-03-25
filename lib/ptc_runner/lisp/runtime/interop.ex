@@ -197,6 +197,30 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     raise ".lastIndexOf: expected string, got #{type_name(s)}"
   end
 
+  @doc """
+  Simulates .toLowerCase method on strings.
+  Delegates to `String.downcase/1`.
+  """
+  def dot_to_lower_case(s) when is_binary(s) do
+    String.downcase(s)
+  end
+
+  def dot_to_lower_case(s) do
+    raise ".toLowerCase: expected string, got #{type_name(s)}"
+  end
+
+  @doc """
+  Simulates .toUpperCase method on strings.
+  Delegates to `String.upcase/1`.
+  """
+  def dot_to_upper_case(s) when is_binary(s) do
+    String.upcase(s)
+  end
+
+  def dot_to_upper_case(s) do
+    raise ".toUpperCase: expected string, got #{type_name(s)}"
+  end
+
   defp type_name(nil), do: "nil"
   defp type_name(x) when is_list(x), do: "list"
   defp type_name(x) when is_map(x), do: "map"
