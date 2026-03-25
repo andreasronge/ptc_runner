@@ -526,6 +526,63 @@ input[type="file"] { display: none; }
   font-size: 11px;
 }
 
+/* Trace header fields */
+.agent-query {
+  margin-top: 8px;
+  color: var(--fg);
+  font-size: 13px;
+  font-style: italic;
+}
+.agent-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.model-name {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 11px;
+}
+.producer-data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.producer-field {
+  color: var(--muted);
+}
+.producer-key {
+  color: var(--fg);
+  opacity: 0.6;
+}
+.badge-benchmark { background: rgba(78, 201, 176, 0.2); color: var(--success); }
+.badge-analysis { background: rgba(86, 156, 214, 0.2); color: var(--accent); }
+.badge-planning { background: rgba(220, 220, 170, 0.2); color: var(--warning); }
+
+/* File picker trace metadata */
+.file-picker-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.file-picker-query {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trace-kind {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
 /* === Turn Lane (Agent View) === */
 .turn-lane {
   display: flex;

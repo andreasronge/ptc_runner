@@ -18,6 +18,48 @@ function lookupAgentConfig(configs, agentId) {
   return configs[agentId] || {};
 }
 
+// Shorten model names for display (e.g., "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0" -> "claude-haiku-4-5")
+function shortModelName(model) {
+  if (!model) return '';
+  // Extract the model name after provider prefix
+  const parts = model.split(':');
+  const name = parts.length > 1 ? parts.slice(1).join(':') : model;
+  // Remove version suffixes and provider prefixes
+  return name
+    .replace(/^anthropic\./, '')
+    .replace(/-\d{8}(-v\d+:\d+)?$/, '')
+    .replace(/^(openai|google|meta)\//, '');
+}
+
+// Render producer-specific data fields based on trace_kind
+function renderProducerData(traceKind, data) {
+  if (!data || typeof data !== 'object') return '';
+
+  // Select which fields to show based on trace_kind
+  const fields = [];
+  if (traceKind === 'benchmark') {
+    if (data.prompt_profile) fields.push(['profile', data.prompt_profile]);
+    if (data.data_mode) fields.push(['data', data.data_mode]);
+    if (data.signature) fields.push(['sig', data.signature]);
+    if (data.max_turns) fields.push(['turns', data.max_turns]);
+    if (data.thinking) fields.push(['thinking', 'on']);
+  }
+  // For other trace_kinds or unknown, show all data keys
+  if (fields.length === 0) {
+    for (const [k, v] of Object.entries(data)) {
+      if (v != null && typeof v !== 'object') {
+        fields.push([k, String(v)]);
+      }
+    }
+  }
+
+  if (fields.length === 0) return '';
+
+  return `<div class="producer-data">${fields.map(([k, v]) =>
+    `<span class="producer-field"><span class="producer-key">${k}:</span> ${escapeHtml(String(v))}</span>`
+  ).join('')}</div>`;
+}
+
 export function renderAgentView(container, state, data) {
   const events = data.events;
   const paired = pairEvents(events);
@@ -75,15 +117,27 @@ export function renderAgentView(container, state, data) {
 
   let html = '';
 
+  // Trace header fields
+  const traceKind = traceStart?.trace_kind;
+  const traceLabel = traceStart?.trace_label;
+  const traceQuery = traceStart?.query;
+  const traceModel = traceStart?.model;
+  const producerData = traceStart?.data;
+
   // Agent header
   html += `<div class="agent-header">
     <h2>${escapeHtml(agentName)}</h2>
     <div class="agent-meta">
+      ${traceKind ? `<span class="badge badge-${traceKind}">${escapeHtml(traceKind)}</span>` : ''}
       <span class="badge">${outputMode === 'ptc_lisp' ? 'PTC-Lisp' : outputMode === 'json' ? 'JSON' : escapeHtml(outputMode)}</span>
       <span>${formatDuration(totalDuration)}</span>
       <span>${formatTokens(totalTokens)} tokens</span>
       <span>${turns.length} turns</span>
+      ${traceModel ? `<span class="model-name">${escapeHtml(shortModelName(traceModel))}</span>` : ''}
     </div>
+    ${traceQuery ? `<div class="agent-query">${escapeHtml(traceQuery)}</div>` : ''}
+    ${traceLabel ? `<div class="agent-label">${escapeHtml(traceLabel)}</div>` : ''}
+    ${renderProducerData(traceKind, producerData)}
   </div>`;
 
   // Multi-run: side-by-side layout (span tree left, content right)
