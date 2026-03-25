@@ -6,6 +6,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
   Expensive inspection tools: `turn_detail`, `diff_traces`
   """
 
+  alias PtcDemo.TraceAnalyzer.EventStream
   alias PtcRunner.TraceLog.Analyzer
 
   @doc """
@@ -13,10 +14,14 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
   """
   def build(trace_dir) do
     %{
+      # High-level domain tools
       "list_traces" => list_traces_tool(trace_dir),
       "trace_summary" => trace_summary_tool(trace_dir),
       "turn_detail" => turn_detail_tool(trace_dir),
-      "diff_traces" => diff_traces_tool(trace_dir)
+      "diff_traces" => diff_traces_tool(trace_dir),
+      # Low-level streaming primitives
+      "query_events" => query_events_tool(trace_dir),
+      "aggregate_events" => aggregate_events_tool(trace_dir)
     }
   end
 
@@ -311,6 +316,68 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
     else
       {:error, msg} -> {:error, msg}
     end
+  end
+
+  # --- query_events ---
+
+  defp query_events_tool(trace_dir) do
+    {fn args -> query_events(trace_dir, args) end,
+     signature:
+       "(filename :string, where :map, select [:string], limit :int, offset :int) -> " <>
+         "{events [:map], total_matched :int, has_more :bool}",
+     description:
+       "Query events from a trace file with streaming filters. Memory-efficient for large files. " <>
+         "Use for flexible drill-down when high-level tools don't cover your question.\n" <>
+         "where: filter map with exact match ({\"tool_name\": \"search\"}), " <>
+         "prefix match ({\"event\": \"tool.*\"}), " <>
+         "numeric comparison ({\"duration_ms\": \">1000\"}), " <>
+         "or existence check ({\"tool_name\": \"*\"}).\n" <>
+         "select: list of fields to return (supports dot paths like \"data.result\"). " <>
+         "Omit to return all fields. Use select to avoid large data payloads.\n" <>
+         "limit: max results (default 20). offset: skip N matches (default 0)."}
+  end
+
+  defp query_events(trace_dir, args) do
+    path = Path.join(trace_dir, args["filename"])
+
+    opts = [
+      where: args["where"] || %{},
+      limit: args["limit"] || 20,
+      offset: args["offset"] || 0
+    ]
+
+    opts = if args["select"], do: Keyword.put(opts, :select, args["select"]), else: opts
+
+    EventStream.query(path, opts)
+  end
+
+  # --- aggregate_events ---
+
+  defp aggregate_events_tool(trace_dir) do
+    {fn args -> aggregate_events(trace_dir, args) end,
+     signature:
+       "(filename :string, where :map, group_by [:string], metrics [:string]) -> " <>
+         "{groups [:map]}",
+     description:
+       "Aggregate events from a trace file with streaming computation. " <>
+         "Memory-efficient for large files.\n" <>
+         "where: same filter syntax as query_events.\n" <>
+         "group_by: list of fields to group by (e.g. [\"tool_name\"] or [\"turn\"]). " <>
+         "Omit for a single aggregate over all matching events.\n" <>
+         "metrics: list of metric expressions. Supported: " <>
+         "\"count\", \"sum(field)\", \"avg(field)\", \"min(field)\", \"max(field)\". " <>
+         "Example: [\"count\", \"sum(duration_ms)\", \"avg(duration_ms)\"].\n" <>
+         "Results are sorted by the first metric descending."}
+  end
+
+  defp aggregate_events(trace_dir, args) do
+    path = Path.join(trace_dir, args["filename"])
+
+    EventStream.aggregate(path,
+      where: args["where"] || %{},
+      group_by: args["group_by"] || [],
+      metrics: args["metrics"] || ["count"]
+    )
   end
 
   # --- Helpers ---
