@@ -305,8 +305,8 @@ defmodule PtcRunner.Lisp do
             {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
 
           e ->
-            # Catch unexpected exceptions in tool implementations and report as tool errors
-            {:error, {:tool_error, "unknown", Exception.message(e)}}
+            # Unexpected exception (e.g., ArgumentError in a built-in) — not a tool failure
+            {:error, {:runtime_error, Exception.message(e)}}
         end
       end
 
@@ -474,6 +474,7 @@ defmodule PtcRunner.Lisp do
   def format_error({:unknown_tool, name, available}),
     do: "Unknown tool: #{name}. Available tools: #{Enum.join(available, ", ")}"
 
+  def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
   def format_error({:tool_error, name, reason}), do: "Tool '#{name}' failed: #{inspect(reason)}"
   # Handle other 3-tuple error formats from Eval: {type, message, data}
   def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
