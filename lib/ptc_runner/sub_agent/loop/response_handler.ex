@@ -124,35 +124,59 @@ defmodule PtcRunner.SubAgent.Loop.ResponseHandler do
   """
   @spec extract_fenced_blocks(String.t()) :: [{String.t(), String.t()}]
   def extract_fenced_blocks(response) do
+    response
+    |> extract_fenced_blocks_with_lines()
+    |> Enum.map(fn {lang, content, _open, _close} -> {lang, content} end)
+  end
+
+  @doc """
+  Like `extract_fenced_blocks/1` but also returns the original opening and
+  closing fence lines, enabling callers to locate or replace the exact source
+  text (including XML-style closers and whitespace variations).
+
+  Returns a list of `{language_tag, content, opening_line, closing_line}` tuples.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.extract_fenced_blocks_with_lines("```clojure\\n(+ 1 2)\\n```")
+      [{"clojure", "(+ 1 2)", "```clojure", "```"}]
+
+      iex> PtcRunner.SubAgent.Loop.ResponseHandler.extract_fenced_blocks_with_lines("```clojure\\n(+ 1 2)\\n</clojure>")
+      [{"clojure", "(+ 1 2)", "```clojure", "</clojure>"}]
+
+  """
+  @spec extract_fenced_blocks_with_lines(String.t()) ::
+          [{String.t(), String.t(), String.t(), String.t()}]
+  def extract_fenced_blocks_with_lines(response) do
     lines = String.split(response, "\n")
-    do_extract_blocks(lines, nil, nil, [], [])
+    do_extract_blocks(lines, nil, nil, nil, [], [])
   end
 
   # Not inside a block — look for opening fence
-  defp do_extract_blocks([], _lang, _acc_lines, _acc_lines_list, blocks),
+  defp do_extract_blocks([], _lang, _opener, _acc_lines, _acc_lines_list, blocks),
     do: Enum.reverse(blocks)
 
-  defp do_extract_blocks([line | rest], nil, nil, [], blocks) do
+  defp do_extract_blocks([line | rest], nil, nil, nil, [], blocks) do
     trimmed = String.trim(line)
 
     case parse_opening_fence(trimmed) do
       {:ok, lang} ->
-        do_extract_blocks(rest, lang, [], [], blocks)
+        do_extract_blocks(rest, lang, line, [], [], blocks)
 
       :not_fence ->
-        do_extract_blocks(rest, nil, nil, [], blocks)
+        do_extract_blocks(rest, nil, nil, nil, [], blocks)
     end
   end
 
   # Inside a block — look for closing fence
-  defp do_extract_blocks([line | rest], lang, acc_lines, _acc_lines_list, blocks) do
+  defp do_extract_blocks([line | rest], lang, opener, acc_lines, _acc_lines_list, blocks) do
     trimmed = String.trim(line)
 
     if closing_fence?(trimmed) do
       content = acc_lines |> Enum.reverse() |> Enum.join("\n")
-      do_extract_blocks(rest, nil, nil, [], [{lang, content} | blocks])
+      do_extract_blocks(rest, nil, nil, nil, [], [{lang, content, opener, line} | blocks])
     else
-      do_extract_blocks(rest, lang, [line | acc_lines], [], blocks)
+      do_extract_blocks(rest, lang, opener, [line | acc_lines], [], blocks)
     end
   end
 
