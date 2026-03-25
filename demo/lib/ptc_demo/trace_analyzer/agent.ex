@@ -59,6 +59,7 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
 
     agent =
       SubAgent.new(
+        name: "trace_analyzer",
         prompt: question,
         tools: tools,
         max_turns: max_turns,
