@@ -13,7 +13,7 @@ defmodule Alma.TaskAgentE2ETest do
 
   @tag :e2e
   test "TaskAgent.run with environment: GraphWorld completes a task" do
-    llm = LLMClient.callback("bedrock:haiku")
+    llm = PtcRunner.LLM.callback("bedrock:haiku")
 
     task_config =
       GraphWorld.generate_tasks(1, %{rooms: 4, objects: 2, connectivity: 0.5, seed: 99})
@@ -31,7 +31,7 @@ defmodule Alma.TaskAgentE2ETest do
 
   @tag :e2e
   test "TaskAgent.run with recall knowledge flows through" do
-    llm = LLMClient.callback("bedrock:haiku")
+    llm = PtcRunner.LLM.callback("bedrock:haiku")
 
     task_config = %{
       rooms: %{
@@ -53,7 +53,7 @@ defmodule Alma.TaskAgentE2ETest do
 
   @tag :e2e
   test "MemoryHarness.evaluate_collection passes environment through" do
-    llm = LLMClient.callback("bedrock:haiku")
+    llm = PtcRunner.LLM.callback("bedrock:haiku")
 
     tasks =
       GraphWorld.generate_tasks(2, %{rooms: 4, objects: 2, connectivity: 0.5, seed: 77})

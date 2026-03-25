@@ -60,11 +60,10 @@ defmodule LLMSetup do
   end
 
   def model_options(provider) do
-    if Code.ensure_loaded?(LLMClient) do
-      # Use LLMClient.presets/1 for available models, filter by availability
-      LLMClient.presets(provider)
+    if Code.ensure_loaded?(PtcRunner.LLM.ReqLLMAdapter) do
+      PtcRunner.LLM.Registry.preset_models(provider)
       |> Enum.map(fn {alias, model_id} ->
-        info = LLMClient.get_model_info(alias)
+        info = PtcRunner.LLM.DefaultRegistry.get_model_info(alias)
         desc = if info, do: info.description, else: alias
         {model_id, "#{alias} - #{desc}"}
       end)
@@ -75,8 +74,8 @@ defmodule LLMSetup do
   end
 
   def create_llm(model) do
-    if Code.ensure_loaded?(LLMClient) do
-      LLMClient.callback(model)
+    if Code.ensure_loaded?(PtcRunner.LLM.ReqLLMAdapter) do
+      PtcRunner.LLM.callback(model)
     else
       fn
         %{system: system, messages: messages, output: :text, schema: schema} ->
@@ -134,7 +133,7 @@ defmodule LLMSetup do
     end
   end
 
-  # Fallback when LLMClient not available (standalone livebook usage)
+  # Fallback when PtcRunner.LLM not available (standalone livebook usage)
   defp fallback_models(:openrouter) do
     [
       {"openrouter:anthropic/claude-haiku-4.5", "haiku - Claude Haiku 4.5"},

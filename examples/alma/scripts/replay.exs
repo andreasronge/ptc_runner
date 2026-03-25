@@ -2,7 +2,7 @@ alias PtcRunner.Lisp.CoreToSource
 alias Alma.{MemoryHarness, Archive}
 alias Alma.Environments.GraphWorld.Generator
 
-llm = LLMClient.callback("bedrock:haiku")
+llm = PtcRunner.LLM.callback("bedrock:haiku")
 
 archive =
   Alma.run(

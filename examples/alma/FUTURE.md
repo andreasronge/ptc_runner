@@ -215,7 +215,7 @@ MemoryArena finds that RAG-based memory often hurts because compressed/reordered
 
 This is the single highest-priority fix. Two paths:
 
-- **Real embeddings** — ✅ Done. `LLMClient.embed/2` wires real embedding APIs (OpenAI, Google, Ollama) through `VectorStore`. Use `--embed-model openai:text-embedding-3-small` to enable. VectorStore now accepts pre-computed dense vectors; n-gram fallback is preserved when no embed model is configured.
+- **Real embeddings** — ✅ Done. `PtcRunner.LLM.ReqLLMAdapter.embed/2` wires real embedding APIs (OpenAI, Google, Ollama) through `VectorStore`. Use `--embed-model openai:text-embedding-3-small` to enable. VectorStore now accepts pre-computed dense vectors; n-gram fallback is preserved when no embed model is configured.
 - **Lean on the graph store** — the graph store works correctly today. Designs that use `graph-path` for spatial navigation and avoid `find-similar` for item lookup would sidestep the embedding quality problem entirely. The evolutionary loop should discover this given enough iterations, but the DebugAgent could accelerate it by flagging low similarity scores as unreliable.
 
 ### Recall format as part of the design space
@@ -300,7 +300,7 @@ Tradeoff: one LLM call per invocation. Wait for evidence that designs need it be
 
 - **Additional archive seeds** — beyond null + spatial, seed with a "cheatsheet" design (uses `tool/summarize` to maintain an evolving advice document) and a "trajectory replay" design (stores full episode summaries, retrieves most similar).
 - **Namespace-as-design consolidation** — store the full namespace as a single source string via `CoreToSource.export_namespace/1` instead of separate `mem_update_source` and `recall_source`. Simplifies persistence and novelty comparison.
-- **Real embeddings** — ✅ Done. See `LLMClient.embed/2` and `--embed-model` CLI option.
+- **Real embeddings** — ✅ Done. See `PtcRunner.LLM.ReqLLMAdapter.embed/2` and `--embed-model` CLI option.
 
 ## ALFWorld Benchmark Parity
 
@@ -327,4 +327,4 @@ Key things to test:
 ## Operational
 
 - **Token budget tracking** — track cumulative token usage across iterations via telemetry. Add a budget cap to control costs in longer runs.
-- **Prompt caching** — MetaAgent and TaskAgent system prompts are identical across iterations. Using `LLMClient.callback("bedrock:haiku", cache: true)` would reduce latency and cost.
+- **Prompt caching** — MetaAgent and TaskAgent system prompts are identical across iterations. Using `PtcRunner.LLM.callback("bedrock:haiku", cache: true)` would reduce latency and cost.

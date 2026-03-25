@@ -12,7 +12,7 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
       OPENROUTER_API_KEY=sk-or-...
       PTC_TEST_MODEL=haiku
 
-  Use `LLMClient.aliases()` to see available model presets.
+  Use `PtcRunner.LLM.Registry.aliases()` to see available model presets.
 
   ## Usage
 
@@ -24,6 +24,7 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
   """
 
   alias PtcRunner.Lisp.LanguageSpec
+  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.TestSupport.LLM
   alias PtcRunner.TestSupport.LLMSupport
 
@@ -61,12 +62,12 @@ defmodule PtcRunner.TestSupport.LispLLMClient do
     model = LLMSupport.model()
 
     text =
-      if LLMClient.requires_api_key?(model) do
+      if ReqLLMAdapter.requires_api_key?(model) do
         # Use ReqLLM for cloud providers
         opts = [receive_timeout: LLMSupport.timeout(), req_http_options: LLMSupport.req_opts()]
         ReqLLM.generate_text!(model, prompt, opts)
       else
-        # Use LLMClient for local providers
+        # Use adapter for local providers
         messages = [%{role: :user, content: prompt}]
 
         case LLM.generate_text(model, messages, receive_timeout: LLMSupport.timeout()) do

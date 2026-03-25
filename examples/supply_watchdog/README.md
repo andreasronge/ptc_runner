@@ -229,7 +229,7 @@ end
 
 ## LLM Provider Setup
 
-See [llm_client/README.md](../../llm_client/README.md) for provider configuration.
+See the [SubAgent Getting Started](../../docs/guides/subagent-getting-started.md) guide for provider configuration.
 
 ## References
 

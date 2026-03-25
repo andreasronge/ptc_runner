@@ -9,6 +9,9 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   - API key validation
   """
 
+  alias PtcRunner.LLM.Registry
+  alias PtcRunner.LLM.ReqLLMAdapter
+
   @default_model "openrouter:google/gemini-2.5-flash"
   @timeout 60_000
   @req_opts [retry: :transient, max_retries: 3]
@@ -35,54 +38,74 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   end
 
   @doc """
-  Resolve a model name using LLMClient.
+  Resolve a model name using the Registry.
 
   If the name is an alias, returns the full model ID.
   If resolution fails, returns the name as-is.
   """
   @spec resolve_model(String.t()) :: String.t()
   def resolve_model(name) do
-    case LLMClient.resolve(name) do
+    case Registry.resolve(name) do
       {:ok, model_id} -> model_id
       {:error, _} -> name
     end
   end
 
-  @doc """
-  Load environment variables from .env file if present.
+  @dotenv_loaded_key {__MODULE__, :dotenv_loaded}
 
-  Checks for .env in the current directory first, then parent directory.
+  @doc """
+  Load environment variables from the nearest `.env` file.
+
+  Walks up from the current working directory looking for a `.env` file.
   Only sets variables that aren't already set (env vars take precedence).
+  Safe to call multiple times — only loads once per VM.
   """
   @spec load_dotenv() :: :ok
   def load_dotenv do
-    env_file =
-      cond do
-        File.exists?(".env") -> ".env"
-        File.exists?("../.env") -> "../.env"
-        true -> nil
-      end
+    unless :persistent_term.get(@dotenv_loaded_key, false) do
+      :persistent_term.put(@dotenv_loaded_key, true)
 
-    if env_file do
-      env_file
-      |> File.read!()
-      |> String.split("\n", trim: true)
-      |> Enum.each(&parse_and_set_env_line/1)
+      case find_dotenv(File.cwd!()) do
+        nil -> :ok
+        path -> apply_dotenv(path)
+      end
     end
 
     :ok
   end
 
-  defp parse_and_set_env_line(line) do
+  defp find_dotenv("/"), do: nil
+
+  defp find_dotenv(dir) do
+    candidate = Path.join(dir, ".env")
+
+    if File.regular?(candidate) do
+      candidate
+    else
+      find_dotenv(Path.dirname(dir))
+    end
+  end
+
+  defp apply_dotenv(path) do
+    path
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      line
+      |> String.trim()
+      |> parse_env_line()
+    end)
+  end
+
+  defp parse_env_line(""), do: :ok
+  defp parse_env_line("#" <> _), do: :ok
+
+  defp parse_env_line(line) do
     case String.split(line, "=", parts: 2) do
       [key, value] ->
         key = String.trim(key)
-        value = String.trim(value)
-
-        # Only set if not already set (env vars take precedence)
-        unless System.get_env(key) do
-          System.put_env(key, value)
-        end
+        value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
+        if System.get_env(key) == nil, do: System.put_env(key, value)
 
       _ ->
         :ok
@@ -126,7 +149,8 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
     current_model = model()
 
-    if LLMClient.requires_api_key?(current_model) and is_nil(System.get_env("OPENROUTER_API_KEY")) do
+    if ReqLLMAdapter.requires_api_key?(current_model) and
+         is_nil(System.get_env("OPENROUTER_API_KEY")) do
       raise """
       OPENROUTER_API_KEY not set.
 

@@ -105,10 +105,9 @@ defmodule PtcRunner.LLM do
   @doc """
   Create a SubAgent-compatible callback function for a model.
 
-  Passes the model string directly to the configured adapter. For model alias
-  resolution (e.g., "haiku" -> "openrouter:anthropic/claude-haiku-4.5"),
-  use `SubAgent.run(agent, llm: "haiku")` which resolves via
-  `PtcRunner.LLM.Registry` before calling this function.
+  Resolves model aliases via `PtcRunner.LLM.Registry.resolve!/1` before
+  creating the callback. Already-resolved `provider:model` strings pass
+  through unchanged.
 
   When the request map contains a `:stream` key with a callback function,
   the callback will use `adapter.stream/2` (if available) and pipe chunks
@@ -121,16 +120,20 @@ defmodule PtcRunner.LLM do
 
   ## Examples
 
-      # Using provider:model format (passed directly to adapter)
-      llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+      # Using aliases (resolved via Registry)
+      llm = PtcRunner.LLM.callback("haiku")
       {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
 
-      # Using full model ID
+      # Using provider:alias format
+      llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+
+      # Using full model ID (passes through)
       llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
   def callback(model, opts \\ []) do
     adapter = adapter!()
+    model = PtcRunner.LLM.Registry.resolve!(model)
     merged_opts = Map.new(opts)
 
     fn req ->

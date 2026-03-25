@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Alma.Smoke do
     rooms = Keyword.get(opts, :rooms, 3)
     seed = Keyword.get(opts, :seed, 100)
 
-    raw_llm = LLMClient.callback(model)
+    raw_llm = PtcRunner.LLM.callback(model)
     {:ok, stats} = Agent.start_link(fn -> %{calls: 0, total_us: 0} end)
 
     llm = fn req ->

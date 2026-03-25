@@ -20,7 +20,8 @@ defmodule RlmRecursive.MixProject do
   defp deps do
     [
       {:ptc_runner, path: "../.."},
-      {:llm_client, path: "../../llm_client"}
+      {:req, "~> 0.5"},
+      {:req_llm, "~> 1.7"}
     ]
   end
 end

@@ -389,6 +389,35 @@ defmodule PtcRunner.LLM.DefaultRegistry do
     end
   end
 
+  @doc """
+  Get detailed info for a model by alias name.
+
+  Returns a map with `:alias`, `:description`, and `:providers` keys, or `nil`
+  if the alias is not found. This is a plain function on `DefaultRegistry` only —
+  not part of the `Registry` behaviour.
+
+  ## Examples
+
+      iex> info = PtcRunner.LLM.DefaultRegistry.get_model_info("haiku")
+      iex> info.alias
+      "haiku"
+      iex> info.description
+      "Claude Haiku 4.5 - Fast, cost-effective"
+      iex> Map.has_key?(info.providers, :openrouter)
+      true
+
+      iex> PtcRunner.LLM.DefaultRegistry.get_model_info("nonexistent")
+      nil
+
+  """
+  @spec get_model_info(String.t()) :: map() | nil
+  def get_model_info(alias_name) do
+    case Map.get(@models, alias_name) do
+      nil -> nil
+      meta -> %{alias: alias_name, description: meta.description, providers: meta.providers}
+    end
+  end
+
   defp unknown_model_error(name) do
     aliases_str = aliases() |> Enum.join(", ")
 

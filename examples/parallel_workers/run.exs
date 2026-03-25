@@ -50,7 +50,7 @@ defmodule ParallelWorkers.Runner do
         signature: "(chunk :string) -> {incidents [:string]}",
         description: "Analyze a log chunk for CRITICAL/ERROR incidents.",
         max_turns: 5,
-        llm: LLMClient.callback("bedrock:haiku")
+        llm: PtcRunner.LLM.callback("bedrock:haiku")
       )
 
     worker_tool = SubAgent.as_tool(worker_agent)
@@ -71,7 +71,7 @@ defmodule ParallelWorkers.Runner do
     run_opts = [
       context: %{"chunks" => chunks},
       tools: %{"worker" => worker_tool},
-      llm: LLMClient.callback("bedrock:sonnet"),
+      llm: PtcRunner.LLM.callback("bedrock:sonnet"),
       max_turns: 5,
       max_heap: 20_000_000,
       # LLM-backed tool calls need longer timeout (each Haiku call ~5-15s)

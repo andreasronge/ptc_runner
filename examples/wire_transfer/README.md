@@ -123,7 +123,7 @@ mix deps.get
 iex -S mix
 ```
 
-The `model:` option selects the LLM provider. Examples: `"bedrock:haiku"`, `"bedrock:sonnet"`, `"haiku"` (OpenRouter). Omit it to use `LLMClient.default_model()`. See the [llm_client README](../../llm_client/README.md) for provider setup.
+The `model:` option selects the LLM provider. Examples: `"bedrock:haiku"`, `"bedrock:sonnet"`, `"haiku"` (OpenRouter). Omit it to use `PtcRunner.LLM.Registry.default_model()`. See the [SubAgent Getting Started](../../docs/guides/subagent-getting-started.md) guide for provider setup.
 
 ### Initiate the transfer
 

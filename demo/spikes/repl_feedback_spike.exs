@@ -434,7 +434,7 @@ defmodule ReplFeedbackSpike do
 
     IO.puts("\n" <> String.duplicate("-", 40))
 
-    case LLMClient.generate_text(model, full_messages, receive_timeout: 60_000) do
+    case PtcRunner.LLM.ReqLLMAdapter.generate_text(model, full_messages, receive_timeout: 60_000) do
       {:ok, %{content: text, tokens: tokens}} ->
         total = Map.get(tokens, :total_tokens, 0)
         {:ok, text || "", total}

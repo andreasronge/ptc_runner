@@ -296,7 +296,7 @@ defmodule SupplyWatchdog do
   defp default_llm do
     # Use bedrock:haiku if AWS credentials available, otherwise fall back to haiku (openrouter)
     model = System.get_env("LLM_MODEL", "bedrock:haiku")
-    LLMClient.callback(model)
+    PtcRunner.LLM.callback(model)
   end
 
   defp tracer_opts do

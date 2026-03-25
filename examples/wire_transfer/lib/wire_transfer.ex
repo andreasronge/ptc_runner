@@ -31,12 +31,12 @@ defmodule WireTransfer do
   """
   def run(journal \\ %{}, recipient, amount, opts \\ []) do
     agent = Agent.new()
-    model = opts[:model] || LLMClient.default_model()
+    model = opts[:model] || PtcRunner.LLM.Registry.default_model()
 
     llm_fn = fn input ->
       messages = [%{role: :system, content: input.system} | input.messages]
 
-      case LLMClient.generate_text(model, messages) do
+      case PtcRunner.LLM.ReqLLMAdapter.generate_text(model, messages) do
         {:ok, response} ->
           {:ok, %{content: response.content, tokens: response.tokens}}
 

@@ -159,7 +159,7 @@ defmodule PtcRunner.LLMTest do
 
     test "falls back to ReqLLMAdapter when no config" do
       Application.delete_env(:ptc_runner, :llm_adapter)
-      # ReqLLM is available in test env (via llm_client dep)
+      # ReqLLM is available in test env (via optional req_llm dep)
       assert PtcRunner.LLM.adapter!() == PtcRunner.LLM.ReqLLMAdapter
     end
   end
