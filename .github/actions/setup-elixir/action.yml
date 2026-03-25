@@ -18,8 +18,6 @@ runs:
         path: |
           deps
           _build
-          llm_client/deps
-          llm_client/_build
           demo/deps
           demo/_build
         key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
@@ -30,8 +28,7 @@ runs:
       if: steps.cache-deps.outputs.cache-hit != 'true'
       run: |
         mix deps.get
-        cd llm_client && mix deps.get
-        cd ../demo && mix deps.get
+        cd demo && mix deps.get
       shell: bash
 
     - name: Cache Dialyzer PLT
