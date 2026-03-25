@@ -102,6 +102,9 @@ defmodule PtcRunner.LLM do
   @doc """
   Create a SubAgent-compatible callback function for a model.
 
+  Accepts model aliases (e.g., "haiku") which are resolved via
+  `PtcRunner.LLM.Registry.resolve!/1` before creating the callback.
+
   When the request map contains a `:stream` key with a callback function,
   the callback will use `adapter.stream/2` (if available) and pipe chunks
   through the stream function. The return value remains `{:ok, %{content, tokens}}`
@@ -113,11 +116,20 @@ defmodule PtcRunner.LLM do
 
   ## Examples
 
-      llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
+      # Using model alias
+      llm = PtcRunner.LLM.callback("haiku", cache: true)
       {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
+
+      # Using provider:alias
+      llm = PtcRunner.LLM.callback("bedrock:haiku")
+
+      # Using full model ID
+      llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
-  def callback(model, opts \\ []) do
+  def callback(model_or_alias, opts \\ []) do
+    # Resolve alias to full model ID
+    model = PtcRunner.LLM.Registry.resolve!(model_or_alias)
     adapter = adapter!()
     merged_opts = Map.new(opts)
 

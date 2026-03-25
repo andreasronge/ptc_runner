@@ -12,13 +12,13 @@ This guide walks you through your first SubAgent - from a minimal example to und
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
   "How many r's are in raspberry?",
-  llm: my_llm
+  llm: "haiku"
 )
 
 step.return  #=> 3
 ```
 
-That's it. No tools, no signature, no validation - just a prompt and an LLM.
+That's it. No tools, no signature, no validation - just a prompt and a model name.
 
 ### Why This Matters
 
@@ -228,21 +228,32 @@ See [Signature Syntax](../signature-syntax.md) for full syntax.
 Add `{:req_llm, "~> 1.2"}` to your deps for the built-in adapter:
 
 ```elixir
-llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
-{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: llm)
+# Pass model alias directly - simplest approach
+{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: "haiku")
+
+# Or with explicit provider
+{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: "bedrock:haiku")
+
+# Or full model ID
+{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: "openrouter:anthropic/claude-haiku-4.5")
 ```
 
-Or supply any callback function directly:
+You can also create a callback explicitly or supply a custom function:
 
 ```elixir
+# Create callback with options
+llm = PtcRunner.LLM.callback("haiku", cache: true)
+{:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
+
+# Or supply any callback function directly
 llm = fn %{system: system, messages: messages} ->
   # Call your LLM provider here
   {:ok, response_text}
 end
 ```
 
-See [LLM Setup](subagent-llm-setup.md) for provider configuration, streaming, custom
-adapters, and framework integration (Req, LangChain, Bumblebee).
+See [LLM Setup](subagent-llm-setup.md) for provider configuration, model aliases,
+custom registries, streaming, and framework integration.
 
 ## Defining Tools
 
