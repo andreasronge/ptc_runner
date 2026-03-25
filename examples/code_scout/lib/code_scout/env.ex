@@ -4,31 +4,9 @@ defmodule CodeScout.Env do
   """
 
   @doc """
-  Loads the `.env` file from the project root.
+  Loads the nearest `.env` file by walking up from the current directory.
+
+  Delegates to `PtcRunner.Dotenv.load/0`.
   """
-  def load do
-    # The root .env is 4 levels up from this file's directory:
-    # lib/code_scout/env.ex -> lib -> code_scout -> examples -> ptc_runner
-    env_path = Path.expand("../../../../.env", __DIR__)
-
-    if File.exists?(env_path) do
-      env_path
-      |> File.read!()
-      |> String.split("\n", trim: true)
-      |> Enum.each(fn line ->
-        case String.split(line, "=", parts: 2) do
-          [key, value] ->
-            # Remove optional quotes and trim
-            key = String.trim(key)
-            value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
-            System.put_env(key, value)
-
-          _ ->
-            :ok
-        end
-      end)
-    else
-      :ok
-    end
-  end
+  defdelegate load, to: PtcRunner.Dotenv
 end

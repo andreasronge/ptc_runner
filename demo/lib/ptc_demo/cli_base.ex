@@ -6,29 +6,11 @@ defmodule PtcDemo.CLIBase do
   """
 
   @doc """
-  Load environment variables from .env file if present.
+  Load environment variables from the nearest `.env` file.
 
-  Checks for .env in the demo directory first, then the parent directory.
+  Delegates to `PtcRunner.Dotenv.load/0`.
   """
-  def load_dotenv do
-    env_file =
-      cond do
-        File.exists?(".env") -> ".env"
-        File.exists?("../.env") -> "../.env"
-        true -> nil
-      end
-
-    if env_file do
-      env_file
-      |> Dotenvy.source!()
-      |> Enum.each(fn {key, value} ->
-        # Only set if not already set (command line env vars take precedence)
-        unless System.get_env(key) do
-          System.put_env(key, value)
-        end
-      end)
-    end
-  end
+  defdelegate load_dotenv, to: PtcRunner.Dotenv, as: :load
 
   @doc """
   Ensure that an API key environment variable is set (unless using local models).
