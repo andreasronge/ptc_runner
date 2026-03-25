@@ -12,10 +12,12 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
   @doc """
   Build the tool map for the trace analyzer agent.
   """
-  def build(trace_dir) do
+  def build(trace_dir, opts \\ []) do
+    exclude_file = Keyword.get(opts, :exclude_file)
+
     %{
       # High-level domain tools
-      "list_traces" => list_traces_tool(trace_dir),
+      "list_traces" => list_traces_tool(trace_dir, exclude_file),
       "trace_summary" => trace_summary_tool(trace_dir),
       "turn_detail" => turn_detail_tool(trace_dir),
       "diff_traces" => diff_traces_tool(trace_dir),
@@ -27,8 +29,8 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
 
   # --- list_traces ---
 
-  defp list_traces_tool(trace_dir) do
-    {fn args -> list_traces(trace_dir, args) end,
+  defp list_traces_tool(trace_dir, exclude_file) do
+    {fn args -> list_traces(trace_dir, args, exclude_file) end,
      signature:
        "(status :string, label :string, trace_kind :string, limit :int) -> " <>
          "{count :int, traces [{filename :string, timestamp :string, agent_name :string, " <>
@@ -41,7 +43,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
          "or trace_kind (benchmark, analysis, planning). Default limit 20."}
   end
 
-  defp list_traces(trace_dir, args) do
+  defp list_traces(trace_dir, args, exclude_file) do
     status_filter = args["status"]
     label_filter = args["label"]
     kind_filter = args["trace_kind"]
@@ -49,6 +51,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
 
     trace_dir
     |> list_jsonl_files()
+    |> Enum.reject(&(Path.basename(&1) == exclude_file))
     |> Enum.map(fn path ->
       try do
         events = Analyzer.load(path)

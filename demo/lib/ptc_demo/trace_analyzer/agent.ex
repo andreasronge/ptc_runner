@@ -54,7 +54,8 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
         end
       end)
 
-    tools = Tools.build(trace_dir)
+    trace_path = trace_path()
+    tools = Tools.build(trace_dir, exclude_file: Path.basename(trace_path))
 
     agent =
       SubAgent.new(
@@ -63,8 +64,6 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
         max_turns: max_turns,
         system_prompt: %{prefix: system_prompt()}
       )
-
-    trace_path = trace_path()
 
     model = PtcDemo.Agent.model()
 
