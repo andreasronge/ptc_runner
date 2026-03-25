@@ -239,7 +239,7 @@ jobs:
 
             Begin fixing the issues now.
 
-          claude_args: '--model claude-sonnet-4-6-20250514 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,Task,TodoWrite,TodoRead"'
+          claude_args: '--model claude-sonnet-4-6 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,Task,TodoWrite,TodoRead"'
           show_full_output: true
 
       # If Claude fails, remove batch-pending so issues can be retried

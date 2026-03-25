@@ -169,7 +169,7 @@ jobs:
             gh pr edit ${{ steps.pr.outputs.number }} --add-label "ready-to-merge"
             ```
 
-          claude_args: '--model claude-sonnet-4-6-20250514 --max-turns 30 --allowed-tools "Read,Glob,Grep,Bash,Task"'
+          claude_args: '--model claude-sonnet-4-6 --max-turns 30 --allowed-tools "Read,Glob,Grep,Bash,Task"'
           show_full_output: true
 
       - name: Check for pending fixes
