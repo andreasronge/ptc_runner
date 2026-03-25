@@ -228,7 +228,7 @@ mix lisp --test --filter=multi_turn --compression  # Multi-turn tests with compr
 
 ## Prompt Profiles
 
-Prompts are composable — the language reference is **not** included by default (most models don't need it):
+Prompts are composable — the language reference is included by default (use `reference: :none` to omit it for capable models):
 
 | Profile | Description |
 |---------|-------------|
@@ -238,10 +238,10 @@ Prompts are composable — the language reference is **not** included by default
 
 | `:auto` | Auto-select per test: `:single_shot` for max_turns=1, `:explicit_return` otherwise |
 
-Add the language reference for weaker models via structured profiles:
+The language reference is included by default. Omit it for capable models via structured profiles:
 
 ```elixir
-system_prompt: %{language_spec: {:profile, :explicit_return, reference: :full}}
+system_prompt: %{language_spec: {:profile, :explicit_return, reference: :none}}
 ```
 
 ```bash

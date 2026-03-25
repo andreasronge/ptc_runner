@@ -8,8 +8,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   - **Reference**: Optional language reference (tool syntax, Java interop, restrictions)
   - **Capabilities**: `:journal` (task caching, semantic progress)
 
-  Compositions do **not** include the language reference by default. Use
-  `{:profile, behavior, reference: :full}` to add it for weaker models.
+  Compositions include the language reference by default. Use
+  `{:profile, behavior, reference: :none}` to omit it for capable models.
 
   ## Compositions
 
@@ -23,8 +23,8 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
   For programmatic composition, use `resolve_profile/1` with a tuple:
 
-      # Add language reference for weaker models
-      LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
+      # Omit language reference for capable models
+      LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none})
 
       # Add journal capability
       LanguageSpec.resolve_profile({:profile, :explicit_return, journal: true})
@@ -44,12 +44,13 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   alias PtcRunner.Prompts
 
   # Compositions: predefined combinations of snippets
-  # Default compositions do NOT include the language reference.
-  # Use {:profile, behavior, reference: :full} to add it for weaker models.
+  # Default compositions include the language reference.
+  # Use {:profile, behavior, reference: :none} to omit it for capable models.
   @compositions %{
-    single_shot: [:behavior_single_shot],
-    explicit_return: [:behavior_multi_turn, :behavior_return_explicit],
+    single_shot: [:reference, :behavior_single_shot],
+    explicit_return: [:reference, :behavior_multi_turn, :behavior_return_explicit],
     explicit_journal: [
+      :reference,
       :behavior_multi_turn,
       :behavior_return_explicit,
       :capability_journal
@@ -155,7 +156,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
   ## Options
 
-  - `:reference` - `:none` (default) or `:full`
+  - `:reference` - `:full` (default) or `:none`
   - `:journal` - `true` or `false` (default)
 
   ## Validation
@@ -177,7 +178,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   def resolve_profile({:profile, behavior, opts}) do
     validate_profile!(behavior, opts)
 
-    reference = Keyword.get(opts, :reference, :none)
+    reference = Keyword.get(opts, :reference, :full)
     journal? = Keyword.get(opts, :journal, false)
 
     parts = if reference == :full, do: [:reference], else: []
