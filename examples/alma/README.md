@@ -335,7 +335,7 @@ cd ../.. && mix ptc.viewer --trace-dir examples/alma/traces
 For scripted or iex usage:
 
 ```elixir
-llm = LLMClient.callback("bedrock:haiku")
+llm = PtcRunner.LLM.callback("bedrock:haiku")
 
 {archive, trace_path} = Alma.run(
   llm: llm,

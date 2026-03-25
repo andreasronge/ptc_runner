@@ -107,13 +107,13 @@ defmodule MyApp.LLMCallback do
 end
 ```
 
-## Using LLMClient (Simplest)
+## Using PtcRunner.LLM (Simplest)
 
-The `llm_client` package provides `callback/1` that handles all modes automatically:
+`PtcRunner.LLM.callback/1` handles all modes automatically:
 
 ```elixir
 # One line - works for :text and :ptc_lisp modes
-llm = LLMClient.callback("sonnet")
+llm = PtcRunner.LLM.callback("sonnet")
 
 # Use with any SubAgent
 {:ok, step} = SubAgent.run(agent, llm: llm, context: %{...})
@@ -127,13 +127,13 @@ If you need more control:
 
 ```elixir
 # Direct call with request map
-LLMClient.call("sonnet", subagent_request)
+PtcRunner.LLM.callback("sonnet").(subagent_request)
 
 # Structured output only
-LLMClient.generate_object(model, messages, schema)
+PtcRunner.LLM.ReqLLMAdapter.generate_object(model, messages, schema)
 
 # Text generation only
-LLMClient.generate_text(model, messages)
+PtcRunner.LLM.ReqLLMAdapter.generate_text(model, messages)
 ```
 
 ## Provider-Specific Implementation

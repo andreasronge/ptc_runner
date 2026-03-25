@@ -116,18 +116,21 @@ defmodule RlmRecursive.Runner do
 
       :counting ->
         profiles = run_opts[:profiles] || 500
+
         IO.puts(
           "Profiles: #{profiles}, Seed: #{run_opts[:seed]}, Age > #{run_opts[:min_age]}, Hobby: #{run_opts[:hobby]}"
         )
 
       :pairs ->
         profiles = run_opts[:profiles] || 100
+
         IO.puts(
           "Profiles: #{profiles}, Seed: #{run_opts[:seed]} (O(n^2) task - recursion essential!)"
         )
 
       :semantic_pairs ->
         profiles = run_opts[:profiles] || 8
+
         IO.puts(
           "Profiles: #{profiles}, Seed: #{run_opts[:seed]} (SEMANTIC judgment per pair - forces recursion!)"
         )
@@ -172,7 +175,7 @@ defmodule RlmRecursive.Runner do
         opts
 
       model ->
-        llm = LLMClient.callback(model)
+        llm = PtcRunner.LLM.callback(model)
         Keyword.put(opts, :llm, llm)
     end
   end

@@ -64,7 +64,7 @@ Shows how to wire up any LLM provider:
 ```elixir
 llm_fn = fn input ->
   messages = [%{role: :system, content: input.system} | input.messages]
-  case LLMClient.generate_text(model, messages) do
+  case PtcRunner.LLM.ReqLLMAdapter.generate_text(model, messages) do
     {:ok, response} -> {:ok, %{content: response.content, tokens: response.tokens}}
     {:error, reason} -> {:error, reason}
   end
@@ -78,7 +78,7 @@ Inspect agent behavior with `--trace` (add `--verbose` for full messages), or vi
 
 ## LLM Provider Setup
 
-This example uses `llm_client`. See [llm_client/README.md](../../llm_client/README.md) for provider configuration (OpenRouter, AWS Bedrock, etc.).
+This example uses `PtcRunner.LLM` with the `ReqLLMAdapter`. See the [SubAgent Getting Started](../../docs/guides/subagent-getting-started.md) guide for provider configuration (OpenRouter, AWS Bedrock, etc.).
 
 ## Installation
 

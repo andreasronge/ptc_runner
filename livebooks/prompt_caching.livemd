@@ -5,7 +5,7 @@ repo_root = Path.expand("..", __DIR__)
 
 deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
-    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+    [{:ptc_runner, path: repo_root}]
   else
     [{:ptc_runner, "~> 0.9.0"}]
   end
@@ -32,7 +32,7 @@ The PTC-Lisp system prompt is ~1,700 tokens, so caching only works with Sonnet (
 **Requirements for caching to work:**
 
 1. **Minimum tokens** - Your system prompt must exceed the threshold (1,024 for Sonnet, 4,096 for Haiku)
-2. **Anthropic routing** - OpenRouter must route to Anthropic (not Google). `LLMClient` handles this automatically when `cache: true`
+2. **Anthropic routing** - OpenRouter must route to Anthropic (not Google). `PtcRunner.LLM` handles this automatically when `cache: true`
 3. **Identical prefix** - The cached portion (system prompt) must be byte-for-byte identical between requests
 
 ## Setup
@@ -71,7 +71,7 @@ my_llm = fn %{system: system, messages: messages, cache: cache} ->
 
   opts = [receive_timeout: 60_000, cache: cache]
 
-  case LLMClient.generate_text(model, [%{role: :system, content: system} | messages], opts) do
+  case PtcRunner.LLM.ReqLLMAdapter.generate_text(model, [%{role: :system, content: system} | messages], opts) do
     {:ok, r} ->
       IO.puts("LLM tokens: #{inspect(r.tokens)}")
       {:ok, r}

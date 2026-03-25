@@ -12,6 +12,7 @@ defmodule PtcRunner.SubAgent.TextModeJsonE2ETest do
 
   @moduletag :e2e
 
+  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.SubAgent
   alias PtcRunner.TestSupport.LLMSupport
 
@@ -144,7 +145,7 @@ defmodule PtcRunner.SubAgent.TextModeJsonE2ETest do
           opts
         end
 
-      case LLMClient.generate_text(model, full_messages, opts) do
+      case ReqLLMAdapter.generate_text(model, full_messages, opts) do
         {:ok, %{content: text}} ->
           {:ok, text}
 

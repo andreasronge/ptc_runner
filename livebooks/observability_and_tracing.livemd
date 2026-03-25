@@ -11,7 +11,7 @@ repo_root = Path.expand("..", __DIR__)
 
 deps =
   if File.exists?(Path.join(repo_root, "mix.exs")) do
-    [{:ptc_runner, path: repo_root}, {:llm_client, path: Path.join(repo_root, "llm_client")}]
+    [{:ptc_runner, path: repo_root}]
   else
     [{:ptc_runner, "~> 0.9.0"}]
   end

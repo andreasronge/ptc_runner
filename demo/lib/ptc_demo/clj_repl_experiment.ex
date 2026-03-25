@@ -143,7 +143,7 @@ defmodule PtcDemo.CljReplExperiment do
 
     full_messages = [%{role: :system, content: @system_prompt} | messages]
 
-    case LLMClient.generate_text(model, full_messages,
+    case PtcRunner.LLM.ReqLLMAdapter.generate_text(model, full_messages,
            receive_timeout: 60_000,
            req_http_options: [retry: :transient, max_retries: 3]
          ) do

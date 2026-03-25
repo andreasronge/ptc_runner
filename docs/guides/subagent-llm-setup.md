@@ -129,11 +129,9 @@ Now you can use your custom aliases:
 ## Built-in Adapter
 
 `PtcRunner.LLM.callback/2` creates a SubAgent-compatible callback using the built-in
-`PtcRunner.LLM.ReqLLMAdapter`. It accepts `provider:model` strings and passes them
-directly to the adapter — it does **not** resolve aliases. For alias resolution
-(e.g., `"haiku"` → `"openrouter:anthropic/claude-haiku-4.5"`), pass the string
-directly to `SubAgent.run(agent, llm: "haiku")`, which resolves via
-`PtcRunner.LLM.Registry` before creating the callback.
+`PtcRunner.LLM.ReqLLMAdapter`. It resolves aliases via `PtcRunner.LLM.Registry`
+(e.g., `"haiku"` → `"openrouter:anthropic/claude-haiku-4.5"`), so you can pass
+aliases directly. Already-resolved `provider:model` strings pass through unchanged.
 
 Supported provider prefixes:
 

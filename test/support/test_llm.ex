@@ -1,4 +1,4 @@
-defmodule PtcRunner.TestSupport.LLMClient do
+defmodule PtcRunner.TestSupport.TestLLM do
   @moduledoc """
   LLM client for E2E testing using ReqLLM.
 
@@ -14,7 +14,7 @@ defmodule PtcRunner.TestSupport.LLMClient do
       OPENROUTER_API_KEY=sk-or-...
       PTC_TEST_MODEL=haiku
 
-  Use `LLMClient.aliases()` to see available model presets.
+  Use `PtcRunner.LLM.Registry.aliases()` to see available model presets.
 
   ## Usage
 

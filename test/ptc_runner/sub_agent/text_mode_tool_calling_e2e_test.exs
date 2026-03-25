@@ -6,7 +6,7 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingE2ETest do
   @moduletag :e2e
 
   defp get_llm do
-    LLMClient.callback("haiku")
+    PtcRunner.LLM.callback("haiku")
   end
 
   describe "tool calling e2e" do
