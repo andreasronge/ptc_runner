@@ -1,4 +1,4 @@
-defmodule PtcRunner.TestSupport.LispLLMClient do
+defmodule PtcRunner.TestSupport.LispTestLLM do
   @moduledoc """
   LLM client for PTC-Lisp E2E testing.
 
