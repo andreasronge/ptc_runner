@@ -128,11 +128,11 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   @doc """
   Format execution result feedback for the next LLM turn.
 
-  Returns `{feedback_string, truncated?}`.
+  Returns `{feedback_string, truncated?, new_progress_state}`.
 
   Only shows explicit println output - the LLM must be intentional about what it inspects.
   """
-  @spec format(Definition.t(), map(), map()) :: {String.t(), boolean()}
+  @spec format(Definition.t(), map(), map()) :: {String.t(), boolean(), term()}
   def format(agent, state, lisp_step) do
     max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
     preview_max = Keyword.get(agent.format_options, :preview_max_chars, 250)
