@@ -1,5 +1,6 @@
 defmodule PtcRunner.LLM.RegistryTest do
   use ExUnit.Case, async: true
+  doctest PtcRunner.LLM.Registry
 
   alias PtcRunner.LLM.DefaultRegistry
   alias PtcRunner.LLM.Registry
@@ -14,8 +15,7 @@ defmodule PtcRunner.LLM.RegistryTest do
     end
 
     test "resolves gemini alias" do
-      # Gemini isn't on the default provider (openrouter), but has exactly one cloud provider
-      # so it auto-selects
+      # Gemini is available on the default provider (openrouter)
       assert {:ok, "openrouter:google/gemini-2.5-flash"} = Registry.resolve("gemini")
     end
   end
