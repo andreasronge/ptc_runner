@@ -53,6 +53,16 @@ defmodule PtcRunner.SubAgent.Definition do
 
   @type llm_callback :: (map() -> {:ok, llm_response()} | {:error, term()})
 
+  @typedoc """
+  LLM reference for SubAgent execution.
+
+  Can be:
+  - `String.t()` — Model alias (e.g., `"haiku"`) or full ID (e.g., `"openrouter:anthropic/claude-haiku-4.5"`)
+  - `atom()` — Registry key (e.g., `:haiku`) that looks up in `llm_registry`
+  - `llm_callback()` — Direct callback function
+  """
+  @type llm_ref :: String.t() | atom() | llm_callback()
+
   @type llm_registry :: %{atom() => llm_callback()}
 
   @typedoc """
@@ -123,7 +133,7 @@ defmodule PtcRunner.SubAgent.Definition do
           max_heap: pos_integer() | nil,
           mission_timeout: pos_integer() | nil,
           llm_retry: map() | nil,
-          llm: atom() | (map() -> {:ok, llm_response()} | {:error, term()}) | nil,
+          llm: llm_ref() | nil,
           system_prompt: system_prompt_opts() | nil,
           memory_limit: pos_integer() | nil,
           max_depth: pos_integer(),

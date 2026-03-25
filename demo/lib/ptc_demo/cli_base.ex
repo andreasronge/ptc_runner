@@ -265,9 +265,71 @@ defmodule PtcDemo.CLIBase do
   """
   def handle_list_models(opts) do
     if opts[:list_models] do
-      IO.puts(LLMClient.format_model_list())
+      IO.puts(format_model_list())
       System.halt(0)
     end
+  end
+
+  # Format models for CLI --list-models output (local implementation, not in Registry)
+  defp format_model_list do
+    default_prov = PtcRunner.LLM.Registry.default_provider()
+
+    {cloud_models, local_models} =
+      PtcRunner.LLM.Registry.list_models()
+      |> Enum.split_with(fn m ->
+        Enum.any?(
+          [:openrouter, :anthropic, :openai, :google, :bedrock, :groq],
+          &(&1 in m.providers)
+        )
+      end)
+
+    header = """
+    Available Models
+    ================
+    Default provider: #{default_prov}
+
+    Cloud Models:
+    """
+
+    cloud_section =
+      cloud_models
+      |> Enum.map(fn model ->
+        status = if model.available, do: "[available]", else: "[needs API key]"
+        providers_str = model.providers |> Enum.map(&to_string/1) |> Enum.join(", ")
+
+        "  #{String.pad_trailing(model.alias, 12)} #{String.pad_trailing(status, 16)} #{model.description}\n" <>
+          "               Providers: #{providers_str}"
+      end)
+      |> Enum.join("\n\n")
+
+    local_header = """
+
+    Local Models (via Ollama):
+    """
+
+    local_section =
+      local_models
+      |> Enum.map(fn model ->
+        status = if model.available, do: "[available]", else: "[needs Ollama]"
+
+        "  #{String.pad_trailing(model.alias, 12)} #{String.pad_trailing(status, 16)} #{model.description}"
+      end)
+      |> Enum.join("\n")
+
+    footer = """
+
+
+    Usage:
+      mix lisp --model=haiku                    # Uses default provider (#{default_prov})
+      mix lisp --model=bedrock:haiku            # Explicit provider
+      mix lisp --model=openrouter:haiku         # Explicit provider
+      mix lisp --model=deepseek-local           # Local Ollama
+
+    Environment:
+      LLM_DEFAULT_PROVIDER=bedrock              # Change default provider
+    """
+
+    header <> cloud_section <> local_header <> local_section <> footer
   end
 
   @doc """
@@ -367,12 +429,12 @@ defmodule PtcDemo.CLIBase do
   end
 
   @doc """
-  Resolve a model name using ModelRegistry.
+  Resolve a model name using PtcRunner.LLM.Registry.
 
   Returns the resolved model ID or exits with an error message.
   """
   def resolve_model(name) do
-    case LLMClient.resolve(name) do
+    case PtcRunner.LLM.Registry.resolve(name) do
       {:ok, model_id} ->
         model_id
 
