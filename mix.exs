@@ -54,7 +54,7 @@ defmodule PtcRunner.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req, "~> 0.5", optional: true},
-      {:req_llm, "~> 1.7", optional: true},
+      {:req_llm, "~> 1.8", optional: true},
       {:kino, "~> 0.14", optional: true},
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false}

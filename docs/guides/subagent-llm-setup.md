@@ -10,7 +10,7 @@ Add the dependencies:
 def deps do
   [
     {:ptc_runner, "~> 0.9.0"},
-    {:req_llm, "~> 1.2"}  # enables the built-in adapter
+    {:req_llm, "~> 1.8"}  # enables the built-in adapter
   ]
 end
 ```
@@ -378,7 +378,7 @@ resolved in this order:
 2. `PtcRunner.LLM.ReqLLMAdapter` — auto-discovered when `req_llm` is in deps
 3. Raises with setup instructions if neither is available
 
-This means adding `{:req_llm, "~> 1.2"}` to your deps is all you need — no config
+This means adding `{:req_llm, "~> 1.8"}` to your deps is all you need — no config
 required.
 
 ## See Also

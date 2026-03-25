@@ -31,7 +31,7 @@ defmodule PtcDemo.MixProject do
     [
       {:ptc_runner, path: ".."},
       {:req, "~> 0.5"},
-      {:req_llm, "~> 1.7"}
+      {:req_llm, "~> 1.8"}
     ]
   end
 
