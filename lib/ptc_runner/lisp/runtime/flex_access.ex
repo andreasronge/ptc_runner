@@ -3,11 +3,18 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   Flexible key access helpers for PTC-Lisp runtime.
 
   These helpers allow accessing map keys using either atom or string versions,
-  providing seamless interoperability between different key formats.
+  with hyphen/underscore normalization for seamless interoperability between
+  Clojure-style keywords (`:turn-summaries`) and Elixir-style keys (`:turn_summaries`).
+
+  ## Lookup order
+
+  1. Exact match (atom or string as given)
+  2. Atom↔string variant (`:foo` → `"foo"` or vice versa)
+  3. Hyphen↔underscore normalized variant (`:turn-summaries` → `:turn_summaries`, `"turn_summaries"`)
   """
 
   @doc """
-  Flexible key access: try both atom and string versions of the key.
+  Flexible key access: try atom/string and hyphen/underscore variants of the key.
   Returns the value if found, nil if missing.
   Use this for simple lookups where you don't need to distinguish between nil values and missing keys.
   """
@@ -15,8 +22,16 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
   def flex_get(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do
-      {:ok, value} -> value
-      :error -> Map.get(map, to_string(key))
+      {:ok, value} ->
+        value
+
+      :error ->
+        str = to_string(key)
+
+        case Map.fetch(map, str) do
+          {:ok, value} -> value
+          :error -> get_normalized(map, str, :atom)
+        end
     end
   end
 
@@ -27,10 +42,16 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
       :error ->
         # Try converting string to existing atom (safe - won't create new atoms)
-        try do
-          Map.get(map, String.to_existing_atom(key))
-        rescue
-          ArgumentError -> nil
+        result =
+          try do
+            Map.fetch(map, String.to_existing_atom(key))
+          rescue
+            ArgumentError -> :error
+          end
+
+        case result do
+          {:ok, value} -> value
+          :error -> get_normalized(map, key, :string)
         end
     end
   end
@@ -56,8 +77,16 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
   def flex_fetch(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do
-      {:ok, _} = ok -> ok
-      :error -> Map.fetch(map, to_string(key))
+      {:ok, _} = ok ->
+        ok
+
+      :error ->
+        str = to_string(key)
+
+        case Map.fetch(map, str) do
+          {:ok, _} = ok -> ok
+          :error -> fetch_normalized(map, str, :atom)
+        end
     end
   end
 
@@ -67,10 +96,16 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
         ok
 
       :error ->
-        try do
-          Map.fetch(map, String.to_existing_atom(key))
-        rescue
-          ArgumentError -> :error
+        result =
+          try do
+            Map.fetch(map, String.to_existing_atom(key))
+          rescue
+            ArgumentError -> :error
+          end
+
+        case result do
+          {:ok, _} = ok -> ok
+          :error -> fetch_normalized(map, key, :string)
         end
     end
   end
@@ -248,4 +283,66 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
       raise ArgumentError, "index #{key} out of bounds for list of length #{length(data)}"
     end
   end
+
+  # --- Hyphen/underscore normalization helpers ---
+  #
+  # Called after exact and atom↔string lookups have failed.
+  # Normalizes hyphens to underscores (the canonical Elixir separator),
+  # then tries both atom and string forms in the caller's preferred order.
+  #
+  # `prefer` is `:atom` or `:string`, matching the original key type so the
+  # normalized tier preserves the same atom-before-string (or vice versa)
+  # precedence as the non-normalized tiers.
+
+  defp get_normalized(map, str, prefer) do
+    case fetch_normalized(map, str, prefer) do
+      {:ok, value} -> value
+      :error -> nil
+    end
+  end
+
+  defp fetch_normalized(map, str, prefer) when is_binary(str) do
+    normalized = normalize_separator(str)
+
+    if normalized == str do
+      :error
+    else
+      case prefer do
+        :atom -> fetch_normalized_atom_first(map, normalized)
+        :string -> fetch_normalized_string_first(map, normalized)
+      end
+    end
+  end
+
+  defp fetch_normalized_atom_first(map, normalized) do
+    result =
+      try do
+        Map.fetch(map, String.to_existing_atom(normalized))
+      rescue
+        ArgumentError -> :error
+      end
+
+    case result do
+      {:ok, _} = ok -> ok
+      :error -> Map.fetch(map, normalized)
+    end
+  end
+
+  defp fetch_normalized_string_first(map, normalized) do
+    case Map.fetch(map, normalized) do
+      {:ok, _} = ok ->
+        ok
+
+      :error ->
+        try do
+          Map.fetch(map, String.to_existing_atom(normalized))
+        rescue
+          ArgumentError -> :error
+        end
+    end
+  end
+
+  # Normalize to underscores — the canonical Elixir separator.
+  # Handles mixed keys like "foo-bar_baz" → "foo_bar_baz".
+  defp normalize_separator(str), do: String.replace(str, "-", "_")
 end
