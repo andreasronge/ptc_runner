@@ -43,6 +43,9 @@ function renderProducerData(traceKind, data) {
     if (data.signature) fields.push(['sig', data.signature]);
     if (data.max_turns) fields.push(['turns', data.max_turns]);
     if (data.thinking) fields.push(['thinking', 'on']);
+  } else if (traceKind === 'analysis') {
+    if (data.trace_dir) fields.push(['trace_dir', data.trace_dir]);
+    if (data.max_turns) fields.push(['max_turns', data.max_turns]);
   }
   // For other trace_kinds or unknown, show all data keys
   if (fields.length === 0) {

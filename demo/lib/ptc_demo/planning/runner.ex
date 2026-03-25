@@ -294,6 +294,7 @@ defmodule PtcDemo.Planning.Runner do
           path: trace_path,
           trace_kind: "planning",
           producer: "demo.planner",
+          model: model,
           query: String.slice(query, 0, 200)
         )
 
