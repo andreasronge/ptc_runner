@@ -262,7 +262,7 @@ Run with `mix test --include e2e`. Uses `OPENROUTER_API_KEY` (set locally and in
 - Use `@moduletag :e2e` and `async: false`
 - See `test/ptc_runner/sub_agent/e2e_test.exs` for the pattern
 - LLM callback must prepend system prompt to messages (contains PTC-Lisp instructions)
-- Use `LispLLMClient.model()` for model resolution
+- Use `LispTestLLM.model()` for model resolution
 
 ## Checklist
 

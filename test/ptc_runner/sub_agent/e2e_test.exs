@@ -14,7 +14,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
 
   alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.SubAgent
-  alias PtcRunner.TestSupport.LispLLMClient
+  alias PtcRunner.TestSupport.LispTestLLM
   alias PtcRunner.TestSupport.LLM
 
   @timeout 30_000
@@ -149,7 +149,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
     end
   end
 
-  defp model, do: LispLLMClient.model()
+  defp model, do: LispTestLLM.model()
 
   defp llm_callback do
     fn %{system: system, messages: messages} ->
@@ -168,7 +168,7 @@ defmodule PtcRunner.SubAgent.E2ETest do
   end
 
   defp ensure_api_key! do
-    model = LispLLMClient.model()
+    model = LispTestLLM.model()
 
     # Skip API key check for local providers
     unless local_provider?(model) or System.get_env("OPENROUTER_API_KEY") do
