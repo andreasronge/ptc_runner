@@ -47,7 +47,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
       end)
 
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("test:model")
+      llm = PtcRunner.LLM.callback("ollama:test-model")
 
       test_pid = self()
       on_chunk = fn %{delta: text} -> send(test_pid, {:chunk, text}) end
@@ -70,7 +70,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
       end)
 
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("test:model")
+      llm = PtcRunner.LLM.callback("ollama:test-model")
 
       test_pid = self()
       on_chunk = fn %{delta: text} -> send(test_pid, {:chunk, text}) end
@@ -116,7 +116,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
       end)
 
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("test:model")
+      llm = PtcRunner.LLM.callback("ollama:test-model")
 
       on_chunk = fn _chunk -> raise "socket closed" end
 
@@ -155,7 +155,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
       end)
 
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("test:model")
+      llm = PtcRunner.LLM.callback("ollama:test-model")
 
       # No on_chunk — should work exactly as before (call/2 path)
       {:ok, step} = SubAgent.Loop.run(agent, llm: llm)

@@ -227,14 +227,14 @@ defmodule PtcDemo.Agent do
   Available preset models for easy switching.
   """
   def preset_models do
-    LLMClient.presets()
+    PtcRunner.LLM.Registry.preset_models()
   end
 
   @doc """
   Get the default model.
   """
   def detect_model do
-    LLMClient.default_model()
+    PtcRunner.LLM.Registry.default_model()
   end
 
   # --- GenServer Callbacks ---
@@ -245,7 +245,7 @@ defmodule PtcDemo.Agent do
         detect_model()
 
       value ->
-        case LLMClient.resolve(value) do
+        case PtcRunner.LLM.Registry.resolve(value) do
           {:ok, model_id} -> model_id
           {:error, _} -> value
         end
@@ -332,7 +332,7 @@ defmodule PtcDemo.Agent do
       TraceLog.with_trace(
         fn ->
           SubAgent.run(agent,
-            llm: llm_callback(state.model),
+            llm: state.model,
             context: context,
             max_turns: max_turns,
             debug: debug
@@ -654,36 +654,6 @@ defmodule PtcDemo.Agent do
       language_spec: PtcDemo.Prompts.get(prompt_profile)
     }
   end
-
-  defp llm_callback(model) do
-    fn %{system: system, messages: messages} ->
-      full_messages = [%{role: :system, content: system} | messages]
-
-      case LLMClient.generate_text(model, full_messages,
-             receive_timeout: @timeout,
-             req_http_options: [retry: :transient, max_retries: 3]
-           ) do
-        {:ok, %{content: text, tokens: tokens}} ->
-          {:ok, %{content: text || "", tokens: tokens}}
-
-        {:error, reason} ->
-          {:error, format_llm_error(reason, model)}
-      end
-    end
-  end
-
-  defp format_llm_error(reason, model) do
-    base_msg = format_error_reason(reason)
-    "#{base_msg} (model: #{model})"
-  end
-
-  defp format_error_reason(%{reason: reason}) when is_binary(reason), do: reason
-  defp format_error_reason(%{message: msg}) when is_binary(msg), do: msg
-  defp format_error_reason(:invalid_format), do: "Invalid model format - check model string"
-  defp format_error_reason(:timeout), do: "Request timed out"
-  defp format_error_reason(:econnrefused), do: "Connection refused - API unreachable"
-  defp format_error_reason(reason) when is_atom(reason), do: "#{reason}"
-  defp format_error_reason(reason), do: inspect(reason)
 
   defp extract_program_from_turns(nil), do: nil
   defp extract_program_from_turns([]), do: nil
