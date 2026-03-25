@@ -37,8 +37,8 @@ export function renderExecutionTree(container, tools, state, data) {
  */
 function resolveChildData(toolPair, state, data) {
   const toolSpanId = toolPair.stop?.span_id || toolPair.start?.span_id;
-  const childTraceIds = toolPair.stop?.metadata?.child_trace_ids ||
-    (toolPair.stop?.metadata?.child_trace_id ? [toolPair.stop.metadata.child_trace_id] : []);
+  const childTraceIds = toolPair.stop?.data?.child_trace_ids ||
+    (toolPair.stop?.data?.child_trace_id ? [toolPair.stop.data.child_trace_id] : []);
 
   // File-based: use first child trace ID (one child per tool call)
   if (childTraceIds.length > 0) {
@@ -56,7 +56,7 @@ function resolveChildData(toolPair, state, data) {
   // Embedded: find child run.start whose parent is this tool span
   if (data?.events && toolSpanId) {
     const childRun = data.events.find(e =>
-      e.event === 'run.start' && e.metadata?.parent_span_id === toolSpanId
+      e.event === 'run.start' && e.parent_span_id === toolSpanId
     );
     if (childRun) {
       const childEvents = extractRunEvents(data.events, childRun.span_id);
@@ -78,19 +78,19 @@ function buildCompactTurns(events) {
   // Find root agent span
   const allSpanIds = new Set(events.filter(e => e.span_id).map(e => e.span_id));
   const rootRun = events.find(e => e.event === 'run.start' &&
-    (!e.metadata?.parent_span_id || !allSpanIds.has(e.metadata.parent_span_id)));
+    (!e.parent_span_id || !allSpanIds.has(e.parent_span_id)));
   const rootSpanId = rootRun?.span_id;
 
   const llmPairs = paired.filter(p => p.type === 'llm' &&
-    (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
+    (!rootSpanId || p.start?.parent_span_id === rootSpanId || p.stop?.parent_span_id === rootSpanId));
   const toolPairs = paired.filter(p => p.type === 'tool' &&
-    (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
+    (!rootSpanId || p.start?.parent_span_id === rootSpanId || p.stop?.parent_span_id === rootSpanId));
 
   return llmPairs.map((llmPair, idx) => {
     const stop = llmPair.stop;
     const start = llmPair.start;
-    const turnNumber = stop?.metadata?.turn || start?.metadata?.turn || idx + 1;
-    const response = stop?.metadata?.response || '';
+    const turnNumber = stop?.turn || start?.turn || idx + 1;
+    const response = stop?.data?.response || '';
     const program = extractProgram(response);
     const duration = stop?.duration_ms || 0;
 
@@ -108,8 +108,8 @@ function buildCompactTurns(events) {
     // Find turn pair for result preview (filter to root agent to avoid cross-agent collisions)
     const turnPairs = paired.filter(p => p.type === 'turn' &&
       (!rootSpanId || p.start?.span_id === rootSpanId || p.stop?.span_id === rootSpanId));
-    const turnPair = turnPairs.find(p => (p.stop?.metadata?.turn || p.start?.metadata?.turn) === turnNumber);
-    const resultPreview = turnPair?.stop?.metadata?.result_preview;
+    const turnPair = turnPairs.find(p => (p.stop?.turn || p.start?.turn) === turnNumber);
+    const resultPreview = turnPair?.stop?.data?.result_preview;
     const hasError = resultPreview && (
       resultPreview.includes('Error:') ||
       resultPreview.includes(':error') ||
@@ -135,14 +135,14 @@ function buildCompactTurns(events) {
  * Renders a single tree node as a <details>/<summary> element.
  */
 function renderTreeNode(toolPair, childData, depth, state, data) {
-  const toolName = toolPair.stop?.metadata?.tool_name || toolPair.start?.metadata?.tool_name || 'unknown';
+  const toolName = toolPair.stop?.tool_name || toolPair.start?.tool_name || 'unknown';
   const toolDuration = toolPair.stop?.duration_ms || 0;
-  const toolArgs = toolPair.start?.metadata?.args || toolPair.stop?.metadata?.args;
+  const toolArgs = toolPair.start?.data?.args || toolPair.stop?.data?.args;
 
   // Status icon
   let statusIcon = '';
-  if (toolPair.stop?.metadata?.result != null) {
-    const result = toolPair.stop.metadata.result;
+  if (toolPair.stop?.data?.result != null) {
+    const result = toolPair.stop.data.result;
     const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
     const isError = resultStr.includes('Error:') || resultStr.includes(':error');
     statusIcon = isError ? '<span class="exec-tree-status error">&#10007;</span>' : '<span class="exec-tree-status success">&#10003;</span>';

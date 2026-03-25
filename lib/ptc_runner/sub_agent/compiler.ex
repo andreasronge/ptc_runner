@@ -182,14 +182,20 @@ defmodule PtcRunner.SubAgent.Compiler do
             end
 
           # Wrap entire execution in telemetry span
-          Telemetry.span([:compiled, :execute], %{agent: agent}, fn ->
-            result =
-              args
-              |> run_and_unwrap(source, runtime_tools, lisp_opts)
-              |> add_field_descriptions(field_descs)
+          compiled_agent_name = agent.name
 
-            {result, %{agent: agent, status: step_status(result)}}
-          end)
+          Telemetry.span(
+            [:compiled, :execute],
+            %{agent_name: compiled_agent_name},
+            fn ->
+              result =
+                args
+                |> run_and_unwrap(source, runtime_tools, lisp_opts)
+                |> add_field_descriptions(field_descs)
+
+              {result, %{agent_name: compiled_agent_name, status: step_status(result)}}
+            end
+          )
         end
 
         # Build metadata from the compilation step

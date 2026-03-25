@@ -128,7 +128,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     state = %{state | current_turn_type: :normal, expanded_prompt: expanded_prompt}
 
     Telemetry.emit([:turn, :start], %{}, %{
-      agent: agent,
+      agent_name: agent.name,
+      agent_id: state.agent_id,
       turn: state.turn,
       type: :normal,
       tools_count: 0
@@ -195,7 +196,6 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
         Metrics.emit_turn_stop_immediate(
           turn,
-          agent,
           state,
           turn_start,
           state_with_tokens.turn_tokens
@@ -216,7 +216,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             original_prompt: state.original_prompt
         }
 
-        Metrics.emit_turn_stop_immediate(nil, agent, state, turn_start, nil)
+        Metrics.emit_turn_stop_immediate(nil, state, turn_start, nil)
         {:error, step_with_metrics}
     end
   end
@@ -240,7 +240,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         state = %{state | current_turn_type: :normal}
 
         Telemetry.emit([:turn, :start], %{}, %{
-          agent: agent,
+          agent_name: agent.name,
+          agent_id: state.agent_id,
           turn: state.turn,
           type: :normal,
           tools_count: 0
@@ -252,7 +253,6 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           {:continue, next_state, turn} ->
             Metrics.emit_turn_stop_immediate(
               turn,
-              agent,
               state,
               turn_start,
               next_state.turn_tokens
@@ -261,7 +261,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             json_driver_loop(agent, llm, next_state)
 
           {:stop, result, turn, turn_tokens} ->
-            Metrics.emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens)
+            Metrics.emit_turn_stop_immediate(turn, state, turn_start, turn_tokens)
             result
         end
     end
@@ -361,7 +361,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         state = %{state | current_turn_type: :normal}
 
         Telemetry.emit([:turn, :start], %{}, %{
-          agent: agent,
+          agent_name: agent.name,
+          agent_id: state.agent_id,
           turn: state.turn,
           type: :normal,
           tools_count: map_size(agent.tools)
@@ -373,7 +374,6 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           {:continue, next_state, turn} ->
             Metrics.emit_turn_stop_immediate(
               turn,
-              agent,
               state,
               turn_start,
               next_state.turn_tokens
@@ -382,7 +382,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             tool_driver_loop(agent, llm, next_state)
 
           {:stop, result, turn, turn_tokens} ->
-            Metrics.emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens)
+            Metrics.emit_turn_stop_immediate(turn, state, turn_start, turn_tokens)
             result
         end
     end
@@ -793,8 +793,14 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # LLM Calling
   # ============================================================
 
-  defp call_llm_with_telemetry(llm, input, state, agent) do
-    start_meta = %{agent: agent, turn: state.turn, messages: input.messages}
+  defp call_llm_with_telemetry(llm, input, state, _agent) do
+    start_meta = %{
+      agent_name: state.agent_name,
+      agent_id: state.agent_id,
+      turn: state.turn,
+      messages: input.messages,
+      model: state.llm
+    }
 
     Telemetry.span([:llm], start_meta, fn ->
       # Bypass retry when streaming — can't retry after partial chunks sent
@@ -805,16 +811,36 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         case result do
           {:ok, %{tool_calls: [_ | _], tokens: tokens}} ->
             measurements = Metrics.build_token_measurements(tokens)
-            meta = %{agent: agent, turn: state.turn, response: "tool_calls"}
+
+            meta = %{
+              agent_name: state.agent_name,
+              agent_id: state.agent_id,
+              turn: state.turn,
+              response: "tool_calls"
+            }
+
             {measurements, meta}
 
           {:ok, %{content: content, tokens: tokens}} ->
             measurements = Metrics.build_token_measurements(tokens)
-            meta = %{agent: agent, turn: state.turn, response: content}
+
+            meta = %{
+              agent_name: state.agent_name,
+              agent_id: state.agent_id,
+              turn: state.turn,
+              response: content
+            }
+
             {measurements, meta}
 
           {:error, _} ->
-            meta = %{agent: agent, turn: state.turn, response: nil}
+            meta = %{
+              agent_name: state.agent_name,
+              agent_id: state.agent_id,
+              turn: state.turn,
+              response: nil
+            }
+
             {%{}, meta}
         end
 

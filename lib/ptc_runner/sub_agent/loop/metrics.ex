@@ -11,7 +11,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   """
 
   alias PtcRunner.Step
-  alias PtcRunner.SubAgent.{Definition, LLMResolver, Telemetry}
+  alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
   alias PtcRunner.Turn
 
   @doc """
@@ -145,20 +145,18 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   ## Parameters
 
   - `turn` - The Turn struct for this turn, or nil if LLM error occurred before turn creation
-  - `agent` - The SubAgent struct
-  - `state` - Current loop state
+  - `state` - Current loop state (must contain `agent_name`, `agent_id`)
   - `turn_start` - Monotonic timestamp when turn started
   - `turn_tokens` - Optional token counts from LLM call (overrides state.turn_tokens if provided)
   """
   @spec emit_turn_stop_immediate(
           Turn.t() | nil,
-          Definition.t() | map(),
           map(),
           integer(),
           map() | nil
         ) ::
           :ok
-  def emit_turn_stop_immediate(turn, agent, state, turn_start, turn_tokens \\ nil) do
+  def emit_turn_stop_immediate(turn, state, turn_start, turn_tokens \\ nil) do
     turn_duration = System.monotonic_time() - turn_start
     # Use explicit turn_tokens if provided, otherwise fall back to state.turn_tokens
     tokens = turn_tokens || state.turn_tokens
@@ -176,7 +174,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       end
 
     metadata = %{
-      agent: agent,
+      agent_name: state.agent_name,
+      agent_id: state.agent_id,
       turn: state.turn,
       program: program,
       result_preview: result_preview,

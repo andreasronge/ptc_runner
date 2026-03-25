@@ -15,7 +15,7 @@ export function pairEvents(events) {
     // Use span_id for pairing (most reliable), fallback to type+turn/tool_name
     const spanId = event.span_id;
     const key = spanId ? `${type}-${spanId}` :
-      `${type}-${event.metadata?.task_id || event.metadata?.turn || event.metadata?.tool_name || ''}`;
+      `${type}-${event.task_id || event.turn || event.tool_name || ''}`;
 
     if (action === 'start') {
       pending[key] = event;
@@ -73,8 +73,8 @@ export function extractChildTraceIds(events) {
   for (const e of events) {
     (e.child_trace_ids || []).forEach(id => ids.add(id));
     if (e.child_trace_id) ids.add(e.child_trace_id);
-    (e.metadata?.child_trace_ids || []).forEach(id => ids.add(id));
-    if (e.metadata?.child_trace_id) ids.add(e.metadata.child_trace_id);
+    (e.data?.child_trace_ids || []).forEach(id => ids.add(id));
+    if (e.data?.child_trace_id) ids.add(e.data.child_trace_id);
   }
   return [...ids];
 }

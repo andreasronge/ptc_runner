@@ -55,12 +55,16 @@ defmodule PtcRunner.TraceLog.HandlerTest do
 
       content = File.read!(path)
       lines = String.split(content, "\n", trim: true)
-      # First line is trace.start, second is our event, third is trace.stop
-      assert length(lines) == 3
+      events = Enum.map(lines, &Jason.decode!/1)
+      event_types = Enum.map(events, & &1["event"])
 
-      event = Jason.decode!(Enum.at(lines, 1))
-      assert event["event"] == "run.start"
-      assert event["trace_id"] == "test-trace"
+      assert "trace.start" in event_types
+      assert "run.start" in event_types
+
+      run_start = Enum.find(events, &(&1["event"] == "run.start"))
+      assert run_start["trace_id"] == "test-trace"
+      assert run_start["schema_version"] == 2
+      assert run_start["agent_name"] == "test-agent"
     after
       Process.delete(:ptc_trace_collectors)
     end
@@ -122,12 +126,15 @@ defmodule PtcRunner.TraceLog.HandlerTest do
 
       content = File.read!(path1)
       lines = String.split(content, "\n", trim: true)
-      # trace.start + our event + trace.stop
-      assert length(lines) == 3
+      events = Enum.map(lines, &Jason.decode!/1)
+      event_types = Enum.map(events, & &1["event"])
 
-      event = Jason.decode!(Enum.at(lines, 1))
-      assert event["event"] == "run.start"
-      assert event["trace_id"] == "outer-trace"
+      # trace.start + agent.config + run.start + trace.stop
+      assert "run.start" in event_types
+      assert "trace.start" in event_types
+
+      run_start = Enum.find(events, &(&1["event"] == "run.start"))
+      assert run_start["trace_id"] == "outer-trace"
     after
       Process.delete(:ptc_trace_collectors)
     end
@@ -237,8 +244,10 @@ defmodule PtcRunner.TraceLog.HandlerTest do
       lines = String.split(content, "\n", trim: true)
       event = Jason.decode!(Enum.at(lines, 1))
 
-      # telemetry_span_context should not appear in the trace
-      refute Map.has_key?(event["metadata"], "telemetry_span_context")
+      # telemetry_span_context should not appear anywhere in the event
+      refute Map.has_key?(event, "telemetry_span_context")
+      # Also shouldn't be in data bag if present
+      if event["data"], do: refute(Map.has_key?(event["data"], "telemetry_span_context"))
     after
       Process.delete(:ptc_trace_collectors)
     end

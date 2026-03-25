@@ -8,77 +8,92 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
   defp sample_events do
     [
       %{
+        "schema_version" => 2,
         "event" => "trace.start",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.000Z",
-        "meta" => %{}
+        "seq" => 0
       },
       %{
+        "schema_version" => 2,
         "event" => "run.start",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.010Z",
+        "seq" => 1,
         "span_id" => "run-1",
-        "metadata" => %{"agent" => %{"name" => "test"}}
+        "agent_name" => "test"
       },
       %{
+        "schema_version" => 2,
         "event" => "turn.start",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.020Z",
+        "seq" => 2,
         "span_id" => "turn-1",
         "parent_span_id" => "run-1",
-        "metadata" => %{"turn" => 1}
+        "turn" => 1
       },
       %{
+        "schema_version" => 2,
         "event" => "llm.start",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.030Z",
+        "seq" => 3,
         "span_id" => "llm-1",
-        "parent_span_id" => "turn-1",
-        "metadata" => %{}
+        "parent_span_id" => "turn-1"
       },
       %{
+        "schema_version" => 2,
         "event" => "llm.stop",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.150Z",
+        "seq" => 4,
         "span_id" => "llm-1",
         "parent_span_id" => "turn-1",
-        "duration_ms" => 120,
-        "metadata" => %{}
+        "duration_ms" => 120
       },
       %{
+        "schema_version" => 2,
         "event" => "tool.start",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.160Z",
+        "seq" => 5,
         "span_id" => "tool-1",
         "parent_span_id" => "turn-1",
-        "metadata" => %{"tool_name" => "get_weather"}
+        "tool_name" => "get_weather"
       },
       %{
+        "schema_version" => 2,
         "event" => "tool.stop",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.200Z",
+        "seq" => 6,
         "span_id" => "tool-1",
         "parent_span_id" => "turn-1",
         "duration_ms" => 40,
-        "metadata" => %{"tool_name" => "get_weather"}
+        "tool_name" => "get_weather"
       },
       %{
+        "schema_version" => 2,
         "event" => "turn.stop",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.210Z",
+        "seq" => 7,
         "span_id" => "turn-1",
         "parent_span_id" => "run-1",
         "duration_ms" => 190,
-        "metadata" => %{"turn" => 1}
+        "turn" => 1
       },
       %{
+        "schema_version" => 2,
         "event" => "run.stop",
         "trace_id" => "test-trace",
         "timestamp" => "2024-01-15T10:00:00.220Z",
+        "seq" => 8,
         "span_id" => "run-1",
         "duration_ms" => 210,
-        "metadata" => %{
-          "status" => "ok",
+        "status" => "ok",
+        "data" => %{
           "step" => %{
             "usage" => %{
               "turns" => 1,
@@ -135,8 +150,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
 
     test "handles missing run.stop event" do
       events = [
-        %{"event" => "run.start", "metadata" => %{}},
-        %{"event" => "llm.stop", "metadata" => %{}}
+        %{"event" => "run.start", "schema_version" => 2},
+        %{"event" => "llm.stop", "schema_version" => 2}
       ]
 
       summary = Analyzer.summary(events)
@@ -277,60 +292,73 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
 
     [
       %{
+        "schema_version" => 2,
         "event" => "trace.start",
         "trace_id" => trace_id,
         "timestamp" => "2025-01-15T10:00:00.000Z",
-        "meta" => %{}
+        "seq" => 0
       },
       %{
+        "schema_version" => 2,
         "event" => "run.start",
         "span_id" => "run-#{trace_id}",
         "parent_span_id" => nil,
         "timestamp" => "2025-01-15T10:00:00.010Z",
-        "metadata" => %{}
+        "seq" => 1
       },
       %{
+        "schema_version" => 2,
         "event" => "turn.start",
         "span_id" => "turn-#{trace_id}",
         "parent_span_id" => "run-#{trace_id}",
         "timestamp" => "2025-01-15T10:00:00.020Z",
-        "metadata" => %{"turn_number" => 1}
+        "seq" => 2,
+        "turn" => 1
       },
       %{
+        "schema_version" => 2,
         "event" => "llm.start",
         "span_id" => "llm-#{trace_id}",
         "parent_span_id" => "turn-#{trace_id}",
         "timestamp" => "2025-01-15T10:00:00.030Z",
-        "metadata" => %{"messages" => []}
+        "seq" => 3,
+        "data" => %{"messages" => []}
       },
       %{
+        "schema_version" => 2,
         "event" => "llm.stop",
         "span_id" => "llm-#{trace_id}",
         "parent_span_id" => "turn-#{trace_id}",
         "timestamp" => "2025-01-15T10:00:00.400Z",
+        "seq" => 4,
         "duration_ms" => duration_ms - 100,
-        "metadata" => %{"response" => "(return 42)"},
-        "measurements" => %{"tokens" => 15}
+        "total_tokens" => 15,
+        "data" => %{"response" => "(return 42)"}
       }
     ] ++
       extra_events ++
       [
         %{
+          "schema_version" => 2,
           "event" => "turn.stop",
           "span_id" => "turn-#{trace_id}",
           "parent_span_id" => "run-#{trace_id}",
           "timestamp" => "2025-01-15T10:00:00.450Z",
+          "seq" => 5 + length(extra_events),
           "duration_ms" => duration_ms - 50,
-          "metadata" => %{"turn_number" => 1, "tokens" => 15}
+          "turn" => 1,
+          "total_tokens" => 15
         },
         %{
+          "schema_version" => 2,
           "event" => "run.stop",
           "span_id" => "run-#{trace_id}",
           "parent_span_id" => nil,
           "timestamp" => "2025-01-15T10:00:00.490Z",
+          "seq" => 6 + length(extra_events),
           "duration_ms" => duration_ms - 10,
-          "metadata" => %{
-            "status" => "ok",
+          "status" => "ok",
+          "data" => %{
             "step" => %{
               "usage" => %{
                 "turns" => 1,
@@ -342,9 +370,11 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           }
         },
         %{
+          "schema_version" => 2,
           "event" => "trace.stop",
           "trace_id" => trace_id,
           "timestamp" => "2025-01-15T10:00:00.500Z",
+          "seq" => 7 + length(extra_events),
           "duration_ms" => duration_ms
         }
       ]
@@ -379,7 +409,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "span_id" => "tool-sub",
           "parent_span_id" => "turn-parent",
           "timestamp" => "2025-01-15T10:00:00.100Z",
-          "metadata" => %{"tool_name" => "sub_agent", "args" => %{}}
+          "tool_name" => "sub_agent",
+          "data" => %{"args" => %{}}
         },
         %{
           "event" => "tool.stop",
@@ -387,7 +418,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "parent_span_id" => "turn-parent",
           "timestamp" => "2025-01-15T10:00:00.300Z",
           "duration_ms" => 200,
-          "metadata" => %{"tool_name" => "sub_agent", "child_trace_id" => child_id}
+          "tool_name" => "sub_agent",
+          "data" => %{"child_trace_id" => child_id}
         }
       ]
 
@@ -414,7 +446,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "span_id" => "tool-self",
           "parent_span_id" => "turn-#{trace_id}",
           "timestamp" => "2025-01-15T10:00:00.100Z",
-          "metadata" => %{"tool_name" => "self_ref", "args" => %{}}
+          "tool_name" => "self_ref",
+          "data" => %{"args" => %{}}
         },
         %{
           "event" => "tool.stop",
@@ -422,7 +455,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "parent_span_id" => "turn-#{trace_id}",
           "timestamp" => "2025-01-15T10:00:00.200Z",
           "duration_ms" => 100,
-          "metadata" => %{"tool_name" => "self_ref", "child_trace_id" => trace_id}
+          "tool_name" => "self_ref",
+          "data" => %{"child_trace_id" => trace_id}
         }
       ]
 
@@ -453,7 +487,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "span_id" => "tool-x",
           "parent_span_id" => "turn-list-parent",
           "timestamp" => "2025-01-15T10:00:00.100Z",
-          "metadata" => %{"tool_name" => "sub", "args" => %{}}
+          "tool_name" => "sub",
+          "data" => %{"args" => %{}}
         },
         %{
           "event" => "tool.stop",
@@ -461,7 +496,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "parent_span_id" => "turn-list-parent",
           "timestamp" => "2025-01-15T10:00:00.200Z",
           "duration_ms" => 100,
-          "metadata" => %{"tool_name" => "sub", "child_trace_id" => child_id}
+          "tool_name" => "sub",
+          "data" => %{"child_trace_id" => child_id}
         }
       ]
 
@@ -489,7 +525,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "span_id" => "tool-d",
           "parent_span_id" => "turn-del-parent",
           "timestamp" => "2025-01-15T10:00:00.100Z",
-          "metadata" => %{"tool_name" => "sub", "args" => %{}}
+          "tool_name" => "sub",
+          "data" => %{"args" => %{}}
         },
         %{
           "event" => "tool.stop",
@@ -497,7 +534,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "parent_span_id" => "turn-del-parent",
           "timestamp" => "2025-01-15T10:00:00.200Z",
           "duration_ms" => 100,
-          "metadata" => %{"tool_name" => "sub", "child_trace_id" => child_id}
+          "tool_name" => "sub",
+          "data" => %{"child_trace_id" => child_id}
         }
       ]
 
@@ -578,7 +616,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "span_id" => "tool-c",
           "parent_span_id" => "turn-chrome-parent",
           "timestamp" => "2025-01-15T10:00:00.100Z",
-          "metadata" => %{"tool_name" => "sub", "args" => %{}}
+          "tool_name" => "sub",
+          "data" => %{"args" => %{}}
         },
         %{
           "event" => "tool.stop",
@@ -586,7 +625,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "parent_span_id" => "turn-chrome-parent",
           "timestamp" => "2025-01-15T10:00:00.200Z",
           "duration_ms" => 100,
-          "metadata" => %{"tool_name" => "sub", "child_trace_id" => child_id}
+          "tool_name" => "sub",
+          "data" => %{"child_trace_id" => child_id}
         }
       ]
 
@@ -628,7 +668,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "span_id" => "tool-f",
           "parent_span_id" => "turn-fmt-parent",
           "timestamp" => "2025-01-15T10:00:00.100Z",
-          "metadata" => %{"tool_name" => "sub", "args" => %{}}
+          "tool_name" => "sub",
+          "data" => %{"args" => %{}}
         },
         %{
           "event" => "tool.stop",
@@ -636,7 +677,8 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
           "parent_span_id" => "turn-fmt-parent",
           "timestamp" => "2025-01-15T10:00:00.200Z",
           "duration_ms" => 100,
-          "metadata" => %{"tool_name" => "sub", "child_trace_id" => child_id}
+          "tool_name" => "sub",
+          "data" => %{"child_trace_id" => child_id}
         }
       ]
 

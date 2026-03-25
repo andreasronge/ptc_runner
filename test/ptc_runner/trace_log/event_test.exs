@@ -9,15 +9,16 @@ defmodule PtcRunner.TraceLog.EventTest do
     test "creates event with correct structure" do
       event = [:ptc_runner, :sub_agent, :run, :start]
       measurements = %{system_time: 1000}
-      metadata = %{agent: "test"}
+      metadata = %{agent_name: "test", agent_id: "abc123"}
 
       result = Event.from_telemetry(event, measurements, metadata, "trace-123")
 
       assert result["event"] == "run.start"
       assert result["trace_id"] == "trace-123"
+      assert result["schema_version"] == 2
       assert is_binary(result["timestamp"])
-      assert result["measurements"]["system_time"] == 1000
-      assert result["metadata"]["agent"] == "test"
+      assert result["agent_name"] == "test"
+      assert result["agent_id"] == "abc123"
     end
 
     test "handles nested event names" do

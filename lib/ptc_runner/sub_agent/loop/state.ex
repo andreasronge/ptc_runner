@@ -101,8 +101,9 @@ defmodule PtcRunner.SubAgent.Loop.State do
     # Child steps for TraceTree
     child_steps: [],
 
-    # Agent name
+    # Agent identity (for v2 trace events)
     agent_name: nil,
+    agent_id: nil,
 
     # Streaming callback
     on_chunk: nil,

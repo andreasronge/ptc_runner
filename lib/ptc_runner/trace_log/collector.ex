@@ -3,10 +3,10 @@ defmodule PtcRunner.TraceLog.Collector do
   GenServer that collects trace events and writes them to a JSONL file.
 
   The Collector holds an open file handle and writes events as they arrive.
-  It tracks write errors and closes the file cleanly when stopped or terminated.
+  It manages a monotonic `seq` counter for deterministic event ordering and
+  deduplicates `agent.config` events by `agent_id`.
 
-  If the underlying file device process crashes, the collector logs a warning
-  on the first write error and stops attempting further writes.
+  Events are written in v2 format with `schema_version: 2`.
   """
 
   use GenServer
@@ -15,7 +15,19 @@ defmodule PtcRunner.TraceLog.Collector do
 
   alias PtcRunner.TraceLog.Event
 
-  defstruct [:file, :path, :trace_id, :meta, :write_errors, :start_time, :parent_ref]
+  @schema_version 2
+
+  defstruct [
+    :file,
+    :path,
+    :trace_id,
+    :meta,
+    :write_errors,
+    :start_time,
+    :parent_ref,
+    :seq,
+    :emitted_agent_ids
+  ]
 
   @type t :: %__MODULE__{
           file: File.io_device() | nil,
@@ -24,7 +36,9 @@ defmodule PtcRunner.TraceLog.Collector do
           meta: map(),
           write_errors: non_neg_integer(),
           start_time: integer(),
-          parent_ref: reference() | nil
+          parent_ref: reference() | nil,
+          seq: non_neg_integer(),
+          emitted_agent_ids: MapSet.t(String.t())
         }
 
   @doc """
@@ -51,27 +65,18 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   @doc """
-  Writes a JSON line to the trace file.
-
-  This is an asynchronous operation that never blocks the caller.
-  Write errors are tracked but do not crash the caller.
-  """
-  @spec write(GenServer.server(), String.t()) :: :ok
-  def write(collector, json_line) when is_binary(json_line) do
-    GenServer.cast(collector, {:write, json_line})
-  end
-
-  @doc """
   Writes an event map to the trace file.
 
-  The event is encoded to JSON before writing.
+  The event is assigned a monotonic `seq` number server-side, then encoded
+  to JSON and written. If the event carries an `agent_id` with an
+  `agent_config` in its data, the collector will emit an `agent.config`
+  event first (deduplicated by agent_id).
+
+  This is an asynchronous operation that never blocks the caller.
   """
   @spec write_event(GenServer.server(), map()) :: :ok
   def write_event(collector, event) when is_map(event) do
-    case Event.encode(event) do
-      {:ok, json} -> write(collector, json)
-      {:error, _reason} -> :ok
-    end
+    GenServer.cast(collector, {:write_event, event})
   end
 
   @doc """
@@ -132,11 +137,13 @@ defmodule PtcRunner.TraceLog.Collector do
           meta: meta,
           write_errors: 0,
           start_time: System.monotonic_time(:millisecond),
-          parent_ref: parent_ref
+          parent_ref: parent_ref,
+          seq: 0,
+          emitted_agent_ids: MapSet.new()
         }
 
-        # Write initial metadata event
-        write_meta_event(state)
+        # Write initial trace.start event with seq 0
+        state = write_trace_start(state)
 
         {:ok, state}
 
@@ -146,12 +153,16 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   @impl true
-  def handle_cast({:write, _json_line}, %{file: nil} = state) do
+  def handle_cast({:write_event, _event}, %{file: nil} = state) do
     {:noreply, %{state | write_errors: state.write_errors + 1}}
   end
 
-  def handle_cast({:write, json_line}, state) do
-    IO.puts(state.file, json_line)
+  def handle_cast({:write_event, event}, state) do
+    # Maybe emit agent.config before this event
+    state = maybe_emit_agent_config(event, state)
+
+    # Assign seq and write
+    state = do_write_event(event, state)
     {:noreply, state}
   rescue
     error ->
@@ -185,9 +196,6 @@ defmodule PtcRunner.TraceLog.Collector do
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{parent_ref: ref} = state)
       when ref != nil do
-    # Parent process died (e.g., killed by Task.async_stream timeout).
-    # Close the file gracefully so the trace data is preserved,
-    # then stop since nobody will call stop/1.
     close_file(state)
     {:stop, :normal, %{state | file: nil, parent_ref: nil}}
   end
@@ -203,13 +211,75 @@ defmodule PtcRunner.TraceLog.Collector do
 
   # Private helpers
 
+  defp do_write_event(event, state) do
+    {seq, state} = next_seq(state)
+
+    # Strip agent_config from data (it was used for agent.config emission)
+    event =
+      with %{"data" => %{} = data} <- event,
+           {:ok, _} <- Map.fetch(data, "agent_config") do
+        update_in(event, ["data"], &Map.delete(&1, "agent_config"))
+      else
+        _ -> event
+      end
+
+    event = Map.put(event, "seq", seq)
+
+    case Event.encode(event) do
+      {:ok, json} -> IO.puts(state.file, json)
+      {:error, _} -> :ok
+    end
+
+    state
+  end
+
+  # Emit agent.config if this event has an unseen agent_id with agent_config data
+  defp maybe_emit_agent_config(event, state) do
+    agent_id = event["agent_id"]
+
+    agent_config =
+      case event do
+        %{"data" => %{"agent_config" => config}} -> config
+        _ -> nil
+      end
+
+    if agent_id && agent_config && agent_id not in state.emitted_agent_ids do
+      {seq, state} = next_seq(state)
+
+      config_event = %{
+        "schema_version" => @schema_version,
+        "event" => "agent.config",
+        "trace_id" => state.trace_id,
+        "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+        "seq" => seq,
+        "agent_id" => agent_id,
+        "agent_name" => event["agent_name"],
+        "config" => Event.sanitize(agent_config)
+      }
+
+      case Event.encode(config_event) do
+        {:ok, json} -> IO.puts(state.file, json)
+        {:error, _} -> :ok
+      end
+
+      %{state | emitted_agent_ids: MapSet.put(state.emitted_agent_ids, agent_id)}
+    else
+      state
+    end
+  end
+
+  defp next_seq(state) do
+    seq = state.seq + 1
+    {seq, %{state | seq: seq}}
+  end
+
   defp close_file(%{file: nil}), do: :ok
 
   defp close_file(state) do
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
     try do
-      write_stop_event(state, duration_ms)
+      write_trace_stop(state, duration_ms)
     rescue
       _ -> :ok
     end
@@ -231,25 +301,33 @@ defmodule PtcRunner.TraceLog.Collector do
     end
   end
 
-  defp write_meta_event(state) do
+  defp write_trace_start(state) do
     event = %{
+      "schema_version" => @schema_version,
       "event" => "trace.start",
       "trace_id" => state.trace_id,
       "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "meta" => state.meta
+      "seq" => 0,
+      "data" => if(state.meta == %{}, do: nil, else: Event.sanitize(state.meta))
     }
 
     case Event.encode(event) do
       {:ok, json} -> IO.puts(state.file, json)
       {:error, _} -> :ok
     end
+
+    state
   end
 
-  defp write_stop_event(state, duration_ms) do
+  defp write_trace_stop(state, duration_ms) do
+    {seq, _state} = next_seq(state)
+
     event = %{
+      "schema_version" => @schema_version,
       "event" => "trace.stop",
       "trace_id" => state.trace_id,
       "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "seq" => seq,
       "duration_ms" => duration_ms
     }
 
