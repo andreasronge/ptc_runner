@@ -174,7 +174,7 @@ defmodule PtcDemo.SampleData do
       # Security policies
       %{
         title: "Data Classification Policy",
-        topics: ["security", "data handling", "classification", "confidential"],
+        topics: ["security", "data handling", "classification", "confidential", "compliance"],
         department: "IT",
         content: "How to classify and handle data based on sensitivity levels."
       },

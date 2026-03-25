@@ -34,7 +34,7 @@
     :department "HR"
     :content "Comprehensive guide for remote workers on expense reimbursement for home office costs including internet and utilities allowance."}
    {:id "DOC-008" :title "Data Classification Policy"
-    :topics ["security" "data handling" "classification" "confidential"]
+    :topics ["security" "data handling" "classification" "confidential" "compliance"]
     :department "IT"
     :content "How to classify and handle data based on sensitivity levels."}
    {:id "DOC-009" :title "Password and Authentication Standards"
@@ -169,10 +169,7 @@
     :topics ["sabbatical" "leave" "extended" "eligibility"]
     :department "HR"
     :content "Sabbatical leave program details and eligibility criteria."}
-   {:id "DOC-042" :title "Security Compliance Audit Process"
-    :topics ["security" "compliance" "audit" "controls"]
-    :department "IT"
-    :content "Annual security compliance audit process covering SOC2 controls and remediation tracking."}])
+])
 
 (defn- matches-query? [doc query]
   (let [terms (clojure.string/split (clojure.string/lower-case query) #"\s+")

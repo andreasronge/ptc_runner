@@ -304,7 +304,7 @@ defmodule PtcDemo.TestRunner.TestCase do
             "Find which department has documents in BOTH categories. " <>
             "Return the department name.",
         expect: :string,
-        constraint: {:one_of, ["IT", "Legal"]},
+        constraint: {:eq, "IT"},
         max_turns: 6,
         description: "Multi-search intersection: two searches, find overlapping department"
       },
