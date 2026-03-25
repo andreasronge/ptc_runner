@@ -289,7 +289,7 @@ jobs:
             This prevents untracked technical debt from accumulating in the codebase.
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          claude_args: '--model claude-opus-4-6-20250725 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
+          claude_args: '--model claude-opus-4-6 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
 
           # Enable full output for debugging
           show_full_output: true

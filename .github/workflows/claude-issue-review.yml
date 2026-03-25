@@ -125,4 +125,4 @@ jobs:
 
             NEVER include "@claude" except in the trigger comment above.
 
-          claude_args: '--model claude-opus-4-6-20250725 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
+          claude_args: '--model claude-opus-4-6 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
