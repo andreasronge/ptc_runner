@@ -216,8 +216,8 @@ defmodule PtcDemo.LispCLI do
 
   defp handle_input("/model", opts) do
     model = PtcDemo.Agent.model()
-    provider = LLMClient.provider_from_model(model)
-    presets = LLMClient.presets(provider)
+    provider = PtcRunner.LLM.Registry.provider_from_model(model)
+    presets = PtcRunner.LLM.Registry.preset_models(provider)
 
     IO.puts("\nCurrent model: #{model}")
     IO.puts("\nAvailable presets for #{provider || "default provider"}:")
@@ -240,13 +240,13 @@ defmodule PtcDemo.LispCLI do
         name
       else
         current_model = PtcDemo.Agent.model()
-        provider = LLMClient.provider_from_model(current_model)
+        provider = PtcRunner.LLM.Registry.provider_from_model(current_model)
         # Normalize amazon_bedrock -> bedrock for resolution
         provider = if provider == :amazon_bedrock, do: :bedrock, else: provider
         if provider, do: "#{provider}:#{name}", else: name
       end
 
-    case LLMClient.resolve(model_spec) do
+    case PtcRunner.LLM.Registry.resolve(model_spec) do
       {:ok, model} ->
         PtcDemo.Agent.set_model(model)
         IO.puts("   [Switched to model: #{model}]\n")

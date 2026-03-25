@@ -238,11 +238,12 @@ Add `{:req_llm, "~> 1.2"}` to your deps for the built-in adapter:
 {:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: "openrouter:anthropic/claude-haiku-4.5")
 ```
 
-You can also create a callback explicitly or supply a custom function:
+You can also create a callback explicitly (using a full `provider:model` string)
+or supply a custom function:
 
 ```elixir
-# Create callback with options
-llm = PtcRunner.LLM.callback("haiku", cache: true)
+# Create callback with options (requires provider:model, not a bare alias)
+llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5", cache: true)
 {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
 
 # Or supply any callback function directly

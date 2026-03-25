@@ -49,7 +49,8 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
         system_prompt: %{prefix: system_prompt()}
       )
 
-    model = PtcDemo.Agent.model()
+    # Use the actual llm being used, not always the default model
+    model = if is_binary(llm), do: llm, else: inspect(llm)
 
     {:ok, result, _path} =
       PtcRunner.TraceLog.with_trace(

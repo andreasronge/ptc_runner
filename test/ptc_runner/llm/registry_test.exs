@@ -61,10 +61,17 @@ defmodule PtcRunner.LLM.RegistryTest do
       assert message =~ "Unknown provider"
     end
 
-    test "auto-selects sole provider when requested provider unavailable" do
-      # deepseek is only on openrouter - auto-selects that when bedrock requested
-      assert {:ok, "openrouter:deepseek/deepseek-chat-v3-0324"} =
-               Registry.resolve("bedrock:deepseek")
+    test "returns error when explicit provider doesn't have the model" do
+      # deepseek is only on openrouter — explicit bedrock: must error, not silently redirect
+      assert {:error, message} = Registry.resolve("bedrock:deepseek")
+      assert message =~ "not available on bedrock"
+      assert message =~ "openrouter"
+    end
+
+    test "auto-selects sole provider for bare alias with default provider miss" do
+      # deepseek only has openrouter, and default provider is openrouter, so this works
+      # But if default were bedrock, a bare "deepseek" would auto-select openrouter
+      assert {:ok, "openrouter:deepseek/deepseek-chat-v3-0324"} = Registry.resolve("deepseek")
     end
   end
 

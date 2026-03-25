@@ -32,8 +32,23 @@ defmodule PtcRunner.LLM.Registry do
         def resolve("smart"), do: {:ok, "anthropic:claude-sonnet-4-5-20250929"}
         def resolve(name), do: PtcRunner.LLM.DefaultRegistry.resolve(name)
 
+        @impl true
+        def resolve!(name) do
+          case resolve(name) do
+            {:ok, model_id} -> model_id
+            {:error, reason} -> raise ArgumentError, reason
+          end
+        end
+
+        @impl true
+        def validate(model_string) do
+          case resolve(model_string) do
+            {:ok, _} -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+        end
+
         # Delegate remaining callbacks to DefaultRegistry
-        defdelegate resolve!(name), to: PtcRunner.LLM.DefaultRegistry
         defdelegate default_model(), to: PtcRunner.LLM.DefaultRegistry
         defdelegate default_provider(), to: PtcRunner.LLM.DefaultRegistry
         defdelegate aliases(), to: PtcRunner.LLM.DefaultRegistry
@@ -41,7 +56,6 @@ defmodule PtcRunner.LLM.Registry do
         defdelegate preset_models(provider), to: PtcRunner.LLM.DefaultRegistry
         defdelegate available_providers(), to: PtcRunner.LLM.DefaultRegistry
         defdelegate provider_from_model(model), to: PtcRunner.LLM.DefaultRegistry
-        defdelegate validate(model_string), to: PtcRunner.LLM.DefaultRegistry
       end
   """
 

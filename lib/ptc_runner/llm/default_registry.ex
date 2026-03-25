@@ -169,10 +169,10 @@ defmodule PtcRunner.LLM.DefaultRegistry do
   def resolve(name) when is_binary(name) do
     case parse_model_spec(name) do
       {:alias_only, alias_name} ->
-        resolve_with_provider(alias_name, default_provider())
+        resolve_with_provider(alias_name, default_provider(), :default)
 
       {:provider_alias, provider, alias_name} ->
-        resolve_with_provider(alias_name, provider)
+        resolve_with_provider(alias_name, provider, :explicit)
 
       {:direct, model_id} ->
         {:ok, model_id}
@@ -235,14 +235,16 @@ defmodule PtcRunner.LLM.DefaultRegistry do
 
   defp normalize_direct_model(_provider, _model_part, name), do: name
 
-  defp resolve_with_provider(alias_name, provider) do
+  defp resolve_with_provider(alias_name, provider, source) do
     model = @models[alias_name]
 
     case Map.get(model.providers, provider) do
       nil ->
-        # If the model has exactly one provider, use it automatically
-        case Map.to_list(model.providers) do
-          [{sole_provider, model_id}] ->
+        available = model.providers |> Map.keys() |> Enum.join(", ")
+
+        case {source, Map.to_list(model.providers)} do
+          # Bare alias with default provider miss — auto-select sole provider
+          {:default, [{sole_provider, model_id}]} ->
             req_llm_provider =
               if sole_provider in [:bedrock, :amazon_bedrock],
                 do: :amazon_bedrock,
@@ -250,9 +252,13 @@ defmodule PtcRunner.LLM.DefaultRegistry do
 
             {:ok, "#{req_llm_provider}:#{model_id}"}
 
-          _ ->
-            available = model.providers |> Map.keys() |> Enum.join(", ")
+          # Explicit provider:alias — never silently redirect
+          {:explicit, _} ->
+            {:error,
+             "Model '#{alias_name}' is not available on #{provider}. Available providers: #{available}"}
 
+          # Multiple providers, none match default
+          {:default, _} ->
             {:error,
              "Model '#{alias_name}' is not available on #{provider}. Available providers: #{available}"}
         end
@@ -318,8 +324,8 @@ defmodule PtcRunner.LLM.DefaultRegistry do
       end)
       |> Enum.map(fn {p, _env} -> p end)
 
-    # Skip Ollama check in CI/test
-    if System.get_env("CI") || Mix.env() == :test do
+    # Skip Ollama check in CI/test (avoid Mix.env() — unavailable in releases)
+    if System.get_env("CI") || System.get_env("MIX_ENV") == "test" do
       cloud
     else
       # Check if ollama is available via HTTP
