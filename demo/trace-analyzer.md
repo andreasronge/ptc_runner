@@ -39,7 +39,7 @@ IO.puts(step.return)
 
 ## How It Works
 
-The trace analyzer is a multi-turn SubAgent (`output: :text`) with four tools. The agent decides which tools to call and in what order based on the question.
+The trace analyzer is a multi-turn SubAgent (PTC-Lisp mode) with four tools. The agent writes PTC-Lisp code to call tools, inspect results, and build an answer across multiple turns.
 
 ### Tool Layers
 

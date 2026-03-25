@@ -60,7 +60,10 @@ defmodule Mix.Tasks.TraceAnalyze do
            verbose: verbose
          ) do
       {:ok, step} ->
-        IO.puts(step.return)
+        answer =
+          if is_binary(step.return), do: step.return, else: inspect(step.return, pretty: true)
+
+        IO.puts(answer)
         IO.puts("\n[#{step.usage[:turns]} turns, #{step.usage[:total_tokens]} tokens]")
 
       {:error, step} ->
