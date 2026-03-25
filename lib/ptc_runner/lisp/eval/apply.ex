@@ -205,6 +205,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
+
+    e in PtcRunner.Lisp.TypeError ->
+      {:error, {:type_error, Exception.message(e), args}}
   end
 
   # Variadic requiring at least one arg: {:variadic_nonempty, name, fun2}
