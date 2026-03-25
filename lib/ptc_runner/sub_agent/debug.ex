@@ -422,22 +422,19 @@ defmodule PtcRunner.SubAgent.Debug do
 
   @doc false
   # Replace code blocks with placeholder to avoid duplication with Program section.
-  # Uses line-by-line fence parser to correctly handle fences inside string literals.
+  # Uses line-by-line fence parser to correctly handle fences inside string literals
+  # and preserves the exact original fence lines (including XML-style closers).
   # Exported for testing.
   def redact_program(text) do
     alias PtcRunner.SubAgent.Loop.ResponseHandler
 
-    blocks = ResponseHandler.extract_fenced_blocks(text)
+    blocks = ResponseHandler.extract_fenced_blocks_with_lines(text)
 
-    Enum.reduce(blocks, text, fn {lang, content}, acc ->
-      # Build the original fenced block as it appeared (opening fence + content + closing fence)
-      opener = if lang == "", do: "```", else: "```#{lang}"
-      # Match the block in the text and replace it
-      # The block spans from the opening fence line through the closing fence line
-      block_pattern = "#{opener}\n#{content}\n```"
+    Enum.reduce(blocks, text, fn {_lang, content, opener, closer}, acc ->
+      original = "#{opener}\n#{content}\n#{closer}"
 
-      if String.contains?(acc, block_pattern) do
-        String.replace(acc, block_pattern, "[program: see below]", global: false)
+      if String.contains?(acc, original) do
+        String.replace(acc, original, "[program: see below]", global: false)
       else
         acc
       end

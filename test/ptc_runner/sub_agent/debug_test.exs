@@ -278,6 +278,29 @@ defmodule PtcRunner.SubAgent.DebugTest do
       assert result =~ "[program: see below]"
       refute result =~ "(return"
     end
+
+    test "redacts code block with XML-style closer" do
+      text = "Some reasoning\n```clojure\n(+ 1 2)\n</clojure>\nMore text"
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "[program: see below]"
+      assert result =~ "Some reasoning"
+      assert result =~ "More text"
+      refute result =~ "(+ 1 2)"
+    end
+
+    test "redacts code block containing inner backtick fences in strings" do
+      text =
+        "Thinking...\n```clojure\n(return {\n  :evidence \"see ```clojure in docs\"\n  :value 42\n})\n```\nDone"
+
+      result = Debug.redact_program(text)
+
+      assert result =~ "[program: see below]"
+      assert result =~ "Thinking..."
+      assert result =~ "Done"
+      refute result =~ ":value 42"
+    end
   end
 
   describe "Debug.print_trace/2 with turns" do
