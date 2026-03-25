@@ -17,7 +17,7 @@ defmodule PtcRunner.MixProject do
       docs: docs(),
       package: package(),
       test_coverage: [
-        ignore_modules: [PtcRunner.TestSupport.LLMClient]
+        ignore_modules: [PtcRunner.TestSupport.TestLLM]
       ],
       dialyzer: [
         plt_core_path: "priv/plts",
@@ -56,7 +56,6 @@ defmodule PtcRunner.MixProject do
       {:req, "~> 0.5", optional: true},
       {:req_llm, "~> 1.7", optional: true},
       {:kino, "~> 0.14", optional: true},
-      {:llm_client, path: "llm_client", only: [:test, :dev]},
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false}
     ]
@@ -72,7 +71,6 @@ defmodule PtcRunner.MixProject do
         "schema.gen",
         "ptc.validate_spec",
         "test --warnings-as-errors",
-        "cmd --cd llm_client mix test --color",
         "cmd --cd demo mix test --color",
         "cmd --cd ptc_viewer mix test --color"
       ],

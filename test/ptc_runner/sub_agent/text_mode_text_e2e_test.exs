@@ -12,6 +12,7 @@ defmodule PtcRunner.SubAgent.TextModeTextE2ETest do
 
   @moduletag :e2e
 
+  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.SubAgent
   alias PtcRunner.TestSupport.LLMSupport
 
@@ -95,7 +96,7 @@ defmodule PtcRunner.SubAgent.TextModeTextE2ETest do
       full_messages = [%{role: :system, content: system} | messages]
       model = LLMSupport.model()
 
-      case LLMClient.generate_text(model, full_messages, receive_timeout: @timeout) do
+      case ReqLLMAdapter.generate_text(model, full_messages, receive_timeout: @timeout) do
         {:ok, %{content: text, tokens: tokens}} ->
           {:ok, %{content: text, tokens: tokens}}
 

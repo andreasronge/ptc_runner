@@ -216,7 +216,7 @@ CljReplExperiment results are compared **manually** against ablation results. Th
 | Data | Hardcoded in Clojure prelude | `SampleData` module |
 | Tools | Native Clojure functions | PTC-Lisp tool adapter |
 | Metrics | Pass/fail only | Full TurnAnalysis |
-| LLM API | Direct `LLMClient` call | Via SubAgent loop |
+| LLM API | Direct `PtcRunner.LLM` call | Via SubAgent loop |
 
 To compare fairly, run both at the same turn budget (6) with the same model.
 

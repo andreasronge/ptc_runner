@@ -397,7 +397,7 @@ defmodule Alma.MemoryHarness do
   defp build_embed_fn(opts) do
     case Keyword.get(opts, :embed_model) do
       nil -> &VectorStore.embed/1
-      model -> fn text -> LLMClient.embed!(model, text) end
+      model -> fn text -> PtcRunner.LLM.ReqLLMAdapter.embed!(model, text) end
     end
   end
 

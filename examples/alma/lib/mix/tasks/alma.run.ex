@@ -94,7 +94,7 @@ defmodule Mix.Tasks.Alma.Run do
 
     alma_opts =
       [
-        llm: with_retry(LLMClient.callback(model)),
+        llm: with_retry(PtcRunner.LLM.callback(model)),
         environment: env_module,
         iterations: Keyword.get(opts, :iterations, 5),
         episodes: Keyword.get(opts, :episodes, 3),
@@ -105,8 +105,8 @@ defmodule Mix.Tasks.Alma.Run do
         verbose: verbose,
         trace: trace
       ] ++
-        if(meta_model, do: [meta_llm: with_retry(LLMClient.callback(meta_model))], else: []) ++
-        if(embed_model, do: [embed_model: LLMClient.resolve!(embed_model)], else: []) ++
+        if(meta_model, do: [meta_llm: with_retry(PtcRunner.LLM.callback(meta_model))], else: []) ++
+        if(embed_model, do: [embed_model: PtcRunner.LLM.Registry.resolve!(embed_model)], else: []) ++
         if(Keyword.has_key?(opts, :python),
           do: [python: Keyword.get(opts, :python)],
           else: []

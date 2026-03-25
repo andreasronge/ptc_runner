@@ -27,8 +27,8 @@ defmodule CodeScout do
         agent
       end
 
-    model = opts[:model] || LLMClient.default_model()
-    llm = LLMClient.callback(model, cache: true)
+    model = opts[:model] || PtcRunner.LLM.Registry.default_model()
+    llm = PtcRunner.LLM.callback(model, cache: true)
 
     # Merge query into context
     context = Map.put(opts[:context] || %{}, "query", query_string)

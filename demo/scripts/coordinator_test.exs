@@ -27,7 +27,7 @@ IO.puts("Model: #{model}\n")
 llm = fn %{system: system, messages: messages} ->
   full_messages = [%{role: :system, content: system} | messages]
 
-  case LLMClient.generate_text(model, full_messages,
+  case PtcRunner.LLM.ReqLLMAdapter.generate_text(model, full_messages,
          receive_timeout: timeout,
          req_http_options: [retry: :transient, max_retries: 3]
        ) do

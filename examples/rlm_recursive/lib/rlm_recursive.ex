@@ -79,7 +79,7 @@ defmodule RlmRecursive do
     llm =
       Keyword.get_lazy(opts, :llm, fn ->
         load_aws_credentials_if_needed()
-        LLMClient.callback("bedrock:sonnet")
+        PtcRunner.LLM.callback("bedrock:sonnet")
       end)
 
     # Generate corpus with ground truth
@@ -132,7 +132,7 @@ defmodule RlmRecursive do
     llm =
       Keyword.get_lazy(opts, :llm, fn ->
         load_aws_credentials_if_needed()
-        LLMClient.callback("bedrock:sonnet")
+        PtcRunner.LLM.callback("bedrock:sonnet")
       end)
 
     # Generate corpus with ground truth
@@ -186,7 +186,7 @@ defmodule RlmRecursive do
     llm =
       Keyword.get_lazy(opts, :llm, fn ->
         load_aws_credentials_if_needed()
-        LLMClient.callback("bedrock:sonnet")
+        PtcRunner.LLM.callback("bedrock:sonnet")
       end)
 
     # Generate corpus with ground truth
@@ -240,7 +240,7 @@ defmodule RlmRecursive do
     llm =
       Keyword.get_lazy(opts, :llm, fn ->
         load_aws_credentials_if_needed()
-        LLMClient.callback("bedrock:sonnet")
+        PtcRunner.LLM.callback("bedrock:sonnet")
       end)
 
     if verbose?,

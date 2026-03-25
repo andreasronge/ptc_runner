@@ -272,7 +272,7 @@ See [Observability Guide](../../docs/guides/subagent-observability.md#chrome-dev
 
 ## LLM Provider Setup
 
-See [llm_client/README.md](../../llm_client/README.md) for provider configuration (OpenRouter, AWS Bedrock, etc.).
+See the [SubAgent Getting Started](../../docs/guides/subagent-getting-started.md) guide for provider configuration (OpenRouter, AWS Bedrock, etc.).
 
 ## Future Work
 
