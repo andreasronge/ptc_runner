@@ -25,17 +25,21 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
   defp list_traces_tool(trace_dir) do
     {fn args -> list_traces(trace_dir, args) end,
      signature:
-       "(status :string, label :string, limit :int) -> " <>
+       "(status :string, label :string, trace_kind :string, limit :int) -> " <>
          "{count :int, traces [{filename :string, timestamp :string, agent_name :string, " <>
-         "status :string, turns :int, total_tokens :int, duration_ms :int, trace_label :string}]}",
+         "status :string, turns :int, total_tokens :int, duration_ms :int, " <>
+         "trace_kind :string, producer :string, trace_label :string, " <>
+         "query :string, model :string}]}",
      description:
        "List available trace files. All parameters are optional. " <>
-         "Filter by status (ok, error, all) or label (substring match on filename). Default limit 20."}
+         "Filter by status (ok, error, all), label (substring match on filename), " <>
+         "or trace_kind (benchmark, analysis, planning). Default limit 20."}
   end
 
   defp list_traces(trace_dir, args) do
     status_filter = args["status"]
     label_filter = args["label"]
+    kind_filter = args["trace_kind"]
     limit = args["limit"] || 20
 
     trace_dir
@@ -44,7 +48,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
       try do
         events = Analyzer.load(path)
         summary = Analyzer.summary(events)
-        meta = extract_trace_meta(events)
+        trace_start = find_trace_start(events)
 
         %{
           filename: Path.basename(path),
@@ -54,7 +58,11 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
           turns: summary.turns,
           total_tokens: summary.tokens[:total],
           duration_ms: summary.duration_ms,
-          trace_label: meta["trace_label"] || meta["type"]
+          trace_kind: trace_start["trace_kind"],
+          producer: trace_start["producer"],
+          trace_label: trace_start["trace_label"],
+          query: trace_start["query"],
+          model: trace_start["model"]
         }
       rescue
         _ -> nil
@@ -63,6 +71,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
     |> Enum.reject(&is_nil/1)
     |> maybe_filter_status(status_filter)
     |> maybe_filter_label(label_filter)
+    |> maybe_filter_kind(kind_filter)
     |> Enum.sort_by(& &1.timestamp, :desc)
     |> Enum.take(limit)
     |> then(fn traces ->
@@ -92,7 +101,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
     if File.exists?(path) do
       events = Analyzer.load(path)
       summary = Analyzer.summary(events)
-      meta = extract_trace_meta(events)
+      trace_start = find_trace_start(events)
 
       turns = extract_turn_summaries(events)
 
@@ -136,7 +145,12 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
          tool_sequence: tool_sequence,
          turn_summaries: turns,
          errors: errors,
-         meta: meta
+         trace_kind: trace_start["trace_kind"],
+         producer: trace_start["producer"],
+         trace_label: trace_start["trace_label"],
+         query: trace_start["query"],
+         model: trace_start["model"],
+         producer_data: trace_start["data"]
        }}
     else
       {:error, "Trace file not found: #{filename}"}
@@ -314,11 +328,8 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
     end
   end
 
-  defp extract_trace_meta(events) do
-    case Enum.find(events, &(&1["event"] == "trace.start")) do
-      %{"data" => data} when is_map(data) -> data
-      _ -> %{}
-    end
+  defp find_trace_start(events) do
+    Enum.find(events, &(&1["event"] == "trace.start")) || %{}
   end
 
   defp extract_timestamp(events) do
@@ -374,6 +385,12 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
     Enum.filter(traces, fn t ->
       String.contains?(String.downcase(t.filename), label_down)
     end)
+  end
+
+  defp maybe_filter_kind(traces, nil), do: traces
+
+  defp maybe_filter_kind(traces, kind) do
+    Enum.filter(traces, &(&1.trace_kind == kind))
   end
 
   defp find_first_divergence(turns_a, turns_b) do

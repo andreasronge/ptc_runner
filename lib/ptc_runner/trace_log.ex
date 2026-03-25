@@ -83,7 +83,12 @@ defmodule PtcRunner.TraceLog do
 
     * `:path` - File path for the JSONL output. Defaults to a timestamped file.
     * `:trace_id` - Custom trace identifier. Defaults to a random hex string.
-    * `:meta` - Additional metadata to include in the trace header.
+    * `:trace_kind` - Trace type discriminator (e.g., `"benchmark"`, `"analysis"`).
+    * `:producer` - Component that created this trace (e.g., `"demo.benchmark"`).
+    * `:trace_label` - Human-readable label (e.g., test case name).
+    * `:model` - LLM model identifier.
+    * `:query` - Input query or question.
+    * `:meta` - Producer-specific metadata under `data`.
 
   ## Examples
 
@@ -91,8 +96,13 @@ defmodule PtcRunner.TraceLog do
       {:ok, step} = SubAgent.run(agent, llm: my_llm())
       {:ok, path, errors} = TraceLog.stop(collector)
 
-      # With custom path
-      {:ok, collector} = TraceLog.start(path: "/tmp/debug.jsonl")
+      # With typed trace header
+      {:ok, collector} = TraceLog.start(
+        path: "/tmp/debug.jsonl",
+        trace_kind: "benchmark",
+        producer: "my_app",
+        query: "How many products?"
+      )
   """
   @spec start(keyword()) :: {:ok, pid()}
   def start(opts \\ []) do
@@ -143,9 +153,8 @@ defmodule PtcRunner.TraceLog do
 
   ## Options
 
-    * `:path` - File path for the JSONL output
-    * `:trace_id` - Custom trace identifier
-    * `:meta` - Additional metadata
+  Accepts all options from `start/1`: `:path`, `:trace_id`, `:trace_kind`,
+  `:producer`, `:trace_label`, `:model`, `:query`, `:meta`.
 
   ## Examples
 
@@ -153,11 +162,11 @@ defmodule PtcRunner.TraceLog do
         SubAgent.run(agent, llm: my_llm())
       end)
 
-      # With options
+      # With typed trace header
       {:ok, step, path} = TraceLog.with_trace(
         fn -> SubAgent.run(agent, llm: my_llm()) end,
-        path: "/tmp/trace.jsonl",
-        meta: %{user: "test"}
+        trace_kind: "benchmark",
+        query: "How many products?"
       )
   """
   @spec with_trace((-> result), keyword()) :: {:ok, result, String.t()} when result: term()

@@ -70,7 +70,9 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
       PtcRunner.TraceLog.with_trace(
         fn -> SubAgent.run(agent, llm: llm, context: %{}) end,
         path: trace_path,
-        meta: %{type: "trace_analyzer", question: String.slice(question, 0, 100)}
+        trace_kind: "analysis",
+        producer: "demo.trace_analyzer",
+        query: String.slice(question, 0, 200)
       )
 
     if verbose do

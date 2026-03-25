@@ -327,19 +327,6 @@ defmodule PtcDemo.Agent do
     trace_label = Keyword.get(opts, :trace_label)
     trace_path = trace_file_path(trace_label)
 
-    # Build trace metadata from run parameters
-    trace_meta = %{
-      model: state.model,
-      agent_name: agent.name,
-      prompt_profile: prompt_profile,
-      data_mode: state.data_mode,
-      max_turns: max_turns,
-      retry_turns: retry_turns,
-      compression: inspect(state.compression),
-      thinking: state.thinking,
-      signature: signature
-    }
-
     # Run with TraceLog to capture execution trace
     {:ok, run_result, _path} =
       TraceLog.with_trace(
@@ -352,7 +339,20 @@ defmodule PtcDemo.Agent do
           )
         end,
         path: trace_path,
-        meta: trace_meta
+        trace_kind: "benchmark",
+        producer: "demo.benchmark",
+        trace_label: trace_label,
+        model: state.model,
+        query: String.slice(question, 0, 200),
+        meta: %{
+          prompt_profile: prompt_profile,
+          data_mode: state.data_mode,
+          max_turns: max_turns,
+          retry_turns: retry_turns,
+          compression: inspect(state.compression),
+          thinking: state.thinking,
+          signature: signature
+        }
       )
 
     case run_result do
