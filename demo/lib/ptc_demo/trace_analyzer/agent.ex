@@ -61,8 +61,7 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
         prompt: question,
         tools: tools,
         max_turns: max_turns,
-        system_prompt: %{prefix: system_prompt()},
-        output: :text
+        system_prompt: %{prefix: system_prompt()}
       )
 
     trace_path = trace_path()
@@ -81,7 +80,11 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
           IO.puts("Turns: #{step.usage[:turns]}")
           IO.puts("Tokens: #{step.usage[:total_tokens]}")
           IO.puts("\nAnswer:")
-          IO.puts(step.return)
+
+          answer =
+            if is_binary(step.return), do: step.return, else: inspect(step.return, pretty: true)
+
+          IO.puts(answer)
 
         {:error, step} ->
           IO.puts("\n--- Trace Analyzer FAILED ---")
