@@ -2271,6 +2271,34 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # keys / vals - nil tolerance
+  # ==========================================================================
+
+  describe "keys nil tolerance" do
+    test "keys on nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keys nil)|)
+      assert result == nil
+    end
+
+    test "keys on nil nested access returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(keys (:missing {:a 1}))|)
+      assert result == nil
+    end
+  end
+
+  describe "vals nil tolerance" do
+    test "vals on nil returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(vals nil)|)
+      assert result == nil
+    end
+
+    test "vals on nil nested access returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(vals (:missing {:a 1}))|)
+      assert result == nil
+    end
+  end
+
+  # ==========================================================================
   # peek - Get last element without removing
   # ==========================================================================
 
