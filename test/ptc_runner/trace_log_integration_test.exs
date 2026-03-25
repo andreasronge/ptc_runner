@@ -235,8 +235,8 @@ defmodule PtcRunner.TraceLogIntegrationTest do
       trace_start1 = Enum.find(events1, &(&1["event"] == "trace.start"))
       trace_start2 = Enum.find(events2, &(&1["event"] == "trace.start"))
 
-      assert trace_start1["meta"]["process"] == "task1"
-      assert trace_start2["meta"]["process"] == "task2"
+      assert trace_start1["data"]["process"] == "task1"
+      assert trace_start2["data"]["process"] == "task2"
     end
 
     test "handles execution errors gracefully", %{tmp_dir: dir} do

@@ -26,8 +26,8 @@ export function renderTimeline(container, paired, totalDurationMs) {
     segment.className = `timeline-segment ${pair.type}`;
     segment.style.left = `${Math.max(0, left)}%`;
     segment.style.width = `${Math.max(width, 1)}%`;
-    segment.textContent = pair.type === 'llm' ? `T${pair.stop?.metadata?.turn || '?'}` :
-      pair.type === 'task' ? (pair.stop?.metadata?.task_id || pair.start?.metadata?.task_id || 'task') : pair.type;
+    segment.textContent = pair.type === 'llm' ? `T${pair.stop?.turn || '?'}` :
+      pair.type === 'task' ? (pair.stop?.task_id || pair.start?.task_id || 'task') : pair.type;
     segment.title = `${pair.type}: ${formatDuration(duration)}`;
     container.appendChild(segment);
   }

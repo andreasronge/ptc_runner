@@ -102,7 +102,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
         |> Enum.filter(&(&1["event"] == "tool.stop"))
         |> Enum.map(fn e ->
           %{
-            name: get_in(e, ["metadata", "tool_name"]),
+            name: e["tool_name"],
             duration_ms: e["duration_ms"]
           }
         end)
@@ -112,13 +112,13 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
         |> Enum.filter(fn e ->
           String.ends_with?(e["event"] || "", ".exception") or
             (e["event"] == "turn.stop" and
-               get_in(e, ["metadata", "type"]) in ["error", "retry"])
+               get_in(e, ["data", "type"]) in ["error", "retry"])
         end)
         |> Enum.map(fn e ->
           %{
             event: e["event"],
-            turn: get_in(e, ["metadata", "turn"]),
-            reason: get_in(e, ["metadata", "reason"])
+            turn: e["turn"],
+            reason: get_in(e, ["data", "reason"])
           }
         end)
 
@@ -168,22 +168,22 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
       turn_stop =
         events
         |> Enum.find(fn e ->
-          e["event"] == "turn.stop" and get_in(e, ["metadata", "turn"]) == turn_num
+          e["event"] == "turn.stop" and e["turn"] == turn_num
         end)
 
       if turn_stop do
-        meta = turn_stop["metadata"] || %{}
+        data = turn_stop["data"] || %{}
 
         detail = %{
           turn: turn_num,
-          type: meta["type"],
-          program: meta["program"],
-          result_preview: meta["result_preview"],
-          prints: meta["prints"] || [],
+          type: data["type"],
+          program: data["program"],
+          result_preview: data["result_preview"],
+          prints: data["prints"] || [],
           duration_ms: turn_stop["duration_ms"],
-          input_tokens: get_in(turn_stop, ["measurements", "input_tokens"]),
-          output_tokens: get_in(turn_stop, ["measurements", "output_tokens"]),
-          total_tokens: get_in(turn_stop, ["measurements", "tokens"])
+          input_tokens: turn_stop["input_tokens"],
+          output_tokens: turn_stop["output_tokens"],
+          total_tokens: turn_stop["total_tokens"]
         }
 
         span_id = turn_stop["span_id"]
@@ -195,8 +195,8 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
           end)
           |> Enum.map(fn e ->
             %{
-              name: get_in(e, ["metadata", "tool_name"]),
-              args: get_in(e, ["metadata", "args"]),
+              name: e["tool_name"],
+              args: get_in(e, ["data", "args"]),
               duration_ms: e["duration_ms"]
             }
           end)
@@ -217,8 +217,8 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
                 e["event"] == "llm.stop" and e["parent_span_id"] == span_id
               end)
 
-            messages = get_in(llm_start || %{}, ["metadata", "messages"]) || []
-            response = get_in(llm_stop || %{}, ["metadata", "response"])
+            messages = get_in(llm_start || %{}, ["data", "messages"]) || []
+            response = get_in(llm_stop || %{}, ["data", "response"])
 
             detail
             |> Map.put(:messages, messages)
@@ -316,7 +316,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
 
   defp extract_trace_meta(events) do
     case Enum.find(events, &(&1["event"] == "trace.start")) do
-      %{"meta" => meta} when is_map(meta) -> meta
+      %{"data" => data} when is_map(data) -> data
       _ -> %{}
     end
   end
@@ -330,7 +330,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
 
   defp extract_agent_name(events) do
     case Enum.find(events, &(&1["event"] == "run.start")) do
-      %{"metadata" => %{"agent" => %{"name" => name}}} -> name
+      %{"agent_name" => name} when is_binary(name) -> name
       _ -> nil
     end
   end
@@ -338,16 +338,16 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
   defp extract_turn_summaries(events) do
     events
     |> Enum.filter(&(&1["event"] == "turn.stop"))
-    |> Enum.sort_by(&get_in(&1, ["metadata", "turn"]))
+    |> Enum.sort_by(& &1["turn"])
     |> Enum.map(fn e ->
-      meta = e["metadata"] || %{}
+      data = e["data"] || %{}
 
       %{
-        turn: meta["turn"],
-        type: meta["type"],
-        program_preview: truncate(meta["program"], 120),
-        result_preview: truncate(meta["result_preview"], 80),
-        tokens: get_in(e, ["measurements", "tokens"]),
+        turn: e["turn"],
+        type: data["type"],
+        program_preview: truncate(data["program"], 120),
+        result_preview: truncate(data["result_preview"], 80),
+        tokens: e["total_tokens"],
         duration_ms: e["duration_ms"]
       }
     end)
@@ -356,7 +356,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
   defp extract_tool_sequence(events) do
     events
     |> Enum.filter(&(&1["event"] == "tool.stop"))
-    |> Enum.map(&get_in(&1, ["metadata", "tool_name"]))
+    |> Enum.map(& &1["tool_name"])
   end
 
   defp maybe_filter_status(traces, nil), do: traces

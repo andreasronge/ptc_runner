@@ -59,16 +59,18 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       event = Jason.decode!(first_line)
 
       assert event["event"] == "trace.start"
-      assert event["meta"]["user"] == "test"
+      assert event["schema_version"] == 2
+      assert event["seq"] == 0
+      assert event["data"]["user"] == "test"
     end
   end
 
-  describe "write/2" do
-    test "writes JSON line to file", %{tmp_dir: dir} do
+  describe "write_event/2" do
+    test "writes event map as JSON line to file", %{tmp_dir: dir} do
       path = Path.join(dir, "test.jsonl")
       {:ok, collector} = Collector.start_link(path: path)
 
-      Collector.write(collector, ~s({"event":"test"}))
+      Collector.write_event(collector, %{"event" => "test"})
 
       {:ok, ^path, 0} = Collector.stop(collector)
 
@@ -76,16 +78,18 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       lines = String.split(content, "\n", trim: true)
       # First line is trace.start, second is our test event, third is trace.stop
       assert length(lines) == 3
-      assert Enum.at(lines, 1) == ~s({"event":"test"})
+      decoded = Jason.decode!(Enum.at(lines, 1))
+      assert decoded["event"] == "test"
+      assert is_integer(decoded["seq"])
     end
 
-    test "writes multiple lines in order", %{tmp_dir: dir} do
+    test "writes multiple events in order", %{tmp_dir: dir} do
       path = Path.join(dir, "test.jsonl")
       {:ok, collector} = Collector.start_link(path: path)
 
-      Collector.write(collector, ~s({"n":1}))
-      Collector.write(collector, ~s({"n":2}))
-      Collector.write(collector, ~s({"n":3}))
+      Collector.write_event(collector, %{"n" => 1})
+      Collector.write_event(collector, %{"n" => 2})
+      Collector.write_event(collector, %{"n" => 3})
 
       {:ok, ^path, 0} = Collector.stop(collector)
 
@@ -97,9 +101,7 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       assert Jason.decode!(Enum.at(lines, 2))["n"] == 2
       assert Jason.decode!(Enum.at(lines, 3))["n"] == 3
     end
-  end
 
-  describe "write_event/2" do
     test "encodes and writes event map", %{tmp_dir: dir} do
       path = Path.join(dir, "test.jsonl")
       {:ok, collector} = Collector.start_link(path: path)
@@ -129,7 +131,7 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       path = Path.join(dir, "test.jsonl")
       {:ok, collector} = Collector.start_link(path: path)
 
-      Collector.write(collector, ~s({"test":true}))
+      Collector.write_event(collector, %{"test" => true})
       {:ok, ^path, 0} = Collector.stop(collector)
 
       # Should be able to read file after close
@@ -144,7 +146,7 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       {:ok, collector} = Collector.start_link(path: path)
 
       # Write something before shutdown
-      Collector.write(collector, ~s({"before":"shutdown"}))
+      Collector.write_event(collector, %{"before" => "shutdown"})
       # Synchronize to ensure write is processed (regular call, not :sys)
       _ = Collector.trace_id(collector)
 
@@ -161,7 +163,7 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       path = Path.join(dir, "test.jsonl")
       {:ok, collector} = Collector.start_link(path: path)
 
-      Collector.write(collector, ~s({"data":"flushed"}))
+      Collector.write_event(collector, %{"data" => "flushed"})
       {:ok, ^path, 0} = Collector.stop(collector)
 
       content = File.read!(path)
@@ -189,14 +191,14 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
       try do
         # First write triggers rescue → logs warning → sets file to nil
-        Collector.write(collector, ~s({"will":"fail"}))
+        Collector.write_event(collector, %{"will" => "fail"})
         _ = Collector.trace_id(collector)
 
         assert_receive {:log_event, :warning, msg}
         assert msg =~ "Trace collector write failed"
 
         # Second write hits file: nil clause → increments errors, no log
-        Collector.write(collector, ~s({"also":"fails"}))
+        Collector.write_event(collector, %{"also" => "fails"})
         _ = Collector.trace_id(collector)
 
         # Drain mailbox and check no "Trace collector" warnings were emitted
@@ -224,13 +226,13 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
       # Suppress the expected log warning from the first failed write
       capture_log(fn ->
-        Collector.write(collector, ~s({"will":"fail"}))
+        Collector.write_event(collector, %{"will" => "fail"})
         _ = Collector.trace_id(collector)
       end)
 
       # Subsequent writes should be handled gracefully (no crash, no exceptions)
-      Collector.write(collector, ~s({"also":"fails"}))
-      Collector.write(collector, ~s({"still":"fails"}))
+      Collector.write_event(collector, %{"also" => "fails"})
+      Collector.write_event(collector, %{"still" => "fails"})
       # Synchronize to ensure casts are processed
       state_after = :sys.get_state(collector)
 
@@ -248,11 +250,11 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
       # Suppress the expected log warning
       capture_log(fn ->
-        Collector.write(collector, ~s({"will":"fail"}))
+        Collector.write_event(collector, %{"will" => "fail"})
         _ = Collector.trace_id(collector)
       end)
 
-      Collector.write(collector, ~s({"also":"fails"}))
+      Collector.write_event(collector, %{"also" => "fails"})
       # Synchronize to ensure cast is processed
       _ = Collector.trace_id(collector)
 

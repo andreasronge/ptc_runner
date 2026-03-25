@@ -6,9 +6,9 @@ export function renderForkJoin(container, parallelEvent, state, data) {
   const start = parallelEvent.start;
   if (!stop) return;
 
-  const count = stop.metadata?.count || 0;
-  const results = stop.metadata?.results || [];
-  const durations = stop.metadata?.durations || [];
+  const count = stop.data?.count || 0;
+  const results = stop.data?.results || [];
+  const durations = stop.data?.durations || [];
   const totalDuration = stop.duration_ms || 0;
 
   // Compute the actual time window for finding child tool events.
@@ -34,13 +34,13 @@ export function renderForkJoin(container, parallelEvent, state, data) {
     for (const toolStop of toolStops) {
       const toolStart = toolStarts[toolStop.span_id];
       childTools.push({
-        name: toolStop.metadata?.tool_name || toolStart?.metadata?.tool_name || 'unknown',
+        name: toolStop.tool_name || toolStart?.tool_name || 'unknown',
         duration: toolStop.duration_ms || 0,
         startTime: toolStart?.timestamp ? new Date(toolStart.timestamp).getTime() : 0,
         stopTime: toolStop.timestamp ? new Date(toolStop.timestamp).getTime() : 0,
-        args: toolStart?.metadata?.args,
-        result: toolStop.metadata?.result,
-        childTraceId: toolStop.metadata?.child_trace_id,
+        args: toolStart?.data?.args,
+        result: toolStop.data?.result,
+        childTraceId: toolStop.data?.child_trace_id,
         toolSpanId: toolStop.span_id
       });
     }
@@ -302,7 +302,7 @@ function drillIntoChild(state, branch, data) {
     import('./parser.js').then(parser => {
       // Find the run.start whose parent_span_id is the tool's span_id
       const childRun = data.events.find(e =>
-        e.event === 'run.start' && e.metadata?.parent_span_id === branch.toolSpanId
+        e.event === 'run.start' && e.parent_span_id === branch.toolSpanId
       );
       if (childRun) {
         const childEvents = parser.extractRunEvents(data.events, childRun.span_id);

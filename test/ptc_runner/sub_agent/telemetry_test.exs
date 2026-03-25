@@ -84,9 +84,9 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
       # Stop event has duration in native time units
       assert is_integer(stop_measurements.duration)
       assert stop_measurements.duration > 0
-      # run.stop uses slim_agent (not the full struct)
-      assert stop_meta.agent.output == agent.output
-      assert stop_meta.agent.max_turns == agent.max_turns
+      # run.stop includes agent_name and agent_id (not the full agent struct)
+      assert stop_meta.agent_name == agent.name
+      assert stop_meta.agent_id != nil
       assert stop_meta.status == :ok
       assert stop_meta.step.return == %{"value" => 42}
       # run.stop surfaces return value at top level
@@ -144,9 +144,9 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       {_, start_measurements, start_meta, _} = first_start
       assert start_measurements == %{}
-      # turn.start uses slim_agent
-      assert start_meta.agent.output == agent.output
-      assert start_meta.agent.max_turns == agent.max_turns
+      # turn.start includes agent_name and agent_id (not the full agent struct)
+      assert start_meta.agent_name == agent.name
+      assert start_meta.agent_id != nil
       assert start_meta.turn == 1
 
       # Check turn stop has duration (all stop events should have duration)
@@ -178,16 +178,16 @@ defmodule PtcRunner.SubAgent.TelemetryTest do
 
       # Start event includes system_time and monotonic_time from telemetry.span
       assert is_integer(start_measurements.system_time)
-      # llm.start uses slim_agent and includes model info
-      assert start_meta.agent.output == agent.output
-      assert start_meta.agent.max_turns == agent.max_turns
+      # llm.start includes agent_name and agent_id (not the full agent struct)
+      assert start_meta.agent_name == agent.name
+      assert start_meta.agent_id != nil
       assert start_meta.turn == 1
       assert is_list(start_meta.messages)
       assert Map.has_key?(start_meta, :model)
 
       # Stop event
       assert is_integer(stop_measurements.duration)
-      assert stop_meta.agent.output == agent.output
+      assert stop_meta.agent_name == agent.name
       assert stop_meta.turn == 1
       assert stop_meta.response =~ "return"
     end

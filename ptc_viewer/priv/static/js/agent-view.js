@@ -5,6 +5,19 @@ import { showTooltip, hideTooltip } from './tooltip.js';
 import { renderForkJoin } from './fork-join.js';
 import { renderExecutionTree } from './execution-tree.js';
 
+// Build agent config lookup from agent.config events
+function buildAgentConfigLookup(events) {
+  const configs = {};
+  events.filter(e => e.event === 'agent.config').forEach(e => {
+    configs[e.agent_id] = e.config || {};
+  });
+  return configs;
+}
+
+function lookupAgentConfig(configs, agentId) {
+  return configs[agentId] || {};
+}
+
 export function renderAgentView(container, state, data) {
   const events = data.events;
   const paired = pairEvents(events);
@@ -20,8 +33,11 @@ export function renderAgentView(container, state, data) {
   const runStop = events.find(e => e.event === 'run.stop');
   const traceStop = events.find(e => e.event === 'trace.stop');
 
-  const agentName = traceStart?.metadata?.agent_name || traceStart?.metadata?.tool_name || data.filename;
-  const outputMode = runStart?.metadata?.agent?.output || 'unknown';
+  const agentConfigs = buildAgentConfigLookup(events);
+
+  const agentName = traceStart?.agent_name || traceStart?.tool_name || data.filename;
+  const runAgentConfig = lookupAgentConfig(agentConfigs, runStart?.agent_id);
+  const outputMode = runAgentConfig.output || 'unknown';
   const totalDuration = execStop?.duration_ms || runStop?.duration_ms || traceStop?.duration_ms || 0;
 
   // For multi-run, find the first run with turns as default selection
@@ -377,22 +393,23 @@ function formatLispValue(v) {
 
 function renderSpanTree(events, selectedRunSpanId) {
   const tree = buildSpanTree(events);
+  const configs = buildAgentConfigLookup(events);
 
   function getRunLabel(spanNode) {
     const runStart = spanNode.events.find(e => e.event === 'run.start');
     if (!runStart) return null;
 
-    // Prefer name (short display label) over description (verbose docs)
-    const agent = runStart.metadata?.agent || {};
-    if (agent.name) return agent.name;
-    if (agent.description) return agent.description;
+    // Prefer agent_name (top-level), fall back to agent.config lookup
+    if (runStart.agent_name) return runStart.agent_name;
+    const agentCfg = lookupAgentConfig(configs, runStart.agent_id);
+    if (agentCfg.description) return agentCfg.description;
 
     // Check the parent tool span for a tool_name label
-    const parentSpanId = runStart.parent_span_id || runStart.metadata?.parent_span_id;
+    const parentSpanId = runStart.parent_span_id;
     if (parentSpanId) {
       // Find tool.start with that span_id
       const parentTool = events.find(e => e.event === 'tool.start' && e.span_id === parentSpanId);
-      if (parentTool?.metadata?.tool_name) return parentTool.metadata.tool_name;
+      if (parentTool?.tool_name) return parentTool.tool_name;
     }
 
     // Fallback: use prompt prefix
@@ -403,9 +420,9 @@ function renderSpanTree(events, selectedRunSpanId) {
   function getToolInfo(spanNode) {
     const toolStart = spanNode.events.find(e => e.event === 'tool.start');
     const toolStop = spanNode.events.find(e => e.event === 'tool.stop');
-    const name = toolStart?.metadata?.tool_name || toolStop?.metadata?.tool_name || 'tool';
-    const result = toolStop?.metadata?.result;
-    const args = toolStart?.metadata?.args || toolStop?.metadata?.args;
+    const name = toolStart?.tool_name || toolStop?.tool_name || 'tool';
+    const result = toolStop?.data?.result;
+    const args = toolStart?.data?.args || toolStop?.data?.args;
     let resultSummary = '';
     let resultFull = '';
     if (result != null) {
@@ -460,7 +477,7 @@ function renderSpanTree(events, selectedRunSpanId) {
       runCounter++;
       const runStop = spanNode.events.find(e => e.event === 'run.stop');
       const runStart = spanNode.events.find(e => e.event === 'run.start');
-      const status = runStop?.metadata?.status;
+      const status = runStop?.status;
       const duration = runStop?.duration_ms || 0;
       const label = getRunLabel(spanNode) || `Run #${runCounter}`;
       const isActive = spanNode.id === selectedRunSpanId;
@@ -472,7 +489,8 @@ function renderSpanTree(events, selectedRunSpanId) {
       const statusIcon = status === 'ok' ? '&#10003;' : status === 'error' ? '&#10007;' : '&#8943;';
       const statusClass = status === 'ok' ? 'success' : status === 'error' ? 'error' : '';
 
-      const agentSigInput = extractSigInput(runStart?.metadata?.agent?.signature);
+      const runCfg = lookupAgentConfig(configs, runStart?.agent_id);
+      const agentSigInput = extractSigInput(runCfg.signature);
       html += `<div class="span-tree-node run${isActive ? ' active' : ''}" data-span-id="${spanNode.id}" style="padding-left: ${depth * 16}px">
         <span class="span-tree-icon">&#9679;</span>
         <span class="span-tree-label">${escapeHtml(label)}</span>
@@ -561,16 +579,18 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
   const rootRun = targetRunSpanId
     ? events.find(e => e.event === 'run.start' && e.span_id === targetRunSpanId)
     : events.find(e => e.event === 'run.start' &&
-      (!e.metadata?.parent_span_id || !allSpanIds.has(e.metadata.parent_span_id)));
+      (!e.parent_span_id || !allSpanIds.has(e.parent_span_id)));
   const rootSpanId = rootRun?.span_id;
-  const agentOutputMode = rootRun?.metadata?.agent?.output || null;
+  const turnConfigs = buildAgentConfigLookup(events);
+  const rootAgentCfg = lookupAgentConfig(turnConfigs, rootRun?.agent_id);
+  const agentOutputMode = rootAgentCfg.output || null;
 
   // Filter to only root agent's LLM calls (parent_span_id matches root span)
   const llmPairs = paired.filter(p => p.type === 'llm' &&
-    (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
+    (!rootSpanId || p.start?.parent_span_id === rootSpanId || p.stop?.parent_span_id === rootSpanId));
   // Filter to only root agent's direct tool calls
   const toolPairs = paired.filter(p => p.type === 'tool' &&
-    (!rootSpanId || p.start?.metadata?.parent_span_id === rootSpanId || p.stop?.metadata?.parent_span_id === rootSpanId));
+    (!rootSpanId || p.start?.parent_span_id === rootSpanId || p.stop?.parent_span_id === rootSpanId));
   const pmapPairs = paired.filter(p => p.type === 'pmap' || p.type === 'pcalls');
   // Filter to root agent's turns to avoid cross-agent turn number collisions
   const turnPairs = paired.filter(p => p.type === 'turn' &&
@@ -579,15 +599,15 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
   // Build turn lookup
   const turnByNum = {};
   turnPairs.forEach(p => {
-    const num = p.stop?.metadata?.turn || p.start?.metadata?.turn;
+    const num = p.stop?.turn || p.start?.turn;
     if (num) turnByNum[num] = p;
   });
 
   return llmPairs.map((llmPair, idx) => {
     const stop = llmPair.stop;
     const start = llmPair.start;
-    const turnNumber = stop?.metadata?.turn || start?.metadata?.turn || idx + 1;
-    const response = stop?.metadata?.response || '';
+    const turnNumber = stop?.turn || start?.turn || idx + 1;
+    const response = stop?.data?.response || '';
     const turnPair = turnByNum[turnNumber];
 
     // Find tool calls that happened after this LLM call and before the next
@@ -618,12 +638,12 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
     let regularToolCount = 0;
     let firstRegularToolName = null;
     for (const t of turnTools) {
-      const tName = t.stop?.metadata?.tool_name || t.start?.metadata?.tool_name || 'unknown';
-      const childIds = t.stop?.metadata?.child_trace_ids ||
-        (t.stop?.metadata?.child_trace_id ? [t.stop.metadata.child_trace_id] : []);
+      const tName = t.stop?.tool_name || t.start?.tool_name || 'unknown';
+      const childIds = t.stop?.data?.child_trace_ids ||
+        (t.stop?.data?.child_trace_id ? [t.stop.data.child_trace_id] : []);
       const spanId = t.stop?.span_id || t.start?.span_id;
       const hasEmbedded = spanId && events.some(e =>
-        e.event === 'run.start' && e.metadata?.parent_span_id === spanId
+        e.event === 'run.start' && e.parent_span_id === spanId
       );
       if (childIds.length > 0 || hasEmbedded) {
         subAgentToolNames.push(tName);
@@ -633,7 +653,7 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
       }
     }
 
-    const resultPreview = turnPair?.stop?.metadata?.result_preview;
+    const resultPreview = turnPair?.stop?.data?.result_preview;
     const hasError = resultPreview && (
       resultPreview.includes('Error:') ||
       resultPreview.includes(':error') ||
@@ -646,20 +666,20 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
 
     // Agent metadata — attach to first turn only for display in right panel
     const isFirstTurn = idx === 0;
-    const rootAgent = isFirstTurn ? (rootRun?.metadata?.agent || {}) : null;
+    const rootAgent = isFirstTurn ? rootAgentCfg : null;
 
     return {
       turnNumber,
       llmPair,
-      systemPrompt: start?.metadata?.system_prompt || null,
-      prompt: getLastUserMessage(start?.metadata?.messages),
+      systemPrompt: start?.data?.system_prompt || null,
+      prompt: getLastUserMessage(start?.data?.messages),
       thinking: extractThinking(response),
-      program: turnPair?.stop?.metadata?.program || extractProgram(response),
-      rawResponse: turnPair?.stop?.metadata?.raw_response || response || null,
-      tokens: stop?.measurements || null,
+      program: turnPair?.stop?.data?.program || extractProgram(response),
+      rawResponse: turnPair?.stop?.data?.raw_response || response || null,
+      tokens: stop ? { input_tokens: stop.input_tokens, output_tokens: stop.output_tokens, tokens: stop.total_tokens, cache_read_tokens: stop.cache_read_tokens } : null,
       duration: stop?.duration_ms || 0,
       resultPreview,
-      prints: turnPair?.stop?.metadata?.prints || null,
+      prints: turnPair?.stop?.data?.prints || null,
       tools: turnTools,
       pmaps: turnPmaps,
       hasError,
@@ -791,11 +811,11 @@ function renderTurnDetail(container, turn, state, data) {
   // Tool calls (skip when pmaps present - fork-join viz renders those)
   const toolsWithChildren = (turn.tools.length > 0 && turn.pmaps.length === 0)
     ? turn.tools.filter(t => {
-        const ids = t.stop?.metadata?.child_trace_ids ||
-          (t.stop?.metadata?.child_trace_id ? [t.stop.metadata.child_trace_id] : []);
+        const ids = t.stop?.data?.child_trace_ids ||
+          (t.stop?.data?.child_trace_id ? [t.stop.data.child_trace_id] : []);
         const spanId = t.stop?.span_id || t.start?.span_id;
         const hasEmbedded = spanId && data?.events?.some(e =>
-          e.event === 'run.start' && e.metadata?.parent_span_id === spanId
+          e.event === 'run.start' && e.parent_span_id === spanId
         );
         return ids.length > 0 || hasEmbedded;
       })
@@ -804,12 +824,12 @@ function renderTurnDetail(container, turn, state, data) {
   if (turn.tools.length > 0 && turn.pmaps.length === 0) {
     html += '<div class="turn-section"><div class="section-title">Tool Calls</div>';
     for (const tool of turn.tools) {
-      const toolName = tool.stop?.metadata?.tool_name || tool.start?.metadata?.tool_name || 'unknown';
+      const toolName = tool.stop?.tool_name || tool.start?.tool_name || 'unknown';
       const toolDuration = tool.stop?.duration_ms || 0;
-      const toolArgs = tool.start?.metadata?.args || tool.stop?.metadata?.args;
-      const toolResult = tool.stop?.metadata?.result;
-      const childTraceIds = tool.stop?.metadata?.child_trace_ids ||
-        (tool.stop?.metadata?.child_trace_id ? [tool.stop.metadata.child_trace_id] : []);
+      const toolArgs = tool.start?.data?.args || tool.stop?.data?.args;
+      const toolResult = tool.stop?.data?.result;
+      const childTraceIds = tool.stop?.data?.child_trace_ids ||
+        (tool.stop?.data?.child_trace_id ? [tool.stop.data.child_trace_id] : []);
 
       html += `<div class="tool-call">
         <div class="tool-header">

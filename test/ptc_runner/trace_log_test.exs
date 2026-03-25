@@ -44,8 +44,8 @@ defmodule PtcRunner.TraceLogTest do
       [first_line | _] = String.split(content, "\n", trim: true)
       event = Jason.decode!(first_line)
 
-      assert event["meta"]["user"] == "alice"
-      assert event["meta"]["env"] == "test"
+      assert event["data"]["user"] == "alice"
+      assert event["data"]["env"] == "test"
     end
   end
 
@@ -196,8 +196,7 @@ defmodule PtcRunner.TraceLogTest do
       inner_events = Enum.map(inner_lines, &Jason.decode!/1)
 
       assert Enum.any?(inner_events, fn e ->
-               e["event"] == "run.start" &&
-                 get_in(e, ["metadata", "agent", "name"]) == "inner"
+               e["event"] == "run.start" && e["agent_name"] == "inner"
              end)
     end
 

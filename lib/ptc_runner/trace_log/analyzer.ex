@@ -252,8 +252,9 @@ defmodule PtcRunner.TraceLog.Analyzer do
   defp extract_turns(nil), do: nil
 
   defp extract_turns(run_stop) do
-    case get_in(run_stop, ["metadata", "step", "usage", "turns"]) do
-      nil -> get_in(run_stop, ["metadata", "turns"])
+    # v2: step is in data bag, or turns from usage
+    case get_in(run_stop, ["data", "step", "usage", "turns"]) do
+      nil -> nil
       turns -> turns
     end
   end
@@ -261,27 +262,34 @@ defmodule PtcRunner.TraceLog.Analyzer do
   defp extract_tokens(nil), do: nil
 
   defp extract_tokens(run_stop) do
-    usage = get_in(run_stop, ["metadata", "step", "usage"])
+    # v2: tokens are top-level fields
+    input = run_stop["input_tokens"]
+    output = run_stop["output_tokens"]
+    total = run_stop["total_tokens"]
 
-    if usage do
-      %{
-        input: usage["input_tokens"],
-        output: usage["output_tokens"],
-        total: usage["total_tokens"]
-      }
+    # Fall back to step.usage if top-level tokens are nil (run.stop has step in data)
+    if input || output || total do
+      %{input: input, output: output, total: total}
     else
-      nil
+      usage = get_in(run_stop, ["data", "step", "usage"])
+
+      if usage do
+        %{
+          input: usage["input_tokens"],
+          output: usage["output_tokens"],
+          total: usage["total_tokens"]
+        }
+      else
+        nil
+      end
     end
   end
 
   defp extract_status(nil), do: nil
 
   defp extract_status(run_stop) do
-    case run_stop["metadata"]["status"] do
-      status when is_atom(status) -> Atom.to_string(status)
-      status when is_binary(status) -> status
-      _ -> nil
-    end
+    # v2: status is top-level
+    run_stop["status"]
   end
 
   defp matches_criteria?(event, criteria) do
@@ -340,11 +348,11 @@ defmodule PtcRunner.TraceLog.Analyzer do
   defp format_event_details(event) do
     case event["event"] do
       "tool.start" ->
-        tool = get_in(event, ["metadata", "tool_name"]) || ""
+        tool = event["tool_name"] || ""
         if tool != "", do: " - #{tool}", else: ""
 
       "tool.stop" ->
-        tool = get_in(event, ["metadata", "tool_name"]) || ""
+        tool = event["tool_name"] || ""
         if tool != "", do: " - #{tool}", else: ""
 
       _ ->
@@ -701,10 +709,8 @@ defmodule PtcRunner.TraceLog.Analyzer do
 
   defp event_pairing_key(event_name, suffix, event) do
     base = String.replace_suffix(event_name, suffix, "")
-
-    {base,
-     event["metadata"]["turn"] || event["metadata"]["turn_number"] ||
-       event["metadata"]["tool_name"]}
+    # v2: turn and tool_name are top-level
+    {base, event["turn"] || event["tool_name"]}
   end
 
   defp match_stop_event(pairs, pending, key, stop_event) do
@@ -725,16 +731,16 @@ defmodule PtcRunner.TraceLog.Analyzer do
   defp event_name(type, stop_event) do
     case type do
       "turn" ->
-        "Turn #{stop_event["metadata"]["turn"] || stop_event["metadata"]["turn_number"] || "?"}"
+        "Turn #{stop_event["turn"] || "?"}"
 
       "tool" ->
-        stop_event["metadata"]["tool_name"] || "tool"
+        stop_event["tool_name"] || "tool"
 
       "pmap" ->
-        "pmap (#{stop_event["metadata"]["count"] || "?"} tasks)"
+        "pmap (#{get_in(stop_event, ["data", "count"]) || "?"} tasks)"
 
       "pcalls" ->
-        "pcalls (#{stop_event["metadata"]["count"] || "?"} tasks)"
+        "pcalls (#{get_in(stop_event, ["data", "count"]) || "?"} tasks)"
 
       "llm" ->
         "LLM call"
@@ -752,47 +758,46 @@ defmodule PtcRunner.TraceLog.Analyzer do
     case type do
       "turn" ->
         Map.merge(base, %{
-          "turn_number" =>
-            stop_event["metadata"]["turn"] || stop_event["metadata"]["turn_number"],
-          "tokens" => stop_event["metadata"]["tokens"]
+          "turn_number" => stop_event["turn"],
+          "tokens" => stop_event["total_tokens"]
         })
 
       "tool" ->
         Map.merge(base, %{
-          "tool_name" => stop_event["metadata"]["tool_name"],
-          "args" => start_event["metadata"]["args"],
-          "child_trace_id" => stop_event["metadata"]["child_trace_id"]
+          "tool_name" => stop_event["tool_name"],
+          "args" => get_in(start_event, ["data", "args"]),
+          "child_trace_id" => get_in(stop_event, ["data", "child_trace_id"])
         })
 
       "pmap" ->
         Map.merge(base, %{
-          "count" => stop_event["metadata"]["count"],
-          "success_count" => stop_event["metadata"]["success_count"],
-          "error_count" => stop_event["metadata"]["error_count"],
-          "child_trace_ids" => stop_event["metadata"]["child_trace_ids"]
+          "count" => get_in(stop_event, ["data", "count"]),
+          "success_count" => get_in(stop_event, ["data", "success_count"]),
+          "error_count" => get_in(stop_event, ["data", "error_count"]),
+          "child_trace_ids" => get_in(stop_event, ["data", "child_trace_ids"])
         })
 
       "pcalls" ->
         Map.merge(base, %{
-          "count" => stop_event["metadata"]["count"],
-          "success_count" => stop_event["metadata"]["success_count"],
-          "error_count" => stop_event["metadata"]["error_count"],
-          "child_trace_ids" => stop_event["metadata"]["child_trace_ids"]
+          "count" => get_in(stop_event, ["data", "count"]),
+          "success_count" => get_in(stop_event, ["data", "success_count"]),
+          "error_count" => get_in(stop_event, ["data", "error_count"]),
+          "child_trace_ids" => get_in(stop_event, ["data", "child_trace_ids"])
         })
 
       "llm" ->
         # Extract program from response (after thinking: block if present)
-        response = stop_event["metadata"]["response"] || ""
+        response = get_in(stop_event, ["data", "response"]) || ""
         program = extract_program_from_response(response)
 
         # Get last user message as prompt context
-        messages = start_event["metadata"]["messages"] || []
+        messages = get_in(start_event, ["data", "messages"]) || []
         last_user_msg = messages |> Enum.filter(&(&1["role"] == "user")) |> List.last()
         prompt_preview = truncate_string(last_user_msg["content"] || "", 500)
 
         Map.merge(base, %{
-          "turn" => stop_event["metadata"]["turn"],
-          "tokens" => stop_event["measurements"]["tokens"],
+          "turn" => stop_event["turn"],
+          "tokens" => stop_event["total_tokens"],
           "program" => program,
           "response_preview" => truncate_string(response, 1000),
           "prompt_preview" => prompt_preview
@@ -862,12 +867,12 @@ defmodule PtcRunner.TraceLog.Analyzer do
     pmap_ids =
       events
       |> Enum.filter(&(&1["event"] in ["pmap.stop", "pcalls.stop"]))
-      |> Enum.flat_map(&(get_in(&1, ["metadata", "child_trace_ids"]) || []))
+      |> Enum.flat_map(&(get_in(&1, ["data", "child_trace_ids"]) || []))
 
     tool_ids =
       events
       |> Enum.filter(&(&1["event"] == "tool.stop"))
-      |> Enum.map(&get_in(&1, ["metadata", "child_trace_id"]))
+      |> Enum.map(&get_in(&1, ["data", "child_trace_id"]))
       |> Enum.reject(&is_nil/1)
 
     Enum.uniq(pmap_ids ++ tool_ids)

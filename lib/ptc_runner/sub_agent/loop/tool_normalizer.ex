@@ -49,34 +49,36 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   """
   @spec normalize(map(), map(), Definition.t()) :: map()
   def normalize(tools, state, agent) when is_map(tools) do
+    agent_id = Map.get(state, :agent_id)
+
     Map.new(tools, fn
       {name, :builtin_grep} ->
         wrapped = wrap_builtin_grep()
-        {name, wrap_with_telemetry(name, wrapped, agent)}
+        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
 
       {name, :builtin_grep_n} ->
         wrapped = wrap_builtin_grep_n()
-        {name, wrap_with_telemetry(name, wrapped, agent)}
+        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
 
       {name, :builtin_llm_query} ->
         wrapped = wrap_builtin_llm_query(name, state)
-        {name, wrap_with_telemetry(name, wrapped, agent)}
+        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
 
       {name, %LLMTool{} = tool} ->
         wrapped = wrap_llm_tool(name, tool, state)
-        {name, wrap_with_telemetry(name, wrapped, agent)}
+        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
 
       {name, %SubAgentTool{} = tool} ->
         wrapped = wrap_sub_agent_tool(name, tool, state)
-        {name, wrap_with_telemetry(name, wrapped, agent)}
+        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
 
       {name, func} when is_function(func, 1) ->
         wrapped = wrap_return(name, func)
-        {name, wrap_with_telemetry(name, wrapped, agent)}
+        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
 
       {name, {func, opts}} when is_function(func, 1) and is_list(opts) ->
         wrapped = wrap_return(name, func)
-        {name, {wrap_with_telemetry(name, wrapped, agent), opts}}
+        {name, {wrap_with_telemetry(name, wrapped, agent, agent_id), opts}}
 
       {name, other} ->
         {name, other}
@@ -87,16 +89,30 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   Wrap a tool function with telemetry events.
 
   Emits `[:sub_agent, :tool, :start]` and `[:sub_agent, :tool, :stop]` events.
+  Uses `agent_name` and `agent_id` for v2 flat trace format.
   """
-  @spec wrap_with_telemetry(String.t(), function(), Definition.t()) :: function()
-  def wrap_with_telemetry(name, func, agent) do
+  @spec wrap_with_telemetry(String.t(), function(), Definition.t(), String.t() | nil) ::
+          function()
+  def wrap_with_telemetry(name, func, agent, agent_id \\ nil) do
+    agent_name = agent.name
+
     fn args ->
-      start_meta = %{agent: agent, tool_name: name, args: summarize_args(args)}
+      start_meta = %{
+        agent_name: agent_name,
+        agent_id: agent_id,
+        tool_name: name,
+        args: summarize_args(args)
+      }
 
       Telemetry.span([:tool], start_meta, fn ->
         result = func.(args)
 
-        stop_meta = %{agent: agent, tool_name: name, result: summarize_result(result)}
+        stop_meta = %{
+          agent_name: agent_name,
+          agent_id: agent_id,
+          tool_name: name,
+          result: summarize_result(result)
+        }
 
         # Include child_trace_id if result contains trace wrapper
         stop_meta =
