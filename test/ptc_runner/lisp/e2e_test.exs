@@ -13,11 +13,11 @@ defmodule PtcRunner.Lisp.E2ETest do
   @moduletag :e2e
 
   alias PtcRunner.Step
-  alias PtcRunner.TestSupport.LispLLMClient
+  alias PtcRunner.TestSupport.LispTestLLM
 
   setup_all do
     IO.puts("\n=== PTC-Lisp E2E Tests ===")
-    IO.puts("Model: #{LispLLMClient.model()}\n")
+    IO.puts("Model: #{LispTestLLM.model()}\n")
     :ok
   end
 
@@ -25,7 +25,7 @@ defmodule PtcRunner.Lisp.E2ETest do
     test "filter with simple predicate" do
       task = "Filter products where price is greater than 10"
 
-      program = LispLLMClient.generate_program!(task)
+      program = LispTestLLM.generate_program!(task)
       IO.puts("\n=== LLM Generated (filter) ===\n#{program}\n")
 
       context = %{
@@ -46,7 +46,7 @@ defmodule PtcRunner.Lisp.E2ETest do
     test "sum aggregation" do
       task = "Calculate the sum of all prices"
 
-      program = LispLLMClient.generate_program!(task)
+      program = LispTestLLM.generate_program!(task)
       IO.puts("\n=== LLM Generated (sum) ===\n#{program}\n")
 
       context = %{
@@ -64,7 +64,7 @@ defmodule PtcRunner.Lisp.E2ETest do
     test "chained operations with threading" do
       task = "Filter products where price > 10, then count them"
 
-      program = LispLLMClient.generate_program!(task)
+      program = LispTestLLM.generate_program!(task)
       IO.puts("\n=== LLM Generated (chain) ===\n#{program}\n")
 
       context = %{
