@@ -111,6 +111,12 @@ defmodule PtcRunner.LLM.DefaultRegistry do
         openai: "gpt-4.1-mini"
       }
     },
+    "gpt-nano" => %{
+      description: "GPT-5.4 Nano - OpenAI's smallest model",
+      providers: %{
+        openrouter: "openai/gpt-5.4-nano"
+      }
+    },
     "gpt-oss" => %{
       description: "GPT-OSS 120B - OpenAI's large open-source model via Groq",
       providers: %{
