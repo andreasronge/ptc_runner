@@ -271,7 +271,7 @@ SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetr
 | `llm:start/stop` | duration, tokens | LLM latency, cost tracking |
 | `tool:start/stop/exception` | duration | Tool performance |
 
-Duration is in native time units. Convert with:
+All events include `agent_name` and `agent_id` in metadata for correlation. Duration is in native time units. Convert with:
 ```elixir
 System.convert_time_unit(duration, :native, :millisecond)
 ```
