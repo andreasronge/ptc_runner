@@ -225,7 +225,7 @@ See [Signature Syntax](../signature-syntax.md) for full syntax.
 
 ## Providing an LLM
 
-Add `{:req_llm, "~> 1.2"}` to your deps for the built-in adapter:
+Add `{:req_llm, "~> 1.8"}` to your deps for the built-in adapter:
 
 ```elixir
 # Pass model alias directly - simplest approach
