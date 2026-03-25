@@ -22,16 +22,39 @@ defmodule PtcViewer.Api do
           path = Path.join(dir, filename)
           stat = File.stat!(path)
 
-          %{
+          base = %{
             filename: filename,
             size: stat.size,
             modified: stat.mtime |> NaiveDateTime.from_erl!() |> NaiveDateTime.to_iso8601()
           }
+
+          # Read trace header from first line for quick metadata
+          Map.merge(base, read_trace_header(path))
         end)
         |> Enum.sort_by(& &1.modified, :desc)
 
       {:error, _} ->
         []
+    end
+  end
+
+  # Read the first line (trace.start) to extract typed header fields
+  defp read_trace_header(path) do
+    with {:ok, file} <- File.open(path, [:read, :utf8]),
+         line when is_binary(line) <- IO.read(file, :line),
+         :ok <- File.close(file),
+         {:ok, event} <- Jason.decode(String.trim(line)) do
+      %{
+        trace_kind: event["trace_kind"],
+        producer: event["producer"],
+        trace_label: event["trace_label"],
+        model: event["model"],
+        query: event["query"]
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+    else
+      _ -> %{}
     end
   end
 

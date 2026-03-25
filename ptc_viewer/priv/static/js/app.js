@@ -1,6 +1,7 @@
 import { parseJsonl, extractTraceId, extractChildTraceIds } from './parser.js';
 import { renderAgentView } from './agent-view.js';
 import { initTooltip } from './tooltip.js';
+import { escapeHtml, truncate } from './utils.js';
 
 function formatDate(isoString) {
   const d = new Date(isoString);
@@ -169,11 +170,15 @@ function setupFilePicker(traces) {
     <div class="file-picker-list">
       ${traces.map(t => `
         <div class="file-picker-item" data-filename="${t.filename}">
-          <span class="filename">${t.filename}</span>
-          <span class="file-meta">
-            <span class="modified">${formatDate(t.modified)}</span>
-            <span class="size">${(t.size / 1024).toFixed(1)} KB</span>
-          </span>
+          <div class="file-picker-main">
+            <span class="filename">${t.filename}</span>
+            <span class="file-meta">
+              ${t.trace_kind ? `<span class="trace-kind badge-${t.trace_kind}">${t.trace_kind}</span>` : ''}
+              <span class="modified">${formatDate(t.modified)}</span>
+              <span class="size">${(t.size / 1024).toFixed(1)} KB</span>
+            </span>
+          </div>
+          ${t.query ? `<div class="file-picker-query">${escapeHtml(truncate(t.query, 80))}</div>` : ''}
         </div>
       `).join('')}
     </div>
