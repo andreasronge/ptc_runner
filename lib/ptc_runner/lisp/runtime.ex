@@ -346,4 +346,6 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate dot_index_of(s, substring), to: Interop
   defdelegate dot_index_of(s, substring, from), to: Interop
   defdelegate dot_last_index_of(s, substring), to: Interop
+  defdelegate dot_to_lower_case(s), to: Interop
+  defdelegate dot_to_upper_case(s), to: Interop
 end

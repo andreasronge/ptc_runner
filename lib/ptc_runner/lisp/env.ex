@@ -432,6 +432,8 @@ defmodule PtcRunner.Lisp.Env do
       {:".indexOf",
        {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},
       {:".lastIndexOf", {:normal, &Runtime.dot_last_index_of/2}},
+      {:".toLowerCase", {:normal, &Runtime.dot_to_lower_case/1}},
+      {:".toUpperCase", {:normal, &Runtime.dot_to_upper_case/1}},
       {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
       {:parse, {:normal, &Runtime.local_date_parse/1}},
 

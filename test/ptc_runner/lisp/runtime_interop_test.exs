@@ -94,6 +94,8 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert msg =~ ".getTime"
       assert msg =~ ".indexOf"
       assert msg =~ ".lastIndexOf"
+      assert msg =~ ".toLowerCase"
+      assert msg =~ ".toUpperCase"
     end
 
     test "Runtime error on nil in .getTime (raised exception)" do
@@ -261,6 +263,50 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     test "empty substring on empty string returns 0" do
       assert {:ok, step} = Lisp.run(~s|(.lastIndexOf "" "")|)
       assert step.return == 0
+    end
+  end
+
+  describe ".toLowerCase" do
+    test "converts string to lower case" do
+      assert {:ok, step} = Lisp.run(~s|(.toLowerCase "Hello World")|)
+      assert step.return == "hello world"
+    end
+
+    test "already lowercase string unchanged" do
+      assert {:ok, step} = Lisp.run(~s|(.toLowerCase "hello")|)
+      assert step.return == "hello"
+    end
+
+    test "handles unicode" do
+      assert {:ok, step} = Lisp.run(~s|(.toLowerCase "ÜBER")|)
+      assert step.return == "über"
+    end
+
+    test "error on non-string" do
+      assert {:error, step} = Lisp.run("(.toLowerCase 123)")
+      assert step.fail.message =~ ".toLowerCase: expected string, got integer"
+    end
+  end
+
+  describe ".toUpperCase" do
+    test "converts string to upper case" do
+      assert {:ok, step} = Lisp.run(~s|(.toUpperCase "Hello World")|)
+      assert step.return == "HELLO WORLD"
+    end
+
+    test "already uppercase string unchanged" do
+      assert {:ok, step} = Lisp.run(~s|(.toUpperCase "HELLO")|)
+      assert step.return == "HELLO"
+    end
+
+    test "handles unicode" do
+      assert {:ok, step} = Lisp.run(~s|(.toUpperCase "über")|)
+      assert step.return == "ÜBER"
+    end
+
+    test "error on non-string" do
+      assert {:error, step} = Lisp.run("(.toUpperCase 123)")
+      assert step.fail.message =~ ".toUpperCase: expected string, got integer"
     end
   end
 end

@@ -113,6 +113,38 @@
       divergences: nil
     },
     %{
+      name: ".toLowerCase",
+      description: "Convert string to lower case",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.toLowerCase s)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: nil,
+      see_also: [],
+      clojure_var: ".toLowerCase",
+      divergences: nil
+    },
+    %{
+      name: ".toUpperCase",
+      description: "Convert string to upper case",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.toUpperCase s)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: nil,
+      see_also: [],
+      clojure_var: ".toUpperCase",
+      divergences: nil
+    },
+    %{
       name: "/",
       description: "Division (always returns float)",
       binding: :variadic_nonempty,
@@ -7718,6 +7750,22 @@
       description: "Index of last occurrence of substring, or -1 if not found",
       signatures: ["(.lastIndexOf s substr)"],
       notes: "Uses grapheme indices (not byte offsets)."
+    },
+    %{
+      name: ".toLowerCase",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Convert string to lower case",
+      signatures: ["(.toLowerCase s)"],
+      notes: ""
+    },
+    %{
+      name: ".toUpperCase",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Convert string to upper case",
+      signatures: ["(.toUpperCase s)"],
+      notes: ""
     }
   ]
 }
