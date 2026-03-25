@@ -292,7 +292,9 @@ defmodule PtcDemo.Planning.Runner do
             SubAgent.run(agent, llm: llm, context: %{"task" => query})
           end,
           path: trace_path,
-          meta: %{type: "planner", query: String.slice(query, 0, 100)}
+          trace_kind: "planning",
+          producer: "demo.planner",
+          query: String.slice(query, 0, 200)
         )
 
       case result do

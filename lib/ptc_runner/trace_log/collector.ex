@@ -16,12 +16,14 @@ defmodule PtcRunner.TraceLog.Collector do
   alias PtcRunner.TraceLog.Event
 
   @schema_version 2
+  @trace_header_keys [:trace_kind, :producer, :trace_label, :model, :query]
 
   defstruct [
     :file,
     :path,
     :trace_id,
     :meta,
+    :header,
     :write_errors,
     :start_time,
     :parent_ref,
@@ -49,11 +51,21 @@ defmodule PtcRunner.TraceLog.Collector do
     * `:path` - File path for the JSONL output. Defaults to a timestamped file in the
       directory configured by `Application.get_env(:ptc_runner, :trace_dir)`, or CWD if unset.
     * `:trace_id` - Unique identifier for this trace. Defaults to a random hex string.
-    * `:meta` - Additional metadata to include with the trace. Defaults to `%{}`.
+    * `:trace_kind` - Discriminator for the type of trace (e.g., `"benchmark"`, `"analysis"`, `"planning"`).
+    * `:producer` - Identifier for the component that created this trace (e.g., `"demo.benchmark"`).
+    * `:trace_label` - Human-readable label for this trace (e.g., test case name).
+    * `:model` - LLM model used for this trace.
+    * `:query` - The input query or question for this trace.
+    * `:meta` - Producer-specific metadata to include under `data`. Defaults to `%{}`.
 
   ## Examples
 
-      {:ok, collector} = Collector.start_link(path: "/tmp/trace.jsonl")
+      {:ok, collector} = Collector.start_link(
+        path: "/tmp/trace.jsonl",
+        trace_kind: "benchmark",
+        producer: "demo.benchmark",
+        query: "How many products?"
+      )
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -118,6 +130,9 @@ defmodule PtcRunner.TraceLog.Collector do
     meta = Keyword.get(opts, :meta, %{})
     parent = Keyword.get(opts, :parent)
 
+    # Extract typed trace header fields
+    header = Map.new(@trace_header_keys, fn key -> {key, Keyword.get(opts, key)} end)
+
     # Ensure parent directory exists
     path |> Path.dirname() |> File.mkdir_p!()
 
@@ -135,6 +150,7 @@ defmodule PtcRunner.TraceLog.Collector do
           path: path,
           trace_id: trace_id,
           meta: meta,
+          header: header,
           write_errors: 0,
           start_time: System.monotonic_time(:millisecond),
           parent_ref: parent_ref,
@@ -302,14 +318,25 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   defp write_trace_start(state) do
-    event = %{
-      "schema_version" => @schema_version,
-      "event" => "trace.start",
-      "trace_id" => state.trace_id,
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "seq" => 0,
-      "data" => if(state.meta == %{}, do: nil, else: Event.sanitize(state.meta))
-    }
+    # Build typed header from state
+    header =
+      state.header
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new(fn {k, v} -> {Atom.to_string(k), v} end)
+
+    # Producer-specific metadata goes under "data"
+    data = if state.meta == %{}, do: nil, else: Event.sanitize(state.meta)
+
+    event =
+      %{
+        "schema_version" => @schema_version,
+        "event" => "trace.start",
+        "trace_id" => state.trace_id,
+        "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+        "seq" => 0,
+        "data" => data
+      }
+      |> Map.merge(header)
 
     case Event.encode(event) do
       {:ok, json} -> IO.puts(state.file, json)
