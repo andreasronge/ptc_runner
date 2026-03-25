@@ -962,6 +962,30 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # concat - type error diagnostics
+  # ==========================================================================
+
+  describe "concat type errors" do
+    test "concat with strings gives clear error instead of Enumerable protocol error" do
+      {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+        Lisp.run(~s|(concat "hello" "world")|)
+
+      assert message =~ "concat expected collections"
+      assert message =~ "string"
+    end
+
+    test "apply concat on flat string list gives clear error" do
+      # This is the exact pattern from the benchmark failure:
+      # (apply concat (:topics doc)) where topics is already a flat list of strings
+      {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+        Lisp.run(~s|(apply concat ["security" "compliance"])|)
+
+      assert message =~ "concat expected collections"
+      assert message =~ ~s("security")
+    end
+  end
+
+  # ==========================================================================
   # Variadic Builtins in HOFs (GH-668)
   # ==========================================================================
 

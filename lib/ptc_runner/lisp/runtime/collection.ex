@@ -11,6 +11,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   are implemented in `Collection.Transform`.
   """
 
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.Collection.Select
@@ -253,7 +254,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Construction
   # ============================================================
 
-  def concat2(a, b), do: Enum.concat(a || [], b || [])
+  def concat2(a, b) do
+    a = a || []
+    b = b || []
+    ensure_enumerable!(a, "concat")
+    ensure_enumerable!(b, "concat")
+    Enum.concat(a, b)
+  end
 
   @doc """
   Returns a new seq with item prepended.
@@ -1074,4 +1081,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   defp call_fn(f, arg) when is_function(f, 1), do: f.(arg)
   defp call_fn(f, arg), do: Callable.call(f, [arg])
+
+  defp ensure_enumerable!(val, _fn_name) when is_list(val), do: :ok
+  defp ensure_enumerable!(val, _fn_name) when is_map(val) and not is_struct(val), do: :ok
+
+  defp ensure_enumerable!(val, fn_name) do
+    if Enumerable.impl_for(val) do
+      :ok
+    else
+      raise PtcRunner.Lisp.TypeError,
+            "#{fn_name} expected collections, got #{Helpers.describe_type(val)} #{inspect(val)}"
+    end
+  end
 end
