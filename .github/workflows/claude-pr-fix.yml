@@ -308,7 +308,7 @@ jobs:
 
             NEVER include "@claude" in comments.
 
-          claude_args: '--model claude-haiku-4-5-20251001 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
+          claude_args: '--model claude-sonnet-4-6 --allowed-tools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,Bash,WebSearch,WebFetch,Task,TodoWrite,TodoRead"'
           show_full_output: true
 
       # Safety net: push any unpushed commits and remove workflow files
@@ -321,6 +321,7 @@ jobs:
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
 
           # Remove workflow files from any unpushed commits (GitHub App tokens can't push these)
+          REWROTE_COMMIT=false
           if git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --name-only --pretty=format: 2>/dev/null | grep -q "^\.github/workflows/"; then
             echo "Removing workflow files from commit..."
             COMMIT_MSG=$(git log -1 --format=%s)
@@ -328,12 +329,21 @@ jobs:
             git checkout origin/${{ steps.pr-branch.outputs.head_ref }} -- .github/workflows/ 2>/dev/null || true
             git add -A
             git reset HEAD -- .github/workflows/ 2>/dev/null || true
-            git commit -m "$COMMIT_MSG" 2>/dev/null || echo "No changes after removing workflow files"
+            if git commit -m "$COMMIT_MSG" 2>/dev/null; then
+              REWROTE_COMMIT=true
+            else
+              echo "No changes after removing workflow files"
+            fi
           fi
 
           # Push if there are unpushed commits
           if git log origin/${{ steps.pr-branch.outputs.head_ref }}..HEAD --oneline 2>/dev/null | grep -q .; then
             echo "Pushing unpushed commits..."
-            git push origin HEAD:${{ steps.pr-branch.outputs.head_ref }}
+            if [ "$REWROTE_COMMIT" = "true" ]; then
+              echo "Using force-with-lease (commit was rewritten to remove workflow files)"
+              git push --force-with-lease origin HEAD:${{ steps.pr-branch.outputs.head_ref }}
+            else
+              git push origin HEAD:${{ steps.pr-branch.outputs.head_ref }}
+            fi
             echo "::notice::Pushed commits"
           fi
