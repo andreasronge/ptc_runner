@@ -40,7 +40,7 @@ defmodule PtcRunner.LLMTest do
 
   describe "callback/2" do
     test "returns a function that calls the adapter" do
-      callback = PtcRunner.LLM.callback("test:model")
+      callback = PtcRunner.LLM.callback("ollama:test-model")
       assert is_function(callback, 1)
 
       {:ok, resp} = callback.(%{system: "test", messages: []})
@@ -49,7 +49,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "merges opts into request" do
-      callback = PtcRunner.LLM.callback("test:model", cache: true)
+      callback = PtcRunner.LLM.callback("ollama:test-model", cache: true)
       assert is_function(callback, 1)
 
       {:ok, resp} = callback.(%{system: "with cache", messages: []})
@@ -57,7 +57,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "streams when request has :stream key and adapter supports streaming" do
-      callback = PtcRunner.LLM.callback("test:model")
+      callback = PtcRunner.LLM.callback("ollama:test-model")
       chunks = :ets.new(:chunks, [:ordered_set, :public])
 
       on_chunk = fn %{delta: text} ->
@@ -83,7 +83,7 @@ defmodule PtcRunner.LLMTest do
 
       Application.put_env(:ptc_runner, :llm_adapter, NoStreamAdapter2)
 
-      callback = PtcRunner.LLM.callback("test:model")
+      callback = PtcRunner.LLM.callback("ollama:test-model")
       chunk_called = :atomics.new(1, [])
 
       on_chunk = fn _chunk ->
@@ -98,7 +98,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "stream key is stripped before passing to adapter" do
-      callback = PtcRunner.LLM.callback("test:model")
+      callback = PtcRunner.LLM.callback("ollama:test-model")
       # Without stream key, it hits call/2 with system: "test"
       {:ok, resp} = callback.(%{system: "test", messages: [], stream: fn _ -> :ok end})
       # Stream was used, so we get the streamed content
@@ -108,14 +108,14 @@ defmodule PtcRunner.LLMTest do
 
   describe "call/2" do
     test "delegates to adapter" do
-      {:ok, resp} = PtcRunner.LLM.call("test:model", %{system: "hello", messages: []})
+      {:ok, resp} = PtcRunner.LLM.call("ollama:test-model", %{system: "hello", messages: []})
       assert resp.content == "mock response for: hello"
     end
   end
 
   describe "stream/2" do
     test "returns a stream of chunks" do
-      {:ok, stream} = PtcRunner.LLM.stream("test:model", %{system: "hi", messages: []})
+      {:ok, stream} = PtcRunner.LLM.stream("ollama:test-model", %{system: "hi", messages: []})
 
       chunks = Enum.to_list(stream)
       assert [%{delta: "hello "}, %{delta: "world"}, %{done: true, tokens: _}] = chunks
@@ -132,7 +132,7 @@ defmodule PtcRunner.LLMTest do
       Application.put_env(:ptc_runner, :llm_adapter, NoStreamAdapter)
 
       assert {:error, :streaming_not_supported} =
-               PtcRunner.LLM.stream("test:model", %{system: "hi", messages: []})
+               PtcRunner.LLM.stream("ollama:test-model", %{system: "hi", messages: []})
     end
   end
 

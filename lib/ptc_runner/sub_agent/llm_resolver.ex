@@ -2,8 +2,10 @@ defmodule PtcRunner.SubAgent.LLMResolver do
   @moduledoc """
   LLM resolution and invocation for SubAgents.
 
-  Handles calling LLMs that can be either functions or atoms, with support for
-  LLM registry lookups for atom-based LLM references (like `:haiku` or `:sonnet`).
+  Handles calling LLMs that can be:
+  - Strings (model aliases like `"haiku"` or full IDs like `"openrouter:anthropic/claude-haiku-4.5"`)
+  - Functions (direct callback functions)
+  - Atoms (registry lookups for atom-based LLM references like `:haiku`)
 
   LLM responses are normalized to a consistent format:
   - Plain string responses become `%{content: string, tokens: nil}`
@@ -20,7 +22,7 @@ defmodule PtcRunner.SubAgent.LLMResolver do
           | %{content: String.t() | nil, tokens: map() | nil, tool_calls: [map()]}
 
   @doc """
-  Resolve and invoke an LLM, handling both functions and atom references.
+  Resolve and invoke an LLM, handling strings, functions, and atom references.
 
   Normalizes the LLM response to always return a map with `:content` and `:tokens` keys.
   This provides a consistent interface for callers regardless of whether the LLM
@@ -28,7 +30,7 @@ defmodule PtcRunner.SubAgent.LLMResolver do
 
   ## Parameters
 
-  - `llm` - Either a function/1 or an atom referencing the registry
+  - `llm` - A model string (alias or full ID), function/1, or atom referencing the registry
   - `input` - The LLM input map to pass to the callback
   - `registry` - Map of atom to LLM callback for atom-based LLM references
 
@@ -38,6 +40,9 @@ defmodule PtcRunner.SubAgent.LLMResolver do
   - `{:error, reason}` - Error tuple with reason on failure
 
   ## Examples
+
+      # String model reference (resolved via PtcRunner.LLM.callback)
+      # PtcRunner.SubAgent.LLMResolver.resolve("haiku", %{...}, %{})
 
       iex> llm = fn %{messages: [%{content: _}]} -> {:ok, "result"} end
       iex> PtcRunner.SubAgent.LLMResolver.resolve(llm, %{messages: [%{content: "test"}]}, %{})
@@ -51,8 +56,18 @@ defmodule PtcRunner.SubAgent.LLMResolver do
       iex> PtcRunner.SubAgent.LLMResolver.resolve(:haiku, %{messages: [%{content: "test"}]}, registry)
       {:ok, %{content: "response", tokens: nil}}
   """
-  @spec resolve(atom() | (map() -> {:ok, term()} | {:error, term()}), map(), map()) ::
+  @spec resolve(String.t() | atom() | (map() -> {:ok, term()} | {:error, term()}), map(), map()) ::
           {:ok, normalized_response()} | {:error, term()}
+  def resolve(llm, input, _registry) when is_binary(llm) do
+    # Resolve model string to callback via PtcRunner.LLM
+    callback = PtcRunner.LLM.callback(llm)
+
+    case callback.(input) do
+      {:ok, response} -> {:ok, normalize_response(response)}
+      {:error, _} = error -> error
+    end
+  end
+
   def resolve(llm, input, _registry) when is_function(llm, 1) do
     case llm.(input) do
       {:ok, response} -> {:ok, normalize_response(response)}

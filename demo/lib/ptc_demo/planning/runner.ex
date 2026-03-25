@@ -27,8 +27,6 @@ defmodule PtcDemo.Planning.Runner do
           executor_tokens: non_neg_integer() | nil
         }
 
-  @timeout 120_000
-
   @doc """
   Run a planning benchmark experiment.
 
@@ -271,8 +269,9 @@ defmodule PtcDemo.Planning.Runner do
   end
 
   # Build and run the planner SubAgent
-  defp run_planner(query, model) do
-    llm = build_llm(model)
+  defp run_planner(query, model_override) do
+    # Use model override or fall back to Agent's current model
+    model = model_override || PtcDemo.Agent.model()
 
     agent =
       SubAgent.new(
@@ -289,7 +288,7 @@ defmodule PtcDemo.Planning.Runner do
       {:ok, result, _trace_path} =
         PtcRunner.TraceLog.with_trace(
           fn ->
-            SubAgent.run(agent, llm: llm, context: %{"task" => query})
+            SubAgent.run(agent, llm: model, context: %{"task" => query})
           end,
           path: trace_path,
           trace_kind: "planning",
@@ -346,25 +345,6 @@ defmodule PtcDemo.Planning.Runner do
     Return a list of 2-6 clear, actionable steps. Each step should describe one logical \
     operation. Keep steps focused — prefer more smaller steps over fewer large ones.
     """
-  end
-
-  defp build_llm(model_override) do
-    model = model_override || PtcDemo.Agent.model()
-
-    fn %{system: system, messages: messages} ->
-      full_messages = [%{role: :system, content: system} | messages]
-
-      case LLMClient.generate_text(model, full_messages,
-             receive_timeout: @timeout,
-             req_http_options: [retry: :transient, max_retries: 3]
-           ) do
-        {:ok, %{content: text, tokens: tokens}} ->
-          {:ok, %{content: text || "", tokens: tokens}}
-
-        {:error, reason} ->
-          {:error, "LLM error: #{inspect(reason)}"}
-      end
-    end
   end
 
   defp analyze_step(nil, passed?) do

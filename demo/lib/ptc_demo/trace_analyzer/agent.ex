@@ -34,25 +34,8 @@ defmodule PtcDemo.TraceAnalyzer.Agent do
     max_turns = Keyword.get(opts, :max_turns, 8)
     verbose = Keyword.get(opts, :verbose, false)
 
-    llm =
-      Keyword.get_lazy(opts, :llm, fn ->
-        model = PtcDemo.Agent.model()
-
-        fn %{system: system, messages: messages} ->
-          full_messages = [%{role: :system, content: system} | messages]
-
-          case LLMClient.generate_text(model, full_messages,
-                 receive_timeout: 120_000,
-                 req_http_options: [retry: :transient, max_retries: 3]
-               ) do
-            {:ok, %{content: text, tokens: tokens}} ->
-              {:ok, %{content: text || "", tokens: tokens}}
-
-            {:error, reason} ->
-              {:error, "LLM error: #{inspect(reason)}"}
-          end
-        end
-      end)
+    # Use provided LLM callback or default to Agent's model string
+    llm = Keyword.get_lazy(opts, :llm, fn -> PtcDemo.Agent.model() end)
 
     trace_path = trace_path()
     tools = Tools.build(trace_dir, exclude_file: Path.basename(trace_path))

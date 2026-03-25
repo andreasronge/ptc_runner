@@ -20,13 +20,97 @@ Set your API key and run:
 ```elixir
 export OPENROUTER_API_KEY=sk-or-...
 
-llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
-{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: llm)
+# Pass model alias directly - no callback needed!
+{:ok, step} = PtcRunner.SubAgent.run("What is 2 + 2?", llm: "haiku")
 step.return  #=> 4
 ```
 
 That's it. The built-in adapter handles text generation, structured output, tool calling,
 and prompt caching across providers.
+
+## Model Aliases
+
+SubAgent accepts model strings directly via the `llm:` option. Aliases are resolved
+automatically through `PtcRunner.LLM.Registry`:
+
+```elixir
+# Using aliases (resolved to default provider)
+{:ok, step} = SubAgent.run(agent, llm: "haiku")
+{:ok, step} = SubAgent.run(agent, llm: "sonnet")
+
+# Using provider:alias format
+{:ok, step} = SubAgent.run(agent, llm: "bedrock:haiku")
+{:ok, step} = SubAgent.run(agent, llm: "openrouter:sonnet")
+
+# Using full model IDs (passthrough)
+{:ok, step} = SubAgent.run(agent, llm: "openrouter:anthropic/claude-haiku-4.5")
+```
+
+### Built-in Aliases
+
+| Alias | Description | Providers |
+|-------|-------------|-----------|
+| `haiku` | Claude Haiku 4.5 - Fast, cost-effective | openrouter, bedrock, anthropic |
+| `sonnet` | Claude Sonnet 4.5 - Balanced performance | openrouter, bedrock, anthropic |
+| `gemini` | Gemini 2.5 Flash - Google's fast model | openrouter, google |
+| `deepseek` | DeepSeek Chat V3 - Cost-effective reasoning | openrouter |
+| `gpt` | GPT-4.1 Mini - OpenAI's efficient model | openrouter, openai |
+| `qwen-local` | Qwen 2.5 Coder 7B - Local via Ollama | ollama |
+
+### Default Provider
+
+Configure the default provider:
+
+```elixir
+# In config.exs
+config :ptc_runner, :default_provider, :bedrock
+
+# Or via environment variable
+export LLM_DEFAULT_PROVIDER=bedrock
+```
+
+When you use an alias like `"haiku"`, it resolves using the default provider.
+With `bedrock` as default, `"haiku"` becomes `"amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"`.
+
+## Custom Model Registry
+
+To add custom aliases or override the default registry, implement the
+`PtcRunner.LLM.Registry` behaviour:
+
+```elixir
+defmodule MyApp.ModelRegistry do
+  @behaviour PtcRunner.LLM.Registry
+
+  @impl true
+  def resolve("fast"), do: {:ok, "anthropic:claude-haiku-4-5-20251001"}
+  def resolve("smart"), do: {:ok, "anthropic:claude-sonnet-4-5-20250929"}
+  def resolve(name), do: PtcRunner.LLM.DefaultRegistry.resolve(name)
+
+  # Delegate remaining callbacks to DefaultRegistry
+  defdelegate resolve!(name), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate default_model(), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate default_provider(), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate aliases(), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate list_models(), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate preset_models(provider), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate available_providers(), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate provider_from_model(model), to: PtcRunner.LLM.DefaultRegistry
+  defdelegate validate(model_string), to: PtcRunner.LLM.DefaultRegistry
+end
+```
+
+Register it in your config:
+
+```elixir
+config :ptc_runner, :model_registry, MyApp.ModelRegistry
+```
+
+Now you can use your custom aliases:
+
+```elixir
+{:ok, step} = SubAgent.run(agent, llm: "fast")  # Your custom alias
+{:ok, step} = SubAgent.run(agent, llm: "haiku") # Still works via delegation
+```
 
 ## Built-in Adapter
 
