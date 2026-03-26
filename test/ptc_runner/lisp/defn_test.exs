@@ -197,10 +197,10 @@ defmodule PtcRunner.Lisp.DefnTest do
       assert result == 20
     end
 
-    test "defn cannot shadow builtins (via def)" do
-      # (defn map [x] x) - should fail because map is a builtin
+    test "defn shadows builtins (via def)" do
       ast = {:def, :map, {:fn, [{:var, :x}], {:var, :x}}}
-      {:error, {:cannot_shadow_builtin, :map}} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      {:ok, %Var{name: :map}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      assert match?({:closure, _, _, _, _, _}, user_ns[:map])
     end
   end
 
@@ -289,20 +289,27 @@ defmodule PtcRunner.Lisp.DefnTest do
       assert result == 10.0
     end
 
-    test "defn cannot shadow builtin map" do
+    test "defn shadows builtin map" do
       source = "(defn map [x] x)"
-      {:error, step} = Lisp.run(source)
+      {:ok, %{return: result}} = Lisp.run(source)
 
-      assert step.fail.reason == :cannot_shadow_builtin
-      assert step.fail.message =~ "map"
+      assert result == %Var{name: :map}
     end
 
-    test "defn cannot shadow builtin filter" do
+    test "defn shadows builtin filter" do
       source = "(defn filter [x] x)"
-      {:error, step} = Lisp.run(source)
+      {:ok, %{return: result}} = Lisp.run(source)
 
-      assert step.fail.reason == :cannot_shadow_builtin
-      assert step.fail.message =~ "filter"
+      assert result == %Var{name: :filter}
+    end
+
+    test "defn shadow persists across turns" do
+      # Turn 1: shadow avg with custom function
+      {:ok, %{memory: user_ns}} = Lisp.run(~s|(defn avg [x] x)|)
+
+      # Turn 2: call the shadowed function
+      {:ok, %{return: result}} = Lisp.run("(avg 42)", memory: user_ns)
+      assert result == 42
     end
 
     test "defn can be used with higher-order functions" do
