@@ -887,7 +887,7 @@ Binds a name to a value in the user namespace, persisting across turns:
 - Creates or overwrites the binding in user namespace
 - Value is evaluated before binding
 - Binding persists until session ends or redefined
-- Cannot shadow builtin function names (returns error)
+- Shadows builtin names — the user binding takes precedence until session ends
 - Can shadow data names, but `data/` prefix still works
 
 ```clojure
@@ -905,8 +905,8 @@ Binds a name to a value in the user namespace, persisting across turns:
 ; Reference previous defs (single evaluation)
 (def a 1) (def b (+ a 1)) b       ; => 2
 
-; Error: cannot shadow builtins
-(def map {})                      ; => error: cannot shadow builtin 'map'
+; Shadowing builtins (like Clojure — user binding takes precedence)
+(def map {})                      ; => #'map (builtin map no longer accessible)
 ```
 
 **Differences from Clojure:**
@@ -929,7 +929,7 @@ Binds a name to a value only if not already defined. Safe for multi-turn use:
 - If name is already bound in user namespace: no-op, returns the var
 - If name is not bound: evaluates value and binds it (same as `def`)
 - Value expression is NOT evaluated if name is already bound
-- Cannot shadow builtin function names
+- Shadows builtin names (same as `def`)
 
 ```clojure
 (defonce total-episodes 0)            ; turn 1 → binds 0, turn 2+ → no-op
@@ -955,7 +955,7 @@ Syntactic sugar for defining named functions in the user namespace:
 - Functions persist across turns via user namespace
 - Can reference other user-defined symbols and functions
 - Can access `data/` data and call `tool/` tools
-- Cannot shadow builtin function names (returns error)
+- Shadows builtin names (same as `def`)
 
 ```clojure
 ; Note: using `twice` not `double` since `double` is a builtin (§8.4)
@@ -3646,7 +3646,6 @@ The formatted strings shown below are human-readable renderings for display to u
 | `:unknown_tool` | Tool not registered |
 | `:tool_error` | Tool execution failed |
 | `:destructure_error` | Destructuring pattern mismatch |
-| `:cannot_shadow_builtin` | Attempt to shadow a built-in function |
 | `:invalid_placeholder` | Invalid placeholder in `#()` syntax |
 | `:timeout` | Execution time exceeded |
 | `:memory_exceeded` | Memory limit exceeded |

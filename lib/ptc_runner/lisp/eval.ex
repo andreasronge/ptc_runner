@@ -54,7 +54,6 @@ defmodule PtcRunner.Lisp.Eval do
           | {:invalid_keyword_call, atom(), [term()]}
           | {:arity_error, String.t()}
           | {:destructure_error, String.t()}
-          | {:cannot_shadow_builtin, atom()}
 
   @spec eval(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
           {:ok, value(), map()} | {:error, runtime_error()}
@@ -150,19 +149,30 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   # Local/global variable from environment
-  # Resolution order: let bindings (env) → user namespace (def bindings) → builtins
-  defp do_eval({:var, name}, %EvalContext{user_ns: user_ns, env: env} = eval_ctx) do
+  # Resolution order: let bindings → user namespace (def bindings) → builtins
+  # env contains both builtins and let bindings; locals tracks let-bound names.
+  # user_ns (def) shadows builtins but not let bindings.
+  defp do_eval({:var, name}, %EvalContext{user_ns: user_ns, env: env, locals: locals} = eval_ctx) do
     cond do
-      Map.has_key?(env, name) ->
+      # Let/fn binding (explicitly tracked as local)
+      MapSet.member?(locals, name) ->
         {:ok, Map.get(env, name), eval_ctx}
 
+      # User namespace (def/defn) — shadows builtins
       Map.has_key?(user_ns, name) ->
         {:ok, Map.get(user_ns, name), eval_ctx}
+
+      # Builtin (from env or Env.initial fallback)
+      Map.has_key?(env, name) ->
+        case Map.get(env, name) do
+          {:constant, value} -> {:ok, value, eval_ctx}
+          other -> {:ok, other, eval_ctx}
+        end
 
       Env.builtin?(name) ->
         case Map.get(Env.initial(), name) do
           {:constant, value} -> {:ok, value, eval_ctx}
-          _ -> {:ok, Map.get(Env.initial(), name), eval_ctx}
+          other -> {:ok, other, eval_ctx}
         end
 
       true ->
@@ -191,15 +201,11 @@ defmodule PtcRunner.Lisp.Eval do
   # Returns the var, not the value (Clojure semantics)
   # Opts may contain :docstring which is merged into closure metadata for functions
   defp do_eval({:def, name, value_ast, opts}, %EvalContext{} = eval_ctx) do
-    if Env.builtin?(name) do
-      {:error, {:cannot_shadow_builtin, name}}
-    else
-      with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
-        # Merge docstring into closure metadata if value is a closure
-        value = merge_docstring_into_closure(value, opts)
-        new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
-        {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
-      end
+    with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+      # Merge docstring into closure metadata if value is a closure
+      value = merge_docstring_into_closure(value, opts)
+      new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+      {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
     end
   end
 
@@ -212,19 +218,14 @@ defmodule PtcRunner.Lisp.Eval do
   # Binds name only if not already defined in user_ns.
   # Value expression is NOT evaluated when name is already bound.
   defp do_eval({:defonce, name, value_ast, opts}, %EvalContext{user_ns: user_ns} = eval_ctx) do
-    cond do
-      Env.builtin?(name) ->
-        {:error, {:cannot_shadow_builtin, name}}
-
-      Map.has_key?(user_ns, name) ->
-        {:ok, %Var{name: name}, eval_ctx}
-
-      true ->
-        with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
-          value = merge_docstring_into_closure(value, opts)
-          new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
-          {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
-        end
+    if Map.has_key?(user_ns, name) do
+      {:ok, %Var{name: name}, eval_ctx}
+    else
+      with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+        value = merge_docstring_into_closure(value, opts)
+        new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+        {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
+      end
     end
   end
 
@@ -281,8 +282,8 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, new_ctx} ->
         case do_eval(body, new_ctx) do
           {:ok, value, final_ctx} ->
-            # Restore the original environment from before the let block
-            {:ok, value, %{final_ctx | env: eval_ctx.env}}
+            # Restore the original environment and locals from before the let block
+            {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
 
           {:error, _} = err ->
             err

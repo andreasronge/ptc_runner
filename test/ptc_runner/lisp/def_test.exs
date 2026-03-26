@@ -97,14 +97,16 @@ defmodule PtcRunner.Lisp.DefTest do
       assert user_ns == %{x: 100}
     end
 
-    test "def cannot shadow builtins" do
+    test "def shadows builtins" do
       ast = {:def, :map, {:map, []}}
-      {:error, {:cannot_shadow_builtin, :map}} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      {:ok, %Var{name: :map}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      assert user_ns[:map] == %{}
     end
 
-    test "def cannot shadow filter builtin" do
+    test "def shadows filter builtin" do
       ast = {:def, :filter, 42}
-      {:error, {:cannot_shadow_builtin, :filter}} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      {:ok, %Var{name: :filter}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      assert user_ns[:filter] == 42
     end
 
     test "nested def returns inner var" do
@@ -142,6 +144,25 @@ defmodule PtcRunner.Lisp.DefTest do
       assert value == 10
     end
 
+    test "let identity rebinding of builtin without def preserves builtin" do
+      # (let [count count] (count [1 2 3])) — rebinds count to itself (the builtin).
+      # Without a def, the let captures the builtin count function.
+      source = "(let [count count] (count [1 2 3]))"
+      {:ok, %{return: result}} = Lisp.run(source)
+
+      assert result == 3
+    end
+
+    test "let identity rebinding of builtin with def captures def value" do
+      # With (def count 99), (let [count count] count) captures 99 (from user_ns),
+      # because user_ns shadows the builtin in the binding value position.
+      # This matches Clojure semantics.
+      source = "(let [count count] count)"
+      {:ok, %{return: result}} = Lisp.run(source, memory: %{count: 99})
+
+      assert result == 99
+    end
+
     test "user_ns values take precedence over builtins when reading" do
       # When user_ns is externally populated, values in user_ns take precedence
       # over builtins when resolving variables (not related to def behavior)
@@ -161,13 +182,14 @@ defmodule PtcRunner.Lisp.DefTest do
       assert elem(value, 0) == :normal
     end
 
-    test "resolution order: env > user_ns > builtins" do
+    test "resolution order: locals > user_ns > builtins" do
+      # Non-builtin in env without being tracked as local → user_ns wins
       ast = {:var, :x}
       env = %{x: :from_env}
       user_ns = %{x: :from_user_ns}
       {:ok, value, _} = Eval.eval(ast, %{}, user_ns, env, &dummy_tool/2)
 
-      assert value == :from_env
+      assert value == :from_user_ns
     end
   end
 
@@ -245,20 +267,40 @@ defmodule PtcRunner.Lisp.DefTest do
       assert user_ns == %{results: [%{id: 1}, %{id: 2}]}
     end
 
-    test "def cannot shadow builtin map" do
+    test "def shadows builtin map" do
       source = "(def map {})"
-      {:error, step} = Lisp.run(source)
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert step.fail.reason == :cannot_shadow_builtin
-      assert step.fail.message =~ "map"
+      assert result == %Var{name: :map}
+      assert user_ns[:map] == %{}
     end
 
-    test "def cannot shadow builtin filter" do
+    test "def shadows builtin filter" do
       source = "(def filter [])"
-      {:error, step} = Lisp.run(source)
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert step.fail.reason == :cannot_shadow_builtin
-      assert step.fail.message =~ "filter"
+      assert result == %Var{name: :filter}
+      assert user_ns[:filter] == []
+    end
+
+    test "def shadowing makes builtin unreachable in same turn" do
+      # (map inc [1 2]) now calls the empty map as a function (map lookup),
+      # not the builtin map. ({} inc [1 2]) = get({}, inc, [1 2]) = [1, 2]
+      source = "(def map {}) (map inc [1 2])"
+      {:ok, %{return: result}} = Lisp.run(source)
+
+      # Empty map returns the default value (second arg), not [2, 3] from builtin map
+      assert result == [1, 2]
+    end
+
+    test "def shadowing persists across turns" do
+      # Turn 1: shadow builtin with intermediate result
+      {:ok, %{memory: user_ns}} = Lisp.run(~s|(def entries [{:a 1} {:b 2}])|)
+      assert user_ns[:entries] == [%{a: 1}, %{b: 2}]
+
+      # Turn 2: access the shadowed binding
+      {:ok, %{return: result}} = Lisp.run("(count entries)", memory: user_ns)
+      assert result == 2
     end
 
     test "def can shadow data names but data/ prefix still works" do
@@ -347,11 +389,11 @@ defmodule PtcRunner.Lisp.DefTest do
       assert :counters.get(call_count, 1) == 0
     end
 
-    test "defonce cannot shadow builtins" do
-      ast = {:defonce, :map, 42, %{}}
+    test "defonce shadows builtins" do
+      ast = {:defonce, :map, {:map, []}, %{}}
 
-      assert {:error, {:cannot_shadow_builtin, :map}} =
-               Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      {:ok, %Var{name: :map}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
+      assert user_ns[:map] == %{}
     end
   end
 
@@ -401,12 +443,22 @@ defmodule PtcRunner.Lisp.DefTest do
       assert user_ns[:total] == 0
     end
 
-    test "defonce cannot shadow builtin" do
+    test "defonce shadows builtin" do
       source = "(defonce map {})"
-      {:error, step} = Lisp.run(source)
+      {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert step.fail.reason == :cannot_shadow_builtin
-      assert step.fail.message =~ "map"
+      assert result == %Var{name: :map}
+      assert user_ns[:map] == %{}
+    end
+
+    test "defonce on builtin is no-op when already bound" do
+      # Turn 1: bind map
+      {:ok, %{memory: user_ns1}} = Lisp.run(~s|(defonce map {})|)
+      assert user_ns1[:map] == %{}
+
+      # Turn 2: defonce again with different value — no-op
+      {:ok, %{memory: user_ns2}} = Lisp.run(~s|(defonce map [])|, memory: user_ns1)
+      assert user_ns2[:map] == %{}
     end
   end
 

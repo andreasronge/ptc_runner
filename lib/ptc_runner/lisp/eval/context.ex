@@ -44,7 +44,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     tool_calls: [],
     pmap_calls: [],
     tool_cache: %{},
-    tools_meta: %{}
+    tools_meta: %{},
+    locals: MapSet.new()
   ]
 
   @typedoc """
@@ -267,7 +268,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
   """
   @spec merge_env(t(), map()) :: t()
   def merge_env(%__MODULE__{} = context, bindings) do
-    %{context | env: Map.merge(context.env, bindings)}
+    new_locals = bindings |> Map.keys() |> MapSet.new()
+
+    %{
+      context
+      | env: Map.merge(context.env, bindings),
+        locals: MapSet.union(context.locals, new_locals)
+    }
   end
 
   @doc """
