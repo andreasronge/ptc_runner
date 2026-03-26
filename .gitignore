@@ -51,3 +51,6 @@ examples/parallel_workers/traces/*
 examples/page_index/traces/*
 !examples/page_index/traces/.gitkeep
 examples/page_index/bench_runs/
+
+# Jekyll build output.
+blog/_site/
